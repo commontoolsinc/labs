@@ -558,15 +558,39 @@ process:
   the server's `totalBudgetBytes` (beside it the total `bytes`, and
   `totalBudgetEvictions`: entries given up to hold that total rather than a
   space's own bounds): per space, `entries` and `bytes` against `budgetBytes`
-  and `maxEntries`, and the lifetime `hits`, `misses` and `evictions`. The
-  occupancy figures (`entries`, `bytes`, and which spaces appear at all) are a
-  snapshot of the moment — the one exception to the paragraph below; the three
-  counters accumulate. A corpus is read again by every load and every refresh,
-  so a space in good shape shows `hits` climbing across loads and `misses`
-  rising only with commits. `evictions` climbing while a corpus is being walked
-  means its working set does not fit the budget, and every walk is paying decode
-  and deep-freeze for it again — on the Topics board that was most of a second
-  of server time per walk.
+  and `maxEntries`, and the lifetime `hits`, `misses`, `evictions`,
+  `patchReplays` and `resumes`. The occupancy figures (`entries`, `bytes`, and
+  which spaces appear at all) are a snapshot of the moment — the one exception
+  to the paragraph below; the five counters accumulate. `hits` and `misses`
+  count reads of a document and nothing else, and each read that resolved to a
+  stored revision lands in one of the two; a read of an entity that has no
+  revision at all moves neither, so the two do not sum to the reads a space
+  served. A corpus is read again by every load and every refresh, so a space in
+  good shape shows `hits` climbing across loads and `misses` rising only with
+  commits. A commit misses, on the revision it has just written. The lookup of
+  the revision before it, where rebuilding that document resumes, is not a read
+  of the document and moves `resumes` rather than `hits`. `evictions` climbing
+  while a corpus is being walked means its working set does not fit the budget,
+  and every walk is paying decode and deep-freeze for it again — on the Topics
+  board that was most of a second of server time per walk. `patchReplays` counts
+  the stored patch rows replayed to rebuild a patched document. A rebuild starts
+  at the newest of that document's base, its newest snapshot, and the newest
+  revision after those that the cache still holds, so a document under a run of
+  patch commits costs one row per commit while it stays resident and the whole
+  chain since its base or snapshot once it does not. The count climbing is
+  therefore ordinary; `patchReplays` far above `misses` is the second case,
+  where the document is being lost between the commits that write it and each of
+  them is rebuilding it from the chain. Two callers rebuild: a read the cache
+  did not serve, and the commit-time check that the pre-state a patch lands on
+  carries no reserved schema reference, which reads only in a space whose
+  commits or stored rows carry one. `resumes` counts the rebuilds that found a
+  revision to start from rather than falling back to the base or the snapshot,
+  so it says which of those two regimes a space is in: `patchReplays` close to
+  `resumes` means rebuilds are replaying about one row each, and `resumes` near
+  zero while `patchReplays` climbs means they are replaying whole chains.
+  `resumes` cannot reach the number of rebuilds, because the commit right after
+  a snapshot has no row before it to resume from, so roughly one rebuild per
+  snapshot interval is a non-resume for a reason unrelated to residency.
 - `servingLoop` — the serving loop's counters
   ([`serving-loop.md` §7](../../specs/server-side-execution/serving-loop.md)),
   present only when this process serves. `settle.series` is a ready-made

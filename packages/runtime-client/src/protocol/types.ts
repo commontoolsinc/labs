@@ -852,7 +852,7 @@ export type InitializationData = {
      * the worker to run against the snapshot with no acting principal
      * named.
      */
-    actingPrincipal?: string;
+    actingPrincipal?: DID;
 
     /**
      * Which revision of the snapshot this is: the runtime id with the

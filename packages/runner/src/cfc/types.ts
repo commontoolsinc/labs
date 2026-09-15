@@ -494,7 +494,17 @@ export type ImplementationIdentity =
 
 export type TrustSnapshot = {
   id: string;
+
+  /**
+   * The principal the transaction's trust is taken from. A host declares
+   * this one as a `DID` (`RuntimeClientOptions.trustSnapshot`). The serving
+   * loop reaches it through `Runtime.trustSnapshotForPrincipal` instead,
+   * carrying the acting user of a run: that is
+   * `ScopeKeyIdentity.principal`, which the memory plane holds as a string
+   * and spells as the empty string for a run with no actor.
+   */
   actingPrincipal?: string;
+
   revision?: string;
 };
 

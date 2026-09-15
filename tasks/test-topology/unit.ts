@@ -2,11 +2,15 @@
  * The workspace's unit tests, which is where almost all of the
  * repository's identities live.
  *
- * A member whose test task is a single `deno test` is enumerated one
- * file at a time, so a lane can be asked for a few files out of a
- * package holding hundreds. A member whose task is something else — a
- * runner script, two commands joined by `&&`, its own import map — is one
- * unit that runs whole, which is what every member is today.
+ * The half read is a member's `deno-test` task where it declares one and
+ * its `test` task otherwise, followed by that half's own dependencies,
+ * taking the first that reads as a single `deno test`. A dependency of a
+ * dependency is not reached. A member with one is
+ * enumerated a file at a time, so a lane can be asked for a few files out
+ * of a package holding hundreds. A member with none — a runner script,
+ * two commands joined by `&&`, its own import map — is one unit that runs
+ * whole, and a member whose only test task announces it has no tests is
+ * left out of the enumeration.
  *
  * `packages/runner` is a suite of its own rather than one more member.
  * Nothing about how it runs differs; what differs is what its
@@ -291,9 +295,9 @@ function unitSuite(
           } else files.push(request);
         }
         if (runsWhole) {
-          // A member whose task cannot be handed a subset runs the task,
-          // which is what every member does today. The skip list still
-          // reaches inside it, through the environment the task inherits.
+          // A member whose task cannot be handed a subset runs the task.
+          // The skip list still reaches inside it, through the
+          // environment the task inherits.
           invocations.push({
             command: [Deno.execPath(), "task", member.denoTestTask],
             cwd: memberDir,

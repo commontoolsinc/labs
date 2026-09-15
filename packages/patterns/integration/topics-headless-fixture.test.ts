@@ -9,7 +9,7 @@
 import { expect } from "@std/expect";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 
-import type { Cell } from "@commonfabric/runner";
+import { type Cell, parseLink } from "@commonfabric/runner";
 
 import {
   buildTopicsFixture,
@@ -91,19 +91,24 @@ function mentionCount(fixture: TopicsFixture): number {
   return fixture.topics.reduce((sum, topic) => sum + topic.mentions.length, 0);
 }
 
-/** What `mentionedBy` returns for `topic` over the measured board, by index. */
+/**
+ * Returns what `mentionedBy` returns for `topic`, by index, over the measured
+ * board's distinct topics in the order of each one's first entry, which is the
+ * list the pivot hands it.
+ */
 function mentionedByIndex(
   measurement: TopicsMeasurement,
   fixture: TopicsFixture,
   topic: number,
 ): number[] {
   const { seeded, derivations } = measurement;
-  const entries = fixture.board.map((index) => seeded.topics[index]);
-  const mentions = fixture.board.map((index) =>
+  const distinct = [...new Set(fixture.board)];
+  const entries = distinct.map((index) => seeded.topics[index]);
+  const mentions = distinct.map((index) =>
     fixture.topics[index].mentions.map((target) => seeded.topics[target])
   );
   return derivations.mentionedBy(seeded.topics[topic], entries, mentions)
-    .map((entry) => fixture.board[entries.indexOf(entry)]);
+    .map((entry) => distinct[entries.indexOf(entry)]);
 }
 
 /** The latest stamp on a topic when edits and retractions are left out. */
@@ -529,10 +534,9 @@ describe("topics-headless-fixture", () => {
     const fixture = buildTopicsFixture({
       topicCount: 6,
       mentions: { shape: "low-degree", perSource: 2 },
-      // `mentionedBy` leaves a topic out of its own backlinks by identity, not
-      // by board position, so the duplicated topic's self-mention must not
-      // reach it through its second entry. Without the self-mention, a
-      // position comparison would pass every case below.
+      // The duplicated topic also mentions itself, so its second board entry
+      // names it: a pivot counting that entry as a source apart from the topic
+      // would list the topic among its own backlinks.
       selfMention: DUPLICATED,
       duplicateBoardEntry: DUPLICATED,
     });
@@ -583,7 +587,7 @@ describe("topics-headless-fixture", () => {
       );
     });
 
-    it("returns every other topic's backlinks as the fixture's indices and `mentionedBy` compute them, with the duplicated source listed per entry", () => {
+    it("returns every other topic's backlinks as the fixture's indices and `mentionedBy` compute them", () => {
       const { seeded, outputs } = measurement;
       const others = fixture.topics.map((_, topic) => topic).filter((topic) =>
         topic !== DUPLICATED
@@ -597,12 +601,81 @@ describe("topics-headless-fixture", () => {
           topicIndicesOf(seeded, outputOf(outputs.backlinks, topic))
         ),
       ).toEqual(expected);
+    });
+
+    it("returns a source listed at two board entries once among the backlinks of a topic it mentions", () => {
+      const { seeded, outputs } = measurement;
       const [target] = fixture.topics[DUPLICATED].mentions;
-      expect(
-        expected[others.indexOf(target)].filter((source) =>
-          source === DUPLICATED
-        ),
-      ).toHaveLength(2);
+      expect(fixture.board.filter((entry) => entry === DUPLICATED))
+        .toHaveLength(2);
+      // Topic 1 and the duplicated topic are the sources mentioning `target`.
+      expect(target).toBe(3);
+      expect(topicIndicesOf(seeded, outputOf(outputs.backlinks, target)))
+        .toEqual([1, DUPLICATED]);
+    });
+  });
+
+  describe("over a board listing one topic again through an alias", () => {
+    const ALIASED = 2;
+    const fixture = buildTopicsFixture({
+      topicCount: 6,
+      mentions: { shape: "low-degree", perSource: 2 },
+    });
+    let measurement: TopicsMeasurement;
+    let holderId: string;
+    let appended: TopicsOperation;
+
+    beforeAll(async () => {
+      measurement = await measureTopicsFixture(
+        fixture,
+        "topics-headless-fixture alias entry",
+      );
+      const { runtime, seeded } = measurement;
+      appended = await measurement.update((tx) => {
+        // The appended entry is a link to the holder's slot, a different link
+        // from the topic's own that resolves to the same document.
+        const holder = runtime.getCell<unknown[]>(
+          seeded.board.getAsNormalizedFullLink().space,
+          "topics-headless-fixture-alias-holder",
+          undefined,
+          tx,
+        );
+        holder.set([seeded.topics[ALIASED]]);
+        seeded.board.withTx(tx).push(holder.key(0));
+        holderId = holder.getAsNormalizedFullLink().id;
+      });
+    });
+    afterAll(async () => {
+      await measurement?.[Symbol.asyncDispose]();
+    });
+
+    it("reports no runtime errors", () => {
+      expect(measurement.errors).toEqual([]);
+    });
+
+    it("returns a source listed again through an alias once among the backlinks of a topic it mentions", () => {
+      const { seeded, outputs } = measurement;
+      const alias = parseLink(
+        seeded.board.key(fixture.board.length).getRaw(),
+        seeded.board,
+      );
+      expect({ id: alias?.id, path: alias?.path }).toEqual({
+        id: holderId,
+        path: ["0"],
+      });
+      expect(topicIndicesOf(seeded, seeded.board)).toEqual([
+        ...fixture.board,
+        ALIASED,
+      ]);
+      const [target] = fixture.topics[ALIASED].mentions;
+      // Topic 1 and the aliased topic are the sources mentioning `target`.
+      expect(target).toBe(3);
+      // The pivot ran after the alias was appended, so the backlinks below are
+      // its result over the board holding the alias, not the result it held
+      // over the board before it.
+      expect(appended.reads.bodies.crossrefTable.runs).toBeGreaterThan(0);
+      expect(topicIndicesOf(seeded, outputOf(outputs.backlinks, target)))
+        .toEqual([1, ALIASED]);
     });
   });
 

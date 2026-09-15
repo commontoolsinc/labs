@@ -30,6 +30,7 @@ export type CapabilityId =
   | "jq"
   | "browser"
   | "git-history"
+  | "github-api"
   | "toolshed"
   | "toolshed-baked"
   | "toolshed-baked-opposite"
@@ -75,6 +76,13 @@ export interface CapabilityContext {
    * without a machine that has neither.
    */
   exec?: Exec;
+
+  /**
+   * The GitHub token the lane took out of its own environment, for the
+   * suites that declared they need one. Absent where the lane was handed
+   * none.
+   */
+  githubToken?: string;
 
   /**
    * How a capability asks a server it started what it is serving. A
@@ -312,6 +320,72 @@ const gitHistory: Capability = {
       }
     }
     return exported({});
+  },
+};
+
+/**
+ * The names a GitHub token reaches a lane under, and the names a suite
+ * that declared one is given it under. The `gh` command line reads
+ * `GH_TOKEN`, and `check-action-pins` reads `GITHUB_TOKEN` and falls
+ * back to `GH_TOKEN`, so both names are taken out of the lane and both
+ * are exported to a suite that asked.
+ */
+const GITHUB_TOKEN_VARIABLES = ["GITHUB_TOKEN", "GH_TOKEN"] as const;
+
+/**
+ * Takes the GitHub token out of this process and answers with it.
+ *
+ * A child process inherits what its parent holds, so a token left in the
+ * lane's own environment reaches every test in the lane whether or not
+ * its suite asked for one. Taking it out is what makes the declaration
+ * mean something.
+ *
+ * It leaves this process rather than being filtered out of each child's
+ * environment, because everything the lane spawns reads the environment
+ * from here: the batches through `runInvocation`, the capability setup
+ * commands, and the `git` calls that read the diff. One take covers
+ * them, and covers whatever spawns next.
+ *
+ * Where the lane was handed a token under more than one name, the first
+ * of the names above wins. Answers with nothing where it was handed
+ * none, which is the state on a workstation and in a job whose workflow
+ * passes none.
+ */
+export function takeGithubToken(): string | undefined {
+  let token: string | undefined;
+  for (const name of GITHUB_TOKEN_VARIABLES) {
+    const value = Deno.env.get(name);
+    Deno.env.delete(name);
+    if (token === undefined && value !== undefined && value.length > 0) {
+      token = value;
+    }
+  }
+  return token;
+}
+
+/**
+ * A token for the GitHub API, handed to the suites that ask the service a
+ * question and to no others.
+ *
+ * A lane runs the repository's own gates beside pattern and integration
+ * tests, and one gate asks GitHub what each action pin resolves to.
+ * Sixty requests an hour is what the service allows a caller with no
+ * token, shared across everything else reaching it from that address, so
+ * the gate needs one.
+ *
+ * What it exports is the token the lane took out of its own environment
+ * before it opened anything, handed back here.
+ */
+const githubApi: Capability = {
+  id: "github-api",
+  description: "a token for the GitHub API",
+  open(context) {
+    const token = context.githubToken;
+    return Promise.resolve(exported(
+      token === undefined ? {} : Object.fromEntries(
+        GITHUB_TOKEN_VARIABLES.map((name) => [name, token]),
+      ),
+    ));
   },
 };
 
@@ -624,6 +698,7 @@ export const CAPABILITIES: ReadonlyMap<CapabilityId, Capability> = new Map(
     jq,
     browser,
     gitHistory,
+    githubApi,
     toolshed,
     toolshedBaked,
     toolshedBakedOpposite,

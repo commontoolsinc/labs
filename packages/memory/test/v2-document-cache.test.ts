@@ -11,6 +11,7 @@
  */
 
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import { expect } from "@std/expect";
 import { ensureDir } from "@std/fs";
 import { describe, it } from "@std/testing/bdd";
 import { join, toFileUrl } from "@std/path";
@@ -85,6 +86,20 @@ const seed = (
     } as never);
   }
 };
+
+/** A commit whose one operation replaces `/value/count` on the first seeded
+ * entity. */
+const commitCountPatch = (engine: Engine, localSeq: number, count: number) =>
+  applyCommit(engine, {
+    sessionId: "s:a",
+    commit: commit(localSeq, {
+      operations: [{
+        op: "patch",
+        id: entityId(0),
+        patches: [{ op: "replace", path: "/value/count", value: count }],
+      }],
+    }),
+  } as never);
 
 /** A temporary store directory for a Server, removed afterwards. */
 const withStoreDir = async (
@@ -792,6 +807,122 @@ describe("v2 document cache", () => {
       assertEquals(served.bytes, encodedWeight({ value: "c".repeat(20) }));
       assertEquals(storedValue(engine, 0), { value: "c".repeat(20) });
       assertEquals(documentCacheDiagnostics(engine).hits - served.hits, 1);
+    });
+  });
+
+  describe("what each counter counts", () => {
+    // `hits` and `misses` count reads that resolved to a stored revision,
+    // and each such read lands in one of the two. `resumes` and
+    // `patchReplays` count rebuilds instead: how many found a revision to
+    // start from, and how many stored rows they replayed. The lookup a
+    // rebuild makes to find that revision is not a read, so it moves
+    // neither `hits` nor `misses`.
+    //
+    // A commit reaches a rebuild the same way a reader does, through a read
+    // that misses: `maybeMaterializeSnapshot` reads back the revision the
+    // commit just wrote to decide whether to snapshot it. That read happens
+    // only while `snapshotInterval` is positive, so every test here sets one
+    // rather than leaning on the engine's default. The interval is set high
+    // enough that no snapshot is taken, which would end the patch span a
+    // rebuild resumes within.
+
+    const snapshots = { snapshotInterval: 100 };
+
+    it("counts a rebuild's resume apart from a read the cache serves", async () => {
+      await withEngine((engine) => {
+        seed(engine, 1, () => ({ count: 0 }));
+        const seeded = documentCacheDiagnostics(engine);
+        for (let count = 1; count <= 3; count++) {
+          commitCountPatch(engine, count + 1, count);
+        }
+
+        // Three commits, three rebuilds. The only reads are the read-backs
+        // the commits themselves make, and each of those misses.
+        const committed = documentCacheDiagnostics(engine);
+        expect(committed.misses - seeded.misses).toBe(3);
+        expect(committed.hits - seeded.hits).toBe(0);
+
+        // The first rebuild has no earlier row to start from. The two after
+        // it resume from the one their predecessor left behind, so each of
+        // the three replays exactly one row.
+        expect(committed.resumes - seeded.resumes).toBe(2);
+        expect(committed.patchReplays - seeded.patchReplays).toBe(3);
+
+        // The read that follows is the one thing the cache serves here, and
+        // it rebuilds nothing.
+        expect(storedValue(engine, 0)).toEqual({ value: { count: 3 } });
+        const served = documentCacheDiagnostics(engine);
+        expect(served.hits - committed.hits).toBe(1);
+        expect(served.misses - committed.misses).toBe(0);
+        expect(served.resumes - committed.resumes).toBe(0);
+        expect(served.patchReplays - committed.patchReplays).toBe(0);
+      }, snapshots);
+    });
+
+    it("counts no resume for a rebuild that starts at the base", async () => {
+      await withEngine((engine) => {
+        seed(engine, 1, () => ({ count: 0 }));
+        commitCountPatch(engine, 2, 1);
+
+        // With the cache emptied the next rebuild has nothing to find, so it
+        // starts at the base and replays both rows rather than the one a
+        // resume would have left it. That difference is the whole of what a
+        // resume buys, and `patchReplays` alone does not say which of the
+        // two happened.
+        evictDocumentCacheEntries(engine, Number.MAX_SAFE_INTEGER);
+        const emptied = documentCacheDiagnostics(engine);
+        commitCountPatch(engine, 3, 2);
+        const rebuilt = documentCacheDiagnostics(engine);
+        expect(rebuilt.resumes - emptied.resumes).toBe(0);
+        expect(rebuilt.patchReplays - emptied.patchReplays).toBe(2);
+        expect(rebuilt.hits - emptied.hits).toBe(0);
+        expect(storedValue(engine, 0)).toEqual({ value: { count: 2 } });
+      }, snapshots);
+    });
+
+    it("counts a rebuild whose replay throws", async () => {
+      await withEngine((engine) => {
+        seed(engine, 1, () => ({ count: 0 }));
+        commitCountPatch(engine, 2, 1);
+        const before = documentCacheDiagnostics(engine);
+
+        // The patch cannot apply to what it replays onto, so the rebuild
+        // throws and the commit rolls back. The work it did is counted all
+        // the same: these are cost counters, not records of what survived.
+        // The rebuild resumes from the revision the previous commit left, so
+        // the single row after it is both the row replayed and the row whose
+        // application throws.
+        expect(() =>
+          applyCommit(engine, {
+            sessionId: "s:a",
+            commit: commit(3, {
+              operations: [{
+                op: "patch",
+                id: entityId(0),
+                patches: [{ op: "add", path: "/value/count/deep", value: 1 }],
+              }],
+            }),
+          } as never)
+        ).toThrow("path is not traversable");
+        const after = documentCacheDiagnostics(engine);
+        expect(after.resumes - before.resumes).toBe(1);
+        expect(after.patchReplays - before.patchReplays).toBe(1);
+        expect(storedValue(engine, 0)).toEqual({ value: { count: 1 } });
+      }, snapshots);
+    });
+
+    it("counts neither a hit nor a miss for an entity with no revision", async () => {
+      await withEngine((engine) => {
+        seed(engine, 1, () => ({ count: 0 }));
+        const seeded = documentCacheDiagnostics(engine);
+
+        // The read resolves to no stored revision, so there is nothing for
+        // the cache to have served or failed to serve.
+        expect(storedValue(engine, 1)).toBe(null);
+        const after = documentCacheDiagnostics(engine);
+        expect(after.hits - seeded.hits).toBe(0);
+        expect(after.misses - seeded.misses).toBe(0);
+      });
     });
   });
 });

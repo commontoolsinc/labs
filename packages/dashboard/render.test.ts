@@ -109,10 +109,11 @@ Deno.test("renderTile: label and sub are escaped — a hostile label cannot inje
 
 Deno.test("renderTile: value, extra and aside are trusted html; hint is escaped", () => {
   const html = renderTile(view({
+    href: "/commits",
     value: `<b>42</b>`,
     aside: `<span class="hfacet">$12</span>`,
     extra: `<svg viewBox="0 0 1 1"></svg>`,
-    hint: `commits ↗ <not a tag>`,
+    hint: `commits ↗ <not a "tag">`,
   }));
   // A tile builds these itself, escaping any data it puts in them.
   assertStringIncludes(html, `<p class="big good"><b>42</b></p>`);
@@ -122,7 +123,11 @@ Deno.test("renderTile: value, extra and aside are trusted html; hint is escaped"
   // The hint is plain text from the tile, so the renderer escapes it.
   assertStringIncludes(
     html,
-    `<span class="drill" title="commits ↗ &lt;not a tag&gt;">commits ↗ &lt;not a tag&gt;</span>`,
+    `<span class="drill" title="commits ↗ &lt;not a &quot;tag&quot;&gt;" aria-hidden="true">↗</span>`,
+  );
+  assertStringIncludes(
+    html,
+    `<a class="tile good link" href="/commits" aria-description="commits ↗ &lt;not a &quot;tag&quot;&gt;" title="commits ↗ &lt;not a &quot;tag&quot;&gt;">`,
   );
 });
 
@@ -141,7 +146,7 @@ Deno.test("renderTile: the aside and hint sit after the label, separated by the 
   const html = renderTile(view({ aside: "<i>mtd</i>", hint: "runs" }));
   assertStringIncludes(
     html,
-    `<p class="lbl"><span class="dot green"></span> labs ci<span class="spacer"></span><i>mtd</i><span class="drill" title="runs">runs</span></p>`,
+    `<p class="lbl"><span class="dot green"></span> labs ci<span class="spacer"></span><i>mtd</i><span class="drill" title="runs" aria-hidden="true">↗</span></p>`,
   );
 });
 
