@@ -39,13 +39,10 @@ import { settleView, waitForRuntimeIdle } from "./cfc-browser-helpers.ts";
 import {
   compiledLiftText,
   type CompiledTopicsLift,
-  confirmLiftImplementations,
-  liftRunningStates,
+  confirmSampledLifts,
   locateLift,
   parseSrc,
-  requireAttributableRuns,
-  requireNoCoverage,
-  requireSameProgram,
+  requireNoCoverageCollector,
   runThenStop,
   timingDelta,
   type TimingRow,
@@ -109,19 +106,34 @@ export const TOPICS_LIFTS: readonly TopicsLift[] = [
 /** The board's entry module, relative to the program root. */
 const TOPICS_MAIN = "topics/main.tsx";
 
+/** One module of a compiled Topics program. */
+export interface CompiledTopicsModule {
+  /** Module path, grounded at the program root. */
+  readonly filename: string;
+
+  /** Content identity, which is the `<identity>` in a run's `src`. */
+  readonly identity: string;
+
+  /** The JavaScript the compiler emitted for it. */
+  readonly js: string;
+}
+
+/** Options for {@link compileTopicsProgram}. */
+export interface CompileTopicsProgramOptions {
+  /** Program root the sources are read from. */
+  readonly sourceRoot?: string;
+
+  /** Replaces a resolved source file's contents before it is compiled. */
+  readonly rewrite?: (name: string, contents: string) => string;
+}
+
 /** The Topics program compiled from the sources a board was seeded from. */
 export interface TopicsProgram {
-  /** Program root the sources were read from. */
-  readonly sourceRoot: string;
-
   /** Each named lift, with its authored site and its compiled text. */
   readonly lifts: readonly CompiledTopicsLift[];
 
   /** Content identity of each compiled Topics module, by `/<module>`. */
   readonly identities: ReadonlyMap<string, string>;
-
-  /** How long compiling the program took, in milliseconds. */
-  readonly compileMs: number;
 }
 
 /** Counters summed over a set of completed runs. */
@@ -289,9 +301,9 @@ export interface TimeTopicsOperationOptions extends TopicsOperationOptions {
  * fixture deploys it, with that directory as the program root, on an emulated
  * runtime, and returns each named lift's authored site and compiled text with
  * the content identity of every compiled module under `/topics/`. A compile
- * takes about a second, so a caller
- * prepares one program and passes it to every {@link measureTopicsReads} call
- * against boards seeded from those sources.
+ * takes about a second, so a caller prepares one program and passes it to
+ * every {@link measureTopicsReads} call against boards seeded from those
+ * sources.
  *
  * @throws If a module does not declare its lift as `locateLift()` requires, if
  *   the compiled program lacks a lift's module, or if a compiled module does
@@ -301,6 +313,49 @@ export async function prepareTopicsProgram(
   sourceRoot: string = TOPICS_SOURCE_ROOT,
   lifts: readonly TopicsLift[] = TOPICS_LIFTS,
 ): Promise<TopicsProgram> {
+  const modules = await compileTopicsProgram({ sourceRoot });
+  const identities = new Map(
+    modules.filter((module) => module.filename.startsWith("/topics/"))
+      .map((module) => [module.filename, module.identity]),
+  );
+  const texts = new Map<string, string>();
+  const compiled: CompiledTopicsLift[] = [];
+  for (const lift of lifts) {
+    const module = `/${lift.module}`;
+    const emitted = modules.find((candidate) => candidate.filename === module);
+    if (emitted === undefined) {
+      throw new Error(
+        `Compiling \`${join(sourceRoot, TOPICS_MAIN)}\` produced no module ` +
+          `\`${module}\``,
+      );
+    }
+    const path = join(sourceRoot, lift.module);
+    let text = texts.get(path);
+    if (text === undefined) {
+      text = await Deno.readTextFile(path);
+      texts.set(path, text);
+    }
+    const { line, col } = locateLift(text, lift.name, path);
+    compiled.push({
+      ...lift,
+      site: `${module}:${line}:${col}`,
+      compiledText: compiledLiftText(emitted.js, lift.name, module),
+    });
+  }
+  return { lifts: compiled, identities };
+}
+
+/**
+ * Compiles the Topics program under `sourceRoot` the way the topic board
+ * fixture deploys it, with that directory as the program root, on an emulated
+ * runtime, and returns every module it emits. `rewrite`, when given, replaces
+ * each resolved source file's contents before the compile, so a caller can
+ * record what a change to those sources compiles to.
+ */
+export async function compileTopicsProgram(
+  options: CompileTopicsProgramOptions = {},
+): Promise<CompiledTopicsModule[]> {
+  const sourceRoot = options.sourceRoot ?? TOPICS_SOURCE_ROOT;
   const runtime = new Runtime(runtimePresets.localDev({
     apiUrl: new URL(import.meta.url),
     storageManager: StorageManager.emulate({
@@ -309,46 +364,26 @@ export async function prepareTopicsProgram(
     experimental: experimentalOptionsFromEnv(Deno.env.get),
   }));
   try {
-    const main = join(sourceRoot, TOPICS_MAIN);
-    const program = await resolveLocalProgram(
+    const resolved = await resolveLocalProgram(
       (resolver) => runtime.harness.resolve(resolver),
-      { main, root: sourceRoot },
+      { main: join(sourceRoot, TOPICS_MAIN), root: sourceRoot },
     );
-    const startedAt = performance.now();
-    const { modules } = await runtime.harness.compileToRecordGraph(program, {
-      noCheck: true,
-    });
-    const compileMs = performance.now() - startedAt;
-    const identities = new Map(
-      modules.filter((module) => module.filename.startsWith("/topics/"))
-        .map((module) => [module.filename, module.identity]),
+    const { rewrite } = options;
+    const { modules } = await runtime.harness.compileToRecordGraph(
+      rewrite === undefined ? resolved : {
+        ...resolved,
+        files: resolved.files.map((file) => ({
+          ...file,
+          contents: rewrite(file.name, file.contents),
+        })),
+      },
+      { noCheck: true },
     );
-    const texts = new Map<string, string>();
-    const compiled: CompiledTopicsLift[] = [];
-    for (const lift of lifts) {
-      const module = `/${lift.module}`;
-      const emitted = modules.find((candidate) =>
-        candidate.filename === module
-      );
-      if (emitted === undefined) {
-        throw new Error(
-          `Compiling \`${main}\` produced no module \`${module}\``,
-        );
-      }
-      const path = join(sourceRoot, lift.module);
-      let text = texts.get(path);
-      if (text === undefined) {
-        text = await Deno.readTextFile(path);
-        texts.set(path, text);
-      }
-      const { line, col } = locateLift(text, lift.name, path);
-      compiled.push({
-        ...lift,
-        site: `${module}:${line}:${col}`,
-        compiledText: compiledLiftText(emitted.js, lift.name, module),
-      });
-    }
-    return { sourceRoot, lifts: compiled, identities, compileMs };
+    return modules.map(({ filename, identity, js }) => ({
+      filename,
+      identity,
+      js,
+    }));
   } finally {
     await runtime.dispose();
   }
@@ -362,15 +397,13 @@ export async function prepareTopicsProgram(
  * show a board seeded from the sources `program` was compiled from, whose
  * producer lift has to be running.
  *
- * @throws If the page's worker collects pattern coverage; if the board runs a
- *   module identity other than `program`'s, as `requireSameProgram()` decides;
- *   if a lift's module file runs where `liftRunningStates()` refuses; if the
- *   runs cannot be attributed by position, as `requireAttributableRuns()`
- *   decides; if a preview holds coverage instrumentation or differs from its
- *   lift's compiled text; if the runtime client is replaced, after read
- *   accounting and telemetry are turned off on the client they were enabled
- *   on; or if the operation completes no run with a read sample, fails an
- *   event commit, or raises a page error. When the operation throws and
+ * @throws If the page's worker collects pattern coverage; if the sample's runs
+ *   cannot be attributed to the lifts of `program`, as `confirmSampledLifts()`
+ *   decides, each of whose messages names its cause; if the runtime client is
+ *   replaced, after read accounting and telemetry are turned off on the client
+ *   they were enabled on; or if the operation completes no run with a read
+ *   sample, fails an event commit, or raises a page error. When the operation
+ *   throws and
  *   disabling accounting or releasing the sample also fails, an
  *   `AggregateError` holds the operation's error first. The sample's hold on
  *   the page is released on every exit.
@@ -384,7 +417,7 @@ export async function measureTopicsReads(
   const token = crypto.randomUUID();
   try {
     const { value } = await runThenStop(async (): Promise<TopicsReadSample> => {
-      requireNoCoverage(await patternCoverageCollecting(page), []);
+      requireNoCoverageCollector(await patternCoverageCollecting(page));
       await startSampling(page, token);
       const { value: measured, stopped: state } = await runThenStop(
         async () => {
@@ -414,24 +447,11 @@ export async function measureTopicsReads(
         );
       }
 
-      const srcs = [
-        ...Object.keys(measured.before.actions),
-        ...Object.keys(after.actions),
-        ...Object.keys(state.bySrc),
-      ];
-      requireSameProgram(sites, options.program.identities, srcs);
-      const runningStates = liftRunningStates(sites, srcs);
-      requireAttributableRuns(sites, runningStates, Object.keys(state.bySrc));
-      requireNoCoverage(
-        false,
-        [measured.before.actions, after.actions].flatMap((actions) =>
-          Object.values(actions).flat()
-        ),
-      );
-      const implementations = confirmLiftImplementations(
+      const { running, implementations } = confirmSampledLifts(
         sites,
+        options.program.identities,
         [measured.before.actions, after.actions],
-        runningStates,
+        Object.keys(state.bySrc),
       );
       const bySite = new Map(sites.map((lift) => [lift.site, {
         totals: emptyTotals(),
@@ -460,7 +480,7 @@ export async function measureTopicsReads(
             role: lift.role,
             site: lift.site,
             ...entry.totals,
-            running: runningStates.get(lift.site)!,
+            running: running.get(lift.site)!,
             implementation: entry.implementation,
           };
         }),

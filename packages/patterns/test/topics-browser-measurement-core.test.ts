@@ -2,13 +2,16 @@
  * Unit tests of `topics-browser-measurement-core.ts`. Several cases read
  * `topics-browser-measurement-core.fixture.json`, which holds output recorded
  * from the Topics sources at one revision: each named lift's compiled module
- * text around its declaration, as
- * `cf check packages/patterns/topics/main.tsx --json --no-check` emits it; the
- * function's length there; the preview a browser running a board seeded from
- * those sources reported for it, and for `cardsByActivity`; the identities the
- * Topics modules compile to with root `packages/patterns`, and the identity
- * `/topics/main.tsx` compiles to with 68 lines added above it; and a preview
- * from a compile with pattern coverage on.
+ * text around its declaration and the length of its compiled function; the
+ * preview a browser running a board seeded from those sources reported for it,
+ * and for `cardsByActivity`; the identities the Topics modules compile to with
+ * root `packages/patterns`, and the identity `/topics/main.tsx` compiles to
+ * with 68 lines added above it; and a preview from a compile with pattern
+ * coverage on.
+ *
+ * `packages/patterns/tools/regenerate-topics-measurement-fixture.ts` writes
+ * everything a compile produces and carries the previews over, failing when a
+ * carried preview no longer matches what the sources compile to.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -18,14 +21,16 @@ import {
   compiledLiftText,
   type CompiledTopicsLift,
   confirmLiftImplementations,
+  confirmSampledLifts,
   COVERAGE_HIT_CALL,
   liftRunningStates,
   locateLift,
   parseSrc,
   PREVIEW_LENGTH,
   requireAttributableRuns,
-  requireNoCoverage,
+  requireNoCoverageCollector,
   requireSameProgram,
+  requireUninstrumentedPreviews,
   runThenStop,
   timingDelta,
   type TopicsLiftSite,
@@ -69,7 +74,19 @@ describe("topics-browser-measurement-core", () => {
     it("throws for a binding that is not declared as a lift", () => {
       expect(() =>
         locateLift("const doubled = computed(() => 2);", "doubled", "fryer.tsx")
-      ).toThrow("`const doubled = lift(...)` declaration in fryer.tsx");
+      ).toThrow("`const doubled = lift(<function>)` declaration in fryer.tsx");
+    });
+
+    it("reads no declaration out of a string, a comment, a template literal, or a regular expression", () => {
+      const text = [
+        'const note = "const doubled = lift((value) => value)";',
+        "// const doubled = lift((value) => value)",
+        "const label = `const doubled = lift((value) => value)`;",
+        "const pattern = /const doubled = lift\\(/;",
+        "const doubled = lift((value: number) => value * 2);",
+      ].join("\n");
+
+      expect(locateLift(text, "doubled")).toEqual({ line: 5, col: 21 });
     });
 
     it("throws for a lift declared twice", () => {
@@ -110,6 +127,46 @@ describe("topics-browser-measurement-core", () => {
           "    const label = `glazed ${value} }`;",
           "    // a ) in a comment",
           "    return /[)]/.test(value);",
+          "}",
+        ].join("\n"),
+      );
+    });
+
+    it("returns a function whose body divides twice after a postfix increment", () => {
+      const emitted = [
+        "const rate = (0, commonfabric_2.lift)((counts) => {",
+        "    let index = 0;",
+        "    const ratio = counts[index++] / (counts.length / 2);",
+        "    return ratio;",
+        "});",
+      ].join("\n");
+
+      expect(compiledLiftText(emitted, "rate")).toBe(
+        [
+          "(counts) => {",
+          "    let index = 0;",
+          "    const ratio = counts[index++] / (counts.length / 2);",
+          "    return ratio;",
+          "}",
+        ].join("\n"),
+      );
+    });
+
+    it("reads no second declaration out of a string or a comment in the function", () => {
+      const emitted = [
+        "const glazed = (0, commonfabric_2.lift)((value) => {",
+        '    const note = "const glazed = (0, commonfabric_2.lift)((v) => v)";',
+        "    // const glazed = (0, commonfabric_2.lift)((v) => v)",
+        "    return value;",
+        "});",
+      ].join("\n");
+
+      expect(compiledLiftText(emitted, "glazed")).toBe(
+        [
+          "(value) => {",
+          '    const note = "const glazed = (0, commonfabric_2.lift)((v) => v)";',
+          "    // const glazed = (0, commonfabric_2.lift)((v) => v)",
+          "    return value;",
           "}",
         ].join("\n"),
       );
@@ -210,7 +267,9 @@ describe("topics-browser-measurement-core", () => {
 
     it("throws for a running module with no action at the lift's site", () => {
       expect(() => liftRunningStates(lifts, [src("/donuts/fryer.tsx:19:20")]))
-        .toThrow("has no action there");
+        .toThrow(
+          "no action of the running `/donuts/fryer.tsx` is at that position",
+        );
     });
 
     it("throws for a module running as two versions", () => {
@@ -274,7 +333,7 @@ describe("topics-browser-measurement-core", () => {
         requireSameProgram(lifts, shifted, [
           `cf:module/${mainIdentity}/topics/main.tsx:405:2`,
         ])
-      ).toThrow("the sources read are not the program the board runs");
+      ).toThrow("the board does not run the program the sources read");
     });
 
     it("throws for a running Topics module without a named lift that carries another identity", () => {
@@ -284,7 +343,7 @@ describe("topics-browser-measurement-core", () => {
           new Map([...identities, ["/topics/schemas.ts", "schemas1"]]),
           [`cf:module/schemas2/topics/schemas.ts:4:2`],
         )
-      ).toThrow("`/topics/schemas.ts` runs as module `schemas2`");
+      ).toThrow("`/topics/schemas.ts` runs under identity `schemas2`");
     });
 
     it("throws for a lift module the compiled program lacks", () => {
@@ -298,22 +357,27 @@ describe("topics-browser-measurement-core", () => {
     });
   });
 
-  describe("requireNoCoverage()", () => {
+  describe("requireNoCoverageCollector()", () => {
     it("throws naming pattern coverage for a worker that collects it", () => {
-      expect(() => requireNoCoverage(true, []))
+      expect(() => requireNoCoverageCollector(true))
         .toThrow("The page's worker collects pattern coverage");
     });
 
+    it("returns for a worker that collects no coverage", () => {
+      expect(() => requireNoCoverageCollector(false)).not.toThrow();
+    });
+  });
+
+  describe("requireUninstrumentedPreviews()", () => {
     it("throws naming pattern coverage for a preview holding a coverage hit call", () => {
       expect(fixture.instrumentedPreview).toContain(COVERAGE_HIT_CALL);
-      expect(() => requireNoCoverage(false, [fixture.instrumentedPreview]))
+      expect(() => requireUninstrumentedPreviews([fixture.instrumentedPreview]))
         .toThrow("holds pattern coverage instrumentation");
     });
 
-    it("returns for a worker without coverage and previews without hit calls", () => {
+    it("returns for previews without hit calls", () => {
       expect(() =>
-        requireNoCoverage(
-          false,
+        requireUninstrumentedPreviews(
           Object.values(fixture.lifts).map((lift) => lift.preview),
         )
       ).not.toThrow();
@@ -429,6 +493,82 @@ describe("topics-browser-measurement-core", () => {
       const running = liftRunningStates(lifts, srcs);
 
       expect(() => requireAttributableRuns(lifts, running, srcs)).not.toThrow();
+    });
+  });
+
+  describe("confirmSampledLifts()", () => {
+    const pivot: CompiledTopicsLift = {
+      name: "crossrefTable",
+      module: "topics/main.tsx",
+      role: "producer",
+      site: "/topics/main.tsx:337:2",
+      compiledText: compiledLiftText(
+        fixture.lifts.crossrefTable.excerpt,
+        "crossrefTable",
+      ),
+    };
+    const identity = fixture.identities["/topics/main.tsx"];
+    const identities = new Map([["/topics/main.tsx", identity]]);
+    const preview = fixture.lifts.crossrefTable.preview;
+    const confirm = (implementation: string, runs = identity) => {
+      const src = `cf:module/${runs}${pivot.site}`;
+      return confirmSampledLifts(
+        [pivot],
+        identities,
+        [{ [src]: [implementation] }],
+        [src],
+      );
+    };
+
+    it("returns the lift as running with the implementation its compiled text names", () => {
+      expect(preview).toBe(pivot.compiledText.slice(0, PREVIEW_LENGTH));
+      expect(confirm(preview)).toEqual({
+        running: new Map([[pivot.site, true]]),
+        implementations: new Map([[pivot.site, preview]]),
+      });
+    });
+
+    it("throws for an implementation one character shorter than the compiled text", () => {
+      expect(() => confirm(preview.slice(0, -1)))
+        .toThrow("differs from its compiled text at character 199");
+    });
+
+    it("throws for an implementation with a trailing space", () => {
+      expect(() => confirm(`${preview} `))
+        .toThrow("differs from its compiled text at character 200");
+    });
+
+    it("throws for an implementation with one letter's case flipped", () => {
+      const at = preview.search(/[a-z]/);
+      const flipped = preview.slice(0, at) + preview[at].toUpperCase() +
+        preview.slice(at + 1);
+
+      expect(flipped).not.toBe(preview);
+      expect(() => confirm(flipped))
+        .toThrow(`differs from its compiled text at character ${at}`);
+    });
+
+    it("throws for an implementation whose runs of whitespace are one space each", () => {
+      const collapsed = preview.replace(/\s+/g, " ");
+
+      expect(collapsed).not.toBe(preview);
+      expect(() => confirm(collapsed))
+        .toThrow("differs from its compiled text at character");
+    });
+
+    it("throws for a module running under an identity differing from the compiled one in its last character alone", () => {
+      const last = identity.slice(-1);
+      const near = `${identity.slice(0, -1)}${last === "a" ? "b" : "a"}`;
+
+      expect(near).not.toBe(identity);
+      expect(near.slice(0, -1)).toBe(identity.slice(0, -1));
+      expect(() => confirm(preview, near))
+        .toThrow("the board does not run the program the sources read");
+    });
+
+    it("throws naming coverage, not the text, for an implementation carrying coverage instrumentation", () => {
+      expect(() => confirm(fixture.instrumentedPreview))
+        .toThrow("holds pattern coverage instrumentation");
     });
   });
 

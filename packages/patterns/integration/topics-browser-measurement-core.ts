@@ -5,9 +5,11 @@
  * board runs the program compiled from the sources read, without coverage
  * instrumentation, and with each lift's preview equal to its compiled text,
  * reading timing deltas and the worker's run count, and ending a sampling after
- * its operation. The module imports nothing, so a plain `deno test` exercises
- * all of it.
+ * its operation. The TypeScript parser is its only import, so a plain
+ * `deno test` exercises all of it.
  */
+
+import ts from "typescript";
 
 /** A position in authored source: line 1-based, column 0-based. */
 export interface SourcePosition {
@@ -82,12 +84,12 @@ export const COVERAGE_HIT_CALL = "__cfPatternCoverage?.hit(";
 const SRC_PATTERN = /^cf:module\/([^/]+)(\/.+:\d+:\d+)$/;
 
 /**
- * Returns where the function argument of `name`'s module-scope
- * `const <name> = lift(<function>)` declaration starts in `text`, which is the
- * position the transformer records for a hoisted builder and the runtime
- * reports in each run's `src`. Comments between the call's parenthesis and the
- * function are skipped; type arguments on `lift`, and a function passed after
- * schema arguments, are not recognized.
+ * Returns where the function argument of `name`'s `const <name> = lift(...)`
+ * declaration starts in `text`, which is the position the transformer records
+ * for a hoisted builder and the runtime reports in each run's `src`. `text` is
+ * parsed as TSX, so declaration-shaped text in a string, a comment, a template
+ * literal, or a regular expression is not a declaration, and a comment between
+ * the call's parenthesis and the function is not part of the argument.
  *
  * @throws If `text` holds no such declaration or more than one; `source` names
  *   the text in the message.
@@ -97,22 +99,22 @@ export function locateLift(
   name: string,
   source = "the source",
 ): SourcePosition {
-  requirePlainName(name);
-  const trivia = String.raw`(?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*`;
-  const declaration = new RegExp(
-    String.raw`\bconst\s+${name}\s*=\s*lift\s*\(` + trivia,
-    "g",
+  const parsed = parse(text, source, ts.ScriptKind.TSX);
+  const found = liftArguments(
+    parsed,
+    name,
+    (callee) => ts.isIdentifier(callee) && callee.text === "lift",
   );
-  const matches = [...text.matchAll(declaration)];
-  if (matches.length !== 1) {
+  if (found.length !== 1) {
     throw new Error(
-      `Expected one \`const ${name} = lift(...)\` declaration in ${source}, ` +
-        `found ${matches.length}`,
+      `Expected one \`const ${name} = lift(<function>)\` declaration in ` +
+        `${source}, found ${found.length}`,
     );
   }
-  const [match] = matches;
-  const lines = text.slice(0, match.index + match[0].length).split("\n");
-  return { line: lines.length, col: lines[lines.length - 1].length };
+  const { line, character } = parsed.getLineAndCharacterOfPosition(
+    found[0].getStart(parsed),
+  );
+  return { line: line + 1, col: character };
 }
 
 /**
@@ -120,51 +122,27 @@ export function locateLift(
  * `const <name> = (0, <alias>.lift)(<function>, ...)`, the form the compiler
  * emits for an authored `const <name> = lift(<function>)`. The text is what the
  * function's `toString()` returns, so a running action's preview is its first
- * {@link PREVIEW_LENGTH} characters. The argument's end is found by scanning
- * tokens, so brackets inside strings, template literals, regular expressions,
- * and comments do not end it.
+ * {@link PREVIEW_LENGTH} characters. `js` is parsed as JavaScript, so a
+ * bracket, a declaration, or a `/` inside a string, a template literal, a
+ * regular expression, or a comment is read as part of that literal or comment.
  *
- * @throws If `js` holds no such declaration or more than one, or the call has
- *   no argument that closes; `source` names the module in the message.
+ * @throws If `js` holds no such declaration or more than one; `source` names
+ *   the module in the message.
  */
 export function compiledLiftText(
   js: string,
   name: string,
   source = "the compiled module",
 ): string {
-  requirePlainName(name);
-  const declaration = new RegExp(
-    String.raw`\bconst\s+${name}\s*=\s*\(0,\s*[A-Za-z_$][\w$]*\.lift\)\(`,
-    "g",
-  );
-  const matches = [...js.matchAll(declaration)];
-  if (matches.length !== 1) {
+  const parsed = parse(js, source, ts.ScriptKind.JS);
+  const found = liftArguments(parsed, name, isCompiledLiftCallee);
+  if (found.length !== 1) {
     throw new Error(
-      `Expected one compiled \`const ${name} = (0, <alias>.lift)(...)\` ` +
-        `declaration in ${source}, found ${matches.length}`,
+      `Expected one compiled \`const ${name} = (0, <alias>.lift)(<function>` +
+        `, ...)\` declaration in ${source}, found ${found.length}`,
     );
   }
-  const [match] = matches;
-  let depth = 0;
-  let first: Token | undefined;
-  let last: Token | undefined;
-  for (const token of scanTokens(js, match.index + match[0].length)) {
-    if (depth === 0 && (token.text === "," || token.text === ")")) {
-      if (first === undefined || last === undefined) break;
-      return js.slice(first.start, last.end);
-    }
-    if (token.text === "(" || token.text === "[" || token.text === "{") {
-      depth++;
-    } else if (token.text === ")" || token.text === "]" || token.text === "}") {
-      depth--;
-    }
-    first ??= token;
-    last = token;
-  }
-  throw new Error(
-    `The compiled \`${name}\` lift call in ${source} has no argument that ` +
-      `closes`,
-  );
+  return js.slice(found[0].getStart(parsed), found[0].getEnd());
 }
 
 /** Splits a run's `src` into module identity and site, if it has that form. */
@@ -251,9 +229,10 @@ export function liftRunningStates(
     }
     if (!sites.has(lift.site)) {
       throw new Error(
-        `\`${lift.name}\` resolves to \`${lift.site}\`, but the running ` +
-          `\`${expected}\` has no action there: the sources read are not the ` +
-          `ones the board runs`,
+        `\`${lift.name}\` resolves to \`${lift.site}\`, but no action of ` +
+          `the running \`${expected}\` is at that position: the lift built ` +
+          `no action the operation saw, or its declaration is not where the ` +
+          `runtime records the lift's position`,
       );
     }
     states.set(lift.site, true);
@@ -265,9 +244,10 @@ export function liftRunningStates(
  * Fails a sample taken on a board running a Topics module other than the one
  * compiled from the sources read. `identities` holds the content identity of
  * each compiled Topics module by `/<module>`; `srcs` are the `src` values of
- * actions seen around the operation, each of which begins
- * `cf:module/<identity>`. A module no `src` names is not checked, since nothing
- * ran from it.
+ * actions seen around the operation, of which one in the form
+ * {@link parseSrc} accepts names the identity its module runs under, and one
+ * of any other form is skipped. A module no `src` names is not checked, since
+ * nothing ran from it.
  *
  * @throws If `identities` lacks a lift's module, or a `src` naming a module in
  *   `identities` carries another identity.
@@ -298,9 +278,9 @@ export function requireSameProgram(
     for (const identity of running.get(module) ?? []) {
       if (identity !== compiled) {
         throw new Error(
-          `\`${module}\` runs as module \`${identity}\`, but the sources read ` +
-            `compile it to \`${compiled}\`: the sources read are not the ` +
-            `program the board runs`,
+          `\`${module}\` runs under identity \`${identity}\`, but the ` +
+            `sources read compile it to identity \`${compiled}\`: the board ` +
+            `does not run the program the sources read`,
         );
       }
     }
@@ -308,25 +288,33 @@ export function requireSameProgram(
 }
 
 /**
- * Fails a sample taken where pattern coverage instruments the running code.
- * Instrumentation writes a hit call before each statement of every lift, so
- * no preview could equal the uninstrumented compiled text. `collecting` is
- * whether the page's worker holds a coverage collector; `previews` are the
- * implementation previews the graph reports.
+ * Fails a sample taken on a page whose worker holds a pattern coverage
+ * collector. Coverage instrumentation writes a hit call before each statement
+ * of every lift, so no preview could equal the uninstrumented compiled text.
  *
- * @throws If `collecting` is true, or a preview holds
- *   {@link COVERAGE_HIT_CALL}.
+ * @throws If `collecting` is true.
  */
-export function requireNoCoverage(
-  collecting: boolean,
-  previews: Iterable<string>,
-): void {
+export function requireNoCoverageCollector(collecting: boolean): void {
   if (collecting) {
     throw new Error(
       "The page's worker collects pattern coverage, whose instrumentation " +
         "rewrites every lift's code: measure on a page without coverage",
     );
   }
+}
+
+/**
+ * Fails a sample whose running implementations carry pattern coverage
+ * instrumentation. `previews` are the implementation previews the graph
+ * reports, which is what a lift's compiled text is compared against, so this
+ * reads the instrumentation off the running code rather than off the page's
+ * collector.
+ *
+ * @throws If a preview holds {@link COVERAGE_HIT_CALL}.
+ */
+export function requireUninstrumentedPreviews(
+  previews: Iterable<string>,
+): void {
   for (const preview of previews) {
     if (preview.includes(COVERAGE_HIT_CALL)) {
       throw new Error(
@@ -423,6 +411,55 @@ export function requireAttributableRuns(
   }
 }
 
+/** What a measured sample's runs may be attributed to lifts by. */
+export interface SampledLifts {
+  /** Whether each lift's module ran, by site. */
+  readonly running: ReadonlyMap<string, boolean>;
+
+  /** Each running lift's confirmed implementation preview, by site. */
+  readonly implementations: ReadonlyMap<string, string>;
+}
+
+/**
+ * Decides what a measured sample's runs may be attributed to, and fails the
+ * sample when they may not be attributed at all. `actions` are the graph
+ * snapshots' implementation previews by `src`, taken before and after the
+ * operation; `runSrcs` are the `src` keys of the runs that carried a read
+ * sample, a run with no `src` keyed by the empty string.
+ *
+ * The checks the attribution rests on all run here, over the `src` values of
+ * the snapshots and of the runs together: the board runs the program the
+ * sources read compile to, each lift's module runs as one version and holds an
+ * action at the lift's position, the runs carry positions to attribute them
+ * by, no running implementation is instrumented for coverage, and each running
+ * lift's implementation is the one its compiled text names.
+ *
+ * @throws Whatever {@link requireSameProgram}, {@link liftRunningStates},
+ *   {@link requireAttributableRuns}, {@link requireUninstrumentedPreviews}, or
+ *   {@link confirmLiftImplementations} throws, each message naming its cause.
+ */
+export function confirmSampledLifts(
+  lifts: readonly CompiledTopicsLift[],
+  identities: ReadonlyMap<string, string>,
+  actions: readonly Readonly<Record<string, readonly string[]>>[],
+  runSrcs: readonly string[],
+): SampledLifts {
+  const srcs = [
+    ...actions.flatMap((snapshot) => Object.keys(snapshot)),
+    ...runSrcs,
+  ];
+  requireSameProgram(lifts, identities, srcs);
+  const running = liftRunningStates(lifts, srcs);
+  requireAttributableRuns(lifts, running, runSrcs);
+  requireUninstrumentedPreviews(
+    actions.flatMap((snapshot) => Object.values(snapshot).flat()),
+  );
+  return {
+    running,
+    implementations: confirmLiftImplementations(lifts, actions, running),
+  };
+}
+
 /**
  * Returns the timing recorded between two snapshots of one thread, joining
  * keys that differ only in an all-digit segment and dropping keys whose last
@@ -507,13 +544,6 @@ export async function runThenStop<T, S>(
   return { value: outcome.value, stopped };
 }
 
-/** Helper for the lookups above, which refuses a name that is not plain. */
-function requirePlainName(name: string): void {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-    throw new Error(`\`${name}\` is not a plain identifier`);
-  }
-}
-
 /** Helper for the decisions above, which returns a site's module path. */
 function moduleOf(site: string): string {
   return site.replace(/:\d+:\d+$/, "");
@@ -530,215 +560,62 @@ function firstDifference(a: string, b: string): number {
 }
 
 //
-// Token scanning
+// Parsing
 //
 
-/** One token of source, with where it starts and ends. */
-interface Token {
-  /** The token's text. */
-  text: string;
-
-  /** Offset of its first character. */
-  start: number;
-
-  /** Offset just past its last character. */
-  end: number;
-}
-
-/** Multi-character punctuators, longest first. */
-const PUNCTUATORS = [
-  ">>>=",
-  "...",
-  "===",
-  "!==",
-  "**=",
-  "<<=",
-  ">>=",
-  ">>>",
-  "&&=",
-  "||=",
-  "??=",
-  "=>",
-  "==",
-  "!=",
-  "<=",
-  ">=",
-  "&&",
-  "||",
-  "??",
-  "?.",
-  "++",
-  "--",
-  "+=",
-  "-=",
-  "*=",
-  "/=",
-  "%=",
-  "&=",
-  "|=",
-  "^=",
-  "**",
-  "<<",
-  ">>",
-];
-
 /**
- * Keywords after which a `/` starts a regular expression literal rather than a
- * division.
+ * Helper for the lookups above, which parses `text` as `kind` under `source`'s
+ * name. The parser recovers from a syntax error rather than throwing, so text
+ * that does not parse as a whole module yields the declarations it could read;
+ * a declaration lost that way is reported as one not found.
  */
-const REGEX_PRECEDING_KEYWORDS: ReadonlySet<string> = new Set([
-  "await",
-  "case",
-  "delete",
-  "do",
-  "else",
-  "in",
-  "instanceof",
-  "new",
-  "of",
-  "return",
-  "throw",
-  "typeof",
-  "void",
-  "yield",
-]);
-
-/**
- * Helper for {@link compiledLiftText}, which yields the tokens of `text` from
- * offset `from`: identifiers, numbers, string, template, and regular
- * expression literals, and punctuators, with whitespace and comments dropped.
- * A template literal is one token, `${...}` substitutions included. An
- * unterminated literal ends at the end of `text`, or for a quoted string at an
- * unescaped line break.
- */
-function* scanTokens(text: string, from = 0): Generator<Token> {
-  const word = /[A-Za-z_$][\w$]*|\d[\w.]*|\.\d\w*/y;
-  let previous: string | undefined;
-  let at = from;
-  while (at < text.length) {
-    const char = text[at];
-    if (/\s/.test(char)) {
-      at++;
-      continue;
-    }
-    if (text.startsWith("//", at)) {
-      const newline = text.indexOf("\n", at);
-      at = newline === -1 ? text.length : newline;
-      continue;
-    }
-    if (text.startsWith("/*", at)) {
-      const close = text.indexOf("*/", at + 2);
-      at = close === -1 ? text.length : close + 2;
-      continue;
-    }
-    let end: number;
-    if (char === '"' || char === "'") {
-      end = quotedEnd(text, at);
-    } else if (char === "`") {
-      end = templateEnd(text, at);
-    } else if (char === "/" && startsRegex(previous)) {
-      end = regexEnd(text, at);
-    } else {
-      word.lastIndex = at;
-      const matched = word.exec(text)?.[0] ??
-        PUNCTUATORS.find((punctuator) =>
-          text.startsWith(punctuator, at) &&
-          !(punctuator === "?." && /\d/.test(text[at + 2] ?? ""))
-        ) ?? char;
-      end = at + matched.length;
-    }
-    const token = { text: text.slice(at, end), start: at, end };
-    previous = token.text;
-    yield token;
-    at = end;
-  }
+function parse(
+  text: string,
+  source: string,
+  kind: ts.ScriptKind,
+): ts.SourceFile {
+  return ts.createSourceFile(source, text, ts.ScriptTarget.Latest, true, kind);
 }
 
 /**
- * Helper for {@link scanTokens}, which returns the offset past the quoted
- * string starting at `at`.
+ * Helper for the lookups above, which returns the first argument of every
+ * `const <name> = <callee>(...)` declaration in `parsed` whose callee
+ * `isLift` accepts, in source order. A declaration whose call has no argument
+ * is not one of them.
  */
-function quotedEnd(text: string, at: number): number {
-  const quote = text[at];
-  for (let end = at + 1; end < text.length; end++) {
-    if (text[end] === "\\") end++;
-    else if (text[end] === quote) return end + 1;
-    else if (text[end] === "\n") return end;
-  }
-  return text.length;
-}
-
-/**
- * Helper for {@link scanTokens}, which returns the offset past the template
- * literal starting at `at`, reading each `${...}` substitution as code.
- */
-function templateEnd(text: string, at: number): number {
-  let end = at + 1;
-  while (end < text.length) {
-    if (text[end] === "\\") {
-      end += 2;
-    } else if (text[end] === "`") {
-      return end + 1;
-    } else if (text.startsWith("${", end)) {
-      end = substitutionEnd(text, end + 2);
-    } else {
-      end++;
+function liftArguments(
+  parsed: ts.SourceFile,
+  name: string,
+  isLift: (callee: ts.Expression) => boolean,
+): ts.Expression[] {
+  const found: ts.Expression[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+      node.name.text === name && node.initializer !== undefined &&
+      ts.isCallExpression(node.initializer) &&
+      isLift(node.initializer.expression) &&
+      node.initializer.arguments.length > 0
+    ) {
+      found.push(node.initializer.arguments[0]);
     }
-  }
-  return text.length;
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(parsed, visit);
+  return found;
 }
 
 /**
- * Helper for {@link templateEnd}, which returns the offset past the `}` closing
- * a substitution whose code starts at `from`.
+ * Helper for {@link compiledLiftText}, which returns whether `callee` is the
+ * `(0, <alias>.lift)` the compiler emits where the authored source calls an
+ * imported `lift`.
  */
-function substitutionEnd(text: string, from: number): number {
-  let depth = 0;
-  for (const token of scanTokens(text, from)) {
-    if (token.text === "{") {
-      depth++;
-    } else if (token.text === "}") {
-      if (depth === 0) return token.end;
-      depth--;
-    }
-  }
-  return text.length;
-}
-
-/**
- * Helper for {@link scanTokens}, which returns whether a `/` after `previous`
- * starts a regular expression literal: at the start, after a keyword that
- * takes an expression, or after a punctuator other than a closing bracket.
- */
-function startsRegex(previous: string | undefined): boolean {
-  if (previous === undefined) return true;
-  if (REGEX_PRECEDING_KEYWORDS.has(previous)) return true;
-  return !/^[\w$"'`]/.test(previous) && previous !== ")" &&
-    previous !== "]" && previous !== "}";
-}
-
-/**
- * Helper for {@link scanTokens}, which returns the offset past the regular
- * expression literal starting at `at`, or past the `/` alone when no literal
- * closes on its line.
- */
-function regexEnd(text: string, at: number): number {
-  let inClass = false;
-  for (let end = at + 1; end < text.length; end++) {
-    const char = text[end];
-    if (char === "\\") {
-      end++;
-    } else if (char === "\n") {
-      return at + 1;
-    } else if (char === "[") {
-      inClass = true;
-    } else if (char === "]") {
-      inClass = false;
-    } else if (char === "/" && !inClass) {
-      const flags = /[A-Za-z]*/y;
-      flags.lastIndex = end + 1;
-      return end + 1 + (flags.exec(text)?.[0].length ?? 0);
-    }
-  }
-  return at + 1;
+function isCompiledLiftCallee(callee: ts.Expression): boolean {
+  if (!ts.isParenthesizedExpression(callee)) return false;
+  const comma = callee.expression;
+  return ts.isBinaryExpression(comma) &&
+    comma.operatorToken.kind === ts.SyntaxKind.CommaToken &&
+    ts.isPropertyAccessExpression(comma.right) &&
+    ts.isIdentifier(comma.right.expression) &&
+    comma.right.name.text === "lift";
 }

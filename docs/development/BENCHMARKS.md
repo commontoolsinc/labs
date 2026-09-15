@@ -348,10 +348,14 @@ A measured sample is taken against a program that `prepareTopicsProgram()`
 compiles from the sources the board was seeded from, on an emulated runtime and
 with `packages/patterns` as the program root, as the topic board fixture deploys
 it. The compile takes about a second, so a caller prepares one program and
-passes it to each measurement. A lift is found by name: the helper finds
-`const <name> = lift(` in its module and takes the position where the lift's
-function starts, which is the position a run's `src` names, so a candidate whose
-lines moved is measured under the same names. Three checks then tie the running
+passes it to each measurement. A lift is found by name: the helper parses the
+module with the TypeScript compiler's parser, finds the one
+`const <name> = lift(<function>)` declaration in it, and takes the position
+where that function starts, which is the position a run's `src` names, so a
+candidate whose lines moved is measured under the same names. It reads a lift's
+compiled function out of the emitted module the same way, so a bracket or a
+declaration inside a string, a comment, a template literal, or a regular
+expression is read as part of that literal or comment rather than as code. Three checks then tie the running
 code to the compiled program, and each failure names the check that failed.
 Every Topics module an action's `src` names must carry the compiled module's
 content identity, the `<identity>` in `cf:module/<identity>/topics/...`; any
@@ -411,6 +415,9 @@ browser live in `topics-browser-measurement-core.ts` beside the helper, and
 `packages/patterns/test/topics-browser-measurement-core.test.ts` tests them
 under a plain `deno test`, partly against compiled text, previews, and module
 identities recorded from the Topics sources in a fixture beside that test.
+`packages/patterns/tools/regenerate-topics-measurement-fixture.ts` rewrites
+everything in that fixture a compile produces, and fails when a preview
+recorded from a browser no longer matches what those sources compile to.
 
 ## The multiplayer contention benchmark
 

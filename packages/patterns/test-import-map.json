@@ -7,6 +7,7 @@
     "@std/testing/bdd": "jsr:@std/testing@^1/bdd",
     "@commonfabric/test-support/isolated-deno": "../test-support/src/isolated-deno.ts",
     "@xyflow/react": "npm:@xyflow/react@^12.11.5",
-    "commonfabric": "./tools/test-support/commonfabric.ts"
+    "commonfabric": "./tools/test-support/commonfabric.ts",
+    "typescript": "npm:typescript@6.0.3"
   }
 }
