@@ -1247,11 +1247,12 @@ function documentIdOf(cell: Cell<unknown>): string {
 //
 
 /**
- * Returns the topic index of each board entry whose mention list names `topic`,
- * leaving out entries that are `topic` itself, in board order.
+ * Returns the index of each topic on the board, other than `topic` itself,
+ * whose mention list names `topic`: once each, in the order of each one's first
+ * board entry.
  */
 export function mentionersOf(fixture: TopicsFixture, topic: number): number[] {
-  return fixture.board.filter((source) =>
+  return [...new Set(fixture.board)].filter((source) =>
     source !== topic && fixture.topics[source].mentions.includes(topic)
   );
 }

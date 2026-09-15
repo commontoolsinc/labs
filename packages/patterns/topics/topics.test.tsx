@@ -588,18 +588,34 @@ export default pattern(() => {
   // shape that separates the rule the pivot actually holds — exclude by
   // identity — from the one that passes every test where each topic appears
   // once, exclude by array position. With a position check the twin at index 1
-  // is not excluded, its mention of `twin` matches, and a topic that only ever
-  // mentioned itself is reported as referenced from elsewhere.
+  // is not excluded, its self-mention matches, and the topic is reported as
+  // referenced from its own second entry.
   const twinA = Topic({ title: "Twin" });
   const twinB = Topic({ title: "Other" });
-  const assert_self_mention_inert_through_a_twin = assert(() =>
-    mentionedBy(twinA, [twinA, twinA, twinB], [[twinA], [twinA], []])
-        .length === 0 &&
-    // The same list still reports a real inbound edge, so the exclusion is
+  const assert_self_mention_inert_through_a_twin = assert(() => {
+    // `twinB`'s mention of `twinA` is a real inbound edge, so the exclusion is
     // not simply swallowing everything.
-    mentionedBy(twinB, [twinA, twinA, twinB], [[twinB], [twinB], []])
-        .length === 2
-  );
+    const inbound = mentionedBy(
+      twinA,
+      [twinA, twinA, twinB],
+      [[twinA], [twinA], [twinA]],
+    );
+    return inbound.length === 1 && equals(inbound[0], twinB);
+  });
+
+  // `mentionedBy` lists a source once for each entry of the list it is handed
+  // whose mentions name the topic, so `twinA` at two entries is listed twice.
+  // The board's backlinks count a duplicated source once because the pivot
+  // hands `mentionedBy` the list `distinctByIdentity` returns.
+  const assert_mentioned_by_counts_each_matching_entry = assert(() => {
+    const inbound = mentionedBy(
+      twinB,
+      [twinA, twinA, twinB],
+      [[twinB], [twinB], []],
+    );
+    return inbound.length === 2 && equals(inbound[0], twinA) &&
+      equals(inbound[1], twinA);
+  });
 
   const assert_repeated_mentions_contribute_one_edge_per_source_entry = assert(
     () => {
@@ -1236,6 +1252,7 @@ export default pattern(() => {
       { action: action_seed_row_universe },
       { assertion: assert_row_universe_accepted },
       { assertion: assert_self_mention_inert_through_a_twin },
+      { assertion: assert_mentioned_by_counts_each_matching_entry },
       {
         assertion:
           assert_repeated_mentions_contribute_one_edge_per_source_entry,

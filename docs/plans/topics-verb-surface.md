@@ -225,11 +225,13 @@ writing a case:
   Topic built in a pattern body does not run: its argument reads as undefined,
   which the runner logs as a potential schema mismatch.
 - The pivot excludes a topic from its own inbound edges by identity rather than
-  array position. Only a list holding the same topic twice separates those, and
-  a board can hold one: writing the live handle of a topic the board already
+  array position. Only a list holding the same topic twice separates those. A
+  board can hold one: writing the live handle of a topic the board already
   lists into its `topics` through the piece controller's `input`, or linking
   that topic there with `PiecesController.link`, adds a second entry for it.
-  `mentionedBy` is exported so that a test can hand it such a list directly.
+  The pivot hands its join the list `distinctByIdentity` returns, which names
+  that topic once, so `mentionedBy` is exported for a test to hand a duplicated
+  list directly.
 
 ## Deploying to the team board
 
