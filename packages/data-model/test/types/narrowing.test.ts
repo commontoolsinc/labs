@@ -12,7 +12,7 @@ import {
   isKeyableObjectOrArray,
   isWalkableObjectNotArray,
   isWalkableObjectOrArray,
-} from "@/types/narrowing.ts";
+} from "@/types";
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricSpecialObject } from "@/fabric-bases/BaseFabricSpecialObject.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";

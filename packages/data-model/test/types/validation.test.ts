@@ -24,15 +24,16 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { codecClasses } from "@/fabric-primitives/index.ts";
 import type { FabricValue } from "@/interface.ts";
 import { shallowFabricFromConvertibleJsValue } from "@/convertible-js.ts";
-import { isFabricPlainObject } from "@/types/narrowing.ts";
 import {
   assertValidFabricValueLayer,
+  isFabricPlainObject,
   isValidFabricConvertibleJsObject,
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
-} from "@/types/validation.ts";
-import { tagOfConvertibleJsValueElseNull, VALUE_TAGS } from "@/types";
+  tagOfConvertibleJsValueElseNull,
+  VALUE_TAGS,
+} from "@/types";
 import { LAYER_CORPUS, PlainClass } from "../fabric-value-corpus.ts";
 
 describe("validation", () => {

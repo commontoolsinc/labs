@@ -43,12 +43,10 @@ import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricPrimitive, type FabricValue } from "@/interface.ts";
 import {
-  isValidFabricConvertibleJsObject,
-  isValidFabricValueLayer,
-} from "@/types/validation.ts";
-import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
+  isValidFabricConvertibleJsObject,
+  isValidFabricValueLayer,
   JS_TYPE_VALUE_TAGS,
   type JsTypeValueTag,
   tagOfConvertibleJsValueElseNull,

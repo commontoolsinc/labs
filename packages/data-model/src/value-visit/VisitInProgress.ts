@@ -13,16 +13,14 @@ import {
   type FabricValue,
 } from "@/interface.ts";
 import {
+  type FabricValueTag,
   isValidFabricValue,
   isValidFabricValueLayer,
-} from "@/types/validation.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
-import {
-  type FabricValueTag,
   tagOfFabricValue,
   tagOfFabricValueElseNull,
   VALUE_TAGS,
 } from "@/types";
+import { toCompactDebugString } from "@/value-debug.ts";
 
 import {
   type BaselineVisitResult,
