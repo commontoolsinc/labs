@@ -88,10 +88,14 @@ compares across jobs. Adding a bench file to the list does not place it, so
 neither the calibration's position nor any other file's can be arranged from
 here.
 
-Benchmark numbers are not gated, and neither is CI wall time. The only per-PR
-gate is the coverage-debt ratchet (`tasks/coverage-check.ts`), which never
-ingests benchmark results, so a bench regression shows up as trend drift on the
-dashboard rather than as a failing check.
+Benchmark results are not gated, and neither is CI wall time. The counts gated
+on every pull request include the coverage-debt ratchet
+(`tasks/coverage-check.ts`, in the Coverage Check job), the read limits of the
+headless lunch-poll render fixtures
+([below](#headless-render-read-limits), in Pattern Unit Tests), and the Topics
+read and graph limits ([below](#the-read-budget), in Pattern Integration
+Tests). None of them ingests benchmark results, so a bench regression shows up
+as trend drift on the dashboard rather than as a failing check.
 
 Most packages with benches define a `bench` task for running them locally
 (see `packages/runner/deno.jsonc`); otherwise invoke `deno bench` on a
@@ -828,13 +832,20 @@ To derive the limits again, run from the repository root:
 
 ```sh
 deno run -A --frozen scripts/topics-computation-cost.ts --derive-limits \
-  > packages/patterns/integration/topics-read-budget-limits.ts
+  > topics-read-budget-limits.derived &&
+  mv topics-read-budget-limits.derived \
+    packages/patterns/integration/topics-read-budget-limits.ts
 ```
 
 The command runs every gated case five times, in rounds, each run in a process
-of its own as the probe runs a case, and prints the limits module. A count that
-does not repeat identically across the five runs is printed as ungated, with the
-value each run observed, and is not checked; the command then fails, naming it.
+of its own as the probe runs a case, and prints the limits module. It imports
+the module it prints, through the read-budget rules, so its output goes to a
+file of its own and replaces the table only once the command succeeds;
+redirecting it straight into the table empties the table before the command
+can load it. A count that does not repeat identically across the five runs is
+printed as ungated, with the value each run observed, and is not checked; the
+command then fails, naming it, and leaves `topics-read-budget-limits.derived`
+holding what it printed.
 
 A failing read-budget test has found a count that grew. Attribute the added
 reads or graph size to a phase and a role in the probe's records before
