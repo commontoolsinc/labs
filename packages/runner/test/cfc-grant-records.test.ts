@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import { CFC_ATOM_TYPE, type CfcAtom, cfcAtom } from "@commonfabric/api/cfc";
+import { hashStringOf } from "@commonfabric/data-model";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
@@ -14,6 +15,8 @@ import type { CfcGrantResolverQuery } from "../src/cfc/exchange-eval.ts";
 import {
   CFC_GRANT_ABSENT_DIGEST,
   CFC_GRANT_ID_PREFIX,
+  CFC_GRANT_VERSION,
+  cfcGrantConsumedReceiptId,
   cfcGrantDocId,
   type CfcGrantWriteInput,
   createTxCfcGrantResolver,
@@ -505,6 +508,36 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       const id = cfcGrantDocId(identity);
       expect(id.startsWith(CFC_GRANT_ID_PREFIX)).toBe(true);
       expect(cfcGrantDocId({ ...identity })).toBe(id);
+    });
+
+    it("takes its digest over the versioned `cfcGrant` wrapper", () => {
+      expect(cfcGrantDocId(identity)).toBe(
+        `${CFC_GRANT_ID_PREFIX}${
+          hashStringOf({
+            cfcGrant: {
+              version: CFC_GRANT_VERSION,
+              space: identity.space,
+              kind: identity.kind,
+              owner: identity.owner,
+              resource: identity.resource,
+            },
+          })
+        }`,
+      );
+    });
+
+    it("takes a receipt digest over the versioned `cfcGrantConsumed` wrapper", () => {
+      const grantId = cfcGrantDocId(identity);
+      expect(cfcGrantConsumedReceiptId(grantId)).toBe(
+        `${CFC_GRANT_ID_PREFIX}${
+          hashStringOf({
+            cfcGrantConsumed: {
+              version: CFC_GRANT_VERSION,
+              grantConsumed: { grantId },
+            },
+          })
+        }`,
+      );
     });
 
     it("changes with every identity field, and only identity fields", () => {
