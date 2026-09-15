@@ -51,11 +51,29 @@ export const TOPICS_READ_BUDGET_GROUPS = {
 /** A group of read-budget cases, which one test file runs. */
 export type ReadBudgetGroup = keyof typeof TOPICS_READ_BUDGET_GROUPS;
 
+/** Returns the name of the test file that runs the cases of `group`. */
+export function readBudgetTestFile(group: ReadBudgetGroup): string {
+  return `topics-read-budget-${group}.test.ts`;
+}
+
 /** Returns the name of the test file of each read-budget group, sorted. */
 export function readBudgetTestFiles(): string[] {
-  return Object.keys(TOPICS_READ_BUDGET_GROUPS)
-    .map((group) => `topics-read-budget-${group}.test.ts`)
+  return readBudgetGroups().map(readBudgetTestFile).toSorted();
+}
+
+/** Returns every read-budget group, sorted. */
+export function readBudgetGroups(): ReadBudgetGroup[] {
+  return (Object.keys(TOPICS_READ_BUDGET_GROUPS) as ReadBudgetGroup[])
     .toSorted();
+}
+
+/**
+ * Returns the call that makes a test file run the cases of `group`. A file
+ * holding no such call registers no test, so its own tests cannot report that
+ * it runs nothing; the other groups' files read its source for this call.
+ */
+export function readBudgetRegistration(group: ReadBudgetGroup): string {
+  return `describeReadBudgetGroup("${group}", import.meta.url)`;
 }
 
 /** The counts a read-budget limit gates, in the order the table lists them. */

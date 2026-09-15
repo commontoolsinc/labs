@@ -13,6 +13,9 @@ import {
   assignedLimitsNotExceeded,
   limitsExceeded,
   type ReadBudgetGroup,
+  readBudgetGroups,
+  readBudgetRegistration,
+  readBudgetTestFile,
   readBudgetTestFiles,
   TOPICS_READ_BUDGET_GROUPS,
   variantsAssignedTo,
@@ -25,7 +28,8 @@ import { READ_BUDGET_VARIANTS } from "./topics-read-budget-variants.ts";
  * for the test file at `testFile`, a `file:` URL:
  *
  * - that `testFile` is the file named for `group`, and sits beside one test
- *   file for each other group;
+ *   file for each other group, each running the cases of the group it is
+ *   named for;
  * - that the limits table holds limits for exactly the cases the groups name;
  * - for each of the group's cases, that every count its phases record stays
  *   within its limit, and that each variant its limits are assigned to exceeds
@@ -44,14 +48,25 @@ export function describeReadBudgetGroup(
     );
   });
 
-  it("sits beside one test file for each group of read-budget cases", async () => {
+  it("sits beside one test file for each group, each running its group", async () => {
+    const directory = new URL(".", import.meta.url);
     const files: string[] = [];
-    for await (const entry of Deno.readDir(new URL(".", import.meta.url))) {
+    for await (const entry of Deno.readDir(directory)) {
       if (/^topics-read-budget-.+\.test\.ts$/.test(entry.name)) {
         files.push(entry.name);
       }
     }
     expect(files.toSorted()).toEqual(readBudgetTestFiles());
+    const registered = await Promise.all(
+      readBudgetGroups().map(async (other) => {
+        const file = readBudgetTestFile(other);
+        const source = await Deno.readTextFile(new URL(file, directory));
+        return source.includes(readBudgetRegistration(other))
+          ? file
+          : `${file} (runs no read-budget group)`;
+      }),
+    );
+    expect(registered.toSorted()).toEqual(readBudgetTestFiles());
   });
 
   it("holds limits for exactly the cases the read-budget groups name", () => {
