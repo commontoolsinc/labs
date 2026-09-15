@@ -32,7 +32,7 @@ import {
   type FabricValueLayer,
 } from "./interface.ts";
 import { isFabricPlainObject, isFabricSpecialObject } from "./type-check.ts";
-import { tagOfNativeBuiltinClassElseNull, VALUE_TAGS } from "@/value-tags";
+import { tagOfNativeValueElseNull, VALUE_TAGS } from "@/value-tags";
 
 /**
  * Indicates whether the value is a `FabricValue`, accepting
@@ -403,28 +403,7 @@ export function isValidFabricPlainObject(
 export function isValidFabricNativeObject(
   value: unknown,
 ): value is FabricNativeObject {
-  if (value === null || typeof value !== "object") return false;
-
-  // Arrays first, and unconditionally, exactly as the full dispatch does it.
-  // An array's class is USUALLY `Array`, whose tag is not one of the six
-  // below -- but a prototype can be re-pointed, and an array whose
-  // `prototype` is `Date.prototype` would otherwise be reported as a
-  // convertible `Date`.
-  // `Array.isArray()` sees through that, and through a subclass and a severed
-  // prototype besides, which is why the array rule alone decides what an array
-  // may be.
-  if (Array.isArray(value)) return false;
-
-  const ctor = constructorOfObject(value);
-  const tag = (ctor !== undefined)
-    ? tagOfNativeBuiltinClassElseNull(ctor)
-    : null;
-
-  // `Error.isError()` is the test that holds across realms, where `instanceof`
-  // does not, and it is what sees an error whose constructor is unreachable.
-  // The one environment here that rebuilds the `Error` constructor -- SES
-  // lockdown -- has the method restored before any of this runs.
-  switch (tag ?? (Error.isError(value) ? VALUE_TAGS.JsError : null)) {
+  switch (tagOfNativeValueElseNull(value)) {
     case VALUE_TAGS.JsError:
     case VALUE_TAGS.JsMap:
     case VALUE_TAGS.JsSet:

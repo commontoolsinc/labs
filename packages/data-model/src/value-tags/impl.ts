@@ -140,10 +140,10 @@ export function tagOfFabricValueElseNull(
  * the direction an unhandled case should fail in.
  *
  * This is asked of a class already read from a prototype, which is a
- * question that arises inside this package: a caller elsewhere holds values,
- * and asks `tagOfNativeValueElseNull()`.
+ * question that arises inside this module: a caller holds values, and asks
+ * `tagOfNativeValueElseNull()`.
  */
-export function tagOfNativeBuiltinClassElseNull(
+function tagOfNativeBuiltinClassElseNull(
   constructorFn: { prototype: unknown },
 ): ValueTag | null {
   // A `switch` on constructor identity, rather than sequential `instanceof`

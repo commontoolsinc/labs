@@ -30,11 +30,7 @@ import {
 } from "@/index.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { isValidFabricNativeObject } from "@/validity-check.ts";
-import {
-  tagOfNativeBuiltinClassElseNull,
-  tagOfNativeValueElseNull,
-  VALUE_TAGS,
-} from "@/value-tags";
+import { tagOfNativeValueElseNull, VALUE_TAGS } from "@/value-tags";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricRegExp", () => {
@@ -347,14 +343,6 @@ describe("FabricRegExp", () => {
     describe("tagOfNativeValueElseNull()", () => {
       it("returns the `JsRegExp` tag for `RegExp` instances", () => {
         expect(tagOfNativeValueElseNull(/abc/)).toBe(VALUE_TAGS.JsRegExp);
-      });
-    });
-
-    describe("tagOfNativeBuiltinClassElseNull()", () => {
-      it("returns the `JsRegExp` tag for the `RegExp` constructor", () => {
-        expect(tagOfNativeBuiltinClassElseNull(RegExp)).toBe(
-          VALUE_TAGS.JsRegExp,
-        );
       });
     });
 
