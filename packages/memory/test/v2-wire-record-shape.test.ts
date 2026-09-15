@@ -79,9 +79,19 @@ const frameForBytes: FrameFor = (place) =>
 
 // The encoder cannot produce a tag it does not recognize, so this frames the
 // message around a placeholder and puts the tag where the placeholder landed.
-const frameForUnrecognized: FrameFor = (place) =>
-  encodeMemoryBoundary(place(PLACEHOLDER))
-    .replace(JSON.stringify(PLACEHOLDER), UNRECOGNIZED);
+// A frame the placeholder is not found in throws: a substitution that missed
+// would leave a plain string at the position, which every test here refuses
+// for a reason other than the one it is pinning.
+const frameForUnrecognized: FrameFor = (place) => {
+  const framed = encodeMemoryBoundary(place(PLACEHOLDER));
+  const encodedPlaceholder = JSON.stringify(PLACEHOLDER);
+  if (!framed.includes(encodedPlaceholder)) {
+    throw new Error(
+      `no ${encodedPlaceholder} to substitute in the framed message`,
+    );
+  }
+  return framed.replace(encodedPlaceholder, UNRECOGNIZED);
+};
 
 const wireInstances: Array<[string, FrameFor]> = [
   ["a `FabricBytes`", frameForBytes],
