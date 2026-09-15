@@ -9,7 +9,7 @@ import {
   type FabricValue,
 } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
-import { type PrimitiveValueTag } from "@/types/tags.ts";
+import { type PrimitiveValueTag } from "@/types";
 
 import {
   type BaselineVisitResult,
