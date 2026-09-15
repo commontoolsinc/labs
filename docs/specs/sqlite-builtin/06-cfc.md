@@ -400,9 +400,16 @@ with the pure half in
    Rule-less tables keep Phase 2's conservative static merge. (An
    author-declared `derived:` fallback label for the refuse case remains a
    possible follow-up.)
-3. **Evaluate per row, attach per row.** Each result row already splits into
-   its own entity doc; the flush writes each labeled row doc **directly** (its
-   own id, root path) under a root-`ifc` schema. Keyed by the row doc's id,
+3. **Evaluate per row, attach per row.** Each result row is stored as an
+   entity doc of its own, keyed for a row-labeled row on its position and its
+   label under the result cell — never on its content, since the doc id is
+   visible to a reader the row label excludes, and on the label because a
+   doc's confidentiality can never weaken (Section
+   [05](./05-reactivity.md)); the
+   flush writes each labeled row doc
+   **directly** (its own id, root path) under a root-`ifc` schema, and then
+   reads each row's stored link back to confirm the row has a doc to carry
+   the label, refusing the query if one does not. Keyed by the row doc's id,
    the per-row root label coexists with Phase 2's per-column field labels on
    the same doc and dominates its fields by prefix-match (a field of a row is
    at least as confidential as the row — inheriting down can only raise).
