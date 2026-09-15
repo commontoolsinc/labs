@@ -589,11 +589,11 @@ export type TopicsDemand =
    */
   | { readonly workload: "all-backlinks" }
   /**
-   * Every topic's comment count and last activity, and nothing else: the two
-   * lifts that read a topic's comments and links. A browser ran them one topic
-   * at a time, the comment count on opening a topic and its last activity on
-   * returning to the board, so every topic's at once is not what a board in
-   * use demands.
+   * Every topic's comment count and last activity, and nothing else: the lifts
+   * that read a topic's comments, and of those the last activity reads its
+   * links as well. A browser ran them only for the topic it opened, the
+   * comment count on opening that topic and its last activity on returning to
+   * the board, so every topic's at once is not what a board in use demands.
    */
   | { readonly workload: "aggregates" };
 

@@ -775,9 +775,9 @@ function verifyOutputs(
 }
 
 /**
- * Checks that no lift `measurement.demand` starts none of completed an action
- * during `operation`, so that a lift running without being demanded, whether or
- * not it holds an output, fails the case.
+ * Checks that no lift outside `measurement.demand` completed an action during
+ * `operation`, so that a lift running without being demanded, whether or not
+ * it holds an output, fails the case.
  *
  * @throws Error when such a lift completed an action.
  */
