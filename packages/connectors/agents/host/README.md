@@ -150,9 +150,11 @@ from it beside the debug view's queue. A producer whose pattern declares no
 authorization fails startup. Producer IDs must be unique. A producer's queue is
 bound before commands are subscribed. Removing a producer from the configuration
 leaves its queue and the piece's link in place; the queue is no longer read. The
-queue's writer is the handler's module identity as read at startup, so a
-`setsrc` that changes the producer's pattern leaves the queue refusing the new
-module's writes until the host restarts and binds the queue again.
+queue's writer claim names the handler's module identity as it was when the
+queue was first bound, and a `setsrc` of the producer's pattern needs no host
+restart: the update records a delegation from the new module identity to the one
+the claim names, and the fabric accepts the delegated writer. A later restart
+presents the claim under the new identity, and the stored claim stays.
 
 The source fields are the connector's `AgentSourceConfig` contract:
 
