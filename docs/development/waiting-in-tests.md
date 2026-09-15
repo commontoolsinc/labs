@@ -334,7 +334,90 @@ Because the sink fires once on registration and then on every committed change,
 the waiter can resolve immediately when the value is already there and otherwise
 on the next change the sink reports.
 
-That last shape is packaged as `waitForCellValue` in
+**Suites that drive a live memory server** — the runner's serving-loop,
+events-down, speculation and effect-channel families — watch a third kind of
+state: what only the server produces. A wave's derived writes, a document
+outside every replica's watch set, a scan over the space's own commit table, a
+counter the loop moves inside a wave cycle. A cell sink sees none of it, which
+is what made a poll over the engine the reflex in those files.
+
+A set of edges carries them, and
+`packages/runner/test/support/serving-waits.ts` holds the waits built on each:
+
+- `Server.watchAdmittedCommits` reports every commit the store admits — a
+  session transact, a delegated append, the server's own direct write, and the
+  serving loop's wave commits — after the engine has applied it. It sits beside
+  the single observer slot the ExecutorHost owns, so any number of watchers
+  attach. `awaitAdmitted(server, predicate)` sleeps on it and reads the engine
+  on each commit.
+- `SpaceServerOptions.onWaveCycle`, forwarded by `ExecutorHostOptions`, reports
+  each wave cycle as it ends — committed or not, thrown or not. The loop's
+  counters move inside a cycle and are visible only as numbers afterwards, so
+  `awaitEach(log, predicate)` re-reads them when one has run.
+- `SpaceServerOptions.onEventDrainPass` reports the end of a drain pass, which
+  is where `events.processed` moves. A pass ends before the settle that
+  follows it, so a wait on that counter at the cycle boundary instead sleeps
+  through a whole flush deadline for nothing.
+- `ExecutorHostOptions.onActivationSettled` reports each activation attempt as
+  it ends. Activation is driven from the admission feed and from session opens
+  and finishes on neither of their edges.
+- `SpaceServerOptions.onDrainInFlightSkip` and `onEventDeferred`, forwarded the
+  same way, report the two things that happen INSIDE a drain pass rather than
+  at its boundary: a re-drain the in-flight guard turned away, and a served
+  dispatch that deferred. A pin that holds a drain parked to build the window
+  it is about is holding the pass whose end the cycle edge above reports, so
+  those two are the only edges left to it.
+- A client's own `storageManager.subscribe`, through
+  `awaitReplica(manager, predicate)`, for what a push to that client reports and
+  the watermark does not: a retirement, which is the loop's own bookkeeping, or
+  a re-issue after a requeue.
+
+`settleServing(engine, runtime, space)` is the barrier the assertions stand
+behind: it flushes the runtime, reads the highest AUTHORED seq in the space, and
+waits for W to cover it through `waitForSettled`. `W >= seq` is the settled
+contract as a client applies it, so past the barrier a consequence that never
+arrived is an absence to assert on. It is a barrier, not a delivery signal: a
+wave that requeues the event it drained still commits, and its advance still
+covers that event's seq, so a test whose subject is the re-run's own output
+waits for that output on the replica.
+
+`ArrivalLog` records what a callback the test already registers hands it — a
+navigate callback, a scheduler `onError`, a fault injector, a settle gate — with
+a promise per arrival, so a test waits on the arrival rather than on a count
+turning true. A test that installs its own gate or fault seam owns that seam's
+edge already: record each hit on a log rather than incrementing a counter, and
+the counter's readers become the log's, with a wait available for free.
+
+A serving-side value that exists only in the SERVING runtime's view — a write
+sealed into an open wave, which the store does not hold yet — has no edge in
+that list, and the `waitForCellValue` shape below is wrong for it: idling the
+serving runtime runs whatever the pin parked there to completion, which in
+these files is the choreography under test. The wait for one of those sleeps
+on the cell's own sink and compares the cell as the sink reports it, without
+idling.
+`awaitServingView` in `executor-events-down.test.ts` is that shape. A cell the
+test's own code writes is better still: report the write from the code that
+makes it, and the wait names the write rather than the view of it.
+
+Each of the SpaceServer and ExecutorHost options above is marked `DIAGNOSTIC
+(tests)` where it is declared. They exist because the state they report has no
+other boundary, and adding one is the alternative the note above prefers to
+keeping a poll.
+
+These waits carry a stuck-condition net, which the waits in the sections above
+do not. A live SpaceServer renews its lease on a repeating timer, so a process
+running one never goes quiet and the fail-fast described below never fires;
+without a net a wait whose condition never arrives burns the whole job instead
+of failing. `stuckNet` in `@commonfabric/test-support/stuck-net` is that net,
+and it is one definition for every wait that needs one: the waits here,
+`wait-on-delivery.ts` below, and `waitForCellValue` for a caller talking to a
+live server, which arms it by passing `stuckLabel`. It is a stuck detector,
+not a bound at the call site: reaching it says the condition never came, which
+is why its span is measured in minutes against waits that take seconds. It
+lives under `test/` so that the fake clock, which classifies a timer by the
+file that armed it, freezes it along with every other test-armed timer.
+
+The read-a-cell-the-sink-observes shape is packaged as `waitForCellValue` in
 `@commonfabric/integration/wait-for-cell-value`, usable from any package's
 tests. It sleeps on the sink and applies its predicate to the cell only after
 `runtime.idle()`, so the wait has neither a poll interval under it nor an
@@ -396,11 +479,12 @@ and an unsatisfiable wait still fails in seconds in the heaviest setup we have,
 two runtimes over an in-process memory server. It does not carry over to the
 browser waits above, where a live DevTools Protocol connection holds the loop
 open and a waiter that never fires would hang instead. A client talking to a
-live server holds the loop open the same way. A wait against one runs to the
-ambient test or CI limit rather than failing fast. The CLI suite's readiness
-probe is such a client. It disposes its controller once the wait returns, which
-also keeps a finished wait from holding the loop open for the rest of the
-suite.
+live server holds the loop open the same way, and so does a process running a
+live SpaceServer, whose lease renews on a repeating timer. A wait against one
+runs to the ambient test or CI limit rather than failing fast, which is what
+the stuck-condition net above is for. The CLI suite's readiness probe is such a
+client. It disposes its controller once the wait returns, which also keeps a
+finished wait from holding the loop open for the rest of the suite.
 
 ### Naming the arrival, across runtimes
 
@@ -907,18 +991,19 @@ boundary the test can await without adding one to production code.
   `nested-counter.test.ts` resolve a `defer()` from an existing
   `resultCell.sink(...)`.
 - `packages/runner/test/support/wait-until.ts` — the `waitUntil` the runner's
-  server-execution suites share. Twenty-two test files wait through it on state
-  the serving loop produces as a side effect of its own cycles: an engine row, a
-  watermark advance, a stats counter. Nothing reports those. `ExecutorHost`
-  exposes `stats()` and `spaceServer()` and no notification, `SpaceServer`
-  raises no event of its own, and the engine is a synchronous store, so there is
-  no event boundary without adding one to production code. Its deadline is a
-  stuck-condition backstop rather than a bound at the call site, and it stays
-  for a second reason: the serving loop holds the event loop open through its
-  lease-renew interval, so the fail-fast described above never fires and an
-  unbounded wait there would hang a run instead of failing it. The failure names
-  elapsed milliseconds and the poll count, which is what separates a predicate
-  that never came true from one the test never got to evaluate.
+  server-execution suites share. Twenty-seven test files still wait through it
+  on state the serving loop produces as a side effect of its own cycles: an
+  engine row, a watermark advance, a stats counter. It stays for as long as
+  they do, and no longer: the boundaries those waits want are the ones listed
+  under "Suites that drive a live memory server" above, and the events-down
+  suite waits on them rather than on this. Its deadline is a stuck-condition
+  backstop of the same kind, for the same reason — the serving loop holds the
+  event loop open through its lease-renew interval, so the fail-fast described
+  above never fires. What the poll interval under it costs is a latency floor
+  on every one of those waits, and that is what converting a file removes. The
+  failure names elapsed milliseconds and the poll count, which is what
+  separates a predicate that never came true from one the test never got to
+  evaluate.
 
   One class of that state does have a reporter after all: an engine row the
   serving loop writes that also fans out to a flag-ON client — the served
@@ -934,7 +1019,8 @@ boundary the test can await without adding one to production code.
   from one delayed past it. Its width, generous headroom over any healthy
   arrival observed, is what keeps a crossing pointing at a stuck wait rather
   than at contention stretching a passing run — the reading a deadline close
-  to the healthy latency cannot support. The bounded poll stays for the rest:
+  to the healthy latency cannot support. It is the shared `stuckNet` above.
+  The bounded poll stays for the rest:
   the watermark, the stats counters, and engine rows nothing delivers.
 
 ### A pull that drives its own loading
