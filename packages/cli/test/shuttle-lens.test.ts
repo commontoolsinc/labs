@@ -409,16 +409,31 @@ describe("lens", () => {
           // that reserved the row would be one row short for the whole of a
           // session that never typed at it.
           //
+          // Read as the rows of the value rather than as a count of the rows
+          // between the edges, because that count is the same either way: the
+          // modeline stands in one of them, so a frame that took the row from
+          // the wrong place would still have `ROWS - 2` of them.
+          //
           // Kills: drawing the modeline into the rows the edges already left,
-          // which returns a frame a row taller than the terminal.
+          // which returns a frame a row taller than the terminal; and taking
+          // the row from neither, which leaves the last row of the value on
+          // screen under a modeline the frame grew for.
 
           const driven = driving("c", ROWS, COLUMNS);
           driven.lens.showing(long());
-          expect(body(last(driven)).length).toBe(ROWS - 2);
+          const whole = body(last(driven));
+          expect(whole.length).toBe(ROWS - 2);
+          expect(whole).toEqual([
+            "[",
+            '  "alpha",',
+            '  "beta",',
+            '  "gamma",',
+            '  "filler",',
+            '  "filler",',
+          ]);
           driven.lens.reads(key(":"));
           expect(last(driven).length).toBe(ROWS);
-          expect(body(last(driven)).length).toBe(ROWS - 2);
-          expect(modeline(last(driven))).toBe(":");
+          expect(body(last(driven))).toEqual([...whole.slice(0, -1), ":"]);
         });
 
         it("draws what is typed at the command line", () => {
@@ -748,6 +763,24 @@ describe("lens", () => {
           expect(unicodeWidth(row)).toBeLessThanOrEqual(16);
           expect(driven.cursors[driven.cursors.length - 1]?.column)
             .toBe(3 + unicodeWidth(row));
+        });
+
+        it("shows a line that exactly fills the row whole", () => {
+          // A line as wide as the row is a line that fits: the cursor after
+          // its last character stands in the column the padding holds, which
+          // is inside the frame and beside its right edge rather than on it.
+          //
+          // Kills: scrolling a line that fits, which drops its first character
+          // to make room for a column the row already has.
+
+          const driven = driving("c", ROWS, 20);
+          types(driven.lens, ":");
+          types(driven.lens, "set depth 43210");
+          const row = modeline(last(driven));
+          expect(unicodeWidth(row)).toBe(16);
+          expect(row).toBe(":set depth 43210");
+          expect(driven.cursors[driven.cursors.length - 1])
+            .toEqual({ row: ROWS - 1, column: 19 });
         });
 
         it("is nothing on a terminal with no room for a command line", () => {

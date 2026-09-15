@@ -92,13 +92,16 @@ finds within the view, `n`/`N` next; `e` edit the selection in `$EDITOR`
 (the substrate already suspends and restores the terminal for this); `:`
 opens the command line.
 
-What `/` does is the one key that differs by view, and it differs because
-a view's rows do. A view of rows filters, dropping the rows that do not
-match; a view of one value searches, moving to the next line of the
-rendering that holds what was typed — a rendering with lines dropped out
-of it is no longer the value's rendering. `n` and `N` move to the next and
-the previous either way, wrapping, and the view says which match of how
-many it is on.
+Three of those keys read the view's rows, so what they do where there are
+none is decided per view rather than once. `/` filters a view of rows,
+dropping the rows that do not match; on a view of one value it searches,
+moving to the next line of the rendering that holds what was typed — a
+rendering with lines dropped out of it is no longer the value's rendering.
+`n` and `N` move to the next match and the previous either way, wrapping,
+and the view says which match of how many it is on. `e` edits the selected
+row where there is one, and the cell the view is open on where there is
+not. `enter` and `backspace` drill, which has no reading at all without a
+row, so they belong to the views that have them.
 
 `:` is the general mechanism instead of a key per verb: any shuttle
 command runs with the view's `%n` handles bound to its rows, and the view
@@ -119,9 +122,8 @@ sitting on it reads as one that could be typed at.
 The value view answers to the motions and the two ways out — `q` and
 `ctrl-c`, `j`/`k` and the arrows, `g` and `G` — and to `/`, `n`/`N`, `e`
 and `:`. `e` there is the cell the view watches, opened through the `edit`
-verb. `enter` and `backspace` arrive with the list view: both want a row
-to drill from, and a value view has a scroll position rather than a
-selection.
+verb. `enter` and `backspace` arrive with the list view, a value view
+having a scroll position rather than a selection.
 
 ## Reuse of the `cf view` substrate
 

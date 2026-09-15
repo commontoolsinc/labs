@@ -1647,8 +1647,14 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
       "armed watch writes one line above the prompt per settled\nchange, " +
       "naming the cell that changed rather than what it changed to.\n" +
       "The view scrolls with `j`/`k` and the arrows, `g` and `G` are its " +
-      "ends, and\n`ctrl-c` closes it as `q` does — the whole of what it " +
-      "answers to. It repaints\nonce per quiet runtime rather than once per " +
+      "ends, and\n`ctrl-c` closes it as `q` does. `/` finds text in the " +
+      "rendering and `n`/`N`\nmove between the matches; `e` opens the " +
+      "watched cell in `$EDITOR`, as\n`edit` does; and `:` runs any shuttle " +
+      "line without leaving the view — where\na line typed at the prompt " +
+      "runs, under the same `ctrl-c`, its output\njoining the transcript " +
+      "when the view gives the screen back. The frame's\nbottom edge offers " +
+      "what it answers to in whichever of those states it is\nin. It " +
+      "repaints\nonce per quiet runtime rather than once per " +
       "value on the way there.\n\nA cell already watched is refused: two " +
       "watches on one cell write two of\nevery line. The line numbers what " +
       "is armed as it arms one, so `unwatch %n`\nneeds no `watches` first.",

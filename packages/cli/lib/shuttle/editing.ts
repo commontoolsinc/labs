@@ -102,11 +102,13 @@ const BINDINGS: ReadonlyMap<string, (editing: Editing) => void> = new Map([
  * A character a terminal acts on rather than prints is one of those neithers.
  * The decoder gives every byte below `0x20` a name and no character, so none
  * of those reaches here at all; what does is a C1 character, which arrives
- * whole out of a paste — and `U+009B` is a sequence introducer, which drawn
- * into the line would take the rest of it as a command. There is nowhere for
- * such a character to be going: no place admits a part holding one
- * (`place.ts`), so a line carrying one is a line already refused, and drawing
- * it would corrupt the screen on the way to that refusal.
+ * whole out of a paste — and `U+009B` is a sequence introducer. There is
+ * nowhere for such a character to be going: no place admits a part holding one
+ * (`place.ts`), so a line carrying one is a line already refused. Both callers
+ * draw the line they are editing on a terminal, and there a sequence
+ * introducer drawn into it would take the rest of the line as a command — so
+ * it would corrupt the screen on the way to a refusal it was always going to
+ * get.
  */
 export function apply(editing: Editing, key: Key): void {
   const motion = BINDINGS.get(key.alt === true ? `alt-${key.name}` : key.name);

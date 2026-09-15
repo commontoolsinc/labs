@@ -307,12 +307,19 @@ writes the place as `//<space>/<piece>@<scope>/…`.
 `watch` is the live half. It arms a **watch** — a subscription on one cell that
 outlives the view that opened it — and opens the value view onto that cell: the
 value as JSON, scrollable with `j`/`k` and the arrows, `g` and `G` for its ends,
-and `q` or `ctrl-c` to come back to the prompt. Those are the whole of what the
-view answers to; the fuller key table the design gives a view — drilling,
-filtering, editing a selection, and a command line inside the frame — is not
-built. The two halves are separable on purpose: `q` closes the view and the
-watch stays armed, and every settled change to a watched cell then writes one
-line above the prompt naming the cell that changed, as in
+and `q` or `ctrl-c` to come back to the prompt. `/` finds text in the rendering
+and `n`/`N` move between the matches; `e` opens the watched cell in `$EDITOR`,
+which is the trip `edit` makes; and `:` runs any shuttle line without leaving
+the view — where a line typed at the prompt runs, against the place the shell
+stands at, and under the same `ctrl-c`, which stops the line rather than closing
+the frame while one is in flight. What a line produced joins the transcript when
+the view gives the screen back, the frame carrying its first line until
+something replaces it. The frame's bottom edge offers what it answers to in
+whichever of those states it is in. What the design's key table has beyond them
+is drilling — `enter` and `backspace` — which wants a row to drill from and
+arrives with the list view. The two halves are separable on purpose: `q` closes
+the view and the watch stays armed, and every settled change to a watched cell
+then writes one line above the prompt naming the cell that changed, as in
 `watch board/replies @space: changed`. It says that the cell moved rather than
 what it moved to: `get` reads the value out, and the view shows it moving.
 Scrollback is never rewritten: liveness lives in those lines, and the view draws

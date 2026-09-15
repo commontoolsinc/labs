@@ -576,7 +576,8 @@ export class ValueLens {
    * it is wrong here for one reason: a cut line is still readable, and a line
    * being typed past the cut is one a person is typing where they cannot see.
    * So what the row shows is the window ending at the cursor, one column short
-   * of the right edge so that the cursor itself has somewhere to stand.
+   * of the right edge so that the cursor itself has somewhere to stand — which
+   * a line that fits does not need, the padding beside it being that column.
    */
   #typedRow(inner: number): { readonly text: string; readonly column: number } {
     const typing = this.#typing!;
@@ -585,7 +586,12 @@ export class ValueLens {
     const before = typing.opening +
       [...typed].slice(0, typing.buffer.col).join("");
     const room = Math.max(inner, 1);
-    if (unicodeWidth(line) < room) {
+    // A line as wide as the row is a line that fits: the cursor after its last
+    // character stands in the column the padding holds, which is inside the
+    // frame and beside the right edge rather than on it. Scrolling a line that
+    // fits would drop its first character to make room for a column the row
+    // already has.
+    if (unicodeWidth(line) <= room) {
       return { text: line, column: unicodeWidth(before) };
     }
     const shown = tail(before, room - 1);

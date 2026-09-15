@@ -21,8 +21,10 @@
  *
  * The line editor is the view substrate's rather than `node:readline`'s.
  * `EditBuffer` (`lib/view/editbuffer.ts`) holds the motions and `decodeKeys`
- * (`lib/view/keys.ts`) supplies the keys, so the bindings are a table this
- * module owns — a value, which a second table can stand beside.
+ * (`lib/view/keys.ts`) supplies the keys, so the bindings are a table — a
+ * value, which a second table can stand beside. The table is `editing.ts`'s
+ * rather than this module's, because a view's command line reads the same one
+ * (`lens.ts`): a binding added to either is added to both.
  * `node:readline` has no supported place for one: the module exports an
  * interface, three cursor helpers and a keypress decoder, and that interface's
  * prototype carries one public method, `question()` — everything else on it,
