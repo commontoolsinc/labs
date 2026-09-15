@@ -553,11 +553,11 @@ server](#clients-that-are-not-built-alongside-their-server).
 
 ### `lazyMaterialization`
 
-**Last checked:** 2026-09-12. **Status:** implemented, on by default.
+**Last checked:** 2026-09-15. **Status:** implemented, on by default.
 
 - **Toggle via.** `EXPERIMENTAL_LAZY_MATERIALIZATION` environment variable, or
-  `new Runtime({ experimental: { lazyMaterialization: false } })` as a temporary
-  rollback override. The flag is server-authoritative for deployed clients
+  `new Runtime({ experimental: { lazyMaterialization: false } })` for the eager
+  posture, subject to the validation limits below. The flag is server-authoritative for deployed clients
   (`EXPERIMENTAL_FLAG_AUTHORITY`), so a server's `false` carries the `cf`
   clients it serves. The browser shell has no build-time define for this
   flag, so a shell build runs the runtime default and the override does not
@@ -572,20 +572,28 @@ server](#clients-that-are-not-built-alongside-their-server).
 - **Design, measurements and staging.**
   [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
 
-**Status against the test suites.** The runner unit and integration suite lanes
-have run at the default posture on every merge, and no failure in them has been
-attributed to the flag. The runner unit suite's runtimes read no environment, so
-the variable does not put that suite in the off posture. The generated-patterns
-integration harness and four of the runner integration files read it; the rest
-of the runner integration lane keeps the built-in default whatever the variable
-says. With the built-in default flipped at its source, the runner unit suite
-passes except for five tests: three stating contracts only the view holds (a
-proxy access count, a lookup that does not re-run on a non-key edit, and the
-unresolved-input refusal), one a crash the eager path keeps, and one asserting
-the default itself. The integration suites have not been run at the off posture;
-the [rollout
-evidence](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md)
-holds the detail.
+**Validation and rollback limits.** Off is not qualified as an equivalent
+rollback. Eager reads can hand `undefined` to a body whose schema promises a
+value, producing a TypeError where the lazy read refuses. The focused
+`unresolved-input-lift.test.ts` pins the missing followed-document case; the
+served notebook scenario also exposes an unavailable nullable edit input.
+The corrected notebook reload renders all seven notes in both postures, but
+the eager run fails on those browser errors. Keep these failures visible when
+qualifying a rollback route; rendering alone is not a successful run.
+
+Direct Runtime construction does not read the environment variable. An eager
+comparison must set the runtime option or temporarily change the built-in
+default, including the browser constructor. Selected runner, runtime-client,
+and shell integration results are in the
+[integration evidence](../history/development/performance/2026-09-14-lazy-off-integration.md).
+The [rollout evidence](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md)
+distinguishes eager unit failures from lazy-specific dependency/count
+expectations and assertions of the built-in default. The
+[reload diagnosis](../history/development/performance/2026-09-15-lazy-reload-diagnosis.md)
+and [navigation-policy follow-up](../history/development/performance/2026-09-15-notebook-reload-navigation-policy.md)
+separate nullable-read errors from a test's assumption about the selected page.
+The owner decision and remaining acceptance work belong to the
+[fast-follow plan](../plans/lazy-materialization-fast-follow.md).
 
 One behavior difference is deliberate rather than a defect, and it is the point
 of the mode: a lift that FORWARDS its argument onward without reading through it
