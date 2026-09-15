@@ -4,6 +4,15 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Loom investigation review clarifications](development/performance/2026-09-15-loom-person-inbox-review-clarifications.md) — complete 203-document access-shape accounting and raw repetitions explaining independently calculated policy and opening medians.
+
+- [Loom person-inbox policy budget](development/performance/2026-09-15-loom-person-inbox-policy-budget.md) — nine retained-candidate policy preparations below 200 ms, per-node click attribution, full runtime validation, interleaved raw measurements, and rejected preconstruction experiments exposing quadratic label coverage.
+- [Loom person-inbox policy optimization rounds](development/performance/2026-09-14-loom-person-inbox-policy-rounds.md) — four measured runtime optimization rounds, metadata-reuse follow-up, full runner validation, and a final same-thread comparison with raw load records and retained failures.
+- [Loom person-inbox policy processing](development/performance/2026-09-14-loom-person-inbox-policy-processing.md) — repeated read and label counts, generated provenance, cache invalidation boundaries, and a validated offline attribution memoization replay.
+- [Loom person-inbox click attribution](development/performance/2026-09-14-loom-person-inbox-click-attribution.md) — combined pattern/runtime worker and browser profiles identify dependency reads, commit policy verification, and small style/layout cost.
+- [Loom person-inbox pattern and runtime improvements](development/performance/2026-09-14-loom-person-inbox-improvements.md) — interleaved real-data improvement measurements, local pattern/runtime commits, validation, and incomplete selector experiments with readiness and source-window failures.
+- [2026-09-14-loom-person-inbox-thread-open.md](development/performance/2026-09-14-loom-person-inbox-thread-open.md) — real-data Loom person-inbox thread opening across pinned and main labs browser bundles: five interleaved repetitions, identical 50-message content, the remaining duplicate pattern derivation and CFC label-view costs, and the full load record.
+
 - [Wish and Loom resource discovery](development/2026-09-14-wish-resource-discovery.md) — September 2026 source investigation of wish discovery, SQLite registration, and person-inbox startup wiring; existing wish tests passed, with a provider composition proposed for implementation.
 - [Stale derived-state correction decision](development/2026-09-14-derived-state-correction.md) — approval and exact fixture scope for two calculated lunch-poll status corrections, consequences, and alternatives.
 
@@ -199,6 +208,9 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [pr3154-review-guide.md](specs/ts-transformer/pr3154-review-guide.md) — reviewer entrypoint for the shipped PR-3154 transformer architecture.
 
 ## Investigations, journals, and working notes
+
+- [Lazy materialization reload diagnosis](development/performance/2026-09-15-lazy-reload-diagnosis.md) — Current-main eager nullable-read failures, durable-state comparison, and a wrong-page reload observation.
+- [Notebook reload navigation policy](development/performance/2026-09-15-notebook-reload-navigation-policy.md) — Default-on wrong-selection reproduction and reload-test correction under the existing speculative-navigation contract.
 
 - [String tuple key measurements](development/performance/2026-09-14-string-tuple-keys.md) — paired utility, consumed-label, and scheduler measurements with a reviewed migration boundary for opaque string keys.
 - [String tuple key replay](development/performance/2026-09-14-string-tuple-keys-replay.py) — portable replay using an isolated baseline worktree and candidate modules from a fixed checkout.

@@ -2858,6 +2858,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return getTransactionReadActivities(this.tx);
   }
 
+  /** @inheritDoc */
+  getPotentiallyExternalReadActivities(): Iterable<IReadActivity> | undefined {
+    return this.tx.getPotentiallyExternalReadActivities?.();
+  }
+
   getWriteAttemptLog(): readonly IWriteAttempt[] {
     // Absent source (a custom transaction with neither a native log nor a
     // journal) degrades to an empty log; the CFC prefix gate then finds no
@@ -4023,6 +4028,11 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   getReadActivities(): Iterable<IReadActivity> {
     return this.#wrapped.getReadActivities?.() ??
       getTransactionReadActivities(this.#wrapped.tx);
+  }
+
+  /** @inheritDoc */
+  getPotentiallyExternalReadActivities(): Iterable<IReadActivity> | undefined {
+    return this.#wrapped.getPotentiallyExternalReadActivities?.();
   }
 
   getWriteAttemptLog(): readonly IWriteAttempt[] {

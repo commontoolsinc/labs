@@ -204,6 +204,14 @@ type SinkOptions = {
   changeGroup?: ChangeGroup;
 
   /**
+   * Read-only host subscription for values and metadata. Its query and callback
+   * child-cell reads use independent read-only transactions; writes through
+   * delivered cells fail. Stream listeners create no subscription transaction.
+   * @internal
+   */
+  readOnly?: boolean;
+
+  /**
    * Read the cell's display CFC label as part of the sink's tracked read set
    * and pass it to the callback as a second argument. Reading it on the sink's
    * transaction makes the cfc-metadata path a reactive dependency, so a
@@ -4112,6 +4120,7 @@ function subscribeToReferencedDocs<T>(
   options: SinkOptions = {},
 ): Cancel {
   const link = ref.link;
+  const readOnly = options.readOnly === true;
   const sink: SinkAction = {
     cleanup: undefined,
     action: (tx) => {
@@ -4121,7 +4130,7 @@ function subscribeToReferencedDocs<T>(
       // dependencies for the initial get, not further cells the callback might
       // read. The callback is responsible for calling sink on those cells if it
       // wants to stay updated.
-      const extraTx = runtime.edit();
+      const extraTx = readOnly ? runtime.readTx() : runtime.edit();
       const wrappedTx = createChildCellTransaction(tx, extraTx);
       const schema = link.schema;
       const needsTraversal = schema === undefined ||
@@ -4171,6 +4180,19 @@ function sinkHelper(
   address: IMemorySpaceAddress,
   options: SinkOptions = {},
 ) {
+  if (options.readOnly === true) {
+    const action = sink.action;
+    sink.action = (tx) => {
+      if (tx.setReadOnly === undefined) {
+        throw new Error(
+          "Read-only subscriptions require transaction read-only support.",
+        );
+      }
+      tx.setReadOnly("Cell.sink()");
+      return action(tx);
+    };
+  }
+
   // Attach a name to the sink action
   const sinkName = `sink:${address.space}/${address.id}/${
     address.path.join("/")

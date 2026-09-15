@@ -66,10 +66,10 @@ const LABEL_KEYS = [
 
 export const canonicalizeCfcLogicalPath = (
   path: readonly string[],
-): string[] => path[0] === "value" ? [...path.slice(1)] : [...path];
+): string[] => path[0] === "value" ? path.slice(1) : [...path];
 
 export const cfcLabelViewPathKey = (path: readonly string[]): string =>
-  encodePointer(canonicalizeCfcLogicalPath(path));
+  encodePointer(path[0] === "value" ? path.slice(1) : path);
 
 export const cfcLabelPathPrefixMatches = (
   prefix: readonly string[],
@@ -169,12 +169,17 @@ export const redactCaveatSourcesForDisplay = (
   }),
 });
 
-const sortEntries = (entries: CfcLabelViewEntry[]): CfcLabelViewEntry[] =>
-  entries.sort((left, right) => {
-    const leftKey = cfcLabelViewPathKey(left.path);
-    const rightKey = cfcLabelViewPathKey(right.path);
-    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
-  });
+const sortEntries = (entries: CfcLabelViewEntry[]): CfcLabelViewEntry[] => {
+  if (entries.length < 2) return entries;
+  // Encoding belongs to the entry, so each path is encoded once per sort.
+  // Equal keys retain input order, including separate observation classes.
+  return entries.map((entry) => ({
+    entry,
+    key: cfcLabelViewPathKey(entry.path),
+  })).sort((left, right) =>
+    left.key < right.key ? -1 : left.key > right.key ? 1 : 0
+  ).map(({ entry }) => entry);
+};
 
 export const mergeLabel = (
   left: IFCLabel | undefined,
@@ -274,7 +279,7 @@ export const rebaseCfcLabelView = (
   for (const entry of view.entries) {
     const entryPath = canonicalizeCfcLogicalPath(entry.path);
     if (cfcLabelPathPrefixMatches(logicalPath, entryPath)) {
-      const label = cloneCfcLabel(entry.label);
+      const label = entry.label;
       if (hasCfcLabelValues(label)) {
         entries.push({
           path: entryPath.slice(logicalPath.length),
@@ -295,7 +300,7 @@ export const rebaseCfcLabelView = (
       ) {
         continue;
       }
-      const label = cloneCfcLabel(entry.label);
+      const label = entry.label;
       if (hasCfcLabelValues(label)) {
         entries.push({
           path: [],

@@ -397,7 +397,9 @@ export class WorkerReconciler {
       };
 
       addCancel(
-        vnode.sink((resolvedVnode: unknown) => renderRoot(resolvedVnode)),
+        vnode.sink((resolvedVnode: unknown) => renderRoot(resolvedVnode), {
+          readOnly: true,
+        }),
       );
     } else {
       // Static VNode - render directly into container
@@ -2095,7 +2097,7 @@ export class WorkerReconciler {
           if (this.#isTextIntegrityPolicyProp(key)) {
             this.#refreshTextIntegrityBoundary(ctx, state);
           }
-        });
+        }, { readOnly: true });
         state.propSubscriptions.set(key, {
           cell: value as Cell<unknown>,
           cancel,
@@ -2283,6 +2285,7 @@ export class WorkerReconciler {
             }]);
           }
         },
+        { readOnly: true },
       );
       state.propSubscriptions.set(key, {
         cell: value as Cell<unknown>,
@@ -2340,8 +2343,7 @@ export class WorkerReconciler {
     ctx: ReconcileContext,
     state: NodeState,
     propsCell: Cell<WorkerProps>,
-  ): Cancel {
-    const [cancel, addCancel] = useCancelGroup();
+  ): void {
     let hasSeenInitialProps = false;
     const refreshPolicyAfterPropsUpdate = () => {
       const childrenAlreadyBound = state.children.size > 0 ||
@@ -2508,8 +2510,7 @@ export class WorkerReconciler {
               key,
               value: propValue,
             }]);
-          });
-          addCancel(propSinkCancel);
+          }, { readOnly: true });
           state.propSubscriptions.set(key, {
             cell: propKeyCell as Cell<unknown>,
             cancel: propSinkCancel,
@@ -2554,15 +2555,12 @@ export class WorkerReconciler {
         }
       }
       refreshPolicyAfterPropsUpdate();
-    });
+    }, { readOnly: true });
 
-    addCancel(sinkCancel);
     state.propSubscriptions.set(CELL_PROPS_KEY, {
       cell: propsCell as Cell<unknown>,
       cancel: sinkCancel,
     });
-
-    return cancel;
   }
 
   #refreshBoundaryPolicyFromProps(
@@ -2796,6 +2794,7 @@ export class WorkerReconciler {
               forceReplace,
             );
           },
+          { readOnly: true },
         );
 
       state.childrenState = {
@@ -2942,11 +2941,12 @@ export class WorkerReconciler {
       childEmittedSpace: ctx.emittedSpace,
     };
     addCancel(() => this.#cleanupNodeHandlers(state));
+    addCancel(() => this.#cancelNodeSubscriptions(state));
     this.#initializeTextIntegrityBoundary(childPolicy, nodeId);
 
     // Bind props. Cell<Props> can synchronously resolve boundary policy props;
     // bind children from the current state policy after props are bound.
-    addCancel(this.#bindProps(ctx, state, sanitized.props));
+    this.#bindProps(ctx, state, sanitized.props);
 
     // Bind children
     const activePolicyChildren = this.#childrenForRenderPolicy(
@@ -2959,14 +2959,12 @@ export class WorkerReconciler {
       state.childRenderPolicy,
     );
     if (activePolicyChildren.children !== undefined) {
-      addCancel(
-        this.#bindChildren(
-          ctx,
-          state,
-          activePolicyChildren.children,
-          visited,
-          state.childRenderPolicy,
-        ),
+      this.#bindChildren(
+        ctx,
+        state,
+        activePolicyChildren.children,
+        visited,
+        state.childRenderPolicy,
       );
     }
 
@@ -3131,12 +3129,13 @@ export class WorkerReconciler {
       childrenBlockedByPolicy: false,
     };
     addCancel(() => this.#cleanupNodeHandlers(state));
+    addCancel(() => this.#cancelNodeSubscriptions(state));
 
     // Array items use the same Cell-aware child path as VNode children.
     // rendererVDOMSchema projects array items as Cells, including at the root,
     // so handing them directly to renderNode would violate its invariant that
     // Cell children have already passed through renderCellChild.
-    addCancel(this.#bindChildren(ctx, state, nodes, visited, policy));
+    this.#bindChildren(ctx, state, nodes, visited, policy);
 
     return state;
   }
@@ -3172,6 +3171,26 @@ export class WorkerReconciler {
   }
 
   /**
+   * Cancels the node's current subscriptions and descendants, including those
+   * installed by in-place reconciliation.
+   */
+  #cancelNodeSubscriptions(state: NodeState): void {
+    const [cancel, addCancel] = useCancelGroup();
+    for (const propState of state.propSubscriptions.values()) {
+      addCancel(propState.cancel);
+    }
+    addCancel(state.childrenState?.cancel);
+    for (const childState of state.children.values()) {
+      addCancel(childState.cancel);
+    }
+    state.propSubscriptions.clear();
+    state.childrenState = undefined;
+    state.children.clear();
+    state.childOrder = [];
+    cancel();
+  }
+
+  /**
    * Bind props to an element, handling reactive values and events.
    * Tracks Cell references in propSubscriptions for later diffing.
    */
@@ -3179,25 +3198,22 @@ export class WorkerReconciler {
     ctx: ReconcileContext,
     state: NodeState,
     props: WorkerProps | Cell<WorkerProps> | null | undefined,
-  ): Cancel {
-    if (!props) return () => {};
-
-    const [cancel, addCancel] = useCancelGroup();
+  ): void {
+    if (!props) return;
 
     // Handle Cell<Props>
     if (isCell(props)) {
-      const cellPropsCancel = this.#bindCellProps(
+      this.#bindCellProps(
         ctx,
         state,
         props as Cell<WorkerProps>,
       );
-      addCancel(cellPropsCancel);
-      return cancel;
+      return;
     }
 
     // Handle static props
     if (typeof props !== "object") {
-      return cancel;
+      return;
     }
 
     for (const [key, value] of Object.entries(props)) {
@@ -3264,8 +3280,8 @@ export class WorkerReconciler {
                 }]);
               }
             },
+            { readOnly: true },
           );
-          addCancel(sinkCancel);
           state.propSubscriptions.set(key, {
             cell: value as Cell<unknown>,
             cancel: sinkCancel,
@@ -3302,8 +3318,7 @@ export class WorkerReconciler {
           if (this.#isTextIntegrityPolicyProp(key)) {
             this.#refreshTextIntegrityBoundary(ctx, state);
           }
-        });
-        addCancel(sinkCancel);
+        }, { readOnly: true });
         state.propSubscriptions.set(key, {
           cell: value as Cell<unknown>,
           cancel: sinkCancel,
@@ -3326,8 +3341,6 @@ export class WorkerReconciler {
         });
       }
     }
-
-    return cancel;
   }
 
   /**
@@ -3423,17 +3436,14 @@ export class WorkerReconciler {
     children: WorkerRenderNode | WorkerRenderNode[],
     visited: Set<object>,
     policy: RenderPolicy,
-  ): Cancel {
-    const [cancel, addCancel] = useCancelGroup();
-
+  ): void {
     // Handle Cell<children>
     if (isCell(children)) {
       const sinkCancel = (
         children as Cell<WorkerRenderNode | WorkerRenderNode[]>
       ).sink((resolvedChildren) => {
         this.#updateChildren(ctx, state, resolvedChildren, visited, policy);
-      });
-      addCancel(sinkCancel);
+      }, { readOnly: true });
       // Track the children Cell for diffing
       state.childrenState = {
         cell: children as Cell<unknown>,
@@ -3444,19 +3454,6 @@ export class WorkerReconciler {
       this.#updateChildren(ctx, state, children, visited, policy);
       state.childrenState = undefined;
     }
-
-    // When this cancel is called, also cancel all current children.
-    // This ensures child sinks are cleaned up when the parent render tree
-    // is torn down (e.g., during reconcileIntoWrapper).
-    addCancel(() => {
-      for (const [, childState] of state.children) {
-        childState.cancel();
-      }
-      state.children.clear();
-      state.childrenState = undefined;
-    });
-
-    return cancel;
   }
 
   /**
@@ -4137,7 +4134,11 @@ export class WorkerReconciler {
       }
     };
 
-    addCancel(cell.sink((resolvedChild) => renderResolved(resolvedChild)));
+    addCancel(
+      cell.sink((resolvedChild) => renderResolved(resolvedChild), {
+        readOnly: true,
+      }),
+    );
 
     // When the cancel group fires (parent teardown), also cancel the current
     // rendered content. Without this, deeper sinks (e.g. children/props of the

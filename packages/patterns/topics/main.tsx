@@ -249,7 +249,7 @@ export function mentionListsOf<M>(
 
 /**
  * The topics that mention `topic`, out of `list` — the pivot's whole join,
- * lifted out so it can be handed a list a board cannot produce.
+ * lifted out so a test can hand it a list built by hand.
  *
  * `mentions[i]` is what `list[i]` points at, read once by the caller because
  * reading it through the reactive array costs a link resolution per topic per
@@ -259,8 +259,8 @@ export function mentionListsOf<M>(
  * whole reason this is a named function. A board listing one topic at two
  * indices must not route its self-mention through the twin and call the result
  * an inbound edge — and a position comparison passes every test where each
- * topic appears once, which is every test a board can set up. Handing this
- * function a duplicated list is what tells the two apart.
+ * topic appears once. Handing this function a duplicated list is what tells the
+ * two apart.
  *
  * Mention membership is checked before source identity: a source with no
  * matching mention contributes no edge and needs no identity comparison.

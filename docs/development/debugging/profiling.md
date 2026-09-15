@@ -74,6 +74,47 @@ work demanded by assertions and render steps, which may be more expensive than
 the preceding action. [The CLI reference](../../../packages/cli/README.md#pattern-test-read-costs)
 defines the four counters and their measurement boundaries.
 
+## 1b. Define the visible transition before comparing implementations
+
+A browser measurement needs the same work and the same completion condition in
+both arms. Pin the selected entity and detail by durable identity, and capture
+an independent expected result for the displayed window. Record its size and a
+content fingerprint alongside the timings. A position in a recent-items list can
+select different work after each load. A stable identity alone also misses
+changes to the records behind it; verify the expected window in every arm.
+
+Define completion in terms of the visible result. An implementation that keeps
+all detail views mounted and selects one with CSS already has every result node
+before the click. Count only nodes inside the visible selected detail and
+require the expected transition from the recorded pre-click state. When two
+selections have the same number of rows, verify selected identity and content as
+well as count. Apply the same display or animation-frame barrier to both arms;
+DOM presence and runtime idle alone do not establish that the new result is
+visible. Gate the run on actual source readiness before starting its clock.
+
+For a client-only comparison, keep one compatible server process and data store
+running while swapping prebuilt client artifacts between repetitions. Record
+source revisions and artifact hashes, and check the served bytes after every
+swap. Start each arm in a fresh browser context with a new page and worker;
+prevent HTTP or service-worker caches from serving the previous artifact, or
+verify hashes of the resources actually loaded by the measured page. Record the
+same cache posture for both arms. Checking the server alone cannot identify code
+already executing in an existing page or worker.
+
+Restarting a server can select a version-keyed store or change cache warmth,
+making a client comparison measure server differences too. If the
+clients require different server protocols, use explicitly matched server/data
+arms and describe the broader comparison instead.
+
+Interleave arms for at least three repetitions, vary their order, and retain raw
+values and medians within each block. Record machine load before and after every
+observation and run a stable control through the same protocol. A control that
+moves with the candidate limits how much of a speedup can be attributed to the
+change. Keep builds and owned test processes outside timing blocks; record
+external contention and failed attempts rather than silently replacing them. Use
+lightweight whole-phase timing for repetitions and separate runs for CPU
+sampling, detailed counts, and node timelines.
+
 ## 2. Bracket the phase — in the process you are going to profile
 
 A CPU profile is samples over a window. It has no idea what a phase is, so
@@ -315,6 +356,41 @@ a gap is not automatically a problem. What it can say is where the absence is
 and how much is at stake. A stretch that keeps following the same span is the
 one to chase: that span handed off to something nobody wrapped, and wrapping
 what follows is what turns the question into an answer.
+
+## 4c. Attribute shared runtime work to pattern nodes
+
+A function ranking can show that policy preparation or traversal dominates
+without identifying which pattern node asks for it. Capture named scheduler
+action spans and shared-runtime spans over the same interaction, in the same
+process clock. Save the corresponding graph or emitted program so generated
+action identities can be mapped to authored computations and view subscriptions.
+Record execution counts as well as durations: one expensive builder and hundreds
+of small subscription initializations need different fixes.
+
+Start with a non-overlapping accounting of the interaction: input preparation,
+actions, result commits, and uncovered time. Within the action bucket, group
+spans by node identity. A parent subscription can initialize child
+subscriptions; count their inclusive interval once when producing a total.
+Attribute shared synchronous work to its enclosing action or commit, then report
+that attribution as a breakdown of those buckets. For example, 30 ms of
+verification inside a 100 ms view subscription is part of that 100 ms, not
+another 30 ms to add. For asynchronous work, interval containment alone does not
+establish a caller; use explicit parent or operation identities where intervals
+can overlap.
+
+Bracket the complete subsystem entry point before timing its inner helpers.
+Input collection and digest construction outside a narrowly named verification
+helper can cost more than the check itself. Keep the enclosing phase total and
+its call count beside the inner breakdown, and verify that the timeline cap was
+not reached. Detailed instrumentation on millions of reads can itself dominate;
+use a separate diagnostic to count them and return to lightweight entry-point
+timing to verify the optimization.
+
+Use one capture for each reconciled time breakdown. A diagnostic's node times
+cannot be assembled into a different run's median, and sampled CPU time is a
+separate attribution from elapsed spans. When an optimization moves work before
+an interaction, capture both startup and interaction counts to prove the work
+moved: a separate reactive derivation can remain lazy until the first selection.
 
 ## 5. Isolate, then pin it with a benchmark
 
