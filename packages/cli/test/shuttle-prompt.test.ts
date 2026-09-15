@@ -1402,6 +1402,7 @@ describe("prompt", () => {
       ) => AsyncIterable<Key>,
       deps: VerbDeps = {},
       sink: () => Promise<() => void> = () => Promise.resolve(() => {}),
+      also: (write: Write) => void = () => {},
     ): { writes: Promise<Write[]>; drawn: Write[] } {
       const waiting: {
         holds: (write: Write) => boolean;
@@ -1428,6 +1429,7 @@ describe("prompt", () => {
           for (const held of waiting.filter((one) => one.holds(write))) {
             held.settle();
           }
+          also(write);
         },
       );
     }
@@ -1505,27 +1507,30 @@ describe("prompt", () => {
       expect(gave).toBeGreaterThan(stopped);
     });
 
-    it("answers two `ctrl-c`s at a hung line with the screen and the line", async () => {
-      // Two presses against a line that will not answer: the first stops the
-      // line, and the second is a person asking for the way out. What a person
-      // gets is that the screen goes back, once, and the stopped line answers.
+    it("closes the frame on the second `ctrl-c`, and not on the first or the end", async () => {
+      // The first `ctrl-c` stops the line and the frame stays up, which the
+      // case above pins on its own. This one is about the second: it is the way
+      // out, and the frame is gone before the keys run out rather than because
+      // they did.
       //
-      // What this does *not* guard, said plainly because a case filed under a
-      // fix that does not guard it is worse than no case at all: the window the
-      // fix closes. A cancel reaches the work through a signal and the outcome
-      // arrives three or four turns of the microtask queue later, and two keys
-      // both landing inside that window is not something this harness can
-      // arrange — the settle is already in flight when the second key is asked
-      // for, and every way of winning that race came down to counting
-      // microtasks, which is the shape that goes flaky the moment anything
-      // between the abort and the arrival grows an await. So these assertions
-      // pass on the behavior before the fix as well.
+      // Both of those are excluded rather than assumed. A `pwd` typed after it
+      // runs only at a prompt — at a frame its keys are a motion the view does
+      // not take — so the position it wrote is what says the frame had already
+      // gone; and the screen is watched from the moment the first key is sent,
+      // so a frame that went then would be seen going.
       //
-      // What guards the window is that there is no second state to get wrong:
-      // `Running.stopped()` is the abort signal itself, so a key arriving
-      // inside the window reads the same fact as one arriving after it.
+      // What is still not excluded, said because two reviewers have read this
+      // case as claiming it: the window the fix closes, between a cancel's
+      // signal and the outcome three or four turns of the microtask queue
+      // later. Two keys both landing inside it is not arrangeable from here —
+      // the settle is already in flight when the second key is asked for — so
+      // these assertions hold on the behavior before the fix as well. What
+      // guards the window is that there is no second state to get wrong:
+      // `Running.stopped()` is the abort signal itself.
 
       const read = gated();
+      let second = false;
+      let wentEarly = false;
       const run = awaiting(
         async function* (wrote) {
           yield* typed(":ls");
@@ -1535,15 +1540,30 @@ describe("prompt", () => {
             write.kind === "announce" && write.text === "Interrupted."
           );
           yield control("c");
-          yield control("c");
           await interrupted;
+          second = true;
+          yield control("c");
+          const ran = wrote((write) =>
+            write.kind === "announce" && write.text.startsWith("position")
+          );
+          yield* typed("pwd");
+          yield ENTER;
+          await ran;
         },
         { listing: { getCellValue: read.read } },
+        () => Promise.resolve(() => {}),
+        (write) => {
+          if (write.kind === "unframe" && !second) wentEarly = true;
+        },
       );
       const drawn = await run.writes;
+      expect(wentEarly).toBe(false);
       expect(drawn.filter((write) => write.kind === "unframe").length).toBe(1);
-      expect(produced(drawn)).toContain("Interrupted.");
-      expect(drawn.at(-1)?.kind).toBe("finish");
+      const gave = drawn.findIndex((write) => write.kind === "unframe");
+      const ran = drawn.findIndex((write) =>
+        write.kind === "announce" && write.text.startsWith("position")
+      );
+      expect(ran).toBeGreaterThan(gave);
     });
 
     it("abandons the line being typed at the frame before the one in flight", async () => {

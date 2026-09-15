@@ -155,6 +155,12 @@ function restorer(terminal: StandardTerminal): () => void {
     if (restored) return;
     restored = true;
     try {
+      // Before the screen goes back, because a program may be holding the
+      // terminal — an editor a line opened — and nothing this object writes
+      // goes out while one is. What that would cost here is the whole of what
+      // a frame was holding back, since the suspension that would have written
+      // it is not something a signal unwinds into.
+      terminal.ending();
       terminal.unframe();
     } catch {
       // The terminal is gone, which is the other way of not holding a screen.
@@ -343,6 +349,21 @@ class StandardTerminal implements PromptTerminal {
     // it was holding with it. {@link StandardTerminal.suspend} is where they
     // land instead.
     if (this.#held === undefined) this.#flush();
+  }
+
+  /**
+   * Lets go of a hold on the way out of the process.
+   *
+   * A suspension ends by giving the terminal back and writing what the frame
+   * was holding, and a signal reaches neither: the handler restores what it can
+   * and ends the process, so nothing unwinds. The hold outlives nothing but
+   * this call, and dropping it here is what lets the restore that follows write
+   * at all — which is the last chance the lines a frame was holding get.
+   */
+  ending(): void {
+    this.#held = undefined;
+    this.#release?.();
+    this.#release = undefined;
   }
 
   /**

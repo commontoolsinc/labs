@@ -89,10 +89,14 @@ interface Stubs {
    * already done. `framed` delivers it as a full-screen frame takes the
    * screen, which is the state a signal costs the most: the process ends
    * without unwinding, so nothing but the handler is left to give that screen
-   * back. All three are orderings the process can really be in, and the
-   * restore has to be right from each of them.
+   * back. `suspended` delivers it as a suspension gives that screen back to a
+   * program, which is the state a signal costs the most *after* that one: the
+   * program holds the terminal, so nothing this module writes goes out until
+   * the hold is dropped, and the suspension that would have dropped it is not
+   * something a signal unwinds into. All four are orderings the process can
+   * really be in, and the restore has to be right from each of them.
    */
-  readonly raiseWhen?: "entering" | "leaving" | "framed";
+  readonly raiseWhen?: "entering" | "leaving" | "framed" | "suspended";
 
   /** The raw-mode call that fails, where one does. */
   readonly rawThrowsOn?: boolean;
@@ -172,9 +176,22 @@ async function watching(
   // two about redirection needs.
   Deno.stdin.isTerminal = stubs.inputIsTerminal ?? (() => true);
   Deno.stdout.isTerminal = stubs.outputIsTerminal ?? (() => true);
+  let gaveScreen = false;
   Deno.stdin.setRaw = (mode: boolean) => {
     raw.push(mode);
     order.push(mode ? "raw" : "cooked");
+    // Cooked, with a frame's screen already given back: that pair is a
+    // suspension and nothing else, and it is the one moment at which a program
+    // holds the terminal. Delivered from here rather than from the write that
+    // gave the screen back, because the hold is taken between the two.
+    if (
+      stubs.raiseWhen === "suspended" && !mode && gaveScreen &&
+      deliver !== undefined
+    ) {
+      const arrived = deliver;
+      deliver = undefined;
+      arrived();
+    }
     if (stubs.rawThrowsOn === mode) {
       throw new Deno.errors.BadResource("stdin is gone");
     }
@@ -183,7 +200,7 @@ async function watching(
     // inside the restore on the way out. Once either way — a signal arrives
     // once, and a second delivery would be the harness inventing a case.
     if (
-      stubs.raiseWhen !== "framed" &&
+      stubs.raiseWhen !== "framed" && stubs.raiseWhen !== "suspended" &&
       mode === (stubs.raiseWhen !== "leaving") && deliver !== undefined
     ) {
       const arrived = deliver;
@@ -222,6 +239,10 @@ async function watching(
       deliver = undefined;
       arrived();
     }
+    // Noted rather than acted on: a suspension gives the screen back before it
+    // takes the hold, so this is the near side of the window a `suspended`
+    // signal wants, and the raw-mode call after it is the far side.
+    if (sent.includes(LEAVE_ALT)) gaveScreen = true;
     return taken;
   };
   const listened: Deno.Signal[] = [];
@@ -429,6 +450,45 @@ describe("terminal", () => {
         },
       );
       expect(watched.order).toEqual(["raw", "screen", "cooked", "exit 130"]);
+    });
+
+    it("restores from a signal that arrived during a suspension", async () => {
+      // A program holding the terminal is the one state in which nothing this
+      // object writes goes out, and a signal is the one ending that does not
+      // unwind into the suspension that would have let the hold go. So the
+      // handler has to drop it itself, and everything the restore owes — the
+      // screen, and the lines the frame was holding back — rides on that.
+      //
+      // Read off the order rather than off the bytes, and this is why: the
+      // giving-back is the one step of the restore that shows as a write, so a
+      // handler that could not write made none. The bytes cannot tell the two
+      // apart here, because the exit a real signal ends the process with is
+      // stood in for — the run carries on afterwards, and the suspension's own
+      // way out writes the same lines a moment later. A case reading only the
+      // bytes would pass either way.
+      //
+      // Kills: restoring without letting go of the hold, which drops the
+      // giving-back and leaves one `screen` where there are two.
+
+      const watched = await watching(
+        { raise: "SIGINT", raiseWhen: "suspended" },
+        async (terminal) => {
+          terminal.frame(["a"]);
+          terminal.announce("a watch said so");
+          await terminal.suspend(() => Promise.resolve());
+          await Promise.resolve();
+        },
+      );
+      const ended = watched.order.indexOf("exit 130");
+      expect(ended).toBeGreaterThan(-1);
+      // Two: the one the suspension made as it handed the terminal over, and
+      // the one the handler made because it could write at all.
+      expect(watched.order.slice(0, ended).filter((at) => at === "screen"))
+        .toEqual(["screen", "screen"]);
+      // What the frame was holding, which is the whole point of the restore
+      // being able to write. It reaches the output either way in this harness,
+      // for the reason above, so it is stated rather than relied on.
+      expect(watched.written()).toContain("a watch said so");
     });
 
     it("ends with the status the shell convention gives the signal", async () => {
