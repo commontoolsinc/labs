@@ -92,9 +92,12 @@ describe("local-dev-scripts", () => {
       expect(stderr).toContain("shell exited before it became ready");
     });
 
-    it("accepts `--allow-skill-scripts` beside `--cf-harness`", async () => {
-      // The switch is the operator's and reaches the launcher, which prints
-      // it; the script itself only carries it through.
+    it("parses `--allow-skill-scripts` beside `--cf-harness`", async () => {
+      // What this reaches is the argument loop: the flag is recognized rather
+      // than falling into its catch-all, and the run still ends at the port
+      // check. It does NOT reach the console-launch invocation, so it says
+      // nothing about the flag being forwarded — that block sits behind the
+      // toolshed and shell coming up, which a stubbed `deno` never does.
       const { code, stderr } = await runScript(
         "start-local-dev.sh",
         UNREACHABLE_SHELL_OFFSET,
