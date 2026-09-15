@@ -1304,12 +1304,17 @@ function extractRunArguments(input: unknown): Record<string, any> {
 }
 
 /**
- * Flattens tools by extracting handlers from piece-based tools.
- * Converts { piece: ... } entries into individual handler entries.
+ * Builds the tool catalog a reader displays: an entry for each tool the
+ * pattern supplies other than a piece-backed one, and the built-in tools
+ * unless `includeBuiltinTools` is false.
+ *
+ * An entry holds the tool's description, its input schema, and its handler
+ * as a link. It holds nothing a turn needs to run the tool, which the turn
+ * reads from `tools` itself.
  *
  * @param toolsCell - Cell containing the tools
- * @param toolHandlers - Optional map to populate with handler references for invocation
- * @returns Flattened tools object with handler/pattern entries
+ * @param includeBuiltinTools - Whether the catalog lists the built-in tools
+ * @returns The catalog, keyed by tool name
  */
 function flattenTools(
   toolsCell: Cell<any>,
@@ -1332,13 +1337,38 @@ function flattenTools(
   const { legacy } = collectToolEntries(toolsCell, includeBuiltinTools);
 
   for (const entry of legacy) {
-    const passThrough: Record<string, unknown> = { ...entry.tool };
-    if (
-      passThrough.inputSchema && typeof passThrough.inputSchema === "object"
-    ) {
-      passThrough.inputSchema = stripInjectedResult(passThrough.inputSchema);
+    // The catalog carries what a reader displays and nothing else, which is
+    // what keeps this write the same over inputs that did not change. An
+    // array of objects is stored one document per element, and a copy of one
+    // mints those documents again, so a catalog holding a copy differs from
+    // the last one over tools that did not change. Two fields of a tool are
+    // full of such arrays — an author's `extraParams`, and a pattern tool's
+    // graph, down to the `anyOf` branches of its argument schema — and a turn
+    // reads both from `tools` itself, so neither is copied here. What is left
+    // is the tool's description, its input schema, and its handler, which is
+    // a stream and so a link to the one the tool already names rather than a
+    // copy of anything.
+    //
+    // An author's `inputSchema` holding an array of objects would land the
+    // same way. Nothing in the tree does today, and the fix if something does
+    // is to give a copied element a content-derived document rather than to
+    // narrow this further: the catalog is already down to what a reader
+    // reads.
+    const tool = entry.tool as Record<string, unknown> | undefined;
+    const flattenedEntry: Record<string, unknown> = {};
+    if (tool?.description !== undefined) {
+      flattenedEntry.description = tool.description;
     }
-    flattened[entry.name] = passThrough;
+    if (tool?.inputSchema !== undefined) {
+      flattenedEntry.inputSchema =
+        tool.inputSchema && typeof tool.inputSchema === "object"
+          ? stripInjectedResult(tool.inputSchema as JSONSchema)
+          : tool.inputSchema;
+    }
+    if (tool?.handler !== undefined) {
+      flattenedEntry.handler = entry.cell.key("handler");
+    }
+    flattened[entry.name] = flattenedEntry;
   }
 
   if (!includeBuiltinTools) {
@@ -3928,7 +3958,18 @@ export function llmDialog(
     }
   };
 
-  return { action, isEffect: true };
+  // The dialog writes its turns into the caller's `messages` cell, and a
+  // pattern may render that cell without ever reading the dialog's own
+  // result. Declaring the write makes this node a materializer: it holds
+  // standing demand and runs when its inputs change, whether or not anything
+  // reads what it returns.
+  Object.assign(action, {
+    materializerWriteEnvelopes: [
+      inputs.key("messages").resolveAsCell().getAsNormalizedFullLink(),
+    ],
+  });
+
+  return { action };
 }
 
 async function startRequest(
