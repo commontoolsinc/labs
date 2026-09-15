@@ -47,16 +47,32 @@ const FABRIC_SESSION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
 
 /**
  * The two tools that read and replace a piece's source. They need a fabric
- * session like the set above, and unlike it they are not parent tools: source
- * enters the context that revises a piece and no other, so they are offered to
- * the `pattern-author` profile and withheld everywhere else. Gating them here
- * rather than in that set is what keeps them off the parent surface while
- * still making them absent — rather than present-but-failing — in a run with
- * no session to reach a piece through.
+ * session like the set above, and unlike it they are not parent tools.
  */
 const PIECE_SOURCE_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
   ["read_piece_source", "revise_piece"] as const,
 );
+
+/**
+ * Tools no parent surface may offer, whatever its backing and whoever asks.
+ *
+ * Source enters the context that revises a piece and no other: a parent that
+ * could read a piece's source would hold program text its own return boundary
+ * exists to keep out of it. Leaving these out of
+ * {@link parentToolIdsForBacking} is not enough on its own, because a parent
+ * surface can also be named explicitly — by `--allow-tool`, or by an
+ * interactive client's policy — and such a list is validated against the tools
+ * this build defines. So every surface that lets a caller name a parent's
+ * tools subtracts this set, and that is the whole of what keeps the two off a
+ * parent: a tool added here is refused by name at each of those surfaces
+ * rather than silently absent from one of them.
+ */
+export const SUBAGENT_ONLY_TOOL_IDS: ReadonlySet<BuiltinToolId> =
+  PIECE_SOURCE_TOOL_IDS;
+
+/** Whether `toolId` is one a parent surface may never offer. */
+export const isSubagentOnlyToolId = (toolId: string): boolean =>
+  SUBAGENT_ONLY_TOOL_IDS.has(toolId as BuiltinToolId);
 
 /**
  * The tools that exist only over the pattern index, gated on the same terms

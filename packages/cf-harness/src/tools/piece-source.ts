@@ -27,6 +27,7 @@ import {
   type PatternUpdateReceipt,
   type PieceController,
   type PiecesController,
+  PieceSourceChangedError,
   type PieceSourceState,
   readPieceSourceState,
 } from "@commonfabric/piece/ops";
@@ -41,6 +42,7 @@ import {
   disclosedCfcLabels,
 } from "../cfc-label-disclosure.ts";
 import { errorMessage } from "../error-message.ts";
+import { scrubBareFabricIdentifiers } from "../fabric-identifier-scrub.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessToolContext, HarnessToolDefinition } from "./types.ts";
 
@@ -344,7 +346,7 @@ export const readPieceSourceTool: HarnessToolDefinition<
     const fail = (message: string): PieceSourceToolErrorOutput => ({
       outputId,
       status: "error",
-      message,
+      message: scrubBareFabricIdentifiers(message),
     });
     const ref = typeof input.token === "string" ? input.token.trim() : "";
     if (ref.length === 0) {
@@ -416,7 +418,7 @@ export const revisePieceTool: HarnessToolDefinition<
     const fail = (message: string): PieceSourceToolErrorOutput => ({
       outputId,
       status: "error",
-      message,
+      message: scrubBareFabricIdentifiers(message),
     });
     const ref = typeof input.token === "string" ? input.token.trim() : "";
     if (ref.length === 0) {
@@ -514,6 +516,19 @@ export const revisePieceTool: HarnessToolDefinition<
           : { expectedPattern: previousPattern }),
       });
     } catch (error) {
+      // A piece that moved under the pin is said by name and in this tool's
+      // own words. The runtime's own text for it quotes the pattern it was
+      // proved against as `<identity>#<symbol>`, and a bare content identity
+      // carries no scheme for the identifier scrub to recognize, so relaying
+      // it would put a fabric identifier in model context that nothing
+      // downstream would catch.
+      if (error instanceof PieceSourceChangedError) {
+        return fail(
+          "revise_piece refused: the piece moved onto different source " +
+            "between the check and the write. Read its source again and " +
+            "rewrite your change against what it holds now.",
+        );
+      }
       return fail(
         `revise_piece could not apply the revision: ${errorMessage(error)}`,
       );

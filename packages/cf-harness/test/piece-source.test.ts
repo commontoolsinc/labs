@@ -19,7 +19,13 @@ import {
   PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS,
   PATTERN_AUTHOR_SUBAGENT_PROFILE_CONFIG,
 } from "../src/contracts/subagent.ts";
-import { DEFAULT_PARENT_TOOL_IDS } from "../src/contracts/tool-descriptor.ts";
+import {
+  DEFAULT_PARENT_TOOL_IDS,
+  isSubagentOnlyToolId,
+  parentToolIdsForBacking,
+  SUBAGENT_ONLY_TOOL_IDS,
+} from "../src/contracts/tool-descriptor.ts";
+import { SUPPORTED_POLICY_TOOL_IDS } from "../src/interactive-chat-stdio.ts";
 import type {
   PieceSourceToolErrorOutput,
   ReadPieceSourceToolSuccessOutput,
@@ -198,6 +204,26 @@ describe("piece-source", () => {
       expect(Array.isArray(output.labels)).toBe(true);
     });
 
+    it("refuses a reference to another space without naming what it found", async () => {
+      // The session's authority ends at its space, the same boundary
+      // run_pattern draws over its inputs.
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      const foreign =
+        `//did:key:z6MkfuESkj8uKUJv7J7sqzPGSUeea3Exh1c2MjWrGdQp1h2z${
+          created.resultRef.startsWith("/")
+            ? created.resultRef
+            : `/${created.resultRef}`
+        }`;
+
+      const result = await engine.invokeBuiltinTool("read_piece_source", {
+        token: foreign,
+      });
+      const output = result.output as PieceSourceToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("this run's own space");
+    });
+
     it("refuses a token that names a position inside a piece rather than a piece", async () => {
       const engine = createEngine();
       const created = await createPiece(engine);
@@ -294,6 +320,39 @@ describe("piece-source", () => {
   });
 
   describe("the parent never sees what the reading child read", () => {
+    it("admits no piece-source tool into the interactive policy's tool set", () => {
+      // A chat policy configures a PARENT, and its tool set is derived from
+      // the registry, so leaving the two out of the default parent list is not
+      // on its own enough: a client could name one and be granted it wherever
+      // a fabric session backs it. This is the check that makes the omission
+      // binding.
+      for (const toolId of SUBAGENT_ONLY_TOOL_IDS) {
+        expect(SUPPORTED_POLICY_TOOL_IDS.has(toolId)).toBe(false);
+      }
+      // An ordinary parent tool is still in it, so the exclusion is about
+      // these two rather than about the set being empty.
+      expect(SUPPORTED_POLICY_TOOL_IDS.has("read_file")).toBe(true);
+    });
+
+    it("keeps both tools off every parent surface a backing can produce", () => {
+      // `parentToolIdsForBacking` is the one derivation of "which tools does a
+      // parent have", so it is the surface to assert rather than the constant
+      // list it starts from — a tool added to a gated set would reach a parent
+      // through it without touching DEFAULT_PARENT_TOOL_IDS at all.
+      for (const fabricSessionAvailable of [true, false]) {
+        const parent = parentToolIdsForBacking({
+          fabricSessionAvailable,
+          patternIndexAvailable: true,
+          skillsShSearchAvailable: true,
+          skillsShAcquisitionAvailable: true,
+          skillRegistryAvailable: true,
+          docsCorpusAvailable: true,
+          loomAuthoringAvailable: true,
+        });
+        expect(parent.filter(isSubagentOnlyToolId)).toEqual([]);
+      }
+    });
+
     it("keeps both tools off the parent surface and on the pattern-author profile's", () => {
       // The read is the whole of how source enters a context, so a surface
       // that holds it is a surface that can hold source. The parent holds

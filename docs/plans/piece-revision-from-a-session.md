@@ -110,12 +110,31 @@ as `expectedPattern`, which the apply path re-checks inside the write
 transaction, so a writer landing between the preflight and the commit is
 refused by name rather than written over.
 
+**Neither is atomic, and the residual case is worth naming.** The
+precondition is a read, and the pin names a content-addressed pattern rather
+than a revision. So a concurrent revision landing between the precheck and
+the commit is caught by the pin only when it changed what the piece runs; a
+concurrent revision to *byte-identical* source keeps the same pattern
+identity, satisfies the pin, and commits. What that case costs is a revision
+id the caller did not expect, over source the caller did read — the piece
+runs the program the caller was editing against either way. Closing it
+properly means pinning the revision inside the write transaction, which is a
+piece-controller change rather than a harness one.
+
 `dangerouslyAllowIncompatibleSchema` is not exposed. A session cannot
 obtain the informed consent that flag stands for, and the spec requires
 explicit human confirmation bound to the exact compiled candidate
 ([`piece-source-lifecycle.md`, "Compatibility policy"](../specs/piece-source-lifecycle.md#compatibility-policy)).
 An incompatible candidate is a refusal carrying `checkPattern`'s report,
 which is what the child needs to write its next attempt.
+
+Every refusal goes through the same bare-identifier scrub `run_pattern`
+gives its model-facing text, so a lower-layer error naming a document does
+not carry that address into the child. One error is handled by type instead
+of by scrub: a piece that moved under the pin raises an error quoting the
+pattern it was proved against as `<identity>#<symbol>`, and a bare content
+identity carries no scheme for the scrub to recognize, so that case is
+answered in this tool's own words.
 
 That refusal is also where [`space-clone-rehearsal.md`](../development/space-clone-rehearsal.md)
 sends a change a person has to judge. Its first trigger is exactly this
