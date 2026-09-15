@@ -556,6 +556,140 @@ are part of their respective measurements.
 The [phase measurement report](../history/development/performance/2026-09-11-index-maintenance-phases.md)
 records the validated local count matrix and its limits.
 
+## Topics computation cost probe
+
+Run `deno run -A scripts/topics-computation-cost.ts` from the repository root to
+measure the Topics board's mention pivot, each topic's backlink lookup, and a
+topic's comment and link aggregates over the headless fixture in
+`packages/patterns/integration/topics-headless-fixture.ts`. The fixture writes
+synthetic topics straight to emulated storage and runs the unmodified Topics
+lifts — `crossrefTable`, `backlinksOf`, `presentCommentCountOf`, and
+`lastActivityOf` — with no browser and no server. Each case runs in a process of
+its own.
+
+The options select what runs:
+
+- `--small` runs only the small cases, which make the smoke run.
+- `--filter=<regexp>` runs the cases whose ID the expression matches.
+- `--repeat=<n>` runs every selected case `n` times, in rounds, so that repeated
+  samples of one case alternate with the others rather than running back to
+  back.
+- `--max-old-space-size=<megabytes>` sets the heap each case's process runs
+  under.
+
+### The heap the 512-topic cases need
+
+The `all-backlinks` cases at 512 topics need more heap than V8 gives a process
+by default. Measured on a machine with 10 processors and 32GB of memory, where
+the default limit is 4,192MB, the `low-degree` and `high-degree` cases run out
+of heap during initialization and are recorded as limits, while `single-bucket`
+completes holding 3.1GB after a full collection. With an 8,192MB heap all three
+complete, holding at most 3.1GB after a collection and up to 6.3GB resident. The
+`board` and `topic-open` cases at 512 topics complete under the default limit,
+holding under 200MB. A full run therefore sets:
+
+```sh
+deno run -A scripts/topics-computation-cost.ts --max-old-space-size=8192
+```
+
+### The matrix
+
+The pivot cases hold 32, 128, and 512 topics under the `low-degree`,
+`high-degree`, and `single-bucket` mention graphs, at four mentions per source.
+At 128 topics a sweep varies mentions per source over 0, 1, 4, and 16, where 0
+is the `none` graph. The small pivot cases hold 4 topics, with as many mentions
+per source, up to four, as each graph allows. The fixture's documentation of
+`MentionGraph` says how each graph spreads its mentions.
+
+The thread cases hold four topics, each with 10, 100, or 1,000 comments and
+three links, then with 10, 100, or 1,000 links and three comments. The small
+thread case gives each topic one comment and one link.
+
+Every case runs under each of three demand workloads:
+
+- `board`: the pivot alone.
+- `topic-open`: the pivot, and the backlinks, present comment count, and last
+  activity of the first topic. In the `high-degree` and `single-bucket` graphs
+  every other topic mentions the first.
+- `all-backlinks`: the pivot, and every topic's three lifts. This is a scaling
+  probe, not what a board in use demands.
+
+A case's ID names all of that, as
+`pivot/<graph>/mentions-<count>/topics-<count>/<workload>` or
+`thread/comments-<count>/links-<count>/<workload>`.
+
+### The phases
+
+Initialization runs from the transaction that starts the demanded lifts through
+settlement. Compiling the Topics sources and writing the fixture come before it
+and are not measured. The warm updates then run in turn on the same fixture,
+each measured from the start of its edit through settlement:
+
+- mention insertion, in which a topic that does not mention the first topic
+  appends a mention of it, or, where every other topic already does, the second
+  topic appends a repeat;
+- mention removal, which writes that topic's mention list back without the
+  appended entry;
+- a same-count retarget, which points one mention of the first topic at another
+  topic;
+- comment append, edit, and retraction on the first topic;
+- link removal, which stamps the first topic's first present link as removed;
+- an unrelated sibling edit, which renames the last topic. None of the measured
+  lifts reads a title.
+
+A phase the fixture cannot give, such as a retarget when nothing mentions the
+first topic, records why it was not measured. After every phase the probe checks
+the pivot and every demanded output against values computed from the fixture
+data, and fails the run on a mismatch or on an error the runtime reports.
+
+Reopening the storage a case wrote is not measured: the fixture's measurement
+offers no second runtime over it. Every sample carries a `reopen` phase saying
+so.
+
+### The output
+
+Standard output carries JSON lines. Standard error carries progress and
+everything a case's process prints.
+
+- The first line has the `kind` `environment`: the git revision and whether the
+  tree is dirty, the Deno, V8, and TypeScript versions, the platform, the
+  processor count, the experimental options the fixture pins, the arguments, the
+  V8 flags each case's process starts with, and the selected case IDs.
+- A `sample` line is one case in one round: the case, its series, the fixture's
+  options and mention count, the heap limit the process ran under, and a record
+  per phase.
+- A `limit` line records a case whose process a signal ended, which is how V8
+  ends a process that exhausts its heap. It names the case, its series (the ID
+  with the scaled count written as `*`), the size that failed, the largest size
+  of that series built so far, the heap limit the process ran under, how long it
+  ran, the signal, and the process's fatal message. The larger sizes of the
+  series are skipped in every later round, and the line lists them.
+- The last line has the `kind` `complete`. A run whose output lacks it did not
+  finish.
+
+Every sample names the first topic as its `focusTopic`. A measured phase
+records:
+
+- `edit`, for a warm update, the topic indices its edit touched;
+- `elapsedMs`, from the start of the phase through settlement;
+- `bodies`, the completed-body reads that
+  [read accounting](../features/read-accounting.md) defines, attributed to a
+  lift by the authored source each run reports and grouped by role: `producer`
+  holds the pivot, `consumer` the backlink lookup, `aggregate` the comment count
+  and last activity, and `other` every remaining run, sinks and builtins
+  included. `total` sums them all. Each entry counts runs, actions, proxy
+  accesses, link resolutions, and per-run sums of distinct documents and
+  registered dependencies, with the most proxy accesses of any one run;
+- `attempts`, the transaction-attempt reads through settlement, of every kind;
+- `graph`, the scheduler's node and edge counts once settled;
+- `memory`, the heap used, heap total, resident set size, and external memory
+  after a full collection.
+
+The complete settled operation is the unit a comparison decides on:
+`bodies.total` and `attempts` cover all of it, and the role groups show where
+the work sits. Elapsed times are local wall-clock samples, for comparison across
+`--repeat` rounds; nothing gates on them.
+
 ## JSON Pointer encoding
 
 `packages/memory/test/v2-path.bench.ts` measures encoding 256 distinct paths and
