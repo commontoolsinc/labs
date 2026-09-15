@@ -12,6 +12,7 @@ import {
   internSchemaAsTaggedHashString,
   schemaTypeOfFabricPrimitive,
 } from "@commonfabric/data-model-schema";
+import { isDID } from "@commonfabric/identity/did";
 import {
   containsExternalSchemaRef,
   formatExternalSchemaRef,
@@ -80,6 +81,7 @@ import {
   isSchedulerDependencyRead,
   stableInternalVerifierRead,
 } from "../storage/reactivity-log.ts";
+import { getTransactionWriteAttempts } from "../storage/transaction-inspection.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import {
   canonicalizeCfcMetadata,
@@ -724,8 +726,7 @@ const hasLiteralDidCurrentPrincipalClaim = (value: unknown): boolean => {
     return value.some(hasLiteralDidCurrentPrincipalClaim);
   }
   if (isCurrentPrincipalClaimAtom(value)) {
-    return typeof value.subject === "string" &&
-      value.subject.startsWith("did:");
+    return isDID(value.subject);
   }
   if (isObjectOrArray(value)) {
     return Object.values(value).some(hasLiteralDidCurrentPrincipalClaim);
@@ -745,7 +746,7 @@ const literalDidSubjectsForPrincipalClaim = (
     return subjects;
   }
   if (isCurrentPrincipalClaimAtom(value) && value.kind === kind) {
-    if (typeof value.subject === "string" && value.subject.startsWith("did:")) {
+    if (isDID(value.subject)) {
       subjects.push(value.subject);
     }
     return subjects;
@@ -1176,6 +1177,72 @@ const storedMetadataFor = (
   }
   return resolved;
 };
+
+/**
+ * Resolves input envelopes during one synchronous boundary preparation.
+ *
+ * Target verification shares successful reads, including absent envelopes.
+ * The transaction's applied-write log invalidates every document changed since
+ * the previous target, including whole-document writes inside schema helpers.
+ * Each preparation owns a fresh resolver. Without write inspection, reuse is
+ * limited to one target's input collection.
+ */
+class VerifierMetadataResolver {
+  #tx: IExtendedStorageTransaction;
+  #envelopes = new Map<string, Map<MediaType, CfcMetadata | undefined>>();
+  #seenWrites = 0;
+
+  /** Binds metadata reads and write inspection to the same transaction. */
+  constructor(tx: IExtendedStorageTransaction) {
+    this.#tx = tx;
+  }
+
+  /** Returns the current envelope, propagating unreadable-envelope errors. */
+  read(
+    space: MemorySpace,
+    id: URI,
+    scope: ReturnType<typeof normalizeCellScope>,
+    type: MediaType,
+  ): CfcMetadata | undefined {
+    const key = stringTupleKey([space, scope, id]);
+    let types = this.#envelopes.get(key);
+    if (types === undefined) {
+      types = new Map();
+      this.#envelopes.set(key, types);
+    }
+    if (!types.has(type)) {
+      types.set(type, storedMetadataFor(this.#tx, space, id, scope, type));
+    }
+    return types.get(type);
+  }
+
+  /**
+   * Invalidates changed documents before a target collects its input labels.
+   * Applied writes form an append-only log during preparation, so only its
+   * new suffix needs inspection.
+   */
+  refresh(): void {
+    // The raw transaction distinguishes unavailable inspection from an empty
+    // log; the extended prefix-gating API returns an empty log for both.
+    const writes = getTransactionWriteAttempts(this.#tx.tx);
+    if (writes === undefined) {
+      this.#envelopes.clear();
+      this.#seenWrites = 0;
+      return;
+    }
+    for (let index = this.#seenWrites; index < writes.length; index++) {
+      const write = writes[index];
+      this.#envelopes.delete(
+        stringTupleKey([
+          write.space,
+          normalizeCellScope(write.scope),
+          write.id,
+        ]),
+      );
+    }
+    this.#seenWrites = writes.length;
+  }
+}
 
 // Whether this transaction's view of the document has a root value.
 //
@@ -2978,10 +3045,7 @@ const currentPrincipalIntegrityReason = (
     const ownerPrincipal = isCurrentPrincipalPlaceholder(ownerPrincipalSpec)
       ? trustSnapshot.actingPrincipal
       : ownerPrincipalSpec;
-    if (
-      typeof ownerPrincipal !== "string" ||
-      !ownerPrincipal.startsWith("did:")
-    ) {
+    if (!isDID(ownerPrincipal)) {
       return `ownerPrincipal must be a DID at /${path.join("/")}`;
     }
     const resolvedCurrentPrincipalValues = resolveCurrentPrincipalLabelValues(
@@ -3994,6 +4058,7 @@ const verifyInputRequirements = (
   // the per-path last-overlapping-write bounds each entry's input checks
   // quantify under.
   prefixBounds: WritePrefixBounds,
+  metadataResolver: VerifierMetadataResolver,
   // Stage-0 precision counters (docs/specs/cfc-value-level-provenance.md §6),
   // accumulated across the boundary pass. undefined — the default, whenever
   // no onPrefixProvenance hook is installed — skips all measurement.
@@ -4024,22 +4089,10 @@ const verifyInputRequirements = (
   // interpret, by version or by shape, and a transaction that consumed such
   // a document fails closed whether or not anything asks what its label
   // says. That refusal must not depend on what a target declares, nor on
-  // whether the measurement dial is on. One resolution serves every read
-  // that landed in the same document: nothing writes between here and the
-  // end of this map, so a later read sees the envelope the first one saw.
-  const envelopes = new Map<string, CfcMetadata | undefined>();
-  const envelopeFor = (
-    space: MemorySpace,
-    id: URI,
-    scope: ReturnType<typeof normalizeCellScope>,
-    type: MediaType,
-  ): CfcMetadata | undefined => {
-    const key = `${targetKey({ space, id, scope })}\u0000${type}`;
-    if (!envelopes.has(key)) {
-      envelopes.set(key, storedMetadataFor(tx, space, id, scope, type));
-    }
-    return envelopes.get(key);
-  };
+  // whether the measurement dial is on. Resolutions remain valid until the
+  // transaction writes the document. The activity list stays live so newly
+  // recorded reads remain visible to later targets.
+  metadataResolver.refresh();
   let clockLessReads = 0;
   const readSources = [
     ...[
@@ -4071,7 +4124,7 @@ const verifyInputRequirements = (
   ].map((read) => ({
     ...read,
     path: canonicalizeLogicalPath(read.path),
-    metadata: envelopeFor(
+    metadata: metadataResolver.read(
       read.space,
       read.id,
       normalizeCellScope(read.scope),
@@ -4130,10 +4183,9 @@ const verifyInputRequirements = (
   // Stage-0 measurement: the pre-D4 comparison baseline. Before D4 the gate
   // quantified over every labeled read with the S7 provenance-only exemption
   // applied transaction-globally — so the baseline is the label filter
-  // without the prefix condition. The gate-visible read set is the same on
-  // every call within one prepare, hence assignment (not accumulation) for
-  // the per-prepare clock-less count. The counter describes the whole set,
-  // which the dial therefore resolves.
+  // without the prefix condition. The clock-less count describes the read
+  // set visible to the latest target, including any reads recorded earlier in
+  // preparation. The dial therefore resolves the whole set.
   const txGlobalGatedReads = provenance === undefined ? 0 : gatedReadsOf()
     .filter((read) => !isProvenanceOnlyConsumedLabel(read.label!))
     .length;
@@ -6387,6 +6439,7 @@ export const prepareBoundaryCommit = (
       }
     }
   }
+  const metadataResolver = new VerifierMetadataResolver(tx);
   for (const key of targetKeys) {
     const candidateSchema = candidates.get(key);
     const schema = candidateSchema ?? emptySchemaObject();
@@ -6499,6 +6552,7 @@ export const prepareBoundaryCommit = (
       target,
       (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
       prefixBounds,
+      metadataResolver,
       prefixProvenance,
     );
     // A verification failure records a reason (which rejects the whole commit

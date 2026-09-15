@@ -55,7 +55,7 @@ import {
   rectangularSelection,
   type ViewUpdate,
 } from "@codemirror/view";
-import type { DID } from "@commonfabric/identity";
+import { type DID, isDID } from "@commonfabric/identity/did";
 import { parseFabricUrl } from "@commonfabric/runner/fabric-url";
 import { stringSchema } from "@commonfabric/runner/schemas";
 import {
@@ -3022,7 +3022,7 @@ export class CFCodeEditor extends BaseElement {
     if (
       !target || !target.id || target.member === "argument" ||
       (target.scope !== undefined && target.scope !== "space") ||
-      (target.space && !target.space.startsWith("did:"))
+      (target.space && !isDID(target.space))
     ) {
       return false;
     }
