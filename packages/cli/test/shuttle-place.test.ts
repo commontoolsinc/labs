@@ -50,6 +50,7 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import {
   CurrentPlace,
   FACETS,
+  handleMove,
   type Move,
   operandForChild,
   type PendingMove,
@@ -113,6 +114,56 @@ describe("place", () => {
         position: { kind: "root", space: SPACE },
         scope: "space",
       });
+    });
+  });
+
+  describe("handleMove()", () => {
+    // Where a handle operand divides, which two readers ask: the move a verb's
+    // operand comes back as, and the recording that writes a handle out as the
+    // row it named (`handles.ts`). One answer, so the pair cannot part.
+
+    it("returns the handle at the head and the walk written after it", () => {
+      expect(handleMove("%1/target/deeper")).toEqual({
+        kind: "handle",
+        handle: "%1",
+        rest: "target/deeper",
+        operand: "%1/target/deeper",
+      });
+    });
+
+    it("returns an empty walk for a handle written on its own", () => {
+      expect(handleMove("%12")).toEqual({
+        kind: "handle",
+        handle: "%12",
+        rest: "",
+        operand: "%12",
+      });
+    });
+
+    it("returns an empty walk for a handle written with a trailing separator", () => {
+      // `%4/` names the row and nothing inside it, the separator opening a
+      // walk with no segment in it.
+
+      expect(handleMove("%4/")).toEqual({
+        kind: "handle",
+        handle: "%4",
+        rest: "",
+        operand: "%4/",
+      });
+    });
+
+    it("returns nothing for an operand that does not open with the sigil", () => {
+      expect(handleMove("items/%1")).toBeUndefined();
+    });
+
+    it("reads a `cd` operand opening with the sigil, whatever the digits say", () => {
+      // The division is the one a verb's operand goes through, and the reading
+      // is reached by the sigil alone: whether the number names a row is the
+      // handle table's question and is asked after this.
+
+      const place = new CurrentPlace(SPACE);
+      expect(place.aim("%0/x", "get").move)
+        .toEqual(handleMove("%0/x"));
     });
   });
 
