@@ -575,3 +575,24 @@ deno bench --no-lock --json packages/memory/test/v2-path.bench.ts
 The
 [local encoding measurement](../history/development/performance/2026-09-14-encode-pointer.md)
 records interleaved comparisons and their limits.
+
+## String tuple keys
+
+`packages/utils/test/string-tuple-key.bench.ts` measures encoding 256 distinct
+string tuples and looking up their values in a prebuilt Map. The cases cover
+two-field document identities, three-field cache slots, five-field consumed
+sources, and fields containing escape characters or Unicode. Construction and
+checksum checks stay outside the timed interval; the lookup includes string
+hashing and flattening.
+
+`stringTupleKey` is available through `@commonfabric/utils/string-tuple-key`.
+It preserves string and tuple boundaries, including empty strings and embedded
+NULs. Its opaque output is for internal Map and Set identities whose components
+are all strings. A caller with a fixed string prefix and one trailing path can
+spread that path into the tuple. Multiple variable-length arrays need explicit
+boundaries; structured or nullable identities need their own encoding contract.
+Existing persisted and wire key formats keep their protocol-defined encoding.
+
+The collector and scheduler effects are tracked by
+`packages/runner/test/cfc-consumed-source-dedup.bench.ts` and
+`packages/runner/test/scheduler-invalid-causes.bench.ts` respectively.
