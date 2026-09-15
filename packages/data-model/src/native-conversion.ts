@@ -46,7 +46,7 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { tagFromNativeValueElseNull, VALUE_TAGS } from "@/value-tags";
+import { tagOfNativeValueElseNull, VALUE_TAGS } from "@/value-tags";
 import {
   assertValidFabricValueLayer,
   isValidFabricNativeObject,
@@ -212,7 +212,7 @@ export function errorClassFromType(type: string): ErrorConstructor {
 export function shallowFabricFromNativeObjectElseUndefined(
   value: unknown,
 ): FabricValueLayer | undefined {
-  switch (tagFromNativeValueElseNull(value)) {
+  switch (tagOfNativeValueElseNull(value)) {
     case VALUE_TAGS.JsError: {
       // Shallow conversion, so the native `Error` is wrapped without recursing
       // into its internals: `cause` and the custom properties are stored as

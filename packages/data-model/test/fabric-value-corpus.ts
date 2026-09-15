@@ -1,7 +1,7 @@
 /**
  * The shared population the value-dispatch cross-checks run over.
  *
- * `tagFromNativeValueElseNull()` names what a value already is,
+ * `tagOfNativeValueElseNull()` names what a value already is,
  * `isValidFabricNativeObject()` decides a subset of that answer by a narrower
  * route, `isValidFabricValueLayer()` decides membership,
  * `assertValidFabricValueLayer()` answers that last question in the form that

@@ -6,7 +6,7 @@
  * `Error.isError` entirely — host code and compartments alike. That is a
  * silent gap until something calls it, at which point classification code that
  * uses the cross-realm-correct error test (data-model's
- * `tagFromNativeValueElseNull`, for one) throws `TypeError: Error.isError is
+ * `tagOfNativeValueElseNull`, for one) throws `TypeError: Error.isError is
  * not a function`.
  *
  * Both halves matter and fail independently: repair mints a separate
@@ -17,10 +17,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  tagFromNativeValueElseNull,
-  VALUE_TAGS,
-} from "@commonfabric/data-model";
+import { tagOfNativeValueElseNull, VALUE_TAGS } from "@commonfabric/data-model";
 import { restoreErrorIsError } from "../src/sandbox/error-taming.ts";
 import {
   ensureSESLockdown,
@@ -111,7 +108,7 @@ describe("Error.isError under SES lockdown", () => {
 
   describe("the caller this shim exists for", () => {
     it("classifies a constructor-less error post-lockdown", () => {
-      // data-model's `tagFromNativeValueElseNull` reaches `Error.isError` for
+      // data-model's `tagOfNativeValueElseNull` reaches `Error.isError` for
       // values whose constructor is unreachable, and reaches it before its other
       // fallbacks — so under lockdown the missing method turned a
       // classification into a `TypeError` thrown from deep inside conversion,
@@ -120,7 +117,7 @@ describe("Error.isError under SES lockdown", () => {
       ensureSESLockdown();
       const severed = new Error("severed");
       Object.setPrototypeOf(severed, null);
-      expect(tagFromNativeValueElseNull(severed)).toBe(VALUE_TAGS.JsError);
+      expect(tagOfNativeValueElseNull(severed)).toBe(VALUE_TAGS.JsError);
     });
   });
 });
