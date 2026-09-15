@@ -1478,6 +1478,48 @@ Deno.test("validates the label documents a version-2 CFC envelope references", a
       "does not hold a label",
     );
 
+    // A stored label document whose bytes were changed out of band no
+    // longer hashes to its id, and a later envelope naming it is refused:
+    // the commit API rejects every `cid:` mutation, so direct database
+    // manipulation is the only door left, and this models genuine
+    // corruption.
+    engine.database.prepare(
+      `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
+    ).run({
+      data: encodeMemoryBoundary({ value: { confidentiality: ["forged"] } }),
+      id: `cid:${labelHash}`,
+    });
+    engine.database.prepare(`UPDATE head SET seq = seq + 1 WHERE id = :id`)
+      .run({ id: `cid:${labelHash}` });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(41, {
+            operations: [{
+              op: "set",
+              id: "of:tampered-carrier",
+              value: {
+                value: { field: "v" },
+                cfc: {
+                  version: 2,
+                  schemaHash: envelopeHash,
+                  labelMap: {
+                    version: 1,
+                    entries: [{
+                      path: ["field"],
+                      label: { $ref: `cid:${labelHash}` },
+                    }],
+                  },
+                },
+              },
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "whose stored content does not verify",
+    );
+
     // A patch that lands a reference at the reserved member is collected
     // from the post-patch document like the schema reference is.
     const otherHash = taggedHashStringOf({ confidentiality: ["other"] });
