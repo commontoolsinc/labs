@@ -5,8 +5,8 @@ import { BaseElement } from "../../core/base-element.ts";
 
 import "../cf-chip/index.ts";
 
-import { type DID, isDID } from "@commonfabric/identity/did";
-import { navigate } from "@commonfabric/navigation";
+import type { DID } from "@commonfabric/identity/did";
+import { navigate, spaceViewRef } from "@commonfabric/navigation";
 
 /**
  * CFSpaceLink - Renders a space as a clickable pill that navigates to the space
@@ -55,16 +55,8 @@ export class CFSpaceLink extends BaseElement {
   private _handleClick(e: Event) {
     e.stopPropagation();
 
-    // A name that is a DID addresses the space by DID. Navigating by name
-    // would instead derive a space key from the name, which is a different
-    // space than the same string names as a DID.
-    if (isDID(this.spaceName)) {
-      navigate({ spaceDid: this.spaceName });
-    } else if (this.spaceName) {
-      navigate({ spaceName: this.spaceName });
-    } else if (this.spaceDid) {
-      navigate({ spaceDid: this.spaceDid });
-    }
+    const space = spaceViewRef(this.spaceName, this.spaceDid);
+    if (space) navigate(space);
   }
 
   override render() {

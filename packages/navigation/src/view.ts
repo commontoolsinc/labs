@@ -64,6 +64,36 @@ export type AppView =
     & AppOpenPathRef
   );
 
+/**
+ * How a view addresses a space, given a name and a DID that may both be
+ * present and may both be absent.
+ *
+ * A name that is a DID addresses the space by DID. Taken as a name it would
+ * instead name the space a key derived from that string reaches, which is a
+ * different space; and the URL it produced would be read back as a space DID
+ * anyway, so the view would not survive its own round trip.
+ *
+ * Returns `undefined` only when neither is given, which is a view that
+ * addresses no space at all; a caller holding a DID always gets one back.
+ */
+export function spaceViewRef(
+  spaceName: string | undefined,
+  spaceDid: DID,
+): { spaceName: string } | { spaceDid: DID };
+export function spaceViewRef(
+  spaceName: string | undefined,
+  spaceDid: DID | undefined,
+): { spaceName: string } | { spaceDid: DID } | undefined;
+export function spaceViewRef(
+  spaceName: string | undefined,
+  spaceDid: DID | undefined,
+): { spaceName: string } | { spaceDid: DID } | undefined {
+  if (isDID(spaceName)) return { spaceDid: spaceName };
+  if (spaceName) return { spaceName };
+  if (spaceDid) return { spaceDid };
+  return undefined;
+}
+
 export function isAppBuiltInView(view: unknown): view is AppBuiltInView {
   switch (view as AppBuiltInView) {
     case "home":

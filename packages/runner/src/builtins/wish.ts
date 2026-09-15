@@ -327,7 +327,7 @@ function getSpaceCellForDID(
  * keywords. Each one becomes a space to search, so an entry that is not a DID
  * would be read as the id of a space nobody named; say so instead.
  */
-function getArbitraryDIDs(scope?: string[]): DID[] {
+export function getArbitraryDIDs(scope?: string[]): DID[] {
   const named = (scope ?? []).filter((s) =>
     s !== "~" && s !== "." && s !== "profile"
   );
