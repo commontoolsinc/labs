@@ -786,31 +786,29 @@ describe("setsrc compatibility preflight", () => {
       expect(forced).toContain("writeAuthorizedBy must remain stable at /name");
     });
 
-    it("returns the verdict the apply reaches for the same tree compiled under another root", async () => {
+    it("clears the same tree compiled under another root, which the apply commits", async () => {
       // The production shape: the piece runs the tree the shell served under
       // `/api/patterns`, and the update supplies it from a checkout under
       // `/packages/patterns`. The contract proof passes, since it compares
-      // neither the file spelling nor the module hash, so whether the stored
-      // claim and the candidate's reconcile is decided by the merge alone.
-      // The check is held to the apply's verdict rather than to a fixed one:
-      // what the merge makes of two stamps under different spellings is the
-      // merge's rule, and the check's job is to report it.
+      // neither the file spelling nor the module hash. The stored claim and
+      // the candidate's are both stamped, each naming its module
+      // content-addressed, and two stamps reconcile without comparing their
+      // spellings, so the merge accepts the candidate and the update commits.
+      // The check has to judge the candidate's born-stamped claim as the
+      // merge does: a preflight that read it as unstamped would demand the
+      // spelling correspondence and refuse an update the deploy accepts.
       const piece = await stampedPiece(writerProgram(servedRoot));
       const candidate = writerProgram(checkoutRoot);
 
       const report = await piece.checkPattern(candidate);
-      const refusal = await piece.setPattern(candidate).then(
-        () => undefined,
-        (error: unknown) => (error as { message?: string })?.message,
-      );
+      expect(report.issues.cfc).toBe(undefined);
+      expect(report.compatible).toBe(true);
 
-      expect(report.compatible).toBe(refusal === undefined);
-      if (refusal !== undefined) {
-        expect(refusal).toContain("writeAuthorizedBy must remain stable");
-        expect(report.issues.cfc).toContain(
-          "writeAuthorizedBy must remain stable at /name",
-        );
-      }
+      await piece.setPattern(candidate);
+      await runtime.idle();
+      expect(getPatternIdentityRef(piece.getCell())?.identity).toBe(
+        report.candidate.identity,
+      );
     });
   });
 
