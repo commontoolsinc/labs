@@ -173,6 +173,18 @@ export default pattern(() => {
     votes: collidingVotes,
   });
 
+  // Fifth instance, for a vote whose voter is not on the roster: the tally
+  // looks a voter up by cell, and a voter who has left has no row to find.
+  // Robin never joins, so her vote has to tally without one.
+  const robin = Writable.of<LunchProfile>({ name: "Robin" });
+  const departedUsers = Writable.of<User[]>([]);
+  const departedVotes = Writable.of<Vote[]>([]);
+  const departedPoll = CozyPoll({
+    options: [SEEDED_OPTION],
+    users: departedUsers,
+    votes: departedVotes,
+  });
+
   // Fourth instance: a NAME-ONLY claim (no profile cell anywhere) must not
   // produce an identity. This exercises main's override-vs-wish selection with
   // the profile side of the claim absent — the browser wish-path shape, where
@@ -223,6 +235,26 @@ export default pattern(() => {
         castAt: now,
       })),
     );
+    departedUsers.set([{
+      profile: alex,
+      name: "Alex",
+      avatar: "",
+      color: "#2f6f4e",
+    }]);
+    departedVotes.set([
+      {
+        voter: alex,
+        optionId: SEEDED_OPTION.id,
+        voteType: "green",
+        castAt: now,
+      },
+      {
+        voter: robin,
+        optionId: SEEDED_OPTION.id,
+        voteType: "red",
+        castAt: now,
+      },
+    ]);
   });
 
   const action_become_alex = action(() => {
@@ -625,6 +657,19 @@ export default pattern(() => {
       hasExactText(accentBob, "E\u0301B");
   });
 
+  // A voter who has left the roster still tallies. The name and color on a
+  // swatch come from the roster row the vote's voter names, so a vote with no
+  // row renders with neither: an empty name, and the fallback swatch color.
+  const assert_departed_voter_tallies_namelessly = assert(() => {
+    const ui = departedPoll[UI];
+    const alexSwatch = findNodeByProp(ui, "data-vote-swatch-name", "Alex");
+    const namelessSwatch = findNodeByProp(ui, "data-vote-swatch-name", "");
+    return departedPoll.todayVoteCount === 2 &&
+      alexSwatch !== undefined &&
+      namelessSwatch !== undefined &&
+      readValue(propsOf(namelessSwatch)?.["aria-label"]) === ": red vote";
+  });
+
   const assert_vote_swatches_have_accessible_names = assert(() => {
     const ui = initialsPoll[UI];
     const daffodil = findNodeByProp(
@@ -848,6 +893,8 @@ export default pattern(() => {
       // Same-first-letter participant names get stable, distinct swatches.
       { assertion: assert_colliding_initials_are_disambiguated },
       { assertion: assert_vote_swatches_have_accessible_names },
+      // A vote whose voter never joined still counts, and renders unnamed.
+      { assertion: assert_departed_voter_tallies_namelessly },
       // Seeded stale (yesterday) vote: stored but hidden everywhere.
       { assertion: assert_legacy_option_without_image_renders },
       { assertion: assert_stale_vote_hidden },
