@@ -323,7 +323,7 @@ figure is the age badge in the header.
 | `duration` | a span in milliseconds, rendered (via `humanSpan`) in the chart's bottom-left corner |
 | `aside` | trusted inline HTML minor header facet (e.g. an MTD or a "running" badge) |
 | `href` | makes the whole tile a link (an `http…` link opens a new tab) |
-| `hint` | small drill affordance, e.g. `"commits ↗"` |
+| `hint` | tooltip for the top-right `↗` drill arrow and accessible link description, e.g. `"commits ↗"` |
 
 ## Tiles
 

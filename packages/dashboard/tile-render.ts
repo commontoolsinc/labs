@@ -8,9 +8,7 @@ export function renderTile(v: TileView, id?: string, wide = false): string {
   const key = id ? ` data-tile-id="${escapeHtml(id)}"` : "";
   const dot = `<span class="dot ${STATUS_DOT[v.status]}"></span>`;
   const hint = v.hint
-    ? `<span class="drill" title="${escapeHtml(v.hint)}">${
-      escapeHtml(v.hint)
-    }</span>`
+    ? `<span class="drill" title="${escapeHtml(v.hint)}">↗</span>`
     : "";
   const header = `<p class="lbl">${dot} ${
     escapeHtml(v.label)
@@ -33,7 +31,10 @@ export function renderTile(v: TileView, id?: string, wide = false): string {
   const inner = `<div class="texture"></div>${header}${big}${sub}${body}`;
   if (!v.href) return `<div class="${cls}"${key}>${inner}</div>`;
   const tgt = /^https?:/.test(v.href) ? ` target="_blank" rel="noopener"` : "";
+  const description = v.hint
+    ? ` aria-description="${escapeHtml(v.hint)}"`
+    : "";
   return `<a class="${cls}"${key} href="${
     escapeHtml(v.href)
-  }"${tgt}>${inner}</a>`;
+  }"${tgt}${description}>${inner}</a>`;
 }
