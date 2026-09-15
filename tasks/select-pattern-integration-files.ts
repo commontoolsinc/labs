@@ -76,14 +76,15 @@ export const PATTERN_INTEGRATION_TEST_WEIGHTS: Readonly<
   "chat-note.test.ts": 0.3,
   "chatbot.test.ts": 0.4,
   "fetch-json.test.ts": 0.4,
-  // The Topics read-budget files, each the larger of two `deno test` runs on a
-  // 10-core arm64 macOS machine while no other test ran. CI runs them several
-  // times slower than that machine, so these weights order the four files
-  // against the CI-profiled ones rather than state what they cost in CI.
-  "topics-read-budget-small-and-threads.test.ts": 35.6,
-  "topics-read-budget-mentions-16.test.ts": 22.0,
-  "topics-read-budget-high-degree.test.ts": 19.5,
-  "topics-read-budget-single-bucket.test.ts": 19.3,
+  // The Topics read-budget files, each the seconds this branch's CI run
+  // 35032776362 reports for the file in the JUnit timing its Pattern
+  // Integration Tests jobs upload. These are the default arm's, the slower of
+  // the two; the opposite server-execution arm ran the same files in 27.8,
+  // 18.5, 16.4 and 16.3 seconds.
+  "topics-read-budget-small-and-threads.test.ts": 84.5,
+  "topics-read-budget-mentions-16.test.ts": 49.3,
+  "topics-read-budget-single-bucket.test.ts": 40.9,
+  "topics-read-budget-high-degree.test.ts": 30.1,
 };
 // Files at or above this measured duration occupy distinct shards.
 export const PATTERN_INTEGRATION_DISTINCT_WEIGHT_MINIMUM = 31;
