@@ -36,6 +36,10 @@ export type RunSource = ReturnType<typeof runSource>;
 
 export interface Tile {
   id: string; // unique, stable key for this tile's scheduling + latest-view state
+
+  /** Header before a view is available; defaults to the tile's id. */
+  label?: string;
+
   intervalMs: number; // how often collect() runs, per source when runSources is set
   wide?: boolean; // render full-width below the grid, including before collection
   // Keep the last completed status and values while ignoring intermediate views.

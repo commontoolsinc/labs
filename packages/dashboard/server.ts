@@ -101,7 +101,7 @@ function dashboardUpdate(currentViews: ReadonlyMap<string, TileView> = views): D
     const v = activeTileView(
       t,
       currentViews.get(t.id) ?? {
-        label: t.id,
+        label: t.label ?? t.id,
         status: "unknown" as const,
       },
     );
@@ -310,7 +310,7 @@ async function collectView(
     const prev = views.get(tile.id);
     return prev
       ? { ...prev, status: "unknown", sub: friendlyError(msg) }
-      : { label: tile.id, status: "unknown", value: "—", sub: friendlyError(msg) };
+      : { label: tile.label ?? tile.id, status: "unknown", value: "—", sub: friendlyError(msg) };
   }
 }
 
