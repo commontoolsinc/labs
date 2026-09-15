@@ -145,9 +145,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
   confidentiality. Gated on a CFC review that has not happened.
 - [Random space identities](random-space-identities.md) replaces publicly
   derived named-space keys with fresh random identities whose authority ends
-  after ACL genesis. It uses the DID subset of
-  [Common Fabric URLs](../specs/fabric-urls.md) and is complete without a public
-  name registry.
+  after ACL genesis. It implements the
+  [random space identity specification](../specs/random-space-identities.md),
+  uses existing DID routes, and is complete without a public name registry.
 - [CFC runner implementation](runner_cfc_implementation.md) defines the
   commit-boundary enforcement workstreams and rollout.
 - [Finishing the piece source lifecycle](piece-source-lifecycle-completion.md)
@@ -168,10 +168,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   [`../development/space-clone-rehearsal.md`](../development/space-clone-rehearsal.md).
   The plan stays live until the practice has been exercised on a real
   migration.
-- [Space name registry](space-name-registry.md) implements the DNS namespaces,
-  ASP redirects, registered targets, and displayed-name selection specified by
-  [Common Fabric URLs](../specs/fabric-urls.md). It remains independent of space
-  identity creation.
 - [Reading Fabric data](fabric-read-model.md) is the umbrella for one model
   across three concerns: everything addressable is a cell, so a verb's result
   and a direct read are the same operation on different cells. It carries the
@@ -224,3 +220,14 @@ a record: archive it to `docs/history/plans/` following the procedure in
   the verb flags and result shapes that offer none, the source `--space` needs
   before any of it is reachable by name, and the gate that keeps completion
   from falling behind the command tree again.
+
+## Concepts not planned for deployment
+
+These documents retain implementation detail for designs that may be evaluated
+again. They are not scheduled work and are not dependencies of current plans.
+
+- [Space name registry](space-name-registry.md) describes a possible
+  implementation of the DNS namespaces, ASP redirects, registered targets, and
+  displayed-name selection in the dormant
+  [Common Fabric URL](../specs/fabric-urls.md) concept. It remains independent of
+  space identity creation.

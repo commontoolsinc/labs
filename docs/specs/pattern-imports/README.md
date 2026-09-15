@@ -451,8 +451,9 @@ Why this shape:
   space-free `cf:pattern:<identity>` form. Authored static imports may still use
   a slug because deployment pins its terminal content identity. A piece origin
   does not accept that slug-shaped form under the tentative direction in Open
-  question 1. Human-readable browser aliases belong to
-  [Common Fabric URLs](../fabric-urls.md), outside this retained-source layer.
+  question 1. Human-readable browser aliases belong to the dormant
+  [Common Fabric URLs](../fabric-urls.md) concept, outside this retained-source
+  layer; no alias resolver is planned for deployment.
 - **Publication = naming.** `slug → a cell carrying patternIdentity` (a piece,
   or a published-pointer cell) in a readable space is the whole publish story;
   updating the slug is publishing a new version (dist-tag semantics). Pieces and
@@ -1100,10 +1101,12 @@ unchanged.
    the space-free content identity. The piece-origin validator rejects a
    slug-shaped or root-only fabric reference, including a pinned slug. Existing
    authored import aliases remain a separate case because deployment pins their
-   terminal content identity into source. A UI can resolve a registered browser
-   name through [Common Fabric URLs](../fabric-urls.md) before the lifecycle
-   sees the resulting DID. The registered name is not itself the durable origin
-   or a repoint target. Further study must settle whether spaces should
+   terminal content identity into source. Under the dormant
+   [Common Fabric URLs](../fabric-urls.md) concept, a UI could resolve a
+   registered browser name before the lifecycle sees the resulting DID. No such
+   resolver is planned for deployment. The registered name would not itself be
+   the durable origin or a repoint target. Further study must settle whether
+   spaces should
    eventually have FIDs rather than DIDs and whether supplied aliases receive
    separate optional provenance metadata.
 2. **Slug-cell typing.** The uniform chase duck-types its hops (a
@@ -1124,9 +1127,10 @@ unchanged.
    are authenticated, how stale site-table entries are replaced, whether
    failover is allowed, and how an open session closes and reconnects without
    losing or duplicating work after a seed or hint has made the route explicit.
-   [Common Fabric URLs](../fabric-urls.md#moving-a-space-between-asps) proposes
-   the browser-level ASP handoff and old-ASP redirect. The storage-session work
-   remains separate.
+   The dormant
+   [Common Fabric URLs](../fabric-urls.md#moving-a-space-between-asps) concept
+   proposes a browser-level ASP handoff and old-ASP redirect. The
+   storage-session work remains separate.
 
 ### One way to build a local program
 

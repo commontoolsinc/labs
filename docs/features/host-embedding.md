@@ -140,9 +140,9 @@ DOM). A host embeds by listening for:
   apply its own URL scheme. Left uncancelled, the default builds a
   fabric URL and calls `globalThis.open`, which on a non-shell origin is
   a 404 tab — so a host that mounts these components binds this one. The
-  intended browser form is specified by
-  [Common Fabric URLs](../specs/fabric-urls.md); the current event behavior does
-  not yet implement that specification.
+  conceptual browser form is described by
+  [Common Fabric URLs](../specs/fabric-urls.md). No deployment is planned; the
+  current event behavior remains authoritative.
 
 **Test.** `packages/navigation/test/navigate-contract.test.ts` (event
 names and detail shapes) and `packages/navigation/test/navigate.test.ts`

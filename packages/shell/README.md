@@ -37,11 +37,11 @@ The shell currently supports these browser URL forms:
 - `/.embed/<space-name-or-did>/<piece-id-or-slug>`: opens the same piece in
   embed mode.
 
-[Common Fabric URLs](../../docs/specs/fabric-urls.md) defines the intended ASP,
-namespace, registered-name, DID, and displayed-URL contract. The
-[space name registry plan](../../docs/plans/space-name-registry.md) tracks the
-shell migration. The forms above describe the current implementation until that
-one-shot change lands.
+[Common Fabric URLs](../../docs/specs/fabric-urls.md) and the
+[space name registry](../../docs/plans/space-name-registry.md) describe a
+possible future ASP, namespace, registered-name, DID, and displayed-URL
+contract. No deployment is planned. The forms above remain the authoritative
+shell behavior.
 
 Embed mode is intended for rendering the shell inside another web view, such as
 an iframe. It removes shell-owned chrome around the pattern, including the

@@ -51,9 +51,9 @@ header, and a piece renderer around the runtime:
   `/{spaceName}/{pieceIdOrSlug}` a specific piece; `/.embed/...` the same
   without shell chrome. Navigation is an event (`cf-navigate`) kept in sync
   with browser history, and `navigateTo()` from Chapter 5 bottoms out here.
-  [Common Fabric URLs](../specs/fabric-urls.md) defines the intended ASP,
-  namespace, registered-name, DID, and presentation contract that will replace
-  this current route behavior.
+  [Common Fabric URLs](../specs/fabric-urls.md) describes a possible future ASP,
+  namespace, registered-name, DID, and presentation contract. No deployment is
+  planned; this route behavior remains authoritative.
 - **Rendering.** To show a piece, the shell asks the runtime for the
   piece's result cell, takes its `[UI]` VNode tree, and materializes it as
   DOM: `cf-*` tags become the Lit web components of Chapter 4, whose

@@ -20,7 +20,9 @@ decision is reversed or superseded).
 
 ### Addressing and navigation
 
-- [Common Fabric URLs](fabric-urls.md) (proposed)
+- [Random space identities](random-space-identities.md) (proposed; active
+  deployment direction)
+- [Common Fabric URLs](fabric-urls.md) (concept; no deployment planned)
 
 ### Pattern construction and authoring
 

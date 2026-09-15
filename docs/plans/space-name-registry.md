@@ -2,19 +2,19 @@
 
 ## Status
 
-Proposed one-shot implementation plan. The change lands enabled for every ASP
-and includes its data migration. It has no feature flag, compatibility mode, or
-later deprecation phase.
+Concept design. No implementation or deployment is currently planned. The
+one-shot implementation details remain here so the design can be evaluated
+independently if it is reconsidered.
 
 [Common Fabric URLs](../specs/fabric-urls.md) is the source of truth for URL
 syntax, DNS namespace resolution, registry targets, redirects, and displayed
 URLs. This plan describes one implementation of that specification.
 
-The plan is independent of
-[random space identities](random-space-identities.md). It accepts every valid
-space DID, including existing deterministically derived DIDs. Implementing it
-does not change how a space DID is created. Conversely, random space identities
-can land with DID-based URLs without this registry.
+The concept is independent of the active
+[random space identities](random-space-identities.md) plan. It accepts every
+valid space DID, including existing deterministically derived DIDs.
+Implementing it would not change how a space DID is created. Conversely,
+random space identities use existing DID routes without this registry.
 
 ## Principles
 

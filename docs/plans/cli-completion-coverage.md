@@ -32,10 +32,12 @@ unreachable.
 
 **The chain has a weak first link.** Reaching a piece, a verb, or a cell path
 needs a space, `--space` is required on every command that reads one, and
-`--space` completes to space DIDs discovered from local stores, while the value
-a caller often types is a registered name. A DID does not reveal which
-viewer-owned or space-owner-owned name the
-[Common Fabric URL registry](../specs/fabric-urls.md) would present.
+`--space` completes to space DIDs discovered from local stores while a caller
+often knows a Home-space display label instead. A DID does not reveal that
+personal label. The dormant
+[Common Fabric URL registry](../specs/fabric-urls.md) concept describes a
+different possible public naming source, but no deployment is planned and this
+completion plan does not depend on it.
 
 **A live provider is exercised in one place only.** The unit tests cover the
 pure shaping functions and assert that a slot with no fabric context degrades

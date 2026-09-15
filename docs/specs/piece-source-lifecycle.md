@@ -45,10 +45,11 @@ route parser when they register a hint.
 This lifecycle slice is partial. Revisions retain the existing verified
 `pattern:<identity>` source-document closure rather than the complete authored
 program manifest specified below. Fabric URL creation, the remaining web URL
-creation paths, Common Fabric browser-link receipt, live mutable fabric
-subscriptions, complete cross-space policy enforcement, forking, and
-runtime-fingerprint handling still require work. Cross-space history repoint is
-rejected until the checked source-replication path exists.
+creation paths, live mutable fabric subscriptions, complete cross-space policy
+enforcement, forking, and runtime-fingerprint handling still require work.
+Common Fabric browser-link receipt is retained below as a concept, but is not
+planned for deployment. Cross-space history repoint is rejected until the
+checked source-replication path exists.
 
 Following an origin is ONE mechanism, triggered by opening a piece — which a
 user does for most pieces and the runtime does for the surfaces it supplies. No
@@ -158,8 +159,9 @@ detachment either: the piece carries something a person can read and repair,
 and nothing follows it.
 
 These retained-source `cf:` URLs are distinct from the user-facing HTTPS URLs
-defined by [Common Fabric URLs](fabric-urls.md). A browser name can resolve to a
-space before the lifecycle stores a stable DID-based source reference.
+described by the dormant [Common Fabric URLs](fabric-urls.md) concept. Under
+that concept, a browser name can resolve to a space before the lifecycle stores
+a stable DID-based source reference.
 
 For example, a host-qualified fabric URL can resolve through
 `cf://toolshed.example/<space-did>/of:fid1:<piece-id>` to a piece, or through
@@ -185,15 +187,15 @@ canonical piece FID or pattern content identity. Static imports keep their
 existing alias-and-pin behavior because the deployed source records the
 terminal content identity.
 
-The Common Fabric name registry can accept a custom string and resolve it before
-the lifecycle operation begins. The registered browser name is not the active
-origin or a repoint target. Whether a revision retains it in a separate optional
-provenance field remains open. The active origin contains only the identifier
-URL. Registry resolution and browser presentation are defined by
-[Common Fabric URLs](fabric-urls.md). Registration ownership and target changes
-are registry concerns whose implementation is defined by the
-[space name registry plan](../plans/space-name-registry.md), not by the
-retained-source grammar.
+The dormant Common Fabric name registry concept can accept a custom string and
+resolve it before the lifecycle operation begins. Under that concept, the
+registered browser name is not the active origin or a repoint target. Whether a
+revision retains it in a separate optional provenance field remains open. The
+active origin contains only the identifier URL. Registry resolution and browser
+presentation are described by [Common Fabric URLs](fabric-urls.md), with
+possible implementation detail in the
+[space name registry](../plans/space-name-registry.md). Neither concept is part
+of the retained-source grammar or planned for deployment.
 
 Classification happens before the origin is stored. An explicit pin on an
 accepted entity-FID URL wins over the target's mutable shape. It normalizes to
@@ -932,6 +934,10 @@ stop before using the target.
 
 ### Common Fabric browser-link receipt
 
+This section retains a design concept. No implementation or deployment is
+currently planned, and this flow is not part of the lifecycle implementation
+sequence below.
+
 The shell can also learn a route from a user-facing link that opens existing
 data instead of selecting a piece's source. Link receipt is not a source
 lifecycle transition. It uses the same route registry and durable site table
@@ -1029,12 +1035,12 @@ replacement. Waiting SQLite registrations settle against the invalidated
 replica instead of blocking convergence. A hint that names the default host
 confirms the provisional route without rebuilding the replica.
 
-This policy settles ingestion of a known host hint. Common Fabric URLs proposes
-an ASP-level transfer followed by a DID-keyed redirect on the source ASP. It
-does not define how an open runtime replaces its effective storage route during
-that transfer. Host unavailability, replicated hosts, failover, stale
-site-table entries, authenticated replacement of an explicit route, and
-replicated-host failover remain open design work.
+This policy settles ingestion of a known host hint. The dormant Common Fabric
+URLs concept proposes an ASP-level transfer followed by a DID-keyed redirect on
+the source ASP. It does not define how an open runtime replaces its effective
+storage route during that transfer. Host unavailability, replicated hosts,
+failover, stale site-table entries, authenticated replacement of an explicit
+route, and replicated-host failover remain open design work.
 
 | Capability | Repository status | Remaining work |
 |---|---|---|
@@ -1042,11 +1048,11 @@ replicated-host failover remain open design work.
 | Keep an accepted late hint stable before opening | **Implemented** | `StorageManager.registerSpaceHost` accepts the first late hint and rejects a different hint before or after the space opens |
 | Replace a provisional default route after opening | **Implemented** | The first late hint invalidates an unseeded provider that opened through the default host before its session accepts a stateful operation. It cancels unfinished connection, initial or reconnect session signature creation, mount, and ACL work. Registered document reads, existing sync barriers, and overlapping read-only calls continue through the hinted host, including verified CFC schema documents discovered from the hinted data. Transactions based on the old replica are rejected as inconsistent at issue time, including when they write another space. A matching default-host hint confirms without reconnecting. Ordinary transactions, ACL setup, and SQLite source registration fix the route when issued, even if acknowledgement later fails |
 | Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table, selects its last origin-only HTTP or HTTPS route for each space, and registers those hints. It ignores credentials, paths, queries, fragments, malformed URLs, unsupported schemes, and entries whose `did` does not start with `did:`. Hydration can replace a provisional default route. A route already accepted through IPC remains fixed; a conflicting table route accepted first makes later IPC registration fail |
-| Apply one origin-only grammar to every route | **Partial** | `normalizeSpaceHost` rejects credentials, a non-root path, a query, and a fragment. Seeds, live hints, and hydration use it. The shared fabric-authority helper defaults to HTTPS and derives HTTP only for loopback when the current runtime route explicitly uses HTTP. Applying the grammar to the default host, future share-link receipt, and future effective-host results remains required |
+| Apply one origin-only grammar to every route | **Partial** | `normalizeSpaceHost` rejects credentials, a non-root path, a query, and a fragment. Seeds, live hints, and hydration use it. The shared fabric-authority helper defaults to HTTPS and derives HTTP only for loopback when the current runtime route explicitly uses HTTP. Applying the grammar to the default host and future effective-host results remains required |
 | Append an accepted route with commit acknowledgment | **Runtime persistence API required** | Generic `CellHandle` writes either overwrite the table or return before a remote append failure can reach the caller. There is no dedicated operation that synchronizes and applies the table's existing candidate, registers the supplied route, transactionally appends it, inspects the commit result, and reports live conflict separately from persistence failure |
 | Accept a host-qualified piece origin | **Origin integration required** | No source lifecycle operation persists and registers a `cf://` hint before resolving and committing the origin |
-| Receive a Common Fabric browser link in the shell | **Link-receipt integration required** | **Copy link** still copies the frontend URL. No shell path yet implements the Common Fabric URL resolver and presentation rules or waits for acknowledged route persistence before navigation |
-| Replace an explicit route after host failure or space movement | **Reliability design required** | [Common Fabric URLs](fabric-urls.md#moving-a-space-between-asps) proposes the browser-level ASP handoff and old-ASP redirect. There is no authenticated storage-route change or failover protocol after a seed or late hint becomes authoritative |
+| Receive a Common Fabric browser link in the shell | **Concept only** | No deployment is planned. **Copy link** continues to copy the current frontend URL |
+| Replace an explicit route after host failure or space movement | **Reliability design required** | There is no authenticated storage-route change or failover protocol after a seed or late hint becomes authoritative. The dormant Common Fabric URLs concept describes one possible browser-level handoff |
 
 ## Reconciliation when a piece loads
 
@@ -1611,8 +1617,8 @@ The implementation evidence for this table is concentrated in:
    table. Design reliable discovery, authenticated route replacement, host
    failover, and explicit close-and-reopen behavior for unavailable or moved
    spaces.
-9. Apply `normalizeSpaceHost` to the default host, Common Fabric link receipt, and
-   effective-host results. `spaceHostMap` seeds, live registration, and
+9. Apply `normalizeSpaceHost` to the default host and effective-host results.
+   `spaceHostMap` seeds, live registration, and
    site-table hydration already reject credentials, paths, queries, fragments,
    malformed URLs, and unsupported schemes. The shared `cf://` authority
    helper defaults to HTTPS. It derives HTTP only for loopback when its caller
@@ -1633,58 +1639,13 @@ The implementation evidence for this table is concentrated in:
    inspect its result before returning success. Propagate resolved
    `ConflictError` and `StoreError` results as well as thrown commit failures. Do
    not retry them. Do not implement this operation with the optimistic
-   `CellHandle.set()` or `CellHandle.push()` paths. Expose the effective host for
-   a space through runtime IPC so share-link creation uses the per-space route.
-11. Add Common Fabric browser-link creation and receipt to the shell. **Copy
-   link** emits the URL selected by the presentation rules in
-   [Common Fabric URLs](fabric-urls.md). Receipt accepts the resolved space DID,
-   bound storage origin, and serving-state revision from the terminal ASP's
-   authenticated response. It calls the dedicated route request before ordinary
-   `AppView` navigation. Intercept an initial share URL before the target
-   `AppView` opens its space. Report malformed links, live conflicts, and
-   durable-write failures without navigating. Keep this route discovery outside
-   pattern APIs and source-origin state.
-12. Add a browser-level shell integration test with two independent toolshed
-   servers and real patterns as the user interface. Put the target data only on
-   the non-default toolshed. Open that target in a producing shell and invoke its
-   production **Copy link** action. Read the emitted URL from the browser
-   clipboard. Assert that its host is the target ASP and that its path follows
-   the Common Fabric presentation rules. Open that exact copied URL in a
-   receiving shell. Prove that resolution reaches the same space DID and that
-   receipt records the route durably.
+   `CellHandle.set()` or `CellHandle.push()` paths.
+The Common Fabric browser-link creation, receipt, and browser integration tests
+remain concept work in [Common Fabric URLs](fabric-urls.md) and the conceptual
+section above. No deployment is planned, so they are not part of this
+implementation sequence.
 
-   Tear down the receiving runtime. Start a fresh shell runtime with the same
-   identity and durable home space. Do not provide a `spaceHostMap` seed, call
-   live registration directly, or write the site table through test setup. Run a
-   pattern whose retained input contains the corresponding hostless cross-space
-   reference. Use an observable test gate to let its provisional default-host
-   read report the missing target before site-table hydration publishes the
-   receipt's persisted hint. Then release hydration and prove that the same
-   running pattern renders the target data without a page reload or pattern
-   restart. The test may control event ordering, but it must not inject the hint
-   through a test-only registration endpoint.
-
-   Add worker-path persistence cases. Begin receipt before the initial local
-   site-table value has synchronized while the remote table already contains an
-   unrelated entry. Prove that receipt synchronizes first and preserves that
-   entry. Make synchronization fail and prove that no live registration, append,
-   navigation, or retry occurs.
-
-   Put a conflicting route for the target DID in the remote table. Hold the
-   asynchronous hydration watcher before it registers that route. Prove that
-   receipt itself applies the synchronized table candidate first, rejects the
-   supplied hint, and performs no append or navigation.
-
-   Start two receipts for different target DIDs from one synchronized table
-   snapshot. Use an event gate after both transactions capture that snapshot.
-   Commit one append, then prove that the other resolves with a real
-   `ConflictError` from the table precondition. The final table retains its
-   original entries and the successful append. The conflicted receipt does not
-   navigate or retry. Separately make an awaited commit resolve with a
-   `StoreError` and require the same shell failure behavior. A main-thread stub
-   that fails before the worker attempts the commit does not cover this
-   contract.
-13. Add CI golden replays that carry representative durable state from each
+11. Add CI golden replays that carry representative durable state from each
    supported prior source to its proposed replacement. These tests cover
    stable keys and causes, intended migration, and behavior that schemas cannot
    prove. Extend the current synthetic system-root replays with general

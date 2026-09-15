@@ -93,10 +93,11 @@ used as-is without derivation.
 The target after the
 [random space identity cutover](../../plans/random-space-identities.md) resolves
 names only through the mount's explicit name-to-DID index. Names no longer
-derive DIDs or create spaces. A mapping discovered through a
-[Common Fabric URL](../fabric-urls.md) can be added to that index without
-changing the space DID. FUSE lookup does not perform an implicit network
-registration or claim.
+derive DIDs or create spaces. Under the dormant
+[Common Fabric URL](../fabric-urls.md) concept, a discovered mapping could be
+added to that index without changing the space DID. No such resolver is planned
+for deployment. FUSE lookup does not perform an implicit network registration
+or claim.
 
 ### Space Index
 
@@ -111,8 +112,9 @@ mapping:
 ```
 
 The current implementation updates this file as spaces are discovered by name
-or listed by Home. After the random-identity cutover, it is updated from Home, a
-Common Fabric URL, or an explicit DID-to-name addition.
+or listed by Home. After the random-identity cutover, it is updated from Home or
+an explicit DID-to-name addition. The dormant Common Fabric URL concept could
+provide another source if it is reconsidered.
 
 ## Piece Directory
 

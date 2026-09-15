@@ -6,15 +6,19 @@ Proposed one-shot implementation plan. The change lands enabled everywhere and
 includes its data migration. It has no feature flag, compatibility mode, or
 deprecation phase.
 
+The [random space identities specification](../specs/random-space-identities.md)
+is the normative target for this plan.
+
 This plan removes the fixed `"common user"` root from space creation. Every new
 ordinary space gets a fresh random key pair and therefore a fresh DID. The
 creating user's identity becomes the initial owner through the genesis ACL.
 
-The plan uses the DID form defined by
-[Common Fabric URLs](../specs/fabric-urls.md). It does not implement DNS
-namespaces or a name registry. Those can land independently through the
-[space name registry plan](space-name-registry.md). If the registry is absent,
-new spaces use DID URLs and Home stores editable display labels.
+The plan uses the shell's existing DID routes. The
+[Common Fabric URL](../specs/fabric-urls.md) and
+[space name registry](space-name-registry.md) designs are separate concepts for
+which no deployment is planned. This plan contains no partial implementation
+of either concept. New spaces use DID URLs and Home stores editable display
+labels.
 
 ## Principles
 
@@ -52,10 +56,9 @@ new spaces use DID URLs and Home stores editable display labels.
 
 ## Connected specifications
 
-- [Common Fabric URLs](../specs/fabric-urls.md) supplies the browser DID form.
-  The random identity plan does not define a competing URL or name resolver.
-  If the separate registry plan is present, a source ASP can preserve this DID
-  URL with a space-move redirect after moving the space to another ASP.
+- [Random space identities](../specs/random-space-identities.md) defines the
+  identity, genesis, idempotency, routing, and compatibility invariants that
+  this plan implements.
 - [Home space and user identity](../common/conventions/HOME_SPACE.md) and
   [Home runtime internals](../features/home-space-internals.md) keep the Home
   space DID equal to the user DID. Its explicit self-owner ACL remains the
@@ -93,19 +96,25 @@ new spaces use DID URLs and Home stores editable display labels.
 - [Toolshed storage configuration](../development/CONFIGURATION.md#memory-store)
   defines the Common Memory server embedded in each Toolshed process. Existing
   [multi-process host topology](../development/staging-space-copy.md#the-host)
-  uses a shared durable store, and production
-  [storage routing](https://github.com/commontoolsinc/infra/blob/main/ansible/roles/nginx/templates/toolshed.conf.j2)
-  sends every connection for one space DID to one of those servers. The control
-  spaces use that same space-keyed route; they do not assume that the embedded
+  uses a shared durable store. The current production
+  [storage routing](https://github.com/commontoolsinc/infra/blob/16e48222254059cc9eff53f5064ab696fbd37236/ansible/roles/nginx/templates/toolshed.conf.j2)
+  is defined in `infra`: nginx sends each `space=<did>` Memory connection to
+  one of the host's Toolshed processes. The proposed Kubernetes replacement is
+  defined in `common-cluster`: a
+  [`SpacePlacement`](https://github.com/commontoolsinc/common-cluster/blob/dc70d63f2ce44930a1b23793a998e78eeac863bf/docs/design.md#july-2026-architecture-amendment-per-space-first-per-user-later)
+  maps a DID to a Toolshed shard, and its
+  [router](https://github.com/commontoolsinc/common-cluster/blob/dc70d63f2ce44930a1b23793a998e78eeac863bf/cmd/toolshed-router-extproc/router.go)
+  rejects unknown placements. Both implement the route-readiness boundary in
+  the random-identity specification. The control spaces use the same
+  space-keyed route as ordinary spaces; they do not assume that embedded
   servers share process memory.
 - The server-side execution
   [per-space lease](../specs/server-side-execution/serving-loop.md#2-the-lease-single-deriver-operationally)
   already fences competing processes. Creation events reuse that lease instead
   of introducing a second work-ownership mechanism.
-- The [space name registry plan](space-name-registry.md) cannot use this route
-  because a name lookup happens before its space DID is known and must support
-  deployment-wide indexed queries. Its PostgreSQL authority is independent of
-  this plan and is not a dependency of random space creation.
+- The [Common Fabric URL](../specs/fabric-urls.md) and
+  [space name registry](space-name-registry.md) concepts are not dependencies
+  of random space creation and leave no implementation residue in this plan.
 - Earlier `ct-space`
   [recovery](https://github.com/commontoolsinc/labs/blob/850bca9aed74c22773de5caa2b0b81c98713e646/docs/access-recovery.md)
   and
@@ -162,6 +171,19 @@ new spaces use DID URLs and Home stores editable display labels.
   reaches the same backend for a given control-space DID and that two backends
   cannot serve independent writable histories for that DID. Creation must not
   depend on frontend-process state.
+- Define one deployment-neutral operation that idempotently makes a DID's
+  ordinary Memory route writable and reports when it is ready. It must not
+  expose a process identity or permit the caller to bypass ordinary
+  space-addressed routing.
+- In the current Estuary and Rapids VM topology, confirm that every production
+  `MEMORY_URL` uses the host-internal nginx endpoint rather than the Memory
+  server embedded in the request process. Confirm that the nginx hash route
+  admits an arbitrary new DID and that its assigned backend retains the same
+  durable history across process restarts.
+- In a `common-cluster` deployment, define the route-readiness operation as an
+  idempotent create-or-find of the DID's `SpacePlacement`, followed by waiting
+  for the selected shard to become writable. Pre-create placements for every
+  provider control-space DID before enabling creation.
 - Load-test each append-only namespace's fixed set of provider-private control
   shards and choose enough shards for the expected creation rate. Record their
   DIDs and immutable hash-to-shard mapping in the existing catalog.
@@ -202,6 +224,12 @@ new spaces use DID URLs and Home stores editable display labels.
     that allocation transaction to Common Memory, whatever response the commit
     attempt returns. Never persist the private key or report success before
     durable state can reproduce the result.
+  - After observing the durable accepted allocation, invoke the target ASP's
+    route-readiness operation for the accepted DID. Record `route-ready` only
+    after the normal space-addressed Memory endpoint reports that the route's
+    authority is writable. Then submit the recorded genesis transaction through
+    that endpoint. Never write genesis directly to a Memory server embedded in
+    the request process.
   - Treat Home registration as part of this operation. Do not expose a second
     caller-managed "add to Home" operation for newly created spaces.
   - Keep the private key in memory only. Do not return it to the shell, store it
@@ -228,11 +256,17 @@ new spaces use DID URLs and Home stores editable display labels.
     making process identity part of request routing. Adding a version scales
     future creation without remapping an existing request.
   - Configure every multi-process ASP's existing internal storage router to send
-    a control-space DID to exactly one embedded Common Memory server, just as it
-    does for an ordinary space DID. Configure every frontend process to reach
-    that router rather than its own embedded server. Keep the durable storage
-    path stable when the assigned process restarts. A single-process deployment
-    uses its one embedded server directly.
+    a control-space or ordinary-space DID to one logical writable Common Memory
+    history. Configure every request process to reach that router rather than
+    its own embedded server. Keep the durable storage path stable when the
+    assigned process restarts. A single-process deployment uses its one
+    embedded server directly.
+  - Implement route readiness without a new persistence service. In the current
+    VM fleet, the existing nginx DID hash accepts any new DID, so readiness
+    verifies that the routed Memory authority is writable. In `common-cluster`,
+    readiness creates or finds exactly one `SpacePlacement` for the accepted DID
+    and waits until its selected shard is writable. An unknown placement must
+    fail closed before genesis rather than fall back to the request process.
   - Treat the creation document's stable Fabric address as the uniqueness
     boundary. Two frontend processes carrying the same signed creation intent
     therefore contend on the same document even when they receive the requests
@@ -255,11 +289,12 @@ new spaces use DID URLs and Home stores editable display labels.
     transaction identity and then reload the stable control document. Do not
     publish a losing DID or signed transaction.
   - Use explicit `intent-recorded`, `home-authorized`, `allocated`,
-    `genesis-committed`, `complete`, `rejected`, `abandoning`, `abandoned`, and
-    `inconsistent` states. A process that receives the same request returns its
-    completed result, resumes its unfinished state, or reports its terminal
-    state. It cannot replace an accepted allocation. `Abandoning` remains
-    unfinished until Home records the matching terminal state.
+    `route-ready`, `genesis-committed`, `complete`, `rejected`, `abandoning`,
+    `abandoned`, and `inconsistent` states. A process that receives the same
+    request returns its completed result, resumes its unfinished state, or
+    reports its terminal state. It cannot replace an accepted allocation.
+    `Abandoning` remains unfinished until Home records the matching terminal
+    state.
   - Enforce immutable intent fields, immutable accepted DID and genesis data,
     and the exact state-transition graph with content authorization on the
     provider control space. Permit a handler to set the deferred marker without
@@ -271,11 +306,14 @@ new spaces use DID URLs and Home stores editable display labels.
   - Ensure a losing concurrent process reads the durable document. It returns
     a completed result or resumes the recorded allocation. It must not publish
     an unused key or genesis transaction.
-  - Submit the recorded signed genesis transaction idempotently. After observing
-    committed genesis, retain that immutable transaction, add the matching
-    committed genesis reference, and mark the genesis step complete in one
-    control-shard transaction. The signed transaction contains no private key
-    and authorizes nothing except the already committed genesis.
+  - From `allocated`, establish or recover the accepted DID's normal route and
+    transition to `route-ready`. A failure leaves the same allocation
+    resumable; it never authorizes another DID. From `route-ready`, submit the
+    recorded signed genesis transaction idempotently through that route. After
+    observing committed genesis, retain that immutable transaction, add the
+    matching committed genesis reference, and mark the genesis step complete in
+    one control-shard transaction. The signed transaction contains no private
+    key and authorizes nothing except the already committed genesis.
   - Schedule one durable server-side creation event for each continuation state.
     Derive its event identity from the control-document address and expected
     state and continuation generation. Atomically schedule the successor event
@@ -446,7 +484,7 @@ new spaces use DID URLs and Home stores editable display labels.
   - Change shell creation to call the shared operation and navigate to the
     returned DID.
   - Change CLI creation to call the shared operation and print the returned DID
-    and Common Fabric URL.
+    and existing ASP-hosted DID URL.
   - Change `PatternFactory.inSpace()` and `PatternFactory.inSpace(label)` to
     request a fresh space. Treat the optional string as a display label only.
   - Preserve the action's durable event identity as the idempotency key for
@@ -483,7 +521,7 @@ new spaces use DID URLs and Home stores editable display labels.
   - Make FUSE named paths resolve only through its explicit `.spaces.json`
     mapping. Direct DID paths remain available.
 
-- Use the Common Fabric DID URL subset.
+- Use existing DID browser routes.
   - Emit `https://<asp-host>/<space-did>` for a space root and
     `https://<asp-host>/<space-did>/<piece-did>` for a piece.
   - Use `https://<asp-host>/` for the authenticated user's home space when the
@@ -494,9 +532,9 @@ new spaces use DID URLs and Home stores editable display labels.
     user-facing compatibility inputs that validate the ASP origin and redirect
     to the equivalent hostname-based URL.
   - Continue to let higher-priority API, static, and embed routes win before the
-    Common Fabric catch-all route.
-  - Do not add unregistered friendly-name routing. The separate registry plan
-    owns that behavior.
+    shell's space route.
+  - Do not add unregistered friendly-name routing. The dormant URL and registry
+    concepts are outside this implementation.
   - Do not implement ASP-to-ASP transfer or space-move redirects in this plan.
     Random space identity remains independently deployable.
 
@@ -561,6 +599,13 @@ new spaces use DID URLs and Home stores editable display labels.
   - Create spaces with the same label for two users and prove their DIDs differ.
   - Submit one idempotency key through different toolshed processes and prove
     every successful response returns one DID and one genesis reference.
+  - In the current VM topology, send creation and recovery requests through
+    different API frontends. Prove both use the same provider control document,
+    the accepted DID follows nginx's `space=<did>` Memory route, and neither
+    writes to its request process's embedded Memory server.
+  - In a `common-cluster` topology, prove an unknown DID fails closed before
+    genesis, concurrent route-readiness attempts converge on one placement, and
+    genesis succeeds only after that placement's shard is writable.
   - Replay a committed handler event and prove it refers to the original new
     space. Trigger a second event with identical inputs and prove it creates a
     different space.
@@ -569,9 +614,9 @@ new spaces use DID URLs and Home stores editable display labels.
     `spaces` entry, one effective site-table hint, and one completed immutable
     creation record in the creator's Home.
   - Exit a process after recording the intent, after Home authorization, after
-    allocation, after genesis, and after the Home commit. Prove another process
-    resumes each request without allocating a new DID or creating duplicate Home
-    entries.
+    allocation, after route readiness, after genesis, and after the Home commit.
+    Prove another process resumes each request without allocating a new DID or
+    creating duplicate Home entries.
   - Disconnect the allocating process after it hands Common Memory the
     conditional allocation transaction. Prove it destroys the private key
     without knowing the commit outcome, resolves the submitted transaction
@@ -582,7 +627,7 @@ new spaces use DID URLs and Home stores editable display labels.
     shard continue, and an authenticated Home wake schedules exactly one new
     continuation generation for the original request.
   - Ask Home to complete a record while the target control document is
-    `allocated`.
+    `allocated` or `route-ready`.
     Prove the target withholds a result and Home does not publish the `spaces`
     entry, site-table hint, or completed record before genesis commits.
   - Prove a creation is not reported as successful while its Home registration
@@ -657,4 +702,5 @@ recording attempt, before that transaction is submitted as genesis. The
 completed creation is already present in the user's durable Home space list,
 with a completed write-once creation-record document and routing supplied by the
 Home site table. Display labels remain convenient user metadata, while browser
-links use the ASP hostname and space DID prescribed by Common Fabric URLs.
+links use the existing ASP-hosted DID routes. Common Fabric URLs and the global
+name registry remain separate concepts with no planned deployment.

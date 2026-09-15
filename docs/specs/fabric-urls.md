@@ -2,10 +2,13 @@
 
 ## Status
 
-Proposed target behavior. The current shell implements only an earlier subset
-of this URL model. The
-[space name registry plan](../plans/space-name-registry.md) describes the
-one-shot implementation and documentation cutover.
+Concept design. No implementation or deployment is currently planned. The
+document remains a reference for evaluating a future URL and naming system;
+the [current shell routes](../../packages/shell/README.md#routes) remain
+authoritative.
+
+The [space name registry](../plans/space-name-registry.md) describes a
+compatible implementation concept. It is also not planned for deployment.
 
 ## Goals
 
