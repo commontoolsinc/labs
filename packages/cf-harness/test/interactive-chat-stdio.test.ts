@@ -1409,3 +1409,71 @@ Deno.test("interactive NDJSON transport reports a failed event write as a transp
     "broken pipe",
   );
 });
+
+Deno.test("interactive stdio refuses a session database another live process holds", async () => {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const dir = await Deno.makeTempDir();
+  const dbPath = join(dir, "chat.sqlite");
+  const args = [
+    "run",
+    "-A",
+    fromFileUrl(new URL("../src/interactive-chat-stdio.ts", import.meta.url)),
+    "--chat-session-db",
+    dbPath,
+  ];
+  const first = new Deno.Command(Deno.execPath(), {
+    args,
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+  const input = first.stdin.getWriter();
+  let firstResponse = "";
+  let second: Deno.CommandOutput | undefined;
+  try {
+    // The response is the first process's proof that it initialized, and so
+    // holds the database, before the second process starts.
+    await input.write(encoder.encode(`${
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-status",
+        method: "status",
+        params: {},
+      })
+    }\n`));
+    const reader = first.stdout.getReader();
+    while (!firstResponse.includes("\n")) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      firstResponse += decoder.decode(value, { stream: true });
+    }
+    reader.releaseLock();
+    second = await new Deno.Command(Deno.execPath(), {
+      args,
+      stdin: "null",
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+  } finally {
+    await input.close();
+  }
+  const firstStatus = await first.status;
+  const firstStderr = await new Response(first.stderr).text();
+  await first.stdout.cancel();
+  await Deno.remove(dir, { recursive: true });
+
+  assertEquals(firstStatus.code, 0, firstStderr);
+  const [statusResponse] = decodeLines([firstResponse.split("\n")[0]]);
+  assertEquals("ok" in statusResponse && statusResponse.ok, true);
+  assertEquals(second?.code, 1);
+  const secondStderr = decoder.decode(second?.stderr);
+  assertStringIncludes(
+    secondStderr,
+    "cf-harness chat session store is held by another live service process: instance ",
+  );
+  assertStringIncludes(secondStderr, `, pid ${first.pid}, since `);
+});
