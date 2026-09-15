@@ -55,6 +55,7 @@ import {
   buildCfcReadCeiling,
   buildCfcTrustConfig,
   type CfcConfClause,
+  type CfcContentAddressedLabels,
   type CfcDeclaredMonotonicityMode,
   type CfcDecomposedEnvelopes,
   type CfcEnforcementMode,
@@ -628,6 +629,16 @@ export interface RuntimeOptions {
   cfcDecomposedEnvelopes?: CfcDecomposedEnvelopes;
 
   /**
+   * Defaults to `false`. When true, the envelope persist path stores
+   * version-2 envelopes: each label above the inline limit is a reference
+   * to a content-addressed label document shared by every envelope that
+   * carries the label (`docs/specs/content-addressed-cfc-labels.md`). Off
+   * stores version 1 with every label inline. Reading resolves either
+   * version.
+   */
+  cfcContentAddressedLabels?: CfcContentAddressedLabels;
+
+  /**
    * Exchange-rule policy evaluation dial (Epic B5, spec §4.4.5). Defaults to
    * `off` (gates decide on raw labels, byte-identical to before the dial).
    * `observe` evaluates gated labels to fixpoint and emits diagnostics while
@@ -997,6 +1008,7 @@ export class Runtime {
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
   readonly cfcDecomposedEnvelopes: CfcDecomposedEnvelopes;
+  readonly cfcContentAddressedLabels: CfcContentAddressedLabels;
   readonly cfcPolicyEvaluation: CfcPolicyEvaluationMode;
   readonly cfcLabelMetadataProtection: CfcLabelMetadataProtectionMode;
   readonly cfcDeclaredMonotonicity: CfcDeclaredMonotonicityMode;
@@ -1694,6 +1706,7 @@ export class Runtime {
       this.cfcWriteFloor = dials.cfcWriteFloor;
       this.cfcTriggerReadGating = dials.cfcTriggerReadGating;
       this.cfcDecomposedEnvelopes = dials.cfcDecomposedEnvelopes;
+      this.cfcContentAddressedLabels = dials.cfcContentAddressedLabels;
       this.cfcPolicyEvaluation = dials.cfcPolicyEvaluation;
       this.cfcLabelMetadataProtection = dials.cfcLabelMetadataProtection;
       this.cfcDeclaredMonotonicity = dials.cfcDeclaredMonotonicity;
@@ -2352,6 +2365,7 @@ export class Runtime {
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
     wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
     wrapped.setCfcDecomposedEnvelopes(this.cfcDecomposedEnvelopes);
+    wrapped.setCfcContentAddressedLabels(this.cfcContentAddressedLabels);
     wrapped.setCfcPolicyEvaluationMode(this.cfcPolicyEvaluation);
     wrapped.setCfcLabelMetadataProtectionMode(this.cfcLabelMetadataProtection);
     wrapped.setCfcDeclaredMonotonicityMode(this.cfcDeclaredMonotonicity);

@@ -62,6 +62,7 @@ decision is reversed or superseded).
 ### Contextual flow control and security
 
 - [CFC commit preparation](cfc-commit-preparation.md)
+- [Content-addressed CFC labels](content-addressed-cfc-labels.md)
 - [CFC enforcement mode matrix](cfc-enforcement-matrix.md)
 - [CFC specification change list](cfc-spec-changes.md)
 - [Cross-space integrity](cfc-cross-space-integrity.md)
