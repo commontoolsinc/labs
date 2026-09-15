@@ -29,6 +29,15 @@ import {
 } from "./paint.ts";
 import type { PromptTerminal } from "./prompt.ts";
 
+/** A frame on the screen: the rows drawn, and where a cursor stands on them. */
+interface Frame {
+  /** The whole frame, one row of the terminal each from the top. */
+  readonly rows: readonly string[];
+
+  /** Where a person is typing on it, and absent where nobody is. */
+  readonly cursor: FrameCursor | undefined;
+}
+
 /** How many bytes one read off the keyboard takes at a time. */
 const READ_SIZE = 1024;
 
@@ -226,24 +235,24 @@ class StandardTerminal implements PromptTerminal {
   #held: Promise<void> | undefined;
 
   /**
-   * The frame as its composer last drew it, and absent where none has the
+   * The frame as its composer last drew it, and absent where no frame has the
    * screen.
    *
-   * It is kept because the screen a frame holds can be taken from it: a
-   * program this prompt hands the terminal to draws where it likes, and what
-   * puts the frame back afterwards is drawing it again
+   * One field for both, because they are one state: a frame has the screen
+   * exactly as long as there is a frame to draw. Two would admit the pair that
+   * says a frame holds the screen and there is nothing to draw on it, which is
+   * a state the restore below would have to answer for and no caller can
+   * reach.
+   *
+   * It is kept as well as sent because the screen a frame holds can be taken
+   * from it: a program this prompt hands the terminal to draws where it likes,
+   * and what puts the frame back afterwards is drawing it again
    * ({@link StandardTerminal.suspend}).
    */
-  #frame: {
-    readonly rows: readonly string[];
-    readonly cursor: FrameCursor | undefined;
-  } | undefined;
+  #frame: Frame | undefined;
 
   /** Ends {@link StandardTerminal.#held}, held by the suspension that made it. */
   #release: (() => void) | undefined;
-
-  /** Whether a frame currently has the screen. */
-  #framed = false;
 
   /**
    * The lines announced while a frame had the screen, in the order they
@@ -301,7 +310,7 @@ class StandardTerminal implements PromptTerminal {
    * with the line being typed at the bottom of it.
    */
   announce(text: string): void {
-    if (this.#framed) {
+    if (this.#frame !== undefined) {
       this.#waiting.push(text);
       return;
     }
@@ -317,13 +326,15 @@ class StandardTerminal implements PromptTerminal {
    * transcript's position over itself and leave nothing to go back to.
    */
   frame(rows: readonly string[], cursor?: FrameCursor): void {
-    if (!this.#framed) {
-      this.#framed = true;
-      this.#write(takingScreen());
-    }
-    // Kept as well as sent, for what a suspension does with it.
-    this.#frame = { rows, cursor };
-    this.#paint();
+    // Held before it is taken, and the order is what a signal turns on: the
+    // handler that restores runs from inside the write below, and a frame this
+    // object does not yet call its own is one that handler gives nothing back
+    // for — leaving the alternate screen held by a process that has ended.
+    const taking = this.#frame === undefined;
+    const drawn = { rows, cursor };
+    this.#frame = drawn;
+    if (taking) this.#write(takingScreen());
+    this.#paint(drawn);
   }
 
   /**
@@ -338,8 +349,7 @@ class StandardTerminal implements PromptTerminal {
    * that differs, another program having drawn on this screen in between.
    */
   unframe(): void {
-    if (!this.#framed) return;
-    this.#framed = false;
+    if (this.#frame === undefined) return;
     this.#frame = undefined;
     this.#write(givingScreen());
     // Held back again where a program has the terminal, rather than written
@@ -422,7 +432,7 @@ class StandardTerminal implements PromptTerminal {
     // is the one thing taking the screen exists to prevent. Written before the
     // hold rather than inside it, because nothing this object draws goes out
     // while the terminal is held.
-    if (this.#framed) this.#write(givingScreen());
+    if (this.#frame !== undefined) this.#write(givingScreen());
     this.#held = new Promise<void>((resolve) => {
       this.#release = resolve;
     });
@@ -444,13 +454,14 @@ class StandardTerminal implements PromptTerminal {
       // A frame taken back on a remembered answer would be an alternate screen
       // nothing is drawing on and nothing will leave, the `unframe` that would
       // have left it having been dropped as every write is.
-      if (this.#framed) {
+      const frame = this.#frame;
+      if (frame !== undefined) {
         // Taken and drawn in one, rather than left blank for whatever comes
         // next to repaint: what comes next is a verb settling, which can be a
         // write to a server away, and an empty screen for the length of one is
         // a frame a reader watches disappear.
         this.#write(takingScreen());
-        this.#paint();
+        this.#paint(frame);
       } else {
         // What the frame was holding back, where it stopped holding the screen
         // while this program had it: the writing that gives it up is dropped
@@ -463,13 +474,8 @@ class StandardTerminal implements PromptTerminal {
     }
   }
 
-  /**
-   * Helper for the two that draw a frame, which sends the frame this was last
-   * given, and sends nothing where it has been given none.
-   */
-  #paint(): void {
-    const frame = this.#frame;
-    if (frame === undefined) return;
+  /** Helper for the two that draw a frame, which sends `frame` to the screen. */
+  #paint(frame: Frame): void {
     this.#write(`${screenOf(frame.rows)}${cursorIn(frame.cursor)}`);
   }
 
@@ -497,7 +503,7 @@ class StandardTerminal implements PromptTerminal {
    * kept for.
    */
   #send(text: string): boolean {
-    if (this.#framed) return false;
+    if (this.#frame !== undefined) return false;
     this.#write(text);
     return true;
   }

@@ -104,6 +104,29 @@ function prompting(opening: ":" | "/"): string {
   return `${opening} `;
 }
 
+/**
+ * A search standing on the rendering: what was typed, and which match the view
+ * is on.
+ *
+ * One field for the pattern and for whether a search is showing, because they
+ * are one state: a search is showing exactly as long as there is something to
+ * have searched for. Two would admit the pair that says a search is showing on
+ * no pattern, which every reader of it would have to answer for and no key can
+ * reach — an empty `/` is how a search is put away, so what it leaves is no
+ * search rather than an empty one.
+ */
+interface Search {
+  /** What was typed after the `/`, which is never empty. */
+  readonly pattern: string;
+
+  /**
+   * The line of the rendering the view is standing on, and absent where the
+   * search found none — or where the value changed under it and the line it
+   * was standing on is no longer a match.
+   */
+  match: number | undefined;
+}
+
 /** A line being typed at the frame: what it opens with, and what it holds. */
 interface Typing {
   /** `:` for a shuttle line, `/` for a search. */
@@ -134,9 +157,7 @@ export class ValueLens {
   #asked: string | undefined;
   #running: string | undefined;
   #said = "";
-  #pattern = "";
-  #match: number | undefined;
-  #searched = false;
+  #search: Search | undefined;
   #wanted: number | undefined;
 
   /**
@@ -288,7 +309,6 @@ export class ValueLens {
     if (this.#closed) return;
     this.#running = undefined;
     this.#said = text;
-    this.#searched = false;
     this.#repaint?.();
   }
 
@@ -469,11 +489,13 @@ export class ValueLens {
       this.#asks(line);
       return;
     }
-    if (line !== "") typing.history.record(line);
-    this.#pattern = line;
-    this.#match = undefined;
-    this.#searched = line !== "";
-    if (line !== "") this.#stepped(1);
+    if (line === "") {
+      this.#search = undefined;
+      return;
+    }
+    typing.history.record(line);
+    this.#search = { pattern: line, match: undefined };
+    this.#stepped(1);
   }
 
   /**
@@ -489,7 +511,6 @@ export class ValueLens {
     this.#asked = line;
     this.#running = line;
     this.#said = "";
-    this.#searched = false;
     return true;
   }
 
@@ -505,18 +526,22 @@ export class ValueLens {
    * moving away from.
    */
   #stepped(step: number): boolean {
-    if (this.#pattern === "") return false;
-    this.#searched = true;
-    const found = this.#matches();
+    const search = this.#search;
+    if (search === undefined) return false;
+    // What a line said is what the modeline carries where there is one, so a
+    // search made after one takes the row by leaving nothing said rather than
+    // by a second field saying which of the two is the newer.
+    this.#said = "";
+    const found = this.#matches(search.pattern);
     if (found.length === 0) {
-      this.#match = undefined;
+      search.match = undefined;
       return true;
     }
-    const at = this.#match === undefined ? -1 : found.indexOf(this.#match);
+    const at = search.match === undefined ? -1 : found.indexOf(search.match);
     const next = at < 0
       ? (step > 0 ? found[0]! : found[found.length - 1]!)
       : found[(at + step + found.length) % found.length]!;
-    this.#match = next;
+    search.match = next;
     this.#wanted = next;
     return true;
   }
@@ -531,11 +556,10 @@ export class ValueLens {
    * rather than an expression, and a shell that read one would owe a reader a
    * dialect and a refusal for a pattern that would not compile.
    */
-  #matches(): number[] {
+  #matches(pattern: string): number[] {
     const found: number[] = [];
-    if (this.#pattern === "") return found;
     this.#shown.forEach((line, index) => {
-      if (line.includes(this.#pattern)) found.push(index);
+      if (line.includes(pattern)) found.push(index);
     });
     return found;
   }
@@ -547,17 +571,25 @@ export class ValueLens {
    *
    * The four things it may carry are ordered by how immediate they are. A line
    * being typed is what the person is doing now; a line in flight is what they
-   * just did and are waiting on; a search is where they are in the value; and
-   * what a line said is the oldest of the four, which is why the other three
-   * replace it.
+   * just did and are waiting on; what a line said is what came back from that;
+   * and a search is where they are in the value, which is the standing state
+   * the other three cover over.
+   *
+   * The two that are neither being typed nor in flight take the row in the
+   * order they happened rather than by rank, and each clears the other as it
+   * arrives: a line that said something leaves the search showing nothing, and
+   * a search leaves nothing said. That is one field fewer than a flag saying
+   * which of them is the newer, and a flag is a state that can disagree with
+   * both of them.
    */
   #modeline(inner: number): string | undefined {
     if (this.#typing !== undefined) return this.#typedRow(inner).text;
     if (this.#running !== undefined) return `: ${this.#running}`;
-    if (this.#searched) {
-      return `${prompting("/")}${this.#pattern}  ${this.#standing()}`;
-    }
     if (this.#said !== "") return oneLineOf(this.#said);
+    const search = this.#search;
+    if (search !== undefined) {
+      return `${prompting("/")}${search.pattern}  ${this.#standing(search)}`;
+    }
     return undefined;
   }
 
@@ -570,10 +602,10 @@ export class ValueLens {
    * says instead is how many there are, which is the question a reader about
    * to press `n` is asking.
    */
-  #standing(): string {
-    const found = this.#matches();
+  #standing(search: Search): string {
+    const found = this.#matches(search.pattern);
     if (found.length === 0) return NO_MATCH;
-    const at = this.#match === undefined ? -1 : found.indexOf(this.#match);
+    const at = search.match === undefined ? -1 : found.indexOf(search.match);
     if (at < 0) {
       return found.length === 1 ? "1 match" : `${found.length} matches`;
     }
@@ -636,7 +668,7 @@ export class ValueLens {
       SCROLL,
       ENDS,
       SEARCH,
-      ...(this.#pattern === "" ? [] : [NEXT]),
+      ...(this.#search === undefined ? [] : [NEXT]),
       ...(running ? [] : [COMMAND, EDIT]),
       ARMED,
     ];
