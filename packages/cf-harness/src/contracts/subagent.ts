@@ -94,6 +94,8 @@ export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
   "read_skill_resource",
   "describe_handle",
   "run_pattern",
+  "read_piece_source",
+  "revise_piece",
   "search_patterns",
   "record_feedback",
   "research",

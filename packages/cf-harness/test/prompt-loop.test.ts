@@ -4061,6 +4061,8 @@ Deno.test("CfHarnessPromptLoop withholds the pattern-index tools from the patter
     "read_skill_resource",
     "describe_handle",
     "run_pattern",
+    "read_piece_source",
+    "revise_piece",
     "research",
   ]);
 });

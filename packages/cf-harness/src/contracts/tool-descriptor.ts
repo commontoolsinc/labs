@@ -12,6 +12,8 @@ export type BuiltinToolId =
   | "write_file"
   | "delegate_task"
   | "run_pattern"
+  | "revise_piece"
+  | "read_piece_source"
   | "assign_slug"
   | "describe_handle"
   | "search_patterns"
@@ -41,6 +43,19 @@ export const DEFAULT_PARENT_TOOL_IDS = [
  */
 const FABRIC_SESSION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
   ["run_pattern", "assign_slug", "acquire_skill"] as const,
+);
+
+/**
+ * The two tools that read and replace a piece's source. They need a fabric
+ * session like the set above, and unlike it they are not parent tools: source
+ * enters the context that revises a piece and no other, so they are offered to
+ * the `pattern-author` profile and withheld everywhere else. Gating them here
+ * rather than in that set is what keeps them off the parent surface while
+ * still making them absent — rather than present-but-failing — in a run with
+ * no session to reach a piece through.
+ */
+const PIECE_SOURCE_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["read_piece_source", "revise_piece"] as const,
 );
 
 /**
@@ -129,6 +144,7 @@ export const withheldToolIds = (
 ): ReadonlySet<BuiltinToolId> =>
   new Set([
     ...(availability.fabricSessionAvailable ? [] : FABRIC_SESSION_TOOL_IDS),
+    ...(availability.fabricSessionAvailable ? [] : PIECE_SOURCE_TOOL_IDS),
     ...(availability.patternIndexAvailable ? [] : PATTERN_INDEX_TOOL_IDS),
     ...(availability.skillsShSearchAvailable ? [] : SKILLS_SH_SEARCH_TOOL_IDS),
     ...(availability.skillsShAcquisitionAvailable

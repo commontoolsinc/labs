@@ -222,6 +222,12 @@ import type {
   RecordFeedbackToolOutput,
 } from "./tools/record-feedback.ts";
 import { getBuiltinTool } from "./tools/registry.ts";
+import type {
+  ReadPieceSourceToolInput,
+  ReadPieceSourceToolOutput,
+  RevisePieceToolInput,
+  RevisePieceToolOutput,
+} from "./tools/piece-source.ts";
 import {
   type RunPatternToolInput,
   type RunPatternToolOutput,
@@ -271,6 +277,8 @@ export interface BuiltinToolInputMap {
   write_file: WriteFileToolInput;
   delegate_task: DelegateTaskToolInput;
   run_pattern: RunPatternToolInput;
+  read_piece_source: ReadPieceSourceToolInput;
+  revise_piece: RevisePieceToolInput;
   assign_slug: AssignSlugToolInput;
   describe_handle: DescribeHandleToolInput;
   search_patterns: SearchPatternsToolInput;
@@ -295,6 +303,8 @@ export interface BuiltinToolOutputMap {
   write_file: WriteFileToolOutput;
   delegate_task: DelegateTaskToolOutput;
   run_pattern: RunPatternToolOutput;
+  read_piece_source: ReadPieceSourceToolOutput;
+  revise_piece: RevisePieceToolOutput;
   assign_slug: AssignSlugToolOutput;
   describe_handle: DescribeHandleToolOutput;
   search_patterns: SearchPatternsToolOutput;
