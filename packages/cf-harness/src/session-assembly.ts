@@ -384,9 +384,8 @@ const establishContextMessages = async (
       messages.push(context.contextText);
     }
   }
-  // Read off the engine rather than taken as configuration, because it is the
-  // run's own allowlist that decides this and every surface has already
-  // resolved one into the engine by here.
+  // The run's own allowlist decides this, and every surface has resolved one
+  // into the engine by the time this runs.
   const allowedScriptsMessage = allowedSkillScriptsContextMessage(
     engine.config.allowedSkillScripts,
   );

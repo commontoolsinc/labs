@@ -537,9 +537,9 @@ Policy rules:
   since an acquired skill has no registry name to key an entry on.
   `acquire_skill` takes that same spelling as its `id`, acquiring those exact
   bytes rather than the repository's default-branch head, and the run is told
-  which pins its operator allowed scripts of before its first turn — so an entry
-  and an acquisition name the same commit by construction rather than by the
-  branch not having moved. A run that acquires the skill at another commit
+  which scripts its operator allowed before its first turn, pins and all — so an
+  entry and an acquisition name the same commit by construction rather than by
+  the branch not having moved. A run that acquires the skill at another commit
   anyway is refused at `delegate_task`, naming both commits, rather than handing
   its child a mounted skill and no tool. It has no registry and no run-start
   snapshot either, so the two conditions above are met differently: the run must

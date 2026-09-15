@@ -1135,11 +1135,11 @@ points; everything after that step is identical, and the pin the run records is
 the same either way. That spelling exists because an operator's script allowlist
 is keyed on a commit while a default branch moves, so a run acquiring by name
 alone holds the allowed bytes only when nothing was pushed in between. The run
-is told which pins its operator allowed scripts of before its first turn, which
-is what lets it name one. A run that acquires the same skill at another commit
-is refused at `delegate_task` with both commits named, rather than handing a
-child a mounted skill and no tool to run it with. No case folding or path
-normalization participates. Zero or multiple candidates refuse, and a tree
+is told which scripts its operator allowed before its first turn, pins and all,
+which is what lets it name one. A run that acquires the same skill at another
+commit is refused at `delegate_task` with both commits named, rather than
+handing a child a mounted skill and no tool to run it with. No case folding or
+path normalization participates. Zero or multiple candidates refuse, and a tree
 response marked `truncated` refuses because an unread inventory is not evidence
 of absence.
 
