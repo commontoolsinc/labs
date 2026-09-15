@@ -44,6 +44,7 @@ import {
   measuredSetName,
   measuredSets,
 } from "./test-selection/coverage.ts";
+import { COVERAGE_FAILURE_MARKER, measuredSetOfReport } from "./ci-lane.ts";
 
 /** What the command line asked for. */
 export interface ReportOptions {
@@ -237,6 +238,12 @@ function memberName(member: string): string {
  * the figure is above what the set measures. Published, it becomes the
  * bar every later pull request is held to, and the gate stops catching a
  * rise it would have caught.
+ *
+ * And so is a set a lane marked as measured through a failing test. That
+ * run stayed green because a flake rate excused the failure, and the
+ * number is short by whatever the failing test would have reached, so
+ * publishing it holds every later pull request to a bar this run did not
+ * clear either.
  */
 export async function measuredSetFigures(
   options: ReportOptions,
@@ -248,9 +255,11 @@ export async function measuredSetFigures(
   )).map(memberName);
   const unlaunched = new Set(laneReports.unlaunchedMembers.map(memberName));
   const reports = await collectSetReports(reportsDirectory(options));
+  const marked = await markedSets(reportsDirectory(options));
   const figures: CoverageDebtMetric[] = [];
   for (const ref of measuredSets(suites)) {
     if (unlaunched.has(ref.set.member)) continue;
+    if (marked.has(measuredSetDirectory(ref))) continue;
     const found = reports.get(measuredSetDirectory(ref));
     if (found === undefined || found.length === 0) continue;
     // A set's units are spread over as many lanes as the packer liked, so
@@ -273,6 +282,34 @@ export async function measuredSetFigures(
     });
   }
   return figures;
+}
+
+/**
+ * The measured sets some lane marked as measured through a failing test,
+ * by the directory a lane writes a set's report under.
+ *
+ * Walked for rather than looked for beside a report, because a lane
+ * writes the marker whether or not it also wrote a report there: a lane
+ * that ran a set's unit and saw it fail may have collected no profile
+ * for it, and the set's baseline still must not be published from
+ * another lane's report.
+ */
+export async function markedSets(reportsDir: string): Promise<Set<string>> {
+  const marked = new Set<string>();
+  try {
+    for await (
+      const entry of walk(reportsDir, { includeDirs: false, exts: [".txt"] })
+    ) {
+      if (path.basename(entry.path) !== COVERAGE_FAILURE_MARKER) continue;
+      const set = measuredSetOfReport(entry.path);
+      if (set !== undefined) marked.add(set);
+    }
+  } catch (error) {
+    // Nothing was downloaded, which the caller reads the same way
+    // `collectReports` does.
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
+  return marked;
 }
 
 /**

@@ -729,7 +729,8 @@ const SELECTION_PROSE: Record<ReportedSelection, string> = {
     "default branch anyway, where no execution of it passed at this " +
     "commit and none failed in the previous run. What the store counts " +
     "as a flake is a test passing and failing at one commit, which is " +
-    "not what either of those two runs saw.",
+    "not what either of those two runs saw. A failure of it does not " +
+    "fail the run on that branch, so nothing is red for this.",
   unrecorded: "This pull request's own run was to have run it and " +
     "recorded nothing for it, so what it did there is not known. A test " +
     "job that fails before it uploads leaves its share of a run's records " +
