@@ -152,8 +152,8 @@ a record: archive it to `docs/history/plans/` following the procedure in
   commit-boundary enforcement workstreams and rollout.
 - [Finishing the piece source lifecycle](piece-source-lifecycle-completion.md)
   compares the lifecycle spec against the repository and orders the remainder
-  as five pull requests in two tracks — what a revision records, and where a
-  space lives.
+  as four pull requests in two tracks — what a revision records, and how a
+  learned route persists.
 - [Bulk piece operations](piece-bulk-operations.md) designs retargeting,
   repairing, and rolling back many pieces as one reviewable, resumable
   operation over a shared plan — with batching as an execution strategy
