@@ -9,6 +9,7 @@ import type {
   HarnessCfcInvocationOperation,
 } from "../contracts/cfc-invocation-context.ts";
 import type {
+  HarnessAcquiredSkill,
   HarnessAllowedSkillScript,
   HarnessSkillAcquisition,
   HarnessSkillActivations,
@@ -221,6 +222,28 @@ export interface HarnessToolContext {
   recordSkillScriptExecution(
     execution: HarnessSkillScriptExecution,
   ): Promise<void>;
+
+  /**
+   * Writes one acquired skill's scripts where a run holding its handle can
+   * execute them, and records where they went. Absent for a run that can
+   * write no artifacts, which acquires instructions and no script.
+   *
+   * @throws Error when a mount of this run's sandbox covers the directory,
+   * since a script the acquiring run can read is one its planner can read.
+   */
+  materializeAcquiredSkill?(options: {
+    registryId: string;
+    commitSha: string;
+    scripts: readonly {
+      path: string;
+      bytes: Uint8Array;
+      valueDigest: string;
+    }[];
+  }): Promise<HarnessAcquiredSkill>;
+
+  /** The skills this run has acquired scripts for, as it stands. */
+  acquiredSkills?: readonly HarnessAcquiredSkill[];
+
   createCfcInvocationContext(options: {
     toolId: string;
     toolOutputId?: ToolOutputId;

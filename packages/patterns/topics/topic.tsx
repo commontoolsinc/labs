@@ -503,12 +503,14 @@ export interface TopicMentionSource {
  * it.
  *
  * ONE ROW PER DISTINCT TOPIC. That is the contract, not a property of the
- * board that happens to hold: a row is addressed by `Writable.for(topic)`, so
- * a board listing the same topic twice addresses ONE row from both entries and
- * the second write lands on the first. Set semantics by construction — nothing
- * downstream dedupes, and a reader finding its row by identity finds exactly
- * one. The pivot's self-skip is asked of the topic rather than of its position
- * so that a duplicate entry stays inert here too.
+ * board that happens to hold: the board's `crossrefTable` builds its rows from
+ * `distinctByIdentity` over the board, which compares entries by `equals`, so a
+ * board listing one topic at two entries — the same link twice, or a link and
+ * an alias of it — gets one row for that topic. Nothing downstream dedupes, and
+ * a reader finding its row by identity finds exactly one. Each of the topic's
+ * entries still counts as a source in the rows of the topics it mentions, and
+ * the pivot's self-skip is asked of the topic rather than of its position so
+ * that a duplicate entry stays inert here too.
  *
  * Both sides are declared `unknown`, which is the whole design rather than a
  * shortcut. A row holds cell REFERENCES — `unknown` is the declaration that
@@ -1721,7 +1723,8 @@ const backlinksOf = lift((
   // `filter` + `flatMap` rather than `find`, so a topic with no row on the
   // table — no board wired in — yields an empty array from the shape of the
   // expression instead of from a `?? []` bolted onto a miss. At most one row
-  // matches: rows are keyed by the topic they describe.
+  // matches: the board's pivot builds one row per distinct topic, compared by
+  // `equals` as this lookup compares.
   table
     .filter((row) => equals(self, row.topic))
     .flatMap((row) => row.mentionedBy) as TopicSummary[]

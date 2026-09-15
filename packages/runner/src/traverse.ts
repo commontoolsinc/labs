@@ -82,7 +82,12 @@ import {
   isWriteRedirectLink,
   type ValuePath,
 } from "./link-types.ts";
-import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
+import {
+  addressKey,
+  NormalizedFullLink,
+  parseLink,
+  schemaForSpaceCrossing,
+} from "./link-utils.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import { type CellLinkRefPayload, SigilLink, type URI } from "./sigil-types.ts";
 import {
@@ -2473,6 +2478,18 @@ function followPointer(
       doc.address,
     ]);
     link = { ...link, schema: false };
+  }
+  if (target.space !== doc.address.space) {
+    link = {
+      ...link,
+      schema: schemaForSpaceCrossing(tx, doc.address.space, link.schema),
+    };
+    if (selector !== undefined) {
+      selector = {
+        ...selector,
+        schema: schemaForSpaceCrossing(tx, doc.address.space, selector.schema),
+      };
+    }
   }
   const schemaScope = schemaScopeForSelector(selector);
   if (!canFollowScopedLink(schemaScope, link.scope)) {
@@ -5633,9 +5650,12 @@ function getNextCellLink(
     // The link may not have the asCell flags, so pull that from itemSchema.
     // Reader precedence, like every other crossing: the handle must not
     // carry the link's wider schema past the reader's.
+    const combined = combineSchemaForLink(schema, lastLink.schema ?? true);
     return {
       ...lastLink,
-      schema: combineSchemaForLink(schema, lastLink.schema ?? true),
+      schema: lastLink.space === doc.address.space
+        ? combined
+        : schemaForSpaceCrossing(tx, doc.address.space, combined),
     };
   }
   // It's fine if we don't have a pointer. In that case, just use the doc

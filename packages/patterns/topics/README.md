@@ -206,9 +206,10 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 - **A reference is a cell, and identity is the only thing compared.** The board
   derives the whole graph once, in `crossrefTable`, from the same topics array
   read under two minimal declared views: one for identity, one for what each
-  topic points at. Matching is a linear scan of `equals` — with a cell reference
-  as the identity there is nothing to key a map by, and at board scale it is a
-  few hundred comparisons of resolved links.
+  topic points at. Matching is a scan of `equals`, because nothing in the
+  pattern API turns a topic reference into a resolved key carrying space, scope,
+  and path: each topic's row checks every source's mentions for the topic, so
+  the comparisons grow as the number of topics times the number of mentions.
 
   Each topic then does a lookup rather than the join: `backlinksOf` scans the
   pivot for the row whose topic is itself, and takes that row's `mentionedBy`.
@@ -218,10 +219,13 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   at. The published row declares both sides `unknown` instead, so a consumer
   that only carries the graph onward expands neither.
 
-  Every row is addressed by the topic it describes (`Writable.for(topic)`), so a
-  row keeps its identity however the board is reordered, and a lookup re-run by
-  an unrelated change recomputes the same links at the same address and writes
-  nothing.
+  The pivot holds one row per distinct topic, with distinctness decided by the
+  same `equals`: a topic the board lists at two entries has one row, so its
+  lookup returns its backlinks once, while each of those entries still counts as
+  a source in the rows of the topics it mentions. Every row is addressed by the
+  topic it describes (`Writable.for(topic)`), so a row keeps its identity
+  however the board is reordered, and a lookup re-run by an unrelated change
+  recomputes the same links at the same address and writes nothing.
 - **Agents reference through a verb.** `mention` and `unmention` take the piece
   itself. With prose no longer scanned there is otherwise no headless way to
   make a reference, and `kind: "topic"` links are ordinary links unless their

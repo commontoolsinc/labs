@@ -20,9 +20,10 @@ function sourceCoveragePath(name: string): string {
  * root `deno.jsonc` `imports` verbatim — so npm versions have a single source of
  * truth and cannot drift — adds a trailing-slash form per npm/jsr entry so
  * package subpaths (e.g. `@noble/hashes/sha2.js`) resolve under the flat map,
- * then layers on the `commonfabric` overrides and the per-package `@/` scopes
- * the foundation packages use internally (derived by reading each workspace
- * member's own config, so a package joining the graph needs no change here).
+ * then layers on the `commonfabric` overrides and, per package, a scope holding
+ * every `@/` alias the package declares for itself (derived by reading each
+ * workspace member's own config, so a package joining the graph, or adding an
+ * alias, needs no change here).
  * Relative root targets are absolutized so the map works from its temp location.
  */
 async function writeChildImportMap(): Promise<string> {
@@ -51,8 +52,10 @@ async function writeChildImportMap(): Promise<string> {
   imports["@commonfabric/runner/jsx-runtime"] =
     new URL("jsx-runtime-stub.test.ts", here).href;
 
-  // Re-establish each workspace member's own `@/` self-alias as a scope, read
+  // Re-establish each workspace member's own `@/` aliases as a scope, read
   // from its config so the set tracks the packages rather than a fixed list.
+  // The `@/` prefix anchors the scope; the other `@/…` keys, which name a
+  // barrel by a bare specifier, go in beside it.
   const scopes: Record<string, Record<string, string>> = {};
   for (const member of root.workspace ?? []) {
     const memberUrl = new URL(`${member}/`, rootUrl);
@@ -70,7 +73,13 @@ async function writeChildImportMap(): Promise<string> {
     const selfAlias = config?.imports?.["@/"];
     if (selfAlias === undefined) continue;
     const url = new URL(selfAlias, memberUrl).href;
-    scopes[url] = { "@/": url };
+    const scope: Record<string, string> = {};
+    for (const [key, target] of Object.entries(config?.imports ?? {})) {
+      if (key.startsWith("@/")) {
+        scope[key] = new URL(target, memberUrl).href;
+      }
+    }
+    scopes[url] = scope;
   }
 
   const path = await Deno.makeTempFile({ suffix: ".json" });

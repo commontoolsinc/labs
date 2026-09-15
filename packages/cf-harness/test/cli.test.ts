@@ -1158,6 +1158,49 @@ Deno.test("parseCfHarnessCliArgs preloads a skill out of the checkout's own skil
   );
 });
 
+Deno.test("parseCfHarnessCliArgs takes an acquired pin's script without a skills root", async () => {
+  // An acquired script is keyed on the pin its bytes were read at, and those
+  // bytes reach the sandbox through the acquisition's own mount. Asking for a
+  // skills root would make the operator name a tree the skill never came from.
+  const pin = `owner/repo/slug@${"d".repeat(40)}`;
+  const config = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--allow-skill-script",
+      `${pin}:scripts/report.sh`,
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in config) {
+    throw new Error("expected config result");
+  }
+  assertEquals(config.allowedSkillScripts, [{
+    skill: pin,
+    path: "scripts/report.sh",
+  }]);
+});
+
+Deno.test("parseCfHarnessCliArgs still asks a registry name for its skills root, beside a pin", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--allow-skill-script",
+          `owner/repo/slug@${"d".repeat(40)}:scripts/report.sh`,
+          "--allow-skill-script",
+          "pattern-dev:scripts/probe.ts",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--allow-skill-script requires --skills-root, except for an acquired pin",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs rejects skills root outside workspace", async () => {
   await assertRejects(
     () =>

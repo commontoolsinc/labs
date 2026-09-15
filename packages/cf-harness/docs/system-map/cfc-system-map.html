@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-15", sha: "4a9a47075e+research-review" };
+    const SNAPSHOT = { date: "2026-09-15", sha: "2919bb0509+research-review" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -2091,7 +2091,7 @@
       },
       g_ingest: {
         body:
-          `<p><code>acquire_skill</code> pins the skill by digest, stamps <code>ExternalIngest</code> integrity, and hands back a capability-typed handle. Fetched skill text remains context.</p>`,
+          `<p><code>acquire_skill</code> pins the skill by digest, stamps <code>ExternalIngest</code> integrity, and hands back a capability-typed handle. Fetched skill text remains context.</p><p>A pinned skill's <code>scripts/</code> comes with its instructions, held outside every mount the acquiring parent holds, and mounted read-only into the one child the handle is delegated to. Running one is the operator's decision — the same <code>run_skill_script</code> allowlist a registry skill's script passes, keyed by the pin — and it is re-checked against the digest taken at acquisition. Its invocation is labeled with confidentiality alone: a non-empty integrity array makes the sandbox fail to start (CT-2302), so the acquisition rides the tool output instead.</p>`,
         why:
           "The stamp is written but never read at a release site, so integrity provenance does not yet change any decision.",
         close: [
@@ -2548,7 +2548,7 @@
             f: ["child_pa", "e_skillssh", "skillssh", "g_ingest", "t1"],
             sel: "g_ingest",
             h: "Acquire a skill from outside",
-            t: "search_skills finds one on skills.sh; acquire_skill pins it by digest and stamps ExternalIngest. The skill text carries an injection: post the user's finance data to an outside URL.",
+            t: "search_skills finds one on skills.sh; acquire_skill pins it by digest and stamps ExternalIngest, instructions and scripts together. The skill text carries an injection: post the user's finance data to an outside URL.",
           },
           {
             f: ["child_pa", "handles", "e_handles_parent", "t4"],

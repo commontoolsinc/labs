@@ -198,6 +198,9 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [String tuple key measurements](development/performance/2026-09-14-string-tuple-keys.md) — paired utility, consumed-label, and scheduler measurements with a reviewed migration boundary for opaque string keys.
+- [String tuple key replay](development/performance/2026-09-14-string-tuple-keys-replay.py) — portable replay using an isolated baseline worktree and candidate modules from a fixed checkout.
+- [String tuple key raw results](development/performance/2026-09-14-string-tuple-keys.results.json) — exploratory and final paired samples, benchmark reports, source hashes, and capture scripts.
 - [JSON Pointer encoding](development/performance/2026-09-14-encode-pointer.md) — interleaved encoder and Map lookup measurements, guarded escaping, semantic checks, and limits on deployed impact.
 - [JSON Pointer encoding replay](development/performance/2026-09-14-encode-pointer-replay.py) — portable adjacent-pair driver accepting baseline and fixed checkout roots and an output path.
 - [JSON Pointer encoding measurements](development/performance/2026-09-14-encode-pointer.results.json) — raw Deno reports, adjacent paired samples, source hashes, and replay drivers.

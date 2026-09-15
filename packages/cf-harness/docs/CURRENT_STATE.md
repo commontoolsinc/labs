@@ -1,7 +1,7 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-09-03
+Last verified: 2026-09-14
 
 The [system map](system-map/README.md) moves in lockstep with this current-state
 reference.
@@ -117,7 +117,13 @@ The current package provides:
   checkout to that checkout's own `skills/` tree, with the resolved tree and its
   source recorded in run state and printed in operator output; skill preload by
   name, indexed supporting-resource reads, and exact allowlisted Deno/Bash skill
-  scripts (which run in the sandbox, and so still ask for the flag);
+  scripts (which run in the sandbox, and so still ask for the flag). The same
+  allowlist and the same execution path take an acquired skill's script, keyed
+  by the pin its bytes were read at and checked against the digest taken at
+  acquisition; the tool output and the execution record carry that acquisition
+  in place of the registry digest fields, and the invocation is labeled with
+  confidentiality alone, because a non-empty `integrity` array in
+  `cfcInputLabels` makes the sandbox fail to start (CT-2302);
 - recoverable rejection of a malformed tool call: a name no tool answers to,
   arguments that are not a JSON object, or a `delegate_task` argument of the
   wrong shape comes back as a `cf-harness.invalid-tool-call` tool result naming
@@ -176,10 +182,14 @@ The current package provides:
   child spawn under `resolveHandleValue`'s contract (table membership,
   string-only, same-space-only, structured refusal before any child exists) and
   injected as a `<skill_context source="handle:<token>">` block beside the
-  profile preload; it bypasses the registry — no resource index, no scripts,
-  name-based selection retired for the delegated path — and the child's
-  activation records `source: "skill-handle"` with the token and the digest of
-  the injected text;
+  profile preload; it bypasses the registry — no resource index, name-based
+  selection retired for the delegated path — and the child's activation records
+  `source: "skill-handle"` with the token and the digest of the injected text.
+  Where the handle came from an acquisition, the context header carries its
+  `pin="owner/repo/slug@<commit sha>"` for `run_skill_script`, and the child
+  mounts that one skill's acquired scripts read-only at `/acquired-skill` and no
+  other skill's, in a sandbox of its own built from the parent's configuration
+  plus that mount rather than in the parent's shared one;
 - pattern references by trusted record: `delegate_task` takes up to eight
   optional `{ patternId, note? }` entries and resolves each id only from the
   records that run already holds — successful `search_patterns` results retained

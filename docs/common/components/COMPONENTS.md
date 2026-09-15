@@ -83,6 +83,10 @@ tree and do see them. See
 [Testing Shadow DOM Components](../../development/UI_TESTING.md) for the full
 decision table and fallback locator strategy.
 
+`cf-checkbox` exposes its checked state through `aria-checked` on the host.
+That state follows the rendered checkbox, including values delivered through
+`$checked` after the first render. An indeterminate checkbox exposes `mixed`.
+
 ## Component Index
 
 One row per component directory in `packages/ui/src/v2/components/`. "Bindable

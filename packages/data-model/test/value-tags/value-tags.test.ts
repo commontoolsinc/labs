@@ -57,8 +57,8 @@ import {
   tagFromNativeBuiltinClassElseNull,
   tagFromNativeValueElseNull,
   VALUE_TAGS,
-} from "@/value-tags.ts";
-import { LAYER_CORPUS } from "./fabric-value-corpus.ts";
+} from "@/value-tags";
+import { LAYER_CORPUS } from "../fabric-value-corpus.ts";
 
 /**
  * A `BaseFabricPrimitive` subclass whose reported tag is one the vocabulary
