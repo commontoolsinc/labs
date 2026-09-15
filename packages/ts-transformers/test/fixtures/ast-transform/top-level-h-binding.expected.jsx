@@ -1,3 +1,11 @@
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
 import { __cfHelpers } from "commonfabric";
 import { pattern } from "commonfabric";
 const define = undefined;
@@ -41,4 +49,5 @@ export default pattern((__cf_pattern_input) => {
     }
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
-void __cfHelpers;
+function __cfHelpersShim(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(__cfHelpersShim);

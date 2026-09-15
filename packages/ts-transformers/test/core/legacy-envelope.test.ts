@@ -125,12 +125,19 @@ Deno.test("interior __cfHelpers WITHOUT the envelope does not match", () => {
   ));
 });
 
-Deno.test("the bare-use trailer for sources binding `h` at top level is not a legacy envelope", () => {
-  // Such sources get `void __cfHelpers;` instead of the `h` shim; that form
+Deno.test("the fallback-shim trailer for sources binding `h` at top level is not a legacy envelope", () => {
+  // Such sources get the shim under the name `__cfHelpersShim`; that form
   // postdates #4158 and is never persisted, so the detector must not widen
   // to it.
   const authored = "export const h = [1];\nexport default h;\n";
-  const injected = injectCfHelpers(authored, "/main.tsx");
-  assert(injected.endsWith("void __cfHelpers;\n"));
-  assertFalse(isLegacyInjectedEnvelope(injected));
+  for (
+    const [fileName, head] of [
+      ["/main.tsx", "function __cfHelpersShim(...args: any[])"],
+      ["/main.jsx", "function __cfHelpersShim(...args)"],
+    ]
+  ) {
+    const injected = injectCfHelpers(authored, fileName);
+    assert(injected.includes(head), fileName);
+    assertFalse(isLegacyInjectedEnvelope(injected), fileName);
+  }
 });

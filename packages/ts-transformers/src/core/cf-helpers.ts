@@ -13,29 +13,43 @@ const HELPERS_STMT =
   `import { ${CF_HELPERS_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
 
 // Name of the forwarding JSX-factory shim appended after the source. It is
-// also the top-level binding name whose presence in the authored module swaps
-// the shim for the bare use statement below (see `injectCfHelpers`).
+// also the module-scope binding name whose presence in the authored module
+// moves the shim to `JSX_FACTORY_FALLBACK_SHIM_NAME` (see `injectCfHelpers`).
 const JSX_FACTORY_SHIM_NAME = "h";
+// Reserved like `__cfHelpers` (the authoring guard rejects it), so the
+// fallback can never collide in turn.
+const JSX_FACTORY_FALLBACK_SHIM_NAME = "__cfHelpersShim";
 
-const HELPERS_USED_STMT = `// @ts-ignore: Internals
-function ${JSX_FACTORY_SHIM_NAME}(...args: any[]) { return ${CF_HELPERS_IDENTIFIER}.h.apply(null, args); }
+// The trailer is a forwarding function declaration. That shape is what the
+// runner's module-body verifier admits at module scope (a direct function,
+// which the hardening pass then closes with `__cfHardenFn(<name>)`); a bare
+// expression statement such as `void __cfHelpers;` is rejected there as
+// top-level executable code. The JavaScript variant, injected into authored
+// `.js`/`.jsx` sources, drops the `: any[]` annotation, which would be a parse
+// error there ("Type annotations can only be used in TypeScript files").
+// Every variant is line-for-line identical so injection shifts source lines
+// the same way regardless of file kind or shim name.
+const usedStmtFor = (name: string, javascript: boolean): string =>
+  `// @ts-ignore: Internals
+function ${name}(${
+    javascript ? "...args" : "...args: any[]"
+  }) { return ${CF_HELPERS_IDENTIFIER}.h.apply(null, args); }
 `;
-// Syntax-neutral variant injected into authored `.js`/`.jsx` sources, where the
-// `: any[]` annotation above would be a parse error ("Type annotations can only
-// be used in TypeScript files"). Keep both statements line-for-line identical
-// so injection shifts source lines the same way regardless of file kind.
-const HELPERS_USED_STMT_JS = `// @ts-ignore: Internals
-function ${JSX_FACTORY_SHIM_NAME}(...args) { return ${CF_HELPERS_IDENTIFIER}.h.apply(null, args); }
-`;
-// Appended instead of the shim when the authored module already binds
-// `JSX_FACTORY_SHIM_NAME` at top level, where a second declaration would be a
-// duplicate identifier (TS2300). A plain use of the helper import is all the
-// shim contributes to binding once JSX itself dispatches through
-// `__cfHelpers.h`. Syntax-neutral, so one form serves both file kinds, and
-// the same line count as the shim variants.
-const HELPERS_USED_STMT_BARE = `// @ts-ignore: Internals
-void ${CF_HELPERS_IDENTIFIER};
-`;
+const HELPERS_USED_STMT = usedStmtFor(JSX_FACTORY_SHIM_NAME, false);
+const HELPERS_USED_STMT_JS = usedStmtFor(JSX_FACTORY_SHIM_NAME, true);
+// Appended instead when the authored module already binds
+// `JSX_FACTORY_SHIM_NAME` in its module scope, where a second declaration
+// would be a duplicate identifier (TS2300, or TS2440 against an import).
+// Keeping the helper import live is all the shim contributes to binding once
+// JSX itself dispatches through `__cfHelpers.h`, so only the name changes.
+const HELPERS_USED_STMT_FALLBACK = usedStmtFor(
+  JSX_FACTORY_FALLBACK_SHIM_NAME,
+  false,
+);
+const HELPERS_USED_STMT_FALLBACK_JS = usedStmtFor(
+  JSX_FACTORY_FALLBACK_SHIM_NAME,
+  true,
+);
 
 export class CFHelpers {
   #sourceFile: ts.SourceFile;
@@ -158,9 +172,9 @@ import { findFirstContentLineIndex } from "./runtime-contract.ts";
 // call `h` explicitly without importing it. JSX itself does not depend on the
 // shim: the js-compiler emits elements and fragments against `__cfHelpers.h`
 // directly (its `jsxFactory` / `jsxFragmentFactory`). When the authored
-// module already binds `h` at top level, the shim would collide with that
-// binding, so a bare `void __cfHelpers;` usage is appended instead and the
-// author's `h` keeps its meaning.
+// module already binds `h` in its module scope, the shim would collide with
+// that binding, so the same function is appended under the reserved name
+// `__cfHelpersShim` instead and the author's `h` keeps its meaning.
 //
 // Source maps are derived from this transformation.
 // Take care in maintaining source lines from its input.
@@ -184,22 +198,43 @@ export function transformCfDirective(
 const JS_FILE_RE = /\.(js|jsx|mjs|cjs)$/;
 
 export function injectCfHelpers(source: string, fileName?: string): string {
-  const sourceFile = ts.createSourceFile(
-    "source.tsx",
-    source,
-    ts.ScriptTarget.ES2023,
-  );
+  const sourceFile = parseAuthoredSource(source, fileName);
   checkCFHelperVar(sourceFile);
+  const javascript = fileName !== undefined && JS_FILE_RE.test(fileName);
   const usedStmt = declaresTopLevelBinding(sourceFile, JSX_FACTORY_SHIM_NAME)
-    ? HELPERS_USED_STMT_BARE
-    : fileName !== undefined && JS_FILE_RE.test(fileName)
-    ? HELPERS_USED_STMT_JS
-    : HELPERS_USED_STMT;
+    ? (javascript ? HELPERS_USED_STMT_FALLBACK_JS : HELPERS_USED_STMT_FALLBACK)
+    : (javascript ? HELPERS_USED_STMT_JS : HELPERS_USED_STMT);
   return [
     HELPERS_STMT,
     source,
     usedStmt,
   ].join("\n");
+}
+
+// Parses the authored source with the script kind its file name implies, so a
+// `.ts` module keeps angle-bracket assertions and generic arrows as
+// TypeScript instead of mis-parsing them as JSX, which would swallow the
+// statements after them and hide their bindings from the scans below. An
+// absent or unrecognized name parses as TSX, the historical default.
+function parseAuthoredSource(
+  source: string,
+  fileName?: string,
+): ts.SourceFile {
+  return ts.createSourceFile(
+    fileName ?? "source.tsx",
+    source,
+    ts.ScriptTarget.ES2023,
+    false,
+    scriptKindFor(fileName),
+  );
+}
+
+function scriptKindFor(fileName?: string): ts.ScriptKind {
+  if (fileName === undefined) return ts.ScriptKind.TSX;
+  if (/\.(ts|mts|cts)$/.test(fileName)) return ts.ScriptKind.TS;
+  if (/\.jsx$/.test(fileName)) return ts.ScriptKind.JSX;
+  if (JS_FILE_RE.test(fileName)) return ts.ScriptKind.JS;
+  return ts.ScriptKind.TSX;
 }
 
 /**
@@ -221,8 +256,9 @@ export function injectCfHelpers(source: string, fileName?: string): string {
  *   final newline is tolerated);
  * - the prefix and trailer must not overlap.
  *
- * The bare-use trailer ({@link HELPERS_USED_STMT_BARE}) postdates #4158 and
- * is never persisted, so it is deliberately not a legacy trailer.
+ * The fallback-shim trailers ({@link HELPERS_USED_STMT_FALLBACK} and its
+ * JavaScript form) postdate #4158 and are never persisted, so they are
+ * deliberately not legacy trailers.
  *
  * Interior `__cfHelpers` occurrences inside a valid envelope DO match: the
  * predicate is prefix+suffix only. That is chosen behavior — `__cfHelpers`
@@ -253,18 +289,24 @@ export function isLegacyInjectedEnvelope(source: string): boolean {
   return false;
 }
 
-// The authoring guard: throws if the reserved `__cfHelpers` identifier appears
-// anywhere in the parsed source (see `isLegacyInjectedEnvelope` for the one
-// tolerated, storage-fed exception).
+// The authoring guard: throws if a reserved helper identifier (`__cfHelpers`,
+// or the fallback shim name) appears anywhere in the parsed source (see
+// `isLegacyInjectedEnvelope` for the one tolerated, storage-fed exception).
 function checkCFHelperVar(sourceFile: ts.SourceFile) {
-  checkReservedHelperVar(sourceFile, CF_HELPERS_IDENTIFIER);
+  checkReservedHelperVar(
+    sourceFile,
+    new Set([CF_HELPERS_IDENTIFIER, JSX_FACTORY_FALLBACK_SHIM_NAME]),
+  );
 }
 
-function checkReservedHelperVar(sourceFile: ts.SourceFile, identifier: string) {
+function checkReservedHelperVar(
+  sourceFile: ts.SourceFile,
+  identifiers: ReadonlySet<string>,
+) {
   const visitor = (node: ts.Node): ts.Node => {
-    if (ts.isIdentifier(node) && node.text === identifier) {
+    if (ts.isIdentifier(node) && identifiers.has(node.text)) {
       throw new Error(
-        `Source cannot contain reserved helper symbol '${identifier}'.`,
+        `Source cannot contain reserved helper symbol '${node.text}'.`,
       );
     }
     return ts.visitEachChild(node, visitor, undefined);
@@ -279,7 +321,11 @@ function checkReservedHelperVar(sourceFile: ts.SourceFile, identifier: string) {
 // (`interface`, `type`) do not count: they occupy no value declaration space,
 // so the function shim coexists with them. Block-scoped bindings in nested
 // statements and anything inside a function or class body do not count
-// either; they merely shadow the shim.
+// either; they merely shadow the shim. An import binding named `name` counts
+// whatever its `type` modifier: whether it conflicts with the shim (TS2440)
+// depends on the imported target's meaning, which this string-level scan
+// cannot resolve, and counting a non-conflicting one costs only the implicit
+// `h(...)` alias.
 function declaresTopLevelBinding(
   sourceFile: ts.SourceFile,
   name: string,
