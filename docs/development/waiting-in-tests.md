@@ -802,6 +802,28 @@ is that check. Moving its barrier earlier leaves every negative case green while
 the controls that can speak to ordering go red, which is the point of having
 them.
 
+A barrier is not the only way out of an interval, and it is not the first
+thing to look for. Where the thing being ruled out is a component failing to
+settle, the settling itself is a positive event, and observing it asserts
+more than any interval could. `packages/runner/test/executor-fan-out.test.ts`'s
+OW29 storm pin is the worked example: the storm it rules out is a serving
+loop whose cycles keep finding work, which never suspends on its input wait,
+so the test waits for that suspension (`SpaceServer.suspendedOnInput`) and
+reads its wave bound there. The memory server's fan-out and the serving
+runtime settle INSIDE that predicate, between two readings of the
+suspension, so a frame still held or a run still owed un-suspends the loop
+before the second rather than landing after the wait returns — the fan-out
+on both sides of the runtime settle, since that settle can itself run work
+that commits. Hold
+`#hasWork()` true and that wait fails by name while the three-second interval
+it replaced passes — the storm's cadence is the flush deadline, which on that
+host is longer than any interval a test can afford. The control is the same
+reading taken while the edits are being covered, which must go false; a
+reading pinned true would satisfy the wait on its first poll. What stays
+out of reach there is a wake from work neither settle covers, and the
+comment says which shape that leaves rather than implying the assertion
+covers everything.
+
 Which controls those are is worth working out rather than assuming, because a
 control can be written so that it cannot fail: only an event that can arrive
 after the page's own scripts have run tests the ordering at all. A control that

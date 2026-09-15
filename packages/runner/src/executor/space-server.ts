@@ -1966,6 +1966,22 @@ export class SpaceServer implements TransactionSealDestination {
     return this.#pendingEffectsByWave.size;
   }
 
+  /**
+   * DIAGNOSTIC (tests): whether the loop is SUSPENDED on its input wait —
+   * it ended a cycle with `#hasWork()` false and is now parked on
+   * `#waitForInput`, having installed a waiter that nothing has resolved.
+   *
+   * This is the loop's settled state rather than a pause inside a cycle.
+   * A loop whose cycles keep finding work of their own never reaches it:
+   * `#hasWork()` holds at the end of each one, so the next begins without
+   * the wait being entered at all. That is what makes it a test's
+   * quiescence signal — the settling itself, observed, rather than an
+   * interval during which nothing was seen to happen.
+   */
+  get suspendedOnInput(): boolean {
+    return this.#feedArrived !== undefined;
+  }
+
   /** DIAGNOSTIC (tests): the demanding identities recorded for a root
    * doc across its demand keys — M1's demand carriage (Phase 2), space
    * roots included (stage B). Two principals demanding one root yield
