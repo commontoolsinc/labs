@@ -17,6 +17,8 @@ import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { normalize } from "@std/path/posix";
 import { CfHarnessEngine } from "../src/engine.ts";
+import type { HarnessAssistantTranscriptMessage } from "../src/contracts/transcript.ts";
+import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
 import {
   CfHarnessPromptLoop,
   outstandingSkillCustody,
@@ -160,6 +162,234 @@ const withSkillCell = async (
 };
 
 describe("prompt-loop delegate_task skillHandle", () => {
+  describe("native search return custody", () => {
+    for (const structured of [false, true]) {
+      for (
+        const location of [
+          "query",
+          "citation-title",
+          "ordinary-source",
+          "withheld-token",
+          "seeded-token",
+        ]
+      ) {
+        it(`scrubs ${location} before formatting a ${structured ? "structured" : "plain"} return`, async () => {
+          await withSkillCell(async ({ pieces, ref }) => {
+            const runId = "search-skill-custody";
+            const owner = {
+              type: "cf-harness.credential-owner-ref" as const,
+              version: 1 as const,
+              ownerKey: "synthetic-owner",
+            };
+            const minted = await mintAddressHandle(
+              createHarnessHandleTable(runId),
+              ref,
+            );
+            const dataHandle = await mintAddressHandle(
+              minted.table,
+              `${ref}/resource`,
+            );
+            const returnedToken = location.endsWith("-token")
+              ? dataHandle.token
+              : undefined;
+            const engine = new CfHarnessEngine({
+              sandboxRuntime: new FakeSandboxRuntime(),
+              runId,
+              model: "gpt-5.6-terra",
+              modelProvider: "openai-codex",
+              credentialOwnerKey: owner.ownerKey,
+              credentialOwner: owner,
+              fabricSessionFactory: () => Promise.resolve({ pieces }),
+            });
+            await engine.recordHandleTable(dataHandle.table);
+            const requests: Record<string, unknown>[] = [];
+            const childMessages: HarnessAssistantTranscriptMessage[] = [];
+            const client = new OpenAICodexResponsesClient({
+              transportRetries: 0,
+              credentialResolver: {
+                credentialOwner: owner,
+                resolve: () =>
+                  Promise.resolve({
+                    type: "oauth",
+                    providerId: "openai-codex",
+                    accessToken: "synthetic-access",
+                    refreshToken: "synthetic-refresh",
+                    accountId: "synthetic-account",
+                    expiresAt: Date.now() + 60000,
+                  }),
+              },
+              fetchFn: (_url, init) => {
+                requests.push(JSON.parse(String(init?.body)));
+                const output = requests.length === 1
+                  ? [{
+                    type: "function_call",
+                    id: "fc_one",
+                    call_id: "call_one",
+                    name: "delegate_task",
+                    arguments: JSON.stringify({
+                      goal:
+                        "Use the selected skill to research a public source." +
+                        (location === "seeded-token"
+                          ? ` Inspect ${dataHandle.token}.`
+                          : ""),
+                      profile: "web_search",
+                      skillHandle: minted.token,
+                      ...(structured
+                        ? {
+                          returnSchema: {
+                            type: "object",
+                            properties: { note: { type: "string" } },
+                            required: ["note"],
+                            additionalProperties: false,
+                          },
+                        }
+                        : {}),
+                    }),
+                  }]
+                  : requests.length === 2
+                  ? [{
+                    type: "web_search_call",
+                    id: "ws_one",
+                    status: "completed",
+                    action: {
+                      type: "search",
+                      query: returnedToken ??
+                        (location === "query" ? SKILL_TEXT : "public query"),
+                      ...(returnedToken === undefined
+                        ? {}
+                        : { [returnedToken]: "source note" }),
+                    },
+                  }, {
+                    type: "message",
+                    role: "assistant",
+                    content: [{
+                      type: "output_text",
+                      text: structured
+                        ? JSON.stringify({ note: "Public answer" })
+                        : "Public answer",
+                      annotations: [{
+                        type: "url_citation",
+                        url: "https://example.test/public",
+                        title: returnedToken ?? (location === "citation-title"
+                          ? SKILL_TEXT
+                          : "Public title"),
+                        start_index: 0,
+                        end_index: 6,
+                      }],
+                    }],
+                  }]
+                  : [{
+                    type: "message",
+                    role: "assistant",
+                    content: [{ type: "output_text", text: "Done" }],
+                  }];
+                return Promise.resolve(
+                  new Response(
+                    `data: ${
+                      JSON.stringify({
+                        type: "response.completed",
+                        response: { status: "completed", output },
+                      })
+                    }\n\n`,
+                    { headers: { "content-type": "text/event-stream" } },
+                  ),
+                );
+              },
+            });
+            const loop = new CfHarnessPromptLoop({
+              engine,
+              modelClient: client,
+              allowedToolIds: ["delegate_task"],
+              allowedSubagentProfiles: ["web_search"],
+            });
+            const result = await loop.runPrompt({
+              prompt: "Research through the selected skill.",
+              promptSlotBinding: directPromptSlotBinding,
+              onTranscriptEvent: (event) => {
+                if (
+                  event.subagent !== undefined &&
+                  event.message.role === "assistant"
+                ) childMessages.push(event.message);
+              },
+            });
+            expect(requests).toHaveLength(3);
+            expect(JSON.stringify(requests[1])).toContain("CANARY-SKILL-9f4e2");
+            expect(JSON.stringify(requests[2])).not.toContain(
+              "CANARY-SKILL-9f4e2",
+            );
+            const toolMessage = result.transcript.find((message) =>
+              message.role === "tool"
+            );
+            expect(toolMessage?.content).not.toContain("CANARY-SKILL-9f4e2");
+            const returned = JSON.parse(toolMessage!.content).subagent;
+            expect(returned.status).toBe("completed");
+            expect(returned.nativeModelToolResults[0].sources[0].url).toBe(
+              "https://example.test/public",
+            );
+            if (structured) {
+              expect(returned.structuredReturn.status).toBe("valid");
+              expect(returned.structuredReturn.value).toEqual({
+                note: { "@link": `opaque:${returned.childRunId}#/note` },
+              });
+            } else {
+              expect(returned.summary).toContain("https://example.test/public");
+            }
+            const evidence = returned.nativeModelToolResults[0];
+            if (location === "ordinary-source") {
+              expect(evidence.sources[0].title).toBe("Public title");
+              expect(evidence.providerMetadata.searchCalls[0].action.query)
+                .toBe("public query");
+            } else if (returnedToken !== undefined) {
+              const raw = childMessages.find((message) =>
+                message.nativeModelToolResults !== undefined
+              )!;
+              expect(JSON.stringify(raw.nativeModelToolResults)).toContain(
+                returnedToken,
+              );
+              expect(JSON.stringify(raw.providerContinuation)).toContain(
+                returnedToken,
+              );
+              if (location === "withheld-token") {
+                expect(JSON.stringify(requests[1])).not.toContain(
+                  returnedToken,
+                );
+                expect(JSON.stringify(requests[2])).not.toContain(
+                  returnedToken,
+                );
+                expect(JSON.stringify(evidence)).not.toContain(returnedToken);
+                expect(JSON.stringify(evidence)).toContain(
+                  "handle-token-removed",
+                );
+              } else {
+                expect(JSON.stringify(requests[1])).toContain(returnedToken);
+                expect(evidence.sources[0].title).toBe(returnedToken);
+                expect(evidence.providerMetadata.searchCalls[0].action.query)
+                  .toBe(returnedToken);
+                expect(
+                  evidence.providerMetadata.searchCalls[0]
+                    .action[returnedToken],
+                ).toBe("source note");
+              }
+            } else {
+              const raw = childMessages.find((message) =>
+                message.nativeModelToolResults !== undefined
+              )!;
+              expect(JSON.stringify(raw.nativeModelToolResults)).toContain(
+                "CANARY-SKILL-9f4e2",
+              );
+              expect(JSON.stringify(raw.providerContinuation)).toContain(
+                "CANARY-SKILL-9f4e2",
+              );
+              expect(JSON.stringify(evidence)).toContain(
+                "handle-delivered skill text withheld",
+              );
+            }
+          });
+        });
+      }
+    }
+  });
+
   it("materializes the handle into the child's skill context and never into the parent's", async () => {
     await withSkillCell(async ({ pieces, ref }) => {
       const runId = "run-skill-handle";

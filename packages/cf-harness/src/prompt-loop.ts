@@ -1124,6 +1124,26 @@ export const scrubHandleSkillText = (
   return scrubbed;
 };
 
+/** Maps each string leaf and key once at the structured delegation boundary. */
+const mapSubagentReturnText = (
+  value: unknown,
+  transform: (text: string) => string,
+): unknown => {
+  if (typeof value === "string") return transform(value);
+  if (Array.isArray(value)) {
+    return value.map((entry) => mapSubagentReturnText(entry, transform));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        transform(key),
+        mapSubagentReturnText(entry, transform),
+      ]),
+    );
+  }
+  return value;
+};
+
 /**
  * {@link scrubHandleSkillText} over every string in a structured value. The
  * raw-text scrub alone cannot cover a structured return: JSON admits
@@ -1135,26 +1155,8 @@ export const scrubHandleSkillText = (
 export const scrubHandleSkillTextDeep = (
   value: unknown,
   skillText: string,
-): unknown => {
-  if (typeof value === "string") {
-    return scrubHandleSkillText(value, skillText);
-  }
-  if (Array.isArray(value)) {
-    return value.map((entry) => scrubHandleSkillTextDeep(entry, skillText));
-  }
-  if (value !== null && typeof value === "object") {
-    // Keys as well as values: a decoded payload can stand in key position.
-    return Object.fromEntries(
-      Object.entries(value).map((
-        [key, entry],
-      ) => [
-        scrubHandleSkillText(key, skillText),
-        scrubHandleSkillTextDeep(entry, skillText),
-      ]),
-    );
-  }
-  return value;
-};
+): unknown =>
+  mapSubagentReturnText(value, (text) => scrubHandleSkillText(text, skillText));
 
 /**
  * The skill-context tokens this run acquired, delegated, and has not yet seen
@@ -5509,9 +5511,21 @@ export class CfHarnessPromptLoop {
             options.resolvedSkill.text,
           ),
       );
-      nativeModelToolResults = collectCodexSearchResults(
+      const childSearchResults = collectCodexSearchResults(
         childResult.transcript,
       );
+      // Apply the existing delegation boundary before the source footer changes
+      // whitespace or markup. Keep the child's evidence and continuation raw.
+      nativeModelToolResults = mapSubagentReturnText(
+        childSearchResults,
+        (text) =>
+          resolveChildHandleTokens(
+            childEngine,
+            options.resolvedSkill === undefined
+              ? text
+              : scrubHandleSkillText(text, options.resolvedSkill.text),
+          ),
+      ) as HarnessOpenAIWebSearchResult[];
       summary = childFinalText +
         (delegateInput.returnSchema === undefined
           ? searchSourceSummary(nativeModelToolResults)
