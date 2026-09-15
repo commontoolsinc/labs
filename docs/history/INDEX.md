@@ -200,6 +200,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [Lazy materialization reload diagnosis](development/performance/2026-09-15-lazy-reload-diagnosis.md) — Current-main eager nullable-read failures, durable-state comparison, and a wrong-page reload observation.
+
 - [String tuple key measurements](development/performance/2026-09-14-string-tuple-keys.md) — paired utility, consumed-label, and scheduler measurements with a reviewed migration boundary for opaque string keys.
 - [String tuple key replay](development/performance/2026-09-14-string-tuple-keys-replay.py) — portable replay using an isolated baseline worktree and candidate modules from a fixed checkout.
 - [String tuple key raw results](development/performance/2026-09-14-string-tuple-keys.results.json) — exploratory and final paired samples, benchmark reports, source hashes, and capture scripts.

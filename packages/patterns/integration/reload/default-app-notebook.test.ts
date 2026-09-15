@@ -52,7 +52,7 @@ describe("default-app notebook reload integration test", () => {
     await clickButtonWithText(page, "Notes");
     await awaitViewSettled(page);
     await clickButtonWithText(page, "New Notebook");
-    await waitForCondition(page, async () => {
+    const notebookId = await waitForCondition(page, async () => {
       const commonfabric = globalThis.commonfabric as
         | { readCell?: (options: { id: string }) => Promise<unknown> }
         | undefined;
@@ -71,8 +71,15 @@ describe("default-app notebook reload integration test", () => {
         console.log = originalLog;
       }
       return (current as { isNotebook?: unknown } | undefined)
-        ?.isNotebook === true;
+          ?.isNotebook === true
+        ? pieceId
+        : false;
     });
+
+    assert(
+      typeof notebookId === "string",
+      "Expected a notebook piece identity",
+    );
 
     await waitForCondition(
       page,
@@ -101,15 +108,62 @@ describe("default-app notebook reload integration test", () => {
     });
 
     await waitForRuntimeSynced(page);
+    const beforeReload = await page.evaluate(() => ({
+      url: location.href,
+      view: globalThis.app?.serialize?.()?.view,
+    }));
+    assertEquals(
+      beforeReload.view && "pieceId" in beforeReload.view
+        ? beforeReload.view.pieceId
+        : undefined,
+      notebookId,
+      `Expected the created notebook before reload: ${
+        JSON.stringify(beforeReload)
+      }`,
+    );
 
     const startedAt = performance.now();
     await page.reload({ waitUntil: "load" });
     await page.applyConsoleFormatter();
     await shell.login(identity);
 
-    await waitForCondition(page, notebookReloadRendered, {
-      args: [noteCreates],
-    });
+    try {
+      const afterLogin = await page.evaluate(() => ({
+        url: location.href,
+        view: globalThis.app?.serialize?.()?.view,
+      }));
+      assertEquals(
+        afterLogin.view && "pieceId" in afterLogin.view
+          ? afterLogin.view.pieceId
+          : undefined,
+        notebookId,
+        `Expected the same notebook after reload: ${
+          JSON.stringify(afterLogin)
+        }`,
+      );
+      await waitForCondition(page, notebookReloadRendered, {
+        args: [noteCreates, notebookId],
+      });
+    } catch (cause) {
+      const current = await page.evaluate(() => ({
+        url: location.href,
+        view: globalThis.app?.serialize?.()?.view,
+      })).catch(() => undefined);
+      const rendered = await collectNotebookRenderState(page)
+        .catch(() => undefined);
+      const diagnostic = JSON.stringify({
+        notebookId,
+        beforeReload,
+        current,
+        rendered,
+      });
+      // Teardown can report browser errors as well. Keep the failed condition's
+      // evidence in the transcript even when teardown replaces its exception.
+      console.log(`Notebook reload condition failed: ${diagnostic}`);
+      throw new Error(`Notebook reload condition failed: ${diagnostic}`, {
+        cause,
+      });
+    }
     await waitForRuntimeIdle(page);
 
     const reloadRenderState = await collectNotebookRenderState(page);
@@ -317,6 +371,7 @@ const notebookSourceStateMatches = async (
 const notebookReloadRendered = async (
   probe: ProbeApi,
   expectedCount: number,
+  expectedId: string,
 ): Promise<boolean> => {
   const commonfabric = globalThis.commonfabric as
     | { readCell?: (options: { id: string }) => Promise<unknown> }
@@ -326,7 +381,7 @@ const notebookReloadRendered = async (
       typeof view.pieceId === "string"
     ? view.pieceId
     : undefined;
-  if (!pieceId || !commonfabric?.readCell) return false;
+  if (pieceId !== expectedId || !commonfabric?.readCell) return false;
   let current: { isNotebook?: unknown; noteCount?: unknown } | undefined;
   const originalLog = console.log;
   try {

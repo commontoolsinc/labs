@@ -158,6 +158,11 @@ must not accidentally inherit it.
       The [reload evidence](../history/development/performance/2026-09-14-lazy-materialization-reload-evidence.md)
       records served eager browser errors and an unresolved default-on control
       failure; those findings remain part of the acceptance decision.
+      The [reload diagnosis](../history/development/performance/2026-09-15-lazy-reload-diagnosis.md)
+      identifies the eager nullable-cell input and a stalled browser displaying
+      a note instead of its notebook. Correlating the navigation event across
+      reload remains required; current default-on passes do not resolve the
+      earlier intermittent failure.
       The [derived-state correction decision](../history/development/2026-09-14-derived-state-correction.md)
       permits two exact stale fetch-status transitions during vintage replay;
       it does not retire the flag or waive other state-loss findings.
