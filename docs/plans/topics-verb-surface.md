@@ -181,10 +181,7 @@ usage:
   cannot retract one, because these verbs name their target by reference and a
   comment carries no fid an inline JSON event could name — [#6713], where the
   candidate keys are set out. And the rule that a retracted link stops
-  resolving into `mentions` is carried by reading rather than by a test: it
-  needs a link whose URL names a real piece, and `cellFromUrl` answers with no
-  cell for any URL a pattern test can build, so a retracted link and a plain
-  web link are indistinguishable to the suite.
+  resolving into `mentions` is carried by reading rather than by a test.
 
 - **`AgentActor` execution provenance** replacing per-event `agentName`, when
   the retention-and-provenance track clears its review. That review has not

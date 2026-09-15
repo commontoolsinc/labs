@@ -1082,10 +1082,7 @@ export default pattern(() => {
   // are the only other `cf-input`s on the page, so the count discriminates:
   // two while reading, three while renaming.
   // These assert what RENDERS and nothing else; `editingTitle`'s own value is
-  // covered by the lifecycle assertions below. Keeping them apart matters
-  // here: a session cell's initial value is not observable through the result
-  // until something writes it, so an unwritten `editingTitle` reads back
-  // undefined while the header correctly renders its read branch.
+  // covered by the lifecycle assertions below.
   const assert_header_reads = assert(() =>
     findAllByTag(directTopic[UI], "cf-input").length === 2
   );
