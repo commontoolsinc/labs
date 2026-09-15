@@ -397,7 +397,9 @@ export class WorkerReconciler {
       };
 
       addCancel(
-        vnode.sink((resolvedVnode: unknown) => renderRoot(resolvedVnode)),
+        vnode.sink((resolvedVnode: unknown) => renderRoot(resolvedVnode), {
+          readOnly: true,
+        }),
       );
     } else {
       // Static VNode - render directly into container
@@ -2095,7 +2097,7 @@ export class WorkerReconciler {
           if (this.#isTextIntegrityPolicyProp(key)) {
             this.#refreshTextIntegrityBoundary(ctx, state);
           }
-        });
+        }, { readOnly: true });
         state.propSubscriptions.set(key, {
           cell: value as Cell<unknown>,
           cancel,
@@ -2283,6 +2285,7 @@ export class WorkerReconciler {
             }]);
           }
         },
+        { readOnly: true },
       );
       state.propSubscriptions.set(key, {
         cell: value as Cell<unknown>,
@@ -2508,7 +2511,7 @@ export class WorkerReconciler {
               key,
               value: propValue,
             }]);
-          });
+          }, { readOnly: true });
           addCancel(propSinkCancel);
           state.propSubscriptions.set(key, {
             cell: propKeyCell as Cell<unknown>,
@@ -2554,7 +2557,7 @@ export class WorkerReconciler {
         }
       }
       refreshPolicyAfterPropsUpdate();
-    });
+    }, { readOnly: true });
 
     addCancel(sinkCancel);
     state.propSubscriptions.set(CELL_PROPS_KEY, {
@@ -2796,6 +2799,7 @@ export class WorkerReconciler {
               forceReplace,
             );
           },
+          { readOnly: true },
         );
 
       state.childrenState = {
@@ -3264,6 +3268,7 @@ export class WorkerReconciler {
                 }]);
               }
             },
+            { readOnly: true },
           );
           addCancel(sinkCancel);
           state.propSubscriptions.set(key, {
@@ -3302,7 +3307,7 @@ export class WorkerReconciler {
           if (this.#isTextIntegrityPolicyProp(key)) {
             this.#refreshTextIntegrityBoundary(ctx, state);
           }
-        });
+        }, { readOnly: true });
         addCancel(sinkCancel);
         state.propSubscriptions.set(key, {
           cell: value as Cell<unknown>,
@@ -3432,7 +3437,7 @@ export class WorkerReconciler {
         children as Cell<WorkerRenderNode | WorkerRenderNode[]>
       ).sink((resolvedChildren) => {
         this.#updateChildren(ctx, state, resolvedChildren, visited, policy);
-      });
+      }, { readOnly: true });
       addCancel(sinkCancel);
       // Track the children Cell for diffing
       state.childrenState = {
@@ -4137,7 +4142,11 @@ export class WorkerReconciler {
       }
     };
 
-    addCancel(cell.sink((resolvedChild) => renderResolved(resolvedChild)));
+    addCancel(
+      cell.sink((resolvedChild) => renderResolved(resolvedChild), {
+        readOnly: true,
+      }),
+    );
 
     // When the cancel group fires (parent teardown), also cancel the current
     // rendered content. Without this, deeper sinks (e.g. children/props of the
