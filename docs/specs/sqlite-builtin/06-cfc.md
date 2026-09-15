@@ -401,8 +401,9 @@ with the pure half in
    author-declared `derived:` fallback label for the refuse case remains a
    possible follow-up.)
 3. **Evaluate per row, attach per row.** Each result row is stored as an
-   entity doc of its own, keyed on the row's content and on the schema it is
-   written under, its labels included (Section [05](./05-reactivity.md)); the
+   entity doc of its own, keyed on its position under the result cell for a
+   row-labeled row, never on its content, since the doc id is visible to a
+   reader the row label excludes (Section [05](./05-reactivity.md)); the
    flush writes each labeled row doc
    **directly** (its own id, root path) under a root-`ifc` schema, and then
    reads each row's stored link back to confirm the row has a doc to carry

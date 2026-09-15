@@ -105,12 +105,14 @@ Every result row is written into the space as a document of its own — which
 is what gives a per-row label somewhere to sit — so the row count of a
 statement is a durable cost of the space rather than the cost of one render. A
 query that returns a million distinct rows writes a million documents, and they
-stay written after the view that asked for them is gone. The document is keyed
-on the row's content and label under the query's result: a re-run whose rows
-are unchanged writes no row documents, two equal rows share one, and a row the
-result held before takes its old document back rather than a new one. A row
-projecting a column name a Fabric record reserves (`constructor`, `__proto__`)
-crosses the wire as a list of entries and is stored the same way.
+stay written after the view that asked for them is gone. A re-run whose rows
+are unchanged writes no row documents: a row of an unlabeled database is keyed
+on its content, so equal rows share one document and a row the result held
+before takes its old document back; a row of a labeled database is keyed on
+its origin table's primary key where the projection carries one, and on its
+position otherwise, so a changed row is rewritten in place. A row projecting a
+column name a Fabric record reserves (`constructor`, `__proto__`) crosses the
+wire as a list of entries and is stored the same way.
 
 A statement therefore bounds its rows, and a filter is not a bound. A `WHERE`
 clause narrows the candidates and says nothing about how many survive it: a

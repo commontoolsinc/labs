@@ -22,6 +22,7 @@
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { parseLink } from "../link-utils.ts";
 import { settleAbandonedRequest } from "./abandoned-request.ts";
+import { resultRowKeys } from "./sqlite/row-identity.ts";
 import {
   computeRowLabelRead,
   resolveCeilingPlaceholders,
@@ -1400,6 +1401,20 @@ export function sqliteQuery(
                 },
               }
               : labelSchema;
+            // Every row is an entity document of its own under the result
+            // cell, keyed as `resultRowKeys()` decides: a key stands still
+            // across runs for a row that did not change, so the diff finds
+            // nothing to write for it, and a key is drawn only from what a
+            // reader of the unlabeled row links may already see. The key
+            // must not depend on anything else that varies between runs, or
+            // an unchanged result would mint a document per row per run.
+            const rowKeys = resultRowKeys({
+              rows: resultRows,
+              columns: res.columns,
+              tables: db.tables,
+              columnLabeled: labelSchema !== undefined,
+              rowLabeled: (i) => perRow[i] !== undefined,
+            });
             const wrote = await runtime.editWithRetry((wtx) => {
               markEffectCompletion(wtx, effectKey);
               applyRunIdentity(wtx);
@@ -1410,29 +1425,13 @@ export function sqliteQuery(
                 return;
               }
               const base = result.getAsNormalizedFullLink();
-              // Every row is an entity document of its own, keyed under the
-              // result cell on the row's content and on the schema the row
-              // is written under, per-column labels and row label included.
-              // A row this result cell has stored before under the same
-              // schema links to that document, and the diff finds nothing to
-              // write there; two rows of equal content and label share one
-              // document. The id must not depend on anything else that
-              // varies between runs, or an unchanged result would mint a
-              // document per row per run.
-              //
-              // The schema is part of the key because the commit attaches
-              // label metadata only to documents it writes. A row whose
-              // content is unchanged but whose label is not — a column's
-              // `ifc` re-declared stricter on the handle, say — therefore
-              // needs a document of its own, or it would keep the label its
-              // old document carries.
-              //
-              // The stored link is bare. The row's schema goes on the write
-              // alone, whose policy input is what carries the labels to the
-              // row document. A link carrying a schema would install that
-              // schema as a content-addressed document, and two scoped
-              // instances of one result settling in separate waves would
-              // both write it, which the second wave refuses.
+              // The stored link is bare. The row's schema, per-column labels
+              // and row label included, goes on the write alone, whose policy
+              // input is what carries the labels to the row document. A link
+              // carrying a schema would install that schema as a
+              // content-addressed document, and two scoped instances of one
+              // result settling in separate waves would both write it, which
+              // the second wave refuses.
               const storedRows = resultRows.map((row, i) => {
                 const schema = {
                   ...rowSchemas[i],
@@ -1442,7 +1441,7 @@ export function sqliteQuery(
                   runtime,
                   {
                     ...base,
-                    id: toURI(createRef({ row, schema }, {
+                    id: toURI(createRef(rowKeys[i], {
                       parent: { id: base.id, space: base.space },
                       path: [...base.path, "result"],
                       context: "sqlite-result-row",

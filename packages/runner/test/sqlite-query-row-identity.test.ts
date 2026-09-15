@@ -313,6 +313,54 @@ describe("sqlite-query-row-identity", () => {
 
   it({
     name:
+      "keeps a column-labeled row's document when the row moves to another position",
+    sanitizeResources: false,
+  }, async () => {
+    // A labeled handle has the server load the column-metadata library, which
+    // stays loaded for the life of the process, so this case is exempt from
+    // the dynamic-library leak check. The rows are ordered by `body`, so
+    // rewriting one row's body moves it to the front: the two rows that did
+    // not change keep their documents at their new positions, and the changed
+    // row's document is the one rewritten.
+
+    const db = await seededDb(labeledTables);
+    const { result, tick } = await runQuery(
+      db,
+      "labeled-reorder",
+      "SELECT id, body FROM notes ORDER BY body",
+    );
+    const first = await settledPast(result, undefined);
+    await runtime.settled();
+    expect(first.error).toBeUndefined();
+    expect(first.result).toEqual([
+      { id: 1, body: "a" },
+      { id: 2, body: "b" },
+      { id: 3, body: "c" },
+    ]);
+    const rowsBefore = rowDocIds(result);
+    const known = new Set(written.map((w) => w.id));
+    const mark = written.length;
+
+    await execSqlite(db, "UPDATE notes SET body = 'A' WHERE id = 3");
+    const second = await rerun(result, tick, first);
+    expect(second.error).toBeUndefined();
+    expect(second.result).toEqual([
+      { id: 3, body: "A" },
+      { id: 1, body: "a" },
+      { id: 2, body: "b" },
+    ]);
+
+    const rowsAfter = rowDocIds(result);
+    expect(rowsAfter).toEqual([rowsBefore[2], rowsBefore[0], rowsBefore[1]]);
+    const secondRun = written.slice(mark);
+    expect(
+      secondRun.filter((w) => rowsBefore.includes(w.id)).map((w) => w.id),
+    ).toEqual([rowsBefore[2]]);
+    expect(secondRun.filter((w) => !known.has(w.id))).toEqual([]);
+  });
+
+  it({
+    name:
       "moves a row whose label changes under unchanged content to a document carrying the new label",
     sanitizeResources: false,
   }, async () => {
