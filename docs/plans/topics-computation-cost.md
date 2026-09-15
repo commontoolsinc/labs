@@ -6,7 +6,8 @@ Reduce repeated collection work in Topicboard and individual Topics while
 preserving their authored data, public behavior, identities, and bounded demand
 shapes. Use maintained collection indexes and named aggregates where
 measurements justify them. Ship improvements in independently reviewable
-changes, then rehearse and coordinate an upgrade of existing pieces.
+changes, rehearse the upgrade on copies of existing pieces, and upgrade test
+Topics instances live.
 
 This plan authorizes no live writes by itself. Implementation, synthetic demos,
 and isolated copy rehearsals can proceed before a deployment window is chosen.
@@ -67,9 +68,10 @@ and removal timestamps. Removing them from the aggregate could move activity
 backward. Preserve optional-field defaults and compatibility with stored topic
 generations. Preserve linked record identity for editing handlers.
 
-No stored hoist name on any deployed topic generation may resolve to a different
-body. The [pattern update gates](../specs/pattern-update-testing.md) do not
-establish this; T5 establishes how to check it, with evidence from stored data.
+No stored hoist name on any deployed board or topic generation may resolve to a
+different body. The [pattern update gates](../specs/pattern-update-testing.md)
+do not establish this; T5 establishes how to check it, with evidence from their
+stored data.
 
 ## Execution tracker
 
@@ -149,8 +151,11 @@ implementation and prototypes can begin earlier.
       maintained docs. Produce matched before/after demos and reports. Establish
       and record how to check the hoist requirement under
       [compatibility requirements](#compatibility-requirements), with evidence
-      from stored data. Each implementation PR needs a review through the
-      [`cf-review` skill](../../skills/cf-review/SKILL.md) and a clean Cubic
+      from the stored data of deployed board and topic generations. That check
+      depends on acquiring the snapshot
+      [stored-state step 3](#stored-state-and-deployment-procedure) describes,
+      which can begin before T6. Each implementation PR needs a review through
+      the [`cf-review` skill](../../skills/cf-review/SKILL.md) and a clean Cubic
       review on its final head before merge. Exit: all accepted T1–T4 changes
       are merged, remaining proposals are explicitly deferred, and exact
       deployable source packages are recorded.
@@ -160,12 +165,14 @@ implementation and prototypes can begin earlier.
       clean passes with semantic and authored-content evidence. Depends on T5;
       acquisition and inventory can begin earlier without blocking synthetic
       work.
-- [ ] **T7 — Coordinate and execute live rollout.** Obtain the owner's target
-      list and deployment window, confirm runtime prerequisites, upgrade in the
-      rehearsed order, and verify each stage before proceeding. Exit: every
-      target has a recorded source revision and acceptance result, or an
-      explicit partial-rollout/rollback disposition. Depends on T6 and live
-      authorization.
+- [ ] **T7 — Coordinate and execute live rollout to test instances.** Obtain the
+      list of test Topics instances to upgrade and a deployment window, confirm
+      runtime prerequisites, upgrade in the rehearsed order, and verify each
+      stage before proceeding. This plan does not upgrade the primary Topics
+      instances; any change to them is coordinated with Gideon, who runs their
+      live upgrade. Exit: every target has a recorded source revision and
+      acceptance result, or an explicit partial-rollout/rollback disposition.
+      Depends on T6 and live authorization.
 - [ ] **T8 — Publish outcomes and archive the plan.** Publish measured benefits
       with workload limits, the authoring guidance, and the final deployment
       status. Transfer genuine fast-follows to separate plans and archive this
@@ -208,17 +215,19 @@ case to expose startup and maintenance overhead that scaling tests can hide.
 
 Three demand workloads are distinct: the board alone, the board with one topic
 open, and all backlink outputs. The browser tier runs the board-alone and
-board-with-one-topic workloads and not the all-backlinks one. The headless tier
-follows the demand the browser measured, and runs the all-backlinks workload as
-a scaling probe rather than normal UI behavior. In that measurement, with client
-execution and stored card values, a board with no topic open ran none of the
-pivot, backlinks, comment-count, or last-activity lifts, because its cards read
-stored values. Opening a topic ran the pivot, that topic's backlinks, and its
-comment count. The measurement is one small sample, taken with
+board-with-one-topic workloads and not the all-backlinks one. In a browser
+measurement with client execution and stored card values, a board loaded before
+any topic was opened ran none of the pivot, backlinks, comment-count, or
+last-activity lifts. Opening a topic ran the pivot, that topic's backlinks, and
+its comment count. Returning to the board afterward ran that topic's
+last-activity lift once. The measurement is one small sample, taken with
 [lazy materialization](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization)
 on. [Server execution](../development/EXPERIMENTAL_OPTIONS.md#serverexecution)
-and lazy materialization off are not yet measured; the browser tier measures
-both before the baseline report. Measure cold initialization, warm updates, and
+and lazy materialization off are not yet measured. T0 measures both before the
+baseline report, in runs labeled by mode; the scheduled Benchmarks workflow runs
+client execution only. The headless tier runs the three workloads with the
+demand the browser measured, labeling the all-backlinks workload a scaling probe
+rather than normal UI behavior. Measure cold initialization, warm updates, and
 reopen or reconnect separately. Hold runtime, source package, data, demand, and
 feature flags constant between comparison arms; alternate repeated timing runs
 and report their distribution rather than a single favorable sample.
@@ -311,7 +320,9 @@ board's package does not upgrade those existing children.
    pristine snapshot for a second clean pass.
 7. Before live execution, record target order, link-binds, exact package hashes,
    retained source revisions, expected schema/data changes, acceptance commands,
-   snapshot location, and rollback actions. Coordinate legacy writers and client
+   snapshot location, and rollback actions. The live targets are test Topics
+   instances; anything touching the primary Topics instances is coordinated with
+   Gideon, who runs their live upgrade. Coordinate legacy writers and client
    refresh if a schema/state transition requires them. Source restoration does
    not undo stored-data migration. Whole-space snapshot restoration can discard
    later human edits; specify a recovery window and preservation procedure
@@ -327,12 +338,13 @@ board's package does not upgrade those existing children.
 ## Decisions to collect without blocking implementation
 
 T0–T5 can proceed with synthetic/local data and the conservative semantic
-requirements above. Before T6, obtain the intended board URL(s), authorized
-snapshot acquisition path, and coverage for linked spaces. Before T7, agree on
-the live window, target set, operator, and recovery constraints. Raise a product
-question only if evidence suggests changing visible ordering, duplicate
-behavior, or another preserved contract; keep the existing semantics while it is
-pending.
+requirements above, except T5's hoist check, which needs the stored data of
+deployed generations. Before that check and before T6, obtain the intended board
+URL(s), authorized snapshot acquisition path, and coverage for linked spaces.
+Before T7, agree on the test instances to upgrade, the live window, operator,
+and recovery constraints. Raise a product question only if evidence suggests
+changing visible ordering, duplicate behavior, or another preserved contract;
+keep the existing semantics while it is pending.
 
 Do not include handler laziness, replication changes, or a new naming allocator
 solely to enlarge this performance release. Their independent plans can proceed
