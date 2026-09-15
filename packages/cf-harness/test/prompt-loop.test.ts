@@ -1330,7 +1330,10 @@ describe("CfHarnessPromptLoop research handoff", () => {
         {
           schema: {
             type: "object",
-            properties: { messages: { type: "array" } },
+            properties: {
+              messages: { type: "array" },
+              "did:key:zResearchText": { type: "string" },
+            },
           },
         },
       );
@@ -1379,7 +1382,7 @@ describe("CfHarnessPromptLoop research handoff", () => {
                 content: JSON.stringify({
                   status: "incomplete",
                   summary:
-                    "The handle contract is known, but semantics remain.",
+                    "The handle contract did:key:zResearchText is known, but semantics remain.",
                   recommendation: {
                     kind: "author",
                     rationale: "Author against the described input shape.",
@@ -1465,12 +1468,22 @@ describe("CfHarnessPromptLoop research handoff", () => {
         throw new Error("expected research tool message");
       }
       const modelOutput = JSON.parse(toolMessage.content) as {
-        kit: { status: string; inputs: Array<{ token: string }> };
+        kit: {
+          status: string;
+          summary: string;
+          inputs: Array<{ token: string }>;
+        };
         guidance: string;
         cfc: HarnessResearchCfcProjection;
         researchRecord?: unknown;
       };
       expect(modelOutput.kit.status).toBe("incomplete");
+      expect(modelOutput.kit.summary).toBe(
+        "The handle contract [fabric-id] is known, but semantics remain.",
+      );
+      expect(result.runState.researchRuns?.[0]?.kit.summary).toContain(
+        "did:key:zResearchText",
+      );
       expect(modelOutput.kit.inputs[0]?.token).toBe(minted.token);
       expect(modelOutput.guidance).toContain("Do not present or implement");
       expect(modelOutput.researchRecord).toBeUndefined();
@@ -1533,6 +1546,12 @@ describe("CfHarnessPromptLoop research handoff", () => {
         locations: [{
           artifactPath: outputRef.artifactPath,
           jsonPointer: "/researchRecord",
+        }],
+      }, {
+        rule: "bare-fabric-identifier-scrub",
+        locations: [{
+          artifactPath: outputRef.artifactPath,
+          jsonPointer: "/kit/summary",
         }],
       }]);
     } finally {
@@ -2160,7 +2179,8 @@ describe("CfHarnessPromptLoop opening research", () => {
                 role: "assistant" as const,
                 content: JSON.stringify({
                   status: "incomplete",
-                  summary: "The task needs more exact evidence.",
+                  summary:
+                    "The task did:key:zOpeningText needs more exact evidence.",
                   recommendation: {
                     kind: "focused-api",
                     rationale:
@@ -2223,6 +2243,10 @@ describe("CfHarnessPromptLoop opening research", () => {
       }
       expect(handoff.content).toContain(
         "Host opening research handoff",
+      );
+      expect(handoff.content).not.toContain("did:key:zOpeningText");
+      expect(result.runState.researchRuns?.[0]?.kit.summary).toContain(
+        "did:key:zOpeningText",
       );
       expect(handoff.content).toContain(
         '"status":"incomplete"',
@@ -2290,6 +2314,12 @@ describe("CfHarnessPromptLoop opening research", () => {
           locations: [{
             artifactPath: outputRef.artifactPath,
             jsonPointer: "/researchRecord",
+          }],
+        }, {
+          rule: "bare-fabric-identifier-scrub",
+          locations: [{
+            artifactPath: outputRef.artifactPath,
+            jsonPointer: "/kit/summary",
           }],
         }],
       });
@@ -2464,7 +2494,10 @@ describe("CfHarnessPromptLoop opening research", () => {
         artifactRoot: join(root, "artifacts"),
         runId,
       });
-      const kit = incompleteKit(task);
+      const kit = {
+        ...incompleteKit(task),
+        summary: "Recover did:key:zRecoveredText",
+      };
       const recoverySecret = cfcAtom.resource(
         "RecoveredResearchSecret",
         "resume",
@@ -2570,6 +2603,8 @@ describe("CfHarnessPromptLoop opening research", () => {
       }
       expect(recoveredHandoff.toolResultProvenance?.outputId).toBe(outputId);
       expect(recoveredHandoff.content).toContain(JSON.stringify(cfc));
+      expect(recoveredHandoff.content).not.toContain("did:key:zRecoveredText");
+      expect(result.runState.researchRuns?.[0]?.kit).toEqual(kit);
       expect(recoveredHandoff.content).not.toContain(
         "RECOVERY-PRIVATE-SENTINEL",
       );
@@ -2598,6 +2633,9 @@ describe("CfHarnessPromptLoop opening research", () => {
             artifactPath,
             jsonPointer: "/researchRecord",
           }],
+        }, {
+          rule: "bare-fabric-identifier-scrub",
+          locations: [{ artifactPath, jsonPointer: "/kit/summary" }],
         }],
       }));
     } finally {

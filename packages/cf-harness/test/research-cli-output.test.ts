@@ -26,6 +26,28 @@ describe("research-cli-output", () => {
     })).toBe('assistant -> tools: research(task="Compose a checklist")\n');
   });
 
+  it("prints the question of a persisted `query_docs` call", () => {
+    expect(formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "query-docs-call",
+          type: "function",
+          function: {
+            name: "query_docs",
+            arguments: JSON.stringify({
+              question: "Which cell API preserves defaults?",
+            }),
+          },
+        }],
+      },
+      transcript: [],
+    })).toBe(
+      'assistant -> tools: query_docs(question="Which cell API preserves defaults?")\n',
+    );
+  });
+
   it("prints the number of research calls that returned no kit", () => {
     const output = formatCfHarnessCliResult({
       model: "test-model",

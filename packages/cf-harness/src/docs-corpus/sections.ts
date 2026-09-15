@@ -1,22 +1,16 @@
 /**
- * Splitting Markdown into addressable sections, and choosing the few a
- * question is answered out of.
+ * Splitting Markdown into addressable sections, and ranking the sections that
+ * answer a question.
  *
  * A section rather than a file is the unit here because the whole point of the
  * tool is that a child stops paying for a document to read a rule. Selection is
- * lexical and deterministic: the same question over the same corpus chooses the
+ * lexical and deterministic: the same question over the same corpus ranks the
  * same sections, which is what makes a query reproducible from a run's record.
  */
 
 import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import type { HarnessDocsCorpusSection } from "../contracts/docs-corpus.ts";
-
-/** How many sections an answer is built out of unless a caller says fewer. */
-export const DEFAULT_SELECTED_SECTIONS = 8;
-
-/** Total characters of section text one query may put in front of the model. */
-export const MAX_SELECTED_SECTION_CHARS = 24_000;
 
 /**
  * Words carrying no discrimination between documentation sections. Scoring
@@ -144,11 +138,6 @@ export const scoreSection = (
   return score;
 };
 
-export interface SelectSectionsOptions {
-  maxSections?: number;
-  maxChars?: number;
-}
-
 /** One section and its deterministic lexical score for a query. */
 export interface RankedDocsCorpusSection {
   /** Section found in the corpus. */
@@ -179,36 +168,4 @@ export const rankSections = (
       utf8Compare(left.section.path, right.section.path) ||
       utf8Compare(left.section.heading, right.section.heading)
     );
-};
-
-/**
- * The sections a question is answered out of, best first. Sections scoring
- * zero are left out rather than padding the selection: a question the corpus
- * says nothing about is better answered with nothing than with the first
- * eight documents in path order.
- *
- * Ties break on path and heading under the repository's code-point comparator,
- * so the selection is a function of the corpus and the question alone rather
- * than of the host's default locale.
- */
-export const selectSections = (
-  sections: readonly HarnessDocsCorpusSection[],
-  question: string,
-  options: SelectSectionsOptions = {},
-): readonly HarnessDocsCorpusSection[] => {
-  const maxSections = options.maxSections ?? DEFAULT_SELECTED_SECTIONS;
-  const maxChars = options.maxChars ?? MAX_SELECTED_SECTION_CHARS;
-  const selected: HarnessDocsCorpusSection[] = [];
-  let chars = 0;
-  for (const entry of rankSections(sections, question)) {
-    if (selected.length >= maxSections) {
-      break;
-    }
-    if (chars + entry.section.text.length > maxChars) {
-      continue;
-    }
-    selected.push(entry.section);
-    chars += entry.section.text.length;
-  }
-  return selected;
 };

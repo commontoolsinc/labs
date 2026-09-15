@@ -20,7 +20,7 @@ import {
   resolveHarnessDocsCorpus,
 } from "../src/docs-corpus/corpus.ts";
 import {
-  selectSections,
+  rankSections,
   splitMarkdownSections,
 } from "../src/docs-corpus/sections.ts";
 
@@ -86,49 +86,14 @@ describe("docs-corpus", () => {
     });
   });
 
-  describe("selectSections()", () => {
-    it("skips a section that exceeds the remaining character budget without clipping it", () => {
-      const sections = splitMarkdownSections(
-        document,
-        "# Guide guide\nThe full long guide.\n# Guide\nShort guide.",
-      );
-      expect(selectSections(sections, "guide", { maxChars: 12 })).toEqual([
-        sections[1],
-      ]);
-    });
-
+  describe("rankSections()", () => {
     it("returns nothing when the question contains only stop words", () => {
       const sections = splitMarkdownSections(
         document,
         "# Guide\nUse the guide.",
       );
-      expect(selectSections(sections, "how should you use this")).toEqual([]);
-    });
 
-    const sections = splitMarkdownSections(
-      document,
-      "# Glazing\n\nDip the donut once.\n\n# Frying\n\nGlazing comes later.\n",
-    );
-
-    it("returns the heading match ahead of the body mention", () => {
-      const selected = selectSections(sections, "how do I do glazing?");
-
-      expect(selected.map((section) => section.heading)).toEqual([
-        "Glazing",
-        "Frying",
-      ]);
-    });
-
-    it("returns nothing for a question the corpus shares no term with", () => {
-      expect(selectSections(sections, "sourdough starter hydration")).toEqual(
-        [],
-      );
-    });
-
-    it("returns no more sections than the caller asked for", () => {
-      const selected = selectSections(sections, "glazing", { maxSections: 1 });
-
-      expect(selected).toHaveLength(1);
+      expect(rankSections(sections, "how should you use this")).toEqual([]);
     });
   });
 

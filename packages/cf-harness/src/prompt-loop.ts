@@ -168,10 +168,13 @@ import {
   validateAndSanitizeSubagentReturn,
 } from "./subagent-return.ts";
 import { createResearchRunner } from "./research/runner.ts";
+import { selectResearchContext } from "./research/context.ts";
+import { projectHarnessResearchKitForModel } from "./research/model-projection.ts";
 import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
 import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
 import {
+  bareFabricIdentifierPointers,
   scrubBareFabricIdentifiers,
   scrubBareFabricIdentifiersDeep,
 } from "./fabric-identifier-scrub.ts";
@@ -1002,13 +1005,13 @@ const subagentProfileConfigForRun = (
 /**
  * The child's initial handle table for a delegation: an empty table salted
  * with the child's own run id, carrying a verbatim copy of every parent entry
- * whose token the parent named in the delegation's `goal`, `context`, or an
- * admitted implementation kit carried with the delegation.
+ * whose token the parent named in the delegation's `goal` or `context`, or
+ * declared as an input binding in the selected research kits.
  * Returns `undefined` when the delegation names no resolvable token, leaving
  * the child to mint its first table itself.
  *
- * This is the cross-agent privilege boundary. A token the parent did not
- * write into the delegation is not in the child's table, so the child cannot
+ * This is the cross-agent privilege boundary. A token neither explicitly
+ * delegated nor declared as a selected kit input is absent, so the child cannot
  * resolve it — what a child can reach is exactly what the delegation handed
  * it. Copying entries verbatim keeps the token stable across the hierarchy:
  * minting looks up by `addressKey`, so a child minting a handle for a seeded
@@ -1018,18 +1021,21 @@ const seedSubagentHandleTable = (
   parentTable: HarnessHandleTable | undefined,
   childRunId: string,
   input: DelegateTaskToolInput,
-  additionalTexts: readonly string[] = [],
+  declaredTokens: readonly string[] = [],
 ): HarnessHandleTable | undefined => {
   if (parentTable === undefined || parentTable.entries.length === 0) {
     return undefined;
   }
   const seeded = new Map<string, HarnessHandleEntry>();
-  for (const text of [input.goal, input.context ?? "", ...additionalTexts]) {
-    for (const match of text.matchAll(new RegExp(HANDLE_TOKEN_PATTERN))) {
-      const entry = resolveHandleToken(parentTable, match[0]);
-      if (entry !== undefined && entry.capability === undefined) {
-        seeded.set(entry.token, entry);
-      }
+  const namedTokens = [input.goal, input.context ?? ""].flatMap((text) =>
+    [...text.matchAll(new RegExp(HANDLE_TOKEN_PATTERN))].map((match) =>
+      match[0]
+    )
+  );
+  for (const token of [...namedTokens, ...declaredTokens]) {
+    const entry = resolveHandleToken(parentTable, token);
+    if (entry !== undefined && entry.capability === undefined) {
+      seeded.set(entry.token, entry);
     }
   }
   if (seeded.size === 0) {
@@ -1491,7 +1497,11 @@ const PATTERN_REFS_CHILD_CONTEXT = (
     ]),
   ].join("\n");
 
-/** Admitted parent research carried intact into a delegated implementation. */
+/**
+ * Bounded parent research projected into a delegated implementation. The child
+ * retains raw kits in run state under the same research ids; it has no research
+ * tool call or tool-output artifact to own an omission record for this context.
+ */
 const RESEARCH_KITS_CHILD_CONTEXT = (
   runs: readonly HarnessResearchRunSummary[],
 ): string =>
@@ -1501,7 +1511,7 @@ const RESEARCH_KITS_CHILD_CONTEXT = (
     JSON.stringify(
       runs.map((run) => ({
         researchRunId: run.researchRunId,
-        kit: run.kit,
+        kit: projectHarnessResearchKitForModel(run.kit).kit,
       })),
       null,
       2,
@@ -1938,39 +1948,6 @@ const presentFieldPointers = (
   fields.filter((field) => Object.hasOwn(output, field)).map((field) =>
     `/${field}`
   );
-
-const escapeJsonPointerSegment = (segment: string): string =>
-  segment.replaceAll("~", "~0").replaceAll("/", "~1");
-
-/** Positions whose strings or member names carry a bare fabric identifier. */
-const bareFabricIdentifierPointers = (
-  value: unknown,
-  pointer = "",
-): string[] => {
-  if (typeof value === "string") {
-    return scrubBareFabricIdentifiers(value) === value ? [] : [pointer];
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap((entry, index) =>
-      bareFabricIdentifierPointers(entry, `${pointer}/${index}`)
-    );
-  }
-  if (!isObjectNotArray(value)) {
-    return [];
-  }
-  return Object.entries(value).flatMap(([key, entry]) => {
-    const childPointer = `${pointer}/${escapeJsonPointerSegment(key)}`;
-    if (scrubBareFabricIdentifiers(key) !== key) {
-      // A JSON Pointer spelling the key would itself copy the identifier into
-      // the omission record. Point at the containing object; the reader
-      // applies the same deep scrub before displaying it.
-      return [pointer];
-    }
-    return [
-      ...bareFabricIdentifierPointers(entry, childPointer),
-    ];
-  });
-};
 
 const truncationPointers = (output: unknown): string[] => {
   if (!isObjectNotArray(output)) {
@@ -3095,7 +3072,31 @@ export class CfHarnessPromptLoop {
     const artifactEvidence = outputRef === undefined
       ? { omissionRules: [] }
       : await this.#recoveryResearchArtifactEvidence(outputRef, researchRun);
-    const omissionRules = artifactEvidence.omissionRules;
+    const projection = researchRun === undefined
+      ? undefined
+      : projectHarnessResearchKitForModel(researchRun.kit);
+    // A persisted handoff is recorded history. Only a reconstruction or an
+    // already projected handoff can claim the current kit reductions.
+    const projectedHandoff = projection !== undefined &&
+      (marker.handoffMessage === undefined ||
+        marker.handoffMessage.includes(JSON.stringify(projection.kit)));
+    const recoveredOmissionRules = [
+      ...artifactEvidence.omissionRules,
+      ...(projectedHandoff && outputRef !== undefined
+        ? omissionRules(
+          createHarnessTranscriptOmissionRuleRecord(
+            "artifact-only",
+            outputRef,
+            projection.artifactOnlyPointers,
+          ),
+          createHarnessTranscriptOmissionRuleRecord(
+            "bare-fabric-identifier-scrub",
+            outputRef,
+            projection.scrubbedPointers,
+          ),
+        )
+        : []),
+    ];
     if (
       outputRef !== undefined && artifactEvidence.cfc !== undefined &&
       !runState.cfcModelContext?.observations.some((observation) =>
@@ -3120,12 +3121,12 @@ export class CfHarnessPromptLoop {
           marker,
           marker.handoffMessage,
           outputRef,
-          omissionRules,
+          recoveredOmissionRules,
         ),
       };
     }
     if (outputRef !== undefined) {
-      const result = researchRun === undefined
+      const result = projection === undefined
         ? JSON.stringify({
           outputId: outputRef.outputId,
           status: "error",
@@ -3138,9 +3139,9 @@ export class CfHarnessPromptLoop {
         : JSON.stringify({
           outputId: outputRef.outputId,
           status: "ok",
-          kit: researchRun.kit,
-          guidance: researchKitGuidance(researchRun.kit),
-          cfc: researchRun.cfc,
+          kit: projection.kit,
+          guidance: researchKitGuidance(projection.kit),
+          cfc: researchRun?.cfc,
         });
       const message = this.#openingResearchHandoffMessage(
         marker,
@@ -3158,7 +3159,7 @@ export class CfHarnessPromptLoop {
           marker,
           message,
           outputRef,
-          omissionRules,
+          recoveredOmissionRules,
         ),
       };
     }
@@ -4845,12 +4846,18 @@ export class CfHarnessPromptLoop {
     }
     if (toolId === "research") {
       let publicOutput: unknown = output;
+      const projection = isResearchToolSuccessOutput(output)
+        ? projectHarnessResearchKitForModel(output.kit)
+        : undefined;
       if (isObjectNotArray(output)) {
         const {
           rawCauseMessage: _rawCauseMessage,
           ...visibleOutput
         } = output;
-        publicOutput = visibleOutput;
+        publicOutput = projection === undefined ? visibleOutput : {
+          ...visibleOutput,
+          kit: projection.kit,
+        };
       }
       const observation = researchModelContextObservation(
         output,
@@ -4866,12 +4873,20 @@ export class CfHarnessPromptLoop {
           createHarnessTranscriptOmissionRuleRecord(
             "artifact-only",
             resultRef,
-            isObjectNotArray(output)
-              ? presentFieldPointers(output, [
-                "researchRecord",
-                "rawCauseMessage",
-              ])
-              : [],
+            [
+              ...(isObjectNotArray(output)
+                ? presentFieldPointers(output, [
+                  "researchRecord",
+                  "rawCauseMessage",
+                ])
+                : []),
+              ...(projection?.artifactOnlyPointers ?? []),
+            ],
+          ),
+          createHarnessTranscriptOmissionRuleRecord(
+            "bare-fabric-identifier-scrub",
+            resultRef,
+            projection?.scrubbedPointers ?? [],
           ),
         ),
       };
@@ -5065,7 +5080,9 @@ export class CfHarnessPromptLoop {
     const maxModelTurns = delegateInput.maxModelTurns ??
       profileConfig.maxModelTurns;
     const parentRunState = this.engine.getRunState();
-    const inheritedResearchRuns = parentRunState.researchRuns ?? [];
+    const inheritedResearchRuns = selectResearchContext(
+      parentRunState.researchRuns ?? [],
+    );
     const modelProvider = parentRunState.modelProvider ??
       this.engine.config.modelProvider;
     const subagentSequence = nextSubagentSequence(parentRunState);
@@ -5210,7 +5227,9 @@ export class CfHarnessPromptLoop {
       this.engine.handleTable,
       childRunId,
       delegateInput,
-      inheritedResearchRuns.map((run) => JSON.stringify(run.kit)),
+      inheritedResearchRuns.flatMap((run) =>
+        run.kit.inputs.map((input) => input.token)
+      ),
     );
     if (seededHandleTable !== undefined) {
       await childEngine.recordHandleTable(seededHandleTable);

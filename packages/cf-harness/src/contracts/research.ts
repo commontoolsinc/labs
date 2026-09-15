@@ -96,12 +96,6 @@ export interface HarnessResearchPatternRecord extends TrustedPatternRecord {
   /** Declared result schema returned by the index. */
   resultSchema?: JSONSchema;
 
-  /** Identity that published the record. */
-  ownerDid?: string;
-
-  /** Time the index recorded the pattern. */
-  createdAt?: string;
-
   /** Program entry path, when source inspection succeeded. */
   main?: string;
 
@@ -199,20 +193,34 @@ export interface HarnessResearchSyntaxCheck {
   detail?: string;
 }
 
-/** Practical invocation or complete source example for the recommendation. */
-export interface HarnessResearchExample {
-  /** Whether the content is tool input JSON or authored pattern source. */
-  kind: "run-pattern-input" | "pattern-source";
-
+/** Complete example content and the evidence supporting its illustrated APIs. */
+interface ResearchExampleContent {
   /** Complete example, never a clipped prefix. */
   content: string;
 
   /** Exact opened reads supporting every API used, comments included. */
   sourceIds: readonly string[];
-
-  /** Host parser result, present for a pattern-source example. */
-  syntax?: HarnessResearchSyntaxCheck;
 }
+
+/** Practical invocation or parser-checked source for the recommendation. */
+export type HarnessResearchExample =
+  & ResearchExampleContent
+  & (
+    | {
+      /** JSON input for the pattern execution tool. */
+      kind: "run-pattern-input";
+
+      /** Syntax diagnostics apply only to TypeScript/TSX examples. */
+      syntax?: never;
+    }
+    | {
+      /** Authored TypeScript/TSX example. */
+      kind: "pattern-source";
+
+      /** Host parser result for the complete source. */
+      syntax: HarnessResearchSyntaxCheck;
+    }
+  );
 
 /** Structured implementation guidance returned by the `research` tool. */
 export interface HarnessResearchKit {

@@ -172,7 +172,7 @@ Individual runs receive only their configured subset; `web_fetch` and
 `run_skill_script` are not in the ordinary default surface. Optional tools are
 gated on the backing a run can supply — a fabric session for `run_pattern`,
 `assign_slug`, and `acquire_skill`, the pattern index for `search_patterns` and
-`record_feedback`, configured skills.sh discovery for `search_skills`, and a a
+`record_feedback`, configured skills.sh discovery for `search_skills`, and a
 resolved documentation corpus or pattern index for `research`, and explicit host
 Loom configuration for the three Loom tools — and a tool the run cannot back is
 absent from the surface rather than present and failing, so an explicit

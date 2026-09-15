@@ -11,6 +11,7 @@
  */
 
 import type { JSONSchema } from "@commonfabric/api";
+import { TRUSTED_PATTERN_PROPERTIES } from "../contracts/trusted-pattern-schema.ts";
 import { schemaToTypeString } from "@commonfabric/runner";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { TrustedPatternRecord } from "../contracts/trusted-pattern.ts";
@@ -153,37 +154,7 @@ export const searchPatternsToolDescriptor: HarnessToolDescriptor = {
           type: "array",
           items: {
             type: "object",
-            properties: {
-              patternId: { type: "string" },
-              description: { type: "string" },
-              hashtags: { type: "array", items: { type: "string" } },
-              signals: {
-                type: "object",
-                properties: {
-                  uses: { type: "number" },
-                  score: { type: "number" },
-                },
-                required: ["uses", "score"],
-                additionalProperties: false,
-              },
-              kind: {
-                type: "string",
-                enum: ["part", "app"],
-                description:
-                  "Whether the published argument schema classifies the pattern as a reusable part or whole app.",
-              },
-              quality: {
-                type: "string",
-                enum: ["penalized", "unproven", "proven"],
-                description:
-                  "Evidence tier from recorded outcomes: penalized is net-negative, unproven has no recorded success, and proven has at least one recorded success or positive rating without a net-negative score.",
-              },
-              matchedTerms: { type: "number" },
-              queryTerms: { type: "number" },
-              importHint: { type: "string" },
-              argumentType: { type: "string" },
-              resultType: { type: "string" },
-            },
+            properties: TRUSTED_PATTERN_PROPERTIES,
             required: [
               "patternId",
               "description",

@@ -24,8 +24,8 @@
 
 import { parseArgs } from "@std/cli/parse-args";
 import { basename, join } from "@std/path";
-import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import type { HarnessRunReport } from "../src/contracts/run-report.ts";
+import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import type { HarnessResearchRecord } from "../src/research/runner.ts";
 import { isCollapsedRunPatternSource } from "../src/run-pattern-source-collapse.ts";
 
@@ -981,6 +981,75 @@ const readJsonObject = async (
   }
 };
 
+/** Research activity normalized to only the fields measurement consumes. */
+type ResearchActivityReading =
+  & Pick<MeasuredResearch, "origin" | "outputId" | "wallMs">
+  & {
+    /** Path of the raw result artifact, when the activity retained one. */
+    artifactPath?: string;
+  };
+
+/**
+ * Reads and normalizes research activity. Other fields may be absent from
+ * historical reports, but no row can be dropped merely because its tool
+ * identity is unreadable.
+ */
+const readResearchActivity = (
+  value: unknown,
+): TranscriptJson<readonly ResearchActivityReading[]> => {
+  if (!Array.isArray(value)) {
+    return unread("`run-report.json` has no activity list");
+  }
+  const research: ResearchActivityReading[] = [];
+  for (const [index, activity] of value.entries()) {
+    if (
+      typeof activity !== "object" || activity === null ||
+      Array.isArray(activity) || typeof activity.toolId !== "string" ||
+      activity.toolId.length === 0
+    ) {
+      return unread(
+        `\`run-report.json\` has malformed \`.toolActivity[${index}]\``,
+      );
+    }
+    if (activity.toolId !== "research") continue;
+    if (
+      typeof activity.toolCallId !== "string" ||
+      activity.toolCallId.length === 0 ||
+      typeof activity.startedAt !== "string" ||
+      !Number.isFinite(Date.parse(activity.startedAt)) ||
+      typeof activity.endedAt !== "string" ||
+      !Number.isFinite(Date.parse(activity.endedAt)) ||
+      (activity.origin !== undefined && activity.origin !== "model" &&
+        activity.origin !== "opening-research")
+    ) {
+      return unread(
+        `\`run-report.json\` has malformed \`.toolActivity[${index}]\``,
+      );
+    }
+    const resultRef = activity.resultRef;
+    if (
+      resultRef !== undefined &&
+      (typeof resultRef !== "object" || resultRef === null ||
+        Array.isArray(resultRef) || typeof resultRef.outputId !== "string" ||
+        (resultRef.artifactPath !== undefined &&
+          typeof resultRef.artifactPath !== "string"))
+    ) {
+      return unread(
+        `\`run-report.json\` has malformed \`.toolActivity[${index}]\``,
+      );
+    }
+    research.push({
+      outputId: resultRef?.outputId ?? activity.toolCallId,
+      origin: activity.origin ?? "model",
+      wallMs: Date.parse(activity.endedAt) - Date.parse(activity.startedAt),
+      ...(resultRef?.artifactPath !== undefined
+        ? { artifactPath: resultRef.artifactPath }
+        : {}),
+    });
+  }
+  return read(research);
+};
+
 /** Adds host opening calls and private work without counting inherited kits. */
 const measureResearchArtifacts = async (
   runRoot: string,
@@ -995,10 +1064,7 @@ const measureResearchArtifacts = async (
   }
   const parsed = parseJson<HarnessRunReport>(reportText, "run-report.json");
   if (parsed.kind === "unread") return { ...measurement, research: parsed };
-  if (
-    parsed.value?.runId !== measurement.runId ||
-    !Array.isArray(parsed.value.toolActivity)
-  ) {
+  if (parsed.value?.runId !== measurement.runId) {
     return {
       ...measurement,
       research: unread(
@@ -1006,18 +1072,20 @@ const measureResearchArtifacts = async (
       ),
     };
   }
-  const calls = parsed.value.toolActivity.filter((call) =>
-    call.toolId === "research"
-  );
+  const activity = readResearchActivity(parsed.value.toolActivity);
+  if (activity.kind === "unread") {
+    return { ...measurement, research: activity };
+  }
+  const calls = activity.value;
   if (calls.length === 0) return measurement;
   const research: MeasuredResearch[] = [];
   const toolOutcomes = { ...measurement.toolOutcomes };
   for (const call of calls) {
-    const outputId = call.resultRef?.outputId ?? call.toolCallId;
-    const artifact = call.resultRef?.artifactPath === undefined
+    const outputId = call.outputId;
+    const artifact = call.artifactPath === undefined
       ? unread<Record<string, unknown>>("research has no output artifact")
       : await readJsonObject(
-        join(runRoot, "tool-outputs", basename(call.resultRef.artifactPath)),
+        join(runRoot, "tool-outputs", basename(call.artifactPath)),
       );
     const matched =
       artifact.kind === "read" && artifact.value.outputId !== outputId
@@ -1036,8 +1104,8 @@ const measureResearchArtifacts = async (
       : undefined;
     research.push({
       outputId,
-      origin: call.origin ?? "model",
-      wallMs: Date.parse(call.endedAt) - Date.parse(call.startedAt),
+      origin: call.origin,
+      wallMs: call.wallMs,
       work: record?.researchRunId === outputId &&
           record.budgets !== undefined && Array.isArray(record.sourceReads) &&
           [

@@ -5,6 +5,10 @@
  */
 
 import type { JSONSchema } from "@commonfabric/api";
+import {
+  RESEARCH_CFC_SCHEMA,
+  RESEARCH_KIT_SCHEMA,
+} from "../contracts/research-schema.ts";
 
 import {
   HARNESS_RESEARCH_RUN_TYPE,
@@ -13,6 +17,7 @@ import {
   type HarnessResearchRunSummary,
 } from "../contracts/research.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import { errorMessage } from "../error-message.ts";
 import {
   createHarnessResearchCfcProjection,
   HarnessResearchError,
@@ -77,58 +82,6 @@ export type ResearchToolOutput =
   | ResearchToolSuccessOutput
   | ResearchToolErrorOutput;
 
-const researchCfcSchema: JSONSchema = {
-  type: "object",
-  properties: {
-    version: { type: "integer", enum: [1] },
-    sourceLabel: {
-      type: "object",
-      properties: {
-        confidentiality: { type: "array", items: {} },
-        integrity: { type: "array", items: {} },
-      },
-      additionalProperties: false,
-    },
-    outputLabel: {
-      type: "object",
-      properties: {
-        confidentiality: { type: "array", items: {} },
-        integrity: { type: "array", items: {} },
-      },
-      additionalProperties: false,
-    },
-    coverage: { type: "string", enum: ["complete", "incomplete"] },
-    missingLabels: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          source: {
-            type: "string",
-            enum: [
-              "pattern-index-metadata",
-              "pattern-index-source",
-              "handle-description",
-              "prior-research",
-            ],
-          },
-          detail: { type: "string" },
-        },
-        required: ["source", "detail"],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: [
-    "version",
-    "sourceLabel",
-    "outputLabel",
-    "coverage",
-    "missingLabels",
-  ],
-  additionalProperties: false,
-};
-
 /** Public model contract of the Common Fabric research capability. */
 export const researchToolDescriptor: HarnessToolDescriptor = {
   toolId: "research",
@@ -156,98 +109,10 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
       properties: {
         outputId: { type: "string" },
         status: { type: "string", enum: ["ok"] },
-        kit: {
-          type: "object",
-          properties: {
-            status: { type: "string", enum: ["complete", "incomplete"] },
-            task: { type: "string" },
-            summary: { type: "string" },
-            recommendation: {
-              type: "object",
-              properties: {
-                kind: {
-                  type: "string",
-                  enum: [
-                    "direct-run",
-                    "compose",
-                    "author",
-                    "focused-api",
-                  ],
-                },
-                rationale: { type: "string" },
-              },
-              required: ["kind", "rationale"],
-              additionalProperties: false,
-            },
-            inputs: { type: "array", items: { type: "object" } },
-            patterns: { type: "array", items: { type: "object" } },
-            steps: { type: "array", items: { type: "string" } },
-            example: {
-              type: "object",
-              properties: {
-                kind: {
-                  type: "string",
-                  enum: ["run-pattern-input", "pattern-source"],
-                },
-                content: { type: "string" },
-                sourceIds: {
-                  type: "array",
-                  items: { type: "string" },
-                },
-                syntax: {
-                  type: "object",
-                  properties: {
-                    status: {
-                      type: "string",
-                      enum: ["valid", "invalid", "unavailable"],
-                    },
-                    scope: { type: "string", enum: ["syntax-only"] },
-                    diagnostics: {
-                      type: "array",
-                      items: {
-                        type: "object",
-                        properties: {
-                          code: { type: "number" },
-                          message: { type: "string" },
-                          line: { type: "number" },
-                          column: { type: "number" },
-                        },
-                        required: ["code", "message"],
-                        additionalProperties: false,
-                      },
-                    },
-                    detail: { type: "string" },
-                  },
-                  required: ["status", "scope", "diagnostics"],
-                  additionalProperties: false,
-                },
-              },
-              required: ["kind", "content", "sourceIds"],
-              additionalProperties: false,
-            },
-            rules: { type: "array", items: { type: "object" } },
-            verification: { type: "array", items: { type: "string" } },
-            sources: { type: "array", items: { type: "object" } },
-            missing: { type: "array", items: { type: "string" } },
-          },
-          required: [
-            "status",
-            "task",
-            "summary",
-            "recommendation",
-            "inputs",
-            "patterns",
-            "steps",
-            "rules",
-            "verification",
-            "sources",
-            "missing",
-          ],
-          additionalProperties: false,
-        },
+        kit: RESEARCH_KIT_SCHEMA,
         researchRecord: { type: "object" },
         guidance: { type: "string" },
-        cfc: researchCfcSchema,
+        cfc: RESEARCH_CFC_SCHEMA,
       },
       required: [
         "outputId",
@@ -264,7 +129,7 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
         outputId: { type: "string" },
         status: { type: "string", enum: ["error"] },
         message: { type: "string" },
-        cfc: researchCfcSchema,
+        cfc: RESEARCH_CFC_SCHEMA,
         rawCauseMessage: { type: "string" },
         researchRecord: { type: "object" },
       },
@@ -274,9 +139,6 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
   } satisfies JSONSchema,
   tags: ["fabric", "docs", "skills", "patterns", "research"],
 };
-
-const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
 
 /** Stable model-facing explanation for an internal research failure. */
 const RESEARCH_FAILURE_MESSAGE =
@@ -289,7 +151,7 @@ export const researchKitGuidance = (kit: HarnessResearchKit): string =>
     : kit.example?.kind === "pattern-source" &&
         kit.example.syntax?.status === "invalid"
     ? "This kit retains its cited evidence and complete source, but the source has the exact TypeScript syntax errors listed under kit.example.syntax.diagnostics. Correct those errors locally without repeating research, then resolve any other item under kit.missing before presenting or implementing the kit as complete. Syntax acceptance alone will not establish its imports, types, compilation, or runtime behavior."
-    : "This kit is incomplete. Do not present or implement it as complete; resolve every item under kit.missing with focused research or report the unresolved limitation.";
+    : "This kit is incomplete. Do not present or implement it as complete. Correct local recipe errors directly; use focused research for missing evidence and report any unresolved limitation.";
 
 /** Narrows a raw tool result to a successful research response. */
 export const isResearchToolSuccessOutput = (

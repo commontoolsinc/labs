@@ -14,7 +14,7 @@ import {
 import { type Cell, readResultSchemaMeta } from "@commonfabric/runner";
 import {
   type CfcLabelView,
-  cfcLabelViewForCellFailClosed,
+  cfcLabelViewForCellFailClosedWithStatus,
   type IFCLabel,
 } from "@commonfabric/runner/cfc";
 import { mergeLabel } from "@commonfabric/runner/cfc/label-view-core";
@@ -717,7 +717,7 @@ interface DescribedReferent {
   labels?: DescribeHandleLabel[];
   database?: DescribeHandleDatabase;
   cfcLabel?: IFCLabel;
-  cfcLabelAvailable?: true;
+  cfcLabelAvailable?: boolean;
 }
 
 /**
@@ -762,9 +762,11 @@ const describeInFabric = async (
     // shape already needed.
     const referent =
       (link.path.length === 0 ? root : root.key(...link.path)) as Cell<unknown>;
-    const labelView = cfcLabelViewForCellFailClosed(referent);
+    const { view: labelView, readFailed } =
+      cfcLabelViewForCellFailClosedWithStatus(referent);
     const labels = describedLabels(labelView);
     const cfcLabel = referentLabel(labelView);
+    const cfcLabelAvailable = !readFailed;
     const documentSchema = readResultSchemaMeta(root);
     const declared = await declaredSchema(
       root,
@@ -777,14 +779,14 @@ const describeInFabric = async (
         labels,
         schema: declared,
         cfcLabel,
-        cfcLabelAvailable: true,
+        cfcLabelAvailable,
       };
     }
     // Nothing was declared, so the referent's own value is the only place a
     // contract can still be stated, and a database handle states one there.
     const { database, ref: db } = databaseOf(referent);
     if (database === undefined || db === undefined) {
-      return { labels, cfcLabel, cfcLabelAvailable: true };
+      return { labels, cfcLabel, cfcLabelAvailable };
     }
     // The counts are read after the contract rather than with it, so a
     // database that discloses its tables still discloses them when nothing
@@ -798,7 +800,7 @@ const describeInFabric = async (
       labels,
       database: fill === undefined ? database : { ...database, fill },
       cfcLabel,
-      cfcLabelAvailable: true,
+      cfcLabelAvailable,
     };
   } catch {
     return {};
@@ -888,12 +890,13 @@ const invokeDescribeHandle = async (
         ? { database: described.database }
         : {}),
     },
-    ...(described.cfcLabelAvailable === true
+    ...(described.cfcLabel !== undefined ||
+        described.cfcLabelAvailable === true
       ? {
         cfcLabel: structuredClone(described.cfcLabel ?? {}),
-        cfcLabelAvailable: true,
       }
-      : { cfcLabelAvailable: false }),
+      : {}),
+    cfcLabelAvailable: described.cfcLabelAvailable === true,
   };
 };
 

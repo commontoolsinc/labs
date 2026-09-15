@@ -131,6 +131,128 @@ describe("measure-runs", () => {
     }
   });
 
+  it("returns unread research for malformed activity rows", async () => {
+    const root = await Deno.makeTempDir();
+    try {
+      await Deno.mkdir(`${root}/root`);
+      await Deno.writeTextFile(`${root}/root/transcript.json`, "[]");
+      const measurements: RunMeasurement[] = [];
+      for (
+        const row of [
+          null,
+          {},
+          { toolId: "research", toolCallId: "research-call" },
+          {
+            toolId: "research",
+            toolCallId: "research-call",
+            startedAt: "2026-09-15T00:00:00.000Z",
+            endedAt: "2026-09-15T00:00:01.000Z",
+            resultRef: {
+              outputId: "research-output",
+              artifactPath: 1,
+            },
+          },
+        ]
+      ) {
+        await Deno.writeTextFile(
+          `${root}/root/run-report.json`,
+          JSON.stringify({ runId: "root", toolActivity: [row] }),
+        );
+        measurements.push(await measureRun(root, "root", "parent"));
+      }
+
+      expect(measurements.map((measurement) => measurement.research)).toEqual([
+        {
+          kind: "unread",
+          reason: "`run-report.json` has malformed `.toolActivity[0]`",
+        },
+        {
+          kind: "unread",
+          reason: "`run-report.json` has malformed `.toolActivity[0]`",
+        },
+        {
+          kind: "unread",
+          reason: "`run-report.json` has malformed `.toolActivity[0]`",
+        },
+        {
+          kind: "unread",
+          reason: "`run-report.json` has malformed `.toolActivity[0]`",
+        },
+      ]);
+      expect(measurements.map((measurement) => renderRunLines(measurement)))
+        .toEqual([
+          [
+            "  [parent] research NOT READ (`run-report.json` has malformed `.toolActivity[0]`)",
+          ],
+          [
+            "  [parent] research NOT READ (`run-report.json` has malformed `.toolActivity[0]`)",
+          ],
+          [
+            "  [parent] research NOT READ (`run-report.json` has malformed `.toolActivity[0]`)",
+          ],
+          [
+            "  [parent] research NOT READ (`run-report.json` has malformed `.toolActivity[0]`)",
+          ],
+        ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("distinguishes a missing activity list, unrelated activity, and a research call without a result reference", async () => {
+    const root = await Deno.makeTempDir();
+    try {
+      await Deno.mkdir(`${root}/root`);
+      await Deno.writeTextFile(`${root}/root/transcript.json`, "[]");
+      await Deno.writeTextFile(
+        `${root}/root/run-report.json`,
+        JSON.stringify({ runId: "root" }),
+      );
+      const missing = await measureRun(root, "root", "parent");
+      await Deno.writeTextFile(
+        `${root}/root/run-report.json`,
+        JSON.stringify({
+          runId: "root",
+          toolActivity: [{ toolId: "bash" }],
+        }),
+      );
+      const unrelated = await measureRun(root, "root", "parent");
+      await Deno.writeTextFile(
+        `${root}/root/run-report.json`,
+        JSON.stringify({
+          runId: "root",
+          toolActivity: [{
+            toolId: "research",
+            toolCallId: "research-call",
+            startedAt: "2026-09-15T00:00:00.000Z",
+            endedAt: "2026-09-15T00:00:01.000Z",
+          }],
+        }),
+      );
+      const withoutResult = await measureRun(root, "root", "parent");
+
+      expect(missing.research).toEqual({
+        kind: "unread",
+        reason: "`run-report.json` has no activity list",
+      });
+      expect(unrelated).not.toHaveProperty("research");
+      expect(withoutResult.research).toEqual({
+        kind: "read",
+        value: [{
+          outputId: "research-call",
+          origin: "model",
+          wallMs: 1_000,
+          work: {
+            kind: "unread",
+            reason: "research has no output artifact",
+          },
+        }],
+      });
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
   it("preserves a research activity whose output artifact is missing", async () => {
     const root = await Deno.makeTempDir();
     try {

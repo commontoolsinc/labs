@@ -1283,6 +1283,12 @@ the narrowly identified compiler case unsupported by the light identity path is
 recorded as deferred rather than misreported as verified. An identity mismatch
 is always refused.
 
+Each exact documentation, source-file, or metadata read is limited to 8,000
+characters. Metadata uses the rendered argument and result types; redundant raw
+schemas remain in the retained pattern record. Metadata larger than the limit is
+refused before its pattern is admitted; documentation and source-file reads
+support continuation windows.
+
 Documentation reads return both the exact `section-N` selector used to reopen a
 section and the distinct `documentation:*` source id used to cite that read.
 Before tool-free synthesis the private loop receives a concise catalog of the
@@ -1297,13 +1303,17 @@ run, composition, authoring, or a focused API answer, and carries admitted
 patterns, described external-handle bindings, ordered steps, rules,
 verification, exact citations, and explicit blockers. Direct-run and composition
 kits require verified published source and a complete invocation or source
-recipe. Authoring kits require complete source. Focused API answers may consist
-only of cited rules. `inputs` contains only existing general handles that the
-loop successfully inspected; types, defaults, literals, and new local state
-belong in the recipe, and `[]` is correct when no external data is required.
-Every API shown by an example, comments included, must cite an exact opened
-read. Routine reversible choices are stated as assumptions; only real blockers
-belong in `missing`.
+recipe. A direct-run example must parse as JSON matching the shared
+`run_pattern` input schema, name a selected inspected pattern, and omit inline
+source. An invalid invocation remains in an incomplete kit for local correction.
+Authoring kits require complete source. Focused API answers may consist only of
+cited rules. `inputs` contains only existing general handles that the loop
+successfully inspected; types, defaults, literals, and new local state belong in
+the recipe, and `[]` is correct when no external data is required. Every API
+shown by an example, comments included, must cite an exact opened read. Every
+source cited by a rule or example appears in the kit's source catalog, including
+sources not repeated in the model's top-level citation list. Routine reversible
+choices are stated as assumptions; only real blockers belong in `missing`.
 
 A complete `pattern-source` example also receives a host-side TypeScript parser
 check. The kit retains the complete source, citations, and exact diagnostic
@@ -1320,8 +1330,10 @@ handle descriptions, and inherited research output. `outputLabel` carries only
 that join's confidentiality into later model context; retained integrity is
 source provenance, not an assertion that the model-authored kit has
 operator-authored authority. Opening handoffs and ordinary research results add
-the output label to model context, delegated children inherit it with the kit,
-and resume reconstructs it from the durable result or summary.
+the output label to model context, and resume reconstructs it from the durable
+result or summary. Delegation always carries the parent's accumulated model
+context label, including when no research kit is selected, so omitting research
+context cannot remove confidentiality acquired earlier in the conversation.
 
 `cfc.coverage` describes metadata availability, independently of whether the kit
 is complete. Every influencing surface that exposes no label is retained in
@@ -1330,7 +1342,9 @@ observation, a handle whose exact label metadata was unavailable, and a legacy
 prior-research summary with no CFC projection. The current pattern-index API
 exposes neither metadata labels nor source labels, and publication does not make
 its private indexed source public, so pattern-index research correctly reports
-incomplete CFC coverage. No missing label is replaced with a clean label.
+incomplete CFC coverage. No missing label is replaced with a clean label. A
+failed handle-label read retains the runtime's fail-closed restriction while
+reporting availability as false. One acquisition supplies both results.
 
 The model-facing tool result contains the admitted kit and explicit guidance not
 to treat an incomplete kit as complete. The full private transcript, exact read
@@ -1340,14 +1354,32 @@ omission record points to that field. Provider errors, cancellation, budget
 exhaustion, and malformed synthesis retain the same partial record and increment
 `researchFailures`. Private token use is included in total run usage.
 
-Successful kits and their host-confirmed records are retained in run state and
-passed intact to a delegated child. Handles bound by a kit are seeded into that
-child even when its goal does not repeat their tokens. A pattern author starts
-from an inherited kit and uses `research` only for unresolved follow-ups rather
-than repeating the initial pass. Locally authored source artifacts record the
-research run ids that shaped them. The current pattern-index publication API has
-no research-association field, so that provenance remains local instead of being
-sent as an ignored index property.
+Admission, retained evidence, and model projection have distinct owners.
+`research/admission.ts` checks recipes and citations using the shared tool
+contracts; `research/runner.ts` owns private search, reads, budgets, and
+retained failure evidence. `research/model-projection.ts` projects a kit at
+ordinary tool handoff, opening-handoff reconstruction, and child context. It
+uses the existing identifier scrub for free text, preserves confirmed import
+identities and exact source/CFC records, and leaves unused raw argument/result
+schemas in artifacts. The scrub produces its changed positions in the same walk.
+The omission writer and auditor share one provenance reader for tool and
+host-supplied results. Recorded handoff history stays authoritative during
+replay; reconstructed handoffs use the current projection. Pattern-search result
+rendering remains a separate surface from the derived research kit.
+
+Successful kits and their host-confirmed records remain intact in durable run
+state. Private follow-ups and delegated children receive the latest
+implementation kit and the two latest focused API answers in chronological
+order, with whole examples. A child retains those selected raw summaries in its
+own run state and receives projected kits in context, joined by research run id.
+It has no research tool call to own a separate omission entry for inherited
+context. Only handles in the selected kits' `inputs[].token` bindings transfer
+automatically; mentions in prose, blockers, or superseded kits transfer nothing.
+A pattern author starts from an inherited kit and uses `research` only for
+unresolved follow-ups rather than repeating the initial pass. Locally authored
+source artifacts record the research run ids that shaped them. The current
+pattern-index publication API has no research-association field, so that
+provenance remains local instead of being sent as an ignored index property.
 
 `query_docs` remains accepted only as a CLI or persisted-policy input alias and
 is normalized to `research` at the use boundary. Existing transcript and run

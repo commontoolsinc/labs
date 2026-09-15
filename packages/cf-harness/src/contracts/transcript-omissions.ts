@@ -199,7 +199,8 @@ const omissionsOf = (
 ): readonly HarnessTranscriptOmissionRuleRecord[] | undefined =>
   (message as AnnotatedTranscriptMessage)[transcriptMessageOmissions];
 
-const resultProvenanceOf = (
+/** Returns the tool-output identity carried by an ordinary or host result. */
+export const resultProvenanceOf = (
   message: HarnessTranscriptMessage,
 ): { toolCallId: string; toolId: string; outputId: string } | undefined => {
   if (message.role === "tool" && message.resultRef !== undefined) {

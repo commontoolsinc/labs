@@ -119,8 +119,8 @@ const linkedValueMetadataForCell = (
 /**
  * Acquire a cell's display label view AND report whether a metadata read
  * errored while doing so. `cfcLabelViewForCell` drops the flag (the common
- * consumers treat a missing view as blocked); the LLM-observation path consults
- * it via `cfcLabelViewForCellFailClosed`.
+ * consumers treat a missing view as blocked); fail-closed consumers retain it
+ * through `cfcLabelViewForCellFailClosedWithStatus`.
  */
 export const cfcLabelViewForCellWithStatus = (
   cell: unknown,
@@ -256,29 +256,38 @@ export const cfcLabelViewForResolvedCellWithStatus = (
 };
 
 /**
- * Fail-closed label acquisition for the LLM-observation egress path (audit 22).
- * Identical to `cfcLabelViewForCell` EXCEPT that when a metadata read errored,
- * the returned view is tainted at the root with `CFC_LABEL_READ_FAILED_ATOM`, so
- * every observation node under it fails any declared confidentiality ceiling and
- * is redacted rather than serialized to the model as public. A cleanly-absent
+ * Fail-closed label acquisition for the LLM-observation egress path (audit 22),
+ * including whether a metadata read failed. When a read fails, the returned
+ * view is tainted at the root with `CFC_LABEL_READ_FAILED_ATOM`, so every
+ * observation node under it fails any declared confidentiality ceiling and is
+ * redacted rather than serialized to the model as public. A cleanly-absent
  * label (no read error) is unchanged, so normal unlabelled data is not
  * over-redacted.
  */
-export const cfcLabelViewForCellFailClosed = (
+export const cfcLabelViewForCellFailClosedWithStatus = (
   cell: unknown,
-): CfcLabelView | undefined => {
+): CfcLabelViewStatus => {
   const { view, readFailed } = cfcLabelViewForCellWithStatus(cell);
   if (!readFailed) {
-    return view;
+    return { view, readFailed };
   }
-  return mergeCfcLabelViews([
-    view,
-    {
-      version: 1,
-      entries: [{
-        path: [],
-        label: { confidentiality: [CFC_LABEL_READ_FAILED_ATOM] },
-      }],
-    },
-  ]);
+  return {
+    view: mergeCfcLabelViews([
+      view,
+      {
+        version: 1,
+        entries: [{
+          path: [],
+          label: { confidentiality: [CFC_LABEL_READ_FAILED_ATOM] },
+        }],
+      },
+    ]),
+    readFailed,
+  };
 };
+
+/** The view-only surface of fail-closed label acquisition. */
+export const cfcLabelViewForCellFailClosed = (
+  cell: unknown,
+): CfcLabelView | undefined =>
+  cfcLabelViewForCellFailClosedWithStatus(cell).view;

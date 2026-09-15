@@ -18,6 +18,21 @@ describe("research", () => {
   });
 
   describe("researchTool", () => {
+    it("retains an artifact-only fallback for an unconvertible provider cause", async () => {
+      const context: Partial<HarnessToolContext> = {
+        nextOutputId: () => createToolOutputId("unconvertible", "research", 1),
+        runResearch: () => Promise.reject(Object.create(null)),
+      };
+      const output = await researchTool.invoke(context as HarnessToolContext, {
+        task: "Find a recipe",
+      });
+      expect(output).toMatchObject({
+        status: "error",
+        rawCauseMessage: "error could not be converted to text",
+      });
+      expect(output).not.toHaveProperty("researchRecord");
+    });
+
     it("returns a source-free error when no research runner is installed", async () => {
       const outputId = createToolOutputId("no-runner", "research", 1);
       const context: Partial<HarnessToolContext> = {

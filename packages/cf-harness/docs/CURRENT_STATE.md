@@ -77,26 +77,39 @@ The current package provides:
   when one is required. Section selectors and citation ids are distinct; a
   current-read catalog supports synthesis and at most one tool-free citation
   repair within the existing model-turn budget. Unread ids remain inadmissible.
-  Complete pattern-source examples receive a host-side syntax-only parser check;
-  exact parser diagnostics keep a claimed-complete kit incomplete while
-  preserving its full source and citations for local correction. Parser success
-  does not establish imports, types, compilation, or runtime behavior. Each
-  result separately carries a CFC projection: its full known source label, a
-  confidentiality-only output label for later model context, and explicit
+  Invocation examples must match the shared `run_pattern` input contract and
+  select an inspected identity. Rule and example citations close over the kit's
+  exact source catalog. Every metadata or source read respects the
+  8,000-character read limit; oversized metadata is refused before pattern
+  admission. Complete pattern-source examples receive a host-side syntax-only
+  parser check; exact parser diagnostics keep a claimed-complete kit incomplete
+  while preserving its full source and citations for local correction. Parser
+  success does not establish imports, types, compilation, or runtime behavior.
+  Each result separately carries a CFC projection: its full known source label,
+  a confidentiality-only output label for later model context, and explicit
   missing-label coverage for unclassified pattern-index metadata/source,
   unavailable handle-label metadata, or legacy research summaries. Documentation
   search accounts for unselected leads that influenced ranking. Publication
   never promotes private indexed source to public, and retained source integrity
   does not endorse a model rewrite. Opening handoff, resume, and delegated-child
   paths preserve the confidentiality influence and diagnostic projection. Exact
-  reads and the complete private transcript remain in the tool artifact; the
-  caller receives the derived kit plus explicit incomplete-kit guidance. Partial
-  evidence survives malformed output, provider failure, budget exhaustion, and
-  cancellation, with private usage and failure counts included in the parent
-  record. Kits, confirmed patterns, and bindings persist through delegation,
-  while local authored-source artifacts record the research ids that shaped
-  them. `query_docs` is accepted only as a legacy CLI or persisted-policy alias
-  and is normalized without rewriting old transcript or run-state evidence;
+  handle-label acquisition returns availability independently of its fail-closed
+  restriction. Model projection has one owner across tool, reconstructed
+  opening, and child handoffs: free text is scrubbed, raw schemas stay in
+  artifacts, and exact import identities and source/CFC records remain usable.
+  The audit and omission writer share the same tool-or-host result provenance
+  reader. Exact reads and the complete private transcript remain in the tool
+  artifact; the caller receives the derived kit plus explicit incomplete-kit
+  guidance. Partial evidence survives malformed output, provider failure, budget
+  exhaustion, and cancellation, with private usage and failure counts included
+  in the parent record. Delegation and focused research retain the latest
+  implementation kit plus two focused answers. Child handle transfer reads only
+  those kits' declared bindings; its inherited CFC context retains the full
+  parent influence even when no kit is selected. Kits and confirmed records
+  persist through delegation, while local authored-source artifacts record the
+  research ids that shaped them. `query_docs` is accepted only as a legacy CLI
+  or persisted-policy alias and is normalized without rewriting old transcript
+  or run-state evidence;
 - schema-validated, sanitized child returns with raw child evidence retained
   outside the ordinary parent return channel;
 - image inputs and structured top-level batch results;

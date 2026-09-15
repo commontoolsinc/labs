@@ -29,6 +29,7 @@ import {
   type HarnessResearchRequest,
   MAX_RESEARCH_EXAMPLE_CHARS,
   MAX_RESEARCH_MODEL_TURNS,
+  MAX_RESEARCH_READ_CHARS,
   MAX_RESEARCH_TOOL_CALLS,
   MAX_RESEARCH_TOTAL_READ_CHARS,
 } from "../src/research/runner.ts";
@@ -434,6 +435,69 @@ describe("research", () => {
       ]);
     });
 
+    it("refuses a read beyond the cumulative budget without losing completed citations", async () => {
+      const successfulReads = MAX_RESEARCH_TOTAL_READ_CHARS /
+        MAX_RESEARCH_READ_CHARS;
+      const corpus = corpusWith([{
+        path: "docs/long-contract.md",
+        heading: "Long contract",
+        text: "contract".repeat(
+          (MAX_RESEARCH_TOTAL_READ_CHARS + MAX_RESEARCH_READ_CHARS) / 8,
+        ),
+      }]);
+      const model = new ScriptedModelClient([
+        () =>
+          assistant(
+            "",
+            Array.from({ length: successfulReads + 1 }, (_, index) => ({
+              id: `read-${index}`,
+              name: "open_doc_section",
+              input: {
+                sectionId: "section-0",
+                offset: index * MAX_RESEARCH_READ_CHARS,
+                maxChars: MAX_RESEARCH_READ_CHARS,
+              },
+            })),
+          ),
+        (request) => {
+          const outputs = toolOutputs(request, "open_doc_section");
+          const sourceId = outputs[successfulReads - 1].sourceId;
+          return finalResult({
+            status: "complete",
+            summary: "The final completed window establishes the contract.",
+            recommendation: {
+              kind: "focused-api",
+              rationale: "The cited window contains the required rule.",
+            },
+            rules: [{
+              rule: "Use the contract from the final completed window.",
+              sourceIds: [sourceId],
+            }],
+            sourceIds: [sourceId],
+            missing: [],
+          });
+        },
+      ]);
+
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({ corpus }),
+      );
+      const outputs = toolOutputs(model.requests[1], "open_doc_section");
+
+      expect(outputs).toHaveLength(successfulReads + 1);
+      expect(outputs.at(-1)?.error).toBe(
+        `research read budget of ${MAX_RESEARCH_TOTAL_READ_CHARS} characters is exhausted`,
+      );
+      expect(reply.record.budgets.readChars).toBe(
+        MAX_RESEARCH_TOTAL_READ_CHARS,
+      );
+      expect(reply.record.sourceReads).toHaveLength(successfulReads);
+      expect(reply.kit.status).toBe("complete");
+      expect(reply.kit.sources).toEqual([
+        reply.record.sourceReads[successfulReads - 1],
+      ]);
+    });
+
     it("repairs one misspelled citation on the final available turn", async () => {
       const corpus = corpusWith([{
         path: "docs/api.md",
@@ -708,7 +772,11 @@ describe("research", () => {
         description: "Displays a dinner-party heading",
         hashtags: ["dinner-party", "ui"],
         dependencies: [],
-        argumentSchema: { type: "object", properties: {} },
+        argumentSchema: {
+          type: "object",
+          properties: {},
+          description: "x".repeat(20_000),
+        },
         resultSchema: { type: "object" },
         program: { main: "/main.tsx", files },
       };
@@ -765,7 +833,7 @@ describe("research", () => {
             selectedPatternIds: [patternId],
             example: {
               kind: "run-pattern-input",
-              content: JSON.stringify({ patternId, argument: {} }),
+              content: JSON.stringify({ patternId, inputs: {} }),
               sourceIds: [
                 inspection.sourceId,
                 ...reads.map((read) => read.sourceId),
@@ -816,6 +884,14 @@ describe("research", () => {
         "inspect_pattern",
       )[0];
       const evidenceText = JSON.stringify(inspection.evidence);
+      expect(inspection.evidence).not.toHaveProperty("argumentSchema");
+      expect(inspection.evidence).not.toHaveProperty("resultSchema");
+      expect(evidenceText.length).toBeLessThanOrEqual(MAX_RESEARCH_READ_CHARS);
+      expect(reply.record.confirmedPatterns[0].argumentSchema).toEqual(
+        pattern.argumentSchema,
+      );
+      expect(JSON.stringify(reply.record.confirmedPatterns[0]).length)
+        .toBeGreaterThan(MAX_RESEARCH_READ_CHARS);
       const evidenceDigest = encodeHex(
         sha256(new TextEncoder().encode(evidenceText)),
       );
@@ -869,7 +945,7 @@ describe("research", () => {
             selectedPatternIds: [patternId],
             example: {
               kind: "run-pattern-input",
-              content: JSON.stringify({ patternId, argument: {} }),
+              content: JSON.stringify({ patternId, inputs: {} }),
             },
             missing: [],
           }),
@@ -1053,7 +1129,7 @@ describe("research", () => {
         patternId,
         ownerDid: "did:key:zPublisher",
         createdAt: "2026-09-01T00:00:00.000Z",
-        description: "x".repeat(MAX_RESEARCH_TOTAL_READ_CHARS),
+        description: "x".repeat(MAX_RESEARCH_READ_CHARS + 1),
         hashtags: [],
         dependencies: [],
         program: { main: "/main.tsx", files },
@@ -1083,7 +1159,7 @@ describe("research", () => {
             selectedPatternIds: [patternId],
             example: {
               kind: "run-pattern-input",
-              content: JSON.stringify({ patternId, argument: {} }),
+              content: JSON.stringify({ patternId, inputs: {} }),
               sourceIds: [],
             },
             missing: [],
@@ -1105,6 +1181,69 @@ describe("research", () => {
   });
 
   describe("CFC metadata", () => {
+    it("retains fail-closed labels and partial evidence when an error cannot be stringified", async () => {
+      const token = "cfh:a:label-failed";
+      const restrictive = cfcAtom.resource("UnclassifiedInput", "handle");
+      const model = new ScriptedModelClient([
+        () =>
+          assistant("", [
+            {
+              id: "read",
+              name: "open_doc_section",
+              input: { sectionId: "section-0" },
+            },
+            { id: "describe", name: "describe_handle", input: { token } },
+          ]),
+        () => {
+          throw Object.create(null);
+        },
+      ]);
+      let failure: unknown;
+      try {
+        await createResearchRunner({ modelClient: model })(requestFor({
+          corpus: corpusWith([{
+            path: "docs/api.md",
+            heading: "API",
+            text: "Read the contract.",
+          }]),
+          handleTokens: [token],
+          describeHandle: () =>
+            Promise.resolve({
+              output: {
+                outputId: "described",
+                token,
+                known: true,
+                hasSchema: false,
+              },
+              cfcLabelAvailable: false,
+              cfcLabel: { confidentiality: [restrictive] },
+            }),
+        }));
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(HarnessResearchError);
+      if (!(failure instanceof HarnessResearchError)) {
+        throw new Error("expected retained failure evidence");
+      }
+      expect(failure.message).toBe("error could not be converted to text");
+      expect(failure.record.sourceReads).toHaveLength(1);
+      expect(failure.record.cfc.sourceLabel.integrity).toEqual([
+        operatorProvisionedReferenceAtom("/trusted/docs"),
+      ]);
+      expect(failure.record.cfc.outputLabel.confidentiality).toContainEqual(
+        restrictive,
+      );
+      expect(failure.record.cfc.coverage).toBe("incomplete");
+      expect(failure.record.cfc.missingLabels).toEqual([{
+        source: "handle-description",
+        detail: `handle ${token} metadata returned by describe_handle`,
+      }]);
+      expect(
+        failure.record.messages.filter((message) => message.role === "tool"),
+      ).toHaveLength(2);
+    });
+
     it("separates a complete kit from partial label coverage across all observations", async () => {
       const docsA = operatorProvisionedReferenceAtom("/trusted/docs-a");
       const docsB = operatorProvisionedReferenceAtom("/trusted/docs-b");

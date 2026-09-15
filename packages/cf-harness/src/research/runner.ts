@@ -4,7 +4,6 @@
  * so callers can keep private evidence out of model context.
  */
 
-import type { JSONSchema } from "@commonfabric/api";
 import { encodeHex } from "@std/encoding/hex";
 import { sha256 } from "@commonfabric/content-hash";
 import {
@@ -16,19 +15,13 @@ import { mergeLabel } from "@commonfabric/runner/cfc/label-view-core";
 
 import type {
   HarnessResearchCfcProjection,
-  HarnessResearchExample,
   HarnessResearchHandleRecord,
-  HarnessResearchInputBinding,
   HarnessResearchKit,
   HarnessResearchMissingLabel,
   HarnessResearchMissingLabelSource,
   HarnessResearchPatternRecord,
-  HarnessResearchRecommendationKind,
-  HarnessResearchRule,
   HarnessResearchRunSummary,
   HarnessResearchSourceRead,
-  HarnessResearchStatus,
-  HarnessResearchSyntaxCheck,
 } from "../contracts/research.ts";
 import {
   cloneIfcLabel,
@@ -45,6 +38,7 @@ import {
 } from "../contracts/docs-corpus.ts";
 import type { HarnessDocsCorpus } from "../docs-corpus/corpus.ts";
 import { rankSections } from "../docs-corpus/sections.ts";
+import { errorMessage } from "../error-message.ts";
 import type {
   HarnessModelAttemptDiagnostic,
   HarnessModelClient,
@@ -63,6 +57,14 @@ import {
   patternIndexImportHint,
 } from "../tools/search-patterns.ts";
 import { parseStructuredResultJson } from "../structured-result.ts";
+import {
+  admitResearchKit,
+  type RawResearchResult,
+  RESEARCH_RESULT_SCHEMA,
+  unreadSourceIds,
+} from "./admission.ts";
+import { objectValue, stringValue, unique } from "./model-value.ts";
+import { selectResearchContext } from "./context.ts";
 
 /** Cheap gateway model used by the bounded research loop. */
 export const RESEARCH_MODEL = "gemini-3.5-flash" as const;
@@ -82,8 +84,7 @@ export const MAX_RESEARCH_READ_CHARS = 8_000;
 /** Total exact document and source characters one research call may read. */
 export const MAX_RESEARCH_TOTAL_READ_CHARS = 96_000;
 
-/** Largest complete code or invocation example admitted to a kit. */
-export const MAX_RESEARCH_EXAMPLE_CHARS = 24_000;
+export { MAX_RESEARCH_EXAMPLE_CHARS } from "./admission.ts";
 
 /** Narrow index surface required by research. */
 export interface HarnessResearchPatternIndex {
@@ -209,20 +210,6 @@ export type HarnessResearchRunner = (
   request: HarnessResearchRequest,
 ) => Promise<HarnessResearchReply>;
 
-interface RawResearchResult {
-  status?: unknown;
-  summary?: unknown;
-  recommendation?: unknown;
-  inputs?: unknown;
-  selectedPatternIds?: unknown;
-  steps?: unknown;
-  example?: unknown;
-  rules?: unknown;
-  verification?: unknown;
-  sourceIds?: unknown;
-  missing?: unknown;
-}
-
 interface ResearchState {
   sourceReads: HarnessResearchSourceRead[];
   confirmedPatterns: Map<string, HarnessResearchPatternRecord>;
@@ -234,124 +221,6 @@ interface ResearchState {
   readChars: number;
   toolCalls: number;
 }
-
-const RESEARCH_RESULT_SCHEMA: JSONSchema = {
-  type: "object",
-  properties: {
-    status: { type: "string", enum: ["complete", "incomplete"] },
-    summary: { type: "string", maxLength: 2_000 },
-    recommendation: {
-      type: "object",
-      properties: {
-        kind: {
-          type: "string",
-          enum: ["direct-run", "compose", "author", "focused-api"],
-        },
-        rationale: { type: "string", maxLength: 2_000 },
-      },
-      required: ["kind", "rationale"],
-      additionalProperties: false,
-    },
-    inputs: {
-      type: "array",
-      maxItems: 16,
-      description:
-        "Existing external data handles only. Every token must come from the authoritative inventory and must have a successful describe_handle result. Use [] when the recipe needs no external data; types, defaults, and new local state belong in the example instead.",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string", minLength: 1, maxLength: 200 },
-          token: {
-            type: "string",
-            minLength: 1,
-            maxLength: 200,
-            description:
-              "Exact opaque cfh token from a successful describe_handle result, never a type, default, literal, or raw Fabric reference.",
-          },
-          purpose: { type: "string", minLength: 1, maxLength: 1_000 },
-        },
-        required: ["name", "token", "purpose"],
-        additionalProperties: false,
-      },
-    },
-    selectedPatternIds: {
-      type: "array",
-      maxItems: 8,
-      items: { type: "string", maxLength: 200 },
-    },
-    steps: {
-      type: "array",
-      maxItems: 24,
-      items: { type: "string", maxLength: 2_000 },
-    },
-    example: {
-      type: "object",
-      properties: {
-        kind: {
-          type: "string",
-          enum: ["run-pattern-input", "pattern-source"],
-        },
-        content: { type: "string", maxLength: MAX_RESEARCH_EXAMPLE_CHARS },
-        sourceIds: {
-          type: "array",
-          maxItems: 16,
-          description:
-            "Exact opened reads supporting every API shown in the example, including APIs mentioned in comments.",
-          items: { type: "string", maxLength: 500 },
-        },
-      },
-      required: ["kind", "content", "sourceIds"],
-      additionalProperties: false,
-    },
-    rules: {
-      type: "array",
-      maxItems: 24,
-      items: {
-        type: "object",
-        properties: {
-          rule: { type: "string", maxLength: 2_000 },
-          sourceIds: {
-            type: "array",
-            maxItems: 12,
-            items: { type: "string", maxLength: 500 },
-          },
-        },
-        required: ["rule", "sourceIds"],
-        additionalProperties: false,
-      },
-    },
-    verification: {
-      type: "array",
-      maxItems: 24,
-      items: { type: "string", maxLength: 2_000 },
-    },
-    sourceIds: {
-      type: "array",
-      maxItems: 32,
-      items: { type: "string", maxLength: 500 },
-    },
-    missing: {
-      type: "array",
-      maxItems: 24,
-      description:
-        "Actual blockers only. Make routine reversible assumptions in the smallest complete recipe instead of listing optional product choices as missing.",
-      items: { type: "string", maxLength: 2_000 },
-    },
-  },
-  required: [
-    "status",
-    "summary",
-    "recommendation",
-    "inputs",
-    "selectedPatternIds",
-    "steps",
-    "rules",
-    "verification",
-    "sourceIds",
-    "missing",
-  ],
-  additionalProperties: false,
-};
 
 const SEARCH_DOCS_TOOL: HarnessModelToolDescriptor = {
   toolId: "search_docs",
@@ -479,29 +348,8 @@ const RESEARCH_TOOLS = [
   DESCRIBE_HANDLE_TOOL,
 ] as const;
 
-const stringValue = (value: unknown, max = 2_000): string =>
-  typeof value === "string" ? value.slice(0, max) : "";
-
-const stringList = (
-  value: unknown,
-  maxItems = 24,
-  maxLength = 2_000,
-): string[] =>
-  (Array.isArray(value) ? value : [])
-    .filter((entry): entry is string => typeof entry === "string")
-    .slice(0, maxItems)
-    .map((entry) => entry.slice(0, maxLength));
-
 const integerValue = (value: unknown, fallback: number): number =>
   typeof value === "number" && Number.isInteger(value) ? value : fallback;
-
-const objectValue = (value: unknown): Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-
-const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
 
 const runWasAborted = (signal: AbortSignal | undefined): boolean =>
   signal?.aborted === true;
@@ -522,8 +370,6 @@ const sourceId = (
   `${kind}:${
     digestText(`${location}\n${offset}\n${end}\n${contentDigest}`).slice(7, 23)
   }`;
-
-const unique = <T>(values: readonly T[]): T[] => [...new Set(values)];
 
 /** Builds the research CFC projection without inventing missing source labels. */
 export const createHarnessResearchCfcProjection = (
@@ -571,23 +417,6 @@ const researchCfcProjection = (
     [...state.missingLabels.values()],
   );
 
-const citedSourceIds = (raw: RawResearchResult): string[] =>
-  unique([
-    ...stringList(raw.sourceIds, 32, 500),
-    ...stringList(objectValue(raw.example).sourceIds, 16, 500),
-    ...(Array.isArray(raw.rules) ? raw.rules : []).flatMap((rule) =>
-      stringList(objectValue(rule).sourceIds, 12, 500)
-    ),
-  ]);
-
-const unreadSourceIds = (
-  raw: RawResearchResult,
-  state: ResearchState,
-): string[] => {
-  const opened = new Set(state.sourceReads.map((read) => read.sourceId));
-  return citedSourceIds(raw).filter((id) => !opened.has(id));
-};
-
 const sourceCatalog = (state: ResearchState): string =>
   [
     "Current citable source catalog. Copy only these sourceId field values, exactly as returned:",
@@ -631,7 +460,7 @@ const systemPrompt = (): string =>
 const userPrompt = (
   request: HarnessResearchRequest,
 ): string => {
-  const prior = request.priorResearchRuns?.slice(-2) ?? [];
+  const prior = selectResearchContext(request.priorResearchRuns ?? []);
   const attachedPatterns = request.attachedPatterns ?? [];
   return [
     "Task:",
@@ -856,8 +685,19 @@ const inspectPattern = async (
   // `evidence` is the exact object serialized for this read's digest and the
   // exact object returned to the private model. The source id is its citation
   // address and therefore sits beside it rather than recursively inside it.
-  const evidence = structuredClone(confirmed);
+  // Rendered types carry the contracts; raw schemas stay on the retained record
+  // without consuming a second copy of the private model's read budget.
+  const {
+    argumentSchema: _argumentSchema,
+    resultSchema: _resultSchema,
+    ...evidence
+  } = structuredClone(confirmed);
   const metadata = JSON.stringify(evidence);
+  if (metadata.length > MAX_RESEARCH_READ_CHARS) {
+    throw new Error(
+      `pattern metadata exceeds the ${MAX_RESEARCH_READ_CHARS}-character read budget`,
+    );
+  }
   const read = addRead(state, {
     kind: "pattern-metadata",
     location: `cf:pattern:${patternId}`,
@@ -1051,9 +891,8 @@ const invokeResearchTool = async (
         throw new Error("handle description is unavailable");
       }
       const described = await request.describeHandle(token);
-      if (described.cfcLabelAvailable) {
-        addSourceLabel(state, described.cfcLabel ?? {});
-      } else {
+      addSourceLabel(state, described.cfcLabel ?? {});
+      if (!described.cfcLabelAvailable) {
         addMissingLabel(
           state,
           "handle-description",
@@ -1071,259 +910,6 @@ const invokeResearchTool = async (
     default:
       throw new Error(`unknown research tool ${name}`);
   }
-};
-
-const parseInputs = (
-  value: unknown,
-  described: ReadonlyMap<string, HarnessResearchHandleRecord>,
-  missing: string[],
-): HarnessResearchInputBinding[] => {
-  const result: HarnessResearchInputBinding[] = [];
-  for (const entry of Array.isArray(value) ? value.slice(0, 16) : []) {
-    const record = objectValue(entry);
-    const token = stringValue(record.token, 200);
-    if (token.length === 0) {
-      missing.push("an input binding has no nonempty handle token");
-      continue;
-    }
-    if (!described.has(token)) {
-      missing.push(`handle ${token} was not described`);
-      continue;
-    }
-    const name = stringValue(record.name, 200).trim();
-    if (name.length === 0) {
-      missing.push(`handle ${token} has no nonempty input name`);
-      continue;
-    }
-    const purpose = stringValue(record.purpose, 1_000).trim();
-    if (purpose.length === 0) {
-      missing.push(`handle ${token} has no nonempty binding purpose`);
-      continue;
-    }
-    result.push({
-      name,
-      token,
-      purpose,
-    });
-  }
-  return result;
-};
-
-const parseRules = (
-  value: unknown,
-  sources: ReadonlyMap<string, HarnessResearchSourceRead>,
-  missing: string[],
-): HarnessResearchRule[] => {
-  const rules: HarnessResearchRule[] = [];
-  for (const entry of Array.isArray(value) ? value.slice(0, 24) : []) {
-    const record = objectValue(entry);
-    const cited = unique(stringList(record.sourceIds, 12, 500));
-    const admitted = cited.filter((id) => sources.has(id));
-    if (admitted.length !== cited.length) {
-      missing.push("one or more API rules cited an unread source");
-    }
-    if (admitted.length === 0) continue;
-    rules.push({ rule: stringValue(record.rule), sourceIds: admitted });
-  }
-  return rules;
-};
-
-/** Checks TypeScript/TSX grammar without resolving, checking, or executing it. */
-const checkPatternSourceSyntax = async (
-  content: string,
-): Promise<HarnessResearchSyntaxCheck> => {
-  try {
-    const { ts } = await ensureCompilerStack();
-    const result = ts.transpileModule(content, {
-      fileName: "/research-example.tsx",
-      reportDiagnostics: true,
-      compilerOptions: {
-        jsx: ts.JsxEmit.Preserve,
-        module: ts.ModuleKind.ESNext,
-        target: ts.ScriptTarget.ESNext,
-      },
-    });
-    const diagnostics = (result.diagnostics ?? [])
-      .filter((diagnostic) =>
-        diagnostic.category === ts.DiagnosticCategory.Error
-      )
-      .map((diagnostic) => {
-        const location = diagnostic.file !== undefined &&
-            diagnostic.start !== undefined
-          ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
-          : undefined;
-        return {
-          code: diagnostic.code,
-          message: ts.flattenDiagnosticMessageText(
-            diagnostic.messageText,
-            "\n",
-          ),
-          ...(location !== undefined
-            ? { line: location.line + 1, column: location.character + 1 }
-            : {}),
-        };
-      });
-    return {
-      status: diagnostics.length === 0 ? "valid" : "invalid",
-      scope: "syntax-only",
-      diagnostics,
-    };
-  } catch (error) {
-    return {
-      status: "unavailable",
-      scope: "syntax-only",
-      diagnostics: [],
-      detail: errorMessage(error),
-    };
-  }
-};
-
-const syntaxDiagnosticText = (
-  diagnostic: HarnessResearchSyntaxCheck["diagnostics"][number],
-): string => {
-  const location = diagnostic.line === undefined ||
-      diagnostic.column === undefined
-    ? ""
-    : ` at ${diagnostic.line}:${diagnostic.column}`;
-  return `TS${diagnostic.code}${location}: ${diagnostic.message}`;
-};
-
-const parseExample = async (
-  value: unknown,
-  sources: ReadonlyMap<string, HarnessResearchSourceRead>,
-  missing: string[],
-): Promise<HarnessResearchExample | undefined> => {
-  const record = objectValue(value);
-  const kind = record.kind;
-  const content = typeof record.content === "string" ? record.content : "";
-  if (
-    (kind !== "run-pattern-input" && kind !== "pattern-source") ||
-    content.length === 0
-  ) return undefined;
-  if (content.length > MAX_RESEARCH_EXAMPLE_CHARS) {
-    missing.push(
-      `complete example exceeds ${MAX_RESEARCH_EXAMPLE_CHARS} characters`,
-    );
-    return undefined;
-  }
-  const cited = unique(stringList(record.sourceIds, 16, 500));
-  const admitted = cited.filter((id) => sources.has(id));
-  if (admitted.length !== cited.length) {
-    missing.push("the example cited one or more unread sources");
-  }
-  if (admitted.length === 0) {
-    missing.push("the example has no exact opened source supporting its APIs");
-  }
-  if (kind === "run-pattern-input") {
-    return { kind, content, sourceIds: admitted };
-  }
-  const syntax = await checkPatternSourceSyntax(content);
-  if (syntax.status === "invalid") {
-    for (const diagnostic of syntax.diagnostics) {
-      missing.push(
-        `pattern-source example has a syntax error: ${
-          syntaxDiagnosticText(diagnostic)
-        }`,
-      );
-    }
-  } else if (syntax.status === "unavailable") {
-    missing.push(
-      `pattern-source syntax check was unavailable: ${
-        syntax.detail ?? "unknown error"
-      }`,
-    );
-  }
-  return { kind, content, sourceIds: admitted, syntax };
-};
-
-const admitResearchKit = async (
-  task: string,
-  raw: RawResearchResult,
-  state: ResearchState,
-): Promise<HarnessResearchKit> => {
-  const missing = stringList(raw.missing);
-  const sourceMap = new Map(
-    state.sourceReads.map((read) => [read.sourceId, read]),
-  );
-  const citedIds = unique(stringList(raw.sourceIds, 32, 500));
-  const sources = citedIds.flatMap((id) => {
-    const read = sourceMap.get(id);
-    if (read === undefined) {
-      missing.push(`source ${id} was not read`);
-      return [];
-    }
-    return [structuredClone(read)];
-  });
-  const selectedIds = unique(stringList(raw.selectedPatternIds, 8, 500));
-  const patterns = selectedIds.flatMap((id) => {
-    const pattern = state.confirmedPatterns.get(id);
-    if (pattern === undefined) {
-      missing.push(`pattern ${id} was not inspected successfully`);
-      return [];
-    }
-    return [structuredClone(pattern)];
-  });
-  const recommendationRecord = objectValue(raw.recommendation);
-  const kindValue = recommendationRecord.kind;
-  const kind: HarnessResearchRecommendationKind =
-    kindValue === "direct-run" || kindValue === "compose" ||
-      kindValue === "author" || kindValue === "focused-api"
-      ? kindValue
-      : "author";
-  const inputs = parseInputs(raw.inputs, state.describedHandles, missing);
-  const rules = parseRules(raw.rules, sourceMap, missing);
-  const example = await parseExample(raw.example, sourceMap, missing);
-  if ((kind === "direct-run" || kind === "compose") && patterns.length === 0) {
-    missing.push(`${kind} requires an inspected published pattern`);
-  }
-  if (
-    (kind === "direct-run" || kind === "compose") &&
-    patterns.some((pattern) => pattern.sourceIdentityVerified !== true)
-  ) {
-    missing.push(`${kind} requires verified published source identities`);
-  }
-  if (kind === "direct-run" && example?.kind !== "run-pattern-input") {
-    missing.push("direct-run requires a complete run_pattern input example");
-  }
-  if (
-    (kind === "compose" || kind === "author") &&
-    example?.kind !== "pattern-source"
-  ) {
-    missing.push(`${kind} requires a complete pattern-source example`);
-  }
-  if (kind === "focused-api" && rules.length === 0) {
-    missing.push("focused-api requires at least one cited rule");
-  }
-  if (sources.length === 0) {
-    missing.push(
-      "no exact documentation or indexed-source read supports the kit",
-    );
-  }
-  const dedupedMissing = unique(missing.filter((entry) => entry.length > 0));
-  const requestedStatus: HarnessResearchStatus = raw.status === "complete"
-    ? "complete"
-    : "incomplete";
-  const status: HarnessResearchStatus =
-    requestedStatus === "complete" && dedupedMissing.length === 0
-      ? "complete"
-      : "incomplete";
-  return {
-    status,
-    task,
-    summary: stringValue(raw.summary),
-    recommendation: {
-      kind,
-      rationale: stringValue(recommendationRecord.rationale),
-    },
-    inputs,
-    patterns,
-    steps: stringList(raw.steps),
-    ...(example !== undefined ? { example } : {}),
-    rules,
-    verification: stringList(raw.verification),
-    sources,
-    missing: dedupedMissing,
-  };
 };
 
 /**

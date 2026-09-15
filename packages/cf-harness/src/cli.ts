@@ -2459,6 +2459,10 @@ const summarizeToolCallArguments = (
         return typeof parsed.task === "string"
           ? `task=${JSON.stringify(parsed.task)}`
           : undefined;
+      case "query_docs":
+        return typeof parsed.question === "string"
+          ? `question=${JSON.stringify(parsed.question)}`
+          : undefined;
       case "record_feedback": {
         // The note is the model's prose about a run and can quote what the
         // pattern produced, so the line names the verdict and the pattern
