@@ -11,8 +11,8 @@ import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
   deepFreeze,
-  type FabricConvertibleValue,
-  fabricFromNativeValue,
+  type FabricConvertibleJsValue,
+  fabricFromConvertibleJsValue,
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
@@ -22,7 +22,7 @@ import {
   refuseFabricInstance,
   shallowCleanArray,
   shallowCleanPlainObject,
-  shallowFabricFromNativeObjectElseUndefined,
+  shallowFabricFromConvertibleJsObjectElseUndefined,
   valueEqual,
 } from "@commonfabric/data-model";
 import {
@@ -2602,7 +2602,7 @@ export class CellImpl<T extends FabricValue>
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
     // by content, mirroring the server's keyless dedup. The content comparison
-    // runs against a fabric-normalized COPY of the candidate (a native `Date`
+    // runs against a fabric-normalized COPY of the candidate (a JS `Date`
     // must match its stored `FabricEpochNsec` form); the original candidate --
     // not the copy -- is what an accepted add writes, so no identity the write
     // path relies on is disturbed.
@@ -2633,7 +2633,7 @@ export class CellImpl<T extends FabricValue>
       // non-string-keyed internals.
       const comparable = isCellLink(candidate)
         ? candidate
-        : fabricFromNativeValue(flattenBuilderArtifacts(candidate));
+        : fabricFromConvertibleJsValue(flattenBuilderArtifacts(candidate));
       return existing.some((element) => valueEqual(element, comparable));
     };
     const toAdd = candidates.filter((candidate) => !alreadyPresent(candidate));
@@ -3270,8 +3270,8 @@ export class CellImpl<T extends FabricValue>
   }
 
   /**
-   * Read the cell's value at the fabric layer (no native unwrapping, no
-   * Proxy wrapping). By default returns a deep-frozen `FabricValue`
+   * Read the cell's value at the fabric layer (no unwrapping to JS form,
+   * no Proxy wrapping). By default returns a deep-frozen `FabricValue`
    * snapshot; pass `{ frozen: false }` for a mutable deep copy.
    *
    * **Frozenness contract:** Defaults to `{ frozen: true }`, returning a
@@ -3309,9 +3309,9 @@ export class CellImpl<T extends FabricValue>
       }),
       readOptions,
     );
-    // Deep-copy with desired frozenness, without native unwrapping — getRaw()
-    // and getRawUntyped() return fabric-layer values, not native ("wild
-    // west") values.
+    // Deep-copy with desired frozenness, without unwrapping to JS form --
+    // getRaw() and getRawUntyped() return fabric-layer values, not
+    // convertible JS ("wild west") values.
     return cloneIfNecessary(value, { frozen });
   }
 
@@ -4516,18 +4516,18 @@ export function frameAnchorIds(
 
 /**
  * What `convertCellsToLinks()` is handed: what a pattern produced. That is a
- * `FabricValue` or a native convertible to one, and on top of that the `Cell`s
+ * `FabricValue` or a convertible JS value, and on top of that the `Cell`s
  * the conversion exists to replace. None of it is durable until it has been
  * through there.
  *
- * `FabricConvertibleValue` is an arm rather than something restated, so
+ * `FabricConvertibleJsValue` is an arm rather than something restated, so
  * this stays true of whatever that comes to admit. The container arms are here
  * as well, and they are not redundant with it: theirs hold only what is already
  * fabric or convertible, where a cell may sit at any depth in what a pattern
  * produced. Replacing a nested one is the whole of what this conversion is for.
  */
 export type CellLinkInput =
-  | FabricConvertibleValue
+  | FabricConvertibleJsValue
   | readonly CellLinkInput[]
   | { readonly [key: string]: CellLinkInput }
   | Cell<any>;
@@ -4716,11 +4716,11 @@ function convertOneToLinks(
             | Record<string, unknown>;
       }
     } else {
-      // A native object carrying a fabric form is minted into it here: a
+      // A JS object carrying a fabric form is minted into it here: a
       // `Date` or `Uint8Array` becomes a `FabricPrimitive`, an `Error` a
       // `FabricError`. Anything else comes back `undefined`, which says only
       // that nothing needed minting.
-      const minted = shallowFabricFromNativeObjectElseUndefined(value);
+      const minted = shallowFabricFromConvertibleJsObjectElseUndefined(value);
 
       if (minted === undefined) {
         // Nothing was minted, so the value has to be usable as it stands. This
@@ -4972,7 +4972,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         validateStaticData(value);
       }
 
-      // TODO(danfuzz): native values in a `Cell.of(...)` initial value are NOT
+      // TODO(danfuzz): JS values in a `Cell.of(...)` initial value are NOT
       // normalized to their fabric form (e.g. a `Date` stays a raw `Date`
       // instead of becoming a `FabricEpochNsec`), unlike the `set()` write path
       // (whose diff normalizes at the write boundary). The raw value flows into

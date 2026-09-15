@@ -3021,7 +3021,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             `Value at path ${address.path.join("/")} is not an object`,
           );
         }
-        // Stored objects are deep-frozen by `fabricFromNativeValueModern()`.
+        // Stored objects are deep-frozen by `fabricFromConvertibleJsValue()`.
         // Clone before mutation to avoid `TypeError` on frozen objects: this
         // always copies (the value may be the transaction's working copy, which
         // must not be mutated in place), and it deep-freezes the bound children

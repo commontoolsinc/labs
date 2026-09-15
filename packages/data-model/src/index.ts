@@ -11,14 +11,14 @@ export type * from "./interface.ts";
 export { FabricInstance, FabricPrimitive } from "./interface.ts";
 
 export {
-  fabricFromNativeValue,
-  isValidFabricConvertibleValue,
-  nativeFromFabricValue,
+  convertibleJsFromFabricValue,
+  fabricFromConvertibleJsValue,
+  isValidFabricConvertibleJsValue,
   shallowCleanArray,
   shallowCleanPlainObject,
-  shallowFabricFromNativeObjectElseUndefined,
-  shallowFabricFromNativeValue,
-} from "./native-conversion.ts";
+  shallowFabricFromConvertibleJsObjectElseUndefined,
+  shallowFabricFromConvertibleJsValue,
+} from "./convertible-js.ts";
 
 export { refuseFabricInstance } from "./refuseFabricInstance.ts";
 
@@ -37,7 +37,7 @@ export {
 
 export {
   assertValidFabricValueLayer,
-  isValidFabricNativeObject,
+  isValidFabricConvertibleJsObject,
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,

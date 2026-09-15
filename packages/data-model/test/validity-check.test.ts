@@ -1,11 +1,11 @@
 /**
  * Membership in the `FabricValue` type, asked one level deep and asked all the
  * way down, plus the plain-record question asked as membership. The one-level
- * question also has a throwing form, whose group is mostly about the reasons
- * it gives, what it accepts being what the predicate accepts -- and which is
+ * question also has a throwing form, whose group is mostly about the reasons it
+ * gives, what it accepts being what the predicate accepts -- and which is
  * cross-checked, value for value, against the refusal
- * `shallowFabricFromNativeValue()` performs today, that being the refusal it
- * is there to stand in for.
+ * `shallowFabricFromConvertibleJsValue()` performs today, that being the
+ * refusal it is there to stand in for.
  *
  * The two depths ask the same question at different scopes, and the cases are
  * arranged around where that difference tells.
@@ -23,16 +23,16 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { codecClasses } from "@/fabric-primitives/index.ts";
 import type { FabricValue } from "@/interface.ts";
-import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
+import { shallowFabricFromConvertibleJsValue } from "@/convertible-js.ts";
 import { isFabricPlainObject } from "@/type-check.ts";
 import {
   assertValidFabricValueLayer,
-  isValidFabricNativeObject,
+  isValidFabricConvertibleJsObject,
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
 } from "@/validity-check.ts";
-import { tagOfNativeValueElseNull, VALUE_TAGS } from "@/value-tags";
+import { tagOfConvertibleJsValueElseNull, VALUE_TAGS } from "@/value-tags";
 import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
 
 describe("validity-check", () => {
@@ -123,7 +123,7 @@ describe("validity-check", () => {
 
       it("returns `true` without recursively validating contents", () => {
         // `isValidFabricValueLayer()` is a shallow, per-se check; deep
-        // validation is `isValidFabricConvertibleValue()`'s job. A nested
+        // validation is `isValidFabricConvertibleJsValue()`'s job. A nested
         // value that is not a `FabricValue` does not make the container itself
         // fail the per-se check.
 
@@ -655,29 +655,31 @@ describe("validity-check", () => {
     });
   });
 
-  describe("isValidFabricNativeObject()", () => {
+  describe("isValidFabricConvertibleJsObject()", () => {
     it("returns `true` for all convertible types", () => {
-      expect(isValidFabricNativeObject(new Error("e"))).toBe(true);
-      expect(isValidFabricNativeObject(new TypeError("e"))).toBe(true);
-      expect(isValidFabricNativeObject(new Map())).toBe(true);
-      expect(isValidFabricNativeObject(new Set())).toBe(true);
-      expect(isValidFabricNativeObject(new Date())).toBe(true);
-      expect(isValidFabricNativeObject(new Uint8Array())).toBe(true);
+      expect(isValidFabricConvertibleJsObject(new Error("e"))).toBe(true);
+      expect(isValidFabricConvertibleJsObject(new TypeError("e"))).toBe(true);
+      expect(isValidFabricConvertibleJsObject(new Map())).toBe(true);
+      expect(isValidFabricConvertibleJsObject(new Set())).toBe(true);
+      expect(isValidFabricConvertibleJsObject(new Date())).toBe(true);
+      expect(isValidFabricConvertibleJsObject(new Uint8Array())).toBe(true);
     });
 
     it("returns `true` for exotic `Error` subclass", () => {
       class WeirdError extends RangeError {}
-      expect(isValidFabricNativeObject(new WeirdError("weird"))).toBe(true);
+      expect(isValidFabricConvertibleJsObject(new WeirdError("weird"))).toBe(
+        true,
+      );
     });
 
     it("returns `true` for `RegExp`", () => {
-      expect(isValidFabricNativeObject(/abc/)).toBe(true);
+      expect(isValidFabricConvertibleJsObject(/abc/)).toBe(true);
     });
 
     it("returns `false` for non-convertible types", () => {
-      expect(isValidFabricNativeObject({})).toBe(false);
-      expect(isValidFabricNativeObject([])).toBe(false);
-      expect(isValidFabricNativeObject(new WeakMap())).toBe(false);
+      expect(isValidFabricConvertibleJsObject({})).toBe(false);
+      expect(isValidFabricConvertibleJsObject([])).toBe(false);
+      expect(isValidFabricConvertibleJsObject(new WeakMap())).toBe(false);
     });
 
     it("returns `false` for a plain object carrying `toJSON()`", () => {
@@ -685,21 +687,23 @@ describe("validity-check", () => {
       // rejects this value is being a plain object. The `Date` below carries
       // one too and is accepted, which is what holds the two apart.
 
-      expect(isValidFabricNativeObject({ toJSON: () => "x" })).toBe(false);
+      expect(isValidFabricConvertibleJsObject({ toJSON: () => "x" })).toBe(
+        false,
+      );
       expect(typeof Date.prototype.toJSON).toBe("function");
-      expect(isValidFabricNativeObject(new Date())).toBe(true);
+      expect(isValidFabricConvertibleJsObject(new Date())).toBe(true);
     });
 
     it("returns `false` for a non-object", () => {
-      expect(isValidFabricNativeObject(null)).toBe(false);
-      expect(isValidFabricNativeObject(undefined)).toBe(false);
-      expect(isValidFabricNativeObject(1)).toBe(false);
-      expect(isValidFabricNativeObject("a")).toBe(false);
-      expect(isValidFabricNativeObject(() => {})).toBe(false);
+      expect(isValidFabricConvertibleJsObject(null)).toBe(false);
+      expect(isValidFabricConvertibleJsObject(undefined)).toBe(false);
+      expect(isValidFabricConvertibleJsObject(1)).toBe(false);
+      expect(isValidFabricConvertibleJsObject("a")).toBe(false);
+      expect(isValidFabricConvertibleJsObject(() => {})).toBe(false);
     });
   });
 
-  describe("`isValidFabricNativeObject()` over the corpus", () => {
+  describe("`isValidFabricConvertibleJsObject()` over the corpus", () => {
     // The predicate answers by a narrow route -- the array rule, the builtin
     // class lookup, and an `Error` test -- while the full dispatch reaches the
     // same values through the fabric classes as well. Deciding a subset of one
@@ -717,9 +721,9 @@ describe("validity-check", () => {
 
     for (const [label, value] of LAYER_CORPUS) {
       it(`agrees with the full dispatch about ${label}`, () => {
-        const tag = tagOfNativeValueElseNull(value);
+        const tag = tagOfConvertibleJsValueElseNull(value);
         const viaDispatch = (tag !== null) && nativeObjectTags.includes(tag);
-        expect(isValidFabricNativeObject(value)).toBe(viaDispatch);
+        expect(isValidFabricConvertibleJsObject(value)).toBe(viaDispatch);
       });
     }
 
@@ -728,7 +732,7 @@ describe("validity-check", () => {
       // the corpus lands on both answers is asserted rather than assumed.
 
       const answers = LAYER_CORPUS.map(([, value]) =>
-        isValidFabricNativeObject(value)
+        isValidFabricConvertibleJsObject(value)
       );
       expect(answers).toContain(true);
       expect(answers).toContain(false);
@@ -759,7 +763,7 @@ describe("validity-check", () => {
     /** The message the shallow conversion refuses the value with, or `null`. */
     function conversionRefusalOf(value: unknown): string | null {
       try {
-        shallowFabricFromNativeValue(value);
+        shallowFabricFromConvertibleJsValue(value);
         return null;
       } catch (e) {
         return (e as Error).message;
@@ -803,10 +807,10 @@ describe("validity-check", () => {
 
     describe("says what the shallow conversion says", () => {
       // What this vet is FOR: standing in for the refusal that
-      // `shallowFabricFromNativeValue()` performs today, so that a caller can
-      // vet without converting. Its verdict and its wording therefore have to be
-      // that function's, value for value -- which is what this pins, over the
-      // whole corpus rather than over a chosen case.
+      // `shallowFabricFromConvertibleJsValue()` performs today, so that a
+      // caller can vet without converting. Its verdict and its wording
+      // therefore have to be that function's, value for value -- which is what
+      // this pins, over the whole corpus rather than over a chosen case.
       //
       // The agreement is bounded to values whose class can be read at all. A
       // value whose prototype has a throwing `constructor` accessor cannot be
@@ -821,13 +825,13 @@ describe("validity-check", () => {
       // once -- and a value that answers differently each time it is asked is
       // not one this agreement is for.
       //
-      // The exception is a `FabricNativeObject`, and it is the whole of the
-      // exception: conversion has a say over one, and either mints its fabric
-      // form or refuses it there. The vet has no say and does not pretend to,
-      // which its own group below covers.
+      // The exception is a `FabricConvertibleJsObject`, and it is the whole of
+      // the exception: conversion has a say over one, and either mints its
+      // fabric form or refuses it there. The vet has no say and does not
+      // pretend to, which its own group below covers.
 
       for (const [label, value] of LAYER_CORPUS) {
-        if (isValidFabricNativeObject(value)) continue;
+        if (isValidFabricConvertibleJsObject(value)) continue;
         it(`gives ${label} the same verdict, in the same words`, () => {
           expect(refusalOf(value)).toBe(conversionRefusalOf(value));
         });
@@ -835,7 +839,7 @@ describe("validity-check", () => {
 
       it("is checked against both verdicts", () => {
         const outcomes = LAYER_CORPUS
-          .filter(([, value]) => !isValidFabricNativeObject(value))
+          .filter(([, value]) => !isValidFabricConvertibleJsObject(value))
           .map(([, value]) => refusalOf(value) === null);
         expect(outcomes).toContain(true);
         expect(outcomes).toContain(false);
@@ -992,9 +996,9 @@ describe("validity-check", () => {
         );
       });
 
-      // A `FabricNativeObject` is in a different position from a value with no
-      // fabric form at all: conversion is what settles it, and settles it
-      // either way -- a `Date` gets a fabric form, a `Map` is refused there
+      // A `FabricConvertibleJsObject` is in a different position from a value
+      // with no fabric form at all: conversion is what settles it, and settles
+      // it either way -- a `Date` gets a fabric form, a `Map` is refused there
       // too, its form not being built. Both are told to go and ask.
       for (
         const [label, value] of [
@@ -1008,7 +1012,7 @@ describe("validity-check", () => {
       ) {
         it(`sends ${label} to the conversion`, () => {
           expect(() => assertValidFabricValueLayer(value)).toThrow(
-            "(a `FabricNativeObject`, so conversion is what decides it)",
+            "(a `FabricConvertibleJsObject`, so conversion is what decides it)",
           );
         });
       }

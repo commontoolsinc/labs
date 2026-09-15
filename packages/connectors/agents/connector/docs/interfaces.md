@@ -722,14 +722,14 @@ zero-based `duplicate` number after the first occurrence.
 Connector hashes use SHA-256 and the `sha256:` prefix. The hash input describes
 the graph produced by the stable-array planner. It includes the converted root
 value and every deterministic child cell's cause and converted value. Each root
-or child value gets its own cell-to-link and native-to-Fabric conversion. These
-are the same conversion boundaries used when the graph is written.
+or child value gets its own cell-to-link and JS-to-Fabric conversion. These are
+the same conversion boundaries used when the graph is written.
 
 `stableFabricValue()` performs this conversion for both hashing and graph
 writes. It replaces connector-owned cells with complete `FabricLink`s. It then
 captures native plain data as immutable `FabricValue`s. Native `toJSON()`
 methods and property getters run during this capture. Later hashing and writing
-use the captured result, so a mutable native object cannot change between those
+use the captured result, so a mutable JS object cannot change between those
 steps. Shared JavaScript references retain their `FabricValue` semantics and do
 not become path-only links. Circular values and arrays with enumerable named
 properties are rejected at this boundary because they have no supported Fabric

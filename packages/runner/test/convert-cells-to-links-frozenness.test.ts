@@ -13,7 +13,7 @@ import { expect } from "@std/expect";
 
 import {
   deepFreeze,
-  type FabricConvertibleValue,
+  type FabricConvertibleJsValue,
 } from "@commonfabric/data-model";
 import { isLinkRef, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import {
@@ -141,8 +141,8 @@ describe("convert-cells-to-links-frozenness", () => {
   it("returns a frozen back-link where a cycle was", () => {
     // A cycle's back-link is the walk's other minted value, and it carries a
     // `path` array of its own.
-    const inner: Record<string, FabricConvertibleValue> = {};
-    const cyclic: Record<string, FabricConvertibleValue> = { inner };
+    const inner: Record<string, FabricConvertibleJsValue> = {};
+    const cyclic: Record<string, FabricConvertibleJsValue> = { inner };
 
     inner.back = cyclic;
 

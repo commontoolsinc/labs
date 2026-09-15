@@ -82,43 +82,6 @@ export type MutableFabricValueLayer =
   | MutableFabricPlainObjectLayer;
 
 //
-// Types for dealing with native (non-fabric, a/k/a "wild west") values
-//
-
-/**
- * Union of raw native JS **object** types that the fabric type system can
- * convert into `FabricInstance` wrappers or `FabricPrimitive` values. These
- * are the inputs to the "sausage grinder" -- `shallowFabricFromNativeValue()`
- * accepts `unknown`, so callers can hand it `FabricValue`s or raw native JS
- * objects alike, and whatever it cannot represent is rejected there rather
- * than excluded by the signature. The conversion produces `FabricInstance`
- * wrappers or `FabricPrimitive` values that live inside `FabricValue`.
- *
- * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
- * and belongs directly in `FabricValue` without wrapping.
- */
-export type FabricNativeObject =
-  | Error
-  | Map<unknown, unknown>
-  | Set<unknown>
-  | Date
-  | RegExp
-  | Uint8Array;
-
-/**
- * A `FabricValue`, a `FabricNativeObject`, or a deep tree thereof -- the values
- * that convert to and from fabric form. This is the precondition of
- * `fabricFromNativeValue()` (which fails on anything else), the result of
- * `nativeFromFabricValue()`, and what `isValidFabricConvertibleValue()` tests
- * for.
- *
- * Distinct from `FabricValue`: containers here may hold `FabricNativeObject`s.
- * Converting a `FabricError` yields an `Error`, so an array of them is an array
- * of natives, which has no `FabricValue` name.
- */
-export type FabricConvertibleValue = FabricValuePlus<FabricNativeObject>;
-
-//
 // Abstract base classes
 //
 // The _class_ definitions corresponding to the _interface_ definitions in
@@ -209,10 +172,10 @@ export abstract class FabricInstance extends BaseFabricSpecialObject {
  * any `FabricPrimitive` uniformly.
  *
  * Instances are always frozen (like true primitives, they are immutable), pass
- * through the native conversions unchanged, and hold no arbitrary outgoing
- * `FabricValue` reference. `BaseFabricPrimitive` freezes each instance at
- * construction; a subclass keeps its state in private fields, which the freeze
- * does not reach.
+ * through the convertible-JS conversions unchanged, and hold no arbitrary
+ * outgoing `FabricValue` reference. `BaseFabricPrimitive` freezes each instance
+ * at construction; a subclass keeps its state in private fields, which the
+ * freeze does not reach.
  *
  * See Section 1.4.6 of the formal spec.
  */
@@ -231,3 +194,44 @@ export abstract class FabricPrimitive extends BaseFabricSpecialObject {
     super();
   }
 }
+
+//
+// Types for dealing with convertible JS (non-fabric, a/k/a "wild west") values
+//
+
+/**
+ * Union of convertible JS **object** types that the fabric type system can
+ * convert into `FabricInstance` wrappers or `FabricPrimitive` values. These are
+ * the inputs to the "sausage grinder" --
+ * `shallowFabricFromConvertibleJsValue()` accepts `unknown`, so callers can
+ * hand it `FabricValue`s or convertible JS objects alike, and whatever it
+ * cannot represent is rejected there rather than excluded by the signature. The
+ * conversion produces `FabricInstance` wrappers or `FabricPrimitive` values
+ * that live inside `FabricValue`.
+ *
+ * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
+ * and belongs directly in `FabricValue` without wrapping.
+ */
+export type FabricConvertibleJsObject =
+  | Error
+  | Map<unknown, unknown>
+  | Set<unknown>
+  | Date
+  | RegExp
+  | Uint8Array;
+
+/**
+ * A `FabricValue`, a `FabricConvertibleJsObject`, or a deep tree thereof -- the
+ * values that convert to and from fabric form. This is the precondition of
+ * `fabricFromConvertibleJsValue()` (which fails on anything else), the result
+ * of `convertibleJsFromFabricValue()`, and what
+ * `isValidFabricConvertibleJsValue()` tests for.
+ *
+ * Distinct from `FabricValue`: containers here may hold
+ * `FabricConvertibleJsObject`s. Converting a `FabricError` yields an `Error`,
+ * so an array of them is an array of JS objects, which has no `FabricValue`
+ * name.
+ */
+export type FabricConvertibleJsValue = FabricValuePlus<
+  FabricConvertibleJsObject
+>;

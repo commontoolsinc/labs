@@ -7,7 +7,7 @@
  * returning a wrong answer.
  *
  * `FabricError` stands in for the whole tree here because it is the instance a
- * cell write actually produces -- `Cell.set()` of a native `Error` wraps one --
+ * cell write actually produces -- `Cell.set()` of a JS `Error` wraps one --
  * and it is the state-heaviest of the concrete classes.
  */
 

@@ -31,36 +31,37 @@ JavaScript "wild west" (unknown/any) <-> Strongly typed (FabricValue) <-> Serial
 ```
 
 - **Left layer — JS wild west.** Arbitrary JavaScript values (`unknown`/`any`),
-  including native objects like `Error`, `Map`, `Set`, `Date`, `RegExp`, and
+  including JS objects like `Error`, `Map`, `Set`, `Date`, `RegExp`, and
   `Uint8Array`. Code in this layer has no type guarantees about what it is
   handling.
 
 - **Middle layer — `FabricValue`.** The strongly typed core of the data model.
   Contains only primitives and containers, the latter being arrays, plain
   objects, and `FabricInstance` implementations (including wrapper classes for
-  native JS types). No raw native JS objects appear at this layer — they are
-  wrapped into `FabricInstance` implementations by the conversion functions
+  convertible JS types). No convertible JS objects appear at this layer — they
+  are wrapped into `FabricInstance` implementations by the conversion functions
   (Section 8).
 
 - **Right layer — Serialized form.** The wire/storage representation
   (`Uint8Array` for binary formats, JSON-compatible trees for the JSON engine).
   Serialization operates exclusively on `FabricValue` input; it never sees raw
-  native JS objects.
+  convertible JS objects.
 
 Conversion functions bridge the left and middle layers:
-`shallowFabricFromNativeValue()` / `fabricFromNativeValue()` convert from JS
-values to `FabricValue`, wrapping native objects into `FabricInstance` wrappers
-and freezing the result. `nativeFromFabricValue()` converts back, unwrapping
-`FabricInstance` wrappers to their native JS equivalents. See Section 8 for
-the full specification of these functions.
+`shallowFabricFromConvertibleJsValue()` / `fabricFromConvertibleJsValue()`
+convert from JS values to `FabricValue`, wrapping JS objects into
+`FabricInstance` wrappers and freezing the result.
+`convertibleJsFromFabricValue()` converts back, unwrapping `FabricInstance`
+wrappers to their JS equivalents. See Section 8 for the full
+specification of these functions.
 
 ### 1.2 Type Universe
 
 A `FabricValue` is defined as the following union. This is the **middle layer**
-— the strongly typed core. Raw native JS objects (`Error`, `Map`, `Set`, `Date`,
-`RegExp`, `Uint8Array`) do not appear here; they are handled by the conversion
-layer (Section 8) and represented in `FabricValue` trees as `FabricInstance`
-wrapper classes (Section 1.4).
+— the strongly typed core. Convertible JS objects (`Error`, `Map`, `Set`,
+`Date`, `RegExp`, `Uint8Array`) do not appear here; they are handled by the
+conversion layer (Section 8) and represented in `FabricValue` trees as
+`FabricInstance` wrapper classes (Section 1.4).
 
 > **Package note:** The data model implementation lives in
 > `packages/data-model/`. The `FabricValue` union and the types beside it are
@@ -76,13 +77,13 @@ wrapper classes (Section 1.4).
 > (Section 2), and the machinery that acts on it in `codec-common/` -- including
 > `BaseEncodeAct` and `BaseDecodeAct`, which are classes the walk carries rather
 > than contracts a caller implements. The conversion functions are in
-> `native-conversion.ts` (Section 8).
+> `convertible-js.ts` (Section 8).
 >
 > **Where a thing is declared is not where it is imported from**, and the
 > modules named here divide on that point. The whole `FabricValue` vocabulary
 > comes from `@commonfabric/data-model`, the package's main entry point: the
 > declarations in `api.ts` and `interface.ts`, the conversions in
-> `native-conversion.ts`, the clone helpers in `value-clone.ts`, and the
+> `convertible-js.ts`, the clone helpers in `value-clone.ts`, and the
 > operations a value of any class is subject to -- `deep-freeze.ts`,
 > `value-hash.ts`, `value-debug.ts`, the comparisons in `comparison/`, and the
 > tag vocabulary in `value-tags/`.
@@ -116,7 +117,7 @@ wrapper classes (Section 1.4).
 /**
  * The complete set of values that can flow through the runtime, be stored
  * persistently, or be transmitted across boundaries. This is the "middle
- * layer" of the three-layer architecture — no raw native JS objects appear
+ * layer" of the three-layer architecture — no convertible JS objects appear
  * here.
  */
 type FabricValue =
@@ -139,7 +140,7 @@ type FabricValue =
 
   // (c) Branded fabric types (custom types implementing the fabric protocol)
   //     This arm covers:
-  //       - Native object wrappers: `FabricError`, `FabricMap`,
+  //       - JS object wrappers: `FabricError`, `FabricMap`,
   //         `FabricSet` (Section 1.4)
   //       - User-defined types: `Cell`, `Stream`, etc.
   //       - System types: `UnknownValue`, `ProblematicValue`
@@ -212,10 +213,10 @@ exposes none of them and a walk stops there (Section 8.6).
 >   Objects).
 > - `function` — Functions are opaque closures with no portable representation.
 >   They are explicitly **not** representable as `FabricValue`s, eliciting a
->   thrown error from `fabricFromNativeValue()` and a `false` return value from
->   `isValidFabricConvertibleValue()`. (`FabricInstance`s are not functions in
->   this sense — they are class instances whose encoding is handled by their
->   class's `[CODEC]`.)
+>   thrown error from `fabricFromConvertibleJsValue()` and a `false` return
+>   value from `isValidFabricConvertibleJsValue()`. (`FabricInstance`s are not
+>   functions in this sense — they are class instances whose encoding is
+>   handled by their class's `[CODEC]`.)
 >
 > A proposed, deliberately narrow exception adds a `FabricFactory` arm for
 > builder-created factories and codec-decoded factory shells admitted to the
@@ -237,17 +238,17 @@ exposes none of them and a walk stops there (Section 8.6).
 > (`"undefined"`, `"boolean"`, `"number"`, `"string"`, `"bigint"`, `"object"`)
 > have unconditional `FabricValue` arms.
 
-#### `FabricNativeObject`
+#### `FabricConvertibleJsObject`
 
 A separate type — **outside** the `FabricValue` hierarchy — defines the raw
-native JS object types that the conversion layer can handle:
+convertible JS object types that the conversion layer can handle:
 
 ```typescript
 // Shown at module scope.
 // file: packages/data-model/src/interface.ts
 
 /**
- * Union of raw native JS object types that the conversion layer can translate
+ * Union of convertible JS object types that the conversion layer can translate
  * to and from `FabricValue`. These types sit outside the `FabricValue`
  * hierarchy and only appear at conversion function boundaries (Section 8).
  *
@@ -256,7 +257,7 @@ native JS object types that the conversion layer can handle:
  * `FabricMap`, etc.) are also NOT this type — they are `FabricInstance`
  * implementations that live inside `FabricValue`.
  */
-type FabricNativeObject =
+type FabricConvertibleJsObject =
   | Error
   | Map<unknown, unknown>
   | Set<unknown>
@@ -265,17 +266,18 @@ type FabricNativeObject =
   | Uint8Array;
 
 /**
- * A `FabricValue`, a `FabricNativeObject`, or a deep tree thereof -- the values
- * that convert to and from fabric form. This is the precondition of
- * `fabricFromNativeValue()` (which fails on anything else), the result of
- * `nativeFromFabricValue()`, and what `isValidFabricConvertibleValue()` tests
- * for.
+ * A `FabricValue`, a `FabricConvertibleJsObject`, or a deep tree thereof -- the
+ * values that convert to and from fabric form. This is the precondition of
+ * `fabricFromConvertibleJsValue()` (which fails on anything else), the result
+ * of `convertibleJsFromFabricValue()`, and what
+ * `isValidFabricConvertibleJsValue()` tests for.
  *
- * Distinct from `FabricValue`: containers here may hold `FabricNativeObject`s.
- * Converting a `FabricError` yields an `Error`, so an array of them is an array
- * of natives, which has no `FabricValue` name.
+ * Distinct from `FabricValue`: containers here may hold
+ * `FabricConvertibleJsObject`s. Converting a `FabricError` yields an `Error`,
+ * so an array of them is an array of JS objects, which has no `FabricValue`
+ * name.
  */
-type FabricConvertibleValue = FabricValuePlus<FabricNativeObject>;
+type FabricConvertibleJsValue = FabricValuePlus<FabricConvertibleJsObject>;
 ```
 
 `Map` and `Set` are named with unconstrained type arguments: their contents are
@@ -284,16 +286,17 @@ bind in any case while `FabricMap` and `FabricSet` remain stubbed (Sections
 1.4.3 and 1.4.4).
 
 Neither type is ever a member of `FabricValue`; both exist solely at the
-conversion boundary (Section 8). Of the two, **`FabricConvertibleValue` is the
+conversion boundary (Section 8). Of the two, **`FabricConvertibleJsValue` is the
 one the boundary actually speaks**, and it exists because `FabricValue |
-FabricNativeObject` cannot say "or a tree of these." A container arm of
+FabricConvertibleJsObject` cannot say "or a tree of these." A container arm of
 `FabricValue` holds `FabricValue`s, so it cannot hold an `Error`; and a
-`FabricNativeObject` is a single native object, not a container of them.
+`FabricConvertibleJsObject` is a single JS object, not a container of them.
 Converting a `FabricError` yields an `Error`, so an array of `FabricError`s
 converts to an array of `Error`s — a value that is neither a `FabricValue` nor a
-`FabricNativeObject`, and which only the recursive type names. It is what
-`fabricFromNativeValue()` succeeds on, what `nativeFromFabricValue()` returns,
-and what `isValidFabricConvertibleValue()` tests (Sections 8.3 and 8.4). It is a
+`FabricConvertibleJsObject`, and which only the recursive type names. It is what
+`fabricFromConvertibleJsValue()` succeeds on, what
+`convertibleJsFromFabricValue()` returns, and what
+`isValidFabricConvertibleJsValue()` tests (Sections 8.3 and 8.4). It is a
 precondition rather than a parameter type: the conversion functions that accept
 arbitrary input declare `unknown` and reject what they cannot convert (Section
 8.2).
@@ -301,7 +304,7 @@ arbitrary input declare `unknown` and reject what they cannot convert (Section
 `FabricValuePlus<PlusType>` is the general form of that recursion, declared in
 `api.ts`: `FabricValue` with one additional type admitted at the top and inside
 every container, so that `FabricValuePlus<never>` is `FabricValue` itself.
-`FabricConvertibleValue` is `FabricValuePlus<FabricNativeObject>`, and
+`FabricConvertibleJsValue` is `FabricValuePlus<FabricConvertibleJsObject>`, and
 `FabricValueLayer` is the same mechanism at a different `PlusType`. The array
 and plain-object arms carry `PlusType` structurally, in their element and value
 types. The instance arm, `FabricInstancePlus<PlusType>`, carries it as a
@@ -309,7 +312,7 @@ type-only brand -- the member keyed by `FABRIC_INSTANCE_PLUS_BRAND`, which
 `FabricInstance` declares at `never` -- because an instance holds its contents
 privately and nothing structural on it can witness what they may include.
 
-Every arm names a specific native class. There is no duck-typed arm: a value
+Every arm names a specific JS class. There is no duck-typed arm: a value
 becomes fabric-representable by being one of these, by implementing the fabric
 protocol (`FabricInstance` + `[CODEC]`), or not at all. In particular a
 `toJSON()` method carries no meaning here — it is an ordinary member, and a
@@ -343,10 +346,10 @@ function-valued member is not representable.
 > `3-json-encoding.md` Section 3, `SpecialNumber@1`) both faithfully represent
 > `-0`, `NaN`, `+Infinity`, and `-Infinity` as first-class values, distinct from
 > `0` and from each other. All four values pass through
-> `shallowFabricFromNativeValue()` and `fabricFromNativeValue()` (Section 4.9)
-> unchanged — `-0` retains its sign (`Object.is(result, -0) === true`), and
-> `NaN` / `±Infinity` round-trip through hashing and JSON encoding via the
-> byte-level forms in `2-hash-byte-format.md` Section 4.3 and the
+> `shallowFabricFromConvertibleJsValue()` and `fabricFromConvertibleJsValue()`
+> (Section 4.9) unchanged — `-0` retains its sign (`Object.is(result, -0) ===
+> true`), and `NaN` / `±Infinity` round-trip through hashing and JSON encoding
+> via the byte-level forms in `2-hash-byte-format.md` Section 4.3 and the
 > `SpecialNumber@1` envelope in `3-json-encoding.md` Section 3. Value-equality
 > among these values follows `Object.is()` — `-0` is distinct from `+0` while
 > all `NaN`s are equal — as specified in Section 6.7.
@@ -358,22 +361,22 @@ function-valued member is not representable.
 > (`Symbol.keyFor(s)`). Unique symbols (`Symbol(desc)` — those for which
 > `Symbol.keyFor(s)` returns `undefined`) have no portable representation and
 > are rejected at every layer. Interned symbols pass through
-> `shallowFabricFromNativeValue()` and `fabricFromNativeValue()` (Section 4.9)
-> unchanged: round-trip via `Symbol.for(key)` yields a result that is `===` to
-> any other `Symbol.for(key)` in the same realm. Unique symbols throw with the
-> message ``"Not representable as a `FabricValue`: unique (uninterned)
-> symbol"``.
+> `shallowFabricFromConvertibleJsValue()` and `fabricFromConvertibleJsValue()`
+> (Section 4.9) unchanged: round-trip via `Symbol.for(key)` yields a result that
+> is `===` to any other `Symbol.for(key)` in the same realm. Unique symbols
+> throw with the message ``"Not representable as a `FabricValue`: unique
+> (uninterned) symbol"``.
 
-### 1.4 Native Object Wrapper Classes
+### 1.4 JS Object Wrapper Classes
 
 Certain built-in JS types (`Error`, `Map`, `Set`) cannot have `Symbol`-keyed
 methods added via prototype patching in a reliable, cross-realm way. Rather than
 handling them with special-case logic in the encoder, the system defines
-**wrapper classes** — one per native type — that implement `FabricInstance`. The
-conversion layer (Section 8) wraps raw native objects into these classes when
-bridging from the JS wild west to `FabricValue`, and unwraps them when bridging
-back. (Native `RegExp` is also bridged by the conversion layer, but into the
-`FabricRegExp` **primitive** rather than a wrapper — see Section 1.4.5.)
+**wrapper classes** — one per JS type — that implement `FabricInstance`. The
+conversion layer (Section 8) wraps convertible JS objects into these classes
+when bridging from the JS wild west to `FabricValue`, and unwraps them when
+bridging back. (A JS `RegExp` is also bridged by the conversion layer, but into
+the `FabricRegExp` **primitive** rather than a wrapper — see Section 1.4.5.)
 
 Because each wrapper genuinely implements `FabricInstance` and hosts a `[CODEC]`
 (Section 2.4), the codec system processes them through the same uniform codec
@@ -405,7 +408,7 @@ not carry a `wireTypeTag` property (no fabric type does, save `UnknownValue` and
 | `FabricMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. **Implementation status: stubbed** — the tag is reserved and the class exists, but its members and codec currently throw (see Section 1.4.3). |
 | `FabricSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. **Implementation status: stubbed** — the tag is reserved and the class exists, but its members and codec currently throw (see Section 1.4.4). |
 
-(Native `RegExp` is also bridged by the conversion layer, but into the
+(A JS `RegExp` is also bridged by the conversion layer, but into the
 `FabricRegExp` **primitive** — a `FabricPrimitive` subclass, not a wrapper. It
 is therefore listed in the special-primitive table below and detailed in
 Section 1.4.5, not here.)
@@ -418,8 +421,8 @@ Each wrapper class above:
   providing a `toNativeValue(frozen)` method for unwrapping.
 - **Hosts a static `[CODEC]`** (Section 2.4) whose `encode()` extracts essential
   state and whose `decode()` returns an instance of the wrapper class — **not**
-  the raw native type. Callers who need the underlying native object use
-  `nativeFromFabricValue()` (Section 8) to unwrap it. The wire tag (e.g.,
+  the JS type. Callers who need the underlying JS object use
+  `convertibleJsFromFabricValue()` (Section 8) to unwrap it. The wire tag (e.g.,
   `"Error@1"`) is carried by the codec, not by the instances.
 - **Has `[DEEP_FREEZE]` and `[IS_DEEP_FROZEN]` methods plus a
   `deepClone(frozen)` method** per the `FabricInstance` protocol (Section 2.3);
@@ -428,16 +431,16 @@ Each wrapper class above:
 
 ##### `FabricNativeWrapper<T>` Base Class
 
-All native object wrappers share an abstract base class that extends
+All JS object wrappers share an abstract base class that extends
 `BaseFabricInstance` (see Section 2.3) and adds methods for unwrapping back
-to native form:
+to convertible JS form:
 
 ```typescript
 // Shown for illustration only.
 // file: packages/data-model/fabric-instances/FabricNativeWrapper.ts
 
 /**
- * Abstract base class for `FabricInstance` wrappers that bridge native JS
+ * Abstract base class for `FabricInstance` wrappers that bridge convertible JS
  * objects into the `FabricValue` layer.
  * Provides a common `toNativeValue()` method used by both the shallow and
  * deep unwrap functions, replacing their `instanceof` cascades with a
@@ -445,7 +448,7 @@ to native form:
  */
 export abstract class FabricNativeWrapper<T extends object>
   extends BaseFabricInstance {
-  /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
+  /** The wrapped JS value, used by `toNativeValue` for freeze-state checks. */
   protected abstract get wrappedValue(): T;
 
   /** Converts the wrapped value to frozen form (only called on state mismatch). */
@@ -454,7 +457,7 @@ export abstract class FabricNativeWrapper<T extends object>
   /** Converts the wrapped value to thawed form (only called on state mismatch). */
   protected abstract toNativeThawed(): T;
 
-  /** Returns the underlying native value, optionally frozen. */
+  /** Returns the underlying JS value, optionally frozen. */
   toNativeValue(frozen: boolean): T {
     const value = this.wrappedValue;
     if (frozen === Object.isFrozen(value)) return value;
@@ -490,7 +493,7 @@ through 1.4.11.
 | `FabricHash` | `FabricPrimitive` | `Hash@1` | `Uint8Array` (hash bytes, private) + `string` (algorithm tag) | Content identifier / hash. Stringifies as `<tag>:<base64urlhash>` (unpadded base64url, RFC 4648 Section 5). The first algorithm tag is `fid1` ("fabric ID, v1"). Wire state is `{ tag, hash }` (see Section 1.4.9). |
 | `FabricBytes` | `FabricPrimitive` | `Bytes@1` | `Uint8Array` (private byte storage) | Immutable byte sequence. The instance owns its bytes outright: input is copied at construction time, unless the caller cedes it with `transfer`. Callers access bytes via `slice()`, `sliceBuffer()`, `copyInto()`, and `length`. |
 | `FabricKeyPair` | `FabricPrimitive` | `KeyPair@1` | Either two `CryptoKey` handles, or an algorithm name and the two keys' bytes | Asymmetric key pair. Which of the two states it holds decides what it can do: only the material state has a JSON encoding or a hash, and only the handle state can hand back a `CryptoKeyPair` (see Section 1.4.11). |
-| `FabricRegExp` | `FabricPrimitive` | `RegExp@1` | `source` / `flags` / `flavor` strings | Regular-expression value. `source` is the pattern string (`regex.source`); `flags` is the flag string (`regex.flags`); `flavor` is the regex dialect identifier (e.g. `"es2025"`). Stores strings only; `value` returns a fresh native `RegExp` clone per call. Extra enumerable properties on a native `RegExp` cause rejection. |
+| `FabricRegExp` | `FabricPrimitive` | `RegExp@1` | `source` / `flags` / `flavor` strings | Regular-expression value. `source` is the pattern string (`regex.source`); `flags` is the flag string (`regex.flags`); `flavor` is the regex dialect identifier (e.g. `"es2025"`). Stores strings only; `value` returns a fresh JS `RegExp` clone per call. Extra enumerable properties on a JS `RegExp` cause rejection. |
 
 #### Extra Enumerable Properties
 
@@ -503,22 +506,22 @@ the decoded instance (Section 1.4.2).
 
 **`FabricMap`, `FabricSet`, `FabricRegExp`, `FabricEpochNsec`, `FabricEpochDay`,
 `FabricHash`, `FabricBytes`, `FabricKeyPair`** must NOT carry extra enumerable
-properties. Their stored value contains only the essential native data (entries,
+properties. Their stored value contains only the essential JS data (entries,
 items, epoch value, bytes respectively). Extra enumerable properties on the
-source native object cause **rejection** — the conversion function throws. This
+source JS object cause **rejection** — the conversion function throws. This
 follows the principle "Death before confusion!" (Mark Miller): it is better to
 fail loudly than to silently lose data. This is in the same spirit as the
 treatment of arrays, where extra non-index properties also cause rejection
 (Section 1.5) — though the array rule is stricter still, rejecting
-non-enumerable and symbol-keyed properties as well. Unlike `Error`, these native
+non-enumerable and symbol-keyed properties as well. Unlike `Error`, these JS
 types have no established convention for custom properties.
 
 #### 1.4.2 `FabricError`
 
-Unlike a thin wrapper holding a native `Error`, `FabricError` stores
+Unlike a thin wrapper holding a JS `Error`, `FabricError` stores
 **structured `FabricValue`-typed state** — fixed-schema slots (`type`, `name`,
 `message`, `stack`, `cause`) plus a hidden "extras" bag of custom enumerable
-properties accessed via map-like methods. The native `Error` form is a
+properties accessed via map-like methods. The JS `Error` form is a
 *projection*, produced on demand by `toNativeValue()` (and cached once the
 instance is frozen, when it can no longer go stale).
 
@@ -532,7 +535,7 @@ instance is frozen, when it can no longer go stale).
  * properties (also in `FabricValue` form).
  */
 export type FabricErrorState = {
-  /** Constructor name of the originating native `Error`
+  /** Constructor name of the originating JS `Error`
    *  (e.g. `"TypeError"`). */
   readonly type: string;
   /**
@@ -560,7 +563,7 @@ export type FabricErrorState = {
 /**
  * Wrapper for `Error` instances in the fabric type system. The publicly
  * observable state is entirely `FabricValue`-typed: fixed-schema slots
- * plus a hidden extras bag. The native `Error` form is produced on demand
+ * plus a hidden extras bag. The JS `Error` form is produced on demand
  * by `toNativeValue()`.
  *
  * Like all `FabricInstance`s, a `FabricError` is wholeheartedly mutable
@@ -589,7 +592,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
   constructor(state: FabricErrorState);
 
   /**
-   * Conversion from a native `Error`. The error's `.cause` and custom
+   * Conversion from a JS `Error`. The error's `.cause` and custom
    * properties go through `options.convert`: by default one that holds a
    * valid `FabricValue` as it stands and puts anything else through the
    * deep conversion of Section 8.2 without freezing, so the result is a
@@ -616,7 +619,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
   // ([DEEP_FREEZE] / [IS_DEEP_FROZEN] freeze `this` and recurse into
   // `cause` + the extras-bag values; `[SHALLOW_UNFROZEN_CLONE]()` copies the
   // slots + bag; `wrappedValue` / `toNativeFrozen()` / `toNativeThawed()`
-  // build the native `Error` projection on demand. `deepClone(frozen)`
+  // build the JS `Error` projection on demand. `deepClone(frozen)`
   // round-trips through the codec: `codec.decode(tag,
   // codec.encode(this, env), env)`. Bodies omitted for brevity.)
 
@@ -695,7 +698,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
 }
 ```
 
-The native projection (`#buildNativeError()`, reached via `toNativeValue()`)
+The JS projection (`#buildNativeError()`, reached via `toNativeValue()`)
 decodes the appropriate `Error` subclass from `type` (via a constructor-name
 lookup, defaulting to `Error`), restores `name` when it differs, and copies
 `stack`, `cause`, and the extras onto the result. While the instance is mutable
@@ -704,7 +707,7 @@ the projection is rebuilt on each access; once frozen it is cached.
 #### 1.4.3 `FabricMap`
 
 > **Implementation status: stubbed (tag reserved).** The live class exists with
-> the full wrapper shape (including the native-projection members, with
+> the full wrapper shape (including the JS-projection members, with
 > `toNativeFrozen()` producing a `FrozenMap`), and its `Map@1` tag is reserved
 > in `CODEC_TYPE_TAGS`, but the protocol members and the codec's
 > `encode()`/`decode()` currently throw (`"FabricMap: not yet implemented"`) —
@@ -730,7 +733,7 @@ export class FabricMap
   // ([DEEP_FREEZE] / [IS_DEEP_FROZEN] freeze `this` and recurse into the
   // entries; `[SHALLOW_UNFROZEN_CLONE]()` copies `map` into a new wrapper;
   // `wrappedValue` / `toNativeFrozen()` (-> `FrozenMap`) /
-  // `toNativeThawed()` are the native-projection members.)
+  // `toNativeThawed()` are the JS-projection members.)
 
   static #codec = Object.freeze(
     new (class FabricMapCodec extends BaseNonterminalCodec {
@@ -784,7 +787,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
     super();
   }
 
-  // (Lifecycle and native-projection members parallel to `FabricMap`.)
+  // (Lifecycle and JS-projection members parallel to `FabricMap`.)
 
   static #codec = Object.freeze(
     new (class FabricSetCodec extends BaseNonterminalCodec {
@@ -818,7 +821,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
 
 #### 1.4.5 `FabricRegExp`
 
-`FabricRegExp` is a `FabricPrimitive` subclass, not a native-object wrapper. A
+`FabricRegExp` is a `FabricPrimitive` subclass, not a JS-object wrapper. A
 regular expression is a leaf type with respect to references (it holds no nested
 `FabricValue`s) and is reasonably conceived of as stateless: although a JS
 `RegExp` carries mutable internal state (notably `lastIndex`), a `FabricRegExp`
@@ -840,20 +843,20 @@ import { FabricPrimitive } from './interface';
  * The essential state is `{ source, flags, flavor }` — the values needed to
  * (re)construct an equivalent regex. The `flavor` string identifies the regex
  * dialect; only `"es2025"` (the default) is currently representable as a
- * native JS `RegExp`. The `flavor` field is forward-looking for multi-runtime
+ * JS `RegExp`. The `flavor` field is forward-looking for multi-runtime
  * scenarios where different regex engines may be in use.
  *
  * For the `"es2025"` flavor the constructor proactively builds and retains a
  * private `RegExp` (validating the pattern eagerly and making `value` cheap);
  * the retained instance is never handed out directly, so `value` returns a
  * fresh clone on each call. Other flavors store their strings faithfully but
- * cannot yet produce a native `RegExp`, so `value` throws for them.
+ * cannot yet produce a JS `RegExp`, so `value` throws for them.
  *
- * A native `RegExp` argument with extra enumerable own properties is rejected
+ * A JS `RegExp` argument with extra enumerable own properties is rejected
  * (death before confusion).
  */
 export class FabricRegExp extends FabricPrimitive {
-  // Constructed either from a native `RegExp` (implying the `"es2025"`
+  // Constructed either from a JS `RegExp` (implying the `"es2025"`
   // flavor) or from explicit `flavor` / `source` / `flags`.
   constructor(regex: RegExp);
   constructor(flavor: string, source: string, flags: string);
@@ -868,9 +871,9 @@ export class FabricRegExp extends FabricPrimitive {
   get flavor(): string;
 
   /**
-   * A fresh native `RegExp` equivalent to this value, returned anew on each
+   * A fresh JS `RegExp` equivalent to this value, returned anew on each
    * call so the internal instance is never aliased out. Throws when the
-   * flavor has no native `RegExp` representation.
+   * flavor has no JS `RegExp` representation.
    */
   get value(): RegExp;
 }
@@ -972,10 +975,10 @@ import {
  * any `FabricPrimitive` uniformly.
  *
  * Instances are always frozen (like true primitives, they are immutable), pass
- * through the native conversions unchanged, and hold no arbitrary outgoing
- * `FabricValue` reference. `BaseFabricPrimitive` freezes each instance at
- * construction; a subclass keeps its state in private fields, which the freeze
- * does not reach.
+ * through the convertible-JS conversions unchanged, and hold no arbitrary
+ * outgoing `FabricValue` reference. `BaseFabricPrimitive` freezes each instance
+ * at construction; a subclass keeps its state in private fields, which the
+ * freeze does not reach.
  *
  * See Section 1.4.6 of the formal spec.
  */
@@ -1383,8 +1386,8 @@ JSON.
 #### 1.4.12 `FabricLink`
 
 `FabricLink` is a fabric-native `FabricInstance` — like the wrapper classes of
-Sections 1.4.2–1.4.4, but not wrapping any native JS type — that represents a
-**link**: the modern, object-shaped form of a reference to data stored in the
+Sections 1.4.2–1.4.4, but not wrapping any convertible JS type — that represents
+a **link**: the modern, object-shaped form of a reference to data stored in the
 fabric. It wraps a single **payload**, a plain object (`FabricPlainObject`) of
 addressing fields, as its sole nested `FabricValue`.
 
@@ -1451,16 +1454,16 @@ owned class to host a `[CODEC]`); see Section 4.5.
 > any other fabric class — no per-type branches in the encoder. This gives the
 > codec layer a uniform, simpler structure: it handles codec-dispatched values
 > and the structural types (arrays, objects, primitives), with no knowledge of
-> specific native JS types.
+> specific convertible JS types.
 >
 > **Decoding returns the wrapper.** The `FabricError` codec's `decode()` returns
 > a `FabricError`, not a raw `Error`. This is consistent with the three-layer
-> separation: the middle layer (`FabricValue`) contains wrappers, not raw native
-> objects. Code that needs the underlying native type uses
-> `nativeFromFabricValue()` (Section 8) as a separate step.
+> separation: the middle layer (`FabricValue`) contains wrappers, not
+> convertible JS objects. Code that needs the underlying JS type uses
+> `convertibleJsFromFabricValue()` (Section 8) as a separate step.
 >
 > **File organization.** Each `FabricInstance` and `FabricPrimitive` class lives
-> in its own file: the `FabricInstance` subclasses (including the native object
+> in its own file: the `FabricInstance` subclasses (including the JS object
 > wrappers `FabricError`, `FabricMap`, `FabricSet` and the explicit-tag-value
 > family) under `packages/data-model/fabric-instances/`; the `FabricPrimitive`
 > subclasses (`FabricEpochNsec`, `FabricEpochDay`, `FabricHash`, `FabricBytes`,
@@ -1557,7 +1560,7 @@ contents private and is governed by the protocol of Section 2.3 instead.
 > `JSON.parse()` — so what stands in the way is the copy loops, not JavaScript.
 >
 > `constructor` copies faithfully. It is reserved because other boundaries in
-> this implementation already refuse it: the projection to native values drops
+> this implementation already refuse it: the projection to JS values drops
 > it, and `FabricError` throws on it. Admitting it here would mean accepting a
 > key that a later boundary discards without saying so.
 >
@@ -1595,8 +1598,8 @@ to a different graph than the one encoded, with nothing at either end saying
 so.
 
 **Conversion is decided separately from encoding, and refuses a cycle.**
-`fabricFromNativeValue()` builds a `FabricValue` out of native data, and will
-not build one containing a cycle; it preserves shared references, so the
+`fabricFromConvertibleJsValue()` builds a `FabricValue` out of JS data, and
+will not build one containing a cycle; it preserves shared references, so the
 converted form for a given original is reused and structural sharing survives.
 That is a third answer under the same rule, not an exception to it: membership
 admits a cycle -- `isValidFabricValue()` handles one and returns `true` -- while
@@ -2443,7 +2446,7 @@ that two references to the same logical entity decode to the same object.
 ### 2.8 Encoded State and Recursion
 
 The value returned by a codec's `encode()` can contain any value that is
-itself a `FabricValue` — including other `FabricInstance`s (such as native
+itself a `FabricValue` — including other `FabricInstance`s (such as JS
 object wrappers), primitives, and plain objects/arrays.
 
 **The codec system handles recursion, not the individual codecs.** An `encode()`
@@ -2453,9 +2456,9 @@ by design, as it would be a layering violation.
 
 Similarly, `decode()` receives state where nested values have already been
 decoded by the codec system. Importantly, `decode()` returns the **wrapper
-type**, not the raw native type. For example, the `FabricError` codec produces a
-`FabricError` instance, not a raw `Error`. Unwrapping to native types is a
-separate step via `nativeFromFabricValue()` (Section 8).
+type**, not the JS type. For example, the `FabricError` codec produces a
+`FabricError` instance, not a raw `Error`. Unwrapping to JS types is a
+separate step via `convertibleJsFromFabricValue()` (Section 8).
 
 ### 2.9 Decode Guarantees
 
@@ -2473,15 +2476,15 @@ The system follows an **immutable-forward** design:
 This immutability guarantee enables safe sharing of decoded values and
 aligns with the reactive system's assumption that values don't mutate in place.
 
-> **Immutability of native object wrappers.** Under the three-layer
+> **Immutability of JS object wrappers.** Under the three-layer
 > architecture, decoding produces `FabricInstance` wrappers (`FabricMap`,
-> `FabricSet`, etc.), not raw native types. Because the system controls the
+> `FabricSet`, etc.), not JS types. Because the system controls the
 > shape of these wrapper classes, they can be properly frozen with
-> `Object.freeze()` — unlike the native types they wrap (e.g., `Object.freeze()`
+> `Object.freeze()` — unlike the JS types they wrap (e.g., `Object.freeze()`
 > on a `Map` does not prevent mutation via `set()`/`delete()`). The underlying
-> native objects stored inside wrappers (e.g., `FabricMap.map`) are not directly
-> exposed to consumers of `FabricValue` — callers who need the native types use
-> `nativeFromFabricValue()` (Section 8), which returns `FrozenMap` and
+> JS objects stored inside wrappers (e.g., `FabricMap.map`) are not directly
+> exposed to consumers of `FabricValue` — callers who need the JS types use
+> `convertibleJsFromFabricValue()` (Section 8), which returns `FrozenMap` and
 > `FrozenSet` (effectively-immutable wrappers) for collection types, preserving
 > the immutability guarantee even after unwrapping.
 
@@ -3325,50 +3328,50 @@ The `memory` package wraps these at its encoding boundary
 
 ### 4.9 Fabric Value Conversion
 
-The native-to-`FabricValue` boundary is managed by
-`packages/data-model/native-conversion.ts`. This module provides
-`fabricFromNativeValue()` / `nativeFromFabricValue()` functions that bridge
-the left layer (JS wild west) and the middle layer (`FabricValue`) at the
-`Cell` read/write boundary.
+The JS-to-`FabricValue` boundary is managed by
+`packages/data-model/convertible-js.ts`. This module provides
+`fabricFromConvertibleJsValue()` / `convertibleJsFromFabricValue()` functions
+that bridge the left layer (JS wild west) and the middle layer (`FabricValue`)
+at the `Cell` read/write boundary.
 
 The module also provides a shallow conversion function
-(`shallowFabricFromNativeValue()`) and a type-check function
-(`isValidFabricConvertibleValue()`). The public surface is re-exported from
+(`shallowFabricFromConvertibleJsValue()`) and a type-check function
+(`isValidFabricConvertibleJsValue()`). The public surface is re-exported from
 `index.ts`, as is the comparison function `valueEqual()` from `comparison/`.
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/native-conversion.ts
+// file: packages/data-model/convertible-js.ts
 
 /**
- * Convert a native JS value to fabric form (deep, recursive). Wraps native
- * types into fabric wrappers (Section 8.2). When `freeze` is `true` (the
- * default), the result tree is deep-frozen; when `false`, wrapping and
- * validation still occur but the result is left mutable. An input that is
+ * Convert a convertible JS value to fabric form (deep, recursive). Wraps
+ * convertible JS types into fabric wrappers (Section 8.2). When `freeze` is
+ * `true` (the default), the result tree is deep-frozen; when `false`, wrapping
+ * and validation still occur but the result is left mutable. An input that is
  * already a deep-frozen `FabricValue` is returned as-is (identity
  * optimization).
  */
-export function fabricFromNativeValue(
+export function fabricFromConvertibleJsValue(
   value: unknown,
   freeze = true,
 ): FabricValue;
 
 /**
- * Convert a `FabricValue` back to native form, unwrapping fabric wrappers
- * back to native JS types (Section 8.4).
+ * Convert a `FabricValue` back to convertible JS form, unwrapping fabric
+ * wrappers back to convertible JS types (Section 8.4).
  */
-export function nativeFromFabricValue(
+export function convertibleJsFromFabricValue(
   value: FabricValue,
   frozen?: boolean,
-): FabricValue;
+): FabricConvertibleJsValue;
 ```
 
 In the `Cell` implementation:
 
-- **Read path:** `Cell.getRaw()` calls `nativeFromFabricValue(value)` to
+- **Read path:** `Cell.getRaw()` calls `convertibleJsFromFabricValue(value)` to
   unwrap fabric wrappers before returning values to the JS wild west.
-- **Write path:** `Cell.setRaw()` calls `fabricFromNativeValue(value)` to
-  wrap native types into fabric form before storing.
+- **Write path:** `Cell.setRaw()` calls `fabricFromConvertibleJsValue(value)` to
+  wrap JS types into fabric form before storing.
 
 #### Module structure
 
@@ -3376,11 +3379,11 @@ The implementation is split across several files for separation of concerns:
 
 | File | Purpose |
 |------|---------|
-| `index.ts` | Public surface, and the package's main entry point: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), the clone helpers (from `value-clone.ts`), the deep freeze (from `deep-freeze.ts`), the hash (from `value-hash.ts`), the debug renderers (from `value-debug.ts`), the tag vocabulary (from `value-tags/`), and the comparisons `valueEqual()` and `fabricAwareEqual()` (from `comparison/`) |
+| `index.ts` | Public surface, and the package's main entry point: re-exports the conversion functions (from `convertible-js.ts`), the type declarations (from `interface.ts`), the clone helpers (from `value-clone.ts`), the deep freeze (from `deep-freeze.ts`), the hash (from `value-hash.ts`), the debug renderers (from `value-debug.ts`), the tag vocabulary (from `value-tags/`), and the comparisons `valueEqual()` and `fabricAwareEqual()` (from `comparison/`) |
 | `api.ts` | The pattern-visible declarations: the `FabricValue` union and the types beside it, the three base classes and every concrete class as an `interface` plus a `declare const`, and the debug-rendering option types. It has no imports, so that the type module the sandbox is served can inline it; it is also the `./api` export subpath, which `@commonfabric/api` re-exports. |
-| `interface.ts` | The three abstract base classes as classes, the layer types, and the conversion-layer types (`FabricNativeObject`, `FabricConvertibleValue`); re-exports every type `api.ts` declares. Free of runtime imports, so that any module can import it. |
+| `interface.ts` | The three abstract base classes as classes, the layer types, and the conversion-layer types (`FabricConvertibleJsObject`, `FabricConvertibleJsValue`); re-exports every type `api.ts` declares. Free of runtime imports, so that any module can import it. |
 | `api-agreement.ts` | Asserts that each of the three base classes and its `api.ts` declaration are mutually assignable. Nothing imports it; it exists to be type-checked, and everything in it erases at compile time. |
-| `native-conversion.ts` | Conversion: `fabricFromNativeValue`, `shallowFabricFromNativeValue`, `nativeFromFabricValue`, `isValidFabricConvertibleValue` |
+| `convertible-js.ts` | Conversion: `fabricFromConvertibleJsValue`, `shallowFabricFromConvertibleJsValue`, `convertibleJsFromFabricValue`, `isValidFabricConvertibleJsValue` |
 | `fabric-bases/` | The abstract bases a concrete `FabricValue` extends, one per branch of the type hierarchy: `BaseFabricInstance.ts`, `BaseFabricPrimitive.ts` (plus an `index.ts` barrel). These are the implementer's half of the hierarchy; `interface.ts` is the client's, and reaching it does not reach these. |
 | `fabric-instances/` | Concrete `FabricInstance` subclasses, each in its own file: `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricLink.ts`, `FabricMap.ts`, `FabricSet.ts` (plus an `index.ts` barrel). `UnknownValue` and `ProblematicValue` are `FabricInstance`s too, but live in `codec-common/`, existing only as products of a decode fault. |
 | `fabric-primitives/` | Concrete `FabricPrimitive` subclasses, each in its own file: `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDay.ts`, `FabricKeyPair.ts`, `FabricRegExp.ts` (plus an `index.ts` barrel). |
@@ -3506,9 +3509,9 @@ regardless of nibble range.
  * `true`, `false`; an LRU cache for primitives (`string`, `number`,
  * `bigint`); and a WeakMap for deep-frozen objects.
  *
- * Native `Date`, `RegExp`, and `Uint8Array` values are handled via
+ * JS `Date`, `RegExp`, and `Uint8Array` values are handled via
  * on-the-fly conversion to their fabric equivalents
- * (`shallowFabricFromNativeValue`), then hashed in their converted
+ * (`shallowFabricFromConvertibleJsValue`), then hashed in their converted
  * form.
  */
 export function hashOf(value: unknown): FabricHash {
@@ -3582,7 +3585,7 @@ export function hashOf(value: unknown): FabricHash {
   //                        `[CODEC]` (Section 2.4), the same source of
   //                        truth the codec layer uses.
   //
-  // The native object wrappers and temporal types are hashed as follows:
+  // The JS object wrappers and temporal types are hashed as follows:
   //
   // - `FabricError`, `FabricMap`, `FabricSet`,
   //   and other `FabricInstance`s with recursively-processable
@@ -3645,7 +3648,7 @@ export function hashOf(value: unknown): FabricHash {
 ### 6.5 Relationship to Late Serialization
 
 Hashing operates on `FabricValue` directly, using codec-encoded state for
-`FabricInstance`s (including the native object wrappers; via `codecOf()`,
+`FabricInstance`s (including the JS object wrappers; via `codecOf()`,
 Section 2.4) and type-specific handling for primitives and plain containers.
 This makes identity hashing independent of any particular wire encoding — the
 same hash whether later serialized to JSON, CBOR, or Automerge.
@@ -3721,24 +3724,24 @@ change its equality result.
 Migration to the spec involves replacing early JSON-form conversion with
 boundary-only encoding and the three-layer architecture:
 
-1. Update `FabricValue` to exclude raw native JS types, include
+1. Update `FabricValue` to exclude convertible JS types, include
    `FabricInstance` (Section 1.2).
-2. Introduce the native object wrapper classes (`FabricError`, etc.) that
+2. Introduce the JS object wrapper classes (`FabricError`, etc.) that
    implement `FabricInstance` (Section 1.4).
-3. Rework `shallowFabricFromNativeValue()` / `fabricFromNativeValue()` to
-   wrap native types into `FabricInstance` wrappers and return frozen results
-   (Section 8).
-4. Add `nativeFromFabricValue()` for unwrapping back to native types
+3. Rework `shallowFabricFromConvertibleJsValue()` /
+   `fabricFromConvertibleJsValue()` to wrap JS types into `FabricInstance`
+   wrappers and return frozen results (Section 8).
+4. Add `convertibleJsFromFabricValue()` for unwrapping back to JS types
    (Section 8).
 5. Remove early conversion points (e.g., `convertCellsToLinks()`, legacy `Error`
    wrapping as `{ "@Error": ... }`).
 6. Introduce a codec engine at each boundary (Section 4.7).
 7. Update internal code to work with `FabricValue` types rather than JSON
-   shapes or raw native objects.
+   shapes or convertible JS objects.
 
 > **`toJSON()` is not a conversion route.** The conversion functions give a
 > `toJSON()` method no standing: a value that is not a `FabricValue`, a
-> `FabricNativeObject`, or an accepted plain container does not become
+> `FabricConvertibleJsObject`, or an accepted plain container does not become
 > representable by carrying one. An object bearing `toJSON` is read as the
 > record it is, so the method itself is an ordinary member — a function, which
 > no record may hold. Anything that needs a representation of its own implements
@@ -3884,20 +3887,20 @@ values and the strongly typed data model.
 
 There are two directions:
 
-- **JS wild west -> `FabricValue`:** `shallowFabricFromNativeValue()`
-  (shallow) and `fabricFromNativeValue()` (deep, recursive).
-- **`FabricValue` -> JS wild west:** `nativeFromFabricValue()` (deep,
+- **JS wild west -> `FabricValue`:** `shallowFabricFromConvertibleJsValue()`
+  (shallow) and `fabricFromConvertibleJsValue()` (deep, recursive).
+- **`FabricValue` -> JS wild west:** `convertibleJsFromFabricValue()` (deep,
   recursive).
 
-### 8.2 `shallowFabricFromNativeValue()` and `fabricFromNativeValue()`
+### 8.2 `shallowFabricFromConvertibleJsValue()` and `fabricFromConvertibleJsValue()`
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/native-conversion.ts
+// file: packages/data-model/convertible-js.ts
 
 /**
  * Convert a value to `FabricValue` without recursing into nested values.
- * Wraps native JS types (`Error`, `Date`, `RegExp`, `Uint8Array`) into
+ * Wraps convertible JS types (`Error`, `Date`, `RegExp`, `Uint8Array`) into
  * their `FabricInstance` or `FabricPrimitive` wrapper classes. If the value
  * is already a valid `FabricValue`, returns it as-is.
  *
@@ -3911,7 +3914,7 @@ There are two directions:
  * the input is already a frozen `FabricValue`, returns the same object.
  * Pass `freeze: false` to skip freezing (see below).
  */
-export function shallowFabricFromNativeValue(
+export function shallowFabricFromConvertibleJsValue(
   value: unknown,
   freeze?: boolean, // default: true
 ): FabricValueLayer;
@@ -3921,7 +3924,7 @@ export function shallowFabricFromNativeValue(
  * (deep conversion). This is the primary conversion entry point.
  *
  * - Recursively descends into arrays and plain objects.
- * - Wraps native JS objects at any depth.
+ * - Wraps convertible JS objects at any depth.
  * - **Single-pass design:** Validation, wrapping, and freezing are performed
  *   together in one recursive descent — there are no separate passes. Each
  *   node is checked, wrapped if needed, and frozen before the function
@@ -3936,7 +3939,7 @@ export function shallowFabricFromNativeValue(
  * Pass `freeze: false` to perform wrapping and validation without freezing
  * (see "Freeze Semantics" below).
  */
-export function fabricFromNativeValue(
+export function fabricFromConvertibleJsValue(
   value: unknown,
   freeze?: boolean, // default: true
 ): FabricValue;
@@ -3954,13 +3957,13 @@ export function fabricFromNativeValue(
 | `Map` | Wrapped into `FabricMap`. Keys and values are recursively converted (deep variant only). Extra enumerable properties on the `Map` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Set` | Wrapped into `FabricSet`. Elements are recursively converted (deep variant only). Extra enumerable properties on the `Set` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Date` | Wrapped into `FabricEpochNsec`. The `Date`'s millisecond timestamp is converted to nanoseconds: `BigInt(date.getTime()) * 1_000_000n`. Note the millisecond precision limitation — sub-millisecond information is not available from `Date`. Extra enumerable properties on the `Date` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
-| `RegExp` | Converted into `FabricRegExp` (a `FabricPrimitive`, not a wrapper). The `source` and `flags` are extracted from the native `RegExp`; `flavor` defaults to `"es2025"` (it is a `FabricRegExp`-level property, not a native `RegExp` property). Extra enumerable properties on the `RegExp` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
+| `RegExp` | Converted into `FabricRegExp` (a `FabricPrimitive`, not a wrapper). The `source` and `flags` are extracted from the JS `RegExp`; `flavor` defaults to `"es2025"` (it is a `FabricRegExp`-level property, not a JS `RegExp` property). Extra enumerable properties on the `RegExp` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Uint8Array` | Wrapped into `FabricBytes`. The input bytes are copied (the caller may mutate the original afterward). Extra enumerable properties on the `Uint8Array` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `FabricValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
 | `{ [key: string]: FabricValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
 
 > **Implementation: tag-based type dispatch.** The conversion functions
-> classify a value through `tagOfNativeValueElseNull()` (in
+> classify a value through `tagOfConvertibleJsValueElseNull()` (in
 > `packages/data-model/src/value-tags/`), which returns a tag string from the
 > `VALUE_TAGS` vocabulary -- the JS type tags of `JS_TYPE_VALUE_TAGS` (the
 > `typeof` name of each primitive and of a function, plus `"null"`),
@@ -3984,19 +3987,22 @@ export function fabricFromNativeValue(
 > no class does: an error by `Error.isError()`, which holds across realms; a
 > `FabricPrimitive` by the tag its instance reports, one of
 > `FABRIC_PRIMITIVE_VALUE_TAGS`; a `FabricInstance` by class. What remains is
-> a native class instance, decided last by its class, read from its prototype,
+> a JS class instance, decided last by its class, read from its prototype,
 > by a `switch` on constructor identity; a recognized one is a value the
 > conversion has yet to import, the heavier path, so the lookup's cost sits on
-> it alone. A `FabricPrimitive` subclass that reports no tag of its own is
-> tagged as its parent, which is a defect in that subclass rather than one the
-> dispatch guards against.
+> it alone. That `switch` names only the classes no earlier question decides:
+> an object merely built on the prototype of `Object`, `Array`, or an `Error`
+> class is none of those by the test that decides it, and comes back `null`,
+> unrecognized rather than misidentified. A `FabricPrimitive` subclass that
+> reports no tag of its own is tagged as its parent, which is a defect in that
+> subclass rather than one the dispatch guards against.
 
 > **Implementation: centralized shallow-clone utility.** The conversion
 > functions use a centralized `cloneIfNecessary()` utility (in
 > `packages/data-model/value-clone.ts`) to handle frozenness adjustment for
 > values that are already valid `FabricValue` but whose freeze state does not
 > match the requested `freeze` argument. This function dispatches on the same
-> native tag to clone primitives (no-op), arrays (shallow copy preserving sparse
+> tag to clone primitives (no-op), arrays (shallow copy preserving sparse
 > holes), plain objects (spread copy), and `FabricInstance` values (via the
 > protocol's `shallowClone()` method from Section 2.3). It is the single home
 > for clone-for-frozenness logic, which every conversion call site reaches
@@ -4007,12 +4013,12 @@ export function fabricFromNativeValue(
 The immutable-forward design requires that `FabricValue` trees produced by
 conversion are frozen **by default**:
 
-- **`shallowFabricFromNativeValue()` (shallow):** `Object.freeze()` on the
-  top-level result.
-- **`fabricFromNativeValue()` (deep):** `Object.freeze()` at every level of
-  nesting, performed in the **same recursive pass** as validation and wrapping.
-  There are no separate passes — each node is checked, wrapped, and frozen
-  before the recursion returns from that level.
+- **`shallowFabricFromConvertibleJsValue()` (shallow):** `Object.freeze()` on
+  the top-level result.
+- **`fabricFromConvertibleJsValue()` (deep):** `Object.freeze()` at every level
+  of nesting, performed in the **same recursive pass** as validation and
+  wrapping. There are no separate passes — each node is checked, wrapped, and
+  frozen before the recursion returns from that level.
 
 **Caller arguments are never mutated.** The conversion functions must not call
 `Object.freeze()` on the caller's input objects. When `freeze` is `true` and
@@ -4061,10 +4067,10 @@ but skips freezing:
 ```typescript
 // Shown inside a pattern body.
 // Frozen (default) -- immutable result, safe for sharing.
-const frozen = fabricFromNativeValue(input);
+const frozen = fabricFromConvertibleJsValue(input);
 
 // Unfrozen -- mutable result, caller can modify before freezing later.
-const mutable = fabricFromNativeValue(input, false);
+const mutable = fabricFromConvertibleJsValue(input, false);
 ```
 
 This exists because JavaScript makes it difficult to update frozen values —
@@ -4074,18 +4080,18 @@ tree incrementally (e.g., merging data from multiple sources) can use
 complete. The `freeze` parameter does not affect validation or wrapping — the
 returned value is always a valid `FabricValue` regardless of its frozen state.
 
-### 8.3 `isValidFabricConvertibleValue()`
+### 8.3 `isValidFabricConvertibleJsValue()`
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/native-conversion.ts
+// file: packages/data-model/convertible-js.ts
 
 /**
- * Type predicate: returns `true` if `fabricFromNativeValue()` would succeed
- * on the given value — i.e., the value is a `FabricValue`, a
- * `FabricNativeObject`, or a tree of these types. That is exactly what
- * `FabricConvertibleValue` names (Section 1.2), so callers can use
- * `isValidFabricConvertibleValue(x)` as a type guard in conditionals.
+ * Type predicate: returns `true` if `fabricFromConvertibleJsValue()` would
+ * succeed on the given value — i.e., the value is a `FabricValue`, a
+ * `FabricConvertibleJsObject`, or a tree of these types. That is exactly what
+ * `FabricConvertibleJsValue` names (Section 1.2), so callers can use
+ * `isValidFabricConvertibleJsValue(x)` as a type guard in conditionals.
  *
  * This is a check-without-conversion function for system boundaries where
  * code receives `unknown` and needs to determine convertibility without
@@ -4095,17 +4101,17 @@ returned value is always a valid `FabricValue` regardless of its frozen state.
  * Relationship to other functions and checks:
  * - `isValidFabricValue(x)` (in `packages/data-model/src/validity-check.ts`):
  *   the narrower check — "is `x` already a `FabricValue`?" — which does NOT
- *   accept raw native types like `Error` or `Map`.
- * - `isValidFabricConvertibleValue(x)`: "Could `x` be converted to a
- *   `FabricValue` via `fabricFromNativeValue()`?" Returns `true` for both
- *   `FabricValue` values AND `FabricNativeObject` values (and deep trees
- *   thereof).
- * - `fabricFromNativeValue(x)`: Actually performs the conversion,
+ *   accept JS types like `Error` or `Map`.
+ * - `isValidFabricConvertibleJsValue(x)`: "Could `x` be converted to a
+ *   `FabricValue` via `fabricFromConvertibleJsValue()`?" Returns `true` for
+ *   both `FabricValue` values AND `FabricConvertibleJsObject` values (and deep
+ *   trees thereof).
+ * - `fabricFromConvertibleJsValue(x)`: Actually performs the conversion,
  *   throwing on unsupported types.
  */
-export function isValidFabricConvertibleValue(
+export function isValidFabricConvertibleJsValue(
   value: unknown,
-): value is FabricConvertibleValue;
+): value is FabricConvertibleJsValue;
 ```
 
 The function recursively checks the value tree. It returns `true` if and only
@@ -4116,38 +4122,39 @@ if the value is:
   Section 1.3 callout.
 - A registry-interned `symbol` (one for which `Symbol.keyFor(s)` returns a
   string). Unique symbols return `false`; see the Section 1.3 callout.
-- A `FabricInstance` (including the native object wrapper classes)
-- A `FabricNativeObject` (`Error`, `Map`, `Set`, `Date`, `RegExp`,
+- A `FabricInstance` (including the JS object wrapper classes)
+- A `FabricConvertibleJsObject` (`Error`, `Map`, `Set`, `Date`, `RegExp`,
   `Uint8Array`)
 - An array where every present element satisfies
-  `isValidFabricConvertibleValue()`, and which the array rule of Section 1.5
+  `isValidFabricConvertibleJsValue()`, and which the array rule of Section 1.5
   accepts
-- A plain object where every value satisfies `isValidFabricConvertibleValue()`
+- A plain object where every value satisfies `isValidFabricConvertibleJsValue()`
 
 It returns `false` for unsupported types (`WeakMap`, `Promise`, DOM nodes,
 class instances that don't implement `FabricInstance`, etc.) and for unique
 symbols.
 
-> **Performance note.** `isValidFabricConvertibleValue()` walks the value tree
+> **Performance note.** `isValidFabricConvertibleJsValue()` walks the value tree
 > without allocating wrappers or frozen copies. For large trees, this is cheaper
-> than calling `fabricFromNativeValue()` inside a try/catch, since it avoids the
-> wrapping and freezing work that would be discarded on failure. However, if the
-> caller intends to convert on success, calling `fabricFromNativeValue()`
-> directly (and catching the error) avoids walking the tree twice.
+> than calling `fabricFromConvertibleJsValue()` inside a try/catch, since it
+> avoids the wrapping and freezing work that would be discarded on failure.
+> However, if the caller intends to convert on success, calling
+> `fabricFromConvertibleJsValue()` directly (and catching the error) avoids
+> walking the tree twice.
 
-### 8.4 `nativeFromFabricValue()`
+### 8.4 `convertibleJsFromFabricValue()`
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/native-conversion.ts
+// file: packages/data-model/convertible-js.ts
 
 /**
  * Deep unwrap: recursively walk a `FabricValue` tree, unwrapping any
- * `FabricNativeWrapper` values to their underlying native types via
+ * `FabricNativeWrapper` values to their underlying JS types via
  * `toNativeValue()`. Non-native `FabricInstance` values (`Cell`, `Stream`,
  * `UnknownValue`, `ProblematicValue`, etc.) pass through unchanged.
  *
- * Wrapper classes are unwrapped to their native equivalents:
+ * Wrapper classes are unwrapped to their JS equivalents:
  *
  * - `FabricError`      -> `Error` (with cause and custom properties
  *                         recursively unwrapped)
@@ -4157,20 +4164,20 @@ symbols.
  * `FabricPrimitive` subclasses (`FabricEpochNsec`, `FabricEpochDay`,
  * `FabricHash`, `FabricBytes`, `FabricKeyPair`, `FabricRegExp`) pass through
  * unchanged — they are always-frozen (Section 1.4.6). (`FabricRegExp` exposes
- * its native form via `value`, and `FabricKeyPair` via `cryptoKeyPair`, each
- * returning it on request; neither is unwrapped to that form by this
+ * its convertible JS form via `value`, and `FabricKeyPair` via `cryptoKeyPair`,
+ * each returning it on request; neither is unwrapped to that form by this
  * function.)
  *
  * **The `frozen` argument is always honored.** The freeze state of every
  * value in the output matches the `frozen` argument. When `frozen` is
  * `true` (the default), unwrapped wrappers use immutable variants
  * (`FrozenMap`, `FrozenSet`, frozen `Error`). When `frozen` is `false`,
- * mutable native types are returned instead.
+ * mutable JS types are returned instead.
  */
-export function nativeFromFabricValue(
+export function convertibleJsFromFabricValue(
   value: FabricValue,
   frozen?: boolean, // default: true
-): FabricConvertibleValue;
+): FabricConvertibleJsValue;
 ```
 
 #### Unwrapping Rules
@@ -4191,10 +4198,10 @@ export function nativeFromFabricValue(
 | Arrays | Recursively unwrapped; output frozen | Recursively unwrapped; output NOT frozen |
 | Plain objects | Recursively unwrapped; output frozen | Recursively unwrapped; output NOT frozen |
 
-The output type is `FabricConvertibleValue` (Section 1.2), reflecting that the
-result may contain native JS types at any depth — a plain container of them is
-neither a `FabricValue` nor a `FabricNativeObject`, so the recursive type is
-what names it.
+The output type is `FabricConvertibleJsValue` (Section 1.2), reflecting that the
+result may contain convertible JS types at any depth — a plain container of them
+is neither a `FabricValue` nor a `FabricConvertibleJsObject`, so the recursive
+type is what names it.
 
 > **Implementation: `FabricNativeWrapper` dispatch.** The unwrapping functions
 > use a single `instanceof FabricNativeWrapper` check to identify all native
@@ -4219,14 +4226,14 @@ the output tree matches the `frozen` argument. Specifically:
   needed, e.g., unwrapping children in the deep variant).
 
 This applies uniformly to all output values — arrays, plain objects, `Error`s,
-and all wrapper-derived native types. Primitives are inherently immutable and
+and all wrapper-derived JS types. Primitives are inherently immutable and
 need no freeze/thaw action. A new object is constructed only when the freeze
 state differs between the stored value and the requested output.
 
 **Recurses into `FabricError` internals.** The function recurses into
 `FabricError` internals — specifically, the `cause` chain and custom enumerable
 properties — unwrapping any nested `FabricInstance` values. This ensures the
-output is fully "native JS" with no fabric wrappers at any depth. Without this
+output is fully "plain JS" with no fabric wrappers at any depth. Without this
 recursion, an Error's `cause` could still contain `FabricInstance` wrappers
 (e.g., a nested `FabricError`).
 
@@ -4242,7 +4249,7 @@ recursion, an Error's `cause` could still contain `FabricInstance` wrappers
 > **Why `FabricPrimitive` subclasses pass through unchanged.**
 > `FabricEpochNsec`, `FabricEpochDay`, `FabricHash`, `FabricBytes`,
 > `FabricKeyPair`, and `FabricRegExp` are all `FabricPrimitive` subclasses —
-> always frozen at construction time with no mutable state. Most have no native
+> always frozen at construction time with no mutable state. Most have no JS
 > equivalent to unwrap to (unlike `FabricError` → `Error` or `FabricMap` →
 > `Map`). Where one does exist it is reached through a member —
 > `FabricRegExp.value`, `FabricKeyPair.cryptoKeyPair` — rather than by
@@ -4250,7 +4257,7 @@ recursion, an Error's `cause` could still contain `FabricInstance` wrappers
 
 > **Why `FabricBytes` owns its input.** `FabricBytes` is a `FabricPrimitive` —
 > always frozen at construction time, holding bytes no other code can reach.
-> `FabricBytes` has no native equivalent to unwrap to, so it is the byte
+> `FabricBytes` has no JS equivalent to unwrap to, so it is the byte
 > representation rather than a wrapper around one. Callers who need raw bytes
 > use `slice()`, `sliceBuffer()`, or `copyInto()` on the instance directly.
 
@@ -4259,7 +4266,7 @@ recursion, an Error's `cause` could still contain `FabricInstance` wrappers
 For any supported value `v`:
 
 ```
-nativeFromFabricValue(fabricFromNativeValue(v))
+convertibleJsFromFabricValue(fabricFromConvertibleJsValue(v))
 ```
 
 produces a value that is structurally equivalent to `v` — the same data at the
@@ -4278,7 +4285,7 @@ matches the `frozen` argument.
 Similarly, for any `FabricValue` `sv`:
 
 ```
-fabricFromNativeValue(nativeFromFabricValue(sv))
+fabricFromConvertibleJsValue(convertibleJsFromFabricValue(sv))
 ```
 
 produces a `FabricValue` that is structurally equivalent to `sv`.
@@ -4444,16 +4451,16 @@ spec from being implementable.
   indirection through an interface (rather than depending on `Runtime` directly)
   makes this straightforward.
 
-- **`getRaw()` / `setRaw()` middle-layer contract**: Emerging consensus is
-  that `Cell.getRaw()` and `Cell.setRaw()` should traffic in `FabricValue`
-  (middle layer), not arbitrary native JS values (wild west). A usage survey
-  of all call sites in the codebase found that every existing caller operates
-  on well-defined `FabricValue`s (plain objects, arrays, strings, links, stream
-  markers) — no call site stores or retrieves raw native types like `Error`,
-  `Date`, `RegExp`, `Map`, `Set`, or `Uint8Array` through these methods.
-  Formalizing this contract (e.g., refining the type parameter `T` of
-  `IAnyCell` to `extends FabricValue`) would make the implicit expectation
-  explicit without breaking any current caller. The `nativeFromFabricValue()` /
-  `fabricFromNativeValue()` conversion in these methods (Section 4.9) is correct
-  but forward-looking: it will become load-bearing when user-facing patterns
-  start storing rich types through the schema-aware `set()` path.
+- **`getRaw()` / `setRaw()` middle-layer contract**: Emerging consensus is that
+  `Cell.getRaw()` and `Cell.setRaw()` should traffic in `FabricValue` (middle
+  layer), not arbitrary convertible JS values (wild west). A usage survey of all
+  call sites in the codebase found that every existing caller operates on
+  well-defined `FabricValue`s (plain objects, arrays, strings, links, stream
+  markers) — no call site stores or retrieves JS types like `Error`, `Date`,
+  `RegExp`, `Map`, `Set`, or `Uint8Array` through these methods. Formalizing
+  this contract (e.g., refining the type parameter `T` of `IAnyCell` to `extends
+  FabricValue`) would make the implicit expectation explicit without breaking
+  any current caller. The `convertibleJsFromFabricValue()` /
+  `fabricFromConvertibleJsValue()` conversion in these methods (Section 4.9) is
+  correct but forward-looking: it will become load-bearing when user-facing
+  patterns start storing rich types through the schema-aware `set()` path.

@@ -387,7 +387,7 @@ export function isUnsafeObjectKey(key: string): boolean {
  *   `Object.defineProperty()`, and `JSON.parse()` all carry the name -- so
  *   what stands in the way is the copy loops, not JavaScript.
  * * `constructor` copies faithfully. It is reserved because other boundaries
- *   in this implementation already refuse it: the projection to native values
+ *   in this implementation already refuse it: the projection to JS values
  *   drops it, and `FabricError` throws on it. Accepting it here would mean
  *   admitting a key that a later boundary discards without saying so.
  *

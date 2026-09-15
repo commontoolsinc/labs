@@ -8,12 +8,12 @@ import type { CfcAtom } from "@commonfabric/api/cfc";
 import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
-  fabricFromNativeValue,
+  fabricFromConvertibleJsValue,
   type FabricPlainObject,
   type FabricValue,
   isFabricSpecialObject,
   isKeyableObjectNotArray,
-  shallowFabricFromNativeObjectElseUndefined,
+  shallowFabricFromConvertibleJsObjectElseUndefined,
   toCompactDebugString,
 } from "@commonfabric/data-model";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
@@ -1236,7 +1236,7 @@ export function normalizeAndDiff(
         try {
           tx.writeValueOrThrow(
             seedTarget,
-            fabricFromNativeValue(seedDefault),
+            fabricFromConvertibleJsValue(seedDefault),
           );
           // The marker is what authorizes the write above past an
           // owner-protected schema's `writeAuthorizedBy` (cfc/prepare.ts
@@ -1565,14 +1565,14 @@ export function normalizeAndDiff(
     }
   }
 
-  // Mint the fabric form of a native object -- a `Date`, a `Uint8Array`, an
+  // Mint the fabric form of a JS object -- a `Date`, a `Uint8Array`, an
   // `Error`. Anything else comes back `undefined`, which says only that
   // nothing needed minting; the value then has to be storable as it stands,
   // and the vet is what holds it to that. Nothing minted here is a container,
   // so a container keeps its own identity all the way through the walk below
   // -- and that identity is the one shared references and cycles arrive
   // under, which is what `state.seen` is keyed on.
-  const minted = shallowFabricFromNativeObjectElseUndefined(newValue);
+  const minted = shallowFabricFromConvertibleJsObjectElseUndefined(newValue);
   if (minted === undefined) {
     assertValidFabricValueLayer(newValue);
   } else {
@@ -1608,7 +1608,7 @@ export function normalizeAndDiff(
   // content equality: the ops build their combined arrays by carrying the
   // stored elements through by reference (the stored tree is frozen, so the
   // reference IS the stored value), while the written value here is only
-  // shallowly normalized -- its nested contents (Cells, native objects) are
+  // shallowly normalized -- its nested contents (Cells, JS objects) are
   // converted later in the recursion, so a deep comparison would inspect
   // values whose canonical form does not exist yet.
   //
@@ -1854,15 +1854,15 @@ export function normalizeAndDiff(
     // of the same coordinated pass. We don't support that descent yet, so the
     // wrapper's internals could otherwise reach storage improperly converted.
     //
-    // As a stopgap we run the deep `fabricFromNativeValue()`, which converts
-    // the internals via a *separate, uncoordinated* pass. The cost: any
-    // `FabricValue` reachable both inside the wrapper and elsewhere in the
+    // As a stopgap we run the deep `fabricFromConvertibleJsValue()`, which
+    // converts the internals via a *separate, uncoordinated* pass. The cost:
+    // any `FabricValue` reachable both inside the wrapper and elsewhere in the
     // outer tree gets de-shared (the outer walk handles one copy; this deep
-    // call mints an independent, separately-frozen copy with no shared `seen`
-    // / ID bookkeeping). That is invisible for `FabricError` today only
-    // because an error's `cause` / custom props aren't, in practice, shared
-    // with the rest of the tree -- but `FabricSet` / `FabricMap` (collections
-    // of arbitrary, routinely-shared `FabricValue`s) WILL break here once they
+    // call mints an independent, separately-frozen copy with no shared `seen` /
+    // ID bookkeeping). That is invisible for `FabricError` today only because
+    // an error's `cause` / custom props aren't, in practice, shared with the
+    // rest of the tree -- but `FabricSet` / `FabricMap` (collections of
+    // arbitrary, routinely-shared `FabricValue`s) WILL break here once they
     // carry real traffic. Proper fix: coordinated descent into wrapper
     // internals, after which a shallow conversion suffices.
     //
@@ -1871,7 +1871,7 @@ export function normalizeAndDiff(
     // instances short-circuit by identity.
     changes.push({
       location: link,
-      value: fabricFromNativeValue(newValue),
+      value: fabricFromConvertibleJsValue(newValue),
     });
     return changes;
   }

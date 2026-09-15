@@ -194,7 +194,7 @@ describe("Cell", () => {
       slot: target.getAsWriteRedirectLink(),
     });
 
-    // Writing a `FabricInstance` (here, a native `Error` that gets wrapped
+    // Writing a `FabricInstance` (here, a JS `Error` that gets wrapped
     // into `FabricError`) through the redirect must land at the target,
     // not clobber the redirect link at `parent.slot`. Target started as
     // `"initial"`; under the bug, target stays as `"initial"` because the

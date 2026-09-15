@@ -1411,7 +1411,7 @@ describe("data-updating", () => {
 
     it("normalizes addUnique candidates before stored-value comparison", () => {
       // The dedup comparison must see the candidate in its fabric form: a
-      // repeated native `Date` matches the stored `FabricEpochNsec` and
+      // repeated JS `Date` matches the stored `FabricEpochNsec` and
       // no-ops rather than throwing (or duplicating). The normalization is
       // comparison-only -- an ACCEPTED candidate writes the original value.
       const frame = pushFrame({

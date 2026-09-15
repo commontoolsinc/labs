@@ -23,7 +23,7 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
  * instances to plain objects. A demoted `FabricError` then fails the
  * `value instanceof FabricInstance` check in the wire/persistence codec
  * (`jsonFromFabricValue()`/`FabricInstanceHandler`), so it is serialized
- * generically and its wrapped native `Error` -- whose `message`/`stack`
+ * generically and its wrapped JS `Error` -- whose `message`/`stack`
  * are non-enumerable -- collapses to `{}`, losing the error entirely.
  *
  * `cloneIfNecessary()` deep-clones via the `FabricValue` machinery
