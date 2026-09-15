@@ -30,27 +30,27 @@ long way without a query-dependency analyzer.
   reader may already see. A row carrying no confidentiality is keyed on its
   content: equal rows share one document, and content the result cell has
   stored before, in the previous run or any earlier one, reuses that
-  document. A row with per-column labels is keyed on its origin table's
-  primary key when the projection carries the whole key from one table, no
-  key column is labeled, and no two rows share a key, so the row keeps its
-  document wherever it lands in the result and a changed row is rewritten in
-  place. A row without such a key is keyed on its position, and a row under a
-  row label on its position and its label: a document's confidentiality can
-  never weaken, so a document may only ever hold rows of one label, and the
-  label is metadata every document carries in the open, so the id gives away
-  nothing the document does not. The keys that are not content also carry
-  the selected database, its space and id, since a query's `db` input can
-  move to another database whose rows would otherwise land on the same
-  documents; the projection, each output column and its origin, since a
-  query's `sql` input can move to a projection whose columns carry other
-  labels; and the handle's `tables`
-  declaration, because a commit attaches label metadata only to the documents
-  it writes: a stricter re-declaration of a label moves every row to a new
-  document that the commit writes and labels, rather than leaving a row with
-  unchanged content under the label its old document carries. What a re-run
-  writes is the result cell (its `pending` flag, request hash, and the array
-  of row links) plus one document per row whose key is new to this result
-  cell or whose content changed — not one document per row per run.
+  document. A row carrying a per-column label is keyed on its position, and a
+  row under a row label on its position and its label: a document's
+  confidentiality can never weaken, so a document may only ever hold rows of
+  one label, and the label is metadata every document carries in the open, so
+  the id gives away nothing the document does not. Position rather than a
+  declared primary key, because the declaration is the handle's claim and not
+  a verified constraint of the table, and two rows sharing a declared key
+  would share a document. The positional keys also carry the selected
+  database, its space and id, since a query's `db` input can move to another
+  database whose rows would otherwise land on the same documents; the
+  projection, each output column and its origin, since a query's `sql` input
+  can move to a projection whose columns carry other labels; and the handle's
+  `tables` declaration, because a commit attaches label metadata only to the
+  documents it writes: a stricter re-declaration of a label moves every row
+  to a new document that the commit writes and labels, rather than leaving a
+  row with unchanged content under the label its old document carries, and
+  any re-declaration of the handle re-keys every labeled row the same way.
+  What a re-run writes is the result cell (its `pending` flag, request hash,
+  and the array of row links) plus one document per row whose key is new to
+  this result cell or whose content changed at its key — not one document per
+  row per run.
 
 This is deliberately the same shape the runtime uses elsewhere: reactivity is
 driven by observing cells, and the handle cell's changing `rev` stands in for

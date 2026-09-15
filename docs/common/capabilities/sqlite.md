@@ -109,10 +109,12 @@ stay written after the view that asked for them is gone. A re-run whose rows
 are unchanged writes no row documents: a row of an unlabeled database is keyed
 on its content, so equal rows share one document and a row the result held
 before takes its old document back; a row of a labeled database is keyed on
-its origin table's primary key where the projection carries one, and on its
-position otherwise, so a changed row is rewritten in place; a row under a
-row label is keyed on its position and its label, so a row whose label
-changes takes a new document. A row projecting a
+its position, so a change rewrites the documents at the positions it moved
+rows across and mints none; a row under a row label is keyed on its position
+and its label, so a row whose label changes takes a new document. Two things
+re-key every row of a labeled database at once and write it again: changing
+the query's projection, and re-declaring the handle's `tables`. A row
+projecting a
 column name a Fabric record reserves (`constructor`, `__proto__`) crosses the
 wire as a list of entries and is stored the same way.
 
@@ -129,10 +131,10 @@ than that pages through it — a bound the reader moves. Paging bounds what one
 query writes rather than what the space accumulates: every page fetched
 materializes its rows, and nothing reclaims the rows of a page the reader has
 left. Returning to an earlier page issues a fresh query; its rows land on the
-documents they had before where their keys still hold (content, or a primary
-key), and rewrite the documents at their positions otherwise. The durable
-cost is the number of distinct row documents the pages materialize, which
-grows with every page whose rows the space has not held.
+documents they had before where their content is the key, and rewrite the
+documents at their positions where their position is. The durable cost is
+the number of distinct row documents the pages materialize, which grows with
+every page whose rows the space has not held.
 
 Project the columns the view reads and no others: a row document carries every
 column the statement selected, so a wider projection is paid on every row.
