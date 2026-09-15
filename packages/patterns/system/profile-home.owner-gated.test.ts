@@ -81,12 +81,14 @@ describe("host embedding contract: profile pinning is owner-gated", () => {
       'bio: Default<OwnerProtectedProfileWrite<string, typeof setBio>, "">',
     );
     expect(home).toContain("isEditing: Default<boolean, false>");
-    // The share inbox pointer (2026-09-15) rides the same split: data with a
-    // Default, its writer an optional late stream.
+    // The share inbox pointer (2026-09-15) is the post-baseline DATA field:
+    // OPTIONAL rather than defaulted, because the pattern-update gate refuses
+    // an object default beneath a `$ref` constraint (profile-picker's
+    // `defaultProfile` broke on exactly that); its writer an optional late
+    // stream like the rest.
     expect(home).toContain(
-      "OwnerProtectedProfileWrite<ProfileInboxPointer, typeof setInbox>,",
+      "inbox?: OwnerProtectedProfileWrite<ProfileInboxPointer, typeof setInbox>;",
     );
-    expect(home).toContain('{ space: ""; host: "" }');
   });
 
   it("weakens the rendered screen in the consumer view", () => {

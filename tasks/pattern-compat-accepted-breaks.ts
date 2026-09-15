@@ -63,6 +63,24 @@ export interface AcceptedContractBreak {
 
 export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
   {
+    // The profile gained its owner-protected share inbox pointer (`inbox`,
+    // optional, undefaulted). The picker consumes a stored profile, and the
+    // proof compares the new property's `ifc` label against a baseline that
+    // has no such property at all, so it reads a label change where a
+    // stored profile without the field still validates. An unlabelled
+    // pointer would pass the proof and let a stranger redirect the owner's
+    // inbox; the label is the point.
+    pattern: "system/profile-picker.tsx",
+    baselines: [
+      "20260729T022742Z-BVxqS5A3M24IcX6m",
+      "20260818T220011Z-J-y30yE6xQ8axACi",
+    ],
+    paths: ["argument.defaultProfile"],
+    reason:
+      "the profile's new owner-protected inbox pointer reads as a changed label under a baseline that never had the property",
+    record: "docs/history/profile-inbox-pointer-break.md",
+  },
+  {
     // The Join verb's event opens: `Record<PropertyKey, never>` compiled to
     // a closed empty object the runner's closed-world gate now enforces, so
     // the rendered button's serialized DOM event was refused and the roster

@@ -191,12 +191,13 @@ export type ProfileHomeOutput = {
   bio: Default<OwnerProtectedProfileWrite<string, typeof setBio>, "">;
   // The owner's share inbox pointer (2026-09-15). Owner-protected like bio;
   // readable by anyone who can read the profile, which is what a sender
-  // needs. Default outside the wrapper for the same reason as bio: stored
-  // profiles predating it have no such property.
-  inbox: Default<
-    OwnerProtectedProfileWrite<ProfileInboxPointer, typeof setInbox>,
-    { space: ""; host: "" }
-  >;
+  // needs. OPTIONAL rather than defaulted, unlike bio: the pattern-update
+  // gate refuses an object default beneath a `$ref` constraint ("defaults
+  // changed below a constraint that is not stable under default insertion"),
+  // and a stored profile predating the field simply has no such property.
+  // A running profile always binds it (empty strings mean "no inbox yet");
+  // a reader of a stored doc takes `inbox?.space`.
+  inbox?: OwnerProtectedProfileWrite<ProfileInboxPointer, typeof setInbox>;
   // Public web profiles the owner has chosen to associate with this profile.
   // The owner-protected list is distinct from `elements`, whose entries are
   // Common Fabric piece references.
