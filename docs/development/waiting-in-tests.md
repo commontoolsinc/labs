@@ -73,6 +73,20 @@ sized so only a multi-minute jump reaches it — except the stuck detector,
 which a competing ceiling keeps lower; its section explains. When an event
 boundary does exist, use it, and neither kind of exception arises.
 
+One bound sits between the two kinds, and is written down here because its
+cost is easy to understate. The browser load summary in
+`packages/patterns/integration/cfc-browser-helpers.ts` gives the worker a
+budget to answer the request for its statistics. Reading them is itself a
+request, and a request carries no deadline, so a worker that has stopped
+answering would hold the collection open for as long as the page lived. An
+early fire fails no test and corrupts nothing, but it does drop a real
+result: a worker that was slow rather than stopped loses the statistics it
+was about to return, and the summary reports the worker half as missing. That
+is the price of a collection that always returns, paid because the summary
+exists to explain a run already in trouble. The budget is a caller's option,
+so a case that wants the backstop exercised asks for a short one rather than
+waiting out the default.
+
 ## The primitives to use instead
 
 Waits split into two groups with different primitives.
@@ -726,6 +740,24 @@ armed unconditionally and only unref'd, and auto-advance ignores unref, so
 every connection a test builds would drive the fake clock to its runaway
 guard. The full analysis is in [the rationale
 document](waiting-in-tests-rationale.md#why-the-runtime-client-suite-stays-on-the-real-clock).
+
+One case opens a `FakeTime` of its own, which is the directly-imported tool
+described below rather than the preload the paragraph above rules out. It pins
+that a request the worker has not answered settles on nothing but its reply or
+the connection's disposal. Proving that a request stays pending means proving
+a negative over time, and a task drain cannot: it crosses one macrotask
+boundary, which no positive-delay timer is due within, so it would pass just
+as well against a connection that rejects the request a minute later. The
+fake clock advances an hour and runs every timer any bound would have been
+armed on.
+
+Two things make that case safe here, and both are worth repeating in any other
+case that reaches for the same tool. It builds its connection before opening
+the clock, so the loop-lag interval is armed on the real one: `unrefTimer`
+hands the id it is given to `Deno.unrefTimer`, and a faked id would name an
+unrelated real timer. Building first also keeps that interval off the fake
+clock, where an hour of ticks would run it thirty-six thousand times for
+nothing.
 
 ## The utils package: a fake clock the test imports
 
