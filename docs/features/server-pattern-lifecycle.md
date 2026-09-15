@@ -15,10 +15,11 @@ acceptance is withdrawable until the wave commits, so the served `setsrc` verb
 does not seal its setup transaction into the wave: the transaction commits
 directly to the store, as one of the serving loop's own commits made outside the
 wave ([Direct commits](#direct-commits) below), and the update's authority
-registers from that verdict. `cf piece setsrc` requests the verb; `cf piece
-setsrc --check` stays in the client's process, since it issues no storage
-writes. Its normal storage reads can still demand materialization by the serving
-runtime, and a check does not freeze the space
+registers from that verdict. `cf piece setsrc` requests the verb;
+`cf piece
+setsrc --check` stays in the client's process, since it issues no
+storage writes. Its normal storage reads can still demand materialization by the
+serving runtime, and a check does not freeze the space
 ([`module-loading.md`](../specs/module-loading.md)).
 
 The verbs run only when `EXPERIMENTAL_SERVER_EXECUTION` selects the ON arm
