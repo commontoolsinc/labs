@@ -6,9 +6,7 @@ export {
   isValidDeepFrozenFabricValue,
 } from "./deep-freeze.ts";
 
-export type * from "./interface.ts";
-
-export { FabricInstance, FabricPrimitive } from "./interface.ts";
+export * from "./interface.ts";
 
 export {
   convertibleJsFromFabricValue,
