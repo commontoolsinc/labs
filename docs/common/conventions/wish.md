@@ -101,6 +101,12 @@ The `scope` parameter controls where wish searches for matching pieces:
 By default (no scope), wish searches **favorites only** for backward
 compatibility.
 
+Home-dependent wishes resolve under the requesting user's transaction, including
+headless hashtag searches. Their results are at least user scoped unless the
+requested schema explicitly selects a scope. Use `PerUser<>` for a shared
+consumer's home-derived resource selection. The shared hashtag scan optimization
+applies only to home-independent, space-scoped searches.
+
 ### Examples
 
 ```tsx

@@ -13,6 +13,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [Loom person-inbox pattern and runtime improvements](development/performance/2026-09-14-loom-person-inbox-improvements.md) — interleaved real-data improvement measurements, local pattern/runtime commits, validation, and incomplete selector experiments with readiness and source-window failures.
 - [2026-09-14-loom-person-inbox-thread-open.md](development/performance/2026-09-14-loom-person-inbox-thread-open.md) — real-data Loom person-inbox thread opening across pinned and main labs browser bundles: five interleaved repetitions, identical 50-message content, the remaining duplicate pattern derivation and CFC label-view costs, and the full load record.
 
+- [Wish and Loom resource discovery](development/2026-09-14-wish-resource-discovery.md) — September 2026 source investigation of wish discovery, SQLite registration, and person-inbox startup wiring; existing wish tests passed, with a provider composition proposed for implementation.
 - [Stale derived-state correction decision](development/2026-09-14-derived-state-correction.md) — approval and exact fixture scope for two calculated lunch-poll status corrections, consequences, and alternatives.
 
 - [Lazy-off integration evidence](development/performance/2026-09-14-lazy-off-integration.md) — isolated runner, runtime-client, and shell/browser integration results with eager materialization, explicit execution postures, and retirement evidence limits.

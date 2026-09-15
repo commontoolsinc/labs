@@ -9,7 +9,7 @@
  */
 
 import { constructorOfPrototype } from "@commonfabric/utils/objects";
-import { isPlainObject } from "@commonfabric/utils/types";
+import { isPlainObject, typeOfIncludingNull } from "@commonfabric/utils/types";
 
 import {
   BaseFabricPrimitive,
@@ -27,7 +27,6 @@ import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
   type FabricValueTag,
-  type JsTypeValueTag,
   VALUE_TAGS,
   type ValueTag,
 } from "./interface.ts";
@@ -37,10 +36,10 @@ import {
  * given value is not valid: a type lie, an instance of no primitive class, or
  * one reporting a tag that is not a primitive tag.
  */
-export function tagFromFabricPrimitive(
+export function tagOfFabricPrimitive(
   value: FabricPrimitive,
 ): FabricPrimitiveValueTag {
-  const result = tagFromFabricPrimitiveElseNull(value);
+  const result = tagOfFabricPrimitiveElseNull(value);
 
   if (result !== null) {
     return result;
@@ -55,7 +54,7 @@ export function tagFromFabricPrimitive(
  * turns out not to be valid: a type lie, an instance of no primitive class, or
  * one reporting a tag that is not a primitive tag.
  */
-export function tagFromFabricPrimitiveElseNull(
+export function tagOfFabricPrimitiveElseNull(
   value: FabricPrimitive,
 ): FabricPrimitiveValueTag | null {
   if (!(value instanceof BaseFabricPrimitive)) {
@@ -71,24 +70,14 @@ export function tagFromFabricPrimitiveElseNull(
 }
 
 /**
- * Maps a value to its JS type tag, which is decided by `typeof` alone: the
- * `typeof` name of a non-object, and the `null` tag for the value `null`.
- * Returns `object` for any other object, which has no JS type tag; its tag is
- * a question for `tagFromFabricValue()` or `tagFromNativeValueElseNull()`.
- */
-export function jsTagFromValue(value: unknown): JsTypeValueTag | "object" {
-  return (value === null) ? VALUE_TAGS.null : typeof value;
-}
-
-/**
  * Maps a presumed valid `FabricValue` or `FabricValueLayer` to its tag, based
  * on a shallow evaluation of its type. This `throw`s if it determines that the
  * given value cannot possibly be valid.
  */
-export function tagFromFabricValue(value: FabricValueLayer): FabricValueTag;
-export function tagFromFabricValue(value: FabricValue): FabricValueTag;
-export function tagFromFabricValue(value: FabricValueLayer): FabricValueTag {
-  const result = tagFromFabricValueElseNull(value);
+export function tagOfFabricValue(value: FabricValueLayer): FabricValueTag;
+export function tagOfFabricValue(value: FabricValue): FabricValueTag;
+export function tagOfFabricValue(value: FabricValueLayer): FabricValueTag {
+  const result = tagOfFabricValueElseNull(value);
 
   if (result !== null) {
     return result;
@@ -104,14 +93,14 @@ export function tagFromFabricValue(value: FabricValueLayer): FabricValueTag {
  * that the given value cannot possibly be valid. To be clear, this function
  * does not go out of its way to make a validity determination.
  */
-export function tagFromFabricValueElseNull(
+export function tagOfFabricValueElseNull(
   value: FabricValueLayer,
 ): FabricValueTag;
-export function tagFromFabricValueElseNull(value: FabricValue): FabricValueTag;
-export function tagFromFabricValueElseNull(
+export function tagOfFabricValueElseNull(value: FabricValue): FabricValueTag;
+export function tagOfFabricValueElseNull(
   value: FabricValue | FabricValueLayer,
 ): FabricValueTag | null {
-  const jsType = jsTagFromValue(value);
+  const jsType = typeOfIncludingNull(value);
 
   if (jsType === VALUE_TAGS.function) {
     // A function is no `FabricValue`, so its tag is not one this returns.
@@ -125,7 +114,7 @@ export function tagFromFabricValueElseNull(
   } else if (isPlainObject(value)) {
     return VALUE_TAGS.Object;
   } else if (value instanceof FabricPrimitive) {
-    return tagFromFabricPrimitiveElseNull(value);
+    return tagOfFabricPrimitiveElseNull(value);
   } else if (value instanceof FabricInstance) {
     return VALUE_TAGS.FabricInstance;
   } else {
@@ -151,10 +140,10 @@ export function tagFromFabricValueElseNull(
  * the direction an unhandled case should fail in.
  *
  * This is asked of a class already read from a prototype, which is a
- * question that arises inside this package: a caller elsewhere holds values,
- * and asks `tagFromNativeValueElseNull()`.
+ * question that arises inside this module: a caller holds values, and asks
+ * `tagOfNativeValueElseNull()`.
  */
-export function tagFromNativeBuiltinClassElseNull(
+function tagOfNativeBuiltinClassElseNull(
   constructorFn: { prototype: unknown },
 ): ValueTag | null {
   // A `switch` on constructor identity, rather than sequential `instanceof`
@@ -228,8 +217,8 @@ export function tagFromNativeBuiltinClassElseNull(
  * severed prototype, so every array reaches array handling and is decided by
  * the array rule, which alone decides what an array may be.
  */
-export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
-  const jsType = jsTagFromValue(value);
+export function tagOfNativeValueElseNull(value: unknown): ValueTag | null {
+  const jsType = typeOfIncludingNull(value);
 
   if (jsType !== "object") {
     return jsType;
@@ -251,7 +240,7 @@ export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
     // null-proto object is a plain object.
     return VALUE_TAGS.Object;
   } else if (value instanceof FabricPrimitive) {
-    return tagFromFabricPrimitiveElseNull(value);
+    return tagOfFabricPrimitiveElseNull(value);
   } else if (value instanceof FabricInstance) {
     return VALUE_TAGS.FabricInstance;
   }
@@ -264,5 +253,5 @@ export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
   // `Error` and silently rebuilt as one.
   const ctor = constructorOfPrototype(proto);
 
-  return (ctor === undefined) ? null : tagFromNativeBuiltinClassElseNull(ctor);
+  return (ctor === undefined) ? null : tagOfNativeBuiltinClassElseNull(ctor);
 }

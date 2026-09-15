@@ -52,6 +52,7 @@ installFakeClock({
     "executor-fetch-instances",
     "executor-fetch-program-instances",
     "executor-sqlite-instances",
+    "executor-home-sqlite",
     // Same wall-clock pacing, same machinery (the SpaceServer's renew
     // interval and flush deadline), one level down: the stage-G
     // recovery-seam tests drive a real SpaceServer directly.

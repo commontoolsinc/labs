@@ -683,7 +683,7 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
   assertEquals(serialized.includes("rotated-refresh-secret"), false);
 });
 
-Deno.test("Codex profile model overrides fail the child without aborting the parent loop", async () => {
+Deno.test("Codex search provider failure fails the child without aborting the parent loop", async () => {
   let modelTurns = 0;
   const modelClient: HarnessModelClient = {
     providerId: "openai-codex",
@@ -694,6 +694,9 @@ Deno.test("Codex profile model overrides fail the child without aborting the par
     },
     complete: () => {
       modelTurns += 1;
+      if (modelTurns === 2) {
+        throw new Error("Synthetic search provider unavailable");
+      }
       return Promise.resolve({
         assistant: modelTurns === 1
           ? {
@@ -745,13 +748,13 @@ Deno.test("Codex profile model overrides fail the child without aborting the par
   };
 
   assertEquals(result.finalAssistantText, "Parent recovered.");
-  assertEquals(modelTurns, 2);
+  assertEquals(modelTurns, 3);
   assertEquals(output.subagent.status, "failed");
   assertEquals(output.subagent.runState.status, "failed");
   assertEquals(output.subagent.runState.failureCount, 1);
   assertStringIncludes(
     output.subagent.summary,
-    "is not available from provider openai-codex",
+    "Synthetic search provider unavailable",
   );
 });
 
