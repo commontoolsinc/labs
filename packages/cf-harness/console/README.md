@@ -87,9 +87,12 @@ The pattern index and skills registry are this deployment's constants rather
 than any fabric's, as is the one skill script every console here allows — see
 [Skill scripts](#skill-scripts) below. It prints every value with the record
 that decided it, and serves on the port Weaver pairs with. Arguments after `--`
-reach this server untouched, so every flag in the tables below is reachable
-through it. [`../docs/WEAVER.md`](../docs/WEAVER.md) is the operator procedure
-it belongs to, including the tailnet topology and the pre-demo preflight.
+reach this server untouched, so every other flag in the tables below is
+reachable through it — the two allowlist flags excepted, which the launcher
+refuses after `--` because it resolves and prints that value itself, and which
+are therefore given to the launcher before the separator.
+[`../docs/WEAVER.md`](../docs/WEAVER.md) is the operator procedure it belongs
+to, including the tailnet topology and the pre-demo preflight.
 
 Against a toolshed of your own, the environment below is what `console:launch`
 would otherwise have resolved:
@@ -172,9 +175,13 @@ own mount. And neither flag may be passed after `--`: the allowlist is one of
 the values the launch resolves and prints, so a console argument setting it
 again would leave that report describing other scripts.
 
-What an entry bounds is the _tool_: a run holding no entry for a script is
-offered no `run_skill_script` for it. It does not bound the bytes — the sandbox
-the script runs in is what does.
+An entry authorizes a script; it does not by itself put a tool anywhere, and the
+two decisions stay separate. What an entry at an acquired pin adds is
+`run_skill_script` on a child that actually receives that matching acquisition —
+a child holding no such acquisition gains nothing from it. And it bounds the
+tool rather than the bytes: the mount is added for any acquisition-sourced
+handle whatever the allowlist says, so what stops an acquired script being run
+some other way is the sandbox it would run in, not this entry.
 
 Publishing to the index is configured the way the CLI configures it, by the same
 names:

@@ -693,9 +693,13 @@ export const resolveConsoleConfig = async (
       parseAllowedSkillScriptsVariable(inheritedSkillScripts),
       ALLOWED_SKILL_SCRIPTS_VARIABLE,
     );
+  // The CONFIGURED root, not any resolved one. A checkout fallback is read on
+  // the host and carries no sandbox mapping, so it gives a registry script no
+  // address inside the sandbox it runs in — the same reason the batch CLI asks
+  // for the flag rather than accepting its own fallback.
   assertAllowedSkillScriptsAddressable(
     allowedSkillScripts,
-    skillsRootRecord !== undefined,
+    skillsRootRecord?.source === "configured",
   );
   const sessionDb = flag("session-db") ??
     nonEmpty(env.CF_HARNESS_CONSOLE_SESSION_DB) ??

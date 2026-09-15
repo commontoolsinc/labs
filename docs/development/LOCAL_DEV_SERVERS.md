@@ -44,10 +44,11 @@ decided each value.
 
 `--allow-skill-script <skill>:scripts/<path>` repeats alongside `--cf-harness`
 and decides which skill scripts a run of that console may execute;
-`--no-allow-skill-script` allows none. Both are passed through to the console
-untouched and resolved there, so the entries appear in the same printout as
-everything else, and a console given neither allows the one entry this
-deployment defaults to. `packages/cf-harness/console/README.md` has the entry
+`--no-allow-skill-script` allows none. `start-local-dev.sh` forwards both to
+`console:launch`, which resolves them, prints each beside the record that
+decided it, and exports the resolved list for the console server to read — so
+the entries appear in the same printout as everything else, and a console given
+neither allows the one entry this deployment defaults to. `packages/cf-harness/console/README.md` has the entry
 form and that default.
 
 The console is a surface on the fabric rather than part of it. It needs Docker

@@ -375,6 +375,8 @@ describe("console/server", () => {
           "console-test",
           "--session-db",
           "none",
+          "--skills-root",
+          "/workspace/skills",
           "--allow-skill-script",
           "cf-tidy:scripts/tidy.sh",
         ],
@@ -412,6 +414,74 @@ describe("console/server", () => {
           skill: `commontoolsinc/labs/cf-spend-digest@${"a".repeat(40)}`,
           path: "scripts/category-budgets.sh",
         },
+      ]);
+    });
+
+    it("rejects a registry-name entry when no skills tree was configured", async () => {
+      // The checkout's own tree is resolved here and does not count: it is
+      // read on the host and carries no sandbox mapping, so it gives a
+      // registry script no address inside the sandbox it runs in.
+      await expect(
+        resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--allow-skill-script",
+            "cf-tidy:scripts/tidy.sh",
+          ],
+          {},
+          "/console",
+        ),
+      ).rejects.toThrow("`cf-tidy` is a registry skill");
+    });
+
+    it("allows a registry-name entry once a skills tree is configured", async () => {
+      const resolved = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--skills-root",
+          "/workspace/skills",
+          "--allow-skill-script",
+          "cf-tidy:scripts/tidy.sh",
+        ],
+        {},
+        "/console",
+      );
+
+      expect(resolved.allowedSkillScripts).toEqual([
+        { skill: "cf-tidy", path: "scripts/tidy.sh" },
+      ]);
+    });
+
+    it("allows an acquired pin with no skills tree at all", async () => {
+      // Its bytes reach the sandbox through the acquisition's own mount.
+      const pin = `commontoolsinc/labs/cf-spend-digest@${"a".repeat(40)}`;
+      const resolved = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--allow-skill-script",
+          `${pin}:scripts/category-budgets.sh`,
+        ],
+        {},
+        "/console",
+      );
+
+      expect(resolved.allowedSkillScripts).toEqual([
+        { skill: pin, path: "scripts/category-budgets.sh" },
       ]);
     });
 
