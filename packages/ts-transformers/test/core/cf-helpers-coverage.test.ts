@@ -230,11 +230,18 @@ Deno.test("injectCfHelpers uses JS-only helper-shim syntax for JavaScript file n
   assertFalse(out.includes("function h(...args: any[])"));
 });
 
-Deno.test("injectCfHelpers appends a bare helper use instead of the `h` shim when the source binds `h` at top level", () => {
-  // A second top-level `h` would be a duplicate identifier (TS2300) at the
-  // authored declaration, so the trailer degrades to a plain use of the helper
-  // import — all the shim contributes to binding once JSX dispatches through
-  // `__cfHelpers.h` (js-compiler `jsxFactory`).
+const FALLBACK_TRAILER_TS = "// @ts-ignore: Internals\n" +
+  "function __cfHelpersShim(...args: any[]) { return __cfHelpers.h.apply(null, args); }\n";
+const FALLBACK_TRAILER_JS = "// @ts-ignore: Internals\n" +
+  "function __cfHelpersShim(...args) { return __cfHelpers.h.apply(null, args); }\n";
+
+Deno.test("injectCfHelpers renames the shim to `__cfHelpersShim` when the source binds `h` at top level", () => {
+  // A second module-scope `h` would be a duplicate identifier (TS2300, or
+  // TS2440 against an import) at the authored declaration. Keeping the helper
+  // import live is all the shim contributes once JSX dispatches through
+  // `__cfHelpers.h` (js-compiler `jsxFactory`), so only its name changes; the
+  // shape stays a direct function, which the runner's module-body verifier
+  // admits at module scope.
   const declarations: Record<string, string> = {
     "const": "export const h = [1, 2];",
     "let": "let h = 1;",
@@ -267,8 +274,6 @@ Deno.test("injectCfHelpers appends a bare helper use instead of the `h` shim whe
     "var in a do-while": "do { var h = 1; } while (false);",
     "var destructured in a block": "{ var { h } = { h: 1 }; }",
   };
-  const bareTrailer =
-    `// @ts-ignore: Internals\nvoid ${CF_HELPERS_IDENTIFIER};\n`;
   for (const [label, declaration] of Object.entries(declarations)) {
     for (const fileName of ["/main.tsx", "/main.jsx"]) {
       const out = injectCfHelpers(
@@ -276,15 +281,36 @@ Deno.test("injectCfHelpers appends a bare helper use instead of the `h` shim whe
         fileName,
       );
       assert(out.startsWith(`import { ${CF_HELPERS_IDENTIFIER} } from`), label);
-      // The shim's body, not `function h(` — the authored declaration may be
-      // a function itself.
-      assertFalse(
-        out.includes(".h.apply(null, args)"),
-        `${label} (${fileName})`,
-      );
-      assert(out.endsWith(`\n${bareTrailer}`), `${label} (${fileName})`);
+      // The shim's own head, not `function h(` — the authored declaration may
+      // be a function itself.
+      assertFalse(out.includes("function h(...args"), `${label} (${fileName})`);
+      const trailer = fileName.endsWith(".jsx")
+        ? FALLBACK_TRAILER_JS
+        : FALLBACK_TRAILER_TS;
+      assert(out.endsWith(`\n${trailer}`), `${label} (${fileName})`);
     }
   }
+});
+
+Deno.test("injectCfHelpers parses `.ts` sources as TypeScript, so a `<T>` assertion cannot hide a later `h`", () => {
+  // Parsed as TSX, `<number>1` opens a JSX element that swallows the rest of
+  // the file, and the scan would miss `h`.
+  const sources = [
+    "export const n = <number>1;\nexport const h = [1];",
+    "export const id = <T>(x: T) => x;\nexport const h = 1;",
+  ];
+  for (const source of sources) {
+    const out = injectCfHelpers(source, "/main.ts");
+    assert(out.endsWith(`\n${FALLBACK_TRAILER_TS}`), source);
+  }
+});
+
+Deno.test("injectCfHelpers rejects the reserved fallback shim name in authored source", () => {
+  assertThrows(
+    () => injectCfHelpers("const __cfHelpersShim = 1;\nconst h = 2;"),
+    Error,
+    "reserved helper symbol '__cfHelpersShim'",
+  );
 });
 
 Deno.test("injectCfHelpers keeps the `h` shim when `h` is only nested, type-only, or not a local binding", () => {
@@ -311,7 +337,7 @@ Deno.test("injectCfHelpers keeps the `h` shim when `h` is only nested, type-only
   for (const [label, source] of Object.entries(sources)) {
     const out = injectCfHelpers(source);
     assert(out.includes("function h(...args: any[])"), label);
-    assertFalse(out.includes(`void ${CF_HELPERS_IDENTIFIER};`), label);
+    assertFalse(out.includes("__cfHelpersShim"), label);
   }
 });
 

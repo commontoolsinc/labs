@@ -196,9 +196,9 @@ export function render() {
     }
 
     it("evaluates elements when the module itself binds `h` at top level", async () => {
-      // The pre-transform appends a bare `void __cfHelpers;` use instead of
-      // its forwarding `h` shim here, so the authored `h` is neither a
-      // duplicate identifier nor the JSX factory.
+      // The pre-transform appends its forwarding shim as `__cfHelpersShim`
+      // instead of `h` here, so the authored `h` is neither a duplicate
+      // identifier nor the JSX factory.
       const name = "/main.tsx";
       const compiler = new TypeScriptCompiler(types);
       const source = `
@@ -224,6 +224,9 @@ export function render() {
         props,
         children,
       });
+      const js = modules.get(name)!.js;
+      expect(js).toContain("function __cfHelpersShim(");
+      expect(js).not.toContain("function h(");
       const exports: { h?: unknown; render?: () => unknown } = {};
       let helpersRequired = 0;
       new Function("exports", "require", modules.get(name)!.js)(
