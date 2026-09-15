@@ -10,6 +10,13 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Revising a piece's source from an agent session](piece-revision-from-a-session.md)
+  is the design, for a ruling, of the cf-harness surface that revises a piece
+  someone already has: how a piece reaches a session as a handle, whether its
+  program text enters model context, what a revision tool validates and
+  returns, which CFC gates it leans on rather than repeating, and why the
+  retained-source edit primitive serves fresh authoring and in-place revision
+  as one mechanism with two resolution paths.
 - [View-scoped client replication](view-scoped-client-replication.md) tracks
   rollout, recovery, and adversarial verification of active-view delivery and
   guarded speculative computation. It separates execution demand from delivery
