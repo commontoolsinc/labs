@@ -9,7 +9,7 @@
  */
 
 import { constructorOfPrototype } from "@commonfabric/utils/objects";
-import { isPlainObject } from "@commonfabric/utils/types";
+import { isPlainObject, typeOfIncludingNull } from "@commonfabric/utils/types";
 
 import {
   BaseFabricPrimitive,
@@ -27,7 +27,6 @@ import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
   type FabricValueTag,
-  type JsTypeValueTag,
   VALUE_TAGS,
   type ValueTag,
 } from "./interface.ts";
@@ -71,16 +70,6 @@ export function tagFromFabricPrimitiveElseNull(
 }
 
 /**
- * Maps a value to its JS type tag, which is decided by `typeof` alone: the
- * `typeof` name of a non-object, and the `null` tag for the value `null`.
- * Returns `object` for any other object, which has no JS type tag; its tag is
- * a question for `tagFromFabricValue()` or `tagFromNativeValueElseNull()`.
- */
-export function jsTagFromValue(value: unknown): JsTypeValueTag | "object" {
-  return (value === null) ? VALUE_TAGS.null : typeof value;
-}
-
-/**
  * Maps a presumed valid `FabricValue` or `FabricValueLayer` to its tag, based
  * on a shallow evaluation of its type. This `throw`s if it determines that the
  * given value cannot possibly be valid.
@@ -111,7 +100,7 @@ export function tagFromFabricValueElseNull(value: FabricValue): FabricValueTag;
 export function tagFromFabricValueElseNull(
   value: FabricValue | FabricValueLayer,
 ): FabricValueTag | null {
-  const jsType = jsTagFromValue(value);
+  const jsType = typeOfIncludingNull(value);
 
   if (jsType === VALUE_TAGS.function) {
     // A function is no `FabricValue`, so its tag is not one this returns.
@@ -229,7 +218,7 @@ export function tagFromNativeBuiltinClassElseNull(
  * the array rule, which alone decides what an array may be.
  */
 export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
-  const jsType = jsTagFromValue(value);
+  const jsType = typeOfIncludingNull(value);
 
   if (jsType !== "object") {
     return jsType;
