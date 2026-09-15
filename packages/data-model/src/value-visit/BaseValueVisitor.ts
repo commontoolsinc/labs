@@ -32,7 +32,7 @@ export abstract class BaseValueVisitor<
   //
 
   /** @inheritDoc */
-  abstract isDomainExtra(value: DomainFor<PlusType>): value is PlusType;
+  abstract isPlusType(value: DomainFor<PlusType>): value is PlusType;
 
   /** @inheritDoc */
   abstract visitCycle(

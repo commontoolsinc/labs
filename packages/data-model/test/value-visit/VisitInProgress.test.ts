@@ -704,8 +704,8 @@ describe("VisitInProgress", () => {
         });
       });
 
-      describe("`isDomainExtra()`", () => {
-        it("passes a non-fabric value to `isDomainExtra()` and, on `true`, to `visitPlusType()`", () => {
+      describe("`isPlusType()`", () => {
+        it("passes a non-fabric value to `isPlusType()` and, on `true`, to `visitPlusType()`", () => {
           const rec = new Recorder();
           const date = new Date(0);
 
@@ -735,7 +735,7 @@ describe("VisitInProgress", () => {
           );
         });
 
-        it("does not call `isDomainExtra()` for a valid `FabricValue`", () => {
+        it("does not call `isPlusType()` for a valid `FabricValue`", () => {
           const rec = new Recorder();
 
           visit({ a: [1, "two", null] }, rec);
@@ -867,7 +867,7 @@ describe("VisitInProgress", () => {
         expect(visitAssumingValid(5, rec)).toEqual(mainResult("5"));
       });
 
-      it("throws on reaching a value that is not a `FabricValue`, without consulting `isDomainExtra()`", () => {
+      it("throws on reaching a value that is not a `FabricValue`, without consulting `isPlusType()`", () => {
         const rec = new Recorder();
 
         expect(() => visitAssumingValid([1, new Date(0)], rec)).toThrow(

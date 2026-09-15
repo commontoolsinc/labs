@@ -20,15 +20,15 @@ import {
 
 /**
  * No-op (empty implementation) of `ValueVisitor`: Every method is implemented
- * and just returns `undefined`, except for `isDomainExtra()` which returns
- * `false` (the safe choice which also aligns with the default binding for
- * `PlusType`). This is meant to be a reasonable base implementation for more
- * useful visitors, not to be particularly useful by itself.
+ * and just returns `undefined`, except for `isPlusType()` which returns `false`
+ * (the safe choice which also aligns with the default binding for `PlusType`).
+ * This is meant to be a reasonable base implementation for more useful
+ * visitors, not to be particularly useful by itself.
  */
 export class NopValueVisitor<PlusType = never, ResultType = FabricValue>
   extends BaseValueVisitor<PlusType, ResultType> {
   /** @inheritDoc */
-  isDomainExtra(_value: DomainFor<PlusType>): _value is PlusType {
+  isPlusType(_value: DomainFor<PlusType>): _value is PlusType {
     return false;
   }
 

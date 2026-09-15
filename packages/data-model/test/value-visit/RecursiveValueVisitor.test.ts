@@ -11,7 +11,7 @@ import {
 
 describe("RecursiveValueVisitor", () => {
   class Recursive extends RecursiveValueVisitor<never, never> {
-    override isDomainExtra(_value: unknown): _value is never {
+    override isPlusType(_value: unknown): _value is never {
       return false;
     }
     override visitCycle(): LeafVisitorResult<never, never> {

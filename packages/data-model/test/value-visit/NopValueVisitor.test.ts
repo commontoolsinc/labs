@@ -6,11 +6,11 @@ import { type DispatchingVisitorResult, NopValueVisitor } from "@/value-visit";
 import { VisitInProgress } from "@/value-visit/VisitInProgress.ts";
 
 describe("NopValueVisitor", () => {
-  it("returns `undefined` from every visitor method, and `false` from `isDomainExtra()`", () => {
+  it("returns `undefined` from every visitor method, and `false` from `isPlusType()`", () => {
     const vis = new NopValueVisitor<unknown, unknown>();
     const instance = new FabricMap(new Map());
 
-    expect(vis.isDomainExtra(new Date(0))).toBe(false);
+    expect(vis.isPlusType(new Date(0))).toBe(false);
     expect(vis.visitCycle(1, 0, 1)).toBeUndefined();
     expect(vis.visitFabricArray([])).toBeUndefined();
     expect(vis.visitFabricContainer([])).toBeUndefined();

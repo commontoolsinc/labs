@@ -191,13 +191,12 @@ export type DispatchingVisitorResult<
  */
 export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
   /**
-   * Indicates whether or not the given value is compatible with the
-   * `PlusType` type defined by the visitor. This is a type predicate for
-   * `PlusType`. The visitor engine calls it before dispatching to
-   * `visitPlusType()`, and will instead `throw` an error if this method returns
-   * anything falsy.
+   * Indicates whether or not the given value is compatible with the `PlusType`
+   * type defined by the visitor. This is a type predicate for `PlusType`. The
+   * visitor engine calls it before dispatching to `visitPlusType()`, and will
+   * instead `throw` an error if this method returns anything falsy.
    */
-  isDomainExtra(value: DomainFor<PlusType>): value is PlusType;
+  isPlusType(value: DomainFor<PlusType>): value is PlusType;
 
   /**
    * Visits a value which is already in the process of being visited. The
@@ -247,8 +246,7 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
 
   /**
    * Visits a value determined to be the `PlusType` by virtue of the visitor
-   * engine having called `isDomainExtra()` on it and gotten a truthy return
-   * value.
+   * engine having called `isPlusType()` on it and gotten a truthy return value.
    */
   visitPlusType(
     value: PlusType,

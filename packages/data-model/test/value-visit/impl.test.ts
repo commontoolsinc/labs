@@ -73,7 +73,7 @@ describe("value-visit/impl", () => {
       // The compile-time refusal is half the point of this test: were the
       // call to type-check, the directive would be reported as unused and
       // the file would fail to compile. The line still runs, and the runtime
-      // half is that the engine, told by `isDomainExtra()` that the value is
+      // half is that the engine, told by `isPlusType()` that the value is
       // outside the domain, throws rather than handing it to the non-fabric
       // hook, whose parameter type is `never`.
       class Strict extends NopValueVisitor<never, number> {

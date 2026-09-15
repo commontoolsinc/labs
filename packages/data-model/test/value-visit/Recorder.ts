@@ -39,8 +39,8 @@ export class Recorder extends RecursiveValueVisitor<unknown, unknown> {
   readonly events: Event[] = [];
 
   /**
-   * The values handed to `isDomainExtra()`, in order. Kept apart from
-   * `events` so that the recorded dispatch sequence is the visit alone.
+   * The values handed to `isPlusType()`, in order. Kept apart from `events` so
+   * that the recorded dispatch sequence is the visit alone.
    */
   readonly domainChecks: unknown[] = [];
 
@@ -80,7 +80,7 @@ export class Recorder extends RecursiveValueVisitor<unknown, unknown> {
     return this.events.map((e) => e[0]);
   }
 
-  override isDomainExtra(value: unknown): value is unknown {
+  override isPlusType(value: unknown): value is unknown {
     // The domain is `unknown`, so everything outside `FabricValue` is in it.
     this.domainChecks.push(value);
     return this.onIsDomainExtra ? this.onIsDomainExtra(value) : true;
