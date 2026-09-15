@@ -1268,7 +1268,7 @@ cheaply.
 
 ## What the store gives us and what it is missing
 
-The store gives, for every execution of every test: the identity, the
+The store gives, for every execution it records: the identity, the
 outcome, the runner's own duration measurement, the commit, the branch,
 the workflow run and job, whether the run was a push or a pull request,
 whether it came from a fork, and for local runs the reporting person. That
@@ -1302,12 +1302,13 @@ runner — and a half with neither is not recorded at all.
 
 The two readers of a task disagree about which members those are. The
 topology reads whichever half a member declares, and then the tasks that
-half depends on, until one reads as a single `deno test`; the runner
-reads only the `test` task's own command. Every member whose `test` task
-is written as the list of tasks it depends on falls in that gap. The
-topology enumerates such a member a file at a time, and no report those
-files could be recorded in is ever produced. The store half of [the
-drift guard](#the-drift-guard) is where those items are reported.
+half names as its own dependencies, taking the first that reads as a
+single `deno test`; a `deno test` any deeper than that it does not
+reach. The runner reads only the `test` task's own command. Every member
+whose `test` task is written as the list of tasks it depends on falls in
+that gap: the topology enumerates it a file at a time, and no report
+those files could be recorded in is ever produced. The store half of
+[the drift guard](#the-drift-guard) is where those items are reported.
 
 What that costs is an item scored at the floor rather than a selection
 that cannot run. `locate()` places a unit record on an item by its file,

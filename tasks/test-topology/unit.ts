@@ -3,8 +3,9 @@
  * repository's identities live.
  *
  * The half read is a member's `deno-test` task where it declares one and
- * its `test` task otherwise, followed by the tasks that half depends on,
- * until one reads as a single `deno test`. A member with one is
+ * its `test` task otherwise, followed by that half's own dependencies,
+ * taking the first that reads as a single `deno test`. A dependency of a
+ * dependency is not reached. A member with one is
  * enumerated a file at a time, so a lane can be asked for a few files out
  * of a package holding hundreds. A member with none — a runner script,
  * two commands joined by `&&`, its own import map — is one unit that runs

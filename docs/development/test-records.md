@@ -361,7 +361,10 @@ A test task naming its own `--import-map` does not take the preload. That
 map governs every module of the invocation, the preload included, so a
 specifier the preload needs and the map does not carry fails the whole
 run rather than the preload alone. Such a member keeps its JUnit path,
-and its files come from the report's own class names instead.
+and its files come from the report's own class names instead — from the
+ones that are a relative source path, joined onto the directory the
+caller names, since a runtime or remote class name resolves to no file
+and a report ingested without that directory records none.
 
 What a class name reaches is the test file that registered the test
 itself. A module of ours that registers on a file's behalf — a fixture
