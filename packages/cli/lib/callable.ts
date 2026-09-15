@@ -8,6 +8,7 @@ import {
   isLink,
   type MemorySpace,
   type NormalizedFullLink,
+  renderCellReference,
 } from "@commonfabric/runner";
 import {
   cfcSchemaResolvedRoot,
@@ -205,8 +206,8 @@ export interface CallableExecutionDeps {
 }
 
 /** A backing-cell address published in an Invocation, written in the
- * fabric's canonical reference syntax — `/[@did/]<id>[@scope][/path]`
- * (`packages/cli/lib/llm-friendly-ref.ts`). One string carries the id, the
+ * fabric's canonical reference syntax, `//<space>/<id>[@scope][/path]`
+ * or `/<id>[@scope][/path]`. One string carries the id, the
  * space when it differs from the one the call targeted, the scope, and the
  * path inside the backing document, so the address a call hands back is
  * exactly what a later command takes in as `--cell`. */
@@ -296,14 +297,13 @@ export function addressArgument(ref: CallableResultRef): string {
 
 /**
  * `ref` written as the canonical fabric reference with its space embedded —
- * `/@<space>/<id>[@scope]` — the one token that names the cell from any
+ * `//<space>/<id>@scope` — the one token that names the cell from any
  * configuration. `--cell` takes it whole: the embedded space supplies the
  * target space when `--space` is absent, and is checked against it when both
- * are named. The id-and-scope segment is {@link addressArgument}'s, so the
- * two spellings of an address cannot drift apart.
+ * are named.
  */
 export function canonicalAddress(ref: CallableResultRef): string {
-  return encodeJsonPointer(["", `@${ref.space}`, addressArgument(ref)]);
+  return renderCellReference({ ...ref, path: [] });
 }
 
 export interface ExecutedCallable {
@@ -1284,7 +1284,7 @@ export function callableCommandSpec(
 
 /** Serialize a receipt/backing link into the canonical reference syntax.
  * `contextSpace` is the space the call targeted: an address in another space
- * carries its `@did` prefix, one in that space does not. */
+ * carries its `//<space>/` prefix; one in that space omits the space. */
 function toInvocationResultLink(
   link: NormalizedFullLink,
   contextSpace: MemorySpace,

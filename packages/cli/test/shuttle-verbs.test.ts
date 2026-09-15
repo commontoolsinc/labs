@@ -1722,7 +1722,7 @@ describe("verbs", () => {
       it("settles a space written as a name before it settles the piece", async () => {
         const shuttle = shuttleIn();
         await runLine(
-          `cd /@${SPACE_NAME}/board/title`,
+          `cd //${SPACE_NAME}/board/title`,
           shuttle,
           settling({ title: 1 }, { board: BOARD }),
         );
@@ -1898,7 +1898,7 @@ describe("verbs", () => {
         const outcome = await runLine(
           "cd #favorites",
           shuttleIn(),
-          addressed(`/@estuary/${HANDLE}`),
+          addressed(`//estuary/${HANDLE}`),
         );
         expect(reasonOf(outcome)).toBe(
           "`#favorites` resolved to an address naming space `estuary`, " +
@@ -1957,7 +1957,7 @@ describe("verbs", () => {
       it("lands where the reference names once the name is this shuttle's own", async () => {
         const shuttle = shuttleIn();
         const outcome = await runLine(
-          `cd /@${SPACE_NAME}/${HANDLE}/title`,
+          `cd //${SPACE_NAME}/${HANDLE}/title`,
           shuttle,
           settling({ title: "t" }),
         );
@@ -1973,7 +1973,7 @@ describe("verbs", () => {
       it("refuses a name that is not the one this shuttle was opened under", async () => {
         const shuttle = shuttleIn();
         const outcome = await runLine(
-          `cd /@estuary/${HANDLE}`,
+          `cd //estuary/${HANDLE}`,
           shuttle,
           READS_NOTHING,
         );
@@ -1990,7 +1990,7 @@ describe("verbs", () => {
         // this space is a question the connection cannot answer and the
         // refusal is the honest arm rather than an error path.
         const outcome = await runLine(
-          `cd /@${SPACE_NAME}/${HANDLE}`,
+          `cd //${SPACE_NAME}/${HANDLE}`,
           shuttleIn(controller(undefined)),
           READS_NOTHING,
         );
@@ -2007,7 +2007,7 @@ describe("verbs", () => {
         expect(
           reasonOf(
             await runLine(
-              `cd /@${SPACE_NAME}/${HANDLE}`,
+              `cd //${SPACE_NAME}/${HANDLE}`,
               shuttle,
               READS_NOTHING,
             ),
@@ -2026,7 +2026,7 @@ describe("verbs", () => {
         // in those characters and is not the name `east/west`.
         const shuttle = shuttleIn(controller("east/west"));
         const outcome = await runLine(
-          `cd /@east~1west/${HANDLE}`,
+          `cd //east~1west/${HANDLE}`,
           shuttle,
           settling(null),
         );
@@ -2043,7 +2043,7 @@ describe("verbs", () => {
         const shuttle = shuttleIn(controller("Board"));
         expect(
           reasonOf(
-            await runLine(`cd /@board/${HANDLE}`, shuttle, READS_NOTHING),
+            await runLine(`cd //board/${HANDLE}`, shuttle, READS_NOTHING),
           ),
         ).toBe(
           "`board` is not the space this shuttle is connected to, which is " +
@@ -2063,7 +2063,7 @@ describe("verbs", () => {
         expect(
           reasonOf(
             await runLine(
-              `cd /@${SPACE_NAME}/${HANDLE}`,
+              `cd //${SPACE_NAME}/${HANDLE}`,
               shuttle,
               READS_NOTHING,
             ),
@@ -2751,7 +2751,7 @@ describe("verbs", () => {
     it("settles a space written as a name, and reads where it names", async () => {
       let config: PieceConfig | undefined;
       const outcome = await runLine(
-        `get /@${SPACE_NAME}/${HANDLE}/title`,
+        `get //${SPACE_NAME}/${HANDLE}/title`,
         shuttleIn(),
         {
           ...READS_NOTHING,
@@ -2768,7 +2768,7 @@ describe("verbs", () => {
     it("moves nowhere settling a space written as a name", async () => {
       const shuttle = shuttleIn();
       const before = shuttle.place.place;
-      await runLine(`get /@${SPACE_NAME}/${HANDLE}`, shuttle, cellValue(null));
+      await runLine(`get //${SPACE_NAME}/${HANDLE}`, shuttle, cellValue(null));
       expect(shuttle.place.place).toBe(before);
     });
 
@@ -2915,7 +2915,7 @@ describe("verbs", () => {
 
     it("refuses a space written as a name that is not this shuttle's own", async () => {
       const outcome = await runLine(
-        `get /@estuary/${HANDLE}`,
+        `get //estuary/${HANDLE}`,
         shuttleIn(),
         READS_NOTHING,
       );

@@ -15,9 +15,9 @@ import {
 } from "@commonfabric/runner/entity-kind";
 import {
   addressKey,
-  createLLMFriendlyLink,
   type NormalizedFullLink,
   parseLLMFriendlyLink,
+  renderCellReference,
 } from "@commonfabric/runner/shared";
 import {
   ADDRESS_HANDLE_TOKEN_PREFIX,
@@ -55,15 +55,6 @@ const sha256Hasher: HandleTokenHasher = (input) =>
   Promise.resolve(sha256(input) as Uint8Array<ArrayBuffer>);
 
 /**
- * Context space handed to `createLLMFriendlyLink()` when a link carries its
- * own space: the serializer embeds a link's space DID only when it differs
- * from the context, and the handle table has no execution space of its own,
- * so every carried DID must survive into the canonical `ref`.
- */
-const HANDLE_REF_CONTEXT_SPACE =
-  "did:cf-harness:handle-table" as NormalizedFullLink["space"];
-
-/**
  * Normalizes `refText` — an LLM-friendly link string, or a bare `of:`- or
  * `computed:`-schemed entity URI — to a normalized link. A ref with no
  * embedded space DID yields a link without `space`; the two operations
@@ -96,12 +87,12 @@ export const parseHandleRef = (refText: string): NormalizedFullLink => {
   } as NormalizedFullLink;
 };
 
-/** Helper for minting, which serializes a link to its canonical `ref`. */
+/**
+ * Helper for minting, which serializes a complete link without context.
+ * Unresolved references retain the implicit base scope of their intake form.
+ */
 const canonicalRef = (link: NormalizedFullLink): string =>
-  createLLMFriendlyLink(
-    link,
-    link.space === undefined ? undefined : HANDLE_REF_CONTEXT_SPACE,
-  );
+  renderCellReference(link, link.space === undefined ? { scope: "space" } : {});
 
 /**
  * Helper for minting, which derives one fixed-width token suffix: SHA-256 of
