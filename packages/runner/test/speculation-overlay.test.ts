@@ -46,6 +46,7 @@ import {
   SpeculationOverlayDestination,
   stampSpeculationRunContext,
 } from "../src/speculation/overlay-destination.ts";
+import { EffectsChannel } from "../src/speculation/effects-channel.ts";
 import {
   ignoreReadForScheduling,
   internalVerifierRead,
@@ -600,6 +601,127 @@ describe("Phase 2 speculation overlay", () => {
     expect(
       destination.deferSealedEffects(bookkeepingTx, [effectOf("fetch")]),
     ).toBe(false);
+  });
+
+  // The two convergence tests below drive the destination directly: the
+  // allowlist decision and the nonce arbitration are the units under
+  // test, and neither needs a server.
+
+  const destinationWithChannel = (): {
+    destination: SpeculationOverlayDestination;
+    channel: EffectsChannel;
+  } => {
+    const runtime = {
+      storageManager: { open: () => ({ replica: {} }) },
+    } as unknown as Runtime;
+    const channel = new EffectsChannel(runtime);
+    (runtime as { effectsChannel?: EffectsChannel }).effectsChannel = channel;
+    return {
+      destination: new SpeculationOverlayDestination(runtime),
+      channel,
+    };
+  };
+
+  const navigateEffect = (
+    nonce: string,
+    flush: () => void,
+  ): PostCommitSideEffect => ({
+    id: `navigateTo:${nonce}`,
+    kind: "navigateTo",
+    nonce,
+    flush,
+  });
+
+  it("converges an optimistic `navigateTo` on an enactment the effects channel already made (protocol.md §5; T2.Q7)", async () => {
+    // Convergence runs both ways. The overlay records an optimistic
+    // enactment's nonce on the channel so a later authoritative
+    // delivery converges on it; this is the other direction — the
+    // authoritative intent reaching the channel first, which happens
+    // whenever the served round trip beats the client's own
+    // speculative run of the same handler. Enacting here navigates a
+    // second time for one journey, and to the client's speculative
+    // target rather than the served one, because the overlay dropped
+    // the writes that target's piece would have needed.
+    const { destination, channel } = destinationWithChannel();
+    const enacted = "nav:already-enacted";
+    // What the channel's authoritative arm does with an arriving
+    // intent: take the nonce and navigate.
+    expect(await channel.enactOnce(enacted, () => Promise.resolve())).toBe(
+      true,
+    );
+
+    // Both effects seal in one transaction, so the second one's flush
+    // is an ordered barrier: the loop decides the first before it
+    // reaches the second. A fresh nonce is a different journey, and
+    // still enacts.
+    const fresh = "nav:not-yet-enacted";
+    const flushed: string[] = [];
+    const reachedFresh = Promise.withResolvers<void>();
+    const derivationTx = {} as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(derivationTx, {
+      actionId: "spec-converge-on-authoritative",
+      kind: "derivation",
+    });
+    expect(
+      destination.deferSealedEffects(derivationTx, [
+        navigateEffect(enacted, () => {
+          flushed.push(enacted);
+        }),
+        navigateEffect(fresh, () => {
+          flushed.push(fresh);
+          reachedFresh.resolve();
+        }),
+      ]),
+    ).toBe(true);
+    await reachedFresh.promise;
+    expect(flushed).toEqual([fresh]);
+  });
+
+  it("enacts an optimistic `navigateTo` whose in-flight enactment failed, and stands down for one that succeeds (protocol.md §5)", async () => {
+    // A record taken before its enactment settles is a prediction, not
+    // a fact: a failed enactment retracts its record and leaves the
+    // durable entry unacked for a later delivery. Standing down on a
+    // prediction that did not come true loses the navigation, since a
+    // quiet space commits nothing else to deliver that entry on.
+    const { destination, channel } = destinationWithChannel();
+    const failing = "nav:in-flight-fails";
+    const succeeding = "nav:in-flight-succeeds";
+    const failure = Promise.withResolvers<void>();
+    const success = Promise.withResolvers<void>();
+    const authoritative = Promise.all([
+      channel.enactOnce(failing, () => failure.promise),
+      channel.enactOnce(succeeding, () => success.promise),
+    ]);
+
+    const flushed: string[] = [];
+    const reachedBarrier = Promise.withResolvers<void>();
+    const derivationTx = {} as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(derivationTx, {
+      actionId: "spec-converge-in-flight",
+      kind: "derivation",
+    });
+    expect(
+      destination.deferSealedEffects(derivationTx, [
+        navigateEffect(failing, () => {
+          flushed.push(failing);
+        }),
+        navigateEffect(succeeding, () => {
+          flushed.push(succeeding);
+        }),
+        navigateEffect("nav:barrier", () => {
+          reachedBarrier.resolve();
+        }),
+      ]),
+    ).toBe(true);
+    // Both enactments are still in flight, so the overlay is waiting on
+    // the first rather than assuming its outcome.
+    expect(flushed).toEqual([]);
+
+    failure.reject(new Error("enactment failed (test-injected)"));
+    success.resolve();
+    expect(await authoritative).toEqual([false, true]);
+    await reachedBarrier.promise;
+    expect(flushed).toEqual([failing]);
   });
 
   it("the llm-dialog tool loop's egress is dropped under speculation (review 2026-08-11 m5): the claimed updateArgument mitigation, asserted", async () => {

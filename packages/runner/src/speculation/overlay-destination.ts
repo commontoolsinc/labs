@@ -932,33 +932,38 @@ export class SpeculationOverlayDestination
     if (enactable.length > 0) {
       void (async () => {
         for (const effect of enactable) {
-          try {
-            // Phase 4 (protocol.md §5, T2.Q7): BEGIN the run's
-            // deterministic nonce on the channel BEFORE the flush's
+          const channel = this.#runtime.effectsChannel;
+          const flush = () => Promise.resolve(effect.flush(tx));
+          if (effect.nonce !== undefined && channel !== undefined) {
+            // Phase 4 (protocol.md §5, T2.Q7): the channel arbitrates
+            // the run's deterministic nonce in either order. It runs
+            // this flush and records the nonce BEFORE the flush's
             // callback can run — the flush awaits an arbitrary
             // (possibly slow, async) navigateCallback, and the
-            // authoritative intent can arrive on the effects channel
-            // MID-flush; the in-flight record makes the channel
-            // converge instead of double-navigating within one life
-            // (LT8 accepts re-enactment only across a RELOAD). The
-            // flush's OUTCOME rides with the record (owner review
-            // P1-1): a FAILED flush retracts it, so the durable intent
-            // re-enacts on a later delivery instead of being
-            // acked-and-retired unenacted; a flush that no-ops on a
-            // superseded attempt is deliberate non-enactment and
-            // resolves as success — acking it is correct (a newer
-            // attempt owns the navigation). Call order is safe: the
-            // flush's callback is deferred to a microtask
-            // (navigate-to.ts's Promise.resolve().then), so the
-            // synchronous beginEnactment below records first.
-            const flushed = Promise.resolve(effect.flush(tx));
-            if (effect.nonce !== undefined) {
-              void this.#runtime.effectsChannel?.beginEnactment(
-                effect.nonce,
-                flushed,
-              );
-            }
-            await flushed;
+            // authoritative intent can arrive on the channel MID-flush,
+            // where the in-flight record makes it converge instead of
+            // double-navigating within one life (LT8 accepts
+            // re-enactment only across a RELOAD). Call order is safe
+            // because the flush's callback is deferred to a microtask
+            // (navigate-to.ts's Promise.resolve().then), so the record
+            // lands first. An intent that arrived and enacted BEFORE
+            // this run sealed leaves the nonce already recorded, and
+            // the flush does not run: the journey's one navigation
+            // happened, and enacting here would navigate a second time
+            // — to the client's own speculative target, the piece whose
+            // writes this overlay dropped. The flush's OUTCOME rides
+            // with the record (owner review P1-1): a FAILED flush
+            // retracts it, so the durable intent re-enacts on a later
+            // delivery instead of being acked-and-retired unenacted; a
+            // flush that no-ops on a superseded attempt is deliberate
+            // non-enactment and resolves as success — acking it is
+            // correct (a newer attempt owns the navigation). The
+            // channel logs a failed enactment (enact-failed).
+            await channel.enactOnce(effect.nonce, flush);
+            continue;
+          }
+          try {
+            await flush();
           } catch (error) {
             logger.error(
               "speculative-enact-failed",

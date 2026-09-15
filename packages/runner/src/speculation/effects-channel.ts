@@ -12,16 +12,16 @@
 // the ENACTED-NONCE RECORD — process memory, deliberately reload-wiped:
 // a reload between intent and ack re-reads the unacked intent on
 // resubscribe and MAY re-enact it, which is ACCEPTED for reversible
-// effects (LT8, RULED 2026-08-03). The record has two writers, both
-// through `beginEnactment` (record BEFORE the enactment settles, with
-// its outcome attached):
+// effects (LT8, RULED 2026-08-03). The record is taken BEFORE the
+// enactment settles, with its outcome attached, and the two paths that
+// take it converge on each other in either order:
 //
-// - the OPTIMISTIC path — the speculation overlay begins the run's
-//   deterministic nonce here BEFORE its navigateTo flush runs
-//   (speculation.md §2; the flush awaits an arbitrary callback, and the
-//   authoritative intent can arrive mid-flush), so the authoritative
-//   intent CONVERGES on the in-flight nonce and never re-navigates
-//   (T2.Q7);
+// - the OPTIMISTIC path — the speculation overlay hands its navigateTo
+//   flush to `enactOnce` (speculation.md §2), which runs the flush and
+//   records the run's deterministic nonce, so the authoritative intent
+//   CONVERGES on the in-flight nonce and never re-navigates (T2.Q7);
+//   the intent that arrived FIRST is the nonce `enactOnce` finds
+//   already recorded, and the flush does not run at all;
 // - the AUTHORITATIVE path — an intent arriving unenacted (a reload, a
 //   client that never speculated the run) is begun, enacted, and — on
 //   SUCCESS — acked here (record-before-invoke guards re-entrant
@@ -132,32 +132,28 @@ export class EffectsChannel {
     return this.#listener?.installed === true;
   }
 
-  /** Record `nonce` as enacted BEFORE `work` (the enactment itself)
-   * settles — the mid-flight convergence guard: the authoritative
-   * intent can arrive mid-enactment and must converge, not
-   * double-navigate. The outcome rides with the record (owner review
-   * P1-1; protocol.md §5's enact-then-ack ordering): SUCCESS keeps the
-   * record and releases any ack chained on the returned promise;
-   * FAILURE retracts the record and withholds the ack, so the durable
-   * entry — still unacked in the store — re-enacts on a later
-   * delivery (or the LT8 reload re-read). Callers: the speculation
-   * overlay's optimistic flush, and this channel's authoritative arm. */
-  beginEnactment(nonce: string, work: Promise<unknown>): Promise<boolean> {
-    this.#enacted.add(nonce);
-    const settled = work.then(() => true, (error) => {
-      logger.warn("enact-failed", () => [
-        `navigate enactment for ${nonce} failed; left unacked — a ` +
-        "later delivery retries",
-        error,
-      ]);
-      return false;
-    }).then((ok) => {
-      this.#enactInFlight.delete(nonce);
-      if (!ok) this.#enacted.delete(nonce);
-      return ok;
-    });
-    this.#enactInFlight.set(nonce, settled);
-    return settled;
+  /** Enact `nonce` at most once in this life: run `work` and record
+   * the nonce, or CONVERGE on the enactment already recorded for it.
+   * Both arms of one journey arrive here in either order — the
+   * speculation overlay's optimistic flush and this channel's own
+   * authoritative delivery — and one navigation results (protocol.md
+   * §5; T2.Q7). An enactment still in flight is awaited rather than
+   * assumed: it FAILING retracts its record, and this caller then
+   * enacts, so convergence never stands on an enactment that did not
+   * happen. Resolves true when the nonce's enactment succeeded, false
+   * when the work this call ran failed — which leaves the durable
+   * entry unacked for a later delivery to re-enact. */
+  async enactOnce(
+    nonce: string,
+    work: () => Promise<unknown>,
+  ): Promise<boolean> {
+    for (;;) {
+      const inFlight = this.#enactInFlight.get(nonce);
+      if (inFlight === undefined) break;
+      if (await inFlight) return true;
+    }
+    if (this.#enacted.has(nonce)) return true;
+    return await this.#beginEnactment(nonce, work());
   }
 
   /** Subscribe to this session's effects instance in `space` (idempotent
@@ -223,6 +219,33 @@ export class EffectsChannel {
         error,
       ]);
     }
+  }
+
+  /** Record `nonce` as enacted BEFORE `work` (the enactment itself)
+   * settles — the mid-flight convergence guard: the authoritative
+   * intent can arrive mid-enactment and must converge, not
+   * double-navigate. The outcome rides with the record (owner review
+   * P1-1; protocol.md §5's enact-then-ack ordering): SUCCESS keeps the
+   * record and releases any ack chained on the returned promise;
+   * FAILURE retracts the record and withholds the ack, so the durable
+   * entry — still unacked in the store — re-enacts on a later
+   * delivery (or the LT8 reload re-read). */
+  #beginEnactment(nonce: string, work: Promise<unknown>): Promise<boolean> {
+    this.#enacted.add(nonce);
+    const settled = work.then(() => true, (error) => {
+      logger.warn("enact-failed", () => [
+        `navigate enactment for ${nonce} failed; left unacked — a ` +
+        "later delivery retries",
+        error,
+      ]);
+      return false;
+    }).then((ok) => {
+      this.#enactInFlight.delete(nonce);
+      if (!ok) this.#enacted.delete(nonce);
+      return ok;
+    });
+    this.#enactInFlight.set(nonce, settled);
+    return settled;
   }
 
   /** ONE listener per channel (design (e) item 13): wants the session
@@ -353,7 +376,7 @@ export class EffectsChannel {
         // Record BEFORE the (deferred) callback can run — a re-entrant
         // delivery converges on the in-flight record instead of
         // double-enacting — and chain the ack on SUCCESS only.
-        void this.beginEnactment(nonce, work).then((ok) => {
+        void this.#beginEnactment(nonce, work).then((ok) => {
           if (ok && !this.#closed) this.#ack(space, nonce);
         });
         continue;
