@@ -32,9 +32,9 @@ import {
  * `DO_VISIT_SUBTYPE` and then whatever specific subtypes need to be altered.
  */
 export abstract class RecursiveValueVisitor<
-  DomainExtra = never,
+  PlusType = never,
   ResultType = FabricValue,
-> extends BaseValueVisitor<DomainExtra, ResultType> {
+> extends BaseValueVisitor<PlusType, ResultType> {
   //
   // Instance members
   //
@@ -42,28 +42,28 @@ export abstract class RecursiveValueVisitor<
   /** @inheritDoc */
   visitFabricArray(
     _value: FabricArray,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
+  ): LeafVisitorResult<PlusType, ResultType> {
     return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
   visitFabricInstance(
     _value: FabricInstance,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
+  ): LeafVisitorResult<PlusType, ResultType> {
     return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
   visitFabricPlainObject(
     _value: FabricPlainObject,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
+  ): LeafVisitorResult<PlusType, ResultType> {
     return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
   visitFabricContainer(
     _value: FabricContainerValue,
-  ): DispatchingVisitorResult<DomainExtra, ResultType> {
+  ): DispatchingVisitorResult<PlusType, ResultType> {
     return DO_RECURSE_VALUES;
   }
 
@@ -71,7 +71,7 @@ export abstract class RecursiveValueVisitor<
   visitedFabricArrayElement(
     _array: FabricArray,
     _index: number,
-    _value: DomainFor<DomainExtra>,
+    _value: DomainFor<PlusType>,
   ): BaselineVisitResult<ResultType> {
     return undefined;
   }
@@ -96,8 +96,8 @@ export abstract class RecursiveValueVisitor<
   /** @inheritDoc */
   visitedFabricPlainObjectEntry(
     _container: FabricPlainObject,
-    _key: DomainFor<DomainExtra>,
-    _value: DomainFor<DomainExtra>,
+    _key: DomainFor<PlusType>,
+    _value: DomainFor<PlusType>,
   ): BaselineVisitResult<ResultType> {
     return undefined;
   }

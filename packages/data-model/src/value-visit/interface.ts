@@ -19,8 +19,8 @@ import {
 // Individual result form types and associated definitions
 //
 
-/** Full domain for a `ValueVisitor` class, given its `DomainExtra`. */
-export type DomainFor<DomainExtra> = FabricValue | DomainExtra;
+/** Full domain for a `ValueVisitor` class, given its `PlusType`. */
+export type DomainFor<PlusType> = FabricValue | PlusType;
 
 /**
  * A `mainResult` form. `value` is a value that is to be returned from the
@@ -65,9 +65,9 @@ export type RecurseForm = {
  * visitor engine to redo visitor dispatch with the replacement (as if the
  * replacement were the value in the same position as the original).
  */
-export type ReplaceForm<DomainExtra> = {
+export type ReplaceForm<PlusType> = {
   readonly type: "replace";
-  readonly value: DomainFor<DomainExtra>;
+  readonly value: DomainFor<PlusType>;
 };
 
 /**
@@ -151,10 +151,10 @@ export type BaselineVisitResult<ResultType = FabricValue> =
  *
  * See the included result types for details on what they mean.
  */
-export type LeafVisitorResult<DomainExtra = never, ResultType = FabricValue> =
+export type LeafVisitorResult<PlusType = never, ResultType = FabricValue> =
   | BaselineVisitResult<ResultType>
   | RecurseForm
-  | ReplaceForm<DomainExtra>;
+  | ReplaceForm<PlusType>;
 
 /**
  * Possible results from a visitor method which covers two or more subtypes of
@@ -165,10 +165,10 @@ export type LeafVisitorResult<DomainExtra = never, ResultType = FabricValue> =
  * See the included result types for details on what they mean.
  */
 export type DispatchingVisitorResult<
-  DomainExtra = never,
+  PlusType = never,
   ResultType = FabricValue,
 > =
-  | LeafVisitorResult<DomainExtra, ResultType>
+  | LeafVisitorResult<PlusType, ResultType>
   | VisitSubtypeForm;
 
 //
@@ -186,18 +186,18 @@ export type DispatchingVisitorResult<
  * structured result type is documented as to its meaning.
  *
  * The value domain of visitors always includes `FabricValue`, and the
- * `DomainExtra` type parameter is available to selectively include another type
+ * `PlusType` type parameter is available to selectively include another type
  * (possibly itself compound) as an additional option.
  */
-export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
+export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
   /**
    * Indicates whether or not the given value is compatible with the
-   * `DomainExtra` type defined by the visitor. This is a type predicate for
-   * `DomainExtra`. The visitor engine calls it before dispatching to
+   * `PlusType` type defined by the visitor. This is a type predicate for
+   * `PlusType`. The visitor engine calls it before dispatching to
    * `visitNonFabricValue()`, and will instead `throw` an error if this method
    * returns anything falsy.
    */
-  isDomainExtra(value: DomainFor<DomainExtra>): value is DomainExtra;
+  isDomainExtra(value: DomainFor<PlusType>): value is PlusType;
 
   /**
    * Visits a value which is already in the process of being visited. The
@@ -207,33 +207,33 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    */
   visitCycle(
     /** Value to visit. */
-    value: DomainFor<DomainExtra>,
+    value: DomainFor<PlusType>,
     /** Depth at which `value` was originally encountered. */
     originalDepth: number,
     /** Depth of the current visit. */
     thisDepth: number,
-  ): LeafVisitorResult<DomainExtra, ResultType>;
+  ): LeafVisitorResult<PlusType, ResultType>;
 
   /**
    * Visits the given `FabricArray`.
    */
   visitFabricArray(
     value: FabricArray,
-  ): LeafVisitorResult<DomainExtra, ResultType>;
+  ): LeafVisitorResult<PlusType, ResultType>;
 
   /**
    * Visits the given `FabricInstance`.
    */
   visitFabricInstance(
     value: FabricInstance,
-  ): LeafVisitorResult<DomainExtra, ResultType>;
+  ): LeafVisitorResult<PlusType, ResultType>;
 
   /**
    * Visits the given `FabricPlainObject`.
    */
   visitFabricPlainObject(
     value: FabricPlainObject,
-  ): LeafVisitorResult<DomainExtra, ResultType>;
+  ): LeafVisitorResult<PlusType, ResultType>;
 
   /**
    * Visits the given `FabricContainerValue`. If this returns type
@@ -243,18 +243,18 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    */
   visitFabricContainer(
     value: FabricContainerValue,
-  ): DispatchingVisitorResult<DomainExtra, ResultType>;
+  ): DispatchingVisitorResult<PlusType, ResultType>;
 
   /**
    * Visits a value determined to _not_ be a valid `FabricValue`. Before calling
    * this method, the visitor engine will call `isDomainExtra()`, and will only
    * call this method if `isDomainExtra()` returned a truthy value (`throw`ing
    * if not). So, as long as that method tells the truth, this method will only
-   * ever get called with a value which is truly compatible with `DomainExtra`.
+   * ever get called with a value which is truly compatible with `PlusType`.
    */
   visitNonFabricValue(
-    value: DomainExtra,
-  ): LeafVisitorResult<DomainExtra, ResultType>;
+    value: PlusType,
+  ): LeafVisitorResult<PlusType, ResultType>;
 
   /**
    * Visits the given primitive value, which can be either a native JavaScript
@@ -263,7 +263,7 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   visitPrimitive(
     value: Primitive | FabricPrimitive,
     tag: PrimitiveValueTag,
-  ): LeafVisitorResult<DomainExtra, ResultType>;
+  ): LeafVisitorResult<PlusType, ResultType>;
 
   /**
    * Visits the given arbitrary value. If this returns type `visitSubtype`, then
@@ -271,8 +271,8 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    * `visitNonFabricValue()`, or `visitPrimitive()`.
    */
   visitValue(
-    value: DomainFor<DomainExtra>,
-  ): DispatchingVisitorResult<DomainExtra, ResultType>;
+    value: DomainFor<PlusType>,
+  ): DispatchingVisitorResult<PlusType, ResultType>;
 
   /**
    * Indicates that an array element was just visited. This method is called as
@@ -282,7 +282,7 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   visitedFabricArrayElement(
     array: FabricArray,
     index: number,
-    value: DomainFor<DomainExtra>,
+    value: DomainFor<PlusType>,
   ): BaselineVisitResult<ResultType>;
 
   /**
@@ -322,7 +322,7 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    */
   visitedFabricPlainObjectEntry(
     container: FabricPlainObject,
-    key: DomainFor<DomainExtra>,
-    value: DomainFor<DomainExtra>,
+    key: DomainFor<PlusType>,
+    value: DomainFor<PlusType>,
   ): BaselineVisitResult<ResultType>;
 }

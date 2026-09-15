@@ -24,64 +24,64 @@ import {
  * `abstract` and includes `protected` helper methods.
  */
 export abstract class BaseValueVisitor<
-  DomainExtra = never,
+  PlusType = never,
   ResultType = FabricValue,
-> implements ValueVisitor<DomainExtra, ResultType> {
+> implements ValueVisitor<PlusType, ResultType> {
   //
   // Subclass contract
   //
 
   /** @inheritDoc */
-  abstract isDomainExtra(value: DomainFor<DomainExtra>): value is DomainExtra;
+  abstract isDomainExtra(value: DomainFor<PlusType>): value is PlusType;
 
   /** @inheritDoc */
   abstract visitCycle(
-    value: DomainFor<DomainExtra>,
+    value: DomainFor<PlusType>,
     originalDepth: number,
     thisDepth: number,
-  ): LeafVisitorResult<DomainExtra, ResultType>;
+  ): LeafVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
   abstract visitFabricArray(
     value: FabricArray,
-  ): LeafVisitorResult<DomainExtra, ResultType>;
+  ): LeafVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
   abstract visitFabricInstance(
     value: FabricInstance,
-  ): LeafVisitorResult<DomainExtra, ResultType>;
+  ): LeafVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
   abstract visitFabricPlainObject(
     value: FabricPlainObject,
-  ): LeafVisitorResult<DomainExtra, ResultType>;
+  ): LeafVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
   abstract visitFabricContainer(
     value: FabricContainerValue,
-  ): DispatchingVisitorResult<DomainExtra, ResultType>;
+  ): DispatchingVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
   abstract visitNonFabricValue(
-    value: DomainExtra,
-  ): LeafVisitorResult<DomainExtra, ResultType>;
+    value: PlusType,
+  ): LeafVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
   abstract visitPrimitive(
     value: Primitive | FabricPrimitive,
     tag: PrimitiveValueTag,
-  ): LeafVisitorResult<DomainExtra, ResultType>;
+  ): LeafVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
   abstract visitValue(
-    value: DomainFor<DomainExtra>,
-  ): DispatchingVisitorResult<DomainExtra, ResultType>;
+    value: DomainFor<PlusType>,
+  ): DispatchingVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
   abstract visitedFabricArrayElement(
     array: FabricArray,
     index: number,
-    value: DomainFor<DomainExtra>,
+    value: DomainFor<PlusType>,
   ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
@@ -100,8 +100,8 @@ export abstract class BaseValueVisitor<
   /** @inheritDoc */
   abstract visitedFabricPlainObjectEntry(
     container: FabricPlainObject,
-    key: DomainFor<DomainExtra>,
-    value: DomainFor<DomainExtra>,
+    key: DomainFor<PlusType>,
+    value: DomainFor<PlusType>,
   ): BaselineVisitResult<ResultType>;
 
   //
@@ -111,7 +111,7 @@ export abstract class BaseValueVisitor<
   /**
    * Throws an error indicating that this visitor does not handle cycles.
    */
-  protected throwNoCycles(value: DomainFor<DomainExtra>): never {
+  protected throwNoCycles(value: DomainFor<PlusType>): never {
     const desc = toCompactDebugString(value, { backtickQuote: true });
     throw new Error(`Cannot visit cyclic value: ${desc}`);
   }

@@ -40,9 +40,9 @@ import {
  * _only_ when a replacement has been made (expected to be uncommon), thereby
  * avoiding allocation for the common un-replaced `visitSubtype` cases.
  */
-type VisitSubtypeOfForm<DomainExtra> = {
+type VisitSubtypeOfForm<PlusType> = {
   readonly type: "visitSubtypeOf";
-  readonly value: DomainFor<DomainExtra>;
+  readonly value: DomainFor<PlusType>;
 };
 
 /**
@@ -70,12 +70,12 @@ type RecurseOfForm = {
  * This class is _intentionally_ omitted from the barrel `export` file for the
  * submodule.
  */
-export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
+export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
   /** Concrete visitor implementation. */
-  #visitor: ValueVisitor<DomainExtra, ResultType>;
+  #visitor: ValueVisitor<PlusType, ResultType>;
 
   /** Container stack of the visit currently in progress. */
-  #stack = new IndexTrackingStack<DomainFor<DomainExtra>>();
+  #stack = new IndexTrackingStack<DomainFor<PlusType>>();
 
   /** Indicates if a visit is now actually in-progress. */
   #inProgress = false;
@@ -95,7 +95,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   /**
    * Constructs an instance.
    */
-  constructor(visitor: ValueVisitor<DomainExtra, ResultType>) {
+  constructor(visitor: ValueVisitor<PlusType, ResultType>) {
     this.#visitor = visitor;
   }
 
@@ -120,7 +120,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * See `visitValue()` for details on the `deepTypeCheck` argument.
    */
   visit(
-    value: DomainFor<DomainExtra>,
+    value: DomainFor<PlusType>,
     deepTypeCheck: boolean,
   ): BaselineVisitResult<ResultType> {
     return this.#mainVisit(value, false, deepTypeCheck);
@@ -134,7 +134,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
   /** Helper which implements most of a top-level visit. */
   #mainVisit(
-    value: DomainFor<DomainExtra>,
+    value: DomainFor<PlusType>,
     assumeValid: boolean,
     deepTypeCheck: boolean,
   ): BaselineVisitResult<ResultType> {
@@ -159,7 +159,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   /**
    * Visits a top-level value or contained sub-value.
    */
-  #visitValue(value: DomainFor<DomainExtra>): BaselineVisitResult<ResultType> {
+  #visitValue(value: DomainFor<PlusType>): BaselineVisitResult<ResultType> {
     const result = this.#visitResolvingSubtype(value);
 
     switch (result?.type) {
@@ -220,12 +220,12 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * this method. See comment on the definition of `RecurseOfForm` for details.
    */
   #visitResolvingSubtype(
-    value: DomainFor<DomainExtra>,
+    value: DomainFor<PlusType>,
   ):
     | RecurseOfForm
     | Exclude<
-      LeafVisitorResult<DomainExtra, ResultType>,
-      ReplaceForm<DomainExtra>
+      LeafVisitorResult<PlusType, ResultType>,
+      ReplaceForm<PlusType>
     > {
     const vis = this.#visitor;
 
@@ -251,7 +251,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       }
 
       const tag = this.#tagOfValueElseNull(value);
-      let result: DispatchingVisitorResult<DomainExtra, ResultType>;
+      let result: DispatchingVisitorResult<PlusType, ResultType>;
 
       switch (tag) {
         case VALUE_TAGS.Array: {
@@ -328,13 +328,13 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * the visitor returns something other than a `replace` result.
    */
   #visitResolvingCyclesAndReplacement(
-    value: DomainFor<DomainExtra>,
+    value: DomainFor<PlusType>,
   ):
     | RecurseOfForm
-    | VisitSubtypeOfForm<DomainExtra>
+    | VisitSubtypeOfForm<PlusType>
     | Exclude<
-      DispatchingVisitorResult<DomainExtra, ResultType>,
-      ReplaceForm<DomainExtra> | RecurseForm
+      DispatchingVisitorResult<PlusType, ResultType>,
+      ReplaceForm<PlusType> | RecurseForm
     > {
     const vis = this.#visitor;
     const origValue = value;
@@ -546,7 +546,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    */
   #adjustRecurseForm(
     result: RecurseForm,
-    finalValue: DomainFor<DomainExtra>,
+    finalValue: DomainFor<PlusType>,
     finalValueTagIfKnown?: FabricValueTag | null,
   ): RecurseOfForm {
     const tag = (finalValueTagIfKnown === undefined)
@@ -578,11 +578,11 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * based on whether the visited value is a replacement.
    */
   #visitSubtypeFormFor(
-    origValue: DomainFor<DomainExtra>,
-    finalValue: DomainFor<DomainExtra>,
+    origValue: DomainFor<PlusType>,
+    finalValue: DomainFor<PlusType>,
   ):
     | VisitSubtypeForm
-    | VisitSubtypeOfForm<DomainExtra> {
+    | VisitSubtypeOfForm<PlusType> {
     if (Object.is(origValue, finalValue)) {
       return DO_VISIT_SUBTYPE;
     }
@@ -598,7 +598,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * type-checking style indicated by the top-level `visit*()` call on this
    * instance.
    */
-  #tagOfValueElseNull(value: DomainFor<DomainExtra>): FabricValueTag | null {
+  #tagOfValueElseNull(value: DomainFor<PlusType>): FabricValueTag | null {
     if (this.#assumeValid) {
       return tagOfFabricValueElseNull(value as FabricValue);
     } else if (this.#deepTypeCheck) {

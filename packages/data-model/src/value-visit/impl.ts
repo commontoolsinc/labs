@@ -55,12 +55,12 @@ export function makeVisitFabricValueFunction<ResultType = FabricValue>(
  *   top-level value being visited. _If this turns out to be a problem in
  *   practice,_ this will become an active area of optimization.
  */
-export function visitValue<DomainExtra, ResultType>(
-  value: NoInfer<DomainFor<DomainExtra>>,
-  visitor: ValueVisitor<DomainExtra, ResultType>,
+export function visitValue<PlusType, ResultType>(
+  value: NoInfer<DomainFor<PlusType>>,
+  visitor: ValueVisitor<PlusType, ResultType>,
   deepTypeCheck: boolean = false,
 ): BaselineVisitResult<ResultType> {
-  const inProgress = new VisitInProgress<DomainExtra, ResultType>(visitor);
+  const inProgress = new VisitInProgress<PlusType, ResultType>(visitor);
   return inProgress.visit(value, deepTypeCheck);
 }
 
@@ -70,10 +70,10 @@ export function visitValue<DomainExtra, ResultType>(
  *
  * See `visitValue()` for details on the `deepTypeCheck` argument.
  */
-export function makeVisitValueFunction<DomainExtra, ResultType>(
-  visitor: ValueVisitor<DomainExtra, ResultType>,
+export function makeVisitValueFunction<PlusType, ResultType>(
+  visitor: ValueVisitor<PlusType, ResultType>,
   deepTypeCheck: boolean = false,
-): (value: DomainFor<DomainExtra>) => BaselineVisitResult<ResultType> {
-  return (value: DomainFor<DomainExtra>) =>
+): (value: DomainFor<PlusType>) => BaselineVisitResult<ResultType> {
+  return (value: DomainFor<PlusType>) =>
     visitValue(value, visitor, deepTypeCheck);
 }

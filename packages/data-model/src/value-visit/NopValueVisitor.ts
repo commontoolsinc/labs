@@ -22,57 +22,57 @@ import {
  * No-op (empty implementation) of `ValueVisitor`: Every method is implemented
  * and just returns `undefined`, except for `isDomainExtra()` which returns
  * `false` (the safe choice which also aligns with the default binding for
- * `DomainExtra`). This is meant to be a reasonable base implementation for more
+ * `PlusType`). This is meant to be a reasonable base implementation for more
  * useful visitors, not to be particularly useful by itself.
  */
-export class NopValueVisitor<DomainExtra = never, ResultType = FabricValue>
-  extends BaseValueVisitor<DomainExtra, ResultType> {
+export class NopValueVisitor<PlusType = never, ResultType = FabricValue>
+  extends BaseValueVisitor<PlusType, ResultType> {
   /** @inheritDoc */
-  isDomainExtra(_value: DomainFor<DomainExtra>): _value is DomainExtra {
+  isDomainExtra(_value: DomainFor<PlusType>): _value is PlusType {
     return false;
   }
 
   /** @inheritDoc */
   visitCycle(
-    _value: DomainFor<DomainExtra>,
+    _value: DomainFor<PlusType>,
     _originalDepth: number,
     _thisDepth: number,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
+  ): LeafVisitorResult<PlusType, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricArray(
     _value: FabricArray,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
+  ): LeafVisitorResult<PlusType, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricInstance(
     _value: FabricInstance,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
+  ): LeafVisitorResult<PlusType, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricPlainObject(
     _value: FabricPlainObject,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
+  ): LeafVisitorResult<PlusType, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricContainer(
     _value: FabricContainerValue,
-  ): DispatchingVisitorResult<DomainExtra, ResultType> {
+  ): DispatchingVisitorResult<PlusType, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitNonFabricValue(
-    _value: DomainExtra,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
+    _value: PlusType,
+  ): LeafVisitorResult<PlusType, ResultType> {
     return undefined;
   }
 
@@ -80,14 +80,14 @@ export class NopValueVisitor<DomainExtra = never, ResultType = FabricValue>
   visitPrimitive(
     _value: Primitive | FabricPrimitive,
     _tag: PrimitiveValueTag,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
+  ): LeafVisitorResult<PlusType, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitValue(
-    _value: DomainFor<DomainExtra>,
-  ): DispatchingVisitorResult<DomainExtra, ResultType> {
+    _value: DomainFor<PlusType>,
+  ): DispatchingVisitorResult<PlusType, ResultType> {
     return undefined;
   }
 
@@ -95,7 +95,7 @@ export class NopValueVisitor<DomainExtra = never, ResultType = FabricValue>
   visitedFabricArrayElement(
     _array: FabricArray,
     _index: number,
-    _value: DomainFor<DomainExtra>,
+    _value: DomainFor<PlusType>,
   ): BaselineVisitResult<ResultType> {
     return undefined;
   }
@@ -120,8 +120,8 @@ export class NopValueVisitor<DomainExtra = never, ResultType = FabricValue>
   /** @inheritDoc */
   visitedFabricPlainObjectEntry(
     _container: FabricPlainObject,
-    _key: DomainFor<DomainExtra>,
-    _value: DomainFor<DomainExtra>,
+    _key: DomainFor<PlusType>,
+    _value: DomainFor<PlusType>,
   ): BaselineVisitResult<ResultType> {
     return undefined;
   }
