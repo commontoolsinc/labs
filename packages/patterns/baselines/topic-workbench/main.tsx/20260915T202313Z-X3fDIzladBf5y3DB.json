@@ -14,6 +14,10 @@
           },
           "title": {
             "type": "string"
+          },
+          "workstreamId": {
+            "description": "The workstream the session was attached under, where one applies.",
+            "type": "string"
           }
         },
         "required": [
@@ -181,7 +185,7 @@
             "type": "string"
           },
           "ownerDid": {
-            "description": "The connector owner's DID; every command the workbench sends names it.",
+            "description": "The connector owner's DID; every command a workbench sends names it.",
             "type": "string"
           },
           "schema": {
@@ -217,6 +221,52 @@
         "required": [
           "schema",
           "sessions"
+        ],
+        "type": "object"
+      },
+      "SessionStart": {
+        "properties": {
+          "commandId": {
+            "type": "string"
+          },
+          "nativeSessionId": {
+            "type": "string"
+          },
+          "sourceId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          },
+          "workstreamId": {
+            "description": "The workstream the start was made for, where one applies.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "commandId",
+          "sourceId",
+          "nativeSessionId",
+          "title",
+          "startedAt"
+        ],
+        "type": "object"
+      },
+      "ShownHarness": {
+        "properties": {
+          "driver": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "driver"
         ],
         "type": "object"
       },
@@ -332,7 +382,7 @@
           "cell"
         ],
         "default": [],
-        "description": "Sessions attached to the topic, the workbench's own durable record.",
+        "description": "Sessions attached to the topic by hand, the workbench's own record.",
         "items": {
           "$ref": "#/$defs/Attachment"
         },
@@ -349,9 +399,33 @@
         },
         "type": "array"
       },
+      "harnessesShown": {
+        "default": [],
+        "description": "Harnesses to list in the picker beside the connector's sources, for a\nmachine that shows a harness it does not run. Picking one starts nothing.",
+        "items": {
+          "$ref": "#/$defs/ShownHarness"
+        },
+        "type": "array"
+      },
       "sessions": {
         "$ref": "#/$defs/SessionIndexView",
         "description": "The agents connector's complete session index for this person."
+      },
+      "startMode": {
+        "default": "",
+        "description": "The permission mode a started session's first turn runs under, one the\ndriver advertises. Empty leaves the driver's default, which cannot pass a\ntool or network approval headlessly.",
+        "type": "string"
+      },
+      "starts": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "description": "Every start this workbench has sent, the workbench's own record. A start\nthe index has confirmed stays here, since the record is what attaches its\nsession; one the index has not confirmed can be withdrawn.",
+        "items": {
+          "$ref": "#/$defs/SessionStart"
+        },
+        "type": "array"
       },
       "topic": {
         "$ref": "#/$defs/TopicView",
@@ -394,6 +468,10 @@
             "type": "string"
           },
           "title": {
+            "type": "string"
+          },
+          "workstreamId": {
+            "description": "The workstream the session was attached under, where one applies.",
             "type": "string"
           }
         },
@@ -466,6 +544,37 @@
           "attached"
         ],
         "type": "object"
+      },
+      "SessionStart": {
+        "properties": {
+          "commandId": {
+            "type": "string"
+          },
+          "nativeSessionId": {
+            "type": "string"
+          },
+          "sourceId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          },
+          "workstreamId": {
+            "description": "The workstream the start was made for, where one applies.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "commandId",
+          "sourceId",
+          "nativeSessionId",
+          "title",
+          "startedAt"
+        ],
+        "type": "object"
       }
     },
     "properties": {
@@ -484,12 +593,14 @@
       },
       "attached": {
         "default": [],
+        "description": "The sessions attached by hand; `attachedSessions` adds the confirmed\nstarts to them.",
         "items": {
           "$ref": "#/$defs/Attachment"
         },
         "type": "array"
       },
       "attachedSessions": {
+        "description": "Every attached session, the confirmed starts among them.",
         "items": {
           "$ref": "#/$defs/SessionRow"
         },
@@ -500,7 +611,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/topic-workbench/main.tsx",
-              "moduleIdentity": "JgsLgwsNipyTvdMhwFoIbStfJbpsJSQtpUzE_3fhAU8",
+              "moduleIdentity": "SoY7S8d85AHChOzR_tklDj8m1GN02QHix0o7BkY1mZ4",
               "path": [
                 "startSessionCommand"
               ]
@@ -514,7 +625,7 @@
         "asCell": [
           "stream"
         ],
-        "description": "Detach a session by provider identity."
+        "description": "Detach a session by provider identity, a started one included."
       },
       "kickoff": {
         "description": "The prompt as it will be sent: the person's words, then the topic's\ncontext and links.",
@@ -544,22 +655,35 @@
       "spawnSource": {
         "type": "string"
       },
+      "startBlocker": {
+        "description": "Why Start would send nothing, or \"\" when it would.",
+        "type": "string"
+      },
       "startSession": {
         "asCell": [
           "stream",
           "opaque"
         ],
-        "description": "Start a session for the topic: sends the connector a `start` command\ncarrying the kickoff prompt, the picked checkout, and the topic's name as\nthe session title, and attaches the new session at once.",
+        "description": "Start a session for the topic: sends the connector a `start` command\ncarrying the kickoff prompt, the picked checkout, and the topic's name as\nthe session title, and records the start. Until the index carries the\nsession the start can be withdrawn; once it does, the record is what\nattaches the session.",
         "tier": "wrapper"
+      },
+      "startingSessions": {
+        "description": "Starts the index has not confirmed yet.",
+        "items": {
+          "$ref": "#/$defs/SessionStart"
+        },
+        "type": "array"
       }
     },
     "required": [
       "attached",
       "attachedSessions",
+      "startingSessions",
       "relatedSessions",
       "recentSessions",
       "spawnCommand",
       "kickoff",
+      "startBlocker",
       "spawnPrompt",
       "spawnRoot",
       "spawnSource",
