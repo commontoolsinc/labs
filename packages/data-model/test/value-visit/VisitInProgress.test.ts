@@ -6,7 +6,7 @@ import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { type FabricContainerValue, type FabricValue } from "@/interface.ts";
-import { type PrimitiveValueTag } from "@/value-tags";
+import { type PrimitiveValueTag } from "@/types";
 import {
   type DispatchingVisitorResult,
   DO_RECURSE_KEYS,

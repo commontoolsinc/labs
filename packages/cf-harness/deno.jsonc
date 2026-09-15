@@ -42,6 +42,7 @@
     "./control-errors": "./src/control-errors.ts",
     "./contracts/prompt-slot": "./src/contracts/prompt-slot.ts",
     "./contracts/cfc-invocation-context": "./src/contracts/cfc-invocation-context.ts",
+    "./contracts/native-model-tool": "./src/contracts/native-model-tool.ts",
     "./contracts/image": "./src/contracts/image.ts",
     "./contracts/run-manifest": "./src/contracts/run-manifest.ts",
     "./contracts/observation": "./src/contracts/observation.ts",

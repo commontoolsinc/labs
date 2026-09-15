@@ -130,6 +130,7 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   cfcWriteFloor: { treat: "absent" },
   cfcTriggerReadGating: { treat: "absent" },
   cfcDecomposedEnvelopes: { treat: "absent" },
+  cfcContentAddressedLabels: { treat: "absent" },
   cfcPolicyEvaluation: { treat: "absent" },
   cfcLabelMetadataProtection: { treat: "absent" },
   cfcDeclaredMonotonicity: { treat: "absent" },

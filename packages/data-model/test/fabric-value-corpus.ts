@@ -1,14 +1,14 @@
 /**
  * The shared population the value-dispatch cross-checks run over.
  *
- * `tagFromNativeValueElseNull()` names what a value already is,
- * `isValidFabricNativeObject()` decides a subset of that answer by a narrower
- * route, `isValidFabricValueLayer()` decides membership,
+ * `tagOfConvertibleJsValueElseNull()` names what a value already is,
+ * `isValidFabricConvertibleJsObject()` decides a subset of that answer by a
+ * narrower route, `isValidFabricValueLayer()` decides membership,
  * `assertValidFabricValueLayer()` answers that last question in the form that
- * carries a reason, and `shallowFabricFromNativeValue()` asks
- * `shallowFabricFromNativeObjectElseUndefined()` and then that vet in turn --
- * so each is worth checking against the others rather than only against a
- * hand-picked case. This carries one entry per arm of the dispatch those
+ * carries a reason, and `shallowFabricFromConvertibleJsValue()` asks
+ * `shallowFabricFromConvertibleJsObjectElseUndefined()` and then that vet in
+ * turn -- so each is worth checking against the others rather than only against
+ * a hand-picked case. This carries one entry per arm of the dispatch those
  * functions make, plus the shapes each arm accepts and refuses; an entry
  * dropped from here is an arm the cross-checks stop reaching.
  */

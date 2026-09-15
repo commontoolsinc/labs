@@ -11,6 +11,7 @@ import {
   isNontrivialSchema,
 } from "@commonfabric/data-model-schema";
 import {
+  containsExternalSchemaRef,
   isExternalSchemaRef,
 } from "@commonfabric/data-model-schema/schema-refs";
 import type { JSONSchemaObj } from "@commonfabric/api";
@@ -29,6 +30,7 @@ import type { MetaLinkField } from "./meta-seam.ts";
 import type { IReadOptions } from "./storage/interface.ts";
 import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
 
 import {
   type AnyCell,
@@ -50,6 +52,7 @@ import {
 import { resolveExternalCfcSchemaRefAsDocument } from "./cfc/schema-refs.ts";
 import { createRef } from "./create-ref.ts";
 import { resolveLink } from "./link-resolution.ts";
+import { ensureExternalSchemaClosure } from "./schema-ifc.ts";
 import {
   areNormalizedLinksSame,
   isNormalizedFullLink,
@@ -239,8 +242,13 @@ let externalizedLinkSchemaCache = new WeakMap<
   object,
   Map<KeepAsCell, JSONSchema>
 >();
+// Only complete closures produce cached values. The registry's retention
+// lease bounds their reuse, and every lookup still checks closure availability.
+let recomposedLinkSchemaCache = new WeakMap<JSONSchemaObj, JSONSchema>();
+const schemaClosureLogger = getLogger("schema-closure");
 onSchemaRegistryClear(() => {
   externalizedLinkSchemaCache = new WeakMap();
+  recomposedLinkSchemaCache = new WeakMap();
 });
 
 /**
@@ -266,6 +274,41 @@ export function externalizeSchema(schema: JSONSchemaObj): JSONSchema {
   } catch (error) {
     if (error instanceof SchemaNotDecomposableError) return schema;
     throw error;
+  }
+}
+
+/**
+ * The self-contained schema a link carries across a space boundary. Its
+ * external documents are loaded from the space holding the declaration;
+ * the target space need not hold them. An incomplete declaration selects
+ * nothing until its missing documents arrive. A declaration rejected by the
+ * decomposer logs a warning and selects nothing.
+ */
+export function schemaForSpaceCrossing(
+  tx: IExtendedStorageTransaction,
+  sourceSpace: MemorySpace,
+  schema: JSONSchema | undefined,
+): JSONSchema | undefined {
+  if (!containsExternalSchemaRef(schema)) return schema;
+  if (!ensureExternalSchemaClosure(tx, sourceSpace, schema)) return false;
+  const interned = internSchema(schema as JSONSchemaObj);
+  const cached = recomposedLinkSchemaCache.get(interned);
+  if (cached !== undefined) return cached;
+  try {
+    const { rootRef, documents } = decomposeSchema(interned, {
+      resolveDocument: lookupSchemaDocument,
+    });
+    const result = recomposeSchema(rootRef, (hash) => documents.get(hash));
+    recomposedLinkSchemaCache.set(interned, result);
+    return result;
+  } catch (error) {
+    if (!(error instanceof SchemaNotDecomposableError)) throw error;
+    schemaClosureLogger.warn("schema-closure", () => [
+      "Link schema cannot be recomposed; it selects nothing:",
+      sourceSpace,
+      error.message,
+    ]);
+    return false;
   }
 }
 

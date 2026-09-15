@@ -1033,6 +1033,34 @@ describe("report", () => {
         context,
       )!;
       expect(body).toContain("too flaky to judge a change by");
+      // And that the branch stayed green for it, which a reader of a
+      // failure list would otherwise assume the other way.
+      expect(body).toContain("does not fail the run on that branch");
+    });
+
+    it("says no run of a withheld test saw it pass and fail at once", () => {
+      // An identity is withheld for a flake rate the same window's counts
+      // are behind, so the store's counts always follow this line. What
+      // the line adds is what those counts do not cover: the two runs the
+      // comparison is over are not among the disagreements they count.
+
+      const body = renderReport(
+        buildReport(input({
+          previous: run([["proves", "pass"]]),
+          current: run([["proves", "fail"]]),
+          pullRequest: knows(["proves"], {
+            withheld: new Map([[key("proves"), "flaky" as const]]),
+            flakes: new Map([[key("proves"), { flakes: 7, runs: 900 }]]),
+          }),
+        })),
+        context,
+      )!;
+      expect(body).toContain("no execution of it passed at this commit");
+      expect(body).toContain("none failed in the previous run");
+      expect(body).toContain("not what either of those two runs saw");
+      // And the counts still follow it, saying what the window holds
+      // rather than what these two runs did.
+      expect(body).toContain("disagree with itself 7 times in 900 runs");
     });
 
     // A pull request that ran the test and passed it is a flake or an

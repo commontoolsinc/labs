@@ -2,12 +2,12 @@
  * `Error` as a `FabricValue`: the wrapper class, and the shape it is built
  * from.
  *
- * A native error is the wild west -- any property, any prototype -- while the
+ * A JS error is the wild west -- any property, any prototype -- while the
  * fabric layer needs a value whose observable state is entirely typed. The
  * useful parts therefore become fixed slots and everything else goes to an
  * extras bag reached by map-like methods, with the slot names reserved so that
- * an extra cannot shadow one. The native form is not retained at all; it is
- * rebuilt on demand.
+ * an extra cannot shadow one. The convertible JS form is not retained at all;
+ * it is rebuilt on demand.
  *
  * Mutability follows the usual instance rule: writable until the instance is
  * frozen, and every mutator refuses from then on.
@@ -44,19 +44,19 @@ import type {
 } from "@/interface.ts";
 import {
   errorClassFromType,
-  fabricFromNativeValue,
-} from "@/native-conversion.ts";
-import { isValidFabricValue } from "@/validity-check.ts";
+  fabricFromConvertibleJsValue,
+} from "@/convertible-js.ts";
+import { isValidFabricValue } from "@/types";
 
 /**
  * Helper for `FabricError.fromNativeError()`, which converts a nested value
  * the way its default does: a valid `FabricValue` is held as it stands, and
- * anything else goes through `fabricFromNativeValue()` without freezing.
+ * anything else goes through `fabricFromConvertibleJsValue()` without freezing.
  */
 function convertNestedNativeValue(value: unknown): FabricValue {
   return isValidFabricValue(value)
     ? value
-    : fabricFromNativeValue(value, false);
+    : fabricFromConvertibleJsValue(value, false);
 }
 
 /**
@@ -80,7 +80,7 @@ const FABRIC_ERROR_RESERVED_KEYS: FrozenSet<string> = new FrozenSet([
  * instance; they are not exposed as an own property.
  */
 export type FabricErrorState = {
-  /** Constructor name of the originating native `Error`, e.g. `TypeError`. */
+  /** Constructor name of the originating JS `Error`, e.g. `TypeError`. */
   readonly type: string;
 
   /**
@@ -112,13 +112,13 @@ export type FabricErrorState = {
 };
 
 /**
- * Wrapper for `Error` instances in the fabric type system. Bridges native
- * `Error` (JS wild west) into the strongly-typed `FabricValue` layer by
+ * Wrapper for `Error` instances in the fabric type system. Bridges a JS
+ * `Error` (the wild west) into the strongly-typed `FabricValue` layer by
  * implementing `FabricInstance`. The publicly observable state is entirely
  * `FabricValue`-typed: fixed-schema slots (`type`, `name`, `message`, `stack`,
  * `cause`) plus a hidden extras bag accessed via map-like methods (`getExtra`,
  * `setExtra`, `hasExtra`, `deleteExtra`, `extraKeys`, `extraEntries`). The
- * native `Error` form is produced on demand by `toNativeValue()`.
+ * JS `Error` form is produced on demand by `toNativeValue()`.
  *
  * Like all `FabricInstance`s, a `FabricError` is wholeheartedly mutable until
  * frozen and immutable thereafter. Every mutator -- the slot setters along with
@@ -128,7 +128,7 @@ export type FabricErrorState = {
  */
 export class FabricError extends FabricNativeWrapper<Error>
   implements ApiFabricError {
-  /** Constructor name of the originating native `Error`, e.g. `TypeError`. */
+  /** Constructor name of the originating JS `Error`, e.g. `TypeError`. */
   #type: string;
 
   /** The `.name` property (always a concrete string). */
@@ -147,7 +147,7 @@ export class FabricError extends FabricNativeWrapper<Error>
   readonly #extras: Map<string, FabricValue>;
 
   /**
-   * Cached lazy native projection, populated only once this instance is
+   * Cached lazy JS projection, populated only once this instance is
    * frozen (so the projection can never go stale against mutable state).
    * While unfrozen, `wrappedValue` rebuilds on each access; thawed copies
    * are always minted fresh by `toNativeThawed()`.
@@ -157,7 +157,7 @@ export class FabricError extends FabricNativeWrapper<Error>
   /**
    * Constructs an instance from a `FabricErrorState` record. All state values
    * must already be in `FabricValue` form. Use `FabricError.fromNativeError()`
-   * to construct from a native `Error`.
+   * to construct from a JS `Error`.
    */
   constructor(state: FabricErrorState) {
     super();
@@ -182,7 +182,7 @@ export class FabricError extends FabricNativeWrapper<Error>
     }
   }
 
-  /** Constructor name of the originating native `Error`, e.g. `TypeError`. */
+  /** Constructor name of the originating JS `Error`, e.g. `TypeError`. */
   get type(): string {
     return this.#type;
   }
@@ -317,7 +317,7 @@ export class FabricError extends FabricNativeWrapper<Error>
    * extras bag's mutation methods are gated by this instance's frozen state,
    * so freezing `this` is sufficient -- there is no separate `Object.freeze`
    * on the bag itself (a `Map` ignores `Object.freeze` for `set`/`delete`).
-   * There is no native-`Error` slot to freeze -- the native projection is a
+   * There is no JS-`Error` slot to freeze -- the JS projection is a
    * derivation produced on demand, not stored as canonical state.
    */
   [DEEP_FREEZE](
@@ -352,7 +352,7 @@ export class FabricError extends FabricNativeWrapper<Error>
   }
 
   /**
-   * Returns the frozen native projection. Once this instance is frozen the
+   * Returns the frozen JS projection. Once this instance is frozen the
    * projection is cached (state can no longer change, so the cache is always
    * valid); while mutable it is rebuilt on each access. `toNativeValue(false)`
    * uses `toNativeThawed()` to mint a thawed copy each time.
@@ -416,9 +416,9 @@ export class FabricError extends FabricNativeWrapper<Error>
   }
 
   /**
-   * Builds a fresh native `Error` from this `FabricError`'s state. `cause`
+   * Builds a fresh JS `Error` from this `FabricError`'s state. `cause`
    * and extras are copied through as-is (no recursive unwrap). Callers that
-   * need recursive unwrap should use `nativeFromFabricValue()`.
+   * need recursive unwrap should use `convertibleJsFromFabricValue()`.
    */
   #buildNativeError(frozen: boolean): Error {
     const ErrorClass = errorClassFromType(this.#type);
@@ -522,11 +522,11 @@ export class FabricError extends FabricNativeWrapper<Error>
   }
 
   /**
-   * Converts a native `Error` into an instance. The fixed slots are read off
+   * Converts a JS `Error` into an instance. The fixed slots are read off
    * the error, and `cause` and every custom enumerable property go through
    * `options.convert`. By default a nested value that is already a valid
-   * `FabricValue` is held as it stands, and anything else is converted the
-   * way `fabricFromNativeValue()` converts it, without freezing, so that the
+   * `FabricValue` is held as it stands, and anything else is converted the way
+   * `fabricFromConvertibleJsValue()` converts it, without freezing, so that the
    * result is a valid `FabricValue` throughout. The instance itself is not
    * frozen.
    *

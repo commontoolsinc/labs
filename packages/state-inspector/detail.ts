@@ -75,6 +75,13 @@ export interface CfcSummary {
     confidentiality: string[];
     integrity: string[];
     origin?: string;
+
+    /**
+     * Set when the entry holds its label by a reference the space could
+     * not supply a label for, so the empty atom lists above say "not
+     * read" rather than "no label".
+     */
+    unresolved?: true;
   }[];
 }
 
@@ -194,7 +201,32 @@ function atomLabel(a: unknown): string {
   return String(a);
 }
 
-function parseCfc(cfc: unknown): CfcSummary | undefined {
+/**
+ * The label a stored entry holds: its own when inline, else the value of
+ * the `cid:` label document its single-member `$ref` names, read out of the
+ * space. `undefined` for a reference the space cannot supply a label for —
+ * no document, one holding no record, or a reference outside the `cid:`
+ * namespace, which names no label document and is not followed into
+ * whatever entity it names.
+ */
+function storedLabelOf(
+  entry: Record<string, unknown>,
+  readDocument: DetailContext["readDocument"],
+): Record<string, unknown> | undefined {
+  const label = isObjectNotArray(entry.label) ? entry.label : {};
+  const ref = label.$ref;
+  if (typeof ref !== "string" || Object.keys(label).length !== 1) {
+    return label;
+  }
+  if (!ref.startsWith("cid:")) return undefined;
+  const content = readDocument(ref)?.value;
+  return isObjectNotArray(content) ? content : undefined;
+}
+
+function parseCfc(
+  cfc: unknown,
+  readDocument: DetailContext["readDocument"],
+): CfcSummary | undefined {
   if (!isObjectNotArray(cfc)) return undefined;
   const out: CfcSummary = {
     schemaHash: typeof cfc.schemaHash === "string" ? cfc.schemaHash : undefined,
@@ -206,16 +238,17 @@ function parseCfc(cfc: unknown): CfcSummary | undefined {
     : [];
   for (const e of entries) {
     if (!isObjectNotArray(e)) continue;
-    const label = isObjectNotArray(e.label) ? e.label : {};
+    const label = storedLabelOf(e, readDocument);
     out.entries.push({
       path: Array.isArray(e.path) ? (e.path as string[]).join("/") : "",
-      confidentiality: Array.isArray(label.confidentiality)
+      confidentiality: Array.isArray(label?.confidentiality)
         ? label.confidentiality.map(atomLabel)
         : [],
-      integrity: Array.isArray(label.integrity)
+      integrity: Array.isArray(label?.integrity)
         ? label.integrity.map(atomLabel)
         : [],
       origin: typeof e.origin === "string" ? e.origin : undefined,
+      ...(label === undefined ? { unresolved: true as const } : {}),
     });
   }
   return out;
@@ -298,6 +331,13 @@ interface DetailContext {
 
   moduleIndex: Map<string, ModuleEntry>;
   docs: Map<string, EntityDocument>;
+
+  /**
+   * Reads one document out of the space by id, whether or not the detail
+   * pass scanned it: the pass is capped, and a `cid:` label document has one
+   * revision and so sits past the cap whenever it is exceeded.
+   */
+  readDocument: (id: string) => EntityDocument | undefined;
 }
 
 function refTo(
@@ -429,7 +469,7 @@ function detailFromDoc(
   const ifc = isObjectNotArray(value) && "ifc" in value
     ? annotate(value.ifc)
     : undefined;
-  const cfc = parseCfc(doc.cfc);
+  const cfc = parseCfc(doc.cfc, ctx.readDocument);
 
   return {
     id,
@@ -568,7 +608,22 @@ export function buildAllDetails(
     labelOf.set(id, { kind: c.kind, label });
   }
 
-  const ctx: DetailContext = { ownDid, labelOf, nameOf, moduleIndex, docs };
+  // Content-addressed documents live at space scope only, so a label
+  // document is read there whatever scope the pass describes.
+  const readDocument = (id: string): EntityDocument | undefined => {
+    const scanned = docs.get(id);
+    if (scanned !== undefined) return scanned;
+    const outcome = reconstructOutcome(space, { id, branch, scope: "space" });
+    return outcome.status === "present" ? outcome.document : undefined;
+  };
+  const ctx: DetailContext = {
+    ownDid,
+    labelOf,
+    nameOf,
+    moduleIndex,
+    docs,
+    readDocument,
+  };
 
   // Pass 3: per-entity detail + version log, read from the branch that OWNS the
   // entity's visible row. An entity a child branch INHERITED has its writes on

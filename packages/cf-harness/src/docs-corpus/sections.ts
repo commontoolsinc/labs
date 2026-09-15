@@ -1,25 +1,16 @@
 /**
- * Splitting Markdown into addressable sections, and choosing the few a
- * question is answered out of.
+ * Splitting Markdown into addressable sections, and ranking the sections that
+ * answer a question.
  *
  * A section rather than a file is the unit here because the whole point of the
  * tool is that a child stops paying for a document to read a rule. Selection is
- * lexical and deterministic: the same question over the same corpus chooses the
+ * lexical and deterministic: the same question over the same corpus ranks the
  * same sections, which is what makes a query reproducible from a run's record.
  */
 
 import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import type { HarnessDocsCorpusSection } from "../contracts/docs-corpus.ts";
-
-/** Longest section text the corpus keeps, in characters. */
-export const MAX_SECTION_TEXT_LENGTH = 4_000;
-
-/** How many sections an answer is built out of unless a caller says fewer. */
-export const DEFAULT_SELECTED_SECTIONS = 8;
-
-/** Total characters of section text one query may put in front of the model. */
-export const MAX_SELECTED_SECTION_CHARS = 24_000;
 
 /**
  * Words carrying no discrimination between documentation sections. Scoring
@@ -58,12 +49,8 @@ const STOP_WORDS = new Set([
 
 const HEADING_PATTERN = /^(#{1,6})\s+(.*)$/;
 
-const trimSectionText = (lines: readonly string[]): string => {
-  const text = lines.join("\n").trim();
-  return text.length > MAX_SECTION_TEXT_LENGTH
-    ? text.slice(0, MAX_SECTION_TEXT_LENGTH)
-    : text;
-};
+const sectionText = (lines: readonly string[]): string =>
+  lines.join("\n").trim();
 
 /**
  * The sections of one Markdown document. Text above the first heading becomes
@@ -84,9 +71,9 @@ export const splitMarkdownSections = (
   let lines: string[] = [];
   let inFence = false;
   const flush = () => {
-    const sectionText = trimSectionText(lines);
-    if (sectionText.length > 0) {
-      sections.push({ ...document, heading, text: sectionText });
+    const text = sectionText(lines);
+    if (text.length > 0) {
+      sections.push({ ...document, heading, text });
     }
     lines = [];
   };
@@ -151,33 +138,29 @@ export const scoreSection = (
   return score;
 };
 
-export interface SelectSectionsOptions {
-  maxSections?: number;
-  maxChars?: number;
+/** One section and its deterministic lexical score for a query. */
+export interface RankedDocsCorpusSection {
+  /** Section found in the corpus. */
+  section: HarnessDocsCorpusSection;
+
+  /** Weighted occurrences of the query terms. */
+  score: number;
 }
 
 /**
- * The sections a question is answered out of, best first. Sections scoring
- * zero are left out rather than padding the selection: a question the corpus
- * says nothing about is better answered with nothing than with the first
- * eight documents in path order.
- *
- * Ties break on path and heading under the repository's code-point comparator,
- * so the selection is a function of the corpus and the question alone rather
- * than of the host's default locale.
+ * Every section that lexically matches `query`, in deterministic best-first
+ * order. The section remains whole: callers that expose text apply their own
+ * read window, so ranking a long section never destroys its tail.
  */
-export const selectSections = (
+export const rankSections = (
   sections: readonly HarnessDocsCorpusSection[],
-  question: string,
-  options: SelectSectionsOptions = {},
-): readonly HarnessDocsCorpusSection[] => {
-  const terms = questionTerms(question);
+  query: string,
+): readonly RankedDocsCorpusSection[] => {
+  const terms = questionTerms(query);
   if (terms.length === 0) {
     return [];
   }
-  const maxSections = options.maxSections ?? DEFAULT_SELECTED_SECTIONS;
-  const maxChars = options.maxChars ?? MAX_SELECTED_SECTION_CHARS;
-  const scored = sections
+  return sections
     .map((section) => ({ section, score: scoreSection(section, terms) }))
     .filter((entry) => entry.score > 0)
     .sort((left, right) =>
@@ -185,17 +168,4 @@ export const selectSections = (
       utf8Compare(left.section.path, right.section.path) ||
       utf8Compare(left.section.heading, right.section.heading)
     );
-  const selected: HarnessDocsCorpusSection[] = [];
-  let chars = 0;
-  for (const entry of scored) {
-    if (selected.length >= maxSections) {
-      break;
-    }
-    if (chars + entry.section.text.length > maxChars) {
-      continue;
-    }
-    selected.push(entry.section);
-    chars += entry.section.text.length;
-  }
-  return selected;
 };

@@ -29,7 +29,7 @@ Deno.test("builtin tool registry includes the agreed first-pass tool floor", () 
     "record_feedback",
     "search_skills",
     "acquire_skill",
-    "query_docs",
+    "research",
     "loom_compose",
     "loom_inspect",
     "loom_authoring_context",

@@ -29,6 +29,7 @@ export {
 export {
   cfcLabelViewForCell,
   cfcLabelViewForCellFailClosed,
+  cfcLabelViewForCellFailClosedWithStatus,
   cfcLabelViewForCellWithStatus,
   cfcLabelViewForDereference,
   cfcLabelViewForDereferenceTraces,
@@ -45,6 +46,7 @@ export { cfcLabelViewFromSchema } from "./schema-label-view.ts";
 export type {
   AttemptedWrite,
   CfcAddress,
+  CfcContentAddressedLabels,
   CfcDeclaredMonotonicityMode,
   CfcDeclaredWideningExemption,
   CfcDecomposedEnvelopes,
@@ -112,6 +114,7 @@ export {
   CFC_ENFORCEMENT_MODES,
   CFC_ENFORCING_STRICTNESS,
   cfcEnforcementStrictness,
+  DEFAULT_CFC_CONTENT_ADDRESSED_LABELS,
   DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
   DEFAULT_CFC_DECOMPOSED_ENVELOPES,
   DEFAULT_CFC_ENFORCEMENT_MODE,
@@ -249,7 +252,22 @@ export {
   reportCfcDenial,
   resetCfcDenialAnnouncements,
 } from "./denial-report.ts";
-export { cfcMetadataPresent, readStoredCfcMetadata } from "./metadata.ts";
+export {
+  cfcMetadataPresent,
+  readStoredCfcMetadata,
+  StoredCfcMetadataError,
+  UnknownCfcMetadataVersionError,
+  UnreadableCfcMetadataError,
+  UnresolvableCfcLabelDocumentError,
+} from "./metadata.ts";
+export {
+  CFC_LABEL_INLINE_LIMIT,
+  cfcLabelDocumentContent,
+  cfcLabelDocumentHash,
+  isCfcLabelReference,
+  parseCfcLabelReference,
+  referencedCfcLabelDocumentHashes,
+} from "./label-documents.ts";
 export { cfcSchemaMergeIssue } from "./schema-merge.ts";
 export type { CfcSchemaMergeIssue, IfcKey } from "./schema-merge.ts";
 export {

@@ -7,6 +7,7 @@
  * `docs/specs/piece-source-lifecycle.md` is the design of record.
  */
 
+import { isDID } from "@commonfabric/identity/did";
 import {
   type Cell,
   fabricAuthorityMatchesSpaceHost,
@@ -221,7 +222,7 @@ export async function resolvePieceOriginSource(
     );
   }
   const stableRef = ref as StableFabricRef;
-  if (ref.space !== undefined && !ref.space.startsWith("did:")) {
+  if (ref.space !== undefined && !isDID(ref.space)) {
     throw new PieceOriginError(
       "piece origins require an explicit space DID",
     );

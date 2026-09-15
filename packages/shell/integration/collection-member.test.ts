@@ -11,7 +11,11 @@ import { expect } from "@std/expect";
 import { join, resolve } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
-import { env, waitForCondition } from "@commonfabric/integration";
+import {
+  env,
+  type ProbeApi,
+  waitForCondition,
+} from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { writeTempIdentity } from "@commonfabric/integration/temp-identity";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
@@ -72,6 +76,16 @@ async function cf(
   return stdout;
 }
 
+/** File the exemplar board, and return its id. */
+async function fileBoard(identityPath: string): Promise<string> {
+  const created = await cf(identityPath, ["piece", "new", BOARD_SOURCE]);
+  const boardId = created.match(/fid1:[^\s]+/)?.[0];
+  if (!boardId) {
+    throw new Error(`cf piece new did not print a fid1 id:\n${created}`);
+  }
+  return boardId;
+}
+
 /**
  * File the exemplar board, give it one member per title, and bind `slug` to
  * the map it keeps them in. That binding is what makes `<slug>/<member>` an
@@ -83,11 +97,7 @@ async function fileBoardWithMembers(
   slug: string,
   titles: readonly string[],
 ): Promise<string> {
-  const created = await cf(identityPath, ["piece", "new", BOARD_SOURCE]);
-  const boardId = created.match(/fid1:[^\s]+/)?.[0];
-  if (!boardId) {
-    throw new Error(`cf piece new did not print a fid1 id:\n${created}`);
-  }
+  const boardId = await fileBoard(identityPath);
   for (const title of titles) {
     await cf(
       identityPath,
@@ -102,6 +112,27 @@ async function fileBoardWithMembers(
     `/of:${boardId}/names`,
   ]);
   return boardId;
+}
+
+/**
+ * Settles the rendered view, then reports whether it shows one member with the
+ * expected name.
+ *
+ * An integration test holds no UI subscription, so asking whether the worker
+ * is idle queues the pull work which renders the selected member.
+ */
+async function settledMemberNameIs(
+  probe: ProbeApi,
+  expected: string,
+): Promise<boolean> {
+  const settle = (globalThis as typeof globalThis & {
+    commonfabric?: { viewSettled?: () => Promise<void> };
+  }).commonfabric?.viewSettled;
+  if (!settle) return false;
+  await settle();
+  const badges = probe.collect("[data-member-name]");
+  return badges.length === 1 &&
+    probe.deepText(badges[0]).trim() === expected;
 }
 
 describe("shell collection members", () => {
@@ -132,9 +163,8 @@ describe("shell collection members", () => {
 
       // One badge, reading the board's name for this member. The board
       // renders one per item, so a page carrying exactly one is the member's.
-      await waitForCondition(shell.page(), (probe) => {
-        const badges = probe.collect("[data-member-name]");
-        return badges.length === 1 && probe.deepText(badges[0]).trim() === "2";
+      await waitForCondition(shell.page(), settledMemberNameIs, {
+        args: ["2"],
       });
       // The tab names the piece the shell opened. Member 2 is the second item
       // filed, and the board would name itself for its item count instead.
@@ -166,9 +196,8 @@ describe("shell collection members", () => {
         identity,
       });
 
-      await waitForCondition(shell.page(), (probe) => {
-        const badges = probe.collect("[data-member-name]");
-        return badges.length === 1 && probe.deepText(badges[0]).trim() === "2";
+      await waitForCondition(shell.page(), settledMemberNameIs, {
+        args: ["2"],
       });
       // The mark says which segment is the space and is no part of it, so the
       // page the shell settles on is the one it would have written itself.
@@ -208,6 +237,74 @@ describe("shell collection members", () => {
               text.includes(expected);
           }),
         { args: [`no member 999 in ${slug}`] },
+      );
+    });
+
+    it("opens nothing for an address naming segments past a member, naming them", async () => {
+      await using tempIdentity = await writeTempIdentity({
+        implementation: "noble",
+      });
+      const { identity, path: identityPath } = tempIdentity;
+      const slug = `nested-${crypto.randomUUID()}`;
+      await fileBoardWithMembers(identityPath, slug, ["Glaze recipes"]);
+
+      // Member 1 is held, so what refuses this page is its address rather
+      // than the collection. The page is served at the longer address, and
+      // the state it has to reach carries the segments past the member.
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: {
+          spaceName: SPACE_NAME,
+          pieceSlug: slug,
+          pieceMember: "1",
+          pieceExtraPath: "comments/7",
+        },
+        identity,
+      });
+
+      await waitForCondition(
+        shell.page(),
+        (probe, expected: string) =>
+          probe.collect(".load-error").some((element) => {
+            const text = probe.deepText(element).replace(/\s+/g, " ").trim();
+            return text.includes("We could not load this piece") &&
+              text.includes(expected);
+          }),
+        { args: [`no piece at comments/7 after member 1 in ${slug}`] },
+      );
+    });
+
+    it("refuses a member after a slug naming a piece at its root, naming it", async () => {
+      await using tempIdentity = await writeTempIdentity({
+        implementation: "noble",
+      });
+      const { identity, path: identityPath } = tempIdentity;
+      const slug = `root-${crypto.randomUUID()}`;
+      // Bound to the board's root rather than to the map inside it, the slug
+      // names a piece, and a segment after it has no collection to select
+      // from. Only the real resolver says so.
+      const boardId = await fileBoard(identityPath);
+      await cf(identityPath, ["piece", "set-slug", slug, `/of:${boardId}`]);
+
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: { spaceName: SPACE_NAME, pieceSlug: slug, pieceMember: "1" },
+        identity,
+      });
+
+      await waitForCondition(
+        shell.page(),
+        (probe, expected: string) =>
+          probe.collect(".load-error").some((element) => {
+            const text = probe.deepText(element).replace(/\s+/g, " ").trim();
+            return text.includes("We could not load this piece") &&
+              text.includes(expected);
+          }),
+        {
+          args: [
+            `no member 1 in ${slug}, which names a piece rather than a collection`,
+          ],
+        },
       );
     });
   });

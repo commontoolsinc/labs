@@ -10,10 +10,18 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Discovering Loom resources with wish](loom-resource-discovery.md) proposes
+  publishing existing database and companion-cell references once per Loom
+  environment, with a staged person-inbox migration and compiled integration
+  acceptance gates.
 - [View-scoped client replication](view-scoped-client-replication.md) tracks
   rollout, recovery, and adversarial verification of active-view delivery and
   guarded speculative computation. It separates execution demand from delivery
   and stages document selection before optional field projections.
+- [cf-harness task research and composition](cf-harness-inbox-reliability.md)
+  adds a `research` service that reads documentation and indexed source,
+  prepares a usable implementation kit for every task, and supports tested email
+  components that authors can compose.
 - [Interaction cost in the unified inbox](person-inbox-interaction-cost.md)
   records the runtime work behind a thread open that cost 1482 ms paced and
   10.7-19.5 s against five people's data: the per-read prefix scan over a
@@ -146,12 +154,17 @@ a record: archive it to `docs/history/plans/` following the procedure in
   sequences how long an invocation record is kept and what the runtime knows
   about who caused it — the `AgentActor` mint, trusted ingress, and metadata
   confidentiality. Gated on a CFC review that has not happened.
+- [Random space identities](random-space-identities.md) replaces publicly
+  derived named-space keys with fresh random identities whose authority ends
+  after ACL genesis. It implements the
+  [random space identity specification](../specs/random-space-identities.md),
+  uses existing DID routes, and is complete without a public name registry.
 - [CFC runner implementation](runner_cfc_implementation.md) defines the
   commit-boundary enforcement workstreams and rollout.
 - [Finishing the piece source lifecycle](piece-source-lifecycle-completion.md)
   compares the lifecycle spec against the repository and orders the remainder
-  as five pull requests in two tracks — what a revision records, and where a
-  space lives.
+  as four pull requests in two tracks — what a revision records, and how a
+  learned route persists.
 - [Bulk piece operations](piece-bulk-operations.md) designs retargeting,
   repairing, and rolling back many pieces as one reviewable, resumable
   operation over a shared plan — with batching as an execution strategy
@@ -218,3 +231,14 @@ a record: archive it to `docs/history/plans/` following the procedure in
   the verb flags and result shapes that offer none, the source `--space` needs
   before any of it is reachable by name, and the gate that keeps completion
   from falling behind the command tree again.
+
+## Concepts not planned for deployment
+
+These documents retain implementation detail for designs that may be evaluated
+again. They are not scheduled work and are not dependencies of current plans.
+
+- [Space name registry](space-name-registry.md) describes a possible
+  implementation of the DNS namespaces, ASP redirects, registered targets, and
+  displayed-name selection in the dormant
+  [Common Fabric URL](../specs/fabric-urls.md) concept. It remains independent of
+  space identity creation.

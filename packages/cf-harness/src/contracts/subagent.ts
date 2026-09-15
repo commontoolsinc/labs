@@ -1,9 +1,11 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { JSONSchema } from "@commonfabric/api";
+import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL } from "@commonfabric/llm/types";
 import {
-  GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
-  type LLMNativeModelToolId,
-} from "@commonfabric/llm/types";
+  type HarnessNativeModelToolId,
+  type HarnessOpenAIWebSearchResult,
+  OPENAI_WEB_SEARCH_NATIVE_MODEL_TOOL,
+} from "./native-model-tool.ts";
 import type { HarnessFailureRecord } from "../diagnostics.ts";
 import type {
   HarnessModelAuthSource,
@@ -21,23 +23,7 @@ export const BROWSER_SUBAGENT_PROFILE = "browser" as const;
 export const WEB_FETCH_SUBAGENT_PROFILE = "web_fetch" as const;
 export const WEB_SEARCH_SUBAGENT_PROFILE = "web_search" as const;
 export const PATTERN_AUTHOR_SUBAGENT_PROFILE = "pattern-author" as const;
-export const EXPLORE_SUBAGENT_PROFILE = "explore" as const;
 export const WEB_SEARCH_SUBAGENT_MODEL = "gemini-3.5-flash" as const;
-
-/**
- * The model an explore turn runs on. A profile's `modelOverride` reaches the
- * provider verbatim as the request's `model`, so this is the gateway's own
- * name for the model and carries no routing prefix.
- */
-export const EXPLORE_SUBAGENT_MODEL = "gemini-3.5-flash" as const;
-
-/**
- * The explore model on the Codex Responses transport, which serves only its
- * own models. An explore turn is one bounded reply over sections the caller
- * already holds, so the dial is cost: this is the cheapest model that
- * transport answers with.
- */
-export const EXPLORE_SUBAGENT_CODEX_MODEL = "gpt-5.6-luna" as const;
 
 export const DEFAULT_SUBAGENT_MAX_MODEL_TURNS = 8;
 export const MAX_SUBAGENT_MAX_MODEL_TURNS = 64;
@@ -97,10 +83,10 @@ export const WEB_SEARCH_SUBAGENT_ALLOWED_TOOL_IDS =
  * the job should compose it rather than write one, and say how the one it ran
  * turned out.
  *
- * `query_docs` is how an author reaches documentation it has no path to. A
- * child cannot delegate — this profile has no `delegate_task`, and the
- * subagent manifest pins the depth at one — so an explore agent is a tool on
- * this surface or it is unreachable from the one context that needs it.
+ * `research` is how an author reaches documentation, indexed source, and
+ * implementation guidance it has no path to. A child cannot delegate, so the
+ * bounded private research loop is a tool on this surface rather than another
+ * child run.
  */
 export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash",
@@ -110,17 +96,8 @@ export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
   "run_pattern",
   "search_patterns",
   "record_feedback",
-  "query_docs",
+  "research",
 ] as const satisfies readonly BuiltinToolId[];
-
-/**
- * Tool surface of the `explore` profile: none at all. The child is handed the
- * documentation sections it may answer out of and has no way to reach anything
- * else — no file it could read, no command it could run, no space it could
- * touch. Read-only is the profile's shape rather than a rule applied to it.
- */
-export const EXPLORE_SUBAGENT_ALLOWED_TOOL_IDS =
-  [] as const satisfies readonly BuiltinToolId[];
 
 export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [
@@ -303,56 +280,6 @@ export const PATTERN_AUTHOR_RETURN_SCHEMA: JSONSchema = {
   ],
 };
 
-/** Longest answer the `explore` profile may return, in characters. */
-export const MAX_EXPLORE_ANSWER_LENGTH = 2_000;
-
-/** Most citations one explore answer may name. */
-export const MAX_EXPLORE_CITATIONS = 8;
-
-/**
- * Return contract of the `explore` profile: a bounded answer and the places it
- * came from, and nothing else.
- *
- * The bound on `answer` is what keeps the asking child's context intact — the
- * point of asking a question rather than reading a file is that the reply is
- * the size of an answer. The citations are inert: a path and a heading address
- * a place in the corpus, carrying no text and no handle, so reading that place
- * stays a separate act by whoever is entitled to it.
- */
-export const EXPLORE_RETURN_SCHEMA: JSONSchema = {
-  type: "object",
-  properties: {
-    answer: {
-      type: "string",
-      maxLength: MAX_EXPLORE_ANSWER_LENGTH,
-      description:
-        "The answer to the question, drawn only from the supplied sections.",
-    },
-    citations: {
-      type: "array",
-      maxItems: MAX_EXPLORE_CITATIONS,
-      items: {
-        type: "object",
-        properties: {
-          path: {
-            type: "string",
-            description: "Corpus path of a supplied section, exactly as given.",
-          },
-          heading: {
-            type: "string",
-            description: "Heading of that section, exactly as given.",
-          },
-        },
-        required: ["path", "heading"],
-        additionalProperties: false,
-      },
-      description: "The sections the answer was drawn from.",
-    },
-  },
-  required: ["answer", "citations"],
-  additionalProperties: false,
-};
-
 export const WEB_SEARCH_SUBAGENT_NATIVE_MODEL_TOOL_IDS = [
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
 ] as const satisfies readonly HarnessNativeModelToolId[];
@@ -366,25 +293,11 @@ export const HARNESS_SUBAGENT_PROFILES = [
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
 ] as const;
 
-/**
- * The profiles the harness runs on a caller's behalf rather than on a
- * delegation's. `explore` is one because its answer is only as good as the
- * corpus it was handed, and the harness is what hands it one: a delegation
- * naming it directly would put a model with no documentation in front of a
- * schema that asks for citations, which is the failure this profile exists to
- * end rather than to reproduce.
- */
-export const HARNESS_INTERNAL_SUBAGENT_PROFILES = [
-  EXPLORE_SUBAGENT_PROFILE,
-] as const;
-
 export type HarnessDelegableSubagentProfile =
   typeof HARNESS_SUBAGENT_PROFILES[number];
-export type HarnessSubagentProfile =
-  | HarnessDelegableSubagentProfile
-  | typeof HARNESS_INTERNAL_SUBAGENT_PROFILES[number];
+export type HarnessSubagentProfile = HarnessDelegableSubagentProfile;
 export type HarnessSubagentModelSource = "parent" | "profile";
-export type HarnessNativeModelToolId = LLMNativeModelToolId;
+export type { HarnessNativeModelToolId } from "./native-model-tool.ts";
 export type HarnessSubagentRunStatus = "completed" | "failed";
 export type HarnessSubagentReturnChannel =
   typeof DEFAULT_SUBAGENT_RETURN_CHANNEL;
@@ -510,31 +423,15 @@ export const PATTERN_AUTHOR_SUBAGENT_PROFILE_CONFIG:
     returnPolicy: DEFAULT_SUBAGENT_RETURN_POLICY,
   };
 
-/**
- * The `explore` profile: a cheap model, no tools, one turn, and a return
- * contract it does not share authority over. Every property is the same
- * decision — the child answers one question out of the text it was handed, and
- * a single turn is all that takes.
- */
-export const EXPLORE_SUBAGENT_PROFILE_CONFIG: HarnessSubagentProfileConfig = {
-  type: "cf-harness.subagent-profile-config",
-  profile: EXPLORE_SUBAGENT_PROFILE,
-  allowedToolIds: EXPLORE_SUBAGENT_ALLOWED_TOOL_IDS,
-  hostToolIds: NO_HOST_TOOL_IDS,
-  modelOverride: EXPLORE_SUBAGENT_MODEL,
-  maxModelTurns: 1,
-  returnSchema: EXPLORE_RETURN_SCHEMA,
-  returnContractAuthority: "profile",
-  returnPolicy: DEFAULT_SUBAGENT_RETURN_POLICY,
-};
-
 export const isHarnessSubagentProfile = (
   input: string,
 ): input is HarnessDelegableSubagentProfile =>
   (HARNESS_SUBAGENT_PROFILES as readonly string[]).includes(input);
 
+/** Resolves the profile against the run's provider before policy is captured. */
 export const getHarnessSubagentProfileConfig = (
   profile: HarnessSubagentProfile,
+  provider: HarnessModelProviderId = "openai-compatible-gateway",
 ): HarnessSubagentProfileConfig => {
   switch (profile) {
     case DEFAULT_SUBAGENT_PROFILE:
@@ -544,11 +441,17 @@ export const getHarnessSubagentProfileConfig = (
     case WEB_FETCH_SUBAGENT_PROFILE:
       return WEB_FETCH_SUBAGENT_PROFILE_CONFIG;
     case WEB_SEARCH_SUBAGENT_PROFILE:
+      if (provider === "openai-codex") {
+        const { modelOverride: _modelOverride, ...config } =
+          WEB_SEARCH_SUBAGENT_PROFILE_CONFIG;
+        return {
+          ...config,
+          nativeModelToolIds: [OPENAI_WEB_SEARCH_NATIVE_MODEL_TOOL],
+        };
+      }
       return WEB_SEARCH_SUBAGENT_PROFILE_CONFIG;
     case PATTERN_AUTHOR_SUBAGENT_PROFILE:
       return PATTERN_AUTHOR_SUBAGENT_PROFILE_CONFIG;
-    case EXPLORE_SUBAGENT_PROFILE:
-      return EXPLORE_SUBAGENT_PROFILE_CONFIG;
   }
 };
 
@@ -671,6 +574,9 @@ export interface HarnessSubagentResult {
   runState: HarnessSubagentRunStateSummary;
   manifest: HarnessSubagentRunManifest;
   structuredReturn?: HarnessSubagentStructuredReturn;
+
+  /** Cited sources survive structured returns without changing their schema. */
+  nativeModelToolResults?: HarnessOpenAIWebSearchResult[];
 }
 
 interface HarnessSubagentRunRefBase {
@@ -728,7 +634,7 @@ export type HarnessSubagentRunRef =
 
 /** One published pattern the parent selected from its prior search results. */
 export interface DelegateTaskPatternRef {
-  /** Content-addressed id exactly as `search_patterns` returned it. */
+  /** Content-addressed id exactly as search or host research returned it. */
   patternId: string;
 
   /** Parent-authored context for this selection, passed to the child verbatim. */

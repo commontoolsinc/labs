@@ -8,18 +8,19 @@ import type { CfcAtom } from "@commonfabric/api/cfc";
 import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
-  fabricFromNativeValue,
+  fabricFromConvertibleJsValue,
   type FabricPlainObject,
   type FabricValue,
   isFabricSpecialObject,
   isKeyableObjectNotArray,
-  shallowFabricFromNativeObjectElseUndefined,
+  shallowFabricFromConvertibleJsObjectElseUndefined,
   toCompactDebugString,
 } from "@commonfabric/data-model";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { isFabricDataUri } from "@commonfabric/data-model/codec-data-uri";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
+import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { forEachSubschema } from "@commonfabric/data-model-schema/schema-walk";
 
@@ -44,7 +45,7 @@ import {
 import {
   readStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
-  UnknownCfcMetadataVersionError,
+  StoredCfcMetadataError,
 } from "./cfc/metadata.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
@@ -257,11 +258,11 @@ const recordLinkWritePolicyInput = (
   try {
     sourceMetadata = readStoredCfcMetadata(tx, source);
   } catch (error) {
-    // A source envelope this build cannot interpret still makes the link
-    // CFC-relevant (fail closed): recording the policy input routes the
-    // write to prepare, where the unreadable envelope rejects it in
-    // enforcing modes instead of the labels silently not carrying.
-    if (!(error instanceof UnknownCfcMetadataVersionError)) throw error;
+    // A source envelope this build cannot produce labels from still makes
+    // the link CFC-relevant (fail closed): recording the policy input
+    // routes the write to prepare, where the unreadable envelope rejects
+    // it in enforcing modes instead of the labels silently not carrying.
+    if (!(error instanceof StoredCfcMetadataError)) throw error;
     sourceEnvelopeUninterpretable = true;
   }
   const sourceRelevant = schemaIfcOverlapsPath(source.schema, [], []) ||
@@ -399,8 +400,10 @@ export interface DiffWalkState {
   /**
    * When present, a plain object sitting in an array that is not already a
    * link gets anchored into an entity document of its own, its id drawn from
-   * this source. Writers running under a builder frame supply the frame's id
-   * counter; frameless writes leave it unset, and such elements store inline.
+   * this source. The `Cell` write paths that can put a plain object into an
+   * array — `set()`, `push()`, `addUnique()` — draw it from the frame their
+   * cell was made in (`frameAnchorIds()`). A walk reached without it stores
+   * such elements inline.
    */
   nextAnchorId?: () => string | number;
 }
@@ -1233,7 +1236,7 @@ export function normalizeAndDiff(
         try {
           tx.writeValueOrThrow(
             seedTarget,
-            fabricFromNativeValue(seedDefault),
+            fabricFromConvertibleJsValue(seedDefault),
           );
           // The marker is what authorizes the write above past an
           // owner-protected schema's `writeAuthorizedBy` (cfc/prepare.ts
@@ -1562,14 +1565,14 @@ export function normalizeAndDiff(
     }
   }
 
-  // Mint the fabric form of a native object -- a `Date`, a `Uint8Array`, an
+  // Mint the fabric form of a JS object -- a `Date`, a `Uint8Array`, an
   // `Error`. Anything else comes back `undefined`, which says only that
   // nothing needed minting; the value then has to be storable as it stands,
   // and the vet is what holds it to that. Nothing minted here is a container,
   // so a container keeps its own identity all the way through the walk below
   // -- and that identity is the one shared references and cycles arrive
   // under, which is what `state.seen` is keyed on.
-  const minted = shallowFabricFromNativeObjectElseUndefined(newValue);
+  const minted = shallowFabricFromConvertibleJsObjectElseUndefined(newValue);
   if (minted === undefined) {
     assertValidFabricValueLayer(newValue);
   } else {
@@ -1605,7 +1608,7 @@ export function normalizeAndDiff(
   // content equality: the ops build their combined arrays by carrying the
   // stored elements through by reference (the stored tree is frozen, so the
   // reference IS the stored value), while the written value here is only
-  // shallowly normalized -- its nested contents (Cells, native objects) are
+  // shallowly normalized -- its nested contents (Cells, JS objects) are
   // converted later in the recursion, so a deep comparison would inspect
   // values whose canonical form does not exist yet.
   //
@@ -1851,15 +1854,15 @@ export function normalizeAndDiff(
     // of the same coordinated pass. We don't support that descent yet, so the
     // wrapper's internals could otherwise reach storage improperly converted.
     //
-    // As a stopgap we run the deep `fabricFromNativeValue()`, which converts
-    // the internals via a *separate, uncoordinated* pass. The cost: any
-    // `FabricValue` reachable both inside the wrapper and elsewhere in the
+    // As a stopgap we run the deep `fabricFromConvertibleJsValue()`, which
+    // converts the internals via a *separate, uncoordinated* pass. The cost:
+    // any `FabricValue` reachable both inside the wrapper and elsewhere in the
     // outer tree gets de-shared (the outer walk handles one copy; this deep
-    // call mints an independent, separately-frozen copy with no shared `seen`
-    // / ID bookkeeping). That is invisible for `FabricError` today only
-    // because an error's `cause` / custom props aren't, in practice, shared
-    // with the rest of the tree -- but `FabricSet` / `FabricMap` (collections
-    // of arbitrary, routinely-shared `FabricValue`s) WILL break here once they
+    // call mints an independent, separately-frozen copy with no shared `seen` /
+    // ID bookkeeping). That is invisible for `FabricError` today only because
+    // an error's `cause` / custom props aren't, in practice, shared with the
+    // rest of the tree -- but `FabricSet` / `FabricMap` (collections of
+    // arbitrary, routinely-shared `FabricValue`s) WILL break here once they
     // carry real traffic. Proper fix: coordinated descent into wrapper
     // internals, after which a shallow conversion suffices.
     //
@@ -1868,7 +1871,7 @@ export function normalizeAndDiff(
     // instances short-circuit by identity.
     changes.push({
       location: link,
-      value: fabricFromNativeValue(newValue),
+      value: fabricFromConvertibleJsValue(newValue),
     });
     return changes;
   }
@@ -2179,10 +2182,10 @@ function hasPath(value: unknown, path: readonly string[]): boolean {
 export function compactChangeSet(changes: ChangeSet): ChangeSet {
   if (changes.length <= 1) return changes;
 
-  // Group by document using safe separator (JSON.stringify avoids key collisions)
+  // Group by document without conflating boundaries between address fields.
   const byDocument = new Map<string, ChangeSet>();
   for (const change of changes) {
-    const key = JSON.stringify([
+    const key = stringTupleKey([
       change.location.space,
       change.location.id,
     ]);

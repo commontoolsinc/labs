@@ -1540,13 +1540,21 @@ Deno.test(
       );
       eventTargetCell.set(streamCell as never);
 
+      const output = runtime.getCell<number>(
+        signer.did(),
+        "render-event-output",
+        undefined,
+        tx,
+      );
+      output.set(0);
       await tx.commit();
       tx = runtime.edit();
 
       let eventSeen: unknown;
       runtime.scheduler.addEventHandler(
-        (_handlerTx, event) => {
+        (handlerTx, event) => {
           eventSeen = event;
+          output.withTx(handlerTx).set(1);
         },
         streamCell.getAsNormalizedFullLink(),
       );
@@ -1573,6 +1581,7 @@ Deno.test(
           | undefined;
         assertEquals(setEventOp !== undefined, true);
 
+        assertEquals(output.get(), 0);
         reconciler.dispatchEvent(
           setEventOp!.handlerId,
           { type: "click" },
@@ -1580,6 +1589,7 @@ Deno.test(
 
         await runtime.idle();
         assertEquals(eventSeen, { type: "click" });
+        assertEquals(output.get(), 1);
       } finally {
         cancel();
       }

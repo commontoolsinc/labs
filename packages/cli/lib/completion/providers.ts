@@ -129,9 +129,9 @@ function writtenPieceRef(line: CompletionLine): string | undefined {
  * parsed through the same grammar the command's own intake parses it with.
  *
  * `normalizeLLMFriendlyRef` reads the reference: the embedded space, the
- * `@scope` suffix, an embedded path, and the `#argument` suffix that selects
+ * `@scope` qualifier, an embedded path, and the `#argument` member that selects
  * the arguments cell the way `--input` does. What it does not recognize falls
- * through to the alias grammar, `id[@scope][#argument]`. Every spelling the
+ * through to the alias grammar, `id[#argument][@scope]`. Every spelling the
  * command's intake accepts has to reach one of the two readings: a word taken
  * verbatim as a piece id resolves to a listing call that cannot succeed, and
  * so to a slot that silently offers nothing.

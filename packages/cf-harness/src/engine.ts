@@ -15,8 +15,11 @@ import {
   type CfcConfClause,
   type CfcLabelView,
   type CfcPostureReport,
+  type IFCLabel,
   inheritedCfcPostureReport,
+  mergeCfcLabelViews,
 } from "@commonfabric/runner/cfc";
+import { mergeLabel } from "@commonfabric/runner/cfc/label-view-core";
 
 import {
   createFileSystemHarnessArtifactStore,
@@ -36,17 +39,23 @@ import {
   type HarnessDocsCorpus,
   loadHarnessDocsCorpus,
 } from "./docs-corpus/corpus.ts";
-import type { HarnessExploreQueryRunner } from "./docs-corpus/explore.ts";
+import type { HarnessResearchRunner } from "./research/runner.ts";
 import type { HarnessToolContext } from "./tools/types.ts";
 import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
+import type { HarnessResearchRunSummary } from "./contracts/research.ts";
 import {
   createHarnessCfcInvocationContext,
+  createHarnessPromptSlotInfluenceLabels,
   type HarnessCfcInvocationContext,
   type HarnessCfcInvocationInputLabelPath,
   type HarnessCfcInvocationOperation,
   summarizeCfcInvocationRunManifest,
 } from "./contracts/cfc-invocation-context.ts";
-import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
+import {
+  createHarnessCfcModelContextInputLabels,
+  type HarnessCfcModelContext,
+  type HarnessCfcModelContextObservationInput,
+} from "./contracts/cfc-model-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import {
@@ -61,7 +70,11 @@ import {
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
+import { HARNESS_ACQUIRED_SKILLS_TYPE } from "./contracts/skill.ts";
 import type {
+  HarnessAcquiredSkill,
+  HarnessAcquiredSkills,
+  HarnessAcquiredSkillScript,
   HarnessSkillAcquisition,
   HarnessSkillActivations,
   HarnessSkillRegistry,
@@ -145,14 +158,18 @@ import type {
 import { resolvePatternRefs } from "./pattern-refs.ts";
 import {
   addHarnessDocsQueryFailures,
+  addHarnessResearchFailures,
   appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
+  appendHarnessResearchRun,
   appendToHarnessRunState,
   createHarnessRunState,
+  type HarnessOpeningResearch,
   type HarnessRunState,
   type HarnessRunTerminalReason,
   isTerminalHarnessRunStatus,
   patchHarnessRunState,
+  setHarnessOpeningResearch,
   setHarnessRunStatus,
   setHarnessSubagentRun,
 } from "./run-state.ts";
@@ -169,7 +186,12 @@ import type {
   DockerRunscAdditionalMountConfig,
   DockerRunscSandboxConfig,
   SandboxRuntime,
+  SandboxRuntimeMountDescription,
 } from "./sandbox/types.ts";
+import {
+  ACQUIRED_SKILL_MOUNT_PATH,
+  AcquiredSkillDirectoryReadableError,
+} from "./skills/acquired-skill-mount.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
 import type {
   AcquireSkillToolInput,
@@ -221,9 +243,9 @@ import type {
   SearchSkillsToolOutput,
 } from "./tools/search-skills.ts";
 import {
-  type QueryDocsToolInput,
-  type QueryDocsToolOutput,
-} from "./tools/query-docs.ts";
+  type ResearchToolInput,
+  type ResearchToolOutput,
+} from "./tools/research.ts";
 import {
   type ViewImageToolInput,
   type ViewImageToolOutput,
@@ -255,7 +277,7 @@ export interface BuiltinToolInputMap {
   record_feedback: RecordFeedbackToolInput;
   search_skills: SearchSkillsToolInput;
   acquire_skill: AcquireSkillToolInput;
-  query_docs: QueryDocsToolInput;
+  research: ResearchToolInput;
   loom_compose: LoomComposeToolInput;
   loom_inspect: LoomReadToolInput;
   loom_authoring_context: LoomReadToolInput;
@@ -279,7 +301,7 @@ export interface BuiltinToolOutputMap {
   record_feedback: RecordFeedbackToolOutput;
   search_skills: SearchSkillsToolOutput;
   acquire_skill: AcquireSkillToolOutput;
-  query_docs: QueryDocsToolOutput;
+  research: ResearchToolOutput;
   loom_compose: LoomAuthoringToolOutput;
   loom_inspect: LoomAuthoringToolOutput;
   loom_authoring_context: LoomAuthoringToolOutput;
@@ -293,6 +315,14 @@ export interface CreateHarnessEngineOptions
   extends ResolveHarnessConfigOptions {
   runId?: string;
   runState?: HarnessRunState;
+
+  /**
+   * The acquired skills this run may execute scripts of, handed to a child by
+   * its delegating parent. A child receives the one its `skillHandle` names
+   * and no other: a run holds the scripts of the skill it was given.
+   */
+  acquiredSkills?: HarnessAcquiredSkills;
+
   lineage?: HarnessSubagentLineage;
   subagentResumeContext?: HarnessSubagentResumeContext;
   workspaceHostPath?: string;
@@ -326,6 +356,15 @@ export interface CreateHarnessEngineOptions
    * it.
    */
   inheritedFabricSessionPosture?: CfcPostureReport;
+
+  /**
+   * Parent research retained verbatim for a delegated child. These are
+   * admitted kits and host-confirmed records, not the private read transcript.
+   */
+  inheritedResearchRuns?: readonly HarnessResearchRunSummary[];
+
+  /** Parent model-context labels retained by a newly delegated child. */
+  inheritedCfcModelContext?: HarnessCfcModelContext;
 
   /**
    * Injection seam for the render gate's probe runtime, mirroring
@@ -523,7 +562,7 @@ export class CfHarnessEngine {
   readonly #skillsShAcquisitionClientFactory?:
     HarnessSkillsShAcquisitionClientFactory;
   #docsCorpus?: Promise<HarnessDocsCorpus>;
-  #exploreQueryRunner?: HarnessExploreQueryRunner;
+  #researchRunner?: HarnessResearchRunner;
   #patternIndexLedger?: PatternIndexLedger;
   readonly #taskText?: string;
   readonly #inputCells: readonly HarnessInputCellSpec[];
@@ -984,7 +1023,16 @@ export class CfHarnessEngine {
         runManifest: this.config.runManifest,
         runManifestPath: this.config.runManifestPath,
         docsCorpus: this.config.docsCorpus,
+        ...(options.inheritedResearchRuns !== undefined
+          ? { researchRuns: [...options.inheritedResearchRuns] }
+          : {}),
+        ...(options.inheritedCfcModelContext !== undefined
+          ? { cfcModelContext: options.inheritedCfcModelContext }
+          : {}),
         skillsRoot: this.config.skillsRootRecord,
+        ...(options.acquiredSkills !== undefined
+          ? { acquiredSkills: options.acquiredSkills }
+          : {}),
         lineage: options.lineage,
         now: this.#now(),
       });
@@ -1023,6 +1071,20 @@ export class CfHarnessEngine {
    */
   get spaceDbPath(): string | undefined {
     return this.#spaceDbPath;
+  }
+
+  /**
+   * The sandbox configuration this engine built its own runtime from, absent
+   * when the runtime was handed in.
+   *
+   * A caller that wants a sandbox differing from this run's — a child that
+   * mounts something its parent does not — needs the configuration rather than
+   * the runtime, and needs to know it may build one at all: where the runtime
+   * was injected, that object is the thing that executes and a configuration
+   * beside it describes something else.
+   */
+  get ownedSandboxConfig(): DockerRunscSandboxConfig | undefined {
+    return this.#ownedRunscConfig;
   }
 
   /**
@@ -1115,7 +1177,7 @@ export class CfHarnessEngine {
     return this.#skillsShSearchClientFactory;
   }
 
-  /** Whether this run configures a documentation corpus for `query_docs`. */
+  /** Whether this run configures a documentation corpus for research. */
   get docsCorpusAvailable(): boolean {
     return (this.docsCorpus?.roots ?? []).length > 0;
   }
@@ -1144,12 +1206,30 @@ export class CfHarnessEngine {
   }
 
   /**
-   * Gives this run a way to answer a documentation question. The model belongs
-   * to the prompt loop, so the loop supplies the runner and the engine carries
-   * it to the tool.
+   * Gives this run a bounded Common Fabric research loop. The model belongs to
+   * the prompt loop, so the loop supplies the runner and the engine carries it
+   * to the tool.
    */
-  setExploreQueryRunner(runner: HarnessExploreQueryRunner): void {
-    this.#exploreQueryRunner = runner;
+  setResearchRunner(runner: HarnessResearchRunner): void {
+    this.#researchRunner = runner;
+  }
+
+  /** Whether this engine was restored from an existing run-state artifact. */
+  get resumedRun(): boolean {
+    return this.#resumedRun;
+  }
+
+  /** Persists the root driver's opening-research checkpoint. */
+  async recordOpeningResearch(
+    openingResearch: HarnessOpeningResearch,
+  ): Promise<HarnessRunState> {
+    this.#runState = setHarnessOpeningResearch(
+      this.#runState,
+      openingResearch,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return this.getRunState();
   }
 
   /** Whether this run can acquire a pinned external skill. */
@@ -1189,13 +1269,32 @@ export class CfHarnessEngine {
   }
 
   /**
-   * Counts documentation queries this run could not get an answer for, its
-   * descendants' included. A `query_docs` failure is a normal tool error to
-   * the model that asked, so without this a docs-blind run leaves no trace in
-   * the one place an operator reads.
+   * Counts legacy documentation-query failures retained by resumed run state.
+   * New calls use {@link recordResearchFailures}; this method remains so a
+   * parent can roll up an older child's durable count without rewriting it.
    */
   recordDocsQueryFailures(count: number): HarnessRunState {
     this.#runState = addHarnessDocsQueryFailures(
+      this.#runState,
+      count,
+      this.#now(),
+    );
+    return this.getRunState();
+  }
+
+  /** Retains one admitted implementation kit for resume and delegation. */
+  recordResearchRun(run: HarnessResearchRunSummary): HarnessRunState {
+    this.#runState = appendHarnessResearchRun(
+      this.#runState,
+      run,
+      this.#now(),
+    );
+    return this.getRunState();
+  }
+
+  /** Counts bounded research calls that returned no kit. */
+  recordResearchFailures(count: number): HarnessRunState {
+    this.#runState = addHarnessResearchFailures(
       this.#runState,
       count,
       this.#now(),
@@ -1624,6 +1723,106 @@ export class CfHarnessEngine {
     return skillScriptExecutionsPath;
   }
 
+  /**
+   * Writes one acquired skill's scripts where a run that holds its handle can
+   * execute them, and records where they went.
+   *
+   * The bytes land at `<artifactRoot>/.acquired-skills/<runId>/<commitSha>/
+   * <slug>` — under the artifact root's one non-run directory, inside no run
+   * root — and the check here is what makes that mean something:
+   * `acquire_skill` runs in the PARENT, so a script the parent's sandbox can
+   * reach is a script the planner can read — the one property the
+   * hostile-skill receipt rests on.
+   * Every mount is asked, the workspace and each `--host-mount` alike, because
+   * an operator mount over the artifact tree is the same hole as an artifact
+   * root inside the workspace. A covering mount refuses, named.
+   *
+   * The digest recorded here is the one taken at acquisition, over the bytes
+   * the pinned commit served, and it is what an execution re-checks the file
+   * against — the pin a registry script gets from the run-start snapshot.
+   *
+   * @throws AcquiredSkillDirectoryReadableError when a mount of this run's
+   * sandbox covers the directory.
+   * @throws Error when the run can write nowhere, or the write fails.
+   */
+  async materializeAcquiredSkill(
+    options: {
+      registryId: string;
+      commitSha: string;
+      scripts: readonly {
+        path: string;
+        bytes: Uint8Array;
+        valueDigest: string;
+      }[];
+    },
+  ): Promise<HarnessAcquiredSkill> {
+    const store = this.artifactStore;
+    if (
+      store?.acquiredSkillsDir === undefined ||
+      store.writeAcquiredSkillScript === undefined
+    ) {
+      throw new Error(
+        "acquiring a skill's scripts requires a run that can write artifacts",
+      );
+    }
+    const covering = this.#hostMountCovering(store.acquiredSkillsDir);
+    if (covering !== undefined) {
+      throw new AcquiredSkillDirectoryReadableError(
+        `the acquired-skills directory is inside this run's ${
+          covering.name ?? covering.kind
+        } mount (${covering.hostPath} at ${covering.sandboxPath}), so a script written there would be readable by the run that acquires it`,
+      );
+    }
+    const slug = options.registryId.split("/").at(-1) ?? options.registryId;
+    // Keyed by the commit first: one commit is one tree, and the slug beneath
+    // it separates two skills acquired from the same one.
+    const relativeDir = `${options.commitSha}/${slug}`;
+    const scripts: HarnessAcquiredSkillScript[] = [];
+    for (const script of options.scripts) {
+      const hostPath = await store.writeAcquiredSkillScript(
+        relativeDir,
+        script.path,
+        script.bytes,
+      );
+      scripts.push({
+        path: script.path,
+        hostPath,
+        sandboxPath: `${ACQUIRED_SKILL_MOUNT_PATH}/${script.path}`,
+        valueDigest: script.valueDigest,
+        sizeBytes: script.bytes.byteLength,
+      });
+    }
+    const acquired: HarnessAcquiredSkill = {
+      registryId: options.registryId,
+      commitSha: options.commitSha,
+      pin: `${options.registryId}@${options.commitSha}`,
+      hostRoot: joinHostPath(store.acquiredSkillsDir, relativeDir),
+      sandboxRoot: ACQUIRED_SKILL_MOUNT_PATH,
+      scripts,
+    };
+    const generatedAt = this.#now();
+    const acquiredSkills: HarnessAcquiredSkills = {
+      type: HARNESS_ACQUIRED_SKILLS_TYPE,
+      version: 1,
+      generatedAt,
+      skills: [
+        ...(this.#runState.acquiredSkills?.skills ?? []).filter((skill) =>
+          skill.pin !== acquired.pin
+        ),
+        acquired,
+      ],
+    };
+    const acquiredSkillsPath = await this.artifactStore
+      ?.persistAcquiredSkills?.(acquiredSkills);
+    this.#runState = patchHarnessRunState(
+      this.#runState,
+      { acquiredSkills, acquiredSkillsPath },
+      generatedAt,
+    );
+    await this.persistRunState();
+    return acquired;
+  }
+
   nextToolOutputId(toolId: string): ToolOutputId {
     this.#outputSequence += 1;
     return `${this.#runState.runId}:${toolId}:${this.#outputSequence}` as ToolOutputId;
@@ -2028,6 +2227,38 @@ export class CfHarnessEngine {
     return normalizeHostPath(this.#resolveHostMount(path).mount.hostPath);
   }
 
+  /**
+   * The sandbox mount covering `path`, or `undefined` when no mount of this
+   * run's sandbox does.
+   *
+   * What a run can read is what it mounts, so this is the question "could this
+   * run see a file here?" asked of a host path. `acquire_skill` asks it of the
+   * directory it is about to write a skill's scripts into: the parent that
+   * plans an acquisition must not be able to read the bytes, and a mount over
+   * that directory is the one way it could.
+   *
+   * Asked of the sandbox that would do the reading, through its own
+   * `describe()`, rather than of `#hostMounts`. The two are the same list for
+   * a run whose sandbox this engine built, and they are not for a run handed a
+   * runtime: there `#hostMounts` comes from a configuration that "may describe
+   * a different sandbox entirely" — empty, when none was given at all — and a
+   * question about what a container can read, answered from a configuration
+   * that container was not built from, fails open. It is also the source
+   * `resolveAcquiredSkillScript` asks at execution, so the boundary is one
+   * predicate over one list rather than two that agree while the runtime is
+   * the one the config describes.
+   *
+   * A mount with no host path covers nothing: it is backed by something other
+   * than a directory of this filesystem, so no path of ours is inside it.
+   */
+  #hostMountCovering(path: string): SandboxRuntimeMountDescription | undefined {
+    const hostPath = normalizeHostPath(path);
+    return this.sandbox.describe().cfc?.mounts?.find((mount) =>
+      mount.hostPath !== undefined &&
+      isHostPathWithinRoot(normalizeHostPath(mount.hostPath), hostPath)
+    );
+  }
+
   #hostPathToWorkspacePath(path: string): string | undefined {
     const hostPath = normalizeHostPath(path);
     for (const mount of this.#hostMounts) {
@@ -2250,7 +2481,33 @@ export class CfHarnessEngine {
     return invocation;
   }
 
+  #researchTaskCfcLabel(): IFCLabel | undefined {
+    const paths: readonly HarnessCfcInvocationInputLabelPath[] = [[
+      "args",
+      "task",
+    ]];
+    const view = mergeCfcLabelViews([
+      createHarnessPromptSlotInfluenceLabels({
+        promptSlot: this.#runState.promptSlotBinding,
+        runManifest: summarizeCfcInvocationRunManifest(
+          this.#runState.runManifest,
+          this.#runState.runManifestPath,
+        ),
+        paths,
+      }),
+      createHarnessCfcModelContextInputLabels({
+        modelContext: this.#runState.cfcModelContext,
+        paths,
+      }),
+    ]);
+    return view?.entries.reduce<IFCLabel | undefined>(
+      (label, entry) => mergeLabel(label, entry.label),
+      undefined,
+    );
+  }
+
   #createToolContext(signal?: AbortSignal) {
+    const researchTaskCfcLabel = this.#researchTaskCfcLabel();
     return {
       runId: this.#runState.runId,
       cfcEnforcementMode: this.#runState.cfcEnforcementMode,
@@ -2289,9 +2546,18 @@ export class CfHarnessEngine {
       ...(this.docsCorpusAvailable
         ? { getDocsCorpus: () => this.getDocsCorpus() }
         : {}),
-      ...(this.#exploreQueryRunner !== undefined
-        ? { runExploreQuery: this.#exploreQueryRunner }
+      ...(this.#researchRunner !== undefined
+        ? { runResearch: this.#researchRunner }
         : {}),
+      researchRuns: this.#runState.researchRuns ?? [],
+      ...(researchTaskCfcLabel !== undefined ? { researchTaskCfcLabel } : {}),
+      patternRefs: this.#runState.patternRefs ?? [],
+      recordResearchRun: (run: HarnessResearchRunSummary) => {
+        this.recordResearchRun(run);
+      },
+      recordResearchFailure: () => {
+        this.recordResearchFailures(1);
+      },
       ...(this.#skillsShSearchClientFactory !== undefined
         ? { getSkillsShSearchClient: this.#skillsShSearchClientFactory }
         : {}),
@@ -2351,6 +2617,18 @@ export class CfHarnessEngine {
       ) => {
         await this.recordSkillScriptExecution(execution);
       },
+      ...(this.artifactStore?.writeAcquiredSkillScript !== undefined
+        ? {
+          materializeAcquiredSkill: (
+            options: Parameters<
+              CfHarnessEngine["materializeAcquiredSkill"]
+            >[0],
+          ) => this.materializeAcquiredSkill(options),
+        }
+        : {}),
+      ...(this.#runState.acquiredSkills !== undefined
+        ? { acquiredSkills: this.#runState.acquiredSkills.skills }
+        : {}),
       createCfcInvocationContext: (options: {
         toolId: string;
         toolOutputId?: ToolOutputId;

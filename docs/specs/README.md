@@ -18,6 +18,12 @@ decision is reversed or superseded).
 
 ## Index
 
+### Addressing and navigation
+
+- [Random space identities](random-space-identities.md) (proposed; active
+  deployment direction)
+- [Common Fabric URLs](fabric-urls.md) (concept; no deployment planned)
+
 ### Pattern construction and authoring
 
 - [Pattern testing](PATTERN_TESTING_SPEC.md)
@@ -62,6 +68,7 @@ decision is reversed or superseded).
 ### Contextual flow control and security
 
 - [CFC commit preparation](cfc-commit-preparation.md)
+- [Content-addressed CFC labels](content-addressed-cfc-labels.md)
 - [CFC enforcement mode matrix](cfc-enforcement-matrix.md)
 - [CFC specification change list](cfc-spec-changes.md)
 - [Cross-space integrity](cfc-cross-space-integrity.md)

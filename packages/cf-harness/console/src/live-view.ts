@@ -82,7 +82,14 @@ export type ConsoleLiveEntry =
  * them. A tool the run's own reading does not cover — every tool but the four
  * it names — is described by the first of these its call carried.
  */
-const SUBJECT_ARGUMENTS = ["question", "query", "path", "slug", "name"];
+const SUBJECT_ARGUMENTS = [
+  "task",
+  "question",
+  "query",
+  "path",
+  "slug",
+  "name",
+];
 
 /** How much of a result or a goal one line carries before it is elided. */
 const LINE_LIMIT = 140;

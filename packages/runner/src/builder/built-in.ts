@@ -25,6 +25,7 @@ import type {
   WishState,
 } from "commonfabric";
 
+import { wishStateSchemaForResult } from "../builtins/wish-schema.ts";
 import { LLMDialogResultSchema } from "../builtins/llm-schemas.ts";
 import { sqliteQueryNodeFactory } from "../builtins/sqlite/query-node.ts";
 import { isCell } from "../cell.ts";
@@ -56,6 +57,7 @@ const WISH_ARGUMENT_SCHEMA = internSchema({
       },
     },
     scope: { type: "array", items: { type: "string" } },
+    headless: { type: "boolean" },
   },
 });
 
@@ -472,7 +474,7 @@ export function wish<T = unknown>(
     type: "ref",
     implementation: "wish",
     argumentSchema: WISH_ARGUMENT_SCHEMA,
-    resultSchema,
+    resultSchema: wishStateSchemaForResult(resultSchema),
   })(param);
 }
 

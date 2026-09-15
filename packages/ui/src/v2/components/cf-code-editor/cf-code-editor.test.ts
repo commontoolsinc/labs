@@ -314,6 +314,17 @@ describe("CFCodeEditor pasted-mention decision", () => {
     expect(result.prevented).toBe(true);
   });
 
+  it("leaves argument and scoped references as text without preventing the paste", () => {
+    for (const suffix of ["#argument", "@user", "@session"]) {
+      expect(paste(pasteThis(), `//${SPACE}/of:fid1:${HASH}${suffix}`)).toEqual(
+        { handled: false, prevented: false },
+      );
+    }
+    expect(paste(pasteThis(), `//${SPACE}/of:fid1:${HASH}@space`).handled).toBe(
+      true,
+    );
+  });
+
   it("takes over a paste of a page URL on a configured host", () => {
     const result = paste(
       pasteThis(),

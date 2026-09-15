@@ -52,7 +52,7 @@ function hex(hash: Uint8Array): string {
 
 /**
  * Returns the raw hash bytes from `hashOf()`, for comparison. Takes `unknown`,
- * as `hashOf()` itself does: the native-instance cases below hash a native
+ * as `hashOf()` itself does: the JS-instance cases below hash a JS
  * `Date` / `RegExp` / `Uint8Array`, none of which is a `FabricValue`.
  */
 function hashBytesOf(value: unknown): Uint8Array {
@@ -1166,15 +1166,15 @@ describe("value-hash", () => {
     });
   });
 
-  describe("`hashOf()` native instances", () => {
+  describe("`hashOf()` JS instances", () => {
     describe("Date", () => {
-      it("hashes a native `Date` without throwing", () => {
+      it("hashes a JS `Date` without throwing", () => {
         const date = new Date("2024-01-01T00:00:00Z");
         const hash = hashBytesOf(date);
         expect(hash.length).toBe(32);
       });
 
-      it("produces the same hash for a native `Date` as for an equivalent `FabricEpochNsec`", () => {
+      it("produces the same hash for a JS `Date` as for an equivalent `FabricEpochNsec`", () => {
         const date = new Date("2024-01-01T00:00:00Z");
         const nsec = BigInt(date.getTime()) * 1_000_000n;
         const dateHash = hex(hashBytesOf(date));
@@ -1189,13 +1189,13 @@ describe("value-hash", () => {
       });
     });
     describe("RegExp", () => {
-      it("hashes a native `RegExp` without throwing", () => {
+      it("hashes a JS `RegExp` without throwing", () => {
         const re = /hello/gi;
         const hash = hashBytesOf(re);
         expect(hash.length).toBe(32);
       });
 
-      it("produces the same hash for a native `RegExp` as for an equivalent `FabricRegExp`", () => {
+      it("produces the same hash for a JS `RegExp` as for an equivalent `FabricRegExp`", () => {
         const re = /hello/gi;
         const nativeHash = hex(hashBytesOf(re));
         const fabricHash = hex(hashBytesOf(new FabricRegExp(re)));
@@ -1209,13 +1209,13 @@ describe("value-hash", () => {
       });
     });
     describe("Uint8Array", () => {
-      it("hashes a native `Uint8Array` without throwing", () => {
+      it("hashes a JS `Uint8Array` without throwing", () => {
         const buf = new Uint8Array([1, 2, 3]);
         const hash = hashBytesOf(buf);
         expect(hash.length).toBe(32);
       });
 
-      it("produces the same hash for a native `Uint8Array` as for a `FabricBytes` with the same bytes", () => {
+      it("produces the same hash for a JS `Uint8Array` as for a `FabricBytes` with the same bytes", () => {
         const bytes = new Uint8Array([10, 20, 30]);
         const nativeHash = hex(hashBytesOf(bytes));
         const fabricHash = hex(hashBytesOf(new FabricBytes(bytes)));

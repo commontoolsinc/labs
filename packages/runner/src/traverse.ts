@@ -72,6 +72,7 @@ import type {
 } from "./builder/types.ts";
 import { isOpaqueReference, opaqueReference } from "./back-to-cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { cfcEnvelopeLabelDocumentHashes } from "./cfc/label-documents.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
@@ -82,7 +83,12 @@ import {
   isWriteRedirectLink,
   type ValuePath,
 } from "./link-types.ts";
-import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
+import {
+  addressKey,
+  NormalizedFullLink,
+  parseLink,
+  schemaForSpaceCrossing,
+} from "./link-utils.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import { type CellLinkRefPayload, SigilLink, type URI } from "./sigil-types.ts";
 import {
@@ -1871,7 +1877,8 @@ export abstract class BaseObjectTraverser {
         }
         const v = this.traverseDAG(docItem, itemDefault, arrayElementLink);
         // Use null for missing/undefined elements (consistent with other value
-        // transforms in this system, e.g. toJSON and shallowFabricFromNativeValue)
+        // transforms in this system, e.g. toJSON and
+        // shallowFabricFromConvertibleJsValue)
         newValue[index] = v === undefined ? null : v;
       });
       // Our link is based on the last link in the chain and not the first.
@@ -2474,6 +2481,18 @@ function followPointer(
     ]);
     link = { ...link, schema: false };
   }
+  if (target.space !== doc.address.space) {
+    link = {
+      ...link,
+      schema: schemaForSpaceCrossing(tx, doc.address.space, link.schema),
+    };
+    if (selector !== undefined) {
+      selector = {
+        ...selector,
+        schema: schemaForSpaceCrossing(tx, doc.address.space, selector.schema),
+      };
+    }
+  }
   const schemaScope = schemaScopeForSelector(selector);
   if (!canFollowScopedLink(schemaScope, link.scope)) {
     // A broader-scoped read context cannot follow a link into a narrower scope
@@ -2801,14 +2820,29 @@ function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
 }
 
 /**
- * Loads the schema document a document's `cfc` envelope names, and nothing
- * else of its metadata, into the traversal. A reader of a labeled document
- * checks what it may read against that schema, so the document is owed it
- * wherever a walk reaches it, named or not. The `pattern`, `argument`, and
- * `result` links and the `internal` manifest are data on the document; a
- * caller that wants a target names it. The target enters the schema
- * tracker, so an absent one arrives when it is written. A document without
- * an envelope loads nothing.
+ * The same-space `cid:` links a `cfc` envelope names its label documents
+ * by, one per distinct reference; only version 2 defines the reference,
+ * so an envelope of any other version names none.
+ */
+function cfcLabelDocumentLinks(envelope: unknown): SigilLink[] {
+  return cfcEnvelopeLabelDocumentHashes(envelope).map((hash) =>
+    linkRefFrom<CellLinkRefPayload>({
+      id: `cid:${hash}` as URI,
+      scope: "space",
+    })
+  );
+}
+
+/**
+ * Loads the schema document a document's `cfc` envelope names, and the
+ * label documents it references, and nothing else of its metadata, into
+ * the traversal. A reader of a labeled document checks what it may read
+ * against that schema and resolves its labels from those documents, so
+ * the document is owed them wherever a walk reaches it, named or not. The
+ * `pattern`, `argument`, and `result` links and the `internal` manifest
+ * are data on the document; a caller that wants a target names it. Each
+ * target enters the schema tracker, so an absent one arrives when it is
+ * written. A document without an envelope loads nothing.
  */
 export function loadLabelSchemaDoc(
   tx: IExtendedStorageTransaction,
@@ -2818,24 +2852,39 @@ export function loadLabelSchemaDoc(
   const doc = valueEntry.value as Immutable<JSONObject>;
   if (!isObjectOrArray(doc) || !("cfc" in doc)) return;
   const envelope = doc["cfc"];
-  const linkObj = isSigilLink(envelope)
+  const schemaLink = isSigilLink(envelope)
     ? envelope as SigilLink
     : cfcMetaToSigilLink(envelope);
-  if (linkObj === undefined) {
+  if (schemaLink === undefined) {
     logger.warn(
       "traverse",
       () => ["Invalid `cfc` envelope in", valueEntry.address],
     );
     return;
   }
+  for (const linkObj of [schemaLink, ...cfcLabelDocumentLinks(envelope)]) {
+    trackMetadataDocument(tx, linkObj, valueEntry, context);
+  }
+}
+
+/**
+ * Helper for `loadLabelSchemaDoc`, which tracks and reads one document a
+ * `cfc` envelope names. A metadata link is a same-space link
+ * (05-queries.md): one resolving to another space selects nothing — the
+ * per-space engine could not read it.
+ */
+function trackMetadataDocument(
+  tx: IExtendedStorageTransaction,
+  linkObj: SigilLink,
+  valueEntry: IMemorySpaceAttestation,
+  context: TraversalContext,
+): void {
   const link = parseLink(linkObj, valueEntry.address)!;
-  // A metadata link is a same-space link (05-queries.md): one resolving to
-  // another space selects nothing — the per-space engine could not read it.
   if (link.space !== valueEntry.address.space) {
     logger.warn(
       "traverse",
       () => [
-        "Foreign-space `cfc` schema link ignored in",
+        "Foreign-space `cfc` metadata link ignored in",
         valueEntry.address,
         "->",
         link.space,
@@ -5633,9 +5682,12 @@ function getNextCellLink(
     // The link may not have the asCell flags, so pull that from itemSchema.
     // Reader precedence, like every other crossing: the handle must not
     // carry the link's wider schema past the reader's.
+    const combined = combineSchemaForLink(schema, lastLink.schema ?? true);
     return {
       ...lastLink,
-      schema: combineSchemaForLink(schema, lastLink.schema ?? true),
+      schema: lastLink.space === doc.address.space
+        ? combined
+        : schemaForSpaceCrossing(tx, doc.address.space, combined),
     };
   }
   // It's fine if we don't have a pointer. In that case, just use the doc

@@ -824,6 +824,25 @@ describe("console/src/live-view", () => {
         .toBe("how does a handler write?");
     });
 
+    it("returns the Common Fabric task `research` investigated", () => {
+      const step: ConsoleStep = {
+        index: 0,
+        kind: "tool",
+        toolName: "research",
+        toolCallId: "call-1",
+        input: { task: "compose a checklist\nwith a cost total" },
+        handlesIntroduced: [],
+        handlesInScope: [],
+        status: "ok",
+        policyEvents: [],
+        withheld: { status: "unrecorded", locations: [] },
+      };
+
+      expect(
+        consoleLiveToolLine(entry("call-1", "research"), undefined, step),
+      ).toBe("compose a checklist with a cost total");
+    });
+
     it("returns `undefined` for a search whose run holds no record of it", () => {
       expect(consoleLiveToolLine(
         entry("call-1", "search_patterns"),

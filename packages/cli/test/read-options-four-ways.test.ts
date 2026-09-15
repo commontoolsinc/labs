@@ -371,7 +371,7 @@ describe("read options, four ways", () => {
     expect(parseEach(rendered)).toEqual({
       "piece get": { $link: `/${id}` },
       "piece call": { $link: `/${id}` },
-      "wish": { $link: `/@${profileSpace}/${id}` },
+      "wish": { $link: `//${profileSpace}/${id}` },
       "exec": { $link: `/${id}` },
     });
     // And the three that share a target space share their bytes, key order

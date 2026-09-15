@@ -3,7 +3,7 @@ import {
   subscribePieceBoundary,
 } from "@commonfabric/html/client";
 import type { DID } from "@commonfabric/identity";
-import { isDID } from "@commonfabric/identity";
+import { assertNotDID, isDID } from "@commonfabric/identity/did";
 import {
   appViewToUrlPath,
   navigate,
@@ -2055,6 +2055,9 @@ export class CFPieceMenu extends BaseElement {
   ): Promise<void> {
     const cell = this.cell;
     if (!cell || this.clonePending) return;
+    // The name is derived into a space key AND put in the URL as a name; a DID
+    // would mean two different spaces on those two routes.
+    assertNotDID(spaceName, "A space name");
     this.cloneMode = copyData ? "copy-data" : "fresh";
     this.clonePending = true;
     this.cloneError = undefined;

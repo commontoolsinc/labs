@@ -11,6 +11,7 @@ import {
   topologyUnits,
 } from "./test-topology.ts";
 import { CAPABILITIES } from "./ci-capabilities.ts";
+import { MEASURED_BATCH_SUFFIX } from "./lane-measurement.ts";
 import { serverExecutionCiLane } from "./server-execution-ci.ts";
 
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -216,6 +217,18 @@ describe("reading the topology as a whole", () => {
       ["other", "c"],
     ]);
     expect(topologyUnits([])).toEqual([]);
+  });
+
+  it("names no suite the batch measurement suffix could swallow", () => {
+    // A lane's batch measurement is named for its suite and marked with
+    // `MEASURED_BATCH_SUFFIX` when coverage was on. A suite whose id
+    // ended with that suffix would have its unmeasured name read as the
+    // measured name of a shorter suite, so the two would be fitted as
+    // one. Reserving the suffix is cheaper than escaping every id.
+    for (const suite of suites) {
+      expect([suite.id, suite.id.endsWith(MEASURED_BATCH_SUFFIX)])
+        .toEqual([suite.id, false]);
+    }
   });
 
   it("keys a set of records the way the store keys them", () => {

@@ -23,12 +23,7 @@ import { unicodeWidth } from "@std/cli/unicode-width";
 import type { Announce } from "./announce.ts";
 import { oneLine } from "./listing.ts";
 import { wrapped } from "./page.ts";
-import {
-  ARGUMENT_SUFFIX,
-  labelForPlace,
-  type PiecePlace,
-  referenceForPlace,
-} from "./place.ts";
+import { labelForPlace, type PiecePlace, referenceForPlace } from "./place.ts";
 import type { RecordEntry } from "./record.ts";
 
 /** The cell a watch is armed on. */
@@ -104,9 +99,7 @@ export class ArmedWatch {
    * refused rather than doubling every line the first one writes.
    */
   get key(): string {
-    return `${referenceForPlace(this.#target.place)}${
-      this.#target.input ? ARGUMENT_SUFFIX : ""
-    }`;
+    return referenceForPlace(this.#target.place, this.#target.input);
   }
 
   /** Whether it is still armed. */

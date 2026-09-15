@@ -176,6 +176,15 @@ import {
 
 export { SessionRegistry } from "./session-registry.ts";
 
+/**
+ * A space DID pinned tightly enough to name a store. `isDID`
+ * (`@commonfabric/identity/did`) answers only whether a string is a DID, so it
+ * admits a method-specific identifier of any shape, and this string goes on to
+ * name a file on disk. The narrower question is the one
+ * `foreignWriteAuthorityFor` has to ask.
+ */
+const WELL_FORMED_SPACE_DID = /^did:[^:]+:[^:]+$/;
+
 // Global OTel API tracer. Interface-only and inert when no provider is
 // registered, so this is a no-op unless the host process (toolshed) has an
 // OTLP SDK installed. Spans created here are purely additive observability and
@@ -1550,6 +1559,12 @@ export class Server {
   #serverExecutionObserver: ServerExecutionObserver | undefined;
 
   /**
+   * Additive watchers of the same admission hook, independent of the host's
+   * observer above: any number attach, and each sees every notice.
+   */
+  #admittedCommitWatchers = new Set<(notice: AdmittedCommitNotice) => void>();
+
+  /**
    * Per-frame delivery record: the wire strips instance keys (frames carry
    * scope _names_), so a delivery rollback cannot recover _which_ instances a
    * frame carried from the frame alone — a lease holder's explicit foreign
@@ -1683,7 +1698,8 @@ export class Server {
         serviceDids?: readonly string[];
 
         /**
-         * Principals whose `session.open` may carry the delegated READ
+         * Principals allowed to carry a SQLite query reader and whose
+         * `session.open` may carry the delegated READ
          * binding `actingAs: "space-owner"` (OW31, READ side RULED
          * 2026-08-19). Such a session's READ-class capability decisions
          * resolve as the space's ACL OWNER — the user whose space it
@@ -2966,6 +2982,19 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       );
     }
+    if (
+      message.reader !== undefined &&
+      (session.principal === undefined ||
+        !this.#isDelegatingPrincipal(session.principal))
+    ) {
+      return respondTypedError<never>(
+        message.requestId,
+        toError(
+          "AuthorizationError",
+          "SQLite reader carriage requires a delegating principal",
+        ),
+      );
+    }
     const aclEngine = this.#aclMode() === "off"
       ? undefined
       : await this.#openEngine(message.space);
@@ -2982,7 +3011,14 @@ export class Server {
           message.sessionId,
           session,
           "READ",
-        );
+        ) ?? (message.reader === undefined
+          ? null
+          : this.#authorizeMessageWithEngine(
+            aclEngine,
+            message.space,
+            message.reader.principal,
+            "READ",
+          ));
       if (deny) {
         return respondTypedError<never>(message.requestId, deny);
       }
@@ -2992,7 +3028,8 @@ export class Server {
       // real read-only, each file its own `main` namespace). The only
       // per-source difference is path resolution: an injected on-disk source's
       // registered path, else the cell-derived path (which the db's scope
-      // qualifies, per the session's principal / id).
+      // qualifies using the carried reader, or the session principal / id
+      // when no reader is carried).
       //
       // Capture per-column origin ONLY when the db declares per-column `ifc`
       // (Phase 2) or a per-row label rule (Phase 3 — rule inputs are located
@@ -3029,10 +3066,13 @@ export class Server {
           message.db,
           message.sql,
           queryParams,
-          Engine.resolveScopeKey(message.db.scope, {
-            principal: session.principal,
-            sessionId: message.sessionId,
-          }),
+          Engine.resolveScopeKey(
+            message.db.scope,
+            message.reader ?? {
+              principal: session.principal,
+              sessionId: message.sessionId,
+            },
+          ),
           wantColumns,
         );
       // SQLite reads necessarily await filesystem work. Re-check both the
@@ -3045,7 +3085,14 @@ export class Server {
           message.sessionId,
           session,
           "READ",
-        );
+        ) ?? (message.reader === undefined
+          ? null
+          : this.#authorizeMessageWithEngine(
+            aclEngine,
+            message.space,
+            message.reader.principal,
+            "READ",
+          ));
         if (deny) {
           return respondTypedError<never>(message.requestId, deny);
         }
@@ -6775,18 +6822,51 @@ export class Server {
     this.#serverExecutionObserver = observer;
   }
 
+  /**
+   * Watch every commit this server admits: a session transact, a
+   * delegated append, the server's own direct write, and the serving
+   * loop's wave commits, each reported after the engine has applied it.
+   * Any number of watchers attach — the host's own observer above is
+   * separate and unaffected — and the returned function detaches one.
+   *
+   * This is the store's "something landed" edge, and it reports the
+   * commits a client's own subscription does not: a doc outside every
+   * replica's watch set, and the serving loop's own bookkeeping.
+   * `docs/development/waiting-in-tests.md` covers what a test does
+   * with it.
+   */
+  watchAdmittedCommits(
+    watcher: (notice: AdmittedCommitNotice) => void,
+  ): () => void {
+    this.#admittedCommitWatchers.add(watcher);
+    return () => {
+      this.#admittedCommitWatchers.delete(watcher);
+    };
+  }
+
   #notifyCommitAdmitted(notice: AdmittedCommitNotice): void {
     const observer = this.#serverExecutionObserver;
-    if (observer?.commitAdmitted === undefined) return;
-    try {
-      observer.commitAdmitted(notice);
-    } catch (error) {
-      // Admission never fails because the observer threw; the host's
-      // catch-up scan (selectCommitsSince) covers a dropped notice.
-      console.warn(
-        "memory v2: server-execution observer threw on commitAdmitted",
-        error,
-      );
+    if (observer?.commitAdmitted !== undefined) {
+      try {
+        observer.commitAdmitted(notice);
+      } catch (error) {
+        // Admission never fails because the observer threw; the host's
+        // catch-up scan (selectCommitsSince) covers a dropped notice.
+        console.warn(
+          "memory v2: server-execution observer threw on commitAdmitted",
+          error,
+        );
+      }
+    }
+    for (const watcher of this.#admittedCommitWatchers) {
+      try {
+        watcher(notice);
+      } catch (error) {
+        console.warn(
+          "memory v2: admitted-commit watcher threw",
+          error,
+        );
+      }
     }
   }
 
@@ -7591,7 +7671,7 @@ export class Server {
     | { granted: true; via: "owner" | "creation" | "acl" }
     | { granted: false; reason: string }
   > {
-    if (!/^did:[^:]+:[^:]+$/.test(space)) {
+    if (!WELL_FORMED_SPACE_DID.test(space)) {
       return {
         granted: false,
         reason: `"${space}" is not a space DID — refusing to resolve (or ` +
@@ -7969,6 +8049,13 @@ export const parseClientMessage = (
 
   if (
     parsed.type === "sqlite.query" &&
+    (parsed.reader === undefined ||
+      (isObjectNotArray(parsed.reader) &&
+        typeof parsed.reader.principal === "string" &&
+        parsed.reader.principal.length > 0 &&
+        (parsed.reader.sessionId === undefined ||
+          (typeof parsed.reader.sessionId === "string" &&
+            parsed.reader.sessionId.length > 0)))) &&
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
@@ -8004,6 +8091,7 @@ export const parseClientMessage = (
       db,
       sql: parsed.sql,
       params,
+      ...(parsed.reader === undefined ? {} : { reader: parsed.reader }),
     } as SqliteQueryRequest;
   }
 

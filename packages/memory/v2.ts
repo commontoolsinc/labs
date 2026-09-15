@@ -1113,6 +1113,9 @@ export type MemoryProtocolFlags = {
    */
   sqliteCommitRowLabelEval: boolean;
 
+  /** SQLite queries authorize the carried reader and select its scoped database. */
+  sqliteQueryReader?: boolean;
+
   /**
    * Server capability (CT-1872 1c): pending reads may carry an ARRAY
    * `localSeq` naming every pending layer the read sat on (resolution
@@ -1186,6 +1189,7 @@ export type WireMemoryProtocolFlags = {
   syncSchemaTableV2?: boolean;
   messageCompressionV1?: boolean;
   sqliteCommitRowLabelEval?: boolean;
+  sqliteQueryReader?: boolean;
   pendingReadStacks?: boolean;
   verdictCatchUpMarkers?: boolean;
   entityIdListing?: boolean;
@@ -1595,6 +1599,9 @@ export function isSqliteDbRef(value: unknown): value is SqliteDbRef {
     typeof (value as SqliteDbRef).id === "string";
 }
 
+/** A reader carried by a trusted serving principal for a SQLite query. */
+export type SqliteQueryReader = ScopeKeyIdentity & { principal: string };
+
 export type SqliteQueryRequest = {
   type: "sqlite.query";
   requestId: string;
@@ -1604,6 +1611,7 @@ export type SqliteQueryRequest = {
   sql: string;
   params?: SqliteParamsWire;
   namedParams?: SqliteNamedParamsWire;
+  reader?: SqliteQueryReader;
 };
 
 /** A result column's output name plus its TRUE source `(table, column)` origin
@@ -2064,6 +2072,7 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // advertises the fact. Peers that see it absent (an older server) keep their
   // write gate failing closed.
   sqliteCommitRowLabelEval: true,
+  sqliteQueryReader: true,
   // Likewise build-inherent: this build's engine resolves array-localSeq
   // pending reads (resolvePendingReads), so it always advertises it. Clients
   // that see it absent scalarize to top-of-stack before sending.
@@ -2132,6 +2141,13 @@ export const parseMemoryProtocolFlags = (
       operationCodecs.some((codec) =>
         typeof codec !== "string" || !/@[1-9][0-9]*$/.test(codec)
       ) || new Set(operationCodecs).size !== operationCodecs.length)
+  ) {
+    return null;
+  }
+
+  const sqliteQueryReader = value.sqliteQueryReader;
+  if (
+    sqliteQueryReader !== undefined && typeof sqliteQueryReader !== "boolean"
   ) {
     return null;
   }
@@ -2237,6 +2253,7 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
     sqliteCommitRowLabelEval: sqliteCommitRowLabelEval === true,
+    sqliteQueryReader: sqliteQueryReader === true,
     // Absent (an older server) parses to false: clients scalarize pending
     // reads to top-of-stack unless the array capability is advertised.
     pendingReadStacks: pendingReadStacks === true,
@@ -2271,6 +2288,7 @@ export const wireMemoryProtocolFlags = (
   syncSchemaTableV2: flags.syncSchemaTableV2,
   messageCompressionV1: flags.messageCompressionV1,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
+  sqliteQueryReader: flags.sqliteQueryReader,
   pendingReadStacks: flags.pendingReadStacks,
   verdictCatchUpMarkers: flags.verdictCatchUpMarkers,
   entityIdListing: flags.entityIdListing,

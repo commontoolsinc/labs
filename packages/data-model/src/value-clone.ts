@@ -26,12 +26,13 @@ import {
   MutableFabricContainerValueLayer,
   MutableFabricPlainObjectLayer,
 } from "./interface.ts";
-import { tagFromNativeValueElseNull, VALUE_TAGS } from "@/value-tags";
-import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import {
   isFabricContainerValue,
   isFabricPlainContainer,
-} from "./type-check.ts";
+  tagOfConvertibleJsValueElseNull,
+  VALUE_TAGS,
+} from "@/types";
+import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import { toDebugKindString } from "./value-debug.ts";
 
 /** Options for `cloneIfNecessary()`. */
@@ -82,8 +83,8 @@ function trackForCircularity(
  * Clones an already-valid `FabricValue` to achieve a desired frozenness,
  * with control over depth and copy semantics.
  *
- * Unlike `fabricFromNativeValue()` (which converts native JS values into
- * fabric wrappers), this function assumes the input is already a valid
+ * Unlike `fabricFromConvertibleJsValue()` (which converts convertible JS values
+ * into fabric wrappers), this function assumes the input is already a valid
  * `FabricValue` and only adjusts frozenness by cloning where necessary.
  *
  * Cyclic values are not supported: a deep clone (the default) throws on a
@@ -181,7 +182,7 @@ export function shallowMutableClone<T extends FabricValue>(
  * Deep mode uses `isValidDeepFrozenFabricValue()` for identity optimization;
  * shallow mode uses `Object.isFrozen(value) === frozen`.
  *
- * This is exported for the package's own use -- `native-conversion.ts` calls it
+ * This is exported for the package's own use -- `convertible-js.ts` calls it
  * -- and deliberately not re-exported from `index.ts`. Its five positional
  * parameters are the internal shape the named clone functions above are the
  * public spelling of; an outside caller wants one of those.
@@ -207,7 +208,7 @@ export function cloneHelper(
     return Object.isFrozen(v) === frozen;
   }
 
-  switch (tagFromNativeValueElseNull(value)) {
+  switch (tagOfConvertibleJsValueElseNull(value)) {
     // Inherently immutable types -- frozenness is irrelevant, no cloning
     // needed regardless of force.
     case VALUE_TAGS.bigint:

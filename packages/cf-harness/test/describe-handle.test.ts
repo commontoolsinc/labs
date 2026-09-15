@@ -33,7 +33,10 @@ import type {
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 import { responsesBodyFromChatFixture } from "./support/responses-fixture.ts";
-import { describeHandleTool } from "../src/tools/describe-handle.ts";
+import {
+  describeHandleForResearch,
+  describeHandleTool,
+} from "../src/tools/describe-handle.ts";
 import { runPatternTool } from "../src/tools/run-pattern.ts";
 import type { RunPatternToolSuccessOutput } from "../src/tools/run-pattern.ts";
 import type { HarnessFabricSession } from "../src/fabric-session.ts";
@@ -679,6 +682,28 @@ describe("describe_handle", () => {
       return output.resultRef;
     };
 
+    /** Instruments the CFC metadata read made by one handle description. */
+    const withCfcMetadataRead = (onRead: () => void): () => void => {
+      const instrumented = runtime as Runtime & {
+        readTx: Runtime["readTx"];
+      };
+      const originalReadTx = instrumented.readTx;
+      instrumented.readTx = (tx) => {
+        const readTx = originalReadTx.call(runtime, tx);
+        const originalReadOrThrow = readTx.readOrThrow.bind(readTx);
+        readTx.readOrThrow = (address, options) => {
+          if (address.path?.length === 1 && address.path[0] === "cfc") {
+            onRead();
+          }
+          return originalReadOrThrow(address, options);
+        };
+        return readTx;
+      };
+      return () => {
+        instrumented.readTx = originalReadTx;
+      };
+    };
+
     it("reports the result shape of a piece whose schema the run never recorded", async () => {
       // The case that matters: a handle handed to a run that did not create
       // the piece. The table knows the address and nothing else, and without
@@ -828,10 +853,11 @@ describe("describe_handle", () => {
         ref,
       );
 
-      const output = await describeHandleTool.invoke(
+      const researchDescription = await describeHandleForResearch(
         contextWith(minted.table, session),
         { token: minted.token },
       );
+      const output = researchDescription.output;
 
       const label = output.labels?.find((entry) => entry.path === undefined);
       expect(label?.integrity).toEqual([
@@ -854,6 +880,84 @@ describe("describe_handle", () => {
       expect(reply).not.toContain("operator-chosen-class");
       expect(reply).not.toContain("operator-chosen-subject");
       expect(reply).not.toContain("operator-chosen-source");
+      expect(researchDescription.cfcLabelAvailable).toBe(true);
+      const exactLabel = JSON.stringify(researchDescription.cfcLabel);
+      expect(exactLabel).toContain("operator-chosen-class");
+      expect(exactLabel).toContain("operator-chosen-subject");
+      expect(exactLabel).toContain("operator-chosen-source");
+    });
+
+    it("reads CFC metadata once when a declared-shape description succeeds", async () => {
+      const resultRef = await createPiece();
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable("run-describe"),
+        resultRef,
+      );
+      let metadataReads = 0;
+      const restore = withCfcMetadataRead(() => metadataReads++);
+
+      let researchDescription: Awaited<
+        ReturnType<typeof describeHandleForResearch>
+      >;
+      try {
+        researchDescription = await describeHandleForResearch(
+          contextWith(minted.table, session),
+          { token: minted.token },
+        );
+      } finally {
+        restore();
+      }
+
+      expect(metadataReads).toBe(1);
+      expect(researchDescription.output.hasSchema).toBe(true);
+      expect(researchDescription.output.labels).toEqual([]);
+      expect(researchDescription.cfcLabelAvailable).toBe(true);
+      expect(researchDescription.cfcLabel).toEqual({});
+    });
+
+    it("keeps the fail-closed label when its single metadata read fails", async () => {
+      const resultRef = await createPiece();
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable("run-describe"),
+        resultRef,
+      );
+      let metadataReads = 0;
+      const restore = withCfcMetadataRead(() => {
+        metadataReads++;
+        throw new Error("metadata read failed");
+      });
+
+      let researchDescription: Awaited<
+        ReturnType<typeof describeHandleForResearch>
+      >;
+      try {
+        researchDescription = await describeHandleForResearch(
+          contextWith(minted.table, session),
+          { token: minted.token },
+        );
+      } finally {
+        restore();
+      }
+
+      expect(metadataReads).toBe(1);
+      expect(researchDescription.output.hasSchema).toBe(true);
+      const properties = (researchDescription.output.schema as {
+        properties: Record<string, unknown>;
+      }).properties;
+      expect(properties).toEqual({
+        $NAME: { type: "string" },
+        remaining: { type: "number" },
+        topCategory: { type: "string" },
+        totalSpent: { type: "number" },
+      });
+      expect(researchDescription.output.labels).toEqual([{
+        confidentiality: [["cfc:label-read-failed"]],
+        integrity: [],
+      }]);
+      expect(researchDescription.cfcLabelAvailable).toBe(false);
+      expect(researchDescription.cfcLabel).toEqual({
+        confidentiality: ["cfc:label-read-failed"],
+      });
     });
 
     it("answers what the space says about a cell's labels, so unlabelled and unread are different answers", async () => {
@@ -876,9 +980,21 @@ describe("describe_handle", () => {
         contextWith(minted.table),
         { token: minted.token },
       );
+      const readForResearch = await describeHandleForResearch(
+        contextWith(minted.table, session),
+        { token: minted.token },
+      );
+      const unreadForResearch = await describeHandleForResearch(
+        contextWith(minted.table),
+        { token: minted.token },
+      );
 
       expect(read.labels).toEqual([]);
       expect(unread.labels).toBeUndefined();
+      expect(readForResearch.cfcLabelAvailable).toBe(true);
+      expect(readForResearch.cfcLabel).toEqual({});
+      expect(unreadForResearch.cfcLabelAvailable).toBe(false);
+      expect(unreadForResearch.cfcLabel).toBeUndefined();
     });
 
     it("reports an address in another space as shapeless even though the runtime could read it", async () => {

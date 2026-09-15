@@ -11,7 +11,7 @@ import { browserTool } from "./browser.ts";
 import { delegateTaskTool } from "./delegate-task.ts";
 import { describeHandleTool } from "./describe-handle.ts";
 import { editFileTool } from "./edit-file.ts";
-import { queryDocsTool } from "./query-docs.ts";
+import { researchTool } from "./research.ts";
 import { readFileTool } from "./read-file.ts";
 import { readSkillResourceTool } from "./read-skill-resource.ts";
 import { recordFeedbackTool } from "./record-feedback.ts";
@@ -42,7 +42,7 @@ export const BUILTIN_TOOLS = [
   recordFeedbackTool,
   searchSkillsTool,
   acquireSkillTool,
-  queryDocsTool,
+  researchTool,
   loomComposeTool,
   loomInspectTool,
   loomAuthoringContextTool,

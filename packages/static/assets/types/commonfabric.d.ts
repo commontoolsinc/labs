@@ -289,8 +289,8 @@ export type FabricSpecialObjectPlus<PlusType> =
 
 /**
  * The `FabricValue`s that participate in the fabric protocol as primitives. An
- * instance is always frozen, passes through the native conversions unchanged,
- * and holds no arbitrary outgoing `FabricValue` reference.
+ * instance is always frozen, passes through the convertible-JS conversions
+ * unchanged, and holds no arbitrary outgoing `FabricValue` reference.
  * `FabricSpecialObject` says how this differs from `FabricInstance`.
  */
 export interface FabricPrimitive {
@@ -483,8 +483,8 @@ export declare const FabricKeyPair: FabricKeyPairConstructor;
  * An immutable regular expression.
  *
  * The pattern is held as a flavor / source / flags triple rather than as a
- * native `RegExp`, so that flavors with no native representation can still be
- * carried. `value` reconstitutes a native `RegExp` where one exists.
+ * JS `RegExp`, so that flavors with no JS representation can still be
+ * carried. `value` reconstitutes a JS `RegExp` where one exists.
  */
 export interface FabricRegExp extends FabricPrimitive {
   readonly source: string;
@@ -492,9 +492,9 @@ export interface FabricRegExp extends FabricPrimitive {
   readonly flavor: string;
 
   /**
-   * A fresh native `RegExp` equivalent to this value, returned anew on each
+   * A fresh JS `RegExp` equivalent to this value, returned anew on each
    * call so the internal instance is never aliased out. Throws for a flavor
-   * with no native `RegExp` representation.
+   * with no JS `RegExp` representation.
    */
   readonly value: RegExp;
 }
@@ -517,7 +517,7 @@ export declare const FabricRegExp: FabricRegExpConstructor;
  * whose keys must not collide with the slot names.
  */
 export type FabricErrorState = {
-  /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
+  /** Constructor name of the originating JS `Error` (e.g. `"TypeError"`). */
   readonly type: string;
 
   /** The `.name` property. Omit to mean "same as `type`". */
@@ -567,8 +567,8 @@ export interface FromNativeErrorOptions {
   /**
    * Converter applied to the error's `cause` and to each of its custom
    * enumerable properties, whose result is what the instance holds. When
-   * absent, a value that is already a valid `FabricValue` is held as it
-   * stands, and anything else is converted the way `fabricFromNativeValue()`
+   * absent, a value that is already a valid `FabricValue` is held as it stands,
+   * and anything else is converted the way `fabricFromConvertibleJsValue()`
    * converts it, without freezing.
    */
   readonly convert?: (value: unknown) => FabricValue;
@@ -824,6 +824,50 @@ export type CellKind =
 export type CellScope = "space" | "user" | "session";
 export type SchemaScope = CellScope | "any";
 export type LinkScope = "inherit" | CellScope;
+
+/** A document selected on the piece segment. */
+export type ReferenceMember = "argument" | "result";
+
+/** A location prefix, with an independently known or unknown scope. */
+export type ReferenceContext =
+  & {
+    scope?: CellScope;
+  }
+  & (
+    | {
+      space?: undefined;
+      id?: undefined;
+      member?: undefined;
+      path?: undefined;
+    }
+    | { space: string; id?: undefined; member?: undefined; path?: undefined }
+    | {
+      space: string;
+      id: string;
+      member?: ReferenceMember;
+      path?: readonly string[];
+    }
+  );
+
+/** A cell address to render, with an optional space for unresolved references. */
+export interface RenderableCellReference {
+  id: string;
+  space?: string;
+  member?: ReferenceMember;
+  scope?: CellScope;
+  pin?: string;
+  path: readonly (string | number)[];
+}
+
+/**
+ * Renders a cell address relative to a location and scope context. Without a
+ * context, includes the known space and explicit scope. Empty and dot path
+ * keys retain their literal meaning.
+ */
+export declare function renderCellReference(
+  link: RenderableCellReference,
+  context?: ReferenceContext,
+): string;
 
 export type AsCellEntry =
   | CellKind
@@ -3810,7 +3854,14 @@ export type SqliteCfLinkFunction = <_T = unknown>() => SqliteColumnSchema;
 
 export type WishTag = `/${string}` | `#${string}`;
 
-export type DID = `did:${string}:${string}`;
+/**
+ * A decentralized identifier, most often a space DID.
+ *
+ * This package is the surface patterns compile against, so it carries no
+ * import of its own; the runtime-side twin of this type, and the predicate
+ * that decides whether a string is a DID, live in `@commonfabric/identity/did`.
+ */
+export type DID = `did:${string}`;
 
 export type WishParams = {
   query: WishTag | string;

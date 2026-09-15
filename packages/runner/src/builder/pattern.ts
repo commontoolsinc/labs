@@ -13,9 +13,10 @@ import {
   UNUSED_RECORD_SUBSCHEMA_KEYS,
   UNUSED_SINGLE_SUBSCHEMA_KEYS,
 } from "@commonfabric/data-model-schema/schema-walk";
+import { isDID } from "@commonfabric/identity/did";
 
 import { type AliasBinding } from "../alias-binding.ts";
-import { isCell, setCellUnlinkedSpace } from "../cell.ts";
+import { isCell, schemaCellScope, setCellUnlinkedSpace } from "../cell.ts";
 import type { ImplementationIdentity } from "../cfc/types.ts";
 import { createRef } from "../create-ref.ts";
 import { defineAuthoredDebugAccessors } from "../harness/authored-debug-source.ts";
@@ -459,7 +460,7 @@ function factoryFromPattern<T, R>(
   allCellsAndInternalRoots.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === (inputs as unknown)) return;
-    const { cell: top, path, value, schema, external } = cell.export();
+    const { cell: top, path, value, schema, scope, external } = cell.export();
     if (path.length > 0 || external) return;
 
     const cellReference = cellReferenceForCell(cell);
@@ -473,6 +474,9 @@ function factoryFromPattern<T, R>(
       derivedInternalPartialCausesByRoot.set(top, partialCause);
       derivedInternalCells.push({
         partialCause,
+        ...(scope !== undefined &&
+          (scope !== "space" || schemaCellScope(schema) !== undefined) &&
+          { scope }),
         ...(descriptorSchema !== undefined && { schema: descriptorSchema }),
       });
     }
@@ -1074,8 +1078,8 @@ function resolveInSpaceTargetSpace(
   space: unknown,
   frame: Frame | undefined,
 ): MemorySpace | undefined {
-  if (typeof space === "string" && /^did:[^:]+:.+/.test(space)) {
-    return optIntoInSpaceMultiSpaceCommit(frame, space as MemorySpace);
+  if (isDID(space)) {
+    return optIntoInSpaceMultiSpaceCommit(frame, space);
   }
   if (isCell(space)) {
     return optIntoInSpaceMultiSpaceCommit(

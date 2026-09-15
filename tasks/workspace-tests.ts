@@ -375,9 +375,10 @@ export function acceptsJUnitPath(
  * that cannot: that map governs every module of the invocation, the
  * preload included, so a specifier the preload needs and the map does not
  * carry fails the whole run rather than the preload alone. What that
- * member gives up is the preload's name map, and it loses nothing by it —
- * with no wrapper installed, the report keeps its own class names and
- * ingestion reads the file from those instead.
+ * member gives up is the preload's name map, so its files come from the
+ * report's own class names, which name the test file for a registration
+ * with nothing of this repository's own between the file and
+ * `Deno.test`.
  */
 export function acceptsPreload(
   member: string,

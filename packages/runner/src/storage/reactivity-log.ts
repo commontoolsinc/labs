@@ -72,6 +72,16 @@ export const internalVerifierRead: Metadata = {
 };
 
 /**
+ * Runtime-owned prepare reads whose internal classification is permanent.
+ * Native journals seal records carrying this exact metadata object and can
+ * omit them from candidate consumed-read scans while retaining the full log.
+ */
+export const stableInternalVerifierRead: Metadata = Object.freeze({
+  ...ignoreReadForScheduling,
+  ...internalVerifierRead,
+});
+
+/**
  * A pending output reused by a write still needs its publication accepted.
  * The shared identity selects this commit-only read for wave acceptance and
  * foreign-space handoff without classifying ordinary verifier probes as writes.

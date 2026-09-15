@@ -2757,7 +2757,7 @@ describe("cf cell get transforms", () => {
       const marked = await deriveSelectedValue(runtime, reader, board, {
         projection: await parseSelectionProjection('{"$link":true}'),
       }) as { $link: string };
-      expect(marked.$link).toBe(`/@${space}/${uriOf(board)}`);
+      expect(marked.$link).toBe(`//${space}/${uriOf(board)}`);
       expect(parseLLMFriendlyLink(marked.$link)).toMatchObject({
         id: uriOf(board),
         space,

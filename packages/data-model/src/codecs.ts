@@ -180,10 +180,11 @@ const realmCodecEngine = newDefaultRealmCodecEngine();
  * avoid, and would charge it to correct input.
  *
  * Named for the `<target>From<Source>Value` family that
- * `fabricFromNativeValue()` and `nativeFromFabricValue()` establish. Both
- * sides being qualified is what keeps `realm` readable only as a modifier on
- * `value` -- a *realm value* is this transport form, as a *native value* is a
- * plain JavaScript one -- rather than as the boundary being crossed.
+ * `fabricFromConvertibleJsValue()` and `convertibleJsFromFabricValue()`
+ * establish. Both sides being qualified is what keeps `realm` readable only as
+ * a modifier on `value` -- a *realm value* is this transport form, as a *native
+ * value* is a plain JavaScript one -- rather than as the boundary being
+ * crossed.
  */
 export function realmFromFabricValue(
   value: FabricValue,

@@ -1344,6 +1344,209 @@ Deno.test("validates the schema document a CFC envelope's schemaHash references"
   });
 });
 
+Deno.test("validates the label documents a version-2 CFC envelope references", async () => {
+  await withEngine((engine) => {
+    const envelopeSchema = {
+      type: "object",
+      properties: { field: { type: "string" } },
+    } as const;
+    const envelopeHash = internSchemaAsTaggedHashString(envelopeSchema);
+    const label = { confidentiality: ["secret", "vaulted"] };
+    const labelHash = taggedHashStringOf(label);
+    const docWithLabel = (ref: string) =>
+      ({
+        op: "set",
+        id: "of:label-carrier",
+        value: {
+          value: { field: "v" },
+          cfc: {
+            version: 2,
+            schemaHash: envelopeHash,
+            labelMap: {
+              version: 1,
+              entries: [{ path: ["field"], label: { $ref: ref } }],
+            },
+          },
+        },
+      }) as never;
+
+    // A label reference nothing backs is the same broken closure a
+    // dangling schema reference is, and is refused the same way.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(1, {
+            operations: [
+              docWithLabel(`cid:${labelHash}`),
+              setOp(`cid:${envelopeHash}`, envelopeSchema),
+            ],
+          }),
+        }),
+      ProtocolError,
+      "references CFC label document",
+    );
+
+    // A reference outside the `cid:` namespace can never be backed.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(2, {
+            operations: [
+              docWithLabel("of:not-content-addressed"),
+              setOp(`cid:${envelopeHash}`, envelopeSchema),
+            ],
+          }),
+        }),
+      ProtocolError,
+      "outside the cid: namespace",
+    );
+
+    // The label document included in the SAME commit backs the reference,
+    // its content already verified against its id by the `cid:` rule...
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, {
+        operations: [
+          docWithLabel(`cid:${labelHash}`),
+          setOp(`cid:${envelopeHash}`, envelopeSchema),
+          setOp(`cid:${labelHash}`, label),
+        ],
+      }),
+    });
+
+    // ...and once stored, it backs later envelopes by itself.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(4, {
+        operations: [docWithLabel(`cid:${labelHash}`)],
+      }),
+    });
+
+    // Entries that hold no reference — inline labels, a malformed label,
+    // an envelope with no entries array — name no document and pass the
+    // scan; the boundary polices backing, not the map's shape.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(40, {
+        operations: [{
+          op: "set",
+          id: "of:inline-carrier",
+          value: {
+            value: { field: "v" },
+            cfc: {
+              version: 2,
+              schemaHash: envelopeHash,
+              labelMap: {
+                version: 1,
+                entries: [
+                  { path: ["field"], label: { confidentiality: ["secret"] } },
+                  { path: ["field"], label: "malformed" },
+                ],
+              },
+            },
+          },
+        } as never, {
+          op: "set",
+          id: "of:entryless-carrier",
+          value: {
+            value: { field: "v" },
+            cfc: { version: 2, schemaHash: envelopeHash, labelMap: {} },
+          },
+        } as never],
+      }),
+    });
+
+    // A document that verifies against its id but is not label-shaped is
+    // refused as well: the hash cannot tell a label from any other record,
+    // and a reader resolving it would fail closed on every read.
+    const malformed = { confidentiality: "secret" };
+    const malformedHash = taggedHashStringOf(malformed);
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(5, {
+            operations: [
+              docWithLabel(`cid:${malformedHash}`),
+              setOp(`cid:${malformedHash}`, malformed),
+            ],
+          }),
+        }),
+      ProtocolError,
+      "does not hold a label",
+    );
+
+    // A stored label document whose bytes were changed out of band no
+    // longer hashes to its id, and a later envelope naming it is refused:
+    // the commit API rejects every `cid:` mutation, so direct database
+    // manipulation is the only door left, and this models genuine
+    // corruption.
+    engine.database.prepare(
+      `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
+    ).run({
+      data: encodeMemoryBoundary({ value: { confidentiality: ["forged"] } }),
+      id: `cid:${labelHash}`,
+    });
+    engine.database.prepare(`UPDATE head SET seq = seq + 1 WHERE id = :id`)
+      .run({ id: `cid:${labelHash}` });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(41, {
+            operations: [{
+              op: "set",
+              id: "of:tampered-carrier",
+              value: {
+                value: { field: "v" },
+                cfc: {
+                  version: 2,
+                  schemaHash: envelopeHash,
+                  labelMap: {
+                    version: 1,
+                    entries: [{
+                      path: ["field"],
+                      label: { $ref: `cid:${labelHash}` },
+                    }],
+                  },
+                },
+              },
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "whose stored content does not verify",
+    );
+
+    // A patch that lands a reference at the reserved member is collected
+    // from the post-patch document like the schema reference is.
+    const otherHash = taggedHashStringOf({ confidentiality: ["other"] });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(6, {
+            operations: [
+              {
+                op: "patch",
+                id: "of:label-carrier",
+                patches: [{
+                  op: "replace",
+                  path: "/cfc/labelMap/entries/0/label",
+                  value: { $ref: `cid:${otherHash}` },
+                }],
+              } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "references CFC label document",
+    );
+  });
+});
+
 Deno.test("walks a CFC envelope's schema-document closure transitively", async () => {
   await withEngine((engine) => {
     // A decomposed envelope root references its definitions as

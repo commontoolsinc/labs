@@ -1,5 +1,6 @@
 import type { Source } from "@commonfabric/js-compiler";
 import { getLogger } from "@commonfabric/utils/logger";
+import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
@@ -229,7 +230,7 @@ export function compileCachePersistenceSlotKey(
   entryIdentity: string,
   opts: { runtimeVersion: string },
 ): string {
-  return JSON.stringify([space, opts.runtimeVersion, entryIdentity]);
+  return stringTupleKey([space, opts.runtimeVersion, entryIdentity]);
 }
 
 function compileCacheClosureSignature(
@@ -285,7 +286,7 @@ function compileCacheRecoveryKey(
   space: MemorySpace,
   entryIdentity: string,
 ): string {
-  return JSON.stringify([space, entryIdentity]);
+  return stringTupleKey([space, entryIdentity]);
 }
 
 function cacheEntriesIncludePatternCoverage(
@@ -1582,6 +1583,7 @@ export class PatternManager {
             identity,
             filename: doc.filename,
           })),
+          { previous: previousEntryIdentity, next: entryIdentity },
         ),
       });
       return prepared;
@@ -3487,9 +3489,9 @@ export class PatternManager {
             undefined,
             readTx,
           ).getAsNormalizedFullLink().id;
-          // An UnknownCfcMetadataVersionError propagates, deliberately: a
-          // stored-source envelope this build cannot interpret must not
-          // read as unprotected source.
+          // A `StoredCfcMetadataError` propagates, deliberately: a
+          // stored-source envelope this build cannot produce labels from
+          // must not read as unprotected source.
           const metadata = readStoredCfcMetadata(readTx, {
             space,
             id: sourceId,

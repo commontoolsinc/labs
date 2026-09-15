@@ -4,6 +4,11 @@ import { Identity } from "@commonfabric/identity";
 import { isDeepFrozen } from "@commonfabric/data-model";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { URI } from "../src/storage/interface.ts";
+import {
+  internalVerifierRead,
+  isInternalVerifierRead,
+  stableInternalVerifierRead,
+} from "../src/storage/reactivity-log.ts";
 
 const signer = await Identity.fromPassphrase("v2-transaction");
 const space = signer.did();
@@ -61,6 +66,120 @@ const wholeListRead = async (
 };
 
 describe("v2-transaction", () => {
+  describe("getPotentiallyExternalReadActivities()", () => {
+    it("retains every raw clock position while excluding sealed verifier records", async () => {
+      const storage = StorageManager.emulate({ as: signer });
+      try {
+        const tx = storage.edit();
+        const address = { space, id: "of:candidate-clock" as URI, type };
+        expect(tx.write({ ...address, path: [] }, { value: { a: 1, b: 2 } }).ok)
+          .toBeDefined();
+        const before = [...tx.getReadActivities!()];
+        expect(tx.read({ ...address, path: ["value", "a"] }).ok).toBeDefined();
+        expect(
+          tx.read({ ...address, path: ["value", "a"] }, {
+            meta: stableInternalVerifierRead,
+          }).ok,
+        ).toBeDefined();
+        expect(
+          tx.trackReadPaths!(address, [["value", "a"], ["value", "b"]], {
+            meta: stableInternalVerifierRead,
+            nonRecursive: true,
+          }).ok,
+        ).toBeDefined();
+        expect(
+          tx.trackReadPaths!(address, [["value"]], {
+            meta: stableInternalVerifierRead,
+          }).ok,
+        ).toBeDefined();
+        expect(tx.read({ ...address, path: ["value", "b"] }).ok).toBeDefined();
+        const raw = [...tx.getReadActivities!()].slice(before.length);
+        const candidates = [...tx.getPotentiallyExternalReadActivities!()!]
+          .filter((read) => !before.includes(read));
+        expect(raw).toHaveLength(6);
+        expect(candidates).toEqual([raw[0], raw[5]]);
+        expect(raw.map((read) => read.journalIndex)).toEqual(
+          Array.from({ length: 6 }, (_, i) => raw[0].journalIndex! + i),
+        );
+        for (const read of raw.slice(1, 5)) {
+          expect(Object.isFrozen(read)).toBe(true);
+          expect(Object.isFrozen(read.meta)).toBe(true);
+          expect(() => {
+            read.meta = {};
+          }).toThrow(TypeError);
+        }
+        expect(Object.isFrozen(raw[0])).toBe(false);
+        expect(Object.isFrozen(raw[5])).toBe(false);
+      } finally {
+        await storage.close();
+      }
+    });
+
+    it("keeps mutable internal metadata available for reclassification", async () => {
+      const storage = StorageManager.emulate({ as: signer });
+      try {
+        const tx = storage.edit();
+        const address = {
+          space,
+          id: "of:candidate-mutable" as URI,
+          type,
+          path: [],
+        };
+        expect(tx.write(address, { value: "body" }).ok).toBeDefined();
+        const meta = { ...internalVerifierRead };
+        expect(tx.read(address, { meta }).ok).toBeDefined();
+        const read = [...tx.getReadActivities!()].at(-1)!;
+        expect([...tx.getPotentiallyExternalReadActivities!()!]).toContain(
+          read,
+        );
+        expect(isInternalVerifierRead(read.meta)).toBe(true);
+        for (const key of Reflect.ownKeys(meta)) delete meta[key];
+        expect(isInternalVerifierRead(read.meta)).toBe(false);
+        expect([...tx.getPotentiallyExternalReadActivities!()!]).toContain(
+          read,
+        );
+        read.meta = { ...internalVerifierRead };
+        expect(isInternalVerifierRead(read.meta)).toBe(true);
+        expect([...tx.getPotentiallyExternalReadActivities!()!]).toContain(
+          read,
+        );
+        const copied = Object.freeze({ ...stableInternalVerifierRead });
+        expect(tx.read(address, { meta: copied }).ok).toBeDefined();
+        const copiedRead = [...tx.getReadActivities!()].at(-1)!;
+        expect(Object.isFrozen(copiedRead)).toBe(false);
+        expect([...tx.getPotentiallyExternalReadActivities!()!]).toContain(
+          copiedRead,
+        );
+      } finally {
+        await storage.close();
+      }
+    });
+
+    it("clears both read logs after a completed storage commit", async () => {
+      const storage = StorageManager.emulate({ as: signer });
+      try {
+        const tx = storage.edit();
+        const address = {
+          space,
+          id: "of:candidate-finish" as URI,
+          type,
+          path: [],
+        };
+        expect(tx.write(address, { value: "body" }).ok).toBeDefined();
+        expect(tx.read(address).ok).toBeDefined();
+        expect(tx.read(address, { meta: stableInternalVerifierRead }).ok)
+          .toBeDefined();
+        expect([...tx.getPotentiallyExternalReadActivities!()!].length)
+          .toBeGreaterThan(0);
+        expect((await tx.commit()).ok).toBeDefined();
+        expect([...tx.getReadActivities!()]).toEqual([]);
+        expect([...tx.getPotentiallyExternalReadActivities!()!]).toEqual([]);
+      } finally {
+        await storage.close();
+      }
+    });
+  });
+
   describe("read()", () => {
     it("takes the same number of property descriptors for a long list as for a short one", async () => {
       const short = await wholeListRead(20);

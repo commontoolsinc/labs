@@ -82,6 +82,10 @@
  * `@commonfabric/data-model` asks the first of these questions of a value the
  * type system already says is a `FabricValue`, and spells it
  * `isFabricObjectOrArray()` for the same reason.
+ *
+ * `typeOfIncludingNull()` is the one function here that is not a predicate.
+ * It returns a value's `typeof` tag, with `null` given a tag of its own, for
+ * a caller that dispatches on the tag rather than testing for one type.
  */
 
 /**
@@ -99,6 +103,21 @@ export type Immutable<T> = T extends ReadonlyArray<infer U>
   ? ReadonlyArray<Immutable<U>>
   : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
   : T;
+
+/**
+ * The tag `typeOfIncludingNull()` returns: the result of `typeof`, plus
+ * `null` for the value `null`, which `typeof` files under `object`.
+ */
+export type JsTypeTagIncludingNull =
+  | "bigint"
+  | "boolean"
+  | "function"
+  | "null"
+  | "number"
+  | "object"
+  | "string"
+  | "symbol"
+  | "undefined";
 
 /** Helper type to recursively remove `readonly` properties from type `T`. */
 export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
@@ -327,6 +346,17 @@ export function isPrimitive(value: unknown): value is Primitive {
 }
 
 /**
+ * Returns the `typeof` tag of a value, with `null` given a tag of its own:
+ * `null` for the value `null`, and otherwise exactly what `typeof` returns.
+ * The result is a plain string, so testing it leaves `value` at its declared
+ * type where a `typeof` test would narrow it; a `switch` whose arms use the
+ * narrowed value is written on `typeof` itself.
+ */
+export function typeOfIncludingNull(value: unknown): JsTypeTagIncludingNull {
+  return (value === null) ? "null" : typeof value;
+}
+
+/**
  * Indicates whether `key` is one this implementation refuses to copy onto an
  * object from untrusted input. Use at boundaries where external data enters
  * the system (deserialization, structural copying).
@@ -357,7 +387,7 @@ export function isUnsafeObjectKey(key: string): boolean {
  *   `Object.defineProperty()`, and `JSON.parse()` all carry the name -- so
  *   what stands in the way is the copy loops, not JavaScript.
  * * `constructor` copies faithfully. It is reserved because other boundaries
- *   in this implementation already refuse it: the projection to native values
+ *   in this implementation already refuse it: the projection to JS values
  *   drops it, and `FabricError` throws on it. Accepting it here would mean
  *   admitting a key that a later boundary discards without saying so.
  *

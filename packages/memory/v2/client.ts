@@ -33,6 +33,7 @@ import {
   type SessionSync,
   type SqliteDbRef,
   type SqliteParamsWire,
+  type SqliteQueryReader,
   type SqliteQueryResult,
   type SqliteQueryWireResult,
   type SqliteRegisterDiskSourceResult,
@@ -1061,8 +1062,17 @@ export class SpaceSession {
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    reader?: SqliteQueryReader,
   ): Promise<SqliteQueryResult> {
     await this.#ensureSessionRestored();
+    if (
+      reader !== undefined &&
+      this.#client.serverFlags?.sqliteQueryReader !== true
+    ) {
+      throw new Error(
+        "sqlite: server does not support carried reader authorization",
+      );
+    }
     const paramFields = params === undefined
       ? {}
       : !Array.isArray(params) && unsafeObjectKeyIn(params) !== undefined
@@ -1076,6 +1086,7 @@ export class SpaceSession {
       db,
       sql,
       ...paramFields,
+      ...(reader === undefined ? {} : { reader }),
     });
     return {
       rows: result.rows.map(sqliteRowFromWire),

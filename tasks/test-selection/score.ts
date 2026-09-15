@@ -179,22 +179,38 @@ function bump(counts: Record<string, number>, day: string): void {
  * that healed itself, so a failure that healed itself is credited as a
  * catch as well.
  */
+/**
+ * The longest window any of a state's per-day counters is kept for, which
+ * is also how long a failure on the default branch waits to be judged.
+ */
+const LONGEST_WINDOW_DAYS = Math.max(CHURN_WINDOW_DAYS, FLAKE_WINDOW_DAYS);
+
 function resolvePendingMain(
   state: IdentityState,
   observation: Observation,
 ): void {
   if (state.pendingMain.length === 0) return;
   if (observation.outcome === "fail") return;
+  // A failure nothing has judged inside the longest window a state keeps
+  // is one the default branch has carried for that long, and crediting a
+  // catch for it now would credit the test with a fix it did not find.
+  // `trimWindows` ages these by the same window, and applies it too late
+  // to answer this on its own: a fold resolves every observation it
+  // reads before it ages anything.
+  const live = state.pendingMain.filter((pending) =>
+    daysBetween(pending.day, observation.day) <= LONGEST_WINDOW_DAYS
+  );
+  state.pendingMain = [];
+  if (live.length === 0) return;
   // One breakage, one catch. A test that stays red across several runs on
   // the default branch has one thing wrong with it, and the change that
   // makes it green fixed that one thing; crediting every run it failed
   // would make a long outage look like the most valuable test in the
   // repository. The first failure is the one the catch belongs to, since
   // that is where the breakage entered.
-  const first = state.pendingMain.reduce((earliest, pending) =>
+  const first = live.reduce((earliest, pending) =>
     pending.day < earliest.day ? pending : earliest
   );
-  state.pendingMain = [];
   if (first.commit === observation.commit) {
     // The same commit, passing now and failing before, is the test
     // disagreeing with itself there. The two runs can arrive in separate
@@ -763,10 +779,19 @@ export function trimWindows(state: IdentityState, today: string): void {
   // term's denominator, the flake rate's, and how recently `lastRun` saw
   // the test. They are kept for the longer of the two windows, and each
   // reader reads back only as far as its own.
-  drop(state.runsByDay, Math.max(CHURN_WINDOW_DAYS, FLAKE_WINDOW_DAYS));
+  drop(state.runsByDay, LONGEST_WINDOW_DAYS);
   drop(state.failuresByDay, CHURN_WINDOW_DAYS);
   drop(state.flakesByDay, FLAKE_WINDOW_DAYS);
   drop(state.costByDay, COST_WINDOW_DAYS);
+  // A failure on the default branch waits here for a later run to judge
+  // it, and a test the branch does not go red for is one no run has to
+  // arrive for. So this is aged like everything else, over the longest
+  // window a state keeps: a failure nothing has judged in that time is
+  // one the branch has carried for that long, and crediting a catch for
+  // it afterwards would credit the test with a fix it did not find.
+  state.pendingMain = state.pendingMain.filter((pending) =>
+    daysBetween(pending.day, today) <= LONGEST_WINDOW_DAYS
+  );
 }
 
 /**

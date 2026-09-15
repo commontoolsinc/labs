@@ -186,7 +186,11 @@ item).
 **SC-11 [normative] Idempotent label persistence — §4.6.4.** Reactive runtimes
 re-derive labels on every recompute; require that persisting an unchanged
 effective label is a no-op (no envelope write, no version bump, no replication
-traffic), with equality defined over the canonical form (§4.1.3 c14n). Without
+traffic), with equality defined over the canonical form (§4.1.3 c14n). One
+exception, taken once per document: a stored version-1 envelope is rewritten
+in version 2 with unchanged labels by a writer selecting version 2
+([content-addressed-cfc-labels.md](content-addressed-cfc-labels.md)), and
+never the reverse. Without
 this, label persistence and reactive scheduling interact pathologically.
 
 **SC-12 [clarify] Degenerate CNF join — §8.9.3.** `concatClauses` over
@@ -666,14 +670,20 @@ verified code artifact, symbol/binding path within it)**. Same artifact hash
 + same symbol = same identity wherever the artifact is loaded; any code
 change changes the hash and with it every identity within the artifact.
 Rebinding does not inherit authority by default. The narrow temporary exception
-is an explicit `piece setsrc` update: canonical-filename matches in the old and
-new recursive module closures persist a cumulative successor-to-predecessor
-delegation. `writeAuthorizedBy` accepts the current module hash or a predecessor
-reachable through the delegation map authenticated in the target document's
-space, but still requires the same symbol/binding path. A delegation loaded from
-another space grants no authority. Source-file spelling remains diagnostic at
-verification; canonical authored filenames govern whether `setsrc` derives a
-delegation in the first place. Because the delegation list is mutable and
+is an explicit `piece setsrc` update: the new entry succeeds the old entry
+outright, since the update is what names the pair, and every other module in
+the old and new recursive closures matches by canonical filename — directly,
+or under the root substitution the two entry names define when they share a
+tail (the same authored tree served under `/api/patterns` and supplied from a
+checkout under `/packages/patterns`) — persisting a cumulative
+successor-to-predecessor delegation; an ambiguous match derives none.
+`writeAuthorizedBy` accepts the current module hash or a predecessor reachable
+through the delegation map authenticated in the target document's space, but
+still requires the same symbol/binding path. A delegation loaded from another
+space grants no authority. Source-file spelling remains diagnostic at
+verification; whether `setsrc` derives a delegation for a module below the
+entry is governed by canonical authored filenames under either root. Because
+the delegation list is mutable and
 outside the source Merkle identity, it is authority-bearing only when protected
 by the compiler's integrity attestation (field-level in source documents,
 root-level in compiled documents). Replace §8.15.6's "no separate naming

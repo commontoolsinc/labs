@@ -42,6 +42,7 @@ import type {
   SqliteDbRef,
   SqliteOperation,
   SqliteParamsWire,
+  SqliteQueryReader,
   SqliteQueryResult,
   SqliteRegisterDiskSourceResult,
   ViewInterest,
@@ -54,6 +55,7 @@ import type { Cancel } from "../cancel.ts";
 import { Cell } from "../cell.ts";
 import type {
   CfcAddress,
+  CfcContentAddressedLabels,
   CfcDeclaredMonotonicityMode,
   CfcDeclaredWideningExemption,
   CfcDecomposedEnvelopes,
@@ -755,6 +757,7 @@ export interface IStorageProvider {
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    reader?: SqliteQueryReader,
   ): Promise<SqliteQueryResult>;
 
   // No `sqliteExecute`: SQLite writes go through the commit fold
@@ -1387,6 +1390,15 @@ export interface IStorageTransaction {
   getReadActivities?(): Iterable<IReadActivity>;
 
   /**
+   * Optional ordered superset of reads that can be noninternal CFC inputs.
+   * Only records whose internal-verifier classification is permanently sealed
+   * may be omitted. Mutable records remain here and consumers recheck their
+   * metadata. Preserves duplicates, activity-clock positions and record
+   * identity; the full journal remains available through getReadActivities.
+   */
+  getPotentiallyExternalReadActivities?(): Iterable<IReadActivity> | undefined;
+
+  /**
    * Optional ordered log of every applied write attempt, in transaction
    * order, stamped on the same per-transaction activity clock as read
    * activities. Unlike `getWriteDetails` (per-path, last-value upserts,
@@ -1831,6 +1843,15 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void;
 
   setCfcDecomposedEnvelopes(enabled: CfcDecomposedEnvelopes): void;
+
+  /**
+   * Selects the envelope version the persist path writes: version 2, which
+   * holds each label above the inline limit as a reference to a
+   * content-addressed label document and shorter ones inline, or version 1
+   * with every label inline. A spelling dial: neither setting is pinned,
+   * and the value is read when the transaction prepares.
+   */
+  setCfcContentAddressedLabels(enabled: CfcContentAddressedLabels): void;
 
   /**
    * Set the exchange-rule policy evaluation dial (Epic B5, spec §4.4.5).

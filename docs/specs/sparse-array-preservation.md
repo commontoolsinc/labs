@@ -105,16 +105,18 @@ Read path:   storage → traverseDAG → normalizeAndDiff → builtins (map, etc
 These layers handle sparse arrays correctly and are less likely to regress
 because their sparse support was part of the original design:
 
-- **`packages/data-model/src/native-conversion.ts`** —
-  `shallowFabricFromNativeValue` and `fabricFromNativeValue` use `i in arr`
-  checks. Every accepted array goes through `cloneHelper()`, which rebuilds it
-  with `new Array(length)` and copies only the indices that are present.
+- **`packages/data-model/src/convertible-js.ts`** —
+  `shallowFabricFromConvertibleJsValue` and `fabricFromConvertibleJsValue` use
+  `i in arr` checks. An accepted array that needs a copy goes through
+  `cloneHelper()`, which rebuilds it with `new Array(length)` and copies only
+  the indices that are present; one that is already a valid deep-frozen
+  `FabricValue` crosses by identity, holes and all.
 - **`packages/data-model/src/codec-json/JsonCodecEngine.ts`** — Encodes a run of
   holes as a single hole-tagged count; decoding rebuilds them as true holes.
 - **`packages/data-model/src/value-hash.ts`** — Feeds holes to the hash
   directly, coalescing each run into one hole entry.
 
-### Value validation (`packages/data-model/src/validity-check.ts`)
+### Value validation (`packages/data-model/src/types/validation.ts`)
 
 `isValidFabricValueLayer()` and `isValidFabricValue()` accept sparse arrays —
 holes are valid fabric structure. `isValidFabricValue()` uses `for` + `i in`
@@ -240,10 +242,10 @@ the preferred entry point in runner code.
 
 Test coverage verifies sparse preservation at each layer:
 
-- **`packages/data-model/test/validity-check.test.ts`** —
+- **`packages/data-model/test/types/validation.test.ts`** —
   `isValidFabricValueLayer()` accepts sparse arrays.
-- **`packages/data-model/test/native-conversion.test.ts`** — 
-  `fabricFromNativeValue()` preserves holes.
+- **`packages/data-model/test/convertible-js.test.ts`** — 
+  `fabricFromConvertibleJsValue()` preserves holes.
 - **`packages/runner/test/cell-core.test.ts`** — sparse-array writes through
   the full Cell write path (which lands in `applyMutablePathWrite`) preserve
   holes; the helper's `cloneForMutation` + leaf-mutation steps round-trip

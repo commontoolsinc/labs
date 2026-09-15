@@ -1,4 +1,4 @@
-import { fabricFromNativeValue } from "@commonfabric/data-model";
+import { fabricFromConvertibleJsValue } from "@commonfabric/data-model";
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
@@ -7,6 +7,7 @@ import {
 import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import { sameAcl } from "@commonfabric/memory/acl";
 import {
   acquireServerExecutionEnabler,
@@ -55,6 +56,7 @@ import {
   buildCfcReadCeiling,
   buildCfcTrustConfig,
   type CfcConfClause,
+  type CfcContentAddressedLabels,
   type CfcDeclaredMonotonicityMode,
   type CfcDecomposedEnvelopes,
   type CfcEnforcementMode,
@@ -628,6 +630,16 @@ export interface RuntimeOptions {
   cfcDecomposedEnvelopes?: CfcDecomposedEnvelopes;
 
   /**
+   * Defaults to `false`. When true, the envelope persist path stores
+   * version-2 envelopes: each label above the inline limit is a reference
+   * to a content-addressed label document shared by every envelope that
+   * carries the label (`docs/specs/content-addressed-cfc-labels.md`). Off
+   * stores version 1 with every label inline. Reading resolves either
+   * version.
+   */
+  cfcContentAddressedLabels?: CfcContentAddressedLabels;
+
+  /**
    * Exchange-rule policy evaluation dial (Epic B5, spec §4.4.5). Defaults to
    * `off` (gates decide on raw labels, byte-identical to before the dial).
    * `observe` evaluates gated labels to fixpoint and emits diagnostics while
@@ -940,10 +952,6 @@ type RuntimeSetupOptions = {
   prepareForResume?: boolean;
 };
 
-function isMemorySpaceDID(value: string): boolean {
-  return /^did:[^:]+:.+/.test(value);
-}
-
 /**
  * Helper for `Runtime.getImmutableCell()`, which tells the storage preflight
  * what a `Cell` stands for -- the sigil link naming it -- and leaves everything
@@ -997,6 +1005,7 @@ export class Runtime {
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
   readonly cfcDecomposedEnvelopes: CfcDecomposedEnvelopes;
+  readonly cfcContentAddressedLabels: CfcContentAddressedLabels;
   readonly cfcPolicyEvaluation: CfcPolicyEvaluationMode;
   readonly cfcLabelMetadataProtection: CfcLabelMetadataProtectionMode;
   readonly cfcDeclaredMonotonicity: CfcDeclaredMonotonicityMode;
@@ -1694,6 +1703,7 @@ export class Runtime {
       this.cfcWriteFloor = dials.cfcWriteFloor;
       this.cfcTriggerReadGating = dials.cfcTriggerReadGating;
       this.cfcDecomposedEnvelopes = dials.cfcDecomposedEnvelopes;
+      this.cfcContentAddressedLabels = dials.cfcContentAddressedLabels;
       this.cfcPolicyEvaluation = dials.cfcPolicyEvaluation;
       this.cfcLabelMetadataProtection = dials.cfcLabelMetadataProtection;
       this.cfcDeclaredMonotonicity = dials.cfcDeclaredMonotonicity;
@@ -2352,6 +2362,7 @@ export class Runtime {
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
     wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
     wrapped.setCfcDecomposedEnvelopes(this.cfcDecomposedEnvelopes);
+    wrapped.setCfcContentAddressedLabels(this.cfcContentAddressedLabels);
     wrapped.setCfcPolicyEvaluationMode(this.cfcPolicyEvaluation);
     wrapped.setCfcLabelMetadataProtectionMode(this.cfcLabelMetadataProtection);
     wrapped.setCfcDeclaredMonotonicityMode(this.cfcDeclaredMonotonicity);
@@ -3444,16 +3455,15 @@ export class Runtime {
    * Makes a read-only cell whose content is `data`, carried entirely in the
    * cell's own `data:` URI id; there is no document in a space to fetch.
    *
-   * **Contract note:** `data` is an arbitrary value, deliberately NOT
-   * limited to `FabricValue`. Callers pass, among other things, `Cell`
-   * objects (wish candidate lists), userland event payloads (whatever
-   * patterns and the DOM hand over, `Date`s and `Error`s included), and
-   * pattern-authored schema defaults. A `Cell` becomes its sigil link on the
-   * way in, by `cellAsLink()`; the conversion itself has no
-   * representation for one. Everything past that converts via
-   * `fabricFromNativeValue()`, the designed intake for exactly this: native
-   * instances become their fabric counterparts, and input that is already a
-   * deep-frozen `FabricValue` passes through by identity.
+   * **Contract note:** `data` is an arbitrary value, deliberately NOT limited
+   * to `FabricValue`. Callers pass, among other things, `Cell` objects (wish
+   * candidate lists), userland event payloads (whatever patterns and the DOM
+   * hand over, `Date`s and `Error`s included), and pattern-authored schema
+   * defaults. A `Cell` becomes its sigil link on the way in, by `cellAsLink()`;
+   * the conversion itself has no representation for one. Everything past that
+   * converts via `fabricFromConvertibleJsValue()`, the designed intake for
+   * exactly this: JS instances become their fabric counterparts, and input
+   * that is already a deep-frozen `FabricValue` passes through by identity.
    *
    * @param space The space the cell claims as its own (it is not stored
    *   there; links within relate to it).
@@ -3491,8 +3501,8 @@ export class Runtime {
     // Builder artifacts become their encodable form and cells become sigil
     // links HERE rather than at each caller. Neither has a fabric
     // representation, so both have to go before the value reaches
-    // `fabricFromNativeValue()`. This is the designed intake, and the callers
-    // are many: raw and JavaScript node inputs, wish candidates, schema
+    // `fabricFromConvertibleJsValue()`. This is the designed intake, and the
+    // callers are many: raw and JavaScript node inputs, wish candidates, schema
     // defaults. Covering them one at a time was tried and is whack-a-mole --
     // each site that is missed fails as a rejection at the conversion, or worse
     // as a cleanup error that masks it.
@@ -3507,7 +3517,7 @@ export class Runtime {
     // its closure.
     const asDataURI = dataUriFromValue(
       inlineExternalSchemaRefsInValue(
-        fabricFromNativeValue(
+        fabricFromConvertibleJsValue(
           flattenBuilderArtifacts(data, { replaceOther: cellAsLink }),
         ),
       ),
@@ -3603,7 +3613,7 @@ export class Runtime {
    * re-running the handler/action (see RetryImmediately).
    */
   resolveSpaceNameSync(name: string): MemorySpace | undefined {
-    if (isMemorySpaceDID(name)) return name as MemorySpace;
+    if (isDID(name)) return name;
     return this.#spaceNameToDid.get(name);
   }
 
@@ -3683,7 +3693,7 @@ export class Runtime {
     if (options?.genesisAcl !== undefined) {
       // A document the resolution cannot honor is refused, never dropped:
       // the caller asked for a space born closed.
-      if (isMemorySpaceDID(name)) {
+      if (isDID(name)) {
         throw new Error(
           `space-name resolution for the DID ${name} cannot register a ` +
             "genesisAcl: the runtime derives no space key for a bare DID, " +

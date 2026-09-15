@@ -50,3 +50,6 @@ purpose. `scripts/category-budgets.sh` prints the skill author's own
 per-category monthly budgets as one JSON object; it reads nothing, takes no
 arguments, and produces the same bytes in every space, which is the demo's
 blast-radius receipt written as code rather than claimed.
+
+The demo allowlists exactly one script of it, at the pin, and the child that
+receives its handle is the only run that mounts its bytes.

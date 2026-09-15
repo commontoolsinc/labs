@@ -58,6 +58,7 @@ import {
   type SqliteDbRef,
   type SqliteOperation,
   type SqliteParamsWire,
+  type SqliteQueryReader,
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
@@ -79,6 +80,10 @@ import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import {
+  cfcEnvelopeLabelDocumentHashes,
+  lookupCfcLabelDocument,
+} from "../cfc/label-documents.ts";
 import {
   isPrimitiveCellLink,
   type NormalizedLink,
@@ -176,10 +181,10 @@ import {
 } from "./v2-watch.ts";
 
 /**
- * Syncs the CFC schema document a document's `cfc.schemaHash` names, and
- * resolves to the sync's error if it had one: the shape of
- * `StorageManager`'s own step, and of the syncer a test supplies in its
- * place.
+ * Syncs the CFC schema document a document's `cfc.schemaHash` names and the
+ * label documents its envelope references, and resolves to the sync's
+ * error if it had one: the shape of `StorageManager`'s own step, and of
+ * the syncer a test supplies in its place.
  */
 export type CfcSchemaDocumentSyncer = (
   space: MemorySpace,
@@ -2558,9 +2563,13 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * Syncs the CFC schema document `document`'s `cfc.schemaHash` names, and
-   * resolves to the sync's error if it had one; a document naming none
-   * resolves at once. A syncer a test supplied stands in for the whole step.
+   * Syncs the CFC schema document `document`'s `cfc.schemaHash` names and
+   * every label document its envelope references, in parallel, and
+   * resolves to the first sync error among them; a document naming none
+   * resolves at once. A reader of the envelope resolves its labels
+   * synchronously from the replica, so the label documents are pulled
+   * beside the schema document rather than on first read. A syncer a test
+   * supplied stands in for the whole step.
    */
   async #syncCfcSchemaDocument(
     space: MemorySpace,
@@ -2571,15 +2580,20 @@ export class StorageManager implements IStorageManager {
       return syncer(space, document);
     }
     const cfc = isObjectNotArray(document?.cfc) ? document.cfc : undefined;
+    const ids: URI[] = [];
     const schemaHash = cfc?.schemaHash;
-    if (typeof schemaHash !== "string" || schemaHash.length === 0) {
-      return undefined;
+    if (typeof schemaHash === "string" && schemaHash.length > 0) {
+      ids.push(`cid:${schemaHash}` as URI);
     }
-    const result = await this.open(space).sync(`cid:${schemaHash}` as URI, {
-      path: [],
-      schema: false,
-    });
-    return result.error;
+    for (const hash of cfcEnvelopeLabelDocumentHashes(cfc)) {
+      ids.push(`cid:${hash}` as URI);
+    }
+    if (ids.length === 0) return undefined;
+    const provider = this.open(space);
+    const results = await Promise.all(
+      ids.map((id) => provider.sync(id, { path: [], schema: false })),
+    );
+    return results.find((result) => result.error !== undefined)?.error;
   }
 
   /**
@@ -3305,9 +3319,10 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    reader?: SqliteQueryReader,
   ): Promise<SqliteQueryResult> {
     return this.#followReplacement((replica) =>
-      replica.sqliteQuery(db, sql, params)
+      replica.sqliteQuery(db, sql, params, reader)
     );
   }
 
@@ -3889,6 +3904,7 @@ export class SpaceReplica
       scope?: CellScope,
       identity?: ScopeKeyIdentity,
     ): boolean;
+    hydrateArrivedCfcSchemaRefs(sync: SessionSync): void;
   } {
     return {
       noteCaughtUpLocalSeq: (localSeq) => this.#noteCaughtUpLocalSeq(localSeq),
@@ -3906,6 +3922,8 @@ export class SpaceReplica
         this.#waitForConflictReadRepair(rejection),
       hasDocumentRecord: (id, scope, identity) =>
         this.#hasDocumentRecord(id, scope, identity),
+      hydrateArrivedCfcSchemaRefs: (sync) =>
+        this.#hydrateArrivedCfcSchemaRefs(sync),
     };
   }
 
@@ -4532,9 +4550,10 @@ export class SpaceReplica
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    reader?: SqliteQueryReader,
   ): Promise<SqliteQueryResult> {
     const { session } = await this.#activeSessionHandle();
-    return await session.sqliteQuery(db, sql, params);
+    return await session.sqliteQuery(db, sql, params, reader);
   }
 
   async listEntityIds(): Promise<string[] | undefined> {
@@ -7843,48 +7862,68 @@ export class SpaceReplica
       const cfc = (doc as { cfc?: unknown }).cfc;
       if (!isObjectNotArray(cfc)) continue;
       const schemaHash = (cfc as { schemaHash?: unknown }).schemaHash;
-      if (typeof schemaHash !== "string" || schemaHash.length === 0) {
-        continue;
+      if (typeof schemaHash === "string" && schemaHash.length > 0) {
+        this.#kickCfcDocumentPull(schemaHash, lookupSchemaDocument);
       }
-      if (this.#kickedCfcSchemaPulls.has(schemaHash)) continue;
-      if (
-        lookupSchemaDocument(schemaHash) !== undefined ||
-        this.getDocument(`cid:${schemaHash}` as URI) !== undefined
-      ) {
-        continue;
+      // A version-2 envelope is owed its label documents on the same
+      // terms: a reader resolves every reference synchronously, and one
+      // that arrives without its document fails closed on every read
+      // until the document is at hand.
+      for (const hash of cfcEnvelopeLabelDocumentHashes(cfc)) {
+        this.#kickCfcDocumentPull(hash, lookupCfcLabelDocument);
       }
-      this.#kickedCfcSchemaPulls.add(schemaHash);
-      queueMicrotask(() => {
-        this.sync(`cid:${schemaHash}` as URI)
-          .then((result) => {
-            if (result.error !== undefined) {
-              logger.warn("cfc-schema-hydration-failed", () => [
-                "arrived-metadata schema pull failed; a later frame " +
-                "carrying the reference re-kicks",
-                { schemaHash, error: String(result.error) },
-              ]);
-              this.#kickedCfcSchemaPulls.delete(schemaHash);
-              return;
-            }
-            if (
-              lookupSchemaDocument(schemaHash) === undefined &&
-              this.getDocument(`cid:${schemaHash}` as URI) === undefined
-            ) {
-              // Completed empty: the document is not installed
-              // server-side yet. Re-arm, so the next reference-carrying
-              // frame retries instead of the window going permanent.
-              this.#kickedCfcSchemaPulls.delete(schemaHash);
-            }
-          }, (error) => {
-            logger.warn("cfc-schema-hydration-failed", () => [
-              "arrived-metadata schema pull threw; a later frame " +
-              "carrying the reference re-kicks",
-              { schemaHash, error: String(error) },
-            ]);
-            this.#kickedCfcSchemaPulls.delete(schemaHash);
-          });
-      });
     }
+  }
+
+  /**
+   * Helper for `#hydrateArrivedCfcSchemaRefs()`, which pulls one `cid:`
+   * document an arrived envelope names, unless the replica or the realm
+   * registry `registered` consults already holds it: one pull per hash per
+   * frame batch, re-armed on a failure or an empty completion so a later
+   * frame carrying the reference retries.
+   */
+  #kickCfcDocumentPull(
+    hash: string,
+    registered: (hash: string) => unknown,
+  ): void {
+    if (this.#kickedCfcSchemaPulls.has(hash)) return;
+    if (
+      registered(hash) !== undefined ||
+      this.getDocument(`cid:${hash}` as URI) !== undefined
+    ) {
+      return;
+    }
+    this.#kickedCfcSchemaPulls.add(hash);
+    queueMicrotask(() => {
+      this.sync(`cid:${hash}` as URI)
+        .then((result) => {
+          if (result.error !== undefined) {
+            logger.warn("cfc-schema-hydration-failed", () => [
+              "arrived-metadata document pull failed; a later frame " +
+              "carrying the reference re-kicks",
+              { hash, error: String(result.error) },
+            ]);
+            this.#kickedCfcSchemaPulls.delete(hash);
+            return;
+          }
+          if (
+            registered(hash) === undefined &&
+            this.getDocument(`cid:${hash}` as URI) === undefined
+          ) {
+            // Completed empty: the document is not installed
+            // server-side yet. Re-arm, so the next reference-carrying
+            // frame retries instead of the window going permanent.
+            this.#kickedCfcSchemaPulls.delete(hash);
+          }
+        }, (error) => {
+          logger.warn("cfc-schema-hydration-failed", () => [
+            "arrived-metadata document pull threw; a later frame " +
+            "carrying the reference re-kicks",
+            { hash, error: String(error) },
+          ]);
+          this.#kickedCfcSchemaPulls.delete(hash);
+        });
+    });
   }
 
   /**

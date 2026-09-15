@@ -1,5 +1,6 @@
 import { type Cell } from "../cell.ts";
 import { parseFabricUrl } from "../fabric-url.ts";
+import { getMetaLink } from "../link-utils.ts";
 import { type Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
 import type { URI } from "../sigil-types.ts";
@@ -83,13 +84,28 @@ export function cellFromUrl(
       // previous URL's link in place after the input stopped naming anything.
       if (cellWithTx.getRaw() !== undefined) cellWithTx.set(undefined);
     } else {
-      const targetCell = runtime.getCellFromLink({
-        id,
-        space,
-        path: target!.path,
-        scope: "space",
-      } as any);
-      cellWithTx.setRawUntyped(targetCell.getAsLink({ base: cell }));
+      const root = runtime.getCellFromLink(
+        {
+          id,
+          space,
+          path: [],
+          scope: target!.scope ?? "space",
+        },
+        undefined,
+        tx,
+      );
+      const argument = target!.member === "argument"
+        ? getMetaLink(root, "argument", {})
+        : undefined;
+      const selected = target!.member === "argument"
+        ? argument && runtime.getCellFromLink(argument, undefined, tx)
+        : root;
+      const targetCell = selected?.key(...target!.path);
+      if (targetCell) {
+        cellWithTx.setRawUntyped(targetCell.getAsLink({ base: cell }));
+      } else if (cellWithTx.getRaw() !== undefined) {
+        cellWithTx.set(undefined);
+      }
     }
 
     const pendingWithTx = pending.withTx(tx);

@@ -217,10 +217,10 @@ Expected implementation and test files:
 
 ### WP1.3 — Make every Fabric operation see the same factory state
 
-- [ ] Update `packages/data-model/src/native-conversion.ts` so admitted
+- [ ] Update `packages/data-model/src/convertible-js.ts` so admitted
   factories are recognized through `tryFactoryState()`, and unbranded functions
   remain invalid. Codec dispatch remains the serialization layer's job.
-- [ ] Update `packages/data-model/src/validity-check.ts` and compatibility
+- [ ] Update `packages/data-model/src/types/validation.ts` and compatibility
   guards so `FabricFactory` is the only valid function-shaped `FabricValue`.
 - [ ] Update `packages/data-model/src/deep-freeze.ts` to seal/freeze canonical
   state and then freeze the callable. Factory handling must precede the current
@@ -241,8 +241,8 @@ Expected implementation and test files:
 
 Focused tests:
 
-- `packages/data-model/test/native-conversion.test.ts`
-- `packages/data-model/test/validity-check.test.ts`
+- `packages/data-model/test/convertible-js.test.ts`
+- `packages/data-model/test/types/validation.test.ts`
 - `packages/data-model/test/deep-freeze.test.ts`
 - `packages/data-model/test/cloneIfNecessary.test.ts`
 - `packages/data-model/test/cloneForMutation.test.ts`

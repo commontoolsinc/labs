@@ -176,7 +176,7 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
 
 describe("SchemaObjectTraverser missing value handling", () => {
   // Missing values are handled consistently with other value transforms
-  // (toJSON, shallowFabricFromNativeValue, etc.):
+  // (toJSON, shallowFabricFromConvertibleJsValue, etc.):
   // - Arrays: null is inserted for missing elements
   // - Objects: undefined is assigned for missing properties
 
@@ -218,7 +218,8 @@ describe("SchemaObjectTraverser missing value handling", () => {
       value: docValue,
     });
 
-    // Missing elements become null (consistent with toJSON, shallowFabricFromNativeValue, etc.)
+    // Missing elements become null (consistent with toJSON,
+    // shallowFabricFromConvertibleJsValue, etc.)
     expect(result).toEqual(["present", null, "also-present"]);
   });
 
@@ -362,7 +363,8 @@ describe("SchemaObjectTraverser missing value handling", () => {
       value: docValue,
     });
 
-    // Missing elements become null (consistent with toJSON, shallowFabricFromNativeValue, etc.)
+    // Missing elements become null (consistent with toJSON,
+    // shallowFabricFromConvertibleJsValue, etc.)
     expect(result).toEqual(["present", null, "also-present"]);
   });
 

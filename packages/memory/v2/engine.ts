@@ -963,11 +963,38 @@ export type DocumentCacheEntry = {
   weight: number;
 };
 
-/** The document cache's lifetime counters. */
+/** One engine's lifetime counters: the document cache's own events, and the
+ * replay a rebuild pays where the cache did not shorten it. */
 export type DocumentCacheStats = {
+  /** Reads served from the cache. A read that resolved to a stored revision
+   * lands in this or in `misses`. A read of an entity that has no revision
+   * at all moves neither. */
   hits: number;
+
   misses: number;
   evictions: number;
+
+  /** Rebuilds that started from a revision the cache still held, replaying
+   * only the rows after it rather than the chain since the base or snapshot.
+   * The lookup that finds that revision is not a read, so it moves this
+   * rather than `hits`. Against `patchReplays` it separates how many
+   * rebuilds resumed from how far back they had to start. */
+  resumes: number;
+
+  /** Stored patch rows replayed to rebuild a patched document, each row
+   * counted once whatever the length of the patch list it holds. A rebuild
+   * starts at the newest of the document's base, its newest snapshot, and
+   * the newest revision after those that the cache still holds, and replays
+   * the rows after that, so what this counts is how far back the rebuild had
+   * to start.
+   *
+   * Every rebuild counts, whichever of the two callers asked for it: a read
+   * the cache did not serve, and the commit-time check that the pre-state a
+   * patch lands on carries no reserved schema reference. The second reads
+   * only in a space whose commits or stored rows carry such a reference, and
+   * resumes from the same cache, so it is replay work of the same kind rather
+   * than a separate population. */
+  patchReplays: number;
 };
 
 /** A peek at one engine's document cache. */
@@ -1005,7 +1032,8 @@ export type Engine = {
    * a new one. Reconstructed documents go in too, which is the larger saving:
    * a patched revision costs a base document plus every patch over it.
    *
-   * Insertion order is the eviction order: a hit re-inserts, so the least
+   * Insertion order is the eviction order: a lookup that finds an entry
+   * re-inserts it, so the least
    * recently read entry goes first, against the byte budget and entry cap
    * below (see DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES for the sizing).
    */
@@ -1133,7 +1161,8 @@ export type OpenOptions = {
   /**
    * The {@link DocumentCacheCoordinator} bounding decoded documents across
    * the engines that share it (a Server's spaces). The cache reports to it
-   * on every access — a hit refreshes this engine's recency; an insertion
+   * on every access — a lookup that finds an entry refreshes this engine's
+   * recency; an insertion
    * also grows the total and trims least-recently-used engines first — so
    * the bound holds at every return whichever path reached the engine, a
    * retained engine's direct reads included.
@@ -1457,7 +1486,8 @@ export const validateDocumentCacheBounds = (
  * engine handed to the runner as much as a request through the Server. The
  * total in bytes is kept incrementally (an insertion adds, an eviction of
  * any kind subtracts, a closed engine leaves), and recency is a set of
- * engines in access order that a hit or an insertion re-inserts into. The
+ * engines in access order that a lookup finding an entry, or an insertion,
+ * re-inserts into. The
  * common under-budget insertion is therefore O(1), and over budget the trim
  * walks only its victims: least recently used engine first, oldest entries
  * first within it.
@@ -1500,7 +1530,8 @@ export class DocumentCacheCoordinator {
     return this.#engines.size;
   }
 
-  /** A hit in `engine`: it is now the most recently used. */
+  /** A lookup found an entry in `engine`: it is now the most recently
+   * used. */
   touched(engine: Engine): void {
     this.#engines.delete(engine);
     this.#engines.add(engine);
@@ -2027,7 +2058,13 @@ export const open = async (
     documentCacheBytes: 0,
     documentCacheBudgetBytes,
     documentCacheMaxEntries,
-    documentCacheStats: { hits: 0, misses: 0, evictions: 0 },
+    documentCacheStats: {
+      hits: 0,
+      misses: 0,
+      evictions: 0,
+      patchReplays: 0,
+      resumes: 0,
+    },
     ...(documentCacheCoordinator === undefined
       ? {}
       : { documentCacheCoordinator }),
@@ -2478,6 +2515,7 @@ const readStateForScopeKey = (
   let document: EntityDocument | null;
   const cached = cachedDocumentForRevision(engine, cacheKey);
   if (cached !== undefined) {
+    engine.documentCacheStats.hits++;
     document = cached.document;
   } else {
     engine.documentCacheStats.misses++;
@@ -5312,6 +5350,7 @@ const applyCommitTransaction = (
       return schema;
     });
   };
+  const requiredLabelDocs = new Set<string>();
   // A stored CFC envelope's `schemaHash` is a schema-document reference in
   // everything but spelling: the read side assembles the label envelope
   // through `cid:<schemaHash>`, so a commit that lands metadata without
@@ -5322,11 +5361,39 @@ const applyCommitTransaction = (
   // domain, so it polices backing, not format. A spelling no content can
   // verify against is simply unbackable, and a commit naming it refuses
   // here rather than reading as unreadable later.
+  //
+  // A version-2 envelope names labels by document as well: an entry whose
+  // `label` is a single-member `{ "$ref": "cid:<hash>" }` record reads its
+  // label out of that document, so the commit must back it too — by a
+  // set in this commit, whose content the `cid:` rule below has already
+  // verified, or by a stored document whose value hashes to the id. The
+  // same policy as the schema reference, with the document's own content
+  // hash as the identity check, since a label is not a schema and has no
+  // closure of its own. Those hashes collect into `requiredLabelDocs`,
+  // declared above the schema-reference collector so the two stay one
+  // scan.
   const collectCfcEnvelopeRef = (metadata: unknown): void => {
     if (metadata === null || typeof metadata !== "object") return;
     const schemaHash = (metadata as { schemaHash?: unknown }).schemaHash;
-    if (typeof schemaHash !== "string" || schemaHash.length === 0) return;
-    requiredSchemaRefs.add(schemaHash);
+    if (typeof schemaHash === "string" && schemaHash.length > 0) {
+      requiredSchemaRefs.add(schemaHash);
+    }
+    const entries = (metadata as { labelMap?: { entries?: unknown } })
+      .labelMap?.entries;
+    if (!Array.isArray(entries)) return;
+    for (const entry of entries) {
+      const label = (entry as { label?: unknown } | null)?.label;
+      if (label === null || typeof label !== "object") continue;
+      const keys = Object.keys(label);
+      const ref = (label as { $ref?: unknown }).$ref;
+      if (keys.length !== 1 || typeof ref !== "string") continue;
+      if (!ref.startsWith("cid:") || ref.length === "cid:".length) {
+        throw new ProtocolError(
+          `memory v2 commit writes a CFC label reference \`${ref}\` outside the cid: namespace`,
+        );
+      }
+      requiredLabelDocs.add(ref.slice("cid:".length));
+    }
   };
   // A document's reserved `schema` metadata member is a schema position
   // in the link spelling — a self-contained inline schema, or a single
@@ -5617,6 +5684,49 @@ const applyCommitTransaction = (
         );
       },
     });
+  }
+
+  // A label document's content is a record whose every member is
+  // `confidentiality` or `integrity` holding an array. The hash alone
+  // cannot tell a label from a record that merely verifies, and a reader
+  // resolving a malformed one would fail closed on every read of the
+  // envelope, so the shape is refused here, where the writer can act on it.
+  const isLabelDocumentShape = (value: unknown): boolean =>
+    value !== null && typeof value === "object" && !Array.isArray(value) &&
+    Object.entries(value).every(([key, member]) =>
+      (key === "confidentiality" || key === "integrity") &&
+      Array.isArray(member)
+    );
+  for (const hash of requiredLabelDocs) {
+    const id = `cid:${hash}`;
+    // A set in this commit reached here with its content verified against
+    // its id, so what remains to check of it is the shape.
+    const installed = cidSetsInCommit?.has(id)
+      ? (cidSetsInCommit.get(id) as { value?: unknown })?.value
+      : undefined;
+    const state = installed === undefined
+      ? readState(engine, { id, branch })
+      : undefined;
+    const storedInner = state?.document === null ||
+        state?.document === undefined
+      ? undefined
+      : (state.document as { value?: unknown }).value;
+    const content = installed ?? storedInner;
+    if (content === undefined) {
+      throw new ProtocolError(
+        `memory v2 commit references CFC label document ${id} that is neither included in the commit nor stored in the space`,
+      );
+    }
+    if (installed === undefined && taggedHashStringOf(content) !== hash) {
+      throw new ProtocolError(
+        `memory v2 commit references CFC label document ${id} whose stored content does not verify`,
+      );
+    }
+    if (!isLabelDocumentShape(content)) {
+      throw new ProtocolError(
+        `memory v2 commit references CFC label document ${id} whose content does not hold a label`,
+      );
+    }
   }
 
   // An identity commit leaves every document it writes as the space
@@ -7207,6 +7317,7 @@ const reconstructPatchedDocument = (
       ),
     );
     if (cached?.document !== undefined && cached.document !== null) {
+      engine.documentCacheStats.resumes++;
       document = cached.document;
       replayFrom = index + 1;
       break;
@@ -7234,6 +7345,7 @@ const reconstructPatchedDocument = (
   }
 
   for (const patch of patches.slice(replayFrom)) {
+    engine.documentCacheStats.patchReplays++;
     document = applyPatchToDocument(
       document,
       decodeStoredPatchList(patch.data),
@@ -7378,21 +7490,19 @@ const documentCacheKey = (
   `${branch}\u0000${id}\u0000${scopeKey}\u0000${seq}\u0000${opIndex}` +
   `\u0000${op}\u0000${dataLength}`;
 
-/** Looks up a revision and records its use without publishing staged entries. */
+/** Looks up a revision and records its use without publishing staged entries.
+ * The counters stay with the callers: serving a read and finding where a
+ * rebuild can resume are separate populations. */
 const cachedDocumentForRevision = (
   engine: Engine,
   key: string,
 ): DocumentCacheEntry | undefined => {
   const staged = engine.stagedDocumentCache?.get(key);
-  if (staged !== undefined) {
-    engine.documentCacheStats.hits++;
-    return staged;
-  }
+  if (staged !== undefined) return staged;
   const cached = engine.documentCache.get(key);
   if (cached !== undefined) {
     engine.documentCache.delete(key);
     engine.documentCache.set(key, cached);
-    engine.documentCacheStats.hits++;
     engine.documentCacheCoordinator?.touched(engine);
   }
   return cached;

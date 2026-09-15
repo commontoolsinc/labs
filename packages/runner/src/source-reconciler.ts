@@ -31,10 +31,12 @@
  * "Saying when a piece has stopped following its origin" in the lifecycle spec.
  */
 
+import { isDID } from "@commonfabric/identity/did";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
+import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 
 import type { Pattern } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
@@ -740,7 +742,7 @@ export class SourceReconciler {
       // The destination must hold the closure behind its creation revision.
       // A compiler hit still performs the destination's persistence work.
       await prepareSourceClosureVerification();
-      const key = JSON.stringify([space, target.href, advertised]);
+      const key = stringTupleKey([space, target.href, advertised]);
       const resolved = await this.#resolveSuppliedSource(
         key,
         target,
@@ -929,11 +931,11 @@ export class SourceReconciler {
       return "unusable";
     }
     const named = ref.space ?? destinationSpace;
-    if (!named.startsWith("did:")) {
+    if (!isDID(named)) {
       this.#unwatchFabricSource(resultCell);
       return "unusable";
     }
-    const sourceSpace = named as MemorySpace;
+    const sourceSpace = named;
     if (
       ref.host !== undefined &&
       !fabricAuthorityMatchesSpaceHost(

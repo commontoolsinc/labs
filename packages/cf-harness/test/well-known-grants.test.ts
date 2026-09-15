@@ -203,7 +203,11 @@ describe("well-known-grants", () => {
       // in run state and the table is the disagreement this closes.
 
       const { table, grants } = await mintWellKnownGrants(undefined, "run-4", [
-        { name: "email", ref: `${MAIL_REF}  `, source: MAIL_GRANT.source },
+        {
+          name: "email",
+          ref: `  ${MAIL_REF}#result@space`,
+          source: MAIL_GRANT.source,
+        },
       ]);
 
       // Against the canonical spelling itself, not against whatever the table

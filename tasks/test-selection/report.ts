@@ -725,7 +725,12 @@ const SELECTION_PROSE: Record<ReportedSelection, string> = {
     "against the budget, so nothing here was missed. This failure raises " +
     "its score, so the next change in this area will run it.",
   "withheld-flaky": "This pull request could not have run it: the store " +
-    "holds it back as too flaky to judge a change by.",
+    "holds it back as too flaky to judge a change by. It runs on the " +
+    "default branch anyway, where no execution of it passed at this " +
+    "commit and none failed in the previous run. What the store counts " +
+    "as a flake is a test passing and failing at one commit, which is " +
+    "not what either of those two runs saw. A failure of it does not " +
+    "fail the run on that branch, so nothing is red for this.",
   unrecorded: "This pull request's own run was to have run it and " +
     "recorded nothing for it, so what it did there is not known. A test " +
     "job that fails before it uploads leaves its share of a run's records " +
