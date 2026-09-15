@@ -116,15 +116,39 @@ interface StoredCellLabels {
 }
 
 /**
+ * The label a stored entry holds: the entry's own label when inline, else
+ * the value of the `cid:` label document its single-member `$ref` names,
+ * read out of the same store. A reference the store cannot back reads as
+ * an empty label here — this reader reports what a space holds and
+ * enforces nothing, and an entry with a path and no atoms is what says
+ * the label could not be read.
+ */
+const storedLabelOf = (
+  raw: Record<string, unknown>,
+  read: (id: string) => Record<string, unknown> | undefined,
+): Record<string, unknown> => {
+  const label = isRecord(raw.label) ? raw.label : {};
+  const ref = label.$ref;
+  if (typeof ref !== "string" || Object.keys(label).length !== 1) {
+    return label;
+  }
+  const content = read(ref)?.value;
+  return isRecord(content) ? content : {};
+};
+
+/**
  * The labelled paths of one stored document. The document's `cfc` path holds
  * a `labelMap` whose entries each name a path and the label sitting at it; a
  * document with no `cfc` path has no labels, which is a finding rather than a
  * failure. Several entries may name one path, differing in what produced them
  * and what they observed, and all of them are kept: the effective label at a
- * path is the join of its components, so dropping one changes the answer.
+ * path is the join of its components, so dropping one changes the answer. A
+ * label the entry holds by reference is read from the label document `read`
+ * resolves the reference to.
  */
 const labelsOf = (
   document: Record<string, unknown> | undefined,
+  read: (id: string) => Record<string, unknown> | undefined,
 ): StoredCellLabels => {
   const cfc = document?.cfc;
   if (!isRecord(cfc)) {
@@ -139,7 +163,7 @@ const labelsOf = (
     if (!isRecord(raw)) {
       continue;
     }
-    const label = isRecord(raw.label) ? raw.label : {};
+    const label = storedLabelOf(raw, read);
     const integrity = atomsOf(label.integrity);
     const transformedBy = integrity.find((atom) =>
       atom.type === TRANSFORMED_BY
@@ -453,7 +477,7 @@ const walkLinkedLabels = (
         continue;
       }
       const through = { path, into };
-      for (const entry of labelsOf(document).entries) {
+      for (const entry of labelsOf(document, read).entries) {
         const at = throughLink(through, entry.path);
         if (at !== undefined) {
           entries.push({ ...entry, path: at, source: id });
@@ -597,12 +621,13 @@ export const openSpaceLabelReader = async (
       if (outcome === undefined || outcome.status !== "present") {
         return { entries: [], linked: [], unread: "no-document" };
       }
-      const own = labelsOf(outcome.document);
+      const readSpaceDocument = (id: string) => {
+        const target = reconstructOutcome(opened, { id, scope: "space" });
+        return target.status === "present" ? target.document : undefined;
+      };
+      const own = labelsOf(outcome.document, readSpaceDocument);
       const { entries, linked, unreadPaths, truncation } = walkLinkedLabels(
-        (id) => {
-          const target = reconstructOutcome(opened, { id, scope: "space" });
-          return target.status === "present" ? target.document : undefined;
-        },
+        readSpaceDocument,
         { id: address.id, document: outcome.document },
         did,
         bounds,

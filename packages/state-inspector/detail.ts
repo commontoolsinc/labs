@@ -194,7 +194,29 @@ function atomLabel(a: unknown): string {
   return String(a);
 }
 
-function parseCfc(cfc: unknown): CfcSummary | undefined {
+/**
+ * The label a stored entry holds: its own when inline, else the value of
+ * the `cid:` label document its single-member `$ref` names, looked up
+ * among the space's documents. A reference the dump does not hold renders
+ * as an empty label.
+ */
+function storedLabelOf(
+  entry: Record<string, unknown>,
+  docs: Map<string, EntityDocument>,
+): Record<string, unknown> {
+  const label = isObjectNotArray(entry.label) ? entry.label : {};
+  const ref = label.$ref;
+  if (typeof ref !== "string" || Object.keys(label).length !== 1) {
+    return label;
+  }
+  const content = docs.get(ref)?.value;
+  return isObjectNotArray(content) ? content : {};
+}
+
+function parseCfc(
+  cfc: unknown,
+  docs: Map<string, EntityDocument>,
+): CfcSummary | undefined {
   if (!isObjectNotArray(cfc)) return undefined;
   const out: CfcSummary = {
     schemaHash: typeof cfc.schemaHash === "string" ? cfc.schemaHash : undefined,
@@ -206,7 +228,7 @@ function parseCfc(cfc: unknown): CfcSummary | undefined {
     : [];
   for (const e of entries) {
     if (!isObjectNotArray(e)) continue;
-    const label = isObjectNotArray(e.label) ? e.label : {};
+    const label = storedLabelOf(e, docs);
     out.entries.push({
       path: Array.isArray(e.path) ? (e.path as string[]).join("/") : "",
       confidentiality: Array.isArray(label.confidentiality)
@@ -429,7 +451,7 @@ function detailFromDoc(
   const ifc = isObjectNotArray(value) && "ifc" in value
     ? annotate(value.ifc)
     : undefined;
-  const cfc = parseCfc(doc.cfc);
+  const cfc = parseCfc(doc.cfc, ctx.docs);
 
   return {
     id,

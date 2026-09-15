@@ -8,6 +8,7 @@ import {
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import type { JSONSchema } from "@commonfabric/api";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { encodeMemoryBoundary } from "../v2.ts";
 import {
@@ -1916,6 +1917,78 @@ Deno.test("memory v2 delivers a label schema document that arrives after the doc
     });
     assertEquals(tracked.state.entities.get(targetKey)?.document, {
       value: labelSchema,
+    });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 delivers the label documents a version-2 CFC envelope references", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-label-document-delivery";
+  const referrer = "of:label-document-referrer";
+  const labelSchema = {
+    type: "object",
+    properties: { n: { type: "number" } },
+  } as const;
+  const labelSchemaId = `cid:${internSchemaAsTaggedHashString(labelSchema)}`;
+  // Two entries share one label document, so the delivery is one document
+  // per distinct reference rather than one per entry.
+  const label = { confidentiality: ["secret", "vaulted"] };
+  const labelId = `cid:${taggedHashStringOf(label)}`;
+  try {
+    applyCommit(engine, {
+      sessionId: "session:label-document-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: labelSchemaId,
+          value: { value: labelSchema },
+        }, {
+          op: "set",
+          id: labelId,
+          value: { value: label },
+        }, {
+          op: "set",
+          id: referrer,
+          value: {
+            value: { n: 1 },
+            cfc: {
+              version: 2,
+              schemaHash: labelSchemaId.slice("cid:".length),
+              labelMap: {
+                version: 1,
+                entries: [
+                  { path: ["n"], label: { $ref: labelId } },
+                  { path: [], origin: "derived", label: { $ref: labelId } },
+                ],
+              },
+            },
+          },
+        }],
+      },
+    });
+
+    // A reader of the referrer resolves its labels from the label document
+    // synchronously, so the document travels with the referrer: tracked
+    // beside the schema document, and delivered in the same result.
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: referrer,
+        selector: { path: [], schema: false },
+      }],
+    });
+    const schemaKey = `${space}/space/${labelSchemaId}` as const;
+    const labelKey = `${space}/space/${labelId}` as const;
+    assert(tracked.state.tracker.has(schemaKey));
+    assert(tracked.state.tracker.has(labelKey));
+    assertEquals(tracked.state.entities.get(labelKey)?.document, {
+      value: label,
     });
   } finally {
     close(engine);

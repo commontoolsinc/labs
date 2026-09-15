@@ -80,6 +80,8 @@ import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { referencedCfcLabelDocumentHashes } from "../cfc/label-documents.ts";
+import type { StoredLabelMapEntry } from "../cfc/types.ts";
 import {
   isPrimitiveCellLink,
   type NormalizedLink,
@@ -177,10 +179,10 @@ import {
 } from "./v2-watch.ts";
 
 /**
- * Syncs the CFC schema document a document's `cfc.schemaHash` names, and
- * resolves to the sync's error if it had one: the shape of
- * `StorageManager`'s own step, and of the syncer a test supplies in its
- * place.
+ * Syncs the CFC schema document a document's `cfc.schemaHash` names and the
+ * label documents its envelope references, and resolves to the sync's
+ * error if it had one: the shape of `StorageManager`'s own step, and of
+ * the syncer a test supplies in its place.
  */
 export type CfcSchemaDocumentSyncer = (
   space: MemorySpace,
@@ -191,6 +193,17 @@ export type CfcSchemaDocumentSyncer = (
 // part of the write; that read is dropped from its conflict set.
 const isCfcLabelPath = (path: readonly string[]): boolean =>
   path.length === 1 && path[0] === "cfc";
+
+// The `labelMap.entries` of a stored envelope, or none for a value that is
+// not envelope-shaped; the entries are not validated here, since only the
+// references among them are read.
+const cfcLabelMapEntriesOf = (
+  cfc: Record<string, unknown> | undefined,
+): StoredLabelMapEntry[] => {
+  const labelMap = cfc?.labelMap;
+  const entries = isObjectNotArray(labelMap) ? labelMap.entries : undefined;
+  return Array.isArray(entries) ? entries as StoredLabelMapEntry[] : [];
+};
 
 const isStrictPrefixPath = (
   prefix: readonly string[],
@@ -2559,9 +2572,13 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * Syncs the CFC schema document `document`'s `cfc.schemaHash` names, and
-   * resolves to the sync's error if it had one; a document naming none
-   * resolves at once. A syncer a test supplied stands in for the whole step.
+   * Syncs the CFC schema document `document`'s `cfc.schemaHash` names and
+   * every label document its envelope references, in parallel, and
+   * resolves to the first sync error among them; a document naming none
+   * resolves at once. A reader of the envelope resolves its labels
+   * synchronously from the replica, so the label documents are pulled
+   * beside the schema document rather than on first read. A syncer a test
+   * supplied stands in for the whole step.
    */
   async #syncCfcSchemaDocument(
     space: MemorySpace,
@@ -2572,15 +2589,24 @@ export class StorageManager implements IStorageManager {
       return syncer(space, document);
     }
     const cfc = isObjectNotArray(document?.cfc) ? document.cfc : undefined;
+    const ids: URI[] = [];
     const schemaHash = cfc?.schemaHash;
-    if (typeof schemaHash !== "string" || schemaHash.length === 0) {
-      return undefined;
+    if (typeof schemaHash === "string" && schemaHash.length > 0) {
+      ids.push(`cid:${schemaHash}` as URI);
     }
-    const result = await this.open(space).sync(`cid:${schemaHash}` as URI, {
-      path: [],
-      schema: false,
-    });
-    return result.error;
+    for (
+      const hash of referencedCfcLabelDocumentHashes(
+        cfcLabelMapEntriesOf(cfc),
+      )
+    ) {
+      ids.push(`cid:${hash}` as URI);
+    }
+    if (ids.length === 0) return undefined;
+    const provider = this.open(space);
+    const results = await Promise.all(
+      ids.map((id) => provider.sync(id, { path: [], schema: false })),
+    );
+    return results.find((result) => result.error !== undefined)?.error;
   }
 
   /**

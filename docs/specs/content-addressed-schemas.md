@@ -158,6 +158,18 @@ A record written before code documents existed holds its code inline as a
 string, and readers accept both forms. Nothing rewrites an existing record;
 only new writes use a code document.
 
+### Label documents
+
+A label document is a `cid:` document whose value is one canonical CFC
+label, named by a version-2 CFC envelope's `labelMap` entry in place of the
+label itself. It is the third kind of content the namespace holds, under the
+same identity check (the general content hash of its value), the same
+immutability and space-scope rules, and the same write-side and read-side
+delivery guarantees, with the traversal's `cfc` seam loading each one beside
+the envelope's schema document.
+[content-addressed-cfc-labels.md](content-addressed-cfc-labels.md) is the
+design.
+
 ### Decomposition
 
 Decomposition turns one self-contained schema into a set of schema documents

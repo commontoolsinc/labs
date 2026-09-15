@@ -43,6 +43,7 @@ was last checked against the code.
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcTriggerReadGating`](#cfctriggerreadgating)                             | `RuntimeOptions.cfcTriggerReadGating`                                                                                                           | `false`                                                                              | Bernhard Seefeld (#4488)                              | move toward `true`                                                                                                                                                                                                                | implemented, staged rollout                                                     |
 | [`cfcDecomposedEnvelopes`](#cfcdecomposedenvelopes)                         | `RuntimeOptions.cfcDecomposedEnvelopes`                                                                                                         | `false`                                                                              | Robin McCollum (CT-2062)                              | move toward `true` once every deployed reader resolves the references a stored root carries                                                                                                                                      | implemented, off by default                                                     |
+| [`cfcContentAddressedLabels`](#cfccontentaddressedlabels)                   | `RuntimeOptions.cfcContentAddressedLabels`                                                                                                      | `false`                                                                              | Bernhard Seefeld                                      | move toward `true` once every deployed reader interprets version-2 envelopes                                                                                                                                                     | implemented, off by default                                                     |
 | [`cfcPolicyEvaluation`](#cfcpolicyevaluation)                               | `RuntimeOptions.cfcPolicyEvaluation`                                                                                                            | `off`                                                                                | Bernhard Seefeld (#4566)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcDeclaredMonotonicity`](#cfcdeclaredmonotonicity)                       | `RuntimeOptions.cfcDeclaredMonotonicity`                                                                                                        | `off`                                                                                | Bernhard Seefeld (#4647)                              | `observe` first, then `enforce` (must soak before the §8.12.7 route 2b event ships)                                                                                                                                               | implemented, off by default                                                     |
 | [`cfcPrefixProvenanceStats`](#cfcprefixprovenancestats)                     | `RuntimeOptions.cfcPrefixProvenanceStats` (per-deployment; not env-wired)                                                                       | `false`                                                                              | Bernhard Seefeld (#4623)                              | stays a measurement opt-in; fold in or remove after Stage 0                                                                                                                                                                       | implemented, off by default, measurement only                                   |
@@ -734,8 +735,8 @@ is planned in
 [`docs/plans/cfc-llm-sink-admission.md`](../plans/cfc-llm-sink-admission.md).
 The bundle deliberately leaves the
 enforcement-mode pin at `enforce-explicit` (strict stays a per-session host
-raise), and leaves `cfcDecomposedEnvelopes`, `cfcTrustConfig`, and
-`cfcPrefixProvenanceStats` alone. It is opt-in per runtime, never a fleet
+raise), and leaves `cfcDecomposedEnvelopes`, `cfcContentAddressedLabels`,
+`cfcTrustConfig`, and `cfcPrefixProvenanceStats` alone. It is opt-in per runtime, never a fleet
 flip: cf-harness exposes it for its fabric session as `--fabric-cfc-posture`
 (`CF_HARNESS_FABRIC_CFC_POSTURE`); toolshed publishes whatever CFC posture its
 Runtime resolved on `/api/meta` (`lib/cfc-posture.ts`), so a deployment's
@@ -932,6 +933,37 @@ the per-epic implementation notes).
   how old a reader can be either way.
 - **Path to removal.** Once the default flips, the dial retires and the
   decomposed spelling becomes the only one the persist path emits.
+
+### `cfcContentAddressedLabels`
+
+- **Toggle via.** `RuntimeOptions.cfcContentAddressedLabels` (a plain
+  boolean).
+- **Added by.** Bernhard Seefeld, in "content-addressed CFC labels"
+  (2026-09-15).
+- **Purpose.** When on, the envelope persist path stores version-2
+  envelopes: each `labelMap` entry keeps its `path`, `origin`, and
+  `observes` inline and holds its `label` as a reference to a
+  content-addressed label document whenever the label's canonical JSON
+  exceeds the inline limit, so every envelope carrying the same label
+  shares one document per space
+  (`docs/specs/content-addressed-cfc-labels.md`). Off stores version 1,
+  every label inline. Reading resolves either version to the same
+  metadata, space-first with content verification and the realm's label
+  registry supplying what the space does not hold, and fails closed on a
+  reference nothing backs; the storage commit boundary refuses a commit
+  whose envelope references a label document it neither includes nor the
+  space stores. With the flag on, a stored version-1 envelope is rewritten
+  in version 2 on its next persist even when its labels are unchanged,
+  which is how a store migrates without a data migration.
+- **Current default and planned end state.** `false` by default. The target
+  is `true`; version-1 envelopes remain readable indefinitely.
+- **Status on 2026-09-15.** Implemented, off by default. The flip is gated
+  on deployment reach: a reader that predates version 2 fails closed on a
+  version-2 envelope through `UnknownCfcMetadataVersionError`, which is
+  correct and also unusable, so every deployed reader must interpret
+  version 2 before any space sees one.
+- **Path to removal.** Once the default flips, the dial retires and version
+  2 becomes the only spelling the persist path emits.
 
 ### `cfcPolicyEvaluation`
 

@@ -55,6 +55,7 @@ import type { Cancel } from "../cancel.ts";
 import { Cell } from "../cell.ts";
 import type {
   CfcAddress,
+  CfcContentAddressedLabels,
   CfcDeclaredMonotonicityMode,
   CfcDeclaredWideningExemption,
   CfcDecomposedEnvelopes,
@@ -1842,6 +1843,13 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   setCfcTriggerReadGating(enabled: CfcTriggerReadGating): void;
 
   setCfcDecomposedEnvelopes(enabled: CfcDecomposedEnvelopes): void;
+
+  /**
+   * Selects the envelope version the persist path writes: version 2, whose
+   * labels are content-addressed label documents, or version 1 with every
+   * label inline. A spelling dial: neither setting is pinned.
+   */
+  setCfcContentAddressedLabels(enabled: CfcContentAddressedLabels): void;
 
   /**
    * Set the exchange-rule policy evaluation dial (Epic B5, spec §4.4.5).

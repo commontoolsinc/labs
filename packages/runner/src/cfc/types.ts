@@ -363,19 +363,59 @@ export type LabelMapEntry = {
 };
 
 /**
+ * A stored envelope's `version`: the format gate every reader checks
+ * first. Version 1 holds every label inline; version 2 may hold a label as
+ * a reference to a content-addressed label document
+ * (`docs/specs/content-addressed-cfc-labels.md`). A value outside this
+ * union is an envelope the build cannot interpret, and every reader fails
+ * closed on it rather than treating the document as unlabeled.
+ */
+export type CfcMetadataVersion = 1 | 2;
+
+/**
+ * A label held by reference in a stored version-2 envelope: a single-member
+ * record naming the `cid:` label document whose value is the label. An
+ * inline label never carries `$ref`, so the key alone tells the two apart.
+ */
+export type CfcLabelReference = { readonly $ref: string };
+
+/**
+ * A `labelMap` entry as it is stored: {@link LabelMapEntry}, except that in
+ * a version-2 envelope the label may be a {@link CfcLabelReference}.
+ */
+export type StoredLabelMapEntry = Omit<LabelMapEntry, "label"> & {
+  label: IFCLabel | CfcLabelReference;
+};
+
+/**
+ * A CFC envelope as it is stored at a document's reserved `cfc` member.
+ * Readers resolve it to a {@link CfcMetadata} — every label inline —
+ * before any consumer walks it; the stored spelling is visible only to
+ * the persist path, which needs to know which version a document holds.
+ */
+export type StoredCfcMetadata = {
+  version: CfcMetadataVersion;
+  schemaHash: string;
+  labelMap: {
+    version: 1;
+    entries: Array<StoredLabelMapEntry>;
+  };
+};
+
+/**
  * `schemaHash` names the envelope's ROOT schema document. The root may be
  * self-contained (the inline form) or reference further documents through
  * `$ref: cid:` members (the decomposed form) — one read policy covers
  * both: every external reference must resolve, verified against its own
  * address, and a member that cannot is an unreadable envelope (fail
  * closed). The storage commit boundary validates the whole closure at
- * write time, so a committed envelope's references are always backed. A
- * `version` outside this union is an envelope the build cannot
- * interpret, and every reader fails closed on it rather than treating
- * the document as unlabeled.
+ * write time, so a committed envelope's references are always backed.
+ * Label references resolve under the same policy, so a consumer holding a
+ * `CfcMetadata` holds every label inline; `version` records which stored
+ * spelling it was resolved from.
  */
 export type CfcMetadata = {
-  version: 1;
+  version: CfcMetadataVersion;
   schemaHash: string;
   labelMap: {
     version: 1;
@@ -730,6 +770,20 @@ export type CfcDecomposedEnvelopes = boolean;
 export const DEFAULT_CFC_DECOMPOSED_ENVELOPES: CfcDecomposedEnvelopes = false;
 
 /**
+ * Whether the envelope persist path stores version-2 envelopes, whose
+ * labels above the inline limit are references to content-addressed label
+ * documents (`docs/specs/content-addressed-cfc-labels.md`). Off stores
+ * version 1, every label inline. Reading resolves either version. Ships
+ * behind a flag because a reader that predates version 2 fails closed on
+ * it, which is correct and also unusable: every deployed reader must
+ * interpret version 2 before any space sees one.
+ */
+export type CfcContentAddressedLabels = boolean;
+
+export const DEFAULT_CFC_CONTENT_ADDRESSED_LABELS: CfcContentAddressedLabels =
+  false;
+
+/**
  * Exchange-rule policy evaluation dial (Epic B5, spec §4.4.5/§5.3),
  * orthogonal to the enforcement ladder: `off` = the gates decide on raw
  * labels exactly as before this dial existed; `observe` = evaluate every
@@ -810,6 +864,7 @@ export type CfcTxState = {
   writeFloorMode: CfcWriteFloorMode;
   triggerReadGating: CfcTriggerReadGating;
   decomposedEnvelopes: CfcDecomposedEnvelopes;
+  contentAddressedLabels: CfcContentAddressedLabels;
   policyEvaluationMode: CfcPolicyEvaluationMode;
   labelMetadataProtectionMode: CfcLabelMetadataProtectionMode;
   declaredMonotonicityMode: CfcDeclaredMonotonicityMode;

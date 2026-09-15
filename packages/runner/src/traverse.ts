@@ -2819,14 +2819,43 @@ function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
 }
 
 /**
- * Loads the schema document a document's `cfc` envelope names, and nothing
- * else of its metadata, into the traversal. A reader of a labeled document
- * checks what it may read against that schema, so the document is owed it
- * wherever a walk reaches it, named or not. The `pattern`, `argument`, and
- * `result` links and the `internal` manifest are data on the document; a
- * caller that wants a target names it. The target enters the schema
- * tracker, so an absent one arrives when it is written. A document without
- * an envelope loads nothing.
+ * The same-space `cid:` links a `cfc` envelope names its label documents
+ * by: one per entry whose `label` is a single-member `{ "$ref": "cid:…" }`
+ * record, deduplicated. A version-1 envelope, whose labels are inline,
+ * names none.
+ */
+function cfcLabelDocumentLinks(envelope: unknown): SigilLink[] {
+  if (!isObjectOrArray(envelope)) return [];
+  const labelMap = envelope["labelMap"];
+  const entries = isObjectOrArray(labelMap) ? labelMap["entries"] : undefined;
+  if (!Array.isArray(entries)) return [];
+  const links: SigilLink[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const label = isObjectOrArray(entry) ? entry["label"] : undefined;
+    if (!isObjectOrArray(label) || Object.keys(label).length !== 1) continue;
+    const ref = label["$ref"];
+    if (typeof ref !== "string" || !ref.startsWith("cid:") || seen.has(ref)) {
+      continue;
+    }
+    seen.add(ref);
+    links.push(
+      linkRefFrom<CellLinkRefPayload>({ id: ref as URI, scope: "space" }),
+    );
+  }
+  return links;
+}
+
+/**
+ * Loads the schema document a document's `cfc` envelope names, and the
+ * label documents it references, and nothing else of its metadata, into
+ * the traversal. A reader of a labeled document checks what it may read
+ * against that schema and resolves its labels from those documents, so
+ * the document is owed them wherever a walk reaches it, named or not. The
+ * `pattern`, `argument`, and `result` links and the `internal` manifest
+ * are data on the document; a caller that wants a target names it. Each
+ * target enters the schema tracker, so an absent one arrives when it is
+ * written. A document without an envelope loads nothing.
  */
 export function loadLabelSchemaDoc(
   tx: IExtendedStorageTransaction,
@@ -2836,24 +2865,39 @@ export function loadLabelSchemaDoc(
   const doc = valueEntry.value as Immutable<JSONObject>;
   if (!isObjectOrArray(doc) || !("cfc" in doc)) return;
   const envelope = doc["cfc"];
-  const linkObj = isSigilLink(envelope)
+  const schemaLink = isSigilLink(envelope)
     ? envelope as SigilLink
     : cfcMetaToSigilLink(envelope);
-  if (linkObj === undefined) {
+  if (schemaLink === undefined) {
     logger.warn(
       "traverse",
       () => ["Invalid `cfc` envelope in", valueEntry.address],
     );
     return;
   }
+  for (const linkObj of [schemaLink, ...cfcLabelDocumentLinks(envelope)]) {
+    trackMetadataDocument(tx, linkObj, valueEntry, context);
+  }
+}
+
+/**
+ * Helper for `loadLabelSchemaDoc`, which tracks and reads one document a
+ * `cfc` envelope names. A metadata link is a same-space link
+ * (05-queries.md): one resolving to another space selects nothing — the
+ * per-space engine could not read it.
+ */
+function trackMetadataDocument(
+  tx: IExtendedStorageTransaction,
+  linkObj: SigilLink,
+  valueEntry: IMemorySpaceAttestation,
+  context: TraversalContext,
+): void {
   const link = parseLink(linkObj, valueEntry.address)!;
-  // A metadata link is a same-space link (05-queries.md): one resolving to
-  // another space selects nothing — the per-space engine could not read it.
   if (link.space !== valueEntry.address.space) {
     logger.warn(
       "traverse",
       () => [
-        "Foreign-space `cfc` schema link ignored in",
+        "Foreign-space `cfc` metadata link ignored in",
         valueEntry.address,
         "->",
         link.space,

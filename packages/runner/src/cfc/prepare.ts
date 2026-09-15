@@ -51,8 +51,12 @@ import {
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
+import { storedLabelMapEntries } from "./label-documents.ts";
 import {
   isCfcMetadata,
+  isKnownCfcMetadataVersion,
+  resolveStoredCfcMetadata,
+  StoredCfcMetadataError,
   UnknownCfcMetadataVersionError,
   UnreadableCfcMetadataError,
 } from "./metadata.ts";
@@ -157,6 +161,7 @@ import {
   type LabelMapEntry,
   type LabelObservationClass,
   runtimeWritePolicyAuthorization,
+  type StoredCfcMetadata,
   type WritePolicyInput,
 } from "./types.ts";
 import {
@@ -1143,14 +1148,25 @@ const storedMetadataFor = (
     return undefined;
   }
   const version = (metadata as { version?: unknown }).version;
-  if (version !== undefined && version !== 1) {
+  if (version !== undefined && !isKnownCfcMetadataVersion(version)) {
     // Fail closed on a format this build postdates: reading the envelope
-    // as version 1 would walk a schema it cannot interpret and silently
-    // under-label. Callers on the commit path turn this into an
+    // as a version it knows would walk labels it cannot interpret and
+    // silently under-label. Callers on the commit path turn this into an
     // unreadable envelope (rejected in enforcing modes) or abort loudly.
     throw new UnknownCfcMetadataVersionError(version);
   }
-  if (!isCfcMetadata(metadata) || !isWalkableLabelMap(metadata)) {
+  if (!isCfcMetadata(metadata)) {
+    throw new UnreadableCfcMetadataError(id);
+  }
+  // A version-2 envelope names labels by document; every consumer below
+  // walks labels inline, so they resolve here — through this transaction,
+  // under the same read policy — and a reference nothing backs throws the
+  // fail-closed resolution error, which the commit path records as an
+  // unreadable envelope.
+  const resolved = resolveStoredCfcMetadata(tx, space, metadata, {
+    meta: INTERNAL_VERIFIER_META,
+  });
+  if (!isWalkableLabelMap(resolved)) {
     // A record at the reserved position naming a version this build
     // interprets, carrying a label map it cannot walk. Every resolution
     // reads `labelMap.entries` and matches each entry's `path`, so the
@@ -1158,7 +1174,7 @@ const storedMetadataFor = (
     // first reaches the part that is missing.
     throw new UnreadableCfcMetadataError(id);
   }
-  return metadata;
+  return resolved;
 };
 
 // Whether this transaction's view of the document has a root value.
@@ -5388,10 +5404,7 @@ export const loadStoredCfcEnvelope = (
     // An envelope this build cannot interpret is a property of the DOCUMENT,
     // not of the caller's transaction, so it lands in the unreadable arm of
     // the taxonomy; a transaction read failure keeps propagating.
-    if (
-      error instanceof UnknownCfcMetadataVersionError ||
-      error instanceof UnreadableCfcMetadataError
-    ) {
+    if (error instanceof StoredCfcMetadataError) {
       return { status: "unreadable", reason: error.message };
     }
     throw error;
@@ -7848,8 +7861,12 @@ export const prepareBoundaryCommit = (
     const envelopeRoot = state.decomposedEnvelopes
       ? decomposeEnvelopeRoot(schemaAndHash.schema)
       : undefined;
+    // The flag decides the envelope VERSION the same way: version 2 names
+    // each label above the inline limit by content-addressed document,
+    // version 1 holds every label inline, and reading resolves either to
+    // the same metadata (`docs/specs/content-addressed-cfc-labels.md`).
     const metadata: CfcMetadata = {
-      version: 1,
+      version: state.contentAddressedLabels ? 2 : 1,
       schemaHash: envelopeRoot?.rootHash ?? schemaAndHash.taggedHashString,
       labelMap: {
         version: 1,
@@ -7876,8 +7893,15 @@ export const prepareBoundaryCommit = (
     // existing.schemaHash, and that schema document was already loaded (and
     // content-verified) via loadSchemaDocument above — it exists, so there is
     // nothing to ensure.
+    //
+    // The stored VERSION is compared beside the labels: an envelope whose
+    // labels are unchanged but whose spelling is not the one the flag
+    // selects is rewritten in the selected spelling, which is how a store
+    // migrates between versions — each document at most once, on its next
+    // persist — and the only case equal labels do not skip.
     if (
       existing !== undefined &&
+      existing.version === metadata.version &&
       deepEqual(
         canonicalizeCfcMetadata(existing),
         canonicalizeCfcMetadata(metadata),
@@ -7901,6 +7925,27 @@ export const prepareBoundaryCommit = (
         envelopeRoot.rootDocument,
       );
     }
+    // A version-2 envelope stages a label document for every label above
+    // the inline limit into THIS transaction, so the commit carries what
+    // the envelope references (the write-side obligation the commit
+    // boundary enforces); the staging dedupes per transaction and elides
+    // documents the space's server already holds.
+    const storedEnvelope: StoredCfcMetadata = metadata.version === 2
+      ? {
+        ...metadata,
+        labelMap: {
+          version: 1,
+          entries: storedLabelMapEntries(
+            metadata.labelMap.entries,
+            (content) =>
+              tx.stageContentAddressedDocument(
+                space,
+                content as unknown as FabricValue,
+              ),
+          ),
+        },
+      }
+      : metadata;
     tx.writeOrThrow({
       space,
       id,
@@ -7910,7 +7955,7 @@ export const prepareBoundaryCommit = (
       // System-owned embedded metadata write. Boundary evaluation is driven by
       // user-surface reads/writes plus explicit policy inputs, not by recursive
       // attempted-target tracking of this internal metadata update.
-    }, metadata);
+    }, storedEnvelope);
   }
   reasons.push(...verifySinkRequestCeilings(tx));
   // Single-use grant consumption (design §2.2): stage every claim the

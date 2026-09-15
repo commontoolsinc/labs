@@ -5322,11 +5322,38 @@ const applyCommitTransaction = (
   // domain, so it polices backing, not format. A spelling no content can
   // verify against is simply unbackable, and a commit naming it refuses
   // here rather than reading as unreadable later.
+  //
+  // A version-2 envelope names labels by document as well: an entry whose
+  // `label` is a single-member `{ "$ref": "cid:<hash>" }` record reads its
+  // label out of that document, so the commit must back it too — by a
+  // set in this commit, whose content the `cid:` rule below has already
+  // verified, or by a stored document whose value hashes to the id. The
+  // same policy as the schema reference, with the document's own content
+  // hash as the identity check, since a label is not a schema and has no
+  // closure of its own.
+  const requiredLabelDocs = new Set<string>();
   const collectCfcEnvelopeRef = (metadata: unknown): void => {
     if (metadata === null || typeof metadata !== "object") return;
     const schemaHash = (metadata as { schemaHash?: unknown }).schemaHash;
-    if (typeof schemaHash !== "string" || schemaHash.length === 0) return;
-    requiredSchemaRefs.add(schemaHash);
+    if (typeof schemaHash === "string" && schemaHash.length > 0) {
+      requiredSchemaRefs.add(schemaHash);
+    }
+    const entries = (metadata as { labelMap?: { entries?: unknown } })
+      .labelMap?.entries;
+    if (!Array.isArray(entries)) return;
+    for (const entry of entries) {
+      const label = (entry as { label?: unknown } | null)?.label;
+      if (label === null || typeof label !== "object") continue;
+      const keys = Object.keys(label);
+      const ref = (label as { $ref?: unknown }).$ref;
+      if (keys.length !== 1 || typeof ref !== "string") continue;
+      if (!ref.startsWith("cid:") || ref.length === "cid:".length) {
+        throw new ProtocolError(
+          `memory v2 commit writes a CFC label reference \`${ref}\` outside the cid: namespace`,
+        );
+      }
+      requiredLabelDocs.add(ref.slice("cid:".length));
+    }
   };
   // A document's reserved `schema` metadata member is a schema position
   // in the link spelling — a self-contained inline schema, or a single
@@ -5559,6 +5586,28 @@ const applyCommitTransaction = (
   // sees: an assembly failure downstream means the patch gap documented
   // above, out-of-band tampering, or a store that predates this
   // validation.
+  for (const hash of requiredLabelDocs) {
+    const id = `cid:${hash}`;
+    // A set in this commit reached here with its content verified against
+    // its id, so it backs the reference by itself.
+    if (cidSetsInCommit?.has(id)) continue;
+    const state = readState(engine, { id, branch });
+    const storedInner = state?.document === null ||
+        state?.document === undefined
+      ? undefined
+      : (state.document as { value?: unknown }).value;
+    if (storedInner === undefined) {
+      throw new ProtocolError(
+        `memory v2 commit references CFC label document ${id} that is neither included in the commit nor stored in the space`,
+      );
+    }
+    if (taggedHashStringOf(storedInner) !== hash) {
+      throw new ProtocolError(
+        `memory v2 commit references CFC label document ${id} whose stored content does not verify`,
+      );
+    }
+  }
+
   if (requiredSchemaRefs.size > 0) {
     const cache = schemaDocCache(engine);
     // The hashes this commit's own sets backed, for the refusal's wording,
