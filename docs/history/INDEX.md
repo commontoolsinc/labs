@@ -4,6 +4,13 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Loom person-inbox policy budget](development/performance/2026-09-15-loom-person-inbox-policy-budget.md) — nine retained-candidate policy preparations below 200 ms, per-node click attribution, full runtime validation, interleaved raw measurements, and rejected preconstruction experiments exposing quadratic label coverage.
+- [Loom person-inbox policy optimization rounds](development/performance/2026-09-14-loom-person-inbox-policy-rounds.md) — four measured runtime optimization rounds, metadata-reuse follow-up, full runner validation, and a final same-thread comparison with raw load records and retained failures.
+- [Loom person-inbox policy processing](development/performance/2026-09-14-loom-person-inbox-policy-processing.md) — repeated read and label counts, generated provenance, cache invalidation boundaries, and a validated offline attribution memoization replay.
+- [Loom person-inbox click attribution](development/performance/2026-09-14-loom-person-inbox-click-attribution.md) — combined pattern/runtime worker and browser profiles identify dependency reads, commit policy verification, and small style/layout cost.
+- [Loom person-inbox pattern and runtime improvements](development/performance/2026-09-14-loom-person-inbox-improvements.md) — interleaved real-data improvement measurements, local pattern/runtime commits, validation, and incomplete selector experiments with readiness and source-window failures.
+- [2026-09-14-loom-person-inbox-thread-open.md](development/performance/2026-09-14-loom-person-inbox-thread-open.md) — real-data Loom person-inbox thread opening across pinned and main labs browser bundles: five interleaved repetitions, identical 50-message content, the remaining duplicate pattern derivation and CFC label-view costs, and the full load record.
+
 - [Stale derived-state correction decision](development/2026-09-14-derived-state-correction.md) — approval and exact fixture scope for two calculated lunch-poll status corrections, consequences, and alternatives.
 
 - [Lazy-off integration evidence](development/performance/2026-09-14-lazy-off-integration.md) — isolated runner, runtime-client, and shell/browser integration results with eager materialization, explicit execution postures, and retirement evidence limits.
