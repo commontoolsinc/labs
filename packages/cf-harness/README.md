@@ -1246,13 +1246,18 @@ it opaque. The authorized resolution still requires table membership, a string
 value, and the same Fabric space, with a structured refusal naming the reference
 on any miss before any child exists. The text is injected into the child's
 context as a `<skill_context source="handle:<token>">` block beside the
-profile's registry preload. The parent never reads the text, and the child never
-holds the handle. The return path is mediated too: every parent-facing return of
-such a delegation has the exact injected payload (and its JSON-escaped spelling)
-scrubbed to fixed inert text, so a child that echoes its instructions verbatim
-cannot walk the payload into the parent transcript. The scrub is deliberately no
-more than that — the child exists to act on the skill, so what it did because of
-the text is its ordinary, policy-mediated output.
+profile's registry preload. For acquired text, the header also carries
+`pin="owner/repo/slug@<commit sha>"` from the acquisition record. The child uses
+that pin as the `skill` argument to `run_skill_script`. When a name or handle
+fails registry lookup in a run holding acquired skills, the error points to the
+pin in this header or the `acquire_skill` output. The parent never reads the
+text, and the child never holds the handle. The return path is mediated too:
+every parent-facing return of such a delegation has the exact injected payload
+(and its JSON-escaped spelling) scrubbed to fixed inert text, so a child that
+echoes its instructions verbatim cannot walk the payload into the parent
+transcript. The scrub is deliberately no more than that — the child exists to
+act on the skill, so what it did because of the text is its ordinary,
+policy-mediated output.
 
 The tree the registry scans comes from `--skills-root`, or, when the run names
 none and is running out of a labs checkout, from that checkout's own `skills/`
