@@ -136,6 +136,19 @@ describe("calibrate", () => {
       expect(seen.setup.size).toBe(0);
     });
 
+    it("passes over a lane measurement of something else entirely", () => {
+      // Everything a lane writes about itself carries the same prefix, so
+      // a kind of measurement this does not read arrives here rather than
+      // anywhere else. Skipping it is what lets a lane record something
+      // new without the fit reading it as a batch.
+      const seen = observationsOf([{
+        run: "a",
+        records: [measured(`${LANE_MEASUREMENT_PREFIX}prologue`, 41.2)],
+      }]);
+      expect(seen.setup.size).toBe(0);
+      expect(seen.batches).toEqual([]);
+    });
+
     it("passes over a record that is not a lane measuring itself", () => {
       const seen = observationsOf([{
         run: "a",
