@@ -159,38 +159,44 @@ export const isSkillScriptAllowlisted = (
 };
 
 /**
- * What a run is told about the acquired-skill scripts its operator allowed,
- * or `undefined` where none were.
+ * What a run is told about the skill scripts its operator allowed, or
+ * `undefined` where none were.
  *
- * An entry keys on the pin its bytes were read at, and a run that acquires a
- * skill by name alone gets whatever the default branch holds when it runs —
- * which is the allowed bytes only by luck. Naming the allowed pins is what
- * lets a run acquire the bytes that were allowed, so this says the pin and
- * says to acquire by it.
+ * Which script may run is the operator's decision and the run has no other
+ * way to learn it: the allowlist reaches the tool, not the model, so a run
+ * never told it can only guess at what it is permitted to do.
  *
- * Registry entries are left out. Those are addressed by a skill's name, which
- * the run's own registry already offers, and nothing about them is a thing the
- * model could otherwise not find out.
+ * An acquired entry additionally carries the commit its bytes were read at,
+ * and that commit exists nowhere else — a run acquiring the skill by name
+ * alone gets whatever the default branch holds when it runs, which is the
+ * allowed bytes only by luck. So the acquired entries are said with the
+ * instruction to acquire by the whole pin.
  */
 export const allowedSkillScriptsContextMessage = (
   allowlist: readonly HarnessAllowedSkillScript[] | undefined,
 ): string | undefined => {
-  const acquired = (allowlist ?? []).filter((script) =>
-    parseAcquiredSkillPin(script.skill) !== undefined
-  );
-  if (acquired.length === 0) {
+  const scripts = allowlist ?? [];
+  if (scripts.length === 0) {
     return undefined;
   }
+  const acquired = scripts.filter((script) =>
+    parseAcquiredSkillPin(script.skill) !== undefined
+  );
   return [
-    "Operator-allowed acquired skill scripts:",
-    ...acquired.map((script) => `- ${script.skill} -> ${script.path}`),
+    "Operator-allowed skill scripts:",
+    ...scripts.map((script) => `- ${script.skill} -> ${script.path}`),
     "",
-    "Each line is a skill pinned to an exact commit, and a script of it that " +
-    "may run. Pass the whole pin as the `acquire_skill` id, so what you " +
-    "acquire is what was allowed; acquiring the same skill by name alone " +
-    "resolves to the repository's current default-branch head, which is " +
-    "these bytes only by coincidence. A child given the resulting handle " +
-    "receives `run_skill_script` for the listed scripts of that pin and for " +
-    "nothing else.",
+    "These are the only scripts `run_skill_script` will run, and a script " +
+    "absent from this list is refused however it is named.",
+    ...(acquired.length === 0 ? [] : [
+      "",
+      "The entries carrying `@<commit sha>` are acquired skills, pinned to " +
+      "exact bytes. Pass the whole pin as the `acquire_skill` id, so what " +
+      "you acquire is what was allowed; acquiring the same skill by name " +
+      "alone resolves to the repository's current default-branch head, which " +
+      "is these bytes only by coincidence. A child given the resulting " +
+      "handle receives `run_skill_script` for the listed scripts of that pin " +
+      "and for nothing else.",
+    ]),
   ].join("\n");
 };

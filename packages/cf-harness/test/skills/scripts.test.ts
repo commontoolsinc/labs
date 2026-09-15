@@ -174,14 +174,22 @@ describe("scripts.ts", () => {
       ).toContain("`acquire_skill` id");
     });
 
-    it("returns nothing for an allowlist holding only registry entries", () => {
-      // A registry skill is addressed by its name, which the run's own
-      // registry already offers.
+    it("names a registry entry too, which the run can learn nowhere else", () => {
+      const message = allowedSkillScriptsContextMessage([
+        { skill: "agent-browser", path: "scripts/run.ts" },
+      ]);
+
+      expect(message).toContain("- agent-browser -> scripts/run.ts");
+    });
+
+    it("says nothing about acquiring for a registry-only allowlist", () => {
+      // There is no pin to acquire by, so the instruction would name a
+      // spelling none of the entries has.
       expect(
         allowedSkillScriptsContextMessage([
           { skill: "agent-browser", path: "scripts/run.ts" },
         ]),
-      ).toBeUndefined();
+      ).not.toContain("`acquire_skill` id");
     });
 
     it("returns nothing for an empty or absent allowlist", () => {

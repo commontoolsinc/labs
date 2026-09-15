@@ -1,9 +1,17 @@
 /**
- * Host-side resolution of a mutable skills.sh discovery hit to the immutable
- * commit at the source repository's default-branch head. This module is
- * machinery for the later acquisition step, not a model-facing tool: the
- * model chooses a candidate, and the host resolves where that candidate
- * points without exposing the GitHub request or response.
+ * Host-side resolution of a skills.sh discovery address to the immutable
+ * commit an acquisition reads its bytes at.
+ *
+ * Two addresses resolve here. A discovery hit, or an id naming a skill alone,
+ * points at whatever the source repository's default branch holds, and
+ * resolving it asks GitHub where that branch points. An id carrying
+ * `@<commit sha>` is already immutable and resolves to that commit with no
+ * request made — the spelling an operator's script allowlist is keyed on, and
+ * so the one a run uses when it must acquire the bytes that were allowed.
+ *
+ * This module is machinery for the later acquisition step, not a model-facing
+ * tool: the model chooses a candidate, and the host resolves where that
+ * candidate points without exposing the GitHub request or response.
  */
 
 import {

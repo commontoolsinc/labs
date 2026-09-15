@@ -275,10 +275,8 @@ describe("delegating an acquired skill to a child", () => {
       },
       assert: () => {
         expect(openingContext).toContain(`- ${PIN} -> ${SCRIPT_PATH}`);
+        expect(openingContext).toContain("- agent-browser -> scripts/run.ts");
         expect(openingContext).toContain("`acquire_skill` id");
-        // A registry entry is addressed by name, which the run's registry
-        // already offers, so it is not repeated here.
-        expect(openingContext).not.toContain("agent-browser");
       },
     });
   });
@@ -350,192 +348,104 @@ describe("delegating an acquired skill to a child", () => {
   });
 
   it("gives the child the mount, the tool, and only its own pin's entries", async () => {
-    const identity = await Identity.fromPassphrase(
-      `acquired-delegation-${crypto.randomUUID()}`,
-    );
-    const storageManager = StorageManager.emulate({ as: identity });
-    const runtime = new Runtime({
-      apiUrl: new URL("http://toolshed.test"),
-      storageManager,
-    });
-    const pieces = new PiecesController(
-      await createSession({
-        identity,
-        spaceName: `acquired-delegation-${crypto.randomUUID()}`,
-      }),
-      runtime,
-    );
-    await pieces.synced();
-    const artifactRoot = await Deno.makeTempDir({
-      prefix: "acquired-delegation-",
-    });
-    const workspace = await Deno.makeTempDir({
-      prefix: "acquired-delegation-workspace-",
-    });
-    try {
-      const engine = new CfHarnessEngine({
-        runId: "acquired-delegation-run",
-        artifactRoot,
-        model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
-        processRunner: scriptedDockerRunner,
-        sandbox: {
-          dockerBinary: "docker",
-          runtimeName: "runsc-cfc",
-          image: "cf-harness:test",
-          workspaceHostPath: workspace,
-          workspaceMountPath: "/workspace",
-          shellPath: "/bin/bash",
-          dockerNetworkMode: "none",
-          additionalMounts: [],
-          extraDockerArgs: [],
-        },
-        // Two entries, one for this pin and one for a skill this run never
-        // acquired. A child that received both would be holding a decision
-        // the operator made about something else.
-        allowedSkillScripts: [
-          { skill: PIN, path: SCRIPT_PATH },
-          { skill: "some-other-skill", path: "scripts/other.sh" },
-        ],
-        fabricSessionFactory: () => Promise.resolve({ pieces }),
-        skillsShAcquisitionClientFactory: () =>
-          Promise.resolve(
-            new SkillsShAcquisitionClient({ fetch: githubFetch }),
-          ),
-      });
-
-      let requests = 0;
-      let handleToken = "";
-      let childPin: string | undefined;
-      const modelFetch: typeof fetch = (_input, init) => {
-        const body = JSON.parse(String(init?.body)) as {
-          input?: { type?: string; output?: string }[];
-        };
-        const index = requests;
-        requests += 1;
-        let turn: unknown;
+    // Two entries, one for this pin and one for a skill this run never
+    // acquired. A child that received both would be holding a decision the
+    // operator made about something else.
+    await runAcquisitionScenario({
+      allowedSkillScripts: [
+        { skill: PIN, path: SCRIPT_PATH },
+        { skill: "some-other-skill", path: "scripts/other.sh" },
+      ],
+      turn: (index, body, context) => {
         if (index === 0) {
-          turn = toolCallTurn("call-acquire", "acquire_skill", {
+          return toolCallTurn("call-acquire", "acquire_skill", {
             id: SKILL_ID,
           });
-        } else if (index === 1) {
-          const acquired = (body.input ?? []).findLast((entry) =>
-            entry.type === "function_call_output"
-          );
-          handleToken =
-            (JSON.parse(String(acquired?.output)) as { skillHandle: string })
-              .skillHandle;
-          turn = toolCallTurn("call-delegate", "delegate_task", {
+        }
+        if (index === 1) {
+          context.handleToken = handleFromOutput(body);
+          return toolCallTurn("call-delegate", "delegate_task", {
             goal: "Use the acquired skill.",
-            skillHandle: handleToken,
+            skillHandle: context.handleToken,
           });
-        } else if (index === 2) {
+        }
+        if (index === 2) {
           const childText = chatViewOfRequest(body).messages
             .map((message) => message.content).join("\n");
-          childPin = /<skill_context\b[^>]*\bpin="([^"]+)"/.exec(childText)
-            ?.[1];
-          turn = toolCallTurn("call-script", "run_skill_script", {
-            skill: childPin ?? "",
+          context.childPin = /<skill_context\b[^>]*\bpin="([^"]+)"/.exec(
+            childText,
+          )?.[1];
+          return toolCallTurn("call-script", "run_skill_script", {
+            skill: context.childPin ?? "",
             path: SCRIPT_PATH,
           });
-        } else if (index === 3) {
-          turn = assistantTurn("Child ran the script.");
-        } else {
-          turn = assistantTurn("Parent done.");
         }
-        return Promise.resolve(
-          new Response(JSON.stringify(responsesBodyFromChatFixture(turn)), {
-            status: 200,
-          }),
-        );
-      };
+        if (index === 3) {
+          return assistantTurn("Child ran the script.");
+        }
+        return assistantTurn("Parent done.");
+      },
+      assert: async (engine, artifactRoot, context) => {
+        expect(context.childPin).toBe(PIN);
+        const acquired = engine.getRunState().acquiredSkills?.skills[0];
+        expect(acquired?.pin).toBe(PIN);
 
-      const loop = new CfHarnessPromptLoop({
-        engine,
-        gatewayClient: new OpenAICompatibleGatewayClient({
-          baseUrl: engine.config.gatewayBaseUrl,
-          authMode: engine.config.gatewayAuthMode,
-          apiKey: "test-key",
-          transportRetries: 0,
-          fetchFn: modelFetch,
-        }),
-        allowedToolIds: ["acquire_skill", "delegate_task"],
-        allowedSubagentProfiles: [DEFAULT_SUBAGENT_PROFILE],
-      });
+        const child = engine.getRunState().subagentRuns?.[0];
+        expect(child?.status).toBe("completed");
 
-      // Brought up the way every surface brings a session up, so what the
-      // parent is told before its first turn is what a real run is told.
-      const contextMessages = await establishHarnessSessionContext({
-        engine,
-        config: { skillNames: [] },
-      });
-      await loop.runPrompt({
-        prompt: "Acquire the skill and delegate it.",
-        contextMessages,
-      });
+        // The tool, brought from the run to a profile that does not carry it.
+        expect(child?.manifest.allowedToolIds).toContain("run_skill_script");
+        // The operator's decision, narrowed to the skill this child was given.
+        expect(child?.manifest.allowedSkillScripts).toEqual([
+          { skill: PIN, path: SCRIPT_PATH },
+        ]);
 
-      expect(childPin).toBe(PIN);
-      const acquired = engine.getRunState().acquiredSkills?.skills[0];
-      expect(acquired?.pin).toBe(PIN);
-
-      const child = engine.getRunState().subagentRuns?.[0];
-      expect(child?.status).toBe("completed");
-
-      // The tool, brought from the run to a profile that does not carry it.
-      expect(child?.manifest.allowedToolIds).toContain("run_skill_script");
-      // The operator's decision, narrowed to the skill this child was given.
-      expect(child?.manifest.allowedSkillScripts).toEqual([
-        { skill: PIN, path: SCRIPT_PATH },
-      ]);
-
-      // The mount, from the child's own record of the sandbox it was built.
-      const capabilities = JSON.parse(
-        await Deno.readTextFile(
-          join(artifactRoot, child!.childRunId, "capabilities.json"),
-        ),
-      ) as {
-        cfc?: { sandbox?: { cfc?: { mounts?: unknown[] } } };
-      };
-      expect(capabilities.cfc?.sandbox?.cfc?.mounts).toContainEqual({
-        kind: "host-bind",
-        name: "acquired-skill",
-        hostPath: acquired!.hostRoot,
-        sandboxPath: acquired!.sandboxRoot,
-        readOnly: true,
-        mode: "readonly",
-      });
-
-      // The child uses the pin from its context to run the mounted script
-      // through the tool and the operator's allowlist.
-      const executions = JSON.parse(
-        await Deno.readTextFile(
-          join(
-            artifactRoot,
-            child!.childRunId,
-            "skill-script-executions.json",
+        // The mount, from the child's own record of the sandbox it was built.
+        const capabilities = JSON.parse(
+          await Deno.readTextFile(
+            join(artifactRoot, child!.childRunId, "capabilities.json"),
           ),
-        ),
-      ) as {
-        executions: {
-          status: string;
-          skillName: string;
-          sandboxResourcePath?: string;
-          acquisition?: { commitSha: string };
-          error?: { code: string };
-        }[];
-      };
-      expect(executions.executions).toHaveLength(1);
-      const execution = executions.executions[0]!;
-      expect(execution.error).toBeUndefined();
-      expect(execution.status).toBe("executed");
-      expect(execution.skillName).toBe(PIN);
-      expect(execution.sandboxResourcePath).toBe(
-        `/acquired-skill/${SCRIPT_PATH}`,
-      );
-      expect(execution.acquisition?.commitSha).toBe(COMMIT_SHA);
-    } finally {
-      await Deno.remove(artifactRoot, { recursive: true });
-      await Deno.remove(workspace, { recursive: true });
-    }
+        ) as {
+          cfc?: { sandbox?: { cfc?: { mounts?: unknown[] } } };
+        };
+        expect(capabilities.cfc?.sandbox?.cfc?.mounts).toContainEqual({
+          kind: "host-bind",
+          name: "acquired-skill",
+          hostPath: acquired!.hostRoot,
+          sandboxPath: acquired!.sandboxRoot,
+          readOnly: true,
+          mode: "readonly",
+        });
+
+        // The child uses the pin from its context to run the mounted script
+        // through the tool and the operator's allowlist.
+        const executions = JSON.parse(
+          await Deno.readTextFile(
+            join(
+              artifactRoot,
+              child!.childRunId,
+              "skill-script-executions.json",
+            ),
+          ),
+        ) as {
+          executions: {
+            status: string;
+            skillName: string;
+            sandboxResourcePath?: string;
+            acquisition?: { commitSha: string };
+            error?: { code: string };
+          }[];
+        };
+        expect(executions.executions).toHaveLength(1);
+        const execution = executions.executions[0]!;
+        expect(execution.error).toBeUndefined();
+        expect(execution.status).toBe("executed");
+        expect(execution.skillName).toBe(PIN);
+        expect(execution.sandboxResourcePath).toBe(
+          `/acquired-skill/${SCRIPT_PATH}`,
+        );
+        expect(execution.acquisition?.commitSha).toBe(COMMIT_SHA);
+      },
+    });
   });
 });
