@@ -16,11 +16,11 @@ and hand the place to someone else.
 A cell reference cannot say where they are. It names one cell and a position
 inside it — space, piece, document, path, resolved in a single dereference,
 which is what makes it canonical and shareable. (The cell reference grammar is
-decided in [`cell-reference-grammar.md`](../../specs/cell-reference-grammar.md),
-and this document cites its decisions by number.) It has one
-document slot because one is enough for an address: reaching a second
-document's contents is two dereferences, and an address describes the
-destination of the last one.
+recorded in
+[`cell-reference-grammar.md`](../../specs/cell-reference-grammar.md), and this
+document cites its decisions by number.) It has one document slot because one is
+enough for an address: reaching a second document's contents is two
+dereferences, and an address describes the destination of the last one.
 
 A route is the other thing. It is how the destination was reached, and it is
 not recoverable from the destination.

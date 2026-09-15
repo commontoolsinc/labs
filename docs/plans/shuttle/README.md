@@ -51,7 +51,7 @@ session is one a caller should state once" — caps out exactly there,
 because piece, path, and scope are not identical across a session: they
 change with every step, because they are the work. The fabric's cell
 reference grammar — `//<space>/<piece>[#member][@qualifier…][/path…]` and its
-space- and piece-relative forms, decided in
+space- and piece-relative forms, recorded in
 [`cell-reference-grammar.md`](../../specs/cell-reference-grammar.md) and read
 by `packages/runner/src/cell-reference.ts` — takes the levels a reference
 omits from a context, and shuttle makes that context a position you
