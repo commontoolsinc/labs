@@ -137,9 +137,6 @@ held to the same standard.
 
 - [`why.md`](why.md) — what Common Fabric is for: the trust model it inverts,
   and which parts already run
-- [`how.md`](how.md) — the same argument as code: what the compiler emits for
-  an ordinary pattern, where the runtime checks the result, what the exits
-  are, and what is not built yet
 - [`inverting-the-physics-of-trust.md`](inverting-the-physics-of-trust.md) —
   the long form of the argument, including the hardware and the objections
 - [`FAQ.md`](FAQ.md) — frequently asked questions with pointers to the
