@@ -167,6 +167,27 @@ describe("resultRowKeys()", () => {
     }]);
   });
 
+  it("keeps a row-label key when duplicate keys move the rest to position", () => {
+    const label = { confidentiality: ["did:mailto:bob@b.example"] };
+    expect(
+      resultRowKeys({
+        rows: [{ id: 1, body: "a" }, { id: 1, body: "b" }, {
+          id: 2,
+          body: "c",
+        }],
+        columns: notesColumns,
+        tables,
+        database,
+        columnLabeled: true,
+        rowLabel: (index) => index === 2 ? label : undefined,
+      }),
+    ).toEqual([{ database, index: 0, tables }, {
+      database,
+      index: 1,
+      tables,
+    }, { database, index: 2, tables, label }]);
+  });
+
   it("keys a wide integer key that arrives as a `bigint`", () => {
     const wide = 2n ** 62n;
     expect(

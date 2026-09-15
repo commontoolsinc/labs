@@ -138,9 +138,11 @@ export function resultRowKeys(options: {
     return { database, table: primaryKey.table, key, tables };
   });
   // A key that two rows share would put two rows in one document, so a result
-  // in which that happens is keyed on position throughout. Key values are
-  // compared by their Fabric hash: a wide integer key arrives as a `bigint`,
-  // which the hash covers.
+  // in which that happens keys every primary-key row on position; content
+  // keys and row-label keys stand, since neither can collide that way and a
+  // row-label key has to keep its label. Key values are compared by their
+  // Fabric hash: a wide integer key arrives as a `bigint`, which the hash
+  // covers.
   const seen = new Set<string>();
   for (const key of keyed) {
     if (!("key" in key)) continue;
@@ -149,7 +151,7 @@ export function resultRowKeys(options: {
     );
     if (seen.has(serialized)) {
       return rows.map((_, index) =>
-        "row" in keyed[index] ? keyed[index] : { database, index, tables }
+        "key" in keyed[index] ? { database, index, tables } : keyed[index]
       );
     }
     seen.add(serialized);

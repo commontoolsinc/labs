@@ -1405,9 +1405,13 @@ export function sqliteQuery(
             // cell, keyed as `resultRowKeys()` decides: a key stands still
             // across runs for a row that did not change, so the diff finds
             // nothing to write for it, and a key is drawn only from what a
-            // reader of the unlabeled row links may already see. The key
-            // must not depend on anything else that varies between runs, or
-            // an unchanged result would mint a document per row per run.
+            // reader of the unlabeled row links may already see. The
+            // selected database and the handle's `tables` declaration are
+            // namespaces the keys carry on purpose, so a query whose `db`
+            // input moves to another database, or whose handle is
+            // re-declared, lands its rows on documents of their own. Nothing
+            // else that varies between runs may reach a key, or an
+            // unchanged result would mint a document per row per run.
             const rowKeys = resultRowKeys({
               rows: resultRows,
               columns: res.columns,
