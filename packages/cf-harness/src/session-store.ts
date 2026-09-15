@@ -31,7 +31,37 @@ export interface HarnessChatSessionTurnEventMutation {
   createTurn?: boolean;
 }
 
+/** The service process holding a store. */
+export interface HarnessChatStoreHolder {
+  /** Identifies one service instance; no two processes share one. */
+  instanceId: string;
+
+  /** Operating-system process id of the holder. */
+  pid: number;
+
+  /** When the hold was taken. */
+  heldSince: string;
+}
+
+/** What `HarnessChatSessionStore.hold()` came to. */
+export type HarnessChatStoreHoldOutcome =
+  | { held: true }
+  | {
+    held: false;
+
+    /** Who has the store, where its record could be read. */
+    holder: HarnessChatStoreHolder | undefined;
+  };
+
 export interface HarnessChatSessionStore {
+  /**
+   * Takes the store for `holder` until it closes, or reports the holder that
+   * has it. A store without this member is held by no one, and every service
+   * that opens it takes it.
+   */
+  hold?(
+    holder: HarnessChatStoreHolder,
+  ): HarnessMaybePromise<HarnessChatStoreHoldOutcome>;
   saveSession(snapshot: HarnessChatSessionSnapshot): HarnessMaybePromise<void>;
   getSession(
     sessionId: string,
