@@ -1,11 +1,11 @@
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { isWalkableObjectOrArray } from "@commonfabric/data-model";
 import { internSchema } from "@commonfabric/data-model-schema";
+import { forEachSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
-import { forEachSubschema } from "../schema-walk.ts";
 import type { CfcConfClause } from "./clause.ts";
 import { normalizeClause } from "./clause.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";

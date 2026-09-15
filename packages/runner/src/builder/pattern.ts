@@ -6,6 +6,13 @@ import {
 } from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import {
+  ARRAY_SUBSCHEMA_KEYS,
+  RECORD_SUBSCHEMA_KEYS,
+  SINGLE_SUBSCHEMA_KEYS,
+  UNUSED_RECORD_SUBSCHEMA_KEYS,
+  UNUSED_SINGLE_SUBSCHEMA_KEYS,
+} from "@commonfabric/data-model-schema/schema-walk";
 
 import { type AliasBinding } from "../alias-binding.ts";
 import { isCell, setCellUnlinkedSpace } from "../cell.ts";
@@ -25,13 +32,6 @@ import {
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import { Runtime } from "../runtime.ts";
 import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
-import {
-  ARRAY_SUBSCHEMA_KEYS,
-  RECORD_SUBSCHEMA_KEYS,
-  SINGLE_SUBSCHEMA_KEYS,
-  UNUSED_RECORD_SUBSCHEMA_KEYS,
-  UNUSED_SINGLE_SUBSCHEMA_KEYS,
-} from "../schema-walk.ts";
 import {
   IExtendedStorageTransaction,
   MemorySpace,

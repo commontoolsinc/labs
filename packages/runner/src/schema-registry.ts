@@ -25,7 +25,7 @@
 
 import type { JSONSchema } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model-schema";
-import { collectExternalSchemaRefHashes } from "./schema-decompose.ts";
+import { walkSchemaDocumentClosure } from "@commonfabric/data-model-schema/schema-closure";
 
 /** Thrown when a document's content does not hash to its claimed id. */
 export class SchemaDocumentHashMismatchError extends Error {
@@ -166,16 +166,17 @@ export function externalResolutionMissCount(): number {
  */
 export function isSchemaDocumentClosureComplete(taggedHash: string): boolean {
   if (completeClosures.has(taggedHash)) return true;
-  const visited = new Set<string>();
-  const pending = [taggedHash];
-  while (pending.length > 0) {
-    const hash = pending.pop()!;
-    if (visited.has(hash) || completeClosures.has(hash)) continue;
-    visited.add(hash);
-    const document = documentsByHash.get(hash);
-    if (document === undefined) return false;
-    pending.push(...collectExternalSchemaRefHashes(document));
-  }
-  for (const hash of visited) completeClosures.add(hash);
+  const { verified, missing } = walkSchemaDocumentClosure({
+    roots: [taggedHash],
+    load: (hash) => {
+      if (completeClosures.has(hash)) return { kind: "settled" };
+      const document = documentsByHash.get(hash);
+      return document === undefined
+        ? undefined
+        : { kind: "verified", schema: document };
+    },
+  });
+  if (missing.size > 0) return false;
+  for (const hash of verified) completeClosures.add(hash);
   return true;
 }
