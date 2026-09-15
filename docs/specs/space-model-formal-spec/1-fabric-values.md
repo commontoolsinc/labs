@@ -2153,9 +2153,12 @@ export type TerminalCodec<Encoded> = FabricCodec<never, Encoded>;
  * kind serves. A terminal codec serves that format alone, a nonterminal one
  * serves every format, and both are "for" this one.
  *
- * Writing the union out is unavoidable. `FabricCodec` is invariant in
- * `Encoded` -- the parameter sits in both an argument and a return position
- * -- so a `NonterminalCodec` is assignable to no format's instantiation, and
+ * Writing the union out is unavoidable. `FabricCodec` is covariant in
+ * `Encoded`: its members are methods, whose parameters TypeScript compares
+ * bivariantly, so the return position of `encode()` is what decides, and a
+ * codec is assignable to an instantiation at a wider `Encoded` and to none
+ * at a narrower one. `FabricValue` is a subtype of no format's value type,
+ * so a `NonterminalCodec` is assignable to no format's instantiation, and
  * the two arms have to be named separately.
  *
  * The nonterminal arm is at `never`, the one `PlusType` with a wire form.

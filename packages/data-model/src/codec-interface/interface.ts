@@ -254,10 +254,13 @@ export type TerminalCodec<Encoded> = FabricCodec<never, Encoded>;
  * serves every format, and both are "for" this one. This is what a mixed
  * roster holds, what {@link CodecRegistry} stores, and what it hands back.
  *
- * Writing the union out is unavoidable. {@link FabricCodec} is invariant in
- * `Encoded` -- the parameter sits in both an argument and a return position --
- * so a `NonterminalCodec` is assignable to no format's instantiation, and the
- * two arms have to be named separately.
+ * Writing the union out is unavoidable. {@link FabricCodec} is covariant in
+ * `Encoded`: its members are methods, whose parameters TypeScript compares
+ * bivariantly, so the return position of `encode()` is what decides, and a
+ * codec is assignable to an instantiation at a wider `Encoded` and to none at
+ * a narrower one. `FabricValue` is a subtype of no format's value type, so a
+ * `NonterminalCodec` is assignable to no format's instantiation, and the two
+ * arms have to be named separately.
  *
  * The nonterminal arm is at `never`, the one `PlusType` with a wire form. That
  * is a claim about what a registry holds, not a check on what a class binds:

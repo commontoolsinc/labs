@@ -24,6 +24,8 @@ declare const nonterminal: NonterminalCodec;
 declare const nonterminalNever: NonterminalCodec<never>;
 declare const nonterminalError: NonterminalCodec<Error>;
 declare const terminalFabricValue: TerminalCodec<FabricValue>;
+declare const terminalString: TerminalCodec<string>;
+declare const terminalNumberOrString: TerminalCodec<number | string>;
 declare const instancePlusError: FabricInstancePlus<Error>;
 
 /** Carrier for the `NonterminalCodec` checks. */
@@ -66,12 +68,28 @@ function terminalCodecTypeChecks() {
   const asNonterminal: NonterminalCodec = terminalFabricValue;
   const asTerminal: TerminalCodec<FabricValue> = nonterminal;
 
-  // A `NonterminalCodec` is no format's `TerminalCodec`: its state is made of
-  // `FabricValue`s, which is not a wire format's own value type.
+  // `FabricCodec` is covariant in `Encoded`: the members are methods, so
+  // only the return position of `encode()` decides, and a codec at a narrower
+  // `Encoded` is one at a wider.
+  const widerEncoded: TerminalCodec<number | string> = terminalString;
+  const stringAsNonterminal: NonterminalCodec = terminalString;
+  // @ts-expect-error a codec emitting numbers is not one emitting strings
+  const narrowerEncoded: TerminalCodec<string> = terminalNumberOrString;
+
+  // Which is why the two arms of `CodecForFormat` are named separately: a
+  // `NonterminalCodec` emits `FabricValue`s, which is a subtype of no format's
+  // own value type.
   // @ts-expect-error a `NonterminalCodec` emits `FabricValue`s, not strings
   const notTerminal: TerminalCodec<string> = nonterminal;
 
-  return { asNonterminal, asTerminal, notTerminal };
+  return {
+    asNonterminal,
+    asTerminal,
+    widerEncoded,
+    stringAsNonterminal,
+    narrowerEncoded,
+    notTerminal,
+  };
 }
 
 describe("interface", () => {
@@ -85,7 +103,7 @@ describe("interface", () => {
   });
 
   describe("TerminalCodec", () => {
-    it("is `NonterminalCodec` at `FabricValue`, and takes no `NonterminalCodec` at a format's own type", () => {
+    it("is `NonterminalCodec` at `FabricValue`, covariant in `Encoded`, and takes no `NonterminalCodec` at a format's own type", () => {
       expect(typeof terminalCodecTypeChecks).toBe("function");
     });
   });
