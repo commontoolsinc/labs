@@ -1170,11 +1170,15 @@ The scripts land at `<artifactRoot>/.acquired-skills/<runId>/<commitSha>/<slug>`
 confidentiality boundary — `bash` does not reserve it the way the file tools do
 — so a script written under the parent's run root is a script the planner could
 read wherever that tree is reachable. Sitting outside the run roots buys the
-lifecycle and not the boundary: the acquisition asks whether any mount of this
-run's sandbox covers the directory, the workspace and every `--host-mount`
-alike, and refuses naming the mount rather than writing bytes the acquiring run
-could read. The refusal comes before the handle is minted, so a covering mount
-leaves no handle to a skill whose scripts its own planner could have read.
+lifecycle and not the boundary: the acquisition asks the sandbox it would be
+read from — every mount that sandbox describes, the workspace and every
+`--host-mount` alike — whether one covers the directory, and refuses naming the
+mount rather than writing bytes the acquiring run could read. Asked of the
+sandbox rather than of the configuration beside it, because for a run handed its
+runtime the configuration describes something else, and a question about what a
+container can read has to be put to that container. The refusal comes before the
+handle is minted, so a covering mount leaves no handle to a skill whose scripts
+its own planner could have read.
 
 The child a `delegate_task` hands that handle to mounts the directory read-only
 at `/acquired-skill`, and mounts the one skill its handle names and no other.

@@ -12,6 +12,7 @@ import type {
   SandboxCommandResult,
   SandboxRuntime,
   SandboxRuntimeDescription,
+  SandboxRuntimeMountDescription,
   SandboxShellRequest,
 } from "../../src/sandbox/types.ts";
 
@@ -20,11 +21,24 @@ const COMMIT_SHA = "dd93980e2f9a1d4c4d50a6e1a3cbb6e2b7a91f3c";
 const SCRIPT_TEXT = "#!/usr/bin/env bash\necho acquired\n";
 
 class FakeSandboxRuntime implements SandboxRuntime {
+  readonly #mounts: readonly SandboxRuntimeMountDescription[];
+
+  // A fake stands in for the container, so what it describes is what the run
+  // can read. A fake that describes no mounts answers "nothing covers this" to
+  // every question asked of it, which is the one answer nothing can check.
+  constructor(mounts: readonly SandboxRuntimeMountDescription[] = []) {
+    this.#mounts = mounts;
+  }
+
   describe(): SandboxRuntimeDescription {
     return {
       kind: "docker-runsc-cfc",
       defaultWorkingDirectory: "/workspace",
-      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+      cfc: {
+        runtimeRequested: true,
+        workspaceMountPath: "/workspace",
+        mounts: this.#mounts,
+      },
     };
   }
 
@@ -70,7 +84,22 @@ describe("acquiring a skill's scripts outside every run root", () => {
   ) =>
     new CfHarnessEngine({
       runId: "run-1",
-      sandboxRuntime: new FakeSandboxRuntime(),
+      // The runtime describes the configuration it was built beside, which is
+      // what a real one does. The two are handed over separately here only
+      // because the test supplies both.
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          kind: "workspace",
+          hostPath: workspace,
+          sandboxPath: "/workspace",
+          readOnly: false,
+        },
+        ...additionalMounts.map((mount) => ({
+          ...mount,
+          sandboxPath: mount.sandboxPath ?? "/fabric",
+          readOnly: mount.readOnly ?? false,
+        })),
+      ]),
       artifactRoot: root,
       sandbox: {
         dockerBinary: "docker",
@@ -187,6 +216,38 @@ describe("acquiring a skill's scripts outside every run root", () => {
       "artifacts",
     );
     expect(engine.getRunState().acquiredSkills).toBeUndefined();
+    await expect(
+      Deno.stat(join(artifactRoot, ".acquired-skills")),
+    ).rejects.toThrow(Deno.errors.NotFound);
+  });
+
+  it("refuses a mount of a handed-in runtime, which no configuration describes", async () => {
+    // The check is about what the container running this can read, and for a
+    // run handed its runtime the configuration beside it is not that
+    // container's — "the unused resolved config … may describe a different
+    // sandbox entirely", and where none was given it is nothing at all. Asked
+    // of a configuration, the question about a real writable bind over the
+    // artifact tree would answer "no mount covers it" and the bytes would be
+    // written where the acquiring run can read them.
+    const engine = new CfHarnessEngine({
+      runId: "run-1",
+      sandboxRuntime: new FakeSandboxRuntime([{
+        kind: "host-bind",
+        name: "artifacts",
+        hostPath: artifactRoot,
+        sandboxPath: "/artifacts",
+        readOnly: false,
+      }]),
+      workspaceHostPath: workspace,
+      artifactRoot,
+    });
+
+    await expect(engine.materializeAcquiredSkill(oneScript)).rejects.toThrow(
+      AcquiredSkillDirectoryReadableError,
+    );
+    await expect(engine.materializeAcquiredSkill(oneScript)).rejects.toThrow(
+      "artifacts",
+    );
     await expect(
       Deno.stat(join(artifactRoot, ".acquired-skills")),
     ).rejects.toThrow(Deno.errors.NotFound);

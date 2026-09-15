@@ -173,6 +173,7 @@ import type {
   DockerRunscAdditionalMountConfig,
   DockerRunscSandboxConfig,
   SandboxRuntime,
+  SandboxRuntimeMountDescription,
 } from "./sandbox/types.ts";
 import {
   ACQUIRED_SKILL_MOUNT_PATH,
@@ -2170,10 +2171,25 @@ export class CfHarnessEngine {
    * directory it is about to write a skill's scripts into: the parent that
    * plans an acquisition must not be able to read the bytes, and a mount over
    * that directory is the one way it could.
+   *
+   * Asked of the sandbox that would do the reading, through its own
+   * `describe()`, rather than of `#hostMounts`. The two are the same list for
+   * a run whose sandbox this engine built, and they are not for a run handed a
+   * runtime: there `#hostMounts` comes from a configuration that "may describe
+   * a different sandbox entirely" — empty, when none was given at all — and a
+   * question about what a container can read, answered from a configuration
+   * that container was not built from, fails open. It is also the source
+   * `resolveAcquiredSkillScript` asks at execution, so the boundary is one
+   * predicate over one list rather than two that agree while the runtime is
+   * the one the config describes.
+   *
+   * A mount with no host path covers nothing: it is backed by something other
+   * than a directory of this filesystem, so no path of ours is inside it.
    */
-  #hostMountCovering(path: string): HostSandboxMount | undefined {
+  #hostMountCovering(path: string): SandboxRuntimeMountDescription | undefined {
     const hostPath = normalizeHostPath(path);
-    return this.#hostMounts.find((mount) =>
+    return this.sandbox.describe().cfc?.mounts?.find((mount) =>
+      mount.hostPath !== undefined &&
       isHostPathWithinRoot(normalizeHostPath(mount.hostPath), hostPath)
     );
   }
