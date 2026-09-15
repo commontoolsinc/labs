@@ -65,20 +65,4 @@ export {
 
 export { hashOf, hashStringOf, taggedHashStringOf } from "./value-hash.ts";
 
-export {
-  FABRIC_PRIMITIVE_VALUE_TAGS,
-  FABRIC_VALUE_TAGS,
-  type FabricPrimitiveValueTag,
-  type FabricValueTag,
-  JS_TYPE_VALUE_TAGS,
-  type JsTypeValueTag,
-  PRIMITIVE_VALUE_TAGS,
-  type PrimitiveValueTag,
-  tagOfFabricPrimitive,
-  tagOfFabricPrimitiveElseNull,
-  tagOfFabricValue,
-  tagOfFabricValueElseNull,
-  tagOfNativeValueElseNull,
-  VALUE_TAGS,
-  type ValueTag,
-} from "@/value-tags";
+export * from "@/value-tags";

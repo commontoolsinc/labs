@@ -55,9 +55,9 @@ import {
   tagOfFabricPrimitiveElseNull,
   tagOfFabricValue,
   tagOfFabricValueElseNull,
-  tagOfNativeBuiltinClassElseNull,
   tagOfNativeValueElseNull,
   VALUE_TAGS,
+  type ValueTag,
 } from "@/value-tags";
 import { LAYER_CORPUS } from "../fabric-value-corpus.ts";
 
@@ -509,7 +509,6 @@ describe("value-tags", () => {
     it("returns `Array` tag for an `Array` subclass", () => {
       class MyArray extends Array {}
 
-      expect(tagOfNativeBuiltinClassElseNull(MyArray)).toBe(null);
       expect(tagOfNativeValueElseNull(new MyArray())).toBe(VALUE_TAGS.Array);
     });
 
@@ -684,99 +683,60 @@ describe("value-tags", () => {
     });
   });
 
-  describe("tagOfNativeBuiltinClassElseNull()", () => {
-    it("returns `JsError` tag for standard `Error` constructors", () => {
-      const constructors = [
-        Error,
-        TypeError,
-        RangeError,
-        SyntaxError,
-        ReferenceError,
-        URIError,
-        EvalError,
-      ];
-      for (const ctor of constructors) {
-        expect(tagOfNativeBuiltinClassElseNull(ctor)).toBe(
-          VALUE_TAGS.JsError,
-        );
-      }
-    });
+  describe("recognition is by the class the prototype names", () => {
+    // The class is read from the prototype and compared by identity, so an
+    // object created from a builtin's prototype is tagged as that builtin
+    // whether or not it carries the builtin's internal slots. An array and an
+    // error are decided before any class is read, so the objects here are
+    // neither.
 
-    it("returns `JsError` tag for exotic `Error` subclass constructor", () => {
+    for (
+      const [label, ctor, tag] of [
+        ["`Error`", Error, VALUE_TAGS.JsError],
+        ["`TypeError`", TypeError, VALUE_TAGS.JsError],
+        ["`RangeError`", RangeError, VALUE_TAGS.JsError],
+        ["`SyntaxError`", SyntaxError, VALUE_TAGS.JsError],
+        ["`ReferenceError`", ReferenceError, VALUE_TAGS.JsError],
+        ["`URIError`", URIError, VALUE_TAGS.JsError],
+        ["`EvalError`", EvalError, VALUE_TAGS.JsError],
+        ["`Map`", Map, VALUE_TAGS.JsMap],
+        ["`Set`", Set, VALUE_TAGS.JsSet],
+        ["`Date`", Date, VALUE_TAGS.JsDate],
+        ["`Uint8Array`", Uint8Array, VALUE_TAGS.JsUint8Array],
+        ["`RegExp`", RegExp, VALUE_TAGS.JsRegExp],
+        ["`Array`", Array, VALUE_TAGS.Array],
+      ] as ReadonlyArray<[string, { prototype: object }, ValueTag]>
+    ) {
+      it(`returns \`${tag}\` for an object whose prototype is that of ${label}`, () => {
+        expect(tagOfNativeValueElseNull(Object.create(ctor.prototype)))
+          .toBe(tag);
+      });
+    }
+
+    it("returns `JsError` tag for an object whose prototype is that of an exotic `Error` subclass", () => {
       class ExoticError extends Error {}
-      // Not in the switch, so the default arm's `prototype instanceof Error`
-      // is what recognizes it.
-      expect(tagOfNativeBuiltinClassElseNull(ExoticError)).toBe(
-        VALUE_TAGS.JsError,
-      );
+
+      expect(tagOfNativeValueElseNull(Object.create(ExoticError.prototype)))
+        .toBe(VALUE_TAGS.JsError);
     });
 
-    it("returns correct tags for `Array`, `Object`, `Map`, `Set`, `Date`, `Uint8Array`", () => {
-      expect(tagOfNativeBuiltinClassElseNull(Array)).toBe(VALUE_TAGS.Array);
-      expect(tagOfNativeBuiltinClassElseNull(Object)).toBe(VALUE_TAGS.Object);
-      expect(tagOfNativeBuiltinClassElseNull(Map)).toBe(VALUE_TAGS.JsMap);
-      expect(tagOfNativeBuiltinClassElseNull(Set)).toBe(VALUE_TAGS.JsSet);
-      expect(tagOfNativeBuiltinClassElseNull(Date)).toBe(VALUE_TAGS.JsDate);
-      expect(tagOfNativeBuiltinClassElseNull(Uint8Array)).toBe(
-        VALUE_TAGS.JsUint8Array,
-      );
+    it("returns `Object` tag for an object whose prototype is a plain object", () => {
+      expect(tagOfNativeValueElseNull(Object.create({})))
+        .toBe(VALUE_TAGS.Object);
     });
 
-    it("returns `JsRegExp` tag for `RegExp` constructor", () => {
-      expect(tagOfNativeBuiltinClassElseNull(RegExp)).toBe(
-        VALUE_TAGS.JsRegExp,
-      );
-    });
-
-    it("returns `null` for unrecognized constructors", () => {
-      expect(tagOfNativeBuiltinClassElseNull(WeakMap)).toBe(null);
-      expect(tagOfNativeBuiltinClassElseNull(Promise)).toBe(null);
-    });
-
-    it("returns `null` for a plain class", () => {
-      class Plain {}
-      expect(tagOfNativeBuiltinClassElseNull(Plain)).toBe(null);
-    });
-
-    describe("`toJSON()` is intentionally not supported", () => {
-      it("returns `null` for a class with `toJSON` on its prototype", () => {
-        class WithToJSON {
-          toJSON() {
-            return { x: 1 };
-          }
-        }
-        expect(tagOfNativeBuiltinClassElseNull(WithToJSON)).toBe(null);
-      });
-
-      it("returns `null` for a subclass inheriting `toJSON`", () => {
-        class Base {
-          toJSON() {
-            return "base";
-          }
-        }
-        class Sub extends Base {}
-        expect(tagOfNativeBuiltinClassElseNull(Sub)).toBe(null);
-      });
-
-      it("returns `JsDate` tag for `Date`, whose `toJSON` is not consulted", () => {
-        expect(tagOfNativeBuiltinClassElseNull(Date)).toBe(VALUE_TAGS.JsDate);
-      });
+    it("returns `null` for an instance of an unrecognized builtin class", () => {
+      expect(tagOfNativeValueElseNull(new WeakMap())).toBe(null);
+      expect(tagOfNativeValueElseNull(Promise.resolve())).toBe(null);
     });
   });
 
-  describe("the value dispatch and the builtin class lookup", () => {
-    // `tagOfNativeValueElseNull()` ends at
-    // `tagOfNativeBuiltinClassElseNull()`, asked of the value's class, once
-    // the array, error, and fabric tests ahead of it have declined. So a value
-    // none of those claim, and whose class that lookup recognizes, gets that
-    // lookup's tag; and a fabric primitive gets the tag its instance carries,
-    // its class being one the builtin lookup declines. An array or an error is
-    // decided before its class is read, and where the two would disagree -- an
-    // array whose prototype is `Date.prototype` -- the value rule wins; the
-    // `tagOfNativeValueElseNull()` group above holds those. The corpus holds
-    // every kind, and it is partitioned here rather than inside a test so that
-    // each assertion below is unconditional: a test that only asserts on one
-    // side of an `if` skips the case it was written for.
+  describe("the value dispatch and the fabric primitives", () => {
+    // A fabric primitive is tagged by the tag its instance carries, its class
+    // being one the value dispatch does not name. Asserted against the fabric
+    // classes by name rather than against whatever the corpus happens to hold,
+    // so a class the corpus stopped carrying is a failure here rather than a
+    // silence.
 
     const fabricClasses = [
       FabricBytes,
@@ -788,53 +748,17 @@ describe("value-tags", () => {
     ];
 
     const objects = LAYER_CORPUS
-      .filter(([, value]) => (value !== null) && (typeof value === "object"))
-      .map(([label, value]) =>
-        [
-          label,
-          value,
-          Object.getPrototypeOf(value as object)?.constructor,
-        ] as const
-      );
-
-    const decidedAhead = objects
-      .filter(([, value]) => Array.isArray(value) || Error.isError(value));
-
-    const builtinBacked = objects
-      .filter(([, value, ctor]) =>
-        !(Array.isArray(value) || Error.isError(value)) &&
-        (typeof ctor === "function") &&
-        (tagOfNativeBuiltinClassElseNull(ctor) !== null)
-      );
-
-    for (const [label, value, ctor] of builtinBacked) {
-      it(`tags ${label} as the builtin lookup tags its class`, () => {
-        expect(tagOfNativeValueElseNull(value)).toBe(
-          tagOfNativeBuiltinClassElseNull(ctor),
-        );
-      });
-    }
+      .filter(([, value]) => (value !== null) && (typeof value === "object"));
 
     for (const cls of fabricClasses) {
-      it(`tags a \`${cls.name}\` by its instance, its class unrecognized`, () => {
-        // Asserted against the fabric classes by name rather than against
-        // whatever the builtin lookup happens to decline, so a class the
-        // corpus stopped carrying is a failure here rather than a silence.
+      it(`tags a \`${cls.name}\` by its instance`, () => {
         const carried = objects.filter(([, value]) => value instanceof cls);
         expect(carried.length).toBeGreaterThan(0);
-        for (const [, value, ctor] of carried) {
-          expect(tagOfNativeBuiltinClassElseNull(ctor)).toBe(null);
-          expect(tagOfNativeValueElseNull(value)).not.toBe(null);
+        for (const [, value] of carried) {
           expect(tagOfNativeValueElseNull(value))
             .toBe(tagOfFabricPrimitive(value as FabricPrimitive));
         }
       });
     }
-
-    it("reaches values on every side of the split", () => {
-      expect(decidedAhead.length).toBeGreaterThan(0);
-      expect(builtinBacked.length).toBeGreaterThan(0);
-      expect(fabricClasses.length).toBeGreaterThan(0);
-    });
   });
 });
