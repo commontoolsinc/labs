@@ -35,8 +35,8 @@ describe("llmDialog demand and idempotency", () => {
   afterEach(async () => {
     await tx.commit();
     await runtime.settled();
+    // `dispose()` closes the storage manager the runtime was given.
     await runtime?.dispose();
-    await storageManager?.close();
   });
 
   it("writes the same tool catalog on a second run over the same inputs", async () => {
