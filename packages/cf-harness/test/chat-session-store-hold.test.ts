@@ -23,6 +23,7 @@ import type {
   RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
 import {
+  HarnessChatStoreAliasedError,
   HarnessChatStoreHeldError,
   type HarnessChatStoreHolder,
 } from "../src/session-store.ts";
@@ -333,6 +334,87 @@ describe("chat session store hold", () => {
           );
           expect((refusal as HarnessChatStoreHeldError).store).toBe(
             await Deno.realPath(join(dir, "real.sqlite")),
+          );
+        } finally {
+          first.close();
+        }
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("refuses a database with more than one name, under every name", async () => {
+      // A hard link shares the file but not the name the hold file is placed
+      // beside, so neither name is admitted while the link stands.
+      const dir = await Deno.makeTempDir();
+      try {
+        const first = await openSqliteHarnessChatSessionStore({
+          url: toFileUrl(join(dir, "real.sqlite")),
+          holder: holder("instance-1"),
+        });
+        try {
+          await Deno.link(join(dir, "real.sqlite"), join(dir, "alias.sqlite"));
+          for (const name of ["alias.sqlite", "real.sqlite"]) {
+            const refusal = await refusalOf(toFileUrl(join(dir, name)));
+            expect(refusal).toBeInstanceOf(HarnessChatStoreAliasedError);
+            expect((refusal as HarnessChatStoreAliasedError).names).toBe(2);
+            expect((refusal as HarnessChatStoreAliasedError).store).toBe(
+              await Deno.realPath(join(dir, name)),
+            );
+          }
+          saveRunningTurn(first, "session-1", "turn-1");
+          expect(first.getTurn("session-1", "turn-1")?.turn.status).toBe(
+            "running",
+          );
+        } finally {
+          first.close();
+        }
+        await Deno.remove(join(dir, "alias.sqlite"));
+        const again = await openSqliteHarnessChatSessionStore({
+          url: toFileUrl(join(dir, "real.sqlite")),
+        });
+        again.close();
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("refuses a database with more than one name to another process while the holder is alive", async () => {
+      const dir = await Deno.makeTempDir();
+      try {
+        const first = await openSqliteHarnessChatSessionStore({
+          url: toFileUrl(join(dir, "real.sqlite")),
+          holder: holder("instance-1"),
+        });
+        try {
+          await Deno.link(join(dir, "real.sqlite"), join(dir, "alias.sqlite"));
+          const child = await new Deno.Command(Deno.execPath(), {
+            args: [
+              "run",
+              "-A",
+              fromFileUrl(
+                new URL(
+                  "./support/hold-chat-session-store.ts",
+                  import.meta.url,
+                ),
+              ),
+              join(dir, "alias.sqlite"),
+              "instance-2",
+            ],
+            stdin: "null",
+            stdout: "piped",
+            stderr: "piped",
+          }).output();
+          expect(child.code).toBe(1);
+          expect(new TextDecoder().decode(child.stdout)).toBe("");
+          expect(new TextDecoder().decode(child.stderr)).toContain(
+            "HarnessChatStoreAliasedError",
+          );
+          expect(await readHolderFile(toFileUrl(join(dir, "real.sqlite"))))
+            .toEqual(holder("instance-1"));
+          saveRunningTurn(first, "session-1", "turn-1");
+          expect(first.getTurn("session-1", "turn-1")?.turn.status).toBe(
+            "running",
           );
         } finally {
           first.close();

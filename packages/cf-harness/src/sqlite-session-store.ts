@@ -18,6 +18,7 @@ import {
   type HarnessChatSessionSnapshot,
   type HarnessChatSessionStore,
   type HarnessChatSessionTurnEventMutation,
+  HarnessChatStoreAliasedError,
   HarnessChatStoreHeldError,
   type HarnessChatStoreHolder,
   type HarnessChatTurnListOptions,
@@ -149,9 +150,7 @@ const HOLDER_FILE_SUFFIX = "-holder";
 /**
  * Returns the path of the file carrying the hold on the database at `url`,
  * which must exist. The database path is resolved through every link first,
- * so two spellings of one database name one hold file rather than one each;
- * a hard link is a second name the resolution cannot see, as it is for the
- * database's own journal.
+ * so two spellings of one database name one hold file rather than one each.
  */
 export const sqliteHarnessChatSessionStoreHolderPath = async (
   url: URL,
@@ -567,7 +566,10 @@ const decodeTurnRow = (row: TurnRow): HarnessChatTurnRecord => {
  * a holder that exits without closing releases it just the same, and a hold
  * is never stale while it is held. A hold is also the only evidence of a
  * holder: a process that opened the database without taking one leaves no
- * trace here, and its database reads as unheld.
+ * trace here, and its database reads as unheld. A database with more than
+ * one name (hard links) is refused under every name with a
+ * `HarnessChatStoreAliasedError`, since a hold beside one name is not seen
+ * from another.
  */
 export const openSqliteHarnessChatSessionStore = async (
   options: OpenSqliteHarnessChatSessionStoreOptions,
@@ -578,6 +580,12 @@ export const openSqliteHarnessChatSessionStore = async (
   (await Deno.open(fromFileUrl(address), { write: true, create: true }))
     .close();
   const store = await resolvedDatabasePath(address);
+  // A hard link is a second name the resolution cannot see, and a hold
+  // beside one name would not be seen from the other.
+  const names = (await Deno.stat(store)).nlink ?? 1;
+  if (names > 1) {
+    throw new HarnessChatStoreAliasedError(store, names);
+  }
   const holderPath = `${store}${HOLDER_FILE_SUFFIX}`;
   const holderFile = await Deno.open(holderPath, {
     read: true,

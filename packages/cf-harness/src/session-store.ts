@@ -78,6 +78,36 @@ export class HarnessChatStoreHeldError extends Error {
   }
 }
 
+/**
+ * The database has more than one name on the file system (hard links), and
+ * a hold taken beside one of them would not be seen from another. It is
+ * refused under every name.
+ */
+export class HarnessChatStoreAliasedError extends Error {
+  readonly #store: string;
+  readonly #names: number;
+
+  /** Constructs an instance for the database at `store`, with `names` names. */
+  constructor(store: string, names: number) {
+    super(
+      `cf-harness chat session store ${store} has ${names} names on the file system (hard links), and a database is opened under one name only`,
+    );
+    this.name = "HarnessChatStoreAliasedError";
+    this.#store = store;
+    this.#names = names;
+  }
+
+  /** The database's path, resolved through every link. */
+  get store(): string {
+    return this.#store;
+  }
+
+  /** How many names the database file has. */
+  get names(): number {
+    return this.#names;
+  }
+}
+
 export interface HarnessChatSessionStore {
   saveSession(snapshot: HarnessChatSessionSnapshot): HarnessMaybePromise<void>;
   getSession(
