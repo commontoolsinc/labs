@@ -11,7 +11,7 @@
 
 ## Routes
 
-The shell supports these browser URL forms:
+The shell currently supports these browser URL forms:
 
 - `/<space-name-or-did>`: opens the space root pattern.
 - `/<space-name-or-did>/<piece-id-or-slug>`: opens a specific piece. Where the
@@ -36,6 +36,12 @@ The shell supports these browser URL forms:
   a segment that is nothing but the mark names no space and opens the home view.
 - `/.embed/<space-name-or-did>/<piece-id-or-slug>`: opens the same piece in
   embed mode.
+
+[Common Fabric URLs](../../docs/specs/fabric-urls.md) and the
+[space name registry](../../docs/plans/space-name-registry.md) describe a
+possible future ASP, namespace, registered-name, DID, and displayed-URL
+contract. No deployment is planned. The forms above remain the authoritative
+shell behavior.
 
 Embed mode is intended for rendering the shell inside another web view, such as
 an iframe. It removes shell-owned chrome around the pattern, including the
