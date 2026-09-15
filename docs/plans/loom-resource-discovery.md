@@ -43,9 +43,10 @@ is an ordinary provider pattern, discoverable through the existing space
 mentionable index.
 
 Use one provider for the first implementation because the inbox already has six
-fixed source roles. One wish also shares the same hashtag resolver across
-consumers in a runtime. Six differently tagged wishes would require six
-discovery scans. The resources piece must remain small: only descriptors and
+fixed source roles. One home wish discovers all source roles for a consumer and
+user. Six differently tagged wishes would require six discovery scans; home-dependent
+wishes execute under the demanding user rather than sharing an identity-free
+resolver. The resources piece must remain small: only descriptors and
 references, never message rows or a materialized copy of the people index.
 
 This introduces one publication point per environment, not zero configuration.
@@ -394,8 +395,12 @@ and inbox pattern/browser tests.
 - Replace the six database/freshness input pairs and people-index read source
   with selected references. Preserve the old fields as complete overrides during
   migration so existing deployments retain their behavior.
-- Keep `people`, `picked`, `view`, generated SQL, thread grouping, and query
-  result scope unchanged. Do not bundle the separate interaction-cost plan.
+- Keep the host-provided `people`, session `view`, generated SQL, thread
+  grouping, and query result scope. Store locally `picked` contacts per user:
+  choosing a personal recent contact must not publish it into shared inputs.
+  Existing shared picks require an explicit migration decision; do not silently
+  copy them into every viewer's private state. Do not bundle the separate
+  interaction-cost plan.
 - Add discovery/source diagnostics and stale-row suppression.
 - Remove this consumer's per-source linking configuration only after the
   discovery path has passed the same checks as the explicit path. Until then,

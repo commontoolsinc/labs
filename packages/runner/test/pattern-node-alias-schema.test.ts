@@ -4,7 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { Runtime } from "../src/runtime.ts";
-import { isCell } from "../src/cell.ts";
+import { createCell, isCell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -84,7 +84,7 @@ describe("compiled pattern node alias schemas", () => {
   });
 
   afterEach(async () => {
-    await runtime?.dispose();
+    await runtime?.dispose({ closeStorage: false });
     await storageManager?.close();
   });
 
@@ -110,11 +110,12 @@ describe("compiled pattern node alias schemas", () => {
     ) as any;
   }
 
-  it("reads child paths of a user-scoped computed object", async () => {
+  it("reads child paths of a user-scoped node", async () => {
     const { live } = await compileSource(`
-      import { computed, pattern, type PerUser } from "commonfabric";
+      import { lift, pattern, type PerUser } from "commonfabric";
+      const value = lift((_: {}) : PerUser<{ count: number }> => ({ count: 7 }));
       export default pattern(() => {
-        const state = computed<PerUser<{ count: number }>>(() => ({ count: 7 }));
+        const state = value({});
         return { count: state.count };
       });
     `);
@@ -129,6 +130,41 @@ describe("compiled pattern node alias schemas", () => {
     expect((await tx.commit()).error).toBeUndefined();
     await result.pull();
     expect(result.key("count").get()).toBe(7);
+    expect(result.key("count").resolveAsCell().getAsNormalizedFullLink().scope)
+      .toBe("user");
+  });
+
+  it("keeps an explicitly shared node root inside a user-scoped result", async () => {
+    const { live } = await compileSource(`
+      import { lift, pattern, type PerSpace } from "commonfabric";
+      const value = lift((_: {}) : PerSpace<{ count: number }> => ({ count: 9 }));
+      export default pattern(() => {
+        const state = value({});
+        return { count: state.count };
+      });
+    `);
+    const tx = runtime.edit();
+    const target = runtime.getCell(
+      space,
+      "shared child of user result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      live,
+      {},
+      createCell(runtime, {
+        ...target.getAsNormalizedFullLink(),
+        scope: "user",
+      }, tx),
+    );
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    await result.pull();
+    expect(result.key("count").get()).toBe(9);
+    expect(result.key("count").resolveAsCell().getAsNormalizedFullLink().scope)
+      .toBe("space");
   });
 
   it("preserves asCell on flat, recursive, and union node aliases", async () => {

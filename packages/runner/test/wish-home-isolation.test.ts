@@ -121,7 +121,7 @@ describe("wish-home-isolation", () => {
         .toEqual([users[0].did(), users[1].did(), users[0].did()]);
     } finally {
       cancels.forEach((cancel) => cancel());
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       lease.release();
       await storageManager.close();
       await server.close();

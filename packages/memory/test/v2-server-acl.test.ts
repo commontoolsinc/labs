@@ -1551,6 +1551,9 @@ describe("v2-server-acl", () => {
           requestedSpace,
           open,
         ) => {
+          // The first open authorizes the request; the second opens the cell
+          // database for I/O. Hold that read so revocation occurs after initial
+          // admission and before the final authorization check.
           if (++opens === 2) {
             readStarted.resolve();
             await resumeRead.promise;

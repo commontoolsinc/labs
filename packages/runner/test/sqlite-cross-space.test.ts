@@ -33,7 +33,7 @@ describe("sqlite-cross-space", () => {
   });
 
   afterEach(async () => {
-    await runtime.dispose();
+    await runtime.dispose({ closeStorage: false });
     await storageManager.close();
   });
 

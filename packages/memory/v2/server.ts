@@ -3013,7 +3013,8 @@ export class Server {
       // real read-only, each file its own `main` namespace). The only
       // per-source difference is path resolution: an injected on-disk source's
       // registered path, else the cell-derived path (which the db's scope
-      // qualifies, per the session's principal / id).
+      // qualifies using the carried reader, or the session principal / id
+      // when no reader is carried).
       //
       // Capture per-column origin ONLY when the db declares per-column `ifc`
       // (Phase 2) or a per-row label rule (Phase 3 — rule inputs are located

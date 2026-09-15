@@ -16,7 +16,9 @@ import { isCellScope } from "../scope.ts";
 const schemaAsCellCache = new LRUCache<string, JSONSchema>({ capacity: 256 });
 
 function schemaAsCell(schema: unknown): JSONSchema {
+  if (schema === false) return false;
   if (schema && typeof schema === "object") {
+    const objectSchema = schema as Exclude<JSONSchema, boolean>;
     const key = hashSchema(schema as JSONSchema);
     let result = schemaAsCellCache.get(key);
     if (result === undefined) {
@@ -24,8 +26,8 @@ function schemaAsCell(schema: unknown): JSONSchema {
       // freeze in place; the clone de-proxies and preserves `FabricValue`
       // leaves that a JSON round-trip would mangle.
       result = deepFrozenCloneAndInternSchema({
-        ...(schema as Record<string, unknown>),
-        asCell: ["cell"],
+        ...objectSchema,
+        asCell: objectSchema.asCell ?? ["cell"],
       });
       schemaAsCellCache.put(key, result);
     }
@@ -42,14 +44,19 @@ export function wishStateSchemaForResult(
   const resultSchema = schemaAsCell(schema);
   // Fragment references resolve from the wish-state schema root after the
   // requested schema is nested under result and candidates.
-  const schemaWithDefinitions = resultSchema as Record<string, unknown> & {
-    $defs?: Record<string, JSONSchema>;
-  };
+  const schemaWithDefinitions =
+    (typeof resultSchema === "object" ? resultSchema : {}) as
+      & Record<string, unknown>
+      & {
+        $defs?: Record<string, JSONSchema>;
+      };
   // The requested scope selects the state instance. Candidate references keep
   // their source scope instead of allocating a scoped copy of the provider.
   const { $defs, scope: stateScope, ...nestedSchemaObject } =
     schemaWithDefinitions;
-  const nestedResultSchema = nestedSchemaObject as JSONSchema;
+  const nestedResultSchema = resultSchema === false
+    ? false
+    : nestedSchemaObject as JSONSchema;
   const candidateSchema = nestedResultSchema;
   return internSchema({
     ...($defs === undefined ? {} : { $defs }),
