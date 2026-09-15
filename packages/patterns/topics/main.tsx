@@ -287,9 +287,10 @@ export function mentionedBy<T extends object>(
  *
  * Identity is `equals`, the comparison `mentionedBy` makes, so two entries that
  * resolve to one document are one topic whether they hold the same link or one
- * holds an alias of it. A cell reference offers nothing to key a map by, so each
- * entry is compared with the distinct entries kept before it, which is at most
- * one comparison per pair of entries.
+ * holds an alias of it. Nothing in the pattern API turns a `ReadonlyCell` entry
+ * into a resolved key carrying space, scope, and path, so each entry is
+ * compared with `equals` against the distinct entries kept before it: at most
+ * `n(n - 1) / 2` comparisons over `n` entries.
  */
 export function distinctByIdentity<T extends object>(
   list: readonly (T | undefined)[],
@@ -346,9 +347,9 @@ const crossrefTable = lift(
     },
   ): TopicCrossrefRow[] => {
     const rows: unknown[] = [];
-    // Both passes below are over a plain array. The scan is quadratic, and an
-    // element read through the reactive array resolves a link every time, so
-    // reading it there costs a link resolution per topic per topic.
+    // Every pass below reads this plain array: an element read through the
+    // reactive array resolves a link every time, and the passes read each
+    // element many times.
     const list = Array.from(sources);
     // Materialize each mention array once; scanning a reactive array resolves
     // its elements again for every destination topic.

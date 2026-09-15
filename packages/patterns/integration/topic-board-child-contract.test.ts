@@ -332,16 +332,17 @@ describe("topic-board-pivot-contract", () => {
 
   // NOTE ON WHAT THIS CANNOT SEPARATE, because the distinction is easy to
   // assume from the wording: every topic here sits at exactly ONE index, so
-  // this case cannot tell the pivot's identity check from a position check —
-  // swap `!equals(other, topic)` for `from !== to` in `crossrefTable` and it
-  // still passes. Only a board listing one topic at two indices separates
-  // them, and that is `assert_self_mention_inert_through_a_twin` in
-  // `packages/patterns/topics/topics.test.tsx`, which stays where it is. It
-  // cannot move here: a duplicate cannot be written into a board's list from
-  // outside it, by `push`, by seeding the array, or through the controller's
-  // `input` — the last is refused by `assertSchemaSubset`. Retiring that test
-  // needs the pivot's join extracted into something a unit test can hand a
-  // duplicated list, not a rehousing.
+  // this case cannot tell the identity check `mentionedBy` makes when it
+  // leaves a topic out of its own backlinks (`!equals(other, topic)` in
+  // `packages/patterns/topics/main.tsx`) from a check by array position: both
+  // pass it. Only a board listing one topic at two indices separates them, and
+  // that case is not here: a duplicate cannot be written into a board's list
+  // from outside it, by `push`, by seeding the array, or through the
+  // controller's `input` — the last is refused by `assertSchemaSubset`.
+  // `assert_self_mention_inert_through_a_twin` in
+  // `packages/patterns/topics/topics.test.tsx` hands `mentionedBy` a duplicated
+  // list, and the "over a board listing one topic twice" group in
+  // `topics-headless-fixture.test.ts` runs the board's lifts over one.
   it("records a self-mention without earning the topic an inbound edge", async () => {
     // Referencing yourself is not being referenced from somewhere else.
     await target.result.set({ topic: target.getCell() }, ["mention"]);

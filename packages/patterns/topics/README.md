@@ -206,9 +206,10 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 - **A reference is a cell, and identity is the only thing compared.** The board
   derives the whole graph once, in `crossrefTable`, from the same topics array
   read under two minimal declared views: one for identity, one for what each
-  topic points at. Matching is a linear scan of `equals` — with a cell reference
-  as the identity there is nothing to key a map by, and at board scale it is a
-  few hundred comparisons of resolved links.
+  topic points at. Matching is a scan of `equals`, because nothing in the
+  pattern API turns a topic reference into a resolved key carrying space, scope,
+  and path: each topic's row checks every source's mentions for the topic, so
+  the comparisons grow as the number of topics times the number of mentions.
 
   Each topic then does a lookup rather than the join: `backlinksOf` scans the
   pivot for the row whose topic is itself, and takes that row's `mentionedBy`.
