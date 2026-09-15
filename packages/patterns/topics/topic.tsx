@@ -507,10 +507,9 @@ export interface TopicMentionSource {
  * `distinctByIdentity` over the board, which compares entries by `equals`, so a
  * board listing one topic at two entries — the same link twice, or a link and
  * an alias of it — gets one row for that topic. Nothing downstream dedupes, and
- * a reader finding its row by identity finds exactly one. Each of the topic's
- * entries still counts as a source in the rows of the topics it mentions, and
- * the pivot's self-skip is asked of the topic rather than of its position so
- * that a duplicate entry stays inert here too.
+ * a reader finding its row by identity finds exactly one. The pivot's sources
+ * come from the same distinct list, so that topic appears once, at its first
+ * entry, in the `mentionedBy` of each topic it mentions, and never in its own.
  *
  * Both sides are declared `unknown`, which is the whole design rather than a
  * shortcut. A row holds cell REFERENCES — `unknown` is the declaration that
