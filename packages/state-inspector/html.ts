@@ -283,7 +283,7 @@ const DID_PREFIX = ${JSON.stringify(DID_PREFIX)};
 const didTail = d => { d = d || "";
   if (!d.startsWith(DID_PREFIX)) return d;
   const rest = d.slice(DID_PREFIX.length), colon = rest.indexOf(":");
-  return colon === -1 ? "" : rest.slice(colon+1); };
+  return colon === -1 || colon === rest.length-1 ? d : rest.slice(colon+1); };
 const shortDid = d => { d=didTail(d); return d.length>14?d.slice(0,8)+"…"+d.slice(-4):d; };
 const shortId = id => { const b = id.replace(/^of:/,"");
   return b.length>22 ? b.slice(0,12)+"…"+b.slice(-6) : b; };
@@ -520,10 +520,12 @@ function renderDetail(id){
 function fmtSession(s){
   const parts = (s||"").split(":"), decode = p => { try { return decodeURIComponent(p); } catch { return p; } };
   if (parts[0]==="session" && parts.length>=3) {
-    const principal = decode(parts.slice(1,-1).join(":"));
+    const [principal, session] = parts.length===3
+      ? [decode(parts[1]), decode(parts[2])]
+      : [parts.slice(1,4).join(":"), parts.slice(4).join(":")];
     if (principal.startsWith(DID_PREFIX)) {
       const t = didTail(principal);
-      return (t.length>12?t.slice(0,6)+"…"+t.slice(-4):t)+"/"+decode(parts[parts.length-1]).slice(0,6);
+      return (t.length>12?t.slice(0,6)+"…"+t.slice(-4):t)+"/"+session.slice(0,6);
     }
   }
   try { s = decodeURIComponent(s); } catch {}

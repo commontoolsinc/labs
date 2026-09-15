@@ -22,7 +22,6 @@ import {
   resolveSpace,
   type SpaceDb,
 } from "@commonfabric/state-inspector";
-import { isDID } from "@commonfabric/identity/did";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 import {
   HARNESS_CELL_LABELS_TYPE,
@@ -264,6 +263,14 @@ export const cellAddressOfRef = (ref: string): CellAddress | undefined => {
 };
 
 /**
+ * A space DID pinned tightly enough to be read as a store's own identity.
+ * `isDID` answers only whether a string is a DID, so it admits `did:` and a
+ * method-specific identifier of any shape; a name that proves nothing about
+ * which space a file holds must not be read as proving one.
+ */
+const STORE_FILENAME_SPACE_DID = /^did:[^:]+:[^:]+$/;
+
+/**
  * The DID of the space a database file holds, from the file's own name: a
  * space store is named for its space, which is how `discoverSpaceDbs` in
  * `@commonfabric/state-inspector` reads a DID off one. A file named anything
@@ -273,7 +280,7 @@ export const cellAddressOfRef = (ref: string): CellAddress | undefined => {
  */
 const spaceDidOfDbPath = (dbPath: string): string | undefined => {
   const name = (dbPath.split("/").pop() ?? dbPath).replace(/\.sqlite$/, "");
-  return isDID(name) ? name : undefined;
+  return STORE_FILENAME_SPACE_DID.test(name) ? name : undefined;
 };
 
 /**

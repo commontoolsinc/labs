@@ -63,6 +63,12 @@ on-disk filename all at once, so it pins the string to
 `^did:key:z[1-9A-HJ-NP-Za-km-z]{20,120}$` and says so. That is a different
 question from `isDID`, and it is not a reason to make `isDID` stricter.
 
+Two more sites ask a narrower question of their own. The memory server refuses
+to provision a store for a space that is not `^did:[^:]+:[^:]+$`, and the
+harness reads a space DID off a store file's name under the same shape. Both
+strings go on to name a file on disk, and a string that proves nothing about
+which space a file holds must not be read as proving one.
+
 ## Values that must not be a DID
 
 The mirror of the rule. A space is addressed either by its DID or by a name,
@@ -73,8 +79,9 @@ space when it travels as a DID — the same string, two spaces, decided by the
 route it took.
 
 Every surface that accepts "a DID or a name" splits on `isDID` and routes each
-to its own handling. Every surface that accepts only a name calls
-`assertNotDID` and fails on the spot:
+to its own handling. A surface that accepts only a name refuses a DID rather
+than deriving a space from one. `assertNotDID` is how it does that where a
+generic message will do:
 
 - `createSession({ spaceName })` — the derivation itself, and the backstop
   under every other named-space path.
@@ -85,6 +92,11 @@ to its own handling. Every surface that accepts only a name calls
   `cloneIntoNewSpace` in the piece menu — both derive a key from a name and
   also show or address that name elsewhere.
 
-Add the same call to any new surface that takes a space name, an identity name,
-or anything else a DID would be mistaken for. Failing at the surface costs one
+A surface with something better to say tests `isDID` and raises its own error.
+The harness console's `--fabric-space` is the example: its message names
+`assign_slug` and says that a URL is composed from the space's name, which is
+the fact its caller needs and a generic message cannot carry.
+
+Refuse a DID at any new surface that takes a space name, an identity name, or
+anything else a DID would be mistaken for. Failing at the surface costs one
 error message; not failing costs a durable write to a space nobody meant.

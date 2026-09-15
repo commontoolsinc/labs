@@ -81,6 +81,16 @@ export const clausesEqual = (
 ): boolean => deepEqual(normalizeClause(left), normalizeClause(right));
 
 /**
+ * Whether a value is a DID naming both of its parts: `isDID` alone admits
+ * `did:` and `did:key`, which name no principal for the rewrite below to
+ * restate.
+ */
+const isCompleteDID = (value: unknown): boolean => {
+  const parsed = parseDID(value);
+  return parsed !== undefined && parsed.method !== "" && parsed.id !== "";
+};
+
+/**
  * A `PersonalSpace(owner)` label alternative, restated as the one principal
  * every reading of the atom puts inside its audience: its owner.
  *
@@ -135,16 +145,6 @@ export const clausesEqual = (
  * carrying the field's type into the marker, neither of which belongs in a
  * fit predicate.
  */
-/**
- * Whether a value is a DID naming both of its parts: `isDID` alone admits
- * `did:` and `did:key`, which name no principal for the rewrite below to
- * restate.
- */
-const isCompleteDID = (value: unknown): boolean => {
-  const parsed = parseDID(value);
-  return parsed !== undefined && parsed.method !== "" && parsed.id !== "";
-};
-
 const personalSpaceOwnerAsReader = (atom: CfcAtom): CfcAtom => {
   if (!isObjectNotArray(atom)) return atom;
   const record = atom as Record<string, CfcAtom>;

@@ -99,7 +99,7 @@ export function bytesToDid(publicKey: Uint8Array): DIDKey {
   const bytes = new Uint8Array(ED25519_PUB_KEY_TAGGED_SIZE);
   varint.encodeTo(ED25519_CODE, bytes);
   bytes.set(publicKey, ED25519_PUB_KEY_TAG_SIZE);
-  return `did:key:${base58btc.encode(bytes)}`;
+  return `${DID_KEY_PREFIX}${base58btc.encode(bytes)}`;
 }
 
 // Convert DID key into public key bytes.

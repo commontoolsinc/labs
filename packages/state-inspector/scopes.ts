@@ -68,10 +68,17 @@ function decodePart(part: string): string {
  * Parse a stored scope_key into its kind + principal/session.
  *
  * The engine writes each part percent-encoded (`resolveScopeKey`), which
- * escapes the colons inside a DID and makes the split on `:` exact. A key
- * written without that encoding leaves its DID spread across the leading
- * parts, so those are rejoined before decoding. Either way the principal has
- * to come out a DID; anything else is `other`, and counted as no-user.
+ * escapes the colons inside a DID and makes the split on `:` exact: a session
+ * key is the kind, the principal, and the session id, and nothing else.
+ *
+ * A key written without that encoding carries no mark of where its principal
+ * ends, and the two parts are read as `did:<method>:<id>` followed by the
+ * session id. That is the only boundary such a key can be read at, so a
+ * principal whose own identifier holds a colon cannot be recovered from one —
+ * which is what the encoding exists to prevent.
+ *
+ * Either way the principal has to come out a DID; anything else is `other`,
+ * and counted as no-user.
  */
 export function parseScope(raw: string): Scope {
   if (raw === "space") {
@@ -79,13 +86,15 @@ export function parseScope(raw: string): Scope {
   }
   const [kind, ...rest] = raw.split(":");
   if (kind === "session" && rest.length >= 2) {
-    const principal = decodePart(rest.slice(0, -1).join(":"));
+    const [principal, sessionId] = rest.length === 2
+      ? [decodePart(rest[0]), decodePart(rest[1])]
+      : [rest.slice(0, 3).join(":"), rest.slice(3).join(":")];
     if (isDID(principal)) {
       return {
         raw,
         kind: "session",
         principal,
-        sessionId: decodePart(rest[rest.length - 1]),
+        sessionId,
         entities: 0,
         revisions: 0,
       };
