@@ -136,6 +136,7 @@ async function report(): Promise<void> {
             JSON.stringify({
               size,
               mode,
+              // Behavior metadata retained for comparison with stored results.
               lazyMaterialization: true,
               steps,
             }),

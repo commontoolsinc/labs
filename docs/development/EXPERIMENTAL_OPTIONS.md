@@ -1827,6 +1827,22 @@ server](#clients-that-are-not-built-alongside-their-server).
 These are recorded so that references to them elsewhere in the tree do not send
 a future reader hunting for a flag that no longer exists.
 
+### `lazyMaterialization`
+
+**Removed.** Lift argument and body reads use schema-observing lazy views
+unconditionally. `RuntimeOptions.experimental.lazyMaterialization` and
+`EXPERIMENTAL_LAZY_MATERIALIZATION` no longer select a mode. Handlers and
+other unmarked transactions retain eager reads; the internal transaction mark
+still scopes the view to lift execution and is reset before result writing.
+
+The [feature guide](../features/lazy-cell-materialization.md) describes the
+current contract. Rollback requires a reviewed code revert and redeploy.
+Restoring the switch restores its default-on behavior; it does not qualify
+eager mode, whose nullable-read errors are documented in the
+[reload diagnosis](../history/development/performance/2026-09-15-lazy-reload-diagnosis.md).
+The [fast-follow plan](../plans/lazy-materialization-fast-follow.md) tracks
+retirement approval, validation, and remaining measurements.
+
 ### `persistentSchedulerState` / `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` (removed)
 
 Persisted the scheduler's observations to durable storage through memory-v2

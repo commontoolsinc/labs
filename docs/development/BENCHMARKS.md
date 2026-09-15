@@ -713,8 +713,9 @@ of the four lifts, since the cards read their stored values. Opening a topic ran
 the pivot and that topic's backlinks and comment count, but not its last
 activity. Returning to the board afterward ran that topic's last activity once;
 a board returned to after opening a topic is not one of the probe's workloads.
-That is one small sample. Server execution, and lazy materialization off, were
-not measured.
+That is one small sample; server execution was not measured.
+[Lazy lift materialization](../features/lazy-cell-materialization.md) is
+unconditional and is not a selectable benchmark mode.
 
 The thread cases are measured under one workload, `aggregates`, which demands
 every topic's present comment count and last activity and nothing else. Those
