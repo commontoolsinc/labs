@@ -777,6 +777,7 @@ const resolveRegistrySkillScript = (
     };
   }
   if (
+    context.allowSkillScripts !== true &&
     !isSkillScriptAllowlisted(context.allowedSkillScripts, {
       skill: skillName,
       path,
@@ -787,7 +788,8 @@ const resolveRegistrySkillScript = (
       error: {
         code: "script_not_allowlisted",
         message:
-          `skill script is not exactly allowlisted: ${skill.name}:${path}`,
+          `this run does not run skill scripts: ${skill.name}:${path}. ` +
+          `Skill scripts run in the sandbox when the operator allows them`,
       },
     };
   }
@@ -898,6 +900,7 @@ const resolveAcquiredSkillScript = (
     };
   }
   if (
+    context.allowSkillScripts !== true &&
     !isSkillScriptAllowlisted(context.allowedSkillScripts, {
       skill: skillName,
       path,
@@ -907,8 +910,8 @@ const resolveAcquiredSkillScript = (
       ok: false,
       error: {
         code: "script_not_allowlisted",
-        message:
-          `skill script is not exactly allowlisted: ${skillName}:${path}`,
+        message: `this run does not run skill scripts: ${skillName}:${path}. ` +
+          `Skill scripts run in the sandbox when the operator allows them`,
       },
       acquisition: activation.acquisition,
     };

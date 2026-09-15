@@ -2526,6 +2526,7 @@ export class CfHarnessEngine {
       ...(signal !== undefined ? { signal } : {}),
       skillRegistry: this.#runState.skillRegistry,
       skillActivations: this.#runState.skillActivations,
+      allowSkillScripts: this.config.allowSkillScripts,
       allowedSkillScripts: this.config.allowedSkillScripts,
       skillScriptExecutionTarget: this.config.skillScriptExecutionTarget,
       browserAccess: this.config.browserAccess,

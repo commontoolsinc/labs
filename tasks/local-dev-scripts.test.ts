@@ -92,6 +92,19 @@ describe("local-dev-scripts", () => {
       expect(stderr).toContain("shell exited before it became ready");
     });
 
+    it("accepts `--allow-skill-scripts` beside `--cf-harness`", async () => {
+      // The switch is the operator's and reaches the launcher, which prints
+      // it; the script itself only carries it through.
+      const { code, stderr } = await runScript(
+        "start-local-dev.sh",
+        UNREACHABLE_SHELL_OFFSET,
+        { args: ["--cf-harness", "--allow-skill-scripts"] },
+      );
+
+      expect(code).toBe(PORT_UNREACHABLE_EXIT);
+      expect(stderr).not.toContain("--allow-skill-scripts");
+    });
+
     it("answers from the recorded list, not from the environment", async () => {
       const { code, stderr } = await runScript(
         "start-local-dev.sh",

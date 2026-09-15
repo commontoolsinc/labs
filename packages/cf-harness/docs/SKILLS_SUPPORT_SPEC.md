@@ -340,7 +340,9 @@ The current CLI flags are:
 ```text
 --skills-root <path>      Skill root containing <name>/SKILL.md
 --skill <name>            Preload a skill for this run (repeatable)
---allow-skill-script <s>  Allow exact script execution (skill:scripts/path,
+--allow-skill-scripts     Run skill scripts in the sandbox, for every skill
+                          this run holds, registry and acquired alike
+--allow-skill-script <s>  Allow one exact script (skill:scripts/path,
                           where skill is a registry name or an acquired pin;
                           a registry name requires --skills-root, a pin does
                           not)
@@ -527,18 +529,22 @@ Policy rules:
 - A skill cannot grant a tool that the run did not already allow.
 - A skill cannot downgrade CFC enforcement.
 - A skill cannot authorize reading protected substrate observations.
-- A skill script can run only through `run_skill_script`, and only when both the
-  tool and exact `skill:scripts/path` entry are allowlisted by the operator.
+- A skill script can run only through `run_skill_script`, and only where the
+  operator allows skill scripts: `--allow-skill-scripts` for every skill the run
+  holds, or an exact `skill:scripts/path` entry for one. The switch covers a
+  registry skill and an acquired one alike, since what a script is trusted with
+  is the sandbox it runs in rather than where the skill came from.
 - A registry skill's script must additionally belong to a skill activated by
   name in this run, and match that script's entry in the run-start registry
   snapshot by digest and size.
-- An acquired skill's script goes through the same allowlist, with the pin its
-  bytes were read at — `owner/repo/slug@<commit sha>` — in the `skill` field,
-  since an acquired skill has no registry name to key an entry on. It has no
-  registry and no run-start snapshot either, so the two conditions above are met
-  differently: the run must hold an activation whose acquisition names that pin,
-  and the file must match the digest taken at acquisition. It runs in the
-  sandbox; a run whose skill-script execution target is the host refuses it.
+- An acquired skill's script goes through the same decision. An entry naming one
+  keys on the pin its bytes were read at — `owner/repo/slug@<commit sha>` —
+  since an acquired skill has no registry name; a run with the switch on needs
+  no entry at all. It has no registry and no run-start snapshot either, so the
+  two conditions above are met differently: the run must hold an activation
+  whose acquisition names that pin, and the file must match the digest taken at
+  acquisition. It runs in the sandbox; a run whose skill-script execution target
+  is the host refuses it.
 - What backs `run_skill_script` for an acquired script is the mount that puts it
   at a path, so a run given no `--skills-root` still offers the tool to a child
   whose sandbox carries that mount, and `--allow-skill-script` takes an acquired

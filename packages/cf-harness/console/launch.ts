@@ -97,6 +97,7 @@ export const LAUNCHER_OWNED_VARIABLES = [
   "CF_HARNESS_CONNECTOR_GRANTS",
   "CF_HARNESS_PATTERN_INDEX_URL",
   "CF_HARNESS_SKILLS_REGISTRY_URL",
+  "CF_HARNESS_ALLOW_SKILL_SCRIPTS",
   "CF_HARNESS_SPACE_DB",
   "MEMORY_DIR",
 ] as const;
@@ -184,6 +185,8 @@ export interface ConsoleLaunchOptions {
   skillsRegistryUrl?: string;
   noPatternIndex?: boolean;
   noSkillsRegistry?: boolean;
+  allowSkillScripts?: boolean;
+  inheritedAllowSkillScripts?: boolean;
   cfcResultDir?: string;
   cfcInvocationContextDir?: string;
   posture?: string;
@@ -478,6 +481,17 @@ export const resolveConsoleLaunchPlan = (
   const registrationSourceName =
     `\`${RUNSC_CFC_RUNTIME}\` as \`docker info\` reports it`;
 
+  // The operator's one decision about skill scripts. Nothing about the fabric
+  // implies it, so it is off unless someone says otherwise, and the printout
+  // says which of the two ways they said it.
+  const allowSkillScripts = options.allowSkillScripts === true ||
+    options.inheritedAllowSkillScripts === true;
+  const allowSkillScriptsSource = options.allowSkillScripts === true
+    ? NAMED
+    : options.inheritedAllowSkillScripts === true
+    ? "`CF_HARNESS_ALLOW_SKILL_SCRIPTS`, inherited"
+    : LAUNCHER_DEFAULT;
+
   const resolved: ResolvedValue[] = [
     ...(instance === undefined ? [] : [{
       name: "instance",
@@ -549,6 +563,11 @@ export const resolveConsoleLaunchPlan = (
         ? NAMED
         : deploymentDefault,
     },
+    {
+      name: "skill scripts",
+      value: allowSkillScripts ? "run in the sandbox" : "not run",
+      source: allowSkillScriptsSource,
+    },
     ...connectorResolved,
     {
       name: "proxy",
@@ -578,6 +597,7 @@ export const resolveConsoleLaunchPlan = (
     ...(skillsRegistryUrl !== undefined
       ? { CF_HARNESS_SKILLS_REGISTRY_URL: skillsRegistryUrl }
       : {}),
+    ...(allowSkillScripts ? { CF_HARNESS_ALLOW_SKILL_SCRIPTS: "1" } : {}),
   };
 
   return { environment, resolved };
@@ -759,7 +779,11 @@ export const prepareConsoleLaunch = async (
       "fabric-cfc-flow-labels",
       "fabric-cfc-enforcement-mode",
     ],
-    boolean: ["no-pattern-index", "no-skills-registry"],
+    boolean: [
+      "no-pattern-index",
+      "no-skills-registry",
+      "allow-skill-scripts",
+    ],
     "--": true,
   });
   // A flag present but empty is a value someone typed that did not survive
@@ -884,6 +908,9 @@ export const prepareConsoleLaunch = async (
       : {}),
     noPatternIndex: parsed["no-pattern-index"] === true,
     noSkillsRegistry: parsed["no-skills-registry"] === true,
+    allowSkillScripts: parsed["allow-skill-scripts"] === true,
+    inheritedAllowSkillScripts:
+      nonEmpty(env.CF_HARNESS_ALLOW_SKILL_SCRIPTS) === "1",
     ...(flag("cfc-result-dir") !== undefined
       ? { cfcResultDir: flag("cfc-result-dir")! }
       : {}),

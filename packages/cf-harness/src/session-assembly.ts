@@ -101,6 +101,9 @@ export interface HarnessSessionConfig {
   /** Reference trees `research` may inspect, and where they came from. */
   docsCorpus?: HarnessDocsCorpusRecord;
 
+  /** Whether a skill this run holds may have its scripts run in the sandbox. */
+  allowSkillScripts?: boolean;
+
   allowedSkillScripts: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
 
@@ -255,6 +258,7 @@ export const harnessSessionEngineOptions = (
     ...(config.docsCorpus !== undefined
       ? { docsCorpus: config.docsCorpus }
       : {}),
+    ...(config.allowSkillScripts === true ? { allowSkillScripts: true } : {}),
     ...(config.allowedSkillScripts.length > 0
       ? { allowedSkillScripts: config.allowedSkillScripts }
       : {}),

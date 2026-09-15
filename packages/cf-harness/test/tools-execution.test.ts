@@ -228,6 +228,7 @@ const createContext = (
   skillScriptExecutionTarget: HarnessToolContext["skillScriptExecutionTarget"] =
     "sandbox",
   browserAccess?: HarnessBrowserAccessLease,
+  allowSkillScripts = false,
 ): HarnessToolContext => {
   let currentDir = initialCurrentDir;
   let sequence = 0;
@@ -238,6 +239,7 @@ const createContext = (
     workspaceHostPath,
     skillRegistry,
     skillActivations,
+    allowSkillScripts,
     allowedSkillScripts,
     skillScriptExecutionTarget,
     browserAccess,
@@ -2757,10 +2759,40 @@ Deno.test({
         { skill: "pattern-test", path: "scripts/check.ts" },
       );
 
+      // The operator's one switch reaches a registry script too: no entry
+      // names this one, and with the switch on it is no longer refused as
+      // un-allowlisted. It is still held to the run-start digest, which this
+      // file no longer matches — so the switch decides whether scripts run,
+      // and decides nothing about which bytes.
+      const allowedByTheSwitch = await runSkillScriptTool.invoke(
+        createContext(
+          new FakeSandboxRuntime(),
+          "/workspace",
+          new FakeProcessRunner(),
+          "observe",
+          undefined,
+          registry,
+          [],
+          "/tmp/cf-harness-workspace",
+          activations,
+          [],
+          [],
+          "sandbox",
+          undefined,
+          true,
+        ),
+        { skill: "pattern-test", path: "scripts/check.ts" },
+      );
+
       assertEquals(notActivated.status, "error");
       assertEquals(notActivated.error?.code, "skill_activations_missing");
       assertEquals(notAllowlisted.status, "error");
       assertEquals(notAllowlisted.error?.code, "script_not_allowlisted");
+      assertEquals(allowedByTheSwitch.status, "error");
+      assertEquals(
+        allowedByTheSwitch.error?.code,
+        "script_snapshot_mismatch",
+      );
       assertEquals(drift.status, "error");
       assertEquals(drift.error?.code, "script_snapshot_mismatch");
       assertEquals(drift.digestMatchesRegistry, false);

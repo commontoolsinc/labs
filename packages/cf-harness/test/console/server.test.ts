@@ -366,6 +366,41 @@ describe("console/server", () => {
       expect(policy.allowedToolIds).toContain("acquire_skill");
     });
 
+    it("runs skill scripts when the console was launched with the switch", async () => {
+      const named = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--allow-skill-scripts",
+        ],
+        {},
+        "/console",
+      );
+      expect(named.allowSkillScripts).toBe(true);
+
+      const inherited = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+        ],
+        { CF_HARNESS_ALLOW_SKILL_SCRIPTS: "1" },
+        "/console",
+      );
+      expect(inherited.allowSkillScripts).toBe(true);
+    });
+
+    it("runs no skill script when the console was launched without it", async () => {
+      expect((await config()).allowSkillScripts).toBe(false);
+    });
+
     it("withholds the skill tools from a session with no registry", async () => {
       const policy = harnessSessionChatPolicy(await config());
       expect(policy.allowedToolIds).not.toContain("search_skills");

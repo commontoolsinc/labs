@@ -5144,12 +5144,13 @@ export class CfHarnessPromptLoop {
       parentAcquiredSkills?.skills,
       options.resolvedSkill?.acquisition,
     );
-    // The operator's allowlist is the run's and the tool surface is the
-    // profile's, so a child given an acquired skill needs both brought to it or
-    // it holds a mounted skill it cannot run a script of.
+    // Whether skill scripts run is the run's decision and the tool surface is
+    // the profile's, so a child given an acquired skill needs both brought to
+    // it or it holds a mounted skill it cannot run a script of.
     const acquiredScripts = acquiredSkillScriptSurface(
       this.engine.config.allowedSkillScripts,
       childAcquiredSkill,
+      this.engine.config.allowSkillScripts === true,
     );
     const childAllowedSkillScripts = [
       ...(profileConfig.allowedSkillScripts ?? []),
@@ -5235,6 +5236,10 @@ export class CfHarnessPromptLoop {
         : {}),
       ...(childAllowedSkillScripts.length > 0
         ? { allowedSkillScripts: childAllowedSkillScripts }
+        : {}),
+      // The run's decision, not the profile's, so it reaches every child.
+      ...(this.engine.config.allowSkillScripts === true
+        ? { allowSkillScripts: true }
         : {}),
       ...(profileConfig.skillScriptExecutionTarget !== undefined
         ? {

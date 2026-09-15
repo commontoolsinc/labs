@@ -140,34 +140,36 @@ export const childSandboxOptions = (
 };
 
 /**
- * What a child given an acquired skill may do with the scripts mounted for it:
- * run the ones the operator allowlisted at that skill's pin, and no others.
+ * What a child given an acquired skill may do with the scripts mounted for it.
  *
- * Two facts have to meet here and belong to different things. The operator's
- * allowlist is a property of the RUN — it is what `--allow-skill-script`
- * writes, and the operator decides before any acquisition happens — while a
- * child's tool surface is a property of its PROFILE. Neither reaches the other
- * on its own, so a child would hold a mounted skill with no tool to run a
- * script and no entry naming one.
+ * Two facts have to meet here and belong to different things. Whether this run
+ * runs skill scripts at all is a property of the RUN — the operator's one
+ * decision — while a child's tool surface is a property of its PROFILE.
+ * Neither reaches the other on its own, so without this a child would hold a
+ * mounted skill and no tool to run a script of it.
  *
- * Narrowed to the pin: the operator decided about that skill's scripts and no
- * others, and a delegation carries one `skillHandle`, so one pin is the whole
- * of what this child was given. A run whose allowlist names none of its scripts
- * grants nothing, and the child's surface is its profile's, unchanged.
+ * `allowedSkillScripts` entries naming this skill's pin are carried too, for a
+ * run whose operator wrote them; a run with the dial on needs none.
  */
 export const acquiredSkillScriptSurface = (
   runAllowlist: readonly HarnessAllowedSkillScript[] | undefined,
   acquired: HarnessAcquiredSkill | undefined,
+  allowSkillScripts = false,
 ): {
   allowedSkillScripts: readonly HarnessAllowedSkillScript[];
   toolIds: readonly "run_skill_script"[];
 } => {
-  const allowedSkillScripts = acquired === undefined
-    ? []
-    : (runAllowlist ?? []).filter((script) => script.skill === acquired.pin);
+  if (acquired === undefined) {
+    return { allowedSkillScripts: [], toolIds: [] };
+  }
+  const allowedSkillScripts = (runAllowlist ?? []).filter((script) =>
+    script.skill === acquired.pin
+  );
   return {
     allowedSkillScripts,
-    toolIds: allowedSkillScripts.length > 0 ? ["run_skill_script"] : [],
+    toolIds: allowSkillScripts || allowedSkillScripts.length > 0
+      ? ["run_skill_script"]
+      : [],
   };
 };
 
