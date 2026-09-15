@@ -1023,9 +1023,9 @@ export function validateAndTransform(
   let link = isCellViewRef(sourceRef) ? sourceRef.link : sourceRef;
   const schema = link.schema;
   const resolvedSchema = resolveSchema(schema);
-  let cfcLabelView = cloneCfcLabelView(
-    isCellViewRef(sourceRef) ? sourceRef.cfcLabelView : undefined,
-  );
+  let cfcLabelView = isCellViewRef(sourceRef)
+    ? sourceRef.cfcLabelView
+    : undefined;
 
   // For opaque cells, create the cell directly from the current link.
   // We intentionally avoid traversing redirect chains or reading through the
@@ -1044,6 +1044,8 @@ export function validateAndTransform(
       undefined,
     );
   }
+
+  cfcLabelView = cloneCfcLabelView(cfcLabelView);
 
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
