@@ -159,7 +159,7 @@ request is queued; `llm` publishes only its latest request's successful result.
 Queue completion writes remain bound to the issuing identity and read the live
 input label basis. This queue behavior applies with server execution on or off.
 
-Served `sqliteQuery` keeps equal non-clearance query hashes across readers,
+Served space-local `sqliteQuery` keeps equal non-clearance query hashes across readers,
 while its outbox key and in-flight RPC set resolve the result's user or session
 instance. Each completion and refusal captures its result target and binds the
 issuing identity before reading the stored claim. Pending publication ownership
@@ -169,9 +169,14 @@ acceptance. Distinct bindings may link the same pending or settled result.
 These tokens retire on acceptance, refusal, or replacement; memoization stays
 in the result cells.
 
-This result lifecycle does not select the database file. The SQLite provider
-READ still resolves a scoped database from its transport session. Explicit
-request-instance authorization for that RPC remains a separate obligation.
+Foreign `sqliteQuery` resolves the provider from the referenced handle's space,
+narrows results to at least user scope, and includes the reader in request
+identity (with session identity only for session-scoped results). Served foreign
+reads carry the complete scoped reader identity to a server advertising
+`sqliteQueryReader`. That server checks the source-space session and the carried
+reader before and after the read, and resolves scoped databases against the
+carried identity. Space-local queries retain transport-session database selection.
+See [SQLite execution](../sqlite-builtin/04-server-execution-and-transactions.md#referenced-databases-and-reader-authorization).
 
 `sqlite*` row clearance — RULED 2026-08-02: **per-reader
 materialization**, today's shape. The reader principal is part of
@@ -318,7 +323,7 @@ stream is passed to other spaces, which then append intents to it.
 - `wish` home-space materialization under serving — LIFTED by Phase 5
   as **per-demanding-identity wish resolution** (RULED 2026-08-14;
   supersedes the (c)-ruled interim refusal): on a serving runtime the
-  wish's home-space targets (`#favorites`/`#journal`/`#profile`
+  wish's home-space targets (favorite hashtags and `#favorites`/`#journal`/`#profile`
   family) resolve against the RUN's demanding identity — the
   demand-supplied instance identity (P2-F's run supply) or the
   event's stamped actor, read from the stamped run context — NEVER

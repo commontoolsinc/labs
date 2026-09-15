@@ -4,6 +4,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Wish and Loom resource discovery](development/2026-09-14-wish-resource-discovery.md) — September 2026 source investigation of wish discovery, SQLite registration, and person-inbox startup wiring; existing wish tests passed, with a provider composition proposed for implementation.
 - [Stale derived-state correction decision](development/2026-09-14-derived-state-correction.md) — approval and exact fixture scope for two calculated lunch-poll status corrections, consequences, and alternatives.
 
 - [Lazy-off integration evidence](development/performance/2026-09-14-lazy-off-integration.md) — isolated runner, runtime-client, and shell/browser integration results with eager materialization, explicit execution postures, and retirement evidence limits.

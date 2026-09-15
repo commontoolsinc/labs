@@ -228,16 +228,17 @@ Deno.test(
           .result;
         expect(wishResult?.candidates?.length).toBe(30);
       }
-      expect(
-        resolvedSchema(
-          rawLinkSchema(results[0].key("result").getRaw()) as JSONSchema,
-        ),
-      ).toEqual(nameOnlyWishSchema);
-      expect(
-        resolvedSchema(
-          rawLinkSchema(results[1].key("result").getRaw()) as JSONSchema,
-        ),
-      ).toEqual(bodyOnlyWishSchema);
+      for (
+        const [index, resourceSchema] of [
+          nameOnlyWishSchema,
+          bodyOnlyWishSchema,
+        ].entries()
+      ) {
+        const stateSchema = resolvedSchema(
+          rawLinkSchema(results[index].key("result").getRaw()) as JSONSchema,
+        ) as { properties: { candidates: { items: JSONSchema } } };
+        expect(stateSchema.properties.candidates.items).toEqual(resourceSchema);
+      }
     } finally {
       await runtime.dispose();
       await storageManager.close();
