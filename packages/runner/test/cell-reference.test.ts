@@ -259,6 +259,29 @@ describe("cell-reference", () => {
   });
 
   describe("renderCellReference()", () => {
+    it("keeps an unscoped cell in base scope under a scoped context", () => {
+      const link = { space: "bakery", id: "glaze", path: [] };
+      for (const scope of ["user", "session"] as const) {
+        const context = { space: "bakery", scope };
+        const rendered = renderCellReference(link, context);
+        expect(rendered).toBe("/glaze@space");
+        expect(parseCellReference(rendered, context).scope).toBe("space");
+      }
+    });
+
+    it("refuses malformed pins before emitting a reference", () => {
+      for (const pin of ["", "short", "a".repeat(42) + "/"]) {
+        expect(() => renderCellReference({ id: "glaze", path: [], pin }))
+          .toThrow(/43 base64url/);
+      }
+      const pin = "a".repeat(43);
+      expect(
+        parseCellReference(renderCellReference({ id: "glaze", path: [], pin }))
+          .pin,
+      )
+        .toBe(pin);
+    });
+
     it("preserves an unresolved space without letting a context fill it", () => {
       const link = { id: "glaze-tracker", scope: "space" as const, path: [""] };
       expect(renderCellReference(link)).toBe("/glaze-tracker@space/");

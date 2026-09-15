@@ -438,14 +438,14 @@ while keeping the position. A bare `title` is the same as `./title`.
 Qualifiers repeat as `@name=value`, with each name appearing once. Scope has the
 abbreviations `@space`, `@user`, `@session`, and `@inherit`; the last requires a
 context. `@pin=<43 base64url characters>` is reserved for module identity and
-ignored by runtime cell resolution. The `/@did:…/` space alias stays readable;
-the `/@name/` alias remains readable until the writer migration. A space
-embedded in it names the target space: it supplies the space when `--space` is
-absent, and when both are given they must agree — a mismatch is refused rather
-than resolved, at parse time when the two are written the same way and once the
-session opens when only a derivation can compare them. An address printed by one
-command therefore composes into the next with no flag beside it, whatever space
-the reader has configured.
+ignored by runtime cell resolution; shuttle refuses pinned operands. The
+`/@did:…/` space alias stays readable; the `/@name/` alias remains readable
+until the writer migration. A space embedded in it names the target space: it
+supplies the space when `--space` is absent, and when both are given they must
+agree — a mismatch is refused rather than resolved, at parse time when the two
+are written the same way and once the session opens when only a derivation can
+compare them. An address printed by one command therefore composes into the next
+with no flag beside it, whatever space the reader has configured.
 
 A slug may name a collection rather than a piece.
 `cf piece set-slug top /of:fid1:…/names` points `top` at the map a board keeps
@@ -1277,12 +1277,12 @@ cf cell get --cell ID notes --schema '{"type":"array","items":{"$link":true}}'
 ```
 
 The address is one string in the fabric's reference syntax —
-`//<space>/<piece>[#member][@qualifier…][/path]` or its space-relative form
-`/<piece>[#member][@qualifier…][/path]` — which is exactly what `cf piece call`
-and `cf cell get` take in the positional they read a target from, scheme
-included, so an address emitted by one command composes into the next unchanged,
-without being reassembled. The space rides in front as `@did:key:…` only when it
-differs from the space the command targeted, the scope follows the id as
+`/@<space>/<piece>[@scope][/path]` or its space-relative form
+`/<piece>[@scope][/path]` — which is exactly what `cf piece call` and
+`cf cell get` take in the positional they read a target from, scheme included,
+so an address emitted by one command composes into the next unchanged, without
+being reassembled. The space rides in front as `@did:key:…` only when it differs
+from the space the command targeted, the scope follows the id as
 `@user`/`@session` only when it is not the default, and the path follows as
 ordinary segments. No schema is inlined and no write-redirect flag rides along.
 

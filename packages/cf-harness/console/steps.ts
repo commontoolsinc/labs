@@ -989,7 +989,7 @@ const linkTarget = (
   if (typeof value !== "string") {
     return undefined;
   }
-  const text = value;
+  const text = value.trimStart();
   const address = parseConsoleReference(text);
   if (!matchLLMFriendlyLink.test(text) || address === undefined) {
     return undefined;

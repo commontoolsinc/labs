@@ -802,11 +802,8 @@ contains "[" "$FROM_HEAD" "the member on the head reads the arguments cell's ite
 check "$FROM_HEAD" "$FROM_SEGMENT" \
   "the member on the head and on the piece segment read one cell from its root"
 RESULT_KEY=$(said 69 "get /slugs/first/items#argument")
-if [ "$RESULT_KEY" != "$FROM_SEGMENT" ]; then
-  ok "a path ending in #argument names a result key rather than the arguments cell"
-else
-  bad "a path ending in #argument read the arguments cell ([$RESULT_KEY])"
-fi
+contains 'Cannot access path "items#argument" - property "items#argument" not found.' "$RESULT_KEY" \
+  "a path ending in #argument names a missing literal result key"
 contains "A place is result-rooted, so \`cd\` selects no \`#argument\` member" \
   "$(said 70 "cd .#argument")" "cd refuses the member on its head"
 check "shuttle first/settings @space> " "$(prompt 70 "cd .#argument")" \

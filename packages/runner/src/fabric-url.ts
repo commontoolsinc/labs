@@ -135,7 +135,7 @@ export function parseFabricUrl(
 
   // A bare or schemed tagged hash, with no path around it.
   if (!trimmed.startsWith("/") && !trimmed.includes("://")) {
-    const id = asEntityId(trimmed);
+    const id = asEntityId(trimmed.trimEnd());
     return id ? { id, path: [] } : undefined;
   }
 

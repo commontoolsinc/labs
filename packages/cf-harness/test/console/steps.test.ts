@@ -1206,6 +1206,24 @@ describe("console/steps provenance", () => {
       expect(args[0].token).toBe("cfh:a:aaaaa");
     });
 
+    it("preserves path whitespace when reading a padded reference", () => {
+      const steps = composed("  /of:fid1:abc/title ");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[2], handles);
+      expect(args[0].isReference).toBe(true);
+      expect(consoleStepArguments(steps[2], [])[0].ref).toBe(
+        "/of:fid1:abc/title ",
+      );
+      expect(args[0].token).toBe("cfh:a:aaaaa");
+    });
+
+    it("refuses non-entity URI schemes as cell references", () => {
+      for (const value of ["/data:abc", "/fid1:abc"]) {
+        const steps = composed(value);
+        expect(consoleStepArguments(steps[2], [])[0].isReference).toBe(false);
+      }
+    });
+
     it("resolves a link naming a path inside a held cell to that cell", () => {
       const steps = composed("/of:fid1:abc/numbers");
       const handles = consoleRunHandles(steps, table);

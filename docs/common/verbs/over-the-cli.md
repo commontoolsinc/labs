@@ -696,8 +696,8 @@ cf cell get --cell <board> notes \
 ```
 
 The address is one string in the fabric's reference syntax —
-`//<space>/<piece>[#member][@qualifier…][/path]` or its
-space-relative form `/<piece>[#member][@qualifier…][/path]` — the same form the target positional reads,
+`/@<space>/<piece>[@scope][/path]` or its
+space-relative form `/<piece>[@scope][/path]` — the same form the target positional reads,
 so an address a read hands you is passed onward as it stands. The space rides in front only
 when it differs from the space the command targeted, and the scope follows the
 id only when it is not the default. No schema is inlined: a stored link can

@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { ValidationError } from "@cliffy/command";
 import {
   isReference,
   normalizeLLMFriendlyRef,
@@ -29,6 +30,12 @@ const sessionOn = (space: string) =>
 const didFor = async (name: string) => (await sessionOn(name)).space;
 
 describe("llm-friendly-ref", () => {
+  it("reports malformed target members and qualifiers as usage errors", () => {
+    for (const target of ["glaze#unknown", "glaze@unknown=value"]) {
+      expect(() => splitArgumentSuffix(target)).toThrow(ValidationError);
+    }
+  });
+
   it("returns undefined for references outside the reference form", () => {
     expect(normalizeLLMFriendlyRef("piece1")).toBeUndefined();
     expect(normalizeLLMFriendlyRef("piece1@user")).toBeUndefined();

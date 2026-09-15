@@ -39,6 +39,13 @@ describe("fabric-url", () => {
       });
     });
 
+    it("trims identifier padding while preserving path whitespace", () => {
+      expect(parseFabricUrl(`  of:fid1:${HASH}  `)?.id).toBe(`of:fid1:${HASH}`);
+      expect(parseFabricUrl(`/of:fid1:${HASH}/title `)?.path).toEqual([
+        "title ",
+      ]);
+    });
+
     describe("a rooted link", () => {
       it("returns the id", () => {
         expect(parseFabricUrl(`/of:fid1:${HASH}`)).toEqual({
