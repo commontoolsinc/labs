@@ -554,12 +554,10 @@ export interface PivotRow {
 /**
  * The experimental options a measurement's runtime pins, so that a measurement
  * keeps these semantics whatever the runtime's defaults become. Left unset,
- * `lazyMaterialization` takes the built-in default, and `serverExecution`
- * takes process-wide state that another runtime in the same process can
- * change.
+ * `serverExecution` takes process-wide state that another runtime in the same
+ * process can change.
  */
 export const TOPICS_FIXTURE_EXPERIMENTAL_OPTIONS = {
-  lazyMaterialization: true,
   serverExecution: false,
 } as const;
 

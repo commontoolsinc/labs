@@ -43,7 +43,7 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
   assertStrictEquals(options.storageManager, storageManager);
   assertEquals(options.experimental?.modernCellRep, true);
   // Unset flags stay unset (tri-state fidelity), not coerced.
-  assertEquals(options.experimental?.lazyMaterialization, undefined);
+  assertEquals(options.experimental?.readerSchemaPrecedence, undefined);
   // EXCEPT the posture: the deployed-topology preset resolves an unset
   // serverExecution to the first-party default, so this server-side
   // process always runs a declared arm.

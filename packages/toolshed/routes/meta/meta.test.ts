@@ -130,7 +130,7 @@ Deno.test("meta routes", async (t) => {
     // real handler rather than a fixture, for exactly that reason.
     publishExperimentalPosture({
       modernCellRep: true,
-      lazyMaterialization: false,
+      computedCellIds: false,
     });
     try {
       const adopted = await experimentalOptionsForDeployedClient({
@@ -145,7 +145,7 @@ Deno.test("meta routes", async (t) => {
       // client adopts the legacy strict `false` a pre-flag server runs.
       assertEquals(adopted, {
         modernCellRep: false,
-        lazyMaterialization: false,
+        computedCellIds: false,
         readerSchemaPrecedence: false,
       });
     } finally {

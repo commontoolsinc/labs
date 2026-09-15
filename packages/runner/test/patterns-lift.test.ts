@@ -176,7 +176,7 @@ describe("Pattern Runner - Lift", () => {
     // its dependency in either mode.
     expect(runCounts).toMatchObject({
       multiply: 4,
-      multiplyGenerator: runtime.experimental.lazyMaterialization ? 1 : 2,
+      multiplyGenerator: 1,
       multiplyGenerator2: 2,
     });
 

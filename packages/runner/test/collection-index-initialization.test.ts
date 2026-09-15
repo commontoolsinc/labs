@@ -28,7 +28,7 @@ describe("collection index initialization", () => {
         const runtime = new Runtime({
           apiUrl: new URL(import.meta.url),
           storageManager: storage,
-          experimental: { lazyMaterialization: true, serverExecution: false },
+          experimental: { serverExecution: false },
         });
         cleanup.defer(() => runtime.dispose({ closeStorage: false }));
         const compiled = await runtime.patternManager.compilePattern({

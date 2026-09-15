@@ -49,7 +49,6 @@ describe("ExperimentalOptions", () => {
           commitPreconditions: false,
           plainResultReceipts: false,
           computedCellIds: false,
-          lazyMaterialization: false,
           readerSchemaPrecedence: false,
         },
       });
@@ -59,7 +58,6 @@ describe("ExperimentalOptions", () => {
         commitPreconditions: false,
         plainResultReceipts: false,
         computedCellIds: false,
-        lazyMaterialization: false,
         readerSchemaPrecedence: false,
         serverExecution: false,
       });
@@ -82,7 +80,6 @@ describe("ExperimentalOptions", () => {
         commitPreconditions: true,
         plainResultReceipts: true,
         computedCellIds: true,
-        lazyMaterialization: true,
         readerSchemaPrecedence: true,
         serverExecution: false,
       });
@@ -103,7 +100,6 @@ describe("ExperimentalOptions", () => {
         commitPreconditions: true,
         plainResultReceipts: true,
         computedCellIds: true,
-        lazyMaterialization: true,
         readerSchemaPrecedence: true,
         serverExecution: false,
       });

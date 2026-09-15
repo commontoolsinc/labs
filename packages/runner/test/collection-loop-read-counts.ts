@@ -136,7 +136,7 @@ async function report(): Promise<void> {
             JSON.stringify({
               size,
               mode,
-              lazyMaterialization: runtime.experimental.lazyMaterialization,
+              lazyMaterialization: true,
               steps,
             }),
         );

@@ -1,9 +1,8 @@
 # Lazy materialization fast-follow
 
-Status: F0 and F2 complete, F2 as an explicit deferral; F1 done as far as the
-deferral needed, with three bullets carried forward; F3's evidence assembled,
-with partial integration coverage recorded; F3's decision, F4, and F5 pending, the
-decision with the flag's owner and the rest behind it. This plan is the
+Status: F0 and F2 complete, F2 as an explicit deferral; F1 complete to the
+deferral boundary; F3 retirement decision approved; F4 implementation and
+validation in progress; F5 measurements pending. This plan is the
 separate follow-up to the
 [computation-cost](../history/plans/pattern-computation-cost.md) arc, whose
 [implementation
@@ -12,9 +11,9 @@ its D1/D2 measurements here. It owns the handler investigation, default-on
 rollout evidence, flag retirement, and those measurements. It does not authorize
 a live lunch-poll update.
 
-The [lazy materialization design](lazy-cell-materialization.md) defines the
-schema-observing view and snapshot contracts. Lift arguments use that view under
-the default-on `lazyMaterialization` flag. The handler path in
+The [lazy materialization guide](../features/lazy-cell-materialization.md)
+defines the schema-observing view and snapshot contracts. Lift arguments use
+that view unconditionally. The handler path in
 [`runner.ts`](../../packages/runner/src/runner.ts) still reads its argument
 without marking the transaction for lazy materialization. Its closed-world event
 validation, cold-input handling, receipts, and effects make it a separate
@@ -25,10 +24,9 @@ integration problem.
 Complete the outstanding work in this plan after the computation-cost arc, with
 independent PRs and acceptance evidence. Keep handler semantics separate from
 removing the lift-path rollout switch: either can expose a correctness issue the
-other does not address. The removal condition and the flag's author remain
-recorded in the registry's [summary
-table](../development/EXPERIMENTAL_OPTIONS.md#summary-table), which names
-Bernhard Seefeld.
+other does not address. The [retirement decision](../history/development/2026-09-15-lazy-materialization-retirement.md)
+authorizes removing the switch, with rollback by reviewed code revert and
+redeploy. No separate flag-owner approval is required.
 
 ## Execution tracker
 
@@ -41,8 +39,8 @@ in the same PR as behavior changes.
 | F0   | Computation-cost acceptance | Fixed baseline and remaining-call-site inventory                      | Done: [F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md)                                                                 |
 | F1   | F0                          | Handler materialization contract and measured prototype               | Done as far as the deferral needed, three bullets carried forward: [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)        |
 | F2   | F1                          | Reviewed handler integration, or an explicit evidence-backed deferral | Done: deferred, with the blocker and the conditions for revisiting in the [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md) |
-| F3   | F0                          | Default-on rollout evidence and flag-retirement decision              | Evidence: [F3 record](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md); decision pending with the flag's owner               |
-| F4   | F3                          | Remove the lift rollout switch and redundant fallback dispatch        | Pending                                                                                                                                                                |
+| F3   | F0                          | Default-on rollout evidence and flag-retirement decision              | Evidence: [F3 record](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md); decision approved in the [retirement record](../history/development/2026-09-15-lazy-materialization-retirement.md)               |
+| F4   | F3                          | Remove the lift rollout switch and redundant fallback dispatch        | Implementation complete; validation and merge pending                                                                                                                                                                |
 | F5   | F2, F4                      | Repeat measurement matrix, update guidance, and archive plans         | Pending                                                                                                                                                                |
 
 F1/F2 and F3 can proceed independently. F4 does not depend on making handlers
@@ -170,14 +168,11 @@ must not accidentally inherit it.
       The [derived-state correction decision](../history/development/2026-09-14-derived-state-correction.md)
       permits two exact stale fetch-status transitions during vintage replay;
       it does not retire the flag or waive other state-loss findings.
-- [ ] Obtain the retirement decision from the flag's owner with a concrete
-      rollback route. No live data mutation is implied by this plan; coordinate
-      any live deployment separately. Bernhard Seefeld, whom the registry's
-      [summary table](../development/EXPERIMENTAL_OPTIONS.md#summary-table)
-      records as the flag's author, holds the decision as its owner; the F3
-      record's [What a retirement decision needs to
-      name](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md#what-a-retirement-decision-needs-to-name)
-      lists what the decision has to settle.
+- [x] Record the retirement decision and rollback route. The
+      [decision](../history/development/2026-09-15-lazy-materialization-retirement.md)
+      authorizes retirement, retains lazy behavior, and requires a reviewed code
+      revert/redeploy for rollback. It does not qualify eager mode or authorize
+      live data changes.
 - [ ] Make the accepted lift behavior unconditional and remove the flag's
       registry entry, environment/runtime option, obsolete conditional dispatch,
       and flag-specific documentation and tests. Retain substantive semantic

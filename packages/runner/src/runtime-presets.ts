@@ -267,7 +267,6 @@ export const EXPERIMENTAL_ENV_VARS = {
   // "false" while the flag exists.
   plainResultReceipts: "EXPERIMENTAL_PLAIN_RESULT_RECEIPTS",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
-  lazyMaterialization: "EXPERIMENTAL_LAZY_MATERIALIZATION",
   // Reader precedence at link crossings is default-on; env-reachable so a
   // process can opt out with an explicit "false" while the flag exists.
   readerSchemaPrecedence: "EXPERIMENTAL_READER_SCHEMA_PRECEDENCE",
@@ -360,9 +359,6 @@ export const EXPERIMENTAL_FLAG_AUTHORITY = {
   // Entity-id minting: a peer predating the `computed:` scheme throws on such
   // ids arriving via sync, so the scheme has to be fleet-wide.
   computedCellIds: "server",
-  // Changes which paths a lift's argument read, and the consumed-read set is
-  // what a commit declares and the server admits against.
-  lazyMaterialization: "server",
   // The whole point of the flag is which side computes what is stored.
   serverExecution: "server",
   // Defaults are published fleet-wide; each session negotiates the mode.

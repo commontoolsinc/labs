@@ -1,21 +1,20 @@
 # Lazy cell materialization
 
-`Cell.get()` builds everything its schema selects before the reader touches any
-of it: every entry link-resolved, defaulted, annotated and registered as a
-reactive dependency. A lift declaring a thousand-entry list pays for a thousand
-entries to read `list.length`.
+Lift arguments use a **view**: a proxy over a `(link, schema)` pair that
+resolves each property as the reader asks for it, narrowing the schema by that
+step. Paths the body does not read are not materialized or registered as value
+dependencies. A lift can read a list's length without materializing every row.
 
-A **view** does that work per path instead. It is a proxy over a
-`(link, schema)` pair that resolves each property as the reader asks for it,
-narrowing the schema by that step. What nobody reads is never built, never
-link-resolved and never registered.
+Unmarked transactions, including handler argument reads, retain eager
+schema-driven materialization. The transaction boundary determines which
+behavior a read uses.
 
 ## Where a view comes from
 
 The transaction decides, not the call site. `tx.markLazyMaterialize(true)` puts
-a transaction in the mode; every read through it is lazy, and nothing else in
-the runtime changes behavior. The runner marks the transaction it runs a lift's
-argument read and body on, and unmarks it afterwards.
+a transaction in the mode; reads through it use the lazy materialization path.
+The runner marks the transaction it runs a lift's argument read and body on,
+and unmarks it afterwards.
 
 `validateAndTransform` in
 [`schema.ts`](../../packages/runner/src/schema.ts) is the single entry point.
@@ -38,12 +37,9 @@ schema selects each one it requires. Both come off the container read a
 view takes anyway, so neither descends.
 
 Everything below is checked where the reader touches it. **A subtree the reader
-never reads is never validated.** That is the one behavior change a pattern
-author can observe: today a broken field five levels down collapses the whole
-argument and the lift does not run; under a view the lift runs, because nothing
-ever asked. It is bounded in the direction that matters — a reader that touches
-broken data still refuses — and it removes a class of whole-argument collapses
-caused by data the reader had no interest in.
+never reads is never validated.** An invalid field in an unread subtree does
+not prevent a lift from running. Reading that field invokes the schema checks,
+and a reader that touches invalid required data refuses.
 
 A mismatch the reader does touch surfaces at the **nearest enclosing property**,
 which is where an eager read decides the same question:
@@ -203,5 +199,3 @@ is the unmarked ones that stand.
   what a schema means on a read.
 - [`../specs/space-model/8-traversal.md`](../specs/space-model/8-traversal.md) —
   the eager traversal a view has to agree with.
-- [`../development/EXPERIMENTAL_OPTIONS.md`](../development/EXPERIMENTAL_OPTIONS.md)
-  — the `lazyMaterialization` flag while it exists.

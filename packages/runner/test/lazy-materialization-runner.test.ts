@@ -1,10 +1,3 @@
-// A lift running under lazy materialization.
-//
-// The runner marks the action's transaction, so the body reads the paths it
-// touches and nothing else, and disposes of a reader that touches data its
-// schema no longer describes the way it disposes of an argument that never
-// resolved: an undefined result, not an error.
-
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -33,12 +26,11 @@ describe("lazy-materialization-runner", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
-  const start = (lazyMaterialization: boolean) => {
+  const start = () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { lazyMaterialization },
     });
   };
 
@@ -52,13 +44,14 @@ describe("lazy-materialization-runner", () => {
   });
 
   /**
-   * Run `body` as a lift over `input`, and report what it returned along with
-   * which of the argument's paths the run registered a read for.
+   * Reads an argument through a marked or unmarked transaction and returns
+   * the body's result.
    */
-  const runLift = async (
+  const readArgument = async (
     cause: string,
     input: unknown,
     body: (argument: any) => unknown,
+    lazy = true,
   ): Promise<unknown> => {
     const tx = runtime.edit();
     const inputCell = runtime.getCell(space, `${cause}-input`, undefined, tx);
@@ -66,7 +59,7 @@ describe("lazy-materialization-runner", () => {
     await tx.commit();
 
     const readTx = runtime.edit();
-    if (runtime.experimental.lazyMaterialization) {
+    if (lazy) {
       readTx.markLazyMaterialize(true);
     }
     const argument = runtime
@@ -80,8 +73,8 @@ describe("lazy-materialization-runner", () => {
   };
 
   it("hands the body a value it can read like a plain object", async () => {
-    start(true);
-    const result = await runLift(
+    start();
+    const result = await readArgument(
       "plain",
       { items: [{ label: "a" }, { label: "b" }], title: "t" },
       (argument) => `${argument.title}:${argument.items.length}`,
@@ -90,17 +83,18 @@ describe("lazy-materialization-runner", () => {
   });
 
   it("agrees with an eager read on what the body sees", async () => {
-    start(false);
-    const eager = await runLift(
+    start();
+    const eager = await readArgument(
       "agree",
       { items: [{ label: "a" }], title: "t" },
       (argument) => JSON.stringify(argument),
+      false,
     );
     await runtime.dispose();
     await storageManager.close();
 
-    start(true);
-    const lazy = await runLift(
+    start();
+    const lazy = await readArgument(
       "agree",
       { items: [{ label: "a" }], title: "t" },
       (argument) => JSON.stringify(argument),
@@ -109,9 +103,9 @@ describe("lazy-materialization-runner", () => {
   });
 
   it("refuses when the body reaches an element the schema no longer describes", async () => {
-    start(true);
+    start();
     let refused = false;
-    await runLift(
+    await readArgument(
       "refuse",
       // The second element is missing the `label` the item schema requires.
       { items: [{ label: "a" }, { note: "b" }], title: "t" },
@@ -127,8 +121,8 @@ describe("lazy-materialization-runner", () => {
   });
 
   it("lets the body run when the mismatch is in an element it never reaches", async () => {
-    start(true);
-    const result = await runLift(
+    start();
+    const result = await readArgument(
       "unreached",
       { items: [{ label: "a" }, { note: "b" }], title: "t" },
       (argument) => argument.items[0].label,
@@ -136,12 +130,13 @@ describe("lazy-materialization-runner", () => {
     expect(result).toBe("a");
   });
 
-  it("leaves reads unchanged when the flag is off", async () => {
-    start(false);
-    const result = await runLift(
-      "flag-off",
+  it("reads arguments through an unmarked transaction", async () => {
+    start();
+    const result = await readArgument(
+      "unmarked",
       { items: [{ label: "a" }], title: "t" },
       (argument) => argument.title,
+      false,
     );
     expect(result).toBe("t");
   });
