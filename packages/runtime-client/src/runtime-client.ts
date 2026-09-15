@@ -401,7 +401,10 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     options: RuntimeClientOptions,
   ): Promise<RuntimeClient> {
     assertRenderDeclassificationPolicy(options.renderDeclassificationPolicy);
-    const initialized = await (new RuntimeConnection(transport)).initialize({
+    // The `satisfies` clause requires every `InitializationData` key, so a
+    // field added to that type is a type error here until this literal names
+    // it. `initialize()` checks the values.
+    const data = {
       apiUrl: options.apiUrl.toString(),
       spaceHostMap: options.spaceHostMap,
       identity: options.identity.keyPair,
@@ -419,7 +422,10 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       forwardWorkerConsole: options.forwardWorkerConsole,
       patternCoverage: options.patternCoverage,
       concurrentWatchRefresh: options.concurrentWatchRefresh,
-    });
+    } satisfies Record<keyof Required<InitializationData>, unknown>;
+    const initialized = await (new RuntimeConnection(transport)).initialize(
+      data,
+    );
     return new RuntimeClient(initialized, options.identity?.did());
   }
 

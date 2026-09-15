@@ -713,11 +713,6 @@ export type InitializationData = {
   spaceIdentity?: FabricKeyPair;
 
   /**
-   * How long a request may go unanswered before the client gives up on it.
-   */
-  timeoutMs?: number;
-
-  /**
    * Experimental space-model feature flags, declared by the host. The worker
    * runs the arm named here rather than resolving its own, so that the two
    * realms cannot diverge.
