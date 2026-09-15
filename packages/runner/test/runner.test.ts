@@ -1918,6 +1918,77 @@ describe("setup/start", () => {
     }
   });
 
+  it("start() yields to a pointer that moved again while the swapped-in pattern's dependencies synced", async () => {
+    // The watcher follows the durable pointer to a pattern the runtime does
+    // not hold by loading it and naming what it reads before the swap. A
+    // pointer that moves again during that naming has its own swap on the
+    // way, so the earlier chain swaps nothing: the piece ends up on the
+    // pattern the pointer names, not on the one whose sync finished last.
+
+    const resultCell = runtime.getCell(
+      space,
+      "watcher yields to a later pointer move",
+    );
+    const first = await compileReceiptPattern(runtime, "yield-first");
+    const second = await compileReceiptPattern(runtime, "yield-second");
+    const third = await compileReceiptPattern(runtime, "yield-third");
+    const manager = runtime.patternManager;
+    const secondRef = manager.getArtifactEntryRef(second);
+    const thirdRef = manager.getArtifactEntryRef(third);
+    if (secondRef === undefined || thirdRef === undefined) {
+      throw new Error("a compiled pattern has no entry ref");
+    }
+    await runtime.runSynced(resultCell, first, {});
+    const movePointer = async (ref: { identity: string; symbol: string }) => {
+      const { error } = await runtime.editWithRetry((tx) => {
+        resultCell.withTx(tx).setMetaRaw(
+          "patternIdentity",
+          ref,
+          rawMetaWriteAuthorization,
+        );
+      });
+      if (error !== undefined) throw error;
+    };
+    // The second pattern is compiled here, so the runtime holds it. Hiding
+    // it from the in-memory lookup sends the watcher down the load path,
+    // whose swap names what the loaded pattern reads before it happens.
+    const originalLookup = manager.artifactFromIdentitySync.bind(manager);
+    manager.artifactFromIdentitySync = (identity, symbol) =>
+      identity === secondRef.identity
+        ? undefined
+        : originalLookup(identity, symbol);
+    let movedDuringSync = false;
+    runtime.runner.accessForTestingOnly.dependencySyncer = async (
+      cell,
+      pattern,
+      inputs,
+      sync,
+    ) => {
+      if (
+        !movedDuringSync &&
+        manager.getArtifactEntryRef(pattern)?.identity === secondRef.identity
+      ) {
+        movedDuringSync = true;
+        await movePointer(thirdRef);
+      }
+      return await sync(cell, pattern, inputs);
+    };
+
+    try {
+      await movePointer(secondRef);
+      await runtime.runner.idlePointerMaintenance();
+      await runtime.idle();
+
+      expect(movedDuringSync).toBe(true);
+      expect(getPatternIdentityRef(resultCell)).toEqual(thirdRef);
+      expect((resultCell.getAsQueryResult() as { marker: string }).marker)
+        .toBe("yield-third");
+    } finally {
+      manager.artifactFromIdentitySync = originalLookup;
+      runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
+    }
+  });
+
   it("runSyncedWithCommit returns the pattern accepted by its setup transaction", async () => {
     const resultCell = runtime.getCell(space, "runSynced commit receipt");
     const initialPattern = await compileReceiptPattern(runtime, "v1");
