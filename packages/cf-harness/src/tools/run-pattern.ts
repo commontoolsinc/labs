@@ -168,8 +168,8 @@ export interface RunPatternToolSuccessOutput {
   rawValue?: unknown;
 
   /**
-   * What became of this run's contribution to the pattern index, when the
-   * run had one to make. Absent when the run published nothing at all — it
+   * This run's queued contribution to the pattern index, when the run had one
+   * to make. Absent when the run staged nothing at all — it
    * named a `patternId`, it gave no description, or the run has no index.
    */
   patternPublication?: RunPatternPublicationReport;
@@ -215,16 +215,17 @@ export interface RunPatternToolSuccessOutput {
 }
 
 /**
- * What became of this run's contribution to the index after publication
- * policy and the render gate were applied.
+ * The contribution staged after publication policy and the render gate were
+ * applied. The tool returns before the session flush sends it to the index,
+ * so this report records intent at tool return, never an acknowledgment.
  *
- * Every field is pinned to a fixed set — the two unions and a boolean, with
+ * Every field is pinned to a fixed set — a status, a reason and a boolean, with
  * `message` drawn from `PATTERN_PUBLICATION_MESSAGES` and never composed. See
  * `pattern-index/publish-render-gate.ts` for why nothing derived from the
  * rendered DOM may join them.
  */
 export interface RunPatternPublicationReport {
-  status: PatternPublicationStatus;
+  status: "queued";
   reason: PatternPublicationReason;
   message: string;
 
@@ -366,7 +367,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           properties: {
             status: {
               type: "string",
-              enum: ["discoverable", "recorded"],
+              enum: ["queued"],
             },
             reason: {
               type: "string",
@@ -1958,9 +1959,9 @@ export const runPatternTool: HarnessToolDefinition<
       }
       return signal?.aborted === true ? "cancelled" : outcome;
     };
-    // Source the model wrote and successfully ran is contributed back to the
-    // index. Recording and being offered to search are separate: the default
-    // records the run, while deliberate corpus seeding may request immediate
+    // Source the model wrote and successfully ran is queued for the index.
+    // Recording and being offered to search are separate: the default
+    // requests a record, while deliberate corpus seeding may request immediate
     // discoverability. A render-gate failure always withholds discovery with
     // its own reason. A run naming a `patternId` records nothing: it ran what
     // the index already holds.
@@ -2014,7 +2015,7 @@ export const runPatternTool: HarnessToolDefinition<
             reason: "recorded-automatically" as const,
           };
         publication = {
-          status: publicationVerdict.status,
+          status: "queued",
           reason: publicationVerdict.reason,
           message: PATTERN_PUBLICATION_MESSAGES[publicationVerdict.reason],
           syntheticInputsComplete: publicationVerdict.syntheticInputsComplete,
@@ -2045,9 +2046,8 @@ export const runPatternTool: HarnessToolDefinition<
             argumentSchema: pattern.argumentSchema,
             resultSchema: pattern.resultSchema,
             dependencies: patternIndexDependencies(program.files),
-            // Recording and surfacing are separate. Everything that ran is
-            // recorded; only an explicit seed configuration asks search to
-            // offer a passing render immediately.
+            // Recording and surfacing are separate. Only an explicit seed
+            // configuration asks search to offer a passing render immediately.
             ...(publicationVerdict.status === "recorded"
               ? {
                 nonDiscoverable: {

@@ -44,7 +44,7 @@ export const RUN_PATTERN_INPUT_SCHEMA = {
     description: {
       type: "string",
       description:
-        'One line saying what the pattern you are running does, e.g. "Totals an invoice\'s line items and applies a discount". Source you wrote is recorded in the pattern index when it runs, so fill this in for later evaluation and discovery. A run without one publishes nothing.',
+        'One line saying what the pattern you are running does, e.g. "Totals an invoice\'s line items and applies a discount". Source you wrote is queued for the pattern index when it runs; publication is not confirmed by the tool result. Fill this in for later evaluation and discovery. A run without one publishes nothing.',
     },
     hashtags: {
       type: "array",
