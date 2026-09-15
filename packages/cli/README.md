@@ -373,10 +373,14 @@ of itself prints in, `page.ts` how much of a rendering one page holds,
 `value.ts` how a value the fabric holds is written, `session.ts` what the last
 listing numbered, what `more` writes next and which pieces the run has started,
 `prompt.ts` the loop that reads keys and runs a line beside them, `history.ts`
-the lines that loop has read and the traversal over them, `completion.ts` what
-`tab` finishes, `announce.ts` what a connection and a pattern write onto that
-loop's out-of-band line, `record.ts` the form `where` and `pwd` share, and
-`paint.ts` and `terminal.ts` the escape sequences and the raw mode under it.
+the lines that loop has read and the traversal over them, `editing.ts` the table
+of what a key does to a line being typed, which that loop and a view's command
+line both read, `completion.ts` what `tab` finishes, `watch.ts` what a watch is
+and the line each settled change writes above the prompt, `lens.ts` the value
+view and every key it answers to, `announce.ts` what a connection and a pattern
+write onto that loop's out-of-band line, `record.ts` the form `where` and `pwd`
+share, and `paint.ts` and `terminal.ts` the escape sequences and the raw mode
+under it.
 
 Each of those is driven by a unit test with nothing behind it — no server, no
 piece, and no terminal — so what the shell does when all of them are real is a
