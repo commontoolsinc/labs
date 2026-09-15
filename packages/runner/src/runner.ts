@@ -154,6 +154,7 @@ import {
   type IStorageSubscription,
   type MemorySpace,
   type Result,
+  toThrowable,
   type Unit,
   type URI,
 } from "./storage/interface.ts";
@@ -7027,7 +7028,8 @@ export class Runner {
    *   store's own. A flag-ON client speculating installs no destination and
    *   is unaffected; its setup is stamped as bookkeeping, which the overlay
    *   passes through to the real store;
-   * - a commit that storage rejects throws, and never falls through to the
+   * - a commit that storage rejects throws an `Error` carrying the
+   *   rejection's name, message, and fields, and never falls through to the
    *   post-commit work that a receipt-less run tolerates;
    * - the required source transition appends a fresh revision, so the setup
    *   cannot be elided as a wholly redundant transaction before reaching
@@ -7259,8 +7261,15 @@ export class Runner {
         // here would run the post-commit work over a setup storage refused and
         // then report no receipt for it. The identity arm below predates the
         // receipt and covers its own callers; neither subsumes the other.
+        //
+        // A verdict that is a plain `Result` object goes out as an `Error`
+        // carrying its name, message, and fields: thrown as it stands it
+        // fails every `instanceof Error` check on the way up and renders as
+        // `[object Object]`, its message discarded. One that is already an
+        // `Error`, a precondition failure among them, goes out as itself, so
+        // its identity, stack, and `cause` survive.
         if (requireCommit || options?.expectedPatternIdentity) {
-          throw error;
+          throw error instanceof Error ? error : toThrowable(error);
         }
         logger.error("pattern-setup-error", "Error setting up pattern", error);
         setupRes = undefined;
