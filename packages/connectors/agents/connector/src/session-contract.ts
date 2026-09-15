@@ -43,6 +43,22 @@ export function sessionCause(
   };
 }
 
+export function sessionManifestCause(
+  spaceDid: string,
+  ownerDid: string,
+  sourceId: string,
+  nativeSessionId: string,
+  driver: string,
+  contentHash: string,
+): Record<string, string | number> {
+  return {
+    ...sessionCause(spaceDid, ownerDid, sourceId, nativeSessionId),
+    agentConnector: "session-version",
+    driver: requiredIdentityPart(driver, "driver"),
+    contentHash: requiredIdentityPart(contentHash, "contentHash"),
+  };
+}
+
 export function sessionChunkCause(
   spaceDid: string,
   ownerDid: string,

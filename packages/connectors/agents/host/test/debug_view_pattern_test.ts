@@ -1315,13 +1315,32 @@ Deno.test("debug pattern loads connector child cells on a cold replica", async (
           details: { capabilities: source.capabilities },
         }],
       });
-      const manifest = writerRuntime.getCell(writerSession.space, {
-        spaceDid: writerSession.space,
-        ownerDid: writerSession.as.did(),
-        agentConnector: "session",
-        sourceId: "codex:test",
-        nativeSessionId: "session-1",
-      });
+      const firstSessionRow = allIndexSessions[0];
+      if (!isLinkRef(firstSessionRow)) {
+        throw new Error("first complete index session row link is missing");
+      }
+      const firstSessionCell = writerRuntime.getCellFromLink(
+        linkRefPayload(firstSessionRow) as unknown as Parameters<
+          Runtime["getCellFromLink"]
+        >[0],
+      );
+      await firstSessionCell.sync();
+      const firstSessionValue = firstSessionCell.getRaw();
+      const manifestLink = firstSessionValue &&
+          typeof firstSessionValue === "object" &&
+          !Array.isArray(firstSessionValue) &&
+          "manifest" in firstSessionValue
+        ? firstSessionValue.manifest
+        : undefined;
+      if (!isLinkRef(manifestLink)) {
+        throw new Error("first session manifest link is missing");
+      }
+      const manifest = writerRuntime.getCellFromLink(
+        linkRefPayload(manifestLink) as unknown as Parameters<
+          Runtime["getCellFromLink"]
+        >[0],
+      );
+      await manifest.sync();
       manifestDocumentId = manifest.getAsNormalizedFullLink().id;
       const manifestValue = manifest.getRaw();
       const firstDescriptorLink = manifestValue &&

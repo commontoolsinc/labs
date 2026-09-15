@@ -8,7 +8,6 @@ import {
   pushStableCellGraph,
   readStableActions,
   readStableCellGraphValue,
-  type StableCellGraphEntry,
   stableCellId,
   subscribeStableActions,
 } from "./fabric-graph.ts";
@@ -20,12 +19,15 @@ import {
   sessionCause,
   sessionChunkCause,
   sessionKey,
+  sessionManifestCause,
 } from "./session-contract.ts";
 import {
-  type CollectedSource,
-  type PreparedSession,
-  prepareSession,
+  completeSessionDescription,
+  type PreparedSessionDescription,
+  prepareSessionHeader,
+  type SourceCollection,
 } from "./reconcile.ts";
+import { iterateEventChunks } from "./chunking.ts";
 import {
   type AgentSessionCommandReceipt,
   commandIdentity,
@@ -40,6 +42,7 @@ import type {
 import { AGENT_CONNECTOR_SCHEMAS } from "./protocol.ts";
 import { type GitContext, GitContextResolver } from "./git-context.ts";
 import {
+  hashStableArrayValue,
   materializeStableArrayCells,
   planStableArrayCells,
   type StableArrayCellPlan,
@@ -75,6 +78,15 @@ export interface AgentFabricPublishOptions {
   onCommit?: () => void;
 }
 
+export interface AgentFabricGraphSession {
+  connection: AgentFabricConnection;
+  release(): Promise<void>;
+}
+
+export type AgentFabricGraphSessionFactory = () => Promise<
+  AgentFabricGraphSession
+>;
+
 interface CellLink {
   id: string;
   space: string;
@@ -102,6 +114,8 @@ interface IndexEntry {
   capabilities: Record<string, unknown>;
   recentMessages?: NormalizedMessage[];
   manifest: Cell<unknown>;
+  manifestVersioned?: boolean;
+  manifestHash?: string;
   contentHash: string;
   syncStatus: "complete" | "partial" | "stale" | "deleted";
   deletedAt?: string;
@@ -335,6 +349,24 @@ function graphEntry(cell: Cell<unknown>, plan: StableArrayCellPlan) {
         materializeCell,
       ) as Record<string, unknown>,
   };
+}
+
+function sessionChunkHashes(value: unknown, key: string): string[] {
+  if (!isRecord(value) || value.key !== key || !Array.isArray(value.chunks)) {
+    return [];
+  }
+  const hashes: string[] = [];
+  for (let index = 0; index < value.chunks.length; index++) {
+    const descriptor = value.chunks[index];
+    if (
+      !isRecord(descriptor) || descriptor.part !== index ||
+      typeof descriptor.contentHash !== "string"
+    ) {
+      return [];
+    }
+    hashes.push(descriptor.contentHash);
+  }
+  return hashes;
 }
 
 function childScope(
@@ -673,6 +705,13 @@ function asIndex(
       !isRecord(session.capabilities) ||
       (session.recentMessages !== undefined &&
         !Array.isArray(session.recentMessages)) ||
+      (session.manifestVersioned !== undefined &&
+        typeof session.manifestVersioned !== "boolean") ||
+      (session.manifestHash !== undefined &&
+        (typeof session.manifestHash !== "string" ||
+          session.manifestHash.length === 0)) ||
+      (session.manifestVersioned === true &&
+        typeof session.manifestHash !== "string") ||
       (session.deletedAt !== undefined &&
         !isIsoTimestamp(session.deletedAt))
     ) {
@@ -683,72 +722,118 @@ function asIndex(
   return record as unknown as AgentSessionIndex;
 }
 
-interface PlannedSessionGraph {
-  chunks: StableCellGraphEntry[];
-  manifest: StableCellGraphEntry;
-  indexEntry: IndexEntry;
-}
-
-const SESSION_GRAPH_BATCH_SIZE = 10;
-const MANIFEST_GRAPH_BATCH_SIZE = 1;
-
-async function planSessionGraph(
+function sessionManifestCell(
   conn: AgentFabricConnection,
-  prepared: PreparedSession,
-  driver: string,
-  gitContext: GitContext,
-): Promise<PlannedSessionGraph> {
-  const manifest = conn.runtime.getCell(
-    conn.spaceDid,
-    sessionCause(
+  entry: IndexEntry,
+): Cell<unknown> {
+  const cause = entry.manifestVersioned === true
+    ? sessionManifestCause(
       conn.spaceDid,
       conn.ownerDid,
-      prepared.sourceId,
-      prepared.nativeSessionId,
-    ),
+      entry.sourceId,
+      entry.nativeSessionId,
+      entry.driver,
+      entry.manifestHash!,
+    )
+    : sessionCause(
+      conn.spaceDid,
+      conn.ownerDid,
+      entry.sourceId,
+      entry.nativeSessionId,
+    );
+  return conn.runtime.getCell(
+    conn.spaceDid,
+    cause,
     agentOwnerSchema(conn.ownerDid),
   );
-  const chunkEntries = await Promise.all(prepared.chunks.map(async (chunk) => {
+}
+
+async function publishSessionGraph(
+  conn: AgentFabricConnection,
+  header: ReturnType<typeof prepareSessionHeader>,
+  events: readonly unknown[],
+  driver: string,
+  gitContext: GitContext,
+  previousEntry: IndexEntry | undefined,
+  startGraphCommit: () => void,
+): Promise<{
+  prepared: PreparedSessionDescription;
+  indexEntry?: IndexEntry;
+}> {
+  const previousManifest = previousEntry === undefined
+    ? undefined
+    : await readStableCellGraphValue(
+      conn,
+      sessionManifestCell(conn, previousEntry),
+      new Map(),
+      { preserveLinkFields: new Set(["link"]) },
+    );
+  const previousChunkHashes = previousManifest === undefined
+    ? []
+    : sessionChunkHashes(previousManifest, header.key);
+  const previousManifestMatches = previousEntry?.manifestVersioned === true &&
+    typeof previousEntry.manifestHash === "string" &&
+    previousManifest !== undefined &&
+    await hashStableArrayValue(previousManifest) === previousEntry.manifestHash;
+  const chunkDescriptors = [];
+  const preparedChunks = [];
+  for (const chunk of iterateEventChunks(events)) {
+    const contentHash = await hashStableArrayValue(chunk.events);
     const cell = conn.runtime.getCell(
       conn.spaceDid,
       sessionChunkCause(
         conn.spaceDid,
         conn.ownerDid,
-        prepared.sourceId,
-        prepared.nativeSessionId,
+        header.sourceId,
+        header.nativeSessionId,
         chunk.part,
-        chunk.contentHash,
+        contentHash,
       ),
       agentOwnerSchema(conn.ownerDid),
     );
-    const value = {
-      schema: AGENT_CONNECTOR_SCHEMAS.sessionChunk,
-      ownerDid: conn.ownerDid,
-      key: prepared.key,
-      part: chunk.part,
-      contentHash: chunk.contentHash,
-      events: chunk.events,
-    };
-    return {
-      cell,
-      plan: await planStableArrayCells(
+    if (previousChunkHashes[chunk.part] !== contentHash) {
+      const value = {
+        schema: AGENT_CONNECTOR_SCHEMAS.sessionChunk,
+        ownerDid: conn.ownerDid,
+        key: header.key,
+        part: chunk.part,
+        contentHash,
+        events: chunk.events,
+      };
+      const plan = await planStableArrayCells(
         value,
         childScope(conn.spaceDid, conn.ownerDid, "session-events", {
-          sourceId: prepared.sourceId,
-          nativeSessionId: prepared.nativeSessionId,
+          sourceId: header.sourceId,
+          nativeSessionId: header.nativeSessionId,
           part: chunk.part,
-          contentHash: chunk.contentHash,
+          contentHash,
         }),
-      ),
-      descriptor: {
-        part: chunk.part,
-        link: cell,
-        contentHash: chunk.contentHash,
-        byteLength: chunk.byteLength,
-        eventCount: chunk.eventCount,
-      },
-    };
-  }));
+      );
+      startGraphCommit();
+      await pushStableCellGraph(conn, [graphEntry(cell, plan)]);
+    }
+    chunkDescriptors.push({
+      part: chunk.part,
+      link: cell,
+      contentHash,
+      byteLength: chunk.byteLength,
+      eventCount: chunk.events.length,
+    });
+    preparedChunks.push({
+      part: chunk.part,
+      contentHash,
+      byteLength: chunk.byteLength,
+      eventCount: chunk.events.length,
+    });
+  }
+  const prepared = await completeSessionDescription(header, preparedChunks);
+  if (
+    previousManifestMatches &&
+    previousEntry?.contentHash === prepared.snapshotHash &&
+    previousEntry.driver === driver
+  ) {
+    return { prepared };
+  }
   const manifestValue = {
     schema: AGENT_CONNECTOR_SCHEMAS.session,
     ownerDid: conn.ownerDid,
@@ -759,22 +844,38 @@ async function planSessionGraph(
     metadata: prepared.summary.raw,
     summary: prepared.summary,
     normalized: { messages: prepared.normalizedMessages },
-    chunks: chunkEntries.map(({ descriptor }) => descriptor),
+    chunks: chunkDescriptors,
     snapshotHash: prepared.snapshotHash,
     revision: prepared.revision ?? null,
     observedAt: new Date().toISOString(),
     complete: prepared.complete,
   };
+  const manifestHash = await hashStableArrayValue(manifestValue);
+  const manifest = conn.runtime.getCell(
+    conn.spaceDid,
+    sessionManifestCause(
+      conn.spaceDid,
+      conn.ownerDid,
+      prepared.sourceId,
+      prepared.nativeSessionId,
+      driver,
+      manifestHash,
+    ),
+    agentOwnerSchema(conn.ownerDid),
+  );
+  const manifestScope = childScope(conn.spaceDid, conn.ownerDid, "session", {
+    sourceId: prepared.sourceId,
+    nativeSessionId: prepared.nativeSessionId,
+    manifestHash,
+  });
   const manifestPlan = await planStableArrayCells(
     manifestValue,
-    childScope(conn.spaceDid, conn.ownerDid, "session", {
-      sourceId: prepared.sourceId,
-      nativeSessionId: prepared.nativeSessionId,
-    }),
+    manifestScope,
   );
+  startGraphCommit();
+  await pushStableCellGraph(conn, [graphEntry(manifest, manifestPlan)]);
   return {
-    chunks: chunkEntries.map(({ cell, plan }) => graphEntry(cell, plan)),
-    manifest: graphEntry(manifest, manifestPlan),
+    prepared,
     indexEntry: {
       ownerDid: conn.ownerDid,
       key: prepared.key,
@@ -796,38 +897,12 @@ async function planSessionGraph(
       capabilities: {},
       recentMessages: recentSessionMessages(prepared.normalizedMessages),
       manifest,
+      manifestVersioned: true,
+      manifestHash,
       contentHash: prepared.snapshotHash,
       syncStatus: prepared.complete ? "complete" : "partial",
     },
   };
-}
-
-async function pushSessionGraphBatch(
-  conn: AgentFabricConnection,
-  graphs: PlannedSessionGraph[],
-): Promise<void> {
-  const chunks = graphs.flatMap((graph) => graph.chunks);
-  for (
-    let offset = 0;
-    offset < chunks.length;
-    offset += SESSION_GRAPH_BATCH_SIZE
-  ) {
-    await pushStableCellGraph(
-      conn,
-      chunks.slice(offset, offset + SESSION_GRAPH_BATCH_SIZE),
-    );
-  }
-  const manifests = graphs.map((graph) => graph.manifest);
-  for (
-    let offset = 0;
-    offset < manifests.length;
-    offset += MANIFEST_GRAPH_BATCH_SIZE
-  ) {
-    await pushStableCellGraph(
-      conn,
-      manifests.slice(offset, offset + MANIFEST_GRAPH_BATCH_SIZE),
-    );
-  }
 }
 
 /**
@@ -885,6 +960,7 @@ export class AgentFabricTarget implements CommandTarget {
   readonly conn: AgentFabricConnection;
   readonly cells: AgentFabricCells;
   readonly #gitContext: GitContextResolver;
+  readonly #graphSessionFactory?: AgentFabricGraphSessionFactory;
   readonly #mutations = new AsyncSerialQueue();
   readonly #latestObservationBySession = new Map<string, number>();
   readonly #latestCompleteObservationBySource = new Map<string, number>();
@@ -902,27 +978,43 @@ export class AgentFabricTarget implements CommandTarget {
     cells: AgentFabricCells,
     gitContext: GitContextResolver,
     storageClaimed: boolean,
+    graphSessionFactory?: AgentFabricGraphSessionFactory,
   ) {
     this.conn = conn;
     this.cells = cells;
     this.#gitContext = gitContext;
     this.#storageClaimed = storageClaimed;
+    this.#graphSessionFactory = graphSessionFactory;
   }
 
   static async open(
     conn: AgentFabricConnection,
     gitContext = new GitContextResolver(),
+    graphSessionFactory?: AgentFabricGraphSessionFactory,
   ): Promise<AgentFabricTarget> {
     const cells = await ensureAgentFabricCells(conn);
-    return new AgentFabricTarget(conn, cells, gitContext, true);
+    return new AgentFabricTarget(
+      conn,
+      cells,
+      gitContext,
+      true,
+      graphSessionFactory,
+    );
   }
 
   static async connect(
     conn: AgentFabricConnection,
     gitContext = new GitContextResolver(),
+    graphSessionFactory?: AgentFabricGraphSessionFactory,
   ): Promise<AgentFabricTarget> {
     const cells = await syncAgentFabricCells(conn);
-    return new AgentFabricTarget(conn, cells, gitContext, false);
+    return new AgentFabricTarget(
+      conn,
+      cells,
+      gitContext,
+      false,
+      graphSessionFactory,
+    );
   }
 
   claimStorage(): Promise<void> {
@@ -940,7 +1032,7 @@ export class AgentFabricTarget implements CommandTarget {
   }
 
   async publish(
-    collected: CollectedSource[],
+    collected: SourceCollection[],
     options: AgentFabricPublishOptions = {},
   ): Promise<number> {
     this.#assertStorageClaimed();
@@ -1007,12 +1099,13 @@ export class AgentFabricTarget implements CommandTarget {
   }
 
   async #publish(
-    collected: CollectedSource[],
+    collected: SourceCollection[],
     options: AgentFabricPublishOptions & { observationSequence: number },
   ): Promise<number> {
     let graphCommitStarted = false;
     const startGraphCommit = () => {
       if (graphCommitStarted) return;
+      options.signal?.throwIfAborted();
       options.onCommit?.();
       graphCommitStarted = true;
     };
@@ -1085,16 +1178,7 @@ export class AgentFabricTarget implements CommandTarget {
             : null,
           archived: typeof entry.archived === "boolean" ? entry.archived : null,
           active: typeof entry.active === "boolean" ? entry.active : null,
-          manifest: this.conn.runtime.getCell(
-            this.conn.spaceDid,
-            sessionCause(
-              this.conn.spaceDid,
-              this.conn.ownerDid,
-              entry.sourceId,
-              entry.nativeSessionId,
-            ),
-            agentOwnerSchema(this.conn.ownerDid),
-          ),
+          manifest: sessionManifestCell(this.conn, entry),
         }]),
     );
     const entriesByKey = new Map<string, IndexEntry>(
@@ -1114,19 +1198,9 @@ export class AgentFabricTarget implements CommandTarget {
         source,
       ) => [String(source.id), { ...source }]),
     );
-    let pendingGraphs: PlannedSessionGraph[] = [];
     const observedSessionKeys = new Set<string>();
     const observedCompleteSourceIds = new Set<string>();
     const observedDescriptorSourceIds = new Set<string>();
-    const flushGraphs = async () => {
-      if (pendingGraphs.length === 0) return;
-      throwIfPublicationCanStop();
-      const batch = pendingGraphs;
-      pendingGraphs = [];
-      startGraphCommit();
-      await pushSessionGraphBatch(this.conn, batch);
-    };
-
     for (const source of collected) {
       if (isSourceSuperseded(source.source.id)) continue;
       const priorSourceRow = sourceRows.get(source.source.id);
@@ -1146,8 +1220,11 @@ export class AgentFabricTarget implements CommandTarget {
         entry.sourceId === source.source.id
       );
       const currentKeys = new Set<string>();
-      for (const snapshot of source.sessions) {
+      for await (const nativeSnapshot of source.sessions) {
         throwIfPublicationCanStop();
+        const snapshot = stableFabricValue(
+          nativeSnapshot,
+        ) as unknown as typeof nativeSnapshot;
         const key = sessionKey(
           source.source.id,
           snapshot.summary.nativeSessionId,
@@ -1167,20 +1244,58 @@ export class AgentFabricTarget implements CommandTarget {
           gitObservationFailed: _gitObservationFailed,
           ...summaryContext
         } = context;
-        const prepared = await prepareSession(source.source.id, {
+        const publicationSnapshot = {
           ...snapshot,
           summary: {
             ...snapshot.summary,
             ...summaryContext,
           },
-        });
-        throwIfPublicationCanStop();
+        };
+        const graphSession = await this.#graphSessionFactory?.();
+        const graphConnection = graphSession?.connection ?? this.conn;
+        const publicationOutcome = await (async () => {
+          if (
+            graphConnection.spaceDid !== this.conn.spaceDid ||
+            graphConnection.ownerDid !== this.conn.ownerDid
+          ) {
+            throw new Error(
+              "agent graph session must use the target space and owner",
+            );
+          }
+          return await publishSessionGraph(
+            graphConnection,
+            prepareSessionHeader(source.source.id, publicationSnapshot),
+            publicationSnapshot.events,
+            driver,
+            context,
+            previousEntry,
+            startGraphCommit,
+          );
+        })().then(
+          (value) => ({ ok: true as const, value }),
+          (error) => ({ ok: false as const, error }),
+        );
+        try {
+          await graphSession?.release();
+        } catch (releaseError) {
+          if (!publicationOutcome.ok) {
+            throw new AggregateError(
+              [publicationOutcome.error, releaseError],
+              "agent session publication and graph storage release failed",
+            );
+          }
+          throw releaseError;
+        }
+        if (!publicationOutcome.ok) {
+          throw publicationOutcome.error;
+        }
+        const publication = publicationOutcome.value;
+        const prepared = publication.prepared;
         observedSessionKeys.add(prepared.key);
-        if (
-          previousEntry &&
-          previousEntry.contentHash === prepared.snapshotHash &&
-          previousEntry.driver === driver
-        ) {
+        if (publication.indexEntry === undefined) {
+          if (previousEntry === undefined) {
+            throw new Error("unchanged session has no prior index entry");
+          }
           entriesByKey.set(prepared.key, {
             ...refreshedRow(previousEntry, context, capabilities),
             recentMessages: recentSessionMessages(
@@ -1190,20 +1305,17 @@ export class AgentFabricTarget implements CommandTarget {
           });
           continue;
         }
-        const graph = await planSessionGraph(
-          this.conn,
-          prepared,
-          driver,
-          context,
-        );
-        const entry = graph.indexEntry;
+        const entry = publication.indexEntry;
+        entry.manifest = sessionManifestCell(this.conn, entry);
         entry.capabilities = { ...capabilities };
         entriesByKey.set(entry.key, entry);
-        pendingGraphs.push(graph);
-        if (pendingGraphs.length >= SESSION_GRAPH_BATCH_SIZE) {
-          await flushGraphs();
-        }
       }
+      const outcome = "outcome" in source ? source.outcome : {
+        errors: source.errors,
+        complete: source.complete,
+        sessionCount: source.sessions.length,
+        consumed: true,
+      };
       // A retained session keeps the row and graph its last read produced,
       // taking the refreshed source capabilities and the checkout's current
       // Git context, observed the way a read session's is: a branch switch
@@ -1216,8 +1328,8 @@ export class AgentFabricTarget implements CommandTarget {
       // word, and the session's row, where there is one, is marked partial
       // below with the other errors. A session this publication read has
       // its outcome already; a retention naming it too is not applied.
-      let sourceComplete = source.complete;
-      const sourceErrors = [...source.errors];
+      let sourceComplete = outcome.complete;
+      const sourceErrors = [...outcome.errors];
       let retainedListed = 0;
       for (const summary of source.retained ?? []) {
         throwIfPublicationCanStop();
@@ -1246,10 +1358,14 @@ export class AgentFabricTarget implements CommandTarget {
         });
         observedSessionKeys.add(key);
       }
-      for (const prior of priorForSource) {
-        if (currentKeys.has(prior.key)) continue;
-        entriesByKey.set(prior.key, {
-          ...prior,
+      // Reading sessions and finishing inventory can change driver controls.
+      // Every row takes the final capabilities, including rows read early.
+      for (const entry of entriesByKey.values()) {
+        if (
+          entry.sourceId !== source.source.id || isSuperseded(entry.key)
+        ) continue;
+        entriesByKey.set(entry.key, {
+          ...entry,
           capabilities: { ...capabilities },
         });
       }
@@ -1291,12 +1407,11 @@ export class AgentFabricTarget implements CommandTarget {
           driver,
           capabilities,
           complete: sourceComplete,
-          sessionCount: source.sessions.length + retainedListed,
+          sessionCount: outcome.sessionCount + retainedListed,
           errors: sourceErrors,
         });
       }
     }
-    await flushGraphs();
     throwIfPublicationCanStop();
     const generatedAt = new Date().toISOString();
     const generation = Math.max(
@@ -1355,19 +1470,20 @@ export class AgentFabricTarget implements CommandTarget {
       this.conn.ownerDid,
       "session-index",
     );
-    const [recentIndexPlan, allIndexPlan] = await Promise.all([
-      planStableArrayCells(recentIndex, indexChildScope),
-      planStableArrayCells(allIndex, indexChildScope),
-    ]);
+    const recentIndexPlan = await planStableArrayCells(
+      recentIndex,
+      indexChildScope,
+    );
+    const allIndexPlan = await planStableArrayCells(
+      allIndex,
+      indexChildScope,
+    );
     throwIfPublicationCanStop();
     startGraphCommit();
-    await pushStableCellGraph(
-      this.conn,
-      [
-        graphEntry(this.cells.index, recentIndexPlan),
-        graphEntry(this.cells.allIndex, allIndexPlan),
-      ],
-    );
+    await pushStableCellGraph(this.conn, [
+      graphEntry(this.cells.index, recentIndexPlan),
+      graphEntry(this.cells.allIndex, allIndexPlan),
+    ]);
     for (const key of observedSessionKeys) {
       this.#latestObservationBySession.set(
         key,

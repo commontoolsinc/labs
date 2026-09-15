@@ -113,6 +113,14 @@ refresh finishes.
 
 ### Collection
 
+`streamSource(driver, signal, retain)` reads one inventory page at a time and
+yields each session snapshot before reading the next. The consumer controls when
+collection advances. Its signal can be a callback returning the current
+cancellation signal. Its `retained` list holds accepted inventory summaries, and
+its `outcome` records read counts, errors, and completeness as the stream is
+consumed. Repeated cursors, duplicate sessions, and the 100,000-listing limit
+use the same rules as the materialized collection.
+
 `collectSource(driver, { signal, retain })` consumes `listSessions()` until
 `nextCursor` is absent. It records an inventory error for a repeated cursor, and
 one per session a later page lists again, which it keeps once. It also records
@@ -502,15 +510,20 @@ Session, chunk, and individual receipt causes add their durable identities:
 {
   "spaceDid": "did:key:...",
   "ownerDid": "did:key:...",
-  "agentConnector": "session",
+  "agentConnector": "session-version",
   "sourceId": "codex",
-  "nativeSessionId": "session-id"
+  "nativeSessionId": "session-id",
+  "driver": "codex-app-server",
+  "contentHash": "sha256:..."
 }
 ```
 
-Chunk causes use `agentConnector: "session-chunk"` and add `part` and
-`contentHash`. Receipt causes use `agentConnector: "command-receipt"` and add
-`commandId`.
+Manifest causes include the producing `driver` and the complete persisted
+manifest hash as `contentHash`. Chunk causes use
+`agentConnector: "session-chunk"` and add `part` and `contentHash`. Receipt
+causes use `agentConnector: "command-receipt"` and add `commandId`. Readers
+continue to accept the earlier unversioned manifest cause while stored indexes
+migrate.
 
 ### Schema names
 
@@ -527,10 +540,10 @@ Chunk causes use `agentConnector: "session-chunk"` and add `part` and
 | Receipt index      | `commonfabric.agent-connector.command-receipts` |
 | Local ledger       | `commonfabric.agent-connector.command-ledger`   |
 
-The schema names and deterministic causes are not versioned. Future readers must
-remain compatible with stored values and cell identities. New fields must be
-optional because older writers omit fields they do not know. Readers permit
-additional fields while continuing to validate the fields they use.
+Schema names remain stable. Future readers must remain compatible with stored
+values and cell identities. New fields must be optional because older writers
+omit fields they do not know. Readers permit additional fields while continuing
+to validate the fields they use.
 
 ### Session key
 
@@ -589,12 +602,11 @@ rewrites the manifest when a source ID is reconfigured to use another driver,
 even when the provider content hash is unchanged.
 
 The manifest is authoritative for the provider that produced its snapshot. The
-index row repeats `driver` for listing, but it can lag the manifest when a
-publication stops between the manifest and index writes.
-
-The manifest uses a deterministic cause, so rewriting the same session updates
-the same manifest cell. A chunk whose content changes uses a new root and new
-array-child cells.
+index row repeats `driver` for listing. Its link names a manifest version whose
+cause includes the hash of the complete manifest graph. Publication can
+therefore write and release each manifest before the final index commit. If
+publication stops, the retained index still points to its matching immutable
+manifest. New chunks and manifests that were not indexed remain unreachable.
 
 ### Session indexes
 
@@ -608,9 +620,10 @@ Each index records generation time, monotonically increasing generation,
 non-deleted session count, older session count, source status rows, and session
 entries. A session entry includes the producing `driver`, normalized metadata,
 nullable `archived` and `active` lifecycle fields, provider capabilities, up to
-12 recent normalized message previews, a live manifest cell link, content hash,
-and synchronization status. The lifecycle fields describe provider state.
-Synchronization status describes the connector's published copy.
+12 recent normalized message previews, a live manifest cell link, snapshot
+content hash, complete manifest hash, and synchronization status. The lifecycle
+fields describe provider state. Synchronization status describes the connector's
+published copy.
 
 Each index also contains one shallow `checkouts` row per non-deleted worktree.
 The row records its root, current branch, current commit, selected repository
@@ -667,7 +680,7 @@ The publisher assigns one base scope to each stored value:
 | Stored value                | Base `agentConnector` scope            | Additional scope identity                            |
 | --------------------------- | -------------------------------------- | ---------------------------------------------------- |
 | Session event chunk         | `session-events-array-elements`        | `sourceId`, `nativeSessionId`, `part`, `contentHash` |
-| Session manifest            | `session-array-elements`               | `sourceId`, `nativeSessionId`                        |
+| Session manifest            | `session-array-elements`               | `sourceId`, `nativeSessionId`, `manifestHash`        |
 | Recent and complete indexes | `session-index-array-elements`         | None                                                 |
 | Health                      | `health-array-elements`                | None                                                 |
 | Individual command receipt  | `command-receipt-array-elements`       | `commandId`                                          |
@@ -762,11 +775,17 @@ coordination for each API, space, and owner.
 The callback must finish synchronously and return a plain record. Causes and
 values must be accepted by the Common Fabric cell and value converters.
 
-Session graph publication batches at most ten content-addressed chunk cells per
-transaction and one manifest per transaction. Index cells are committed after
-session graphs. Because changed chunks use new root and child cells, committing
-chunks before a manifest cannot mutate the graph reachable from the prior
-manifest.
+Session graph publication commits one content-addressed chunk at a time and one
+manifest at a time. Index cells are committed after session graphs. Because
+changed chunks and manifests use new root and child cells, publishing them
+cannot mutate the graph reachable from the prior indexes.
+
+`AgentFabricTarget.open()` and `connect()` accept an optional graph-session
+factory. The command-line host supplies a separate reusable runtime through this
+factory and closes its storage session after each provider session. Closing the
+storage session releases every chunk document cached during that publication.
+The next provider session reopens the storage connection on demand. A graph
+session must use the same space and owner as the target.
 
 `readStableCellGraphValue()` synchronizes a root cell and recursively hydrates
 `FabricLink`s. It caches repeated links within one read and synchronizes at most
