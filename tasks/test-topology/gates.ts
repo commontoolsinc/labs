@@ -560,7 +560,9 @@ async function patternCompatSuite(root: string): Promise<Suite> {
           Deno.execPath(),
           "task",
           name,
-          ...(whole ? [] : ["--only", ...keys.map((key) => byKey.get(key)!)]),
+          // One flag per pattern: the task's parser takes a single value
+          // after each `--only`, and refuses the second path of a list.
+          ...(whole ? [] : keys.flatMap((key) => ["--only", byKey.get(key)!])),
         ],
         cwd: context.root,
       }]);
@@ -612,7 +614,10 @@ function patternVintageSuite(): Suite {
 /** Every gate suite, read from the working tree. */
 export async function loadGateSuites(root: string): Promise<Suite[]> {
   return [
-    gateSuite("repo-gates", WORKING_TREE_GATES, ["deno"]),
+    // The action-pin gate asks GitHub what each pin resolves to, and
+    // sixty requests an hour is what the service allows a caller with no
+    // token.
+    gateSuite("repo-gates", WORKING_TREE_GATES, ["deno", "github-api"]),
     gateSuite("repo-history-gates", HISTORY_GATES, ["deno", "git-history"]),
     await typecheckSuite(root),
     cfcheckSuite(),

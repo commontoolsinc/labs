@@ -327,11 +327,15 @@ export function checkTree(
 }
 
 /**
- * The workflow half: every identity a workflow step records by hand is
- * claimed by exactly one suite.
+ * The workflow half: no step under `.github` records a test by hand.
+ *
+ * A lane is what runs a test now, and it records what it ran through the
+ * suite that owns it. A recording step in a workflow is therefore either
+ * a test no suite knows about, or a second run of one a lane already
+ * carries — and the two look identical from here, which is why neither is
+ * allowed rather than one being sorted from the other.
  */
 export function checkWorkflows(
-  suites: readonly Suite[],
   records: readonly WorkflowRecord[],
 ): Finding[] {
   const findings: Finding[] = [];
@@ -340,14 +344,10 @@ export function checkWorkflows(
     const key = testIdentityKey(record.test);
     if (seen.has(key)) continue;
     seen.add(key);
-    const claims = claimsFor(suites, record);
-    if (claims.length === 1) continue;
     findings.push({
       fails: true,
-      message: claims.length === 0
-        ? `no suite claims ${key}, which ${record.where} records`
-        : `${claims.map((claim) => claim.suite.id).join(" and ")} ` +
-          `both claim ${key}, which ${record.where} records`,
+      message: `${record.where} records ${key} by hand; a suite under ` +
+        `tasks/test-topology/ is what runs a test`,
     });
   }
   return findings;
@@ -486,7 +486,7 @@ export async function check(
     { fixtures: NOT_A_TEST_SURFACE },
   );
   findings.push(
-    ...checkWorkflows(suites, await workflowRecords(options.root)),
+    ...checkWorkflows(await workflowRecords(options.root)),
   );
   if (options.records !== undefined) {
     findings.push(...checkStore(suites, await readRecords(options.records)));

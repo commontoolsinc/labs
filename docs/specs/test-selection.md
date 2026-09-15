@@ -348,7 +348,12 @@ reason added later does not become non-gating without anybody deciding it.
 
 An invocation is excused only when it accounted for every identity it was
 asked to run, since one that recorded a withheld failure and then stopped
-has run almost nothing while satisfying any weaker test. That is the rule
+has run almost nothing while satisfying any weaker test. A stand-in for a
+unit the store has never seen is accounted for by that unit recording
+anything at all, because no record can carry a stand-in's name: a record
+is named for a test and a stand-in for a file. And a unit that recorded
+nothing recorded nothing under any name, which fails the run whether or
+not anything was there to excuse. That is the rule
 under [what a run owes the change behind
 it](#what-a-run-on-the-default-branch-owes-the-change-behind-it) applied
 here, that a conclusion rests on a record that is there and never on one

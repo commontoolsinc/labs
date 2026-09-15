@@ -14,24 +14,18 @@ import {
   leafFlags,
   memberRecordingArguments,
   memberTestTask,
-  parseDisabledPackageList,
   readWorkspaceMembers,
   recordingSpool,
   runTests,
-  selectShardMembers,
+  selectMembers,
   testConcurrency,
   testPackage,
 } from "./workspace-tests.ts";
 import { preloadArgument } from "@commonfabric/test-support/records";
-import { WORKSPACE_TEST_WEIGHTS } from "./test-timing-weights.ts";
 import {
   readUnlaunchedMembers,
   UNLAUNCHED_MEMBERS_FILE,
 } from "./unlaunched-members.ts";
-
-const WORKSPACE_SHARDS = 8;
-const AGENTS_HOST_SHARDS = 5;
-const CLI_SHARDS = 10;
 
 // Write a minimal workspace under `dir`: a root deno.jsonc listing the
 // members, and one directory per package whose `test` task records that it
@@ -72,202 +66,6 @@ async function ranPackages(
   }
   return ran;
 }
-
-Deno.test("parseDisabledPackageList parses comma and whitespace separated names", () => {
-  assertEquals(parseDisabledPackageList("runner, ui\nshell\tcli"), [
-    "runner",
-    "ui",
-    "shell",
-    "cli",
-  ]);
-});
-
-Deno.test("parseDisabledPackageList ignores empty entries", () => {
-  assertEquals(parseDisabledPackageList(" runner, ,ui "), ["runner", "ui"]);
-  assertEquals(parseDisabledPackageList(undefined), []);
-});
-
-function unitNames(units: { packageName: string }[]): string[] {
-  return units.map((unit) => unit.packageName);
-}
-
-Deno.test("selectShardMembers returns every enabled member without a shard", () => {
-  assertEquals(
-    selectShardMembers(
-      ["./packages/b", "./packages/a", "./tasks"],
-      ["a"],
-      undefined,
-    ),
-    [
-      { memberPath: "./packages/b", packageName: "b" },
-      { memberPath: "./tasks", packageName: "tasks" },
-    ],
-  );
-});
-
-Deno.test("selectShardMembers balances enabled members by weight", () => {
-  const members = [
-    "./packages/d",
-    "./packages/b",
-    "./packages/a",
-    "./packages/c",
-    "./packages/e",
-  ];
-  assertEquals(
-    unitNames(selectShardMembers(members, [], { index: 1, total: 2 })),
-    ["a", "c", "e"],
-  );
-  assertEquals(
-    unitNames(selectShardMembers(members, [], { index: 2, total: 2 })),
-    ["b", "d"],
-  );
-});
-
-Deno.test("selectShardMembers excludes disabled members before assigning shards", () => {
-  const members = ["./packages/a", "./packages/b", "./packages/c"];
-  assertEquals(
-    unitNames(selectShardMembers(members, ["a"], { index: 1, total: 2 })),
-    ["b"],
-  );
-  assertEquals(
-    unitNames(selectShardMembers(members, ["a"], { index: 2, total: 2 })),
-    ["c"],
-  );
-});
-
-Deno.test("selectShardMembers expands the cli package into internal shards when sharded", () => {
-  const members = ["./packages/a", "./packages/cli", "./packages/z"];
-
-  // Without a workspace shard, cli stays a single unit with no shard env.
-  assertEquals(selectShardMembers(members, [], undefined), [
-    { memberPath: "./packages/a", packageName: "a" },
-    { memberPath: "./packages/cli", packageName: "cli" },
-    { memberPath: "./packages/z", packageName: "z" },
-  ]);
-
-  const selections = Array.from(
-    { length: WORKSPACE_SHARDS },
-    (_, offset) =>
-      selectShardMembers(members, [], {
-        index: offset + 1,
-        total: WORKSPACE_SHARDS,
-      }),
-  );
-  const units = selections.flat();
-  const cliUnits = units.filter((unit) => unit.packageName.startsWith("cli "))
-    .toSorted((a, b) => {
-      const slice = (name: string) => Number(name.match(/\((\d+)\//)?.[1]);
-      return slice(a.packageName) - slice(b.packageName);
-    });
-  assertEquals(
-    cliUnits,
-    Array.from({ length: CLI_SHARDS }, (_, offset) => ({
-      memberPath: "./packages/cli",
-      packageName: `cli (${offset + 1}/${CLI_SHARDS})`,
-      env: { CLI_TEST_SHARD: `${offset + 1}/${CLI_SHARDS}` },
-    })),
-  );
-  assertEquals(unitNames(units).filter((name) => name === "a"), ["a"]);
-  assertEquals(unitNames(units).filter((name) => name === "z"), ["z"]);
-});
-
-Deno.test("selectShardMembers expands agents-host into internal shards", () => {
-  const members = ["./packages/connectors/agents/host"];
-  const units = Array.from(
-    { length: AGENTS_HOST_SHARDS },
-    (_, offset) =>
-      selectShardMembers(members, [], {
-        index: offset + 1,
-        total: AGENTS_HOST_SHARDS,
-      }),
-  ).flat();
-
-  assertEquals(
-    units,
-    Array.from({ length: AGENTS_HOST_SHARDS }, (_, offset) => ({
-      memberPath: "./packages/connectors/agents/host",
-      packageName: `connectors/agents/host (${
-        offset + 1
-      }/${AGENTS_HOST_SHARDS})`,
-      env: {
-        AGENTS_HOST_TEST_SHARD: `${offset + 1}/${AGENTS_HOST_SHARDS}`,
-      },
-    })),
-  );
-});
-
-Deno.test("selectShardMembers expands piece and tasks into internal shards", () => {
-  const members = ["./packages/piece", "./tasks"];
-  const units = Array.from(
-    { length: 3 },
-    (_, offset) =>
-      selectShardMembers(members, [], { index: offset + 1, total: 3 }),
-  ).flat();
-
-  assertEquals(
-    unitNames(units).sort(),
-    [
-      "piece (1/3)",
-      "piece (2/3)",
-      "piece (3/3)",
-      "tasks (1/3)",
-      "tasks (2/3)",
-      "tasks (3/3)",
-    ],
-  );
-});
-
-Deno.test("real workspace timing weights limit two-worker makespans", async () => {
-  const expectedAgentsHostUnits = Array.from(
-    { length: AGENTS_HOST_SHARDS },
-    (_, offset) =>
-      `connectors/agents/host (${offset + 1}/${AGENTS_HOST_SHARDS})`,
-  );
-  const profiledAgentsHostUnits = Object.keys(WORKSPACE_TEST_WEIGHTS)
-    .filter((name) => name.startsWith("connectors/agents/host ("))
-    .toSorted((a, b) => {
-      const slice = (name: string) => Number(name.match(/\((\d+)\//)?.[1]);
-      return slice(a) - slice(b);
-    });
-  assertEquals(profiledAgentsHostUnits, expectedAgentsHostUnits);
-
-  const expectedCliUnits = Array.from(
-    { length: CLI_SHARDS },
-    (_, offset) => `cli (${offset + 1}/${CLI_SHARDS})`,
-  );
-  const profiledCliUnits = Object.keys(WORKSPACE_TEST_WEIGHTS)
-    .filter((name) => name.startsWith("cli ("))
-    .toSorted((a, b) => {
-      const slice = (name: string) => Number(name.match(/\((\d+)\//)?.[1]);
-      return slice(a) - slice(b);
-    });
-  assertEquals(profiledCliUnits, expectedCliUnits);
-
-  const members = await readWorkspaceMembers(
-    new URL("../deno.jsonc", import.meta.url),
-  );
-  const makespans = Array.from(
-    { length: WORKSPACE_SHARDS },
-    (_, offset) => {
-      const workerLoads = [0, 0];
-      const units = selectShardMembers(members, ["runner"], {
-        index: offset + 1,
-        total: WORKSPACE_SHARDS,
-      });
-      for (const unit of units) {
-        const worker = workerLoads[0] <= workerLoads[1] ? 0 : 1;
-        workerLoads[worker] += WORKSPACE_TEST_WEIGHTS[unit.packageName] ?? 1;
-      }
-      return Math.max(...workerLoads);
-    },
-  );
-
-  assertEquals(
-    Math.max(...makespans) < 80,
-    true,
-    `modeled workspace two-worker makespans: ${makespans.join(", ")}`,
-  );
-});
 
 Deno.test("readWorkspaceMembers reads the workspace list from a JSONC manifest", async () => {
   const dir = await Deno.makeTempDir({ prefix: "ws-members-" });
@@ -388,7 +186,7 @@ Deno.test("runTests drains every package with a concurrency limit of one", async
   try {
     await makeWorkspace(dir, ["a", "b", "c"]);
     await withTestConcurrency("1", async () => {
-      const passed = await runTests([], undefined, dir);
+      const passed = await runTests([], dir);
       assertEquals(passed, true);
     });
     assertEquals(await ranPackages(dir, ["a", "b", "c"]), ["a", "b", "c"]);
@@ -420,7 +218,7 @@ Deno.test("runTests reports a failure and stops scheduling packages", async () =
     try {
       passed = await withTestConcurrency(
         "1",
-        () => runTests([], undefined, dir),
+        () => runTests([], dir),
       );
     } finally {
       console.error = originalError;
@@ -462,7 +260,7 @@ Deno.test("runTests records the packages it selected and never started", async (
         dir,
         (coverageDir) =>
           withTestConcurrency("1", async () => {
-            await runTests([], undefined, dir);
+            await runTests([], dir);
             return await readUnlaunchedMembers(coverageDir);
           }),
       );
@@ -491,7 +289,7 @@ Deno.test("runTests writes no record when every package it selected started", as
       dir,
       (coverageDir) =>
         withTestConcurrency("1", async () => {
-          assertEquals(await runTests([], undefined, dir), true);
+          assertEquals(await runTests([], dir), true);
           return `${coverageDir}/${UNLAUNCHED_MEMBERS_FILE}`;
         }),
     );
@@ -522,13 +320,13 @@ Deno.test("runTests clears the record an earlier run left in the same coverage d
         dir,
         (coverageDir) =>
           withTestConcurrency("1", async () => {
-            await runTests([], undefined, dir);
+            await runTests([], dir);
             const stopped = await readUnlaunchedMembers(coverageDir);
             await Deno.writeTextFile(
               `${dir}/packages/a/deno.jsonc`,
               JSON.stringify({ tasks: { test: "echo ok > ran.txt" } }),
             );
-            assertEquals(await runTests([], undefined, dir), true);
+            assertEquals(await runTests([], dir), true);
             return [stopped, await readUnlaunchedMembers(coverageDir)];
           }),
       );
@@ -544,50 +342,25 @@ Deno.test("runTests clears the record an earlier run left in the same coverage d
   }
 });
 
+Deno.test("selectMembers returns every member the caller did not disable", () => {
+  const members = ["./packages/a", "./packages/b", "./packages/c"];
+  assertEquals(
+    selectMembers(members, []).map((unit) => unit.packageName),
+    ["a", "b", "c"],
+  );
+  assertEquals(
+    selectMembers(members, ["b"]).map((unit) => unit.packageName),
+    ["a", "c"],
+  );
+});
+
 Deno.test("runTests runs every enabled package's test task", async () => {
   const dir = await Deno.makeTempDir({ prefix: "ws-run-" });
   try {
     await makeWorkspace(dir, ["a", "b", "c"]);
-    const passed = await runTests(["b"], undefined, dir);
+    const passed = await runTests(["b"], dir);
     assertEquals(passed, true);
     assertEquals(await ranPackages(dir, ["a", "b", "c"]), ["a", "c"]);
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
-});
-
-Deno.test("runTests runs only the selected shard's packages", async () => {
-  const dir = await Deno.makeTempDir({ prefix: "ws-shard-" });
-  try {
-    await makeWorkspace(dir, ["a", "b", "c", "d"]);
-    const passed = await runTests([], { index: 2, total: 2 }, dir);
-    assertEquals(passed, true);
-    assertEquals(await ranPackages(dir, ["a", "b", "c", "d"]), ["b", "d"]);
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
-});
-
-Deno.test("runTests passes internal shard environment to expanded packages", async () => {
-  const dir = await Deno.makeTempDir({ prefix: "ws-clishard-" });
-  try {
-    await makeWorkspace(dir, ["a", "cli", "z"]);
-    await Deno.writeTextFile(
-      `${dir}/packages/cli/deno.jsonc`,
-      JSON.stringify({
-        tasks: { test: "echo shard=$CLI_TEST_SHARD > ran.txt" },
-      }),
-    );
-    const shard = { index: 1, total: WORKSPACE_SHARDS };
-    const expected = selectShardMembers(
-      ["./packages/a", "./packages/cli", "./packages/z"],
-      [],
-      shard,
-    ).find((unit) => unit.packageName.startsWith("cli "));
-    const passed = await runTests([], shard, dir);
-    assertEquals(passed, true);
-    const ran = await Deno.readTextFile(`${dir}/packages/cli/ran.txt`);
-    assertEquals(ran.trim(), `shard=${expected?.env?.CLI_TEST_SHARD}`);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
@@ -645,7 +418,7 @@ Deno.test("runTests reports a failure when every member is disabled", async () =
     };
     let passed: boolean;
     try {
-      passed = await runTests(["a", "b"], undefined, dir);
+      passed = await runTests(["a", "b"], dir);
     } finally {
       console.error = originalError;
     }
@@ -961,7 +734,7 @@ Deno.test("runTests refuses a workspace whose member defines no test task", asyn
     );
 
     await assertRejects(
-      () => runTests([], undefined, dir),
+      () => runTests([], dir),
       Error,
       "Missing from: `./packages/b/deno.jsonc`",
     );

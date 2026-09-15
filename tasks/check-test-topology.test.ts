@@ -275,52 +275,30 @@ describe("what the tree half looks at", () => {
 });
 
 describe("the workflow half of the drift guard", () => {
-  const gates = suite({
-    id: "repo-checks",
-    units: ["check-icing"],
-    locate: (record) =>
-      record.test.k === "gate" && record.test.s === "repo" &&
-        record.test.n === "check-icing"
-        ? { level: "unit", unit: record.test.n }
-        : undefined,
-  });
-
   /** One step, written the way a workflow writes it. */
   function step(k: string, s: string, n: string) {
     return { test: { k, s, n }, where: ".github/workflows/deno.yml" };
   }
 
-  it("passes a step exactly one suite claims", () => {
-    const findings = checkWorkflows([gates], [
-      step("gate", "repo", "check-icing"),
-    ]);
-    expect(findings).toEqual([]);
+  it("passes a workflow that records nothing", () => {
+    expect(checkWorkflows([])).toEqual([]);
   });
 
-  it("fails a step no suite claims", () => {
-    // A gate wired into a job and into no suite runs while its step
-    // stands and stops when a lane takes over the job.
-    const findings = checkWorkflows([gates], [
-      step("gate", "repo", "check-glaze"),
-    ]);
+  it("fails a step that records a test by hand", () => {
+    // A lane runs a test and records it through the suite that owns it.
+    // A step doing it in a workflow is either a test no suite knows about
+    // or a second run of one a lane already carries, and the two look the
+    // same from here.
+    const findings = checkWorkflows([step("gate", "repo", "check-glaze")]);
     expect(findings.map((finding) => finding.fails)).toEqual([true]);
     expect(findings[0]!.message).toContain(
-      'no suite claims ["gate","repo","check-glaze"], which ' +
-        ".github/workflows/deno.yml records",
+      '.github/workflows/deno.yml records ["gate","repo","check-glaze"] ' +
+        "by hand",
     );
-  });
-
-  it("fails a step two suites claim", () => {
-    const findings = checkWorkflows(
-      [gates, { ...gates, id: "repo-gates" }],
-      [step("gate", "repo", "check-icing")],
-    );
-    expect(findings.map((finding) => finding.fails)).toEqual([true]);
-    expect(findings[0]!.message).toContain("both claim");
   });
 
   it("counts one identity once, however many steps write it", () => {
-    const findings = checkWorkflows([gates], [
+    const findings = checkWorkflows([
       step("gate", "repo", "check-glaze"),
       step("gate", "repo", "check-glaze"),
     ]);

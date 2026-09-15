@@ -522,7 +522,7 @@ Deno.test("coverage debt gating follows changed source groups", () => {
     "packages/runner/src/cell.ts",
     "packages/patterns/README.md",
     "packages/ui/src/button.test.tsx",
-    "tasks/coverage-check.ts",
+    "tasks/coverage-report.ts",
     "scripts/build.ts",
   ]);
 

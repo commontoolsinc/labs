@@ -9,6 +9,7 @@ import type { CapabilityId } from "./ci-capabilities.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 
 import {
+  accountFor,
   batchCoverage,
   batchesOf,
   batchRepeats,
@@ -31,6 +32,11 @@ import {
   spoolRecords,
   unitsForRun,
 } from "./ci-lane.ts";
+import {
+  batchMeasurement,
+  batchMeasurementName,
+  MEASURED_BATCH_SUFFIX,
+} from "./lane-measurement.ts";
 import { census } from "./test-selection/census.ts";
 import type { CommandContext, Suite } from "./test-topology/suite.ts";
 import {
@@ -364,6 +370,9 @@ describe("the order a runner is handed its work in", () => {
   });
 
   it("puts the batches themselves in one order whatever chose them", () => {
+    // Which batch a lane takes next is decided by the plan and never by
+    // which pass put a selection in it, so the two runs the design has
+    // to keep together cannot order their work differently.
     const seen = census(bakery, undefined, new Set());
     const selections = seen.manifest.entries.map((entry) => ({
       entry,
@@ -372,7 +381,10 @@ describe("the order a runner is handed its work in", () => {
     }));
     const suiteIds = (chosen: readonly Selection[]) =>
       batchesOf(bakery, seen.manifest, chosen).map((batch) => batch.suite.id);
-    expect(suiteIds(selections)).toEqual(["repo-gates", "workspace-unit"]);
+    expect(suiteIds(selections).toSorted()).toEqual([
+      "repo-gates",
+      "workspace-unit",
+    ]);
     expect(suiteIds([...selections].reverse())).toEqual(suiteIds(selections));
   });
 });
@@ -1577,6 +1589,63 @@ describe("what a lane records about itself", () => {
     await Deno.remove(spool, { recursive: true });
   });
 
+  it("reads back the suite and the coverage a batch measurement names", () => {
+    // One place composes the name and one place takes it apart, so a
+    // reader that took it apart itself could not part company with the
+    // writer.
+    expect(batchMeasurement(batchMeasurementName("workspace-unit", false)))
+      .toEqual({ suite: "workspace-unit", measured: false, kind: "spent" });
+    expect(batchMeasurement(batchMeasurementName("workspace-unit", true)))
+      .toEqual({ suite: "workspace-unit", measured: true, kind: "spent" });
+    // The planned half names the same suite, and says which half it is.
+    expect(
+      batchMeasurement(
+        batchMeasurementName("workspace-unit", false, "planned"),
+      ),
+    ).toEqual({ suite: "workspace-unit", measured: false, kind: "planned" });
+    expect(batchMeasurement("ci-lane setup deno")).toBeUndefined();
+    expect(batchMeasurement("ci-lane batch ")).toBeUndefined();
+  });
+
+  it("names what a measured batch cost apart from what an unmeasured one did", async () => {
+    // Instrumenting a run costs it time, and how much is a property of
+    // the suite rather than a constant. One correction fitted over both
+    // would charge every unmeasured run part of what an instrumented one
+    // costs, and charge a measured one less than it takes.
+    const spooledNames = async (coverage?: { dir: string }) => {
+      const workDir = await Deno.makeTempDir({ prefix: "lane-measured-" });
+      const spool = await Deno.makeTempDir({ prefix: "lane-spool-" });
+      try {
+        await runBatch(
+          {
+            suite: suite({ id: "workspace-unit", units: ["one"] }),
+            units: [],
+            runs: new Map(),
+          },
+          lane,
+          workDir,
+          spool,
+          {},
+          coverage,
+        );
+        const written: string[] = [];
+        for await (const entry of Deno.readDir(spool)) {
+          if (entry.isFile) {
+            written.push(await Deno.readTextFile(`${spool}/${entry.name}`));
+          }
+        }
+        return written.join("");
+      } finally {
+        await Deno.remove(workDir, { recursive: true });
+        await Deno.remove(spool, { recursive: true });
+      }
+    };
+    expect(await spooledNames()).toContain('ci-lane batch workspace-unit"');
+    expect(await spooledNames({ dir: "/coverage" })).toContain(
+      `ci-lane batch workspace-unit${MEASURED_BATCH_SUFFIX}`,
+    );
+  });
+
   /**
    * A batch whose one invocation spools exactly this record, run against
    * a suite declaring the surface and variant given.
@@ -1789,14 +1858,282 @@ describe("writing the lane's records into its spool", () => {
   });
 });
 
+describe("the order a lane runs its batches in", () => {
+  /** A manifest whose entries name these suites, fitting only some. */
+  function withFit(
+    fitted: readonly string[],
+    cost: Record<string, number> = {},
+  ) {
+    const made = manifestOf([
+      {
+        test: { k: "unit", s: "a", n: "one" },
+        suite: "zebra",
+        unit: "z.ts",
+        cost: cost.zebra ?? 1,
+      },
+      {
+        test: { k: "unit", s: "b", n: "two" },
+        suite: "alpha",
+        unit: "a.ts",
+        cost: cost.alpha ?? 1,
+      },
+    ]);
+    for (const suite of fitted) {
+      made.calibration.suites[suite] = { overhead: 5, correction: 1 };
+    }
+    return made;
+  }
+
+  /** The suites a lane would run, in the order it would run them. */
+  function order(
+    fitted: readonly string[],
+    cost: Record<string, number> = {},
+  ): string[] {
+    const made = withFit(fitted, cost);
+    const topology = made.entries.map((entry) =>
+      suite({
+        id: entry.suite,
+        units: [entry.unit],
+        locate: () => ({ level: "unit" as const, unit: entry.unit }),
+      })
+    );
+    return batchesOf(
+      topology,
+      made,
+      made.entries.map((entry) => ({
+        entry,
+        reason: "value" as const,
+        repeats: 1,
+      })),
+    ).map((batch) => batch.suite.id);
+  }
+
+  it("runs a suite nothing has measured before one it has", () => {
+    // A lane that runs out of time is killed with its later batches
+    // unrun and unmeasured, so a suite that sorts late is one the cost
+    // model can never learn — and one it cannot price is one that makes
+    // lanes run out of time.
+    expect(order(["alpha"])).toEqual(["zebra", "alpha"]);
+  });
+
+  it("runs the largest share of the lane first within a group", () => {
+    // A lane that runs out of time should have spent it on the batch
+    // most worth knowing about and dropped the cheap ones. With nothing
+    // measured the two suites are equally unknown, so this is what
+    // decides — and ordering by the identifier instead put the largest
+    // suites last by the alphabet.
+    expect(order([], { alpha: 1, zebra: 90 })).toEqual(["zebra", "alpha"]);
+    expect(order([], { alpha: 90, zebra: 1 })).toEqual(["alpha", "zebra"]);
+  });
+
+  it("orders the same way whatever built the plan", () => {
+    // Both keys are a function of the plan, which is what the
+    // identifier was there for.
+    expect(order(["alpha", "zebra"], { alpha: 90, zebra: 1 }))
+      .toEqual(["alpha", "zebra"]);
+    expect(order(["alpha", "zebra"], { alpha: 1, zebra: 90 }))
+      .toEqual(["zebra", "alpha"]);
+  });
+});
+
+describe("reading a batch's records against what it was asked to run", () => {
+  const UNIT = "packages/bakery/glaze.test.ts";
+
+  /** A batch of one unit, over a suite that locates by scope. */
+  function batch() {
+    return {
+      suite: suite({
+        id: "workspace-unit",
+        units: [UNIT],
+        locate: (record: { test: { k: string; s: string } }) =>
+          record.test.s === "bakery"
+            ? { level: "unit" as const, unit: UNIT }
+            : undefined,
+      }),
+      units: [{ unit: UNIT, skip: [] }],
+      runs: new Map([[UNIT, 1]]),
+    };
+  }
+
+  /** One record, as a runner writes it. */
+  function record(n: string, outcome: "pass" | "fail"): TestRecord {
+    return {
+      line: "record",
+      test: { k: "unit", s: "bakery", n },
+      outcome,
+      durationMs: 1,
+    };
+  }
+
+  /** The selections that ask for one identity of that unit. */
+  function asked(n: string) {
+    return [{
+      entry: {
+        test: { k: "unit", s: "bakery", n },
+        suite: "workspace-unit",
+        unit: UNIT,
+        cost: 1,
+        score: 0.5,
+        inputs: { catches: 0, sources: 0, churn: 0 },
+        flakeRate: 0,
+        repeats: 1,
+      },
+      reason: "value" as const,
+      repeats: 1,
+    }];
+  }
+
+  it("says a unit that recorded something ran", () => {
+    const found = accountFor(
+      batch(),
+      asked("glaze > sets"),
+      [record("glaze > sets", "pass")],
+      new Set(),
+    );
+    expect(found).toEqual({
+      gating: [],
+      excused: [],
+      silent: [],
+      unaccounted: [],
+      failedUnits: [],
+    });
+  });
+
+  it("names a unit that recorded nothing at all", () => {
+    // A unit runs its tests or it does not. Nothing recorded is a
+    // runner that ran none of it, which is the one way a lane could
+    // pass over a set no run covered.
+    const found = accountFor(batch(), asked("glaze > sets"), [], new Set());
+    expect(found.silent).toEqual([UNIT]);
+  });
+
+  it("keeps a failure the run fails for apart from one it excuses", () => {
+    const excused = testIdentityKey({ k: "unit", s: "bakery", n: "flaky" });
+    const found = accountFor(
+      batch(),
+      asked("flaky"),
+      [record("flaky", "fail"), record("glaze > sets", "fail")],
+      new Set([excused]),
+    );
+    expect(found.excused).toEqual([excused]);
+    expect(found.gating).toEqual([
+      testIdentityKey({ k: "unit", s: "bakery", n: "glaze > sets" }),
+    ]);
+  });
+
+  it("counts one identity once, however many times it failed", () => {
+    // A repeated identity fails once per execution, and the lane has one
+    // thing to say about it.
+    const found = accountFor(
+      batch(),
+      asked("glaze > sets"),
+      [record("glaze > sets", "fail"), record("glaze > sets", "fail")],
+      new Set(),
+    );
+    expect(found.gating.length).toBe(1);
+  });
+
+  it("reads a record no suite locates as saying nothing about a unit", () => {
+    // A record outside the suite's own surfaces belongs to no unit of
+    // it, so it cannot stand in for one having run.
+    const found = accountFor(
+      batch(),
+      asked("glaze > sets"),
+      [{
+        line: "record",
+        test: { k: "unit", s: "pantry", n: "elsewhere" },
+        outcome: "pass",
+        durationMs: 1,
+      }],
+      new Set(),
+    );
+    expect(found.silent).toEqual([UNIT]);
+  });
+
+  it("names the unit a failure was seen in, excused or not", () => {
+    // A measured set holding that unit measured its member through a
+    // failing test, so its number is short by whatever that test would
+    // have reached.
+    const excused = testIdentityKey({ k: "unit", s: "bakery", n: "flaky" });
+    const found = accountFor(
+      batch(),
+      asked("flaky"),
+      [record("flaky", "fail")],
+      new Set([excused]),
+    );
+    expect(found.failedUnits).toEqual([UNIT]);
+  });
+
+  it("names an identity no record accounts for", () => {
+    // A manifest is hours old by construction, so an identity it names
+    // and the tree has since renamed records under the new name. That
+    // costs an excusal rather than the run.
+    const found = accountFor(
+      batch(),
+      asked("glaze > sets"),
+      [record("glaze > sets under its new name", "pass")],
+      new Set(),
+    );
+    expect(found.unaccounted).toEqual([
+      testIdentityKey({ k: "unit", s: "bakery", n: "glaze > sets" }),
+    ]);
+    expect(found.silent).toEqual([]);
+  });
+
+  it("accounts for a stand-in by its unit having recorded", () => {
+    // No record will ever carry a stand-in's name: a real record is
+    // named for a test and a stand-in is named for a file.
+    const standIn = asked(`unrecorded ${UNIT}`);
+    const found = accountFor(
+      batch(),
+      standIn,
+      [record("glaze > sets", "pass")],
+      new Set(),
+    );
+    expect(found.unaccounted).toEqual([]);
+  });
+});
+
 describe("what a lane does with the batches it was given", () => {
+  const UNIT = "packages/bakery/test/glaze.test.ts";
+
+  /**
+   * A command that records the unit having run, and then does whatever
+   * the case asked for. Every real suite records what it ran, and a lane
+   * reads the records to decide what its batches came to, so a fixture
+   * that recorded nothing would be testing the lane against a runner
+   * shaped like nothing in the tree.
+   */
+  function recording(then: string): string[] {
+    return [
+      Deno.execPath(),
+      "eval",
+      `const dir = Deno.env.get("CF_TEST_RECORDS_DIR");
+       Deno.mkdirSync(dir, { recursive: true });
+       Deno.writeTextFileSync(
+         \`\${dir}/fragment-fixture-\${crypto.randomUUID()}.ndjson\`,
+         JSON.stringify({
+           line: "record",
+           test: { k: "unit", s: "bakery", n: "glaze > sets" },
+           outcome: "pass",
+           durationMs: 1,
+         }) + "\\n",
+       );
+       ${then}`,
+    ];
+  }
+
   /** A topology of one suite running the command a case names. */
   function topology(command: readonly string[]) {
     return () =>
       Promise.resolve([
         suite({
           id: "workspace-unit",
-          units: ["packages/bakery/test/glaze.test.ts"],
+          units: [UNIT],
+          locate: (record) =>
+            record.test.k === "unit" && record.test.s === "bakery"
+              ? { level: "unit" as const, unit: UNIT }
+              : undefined,
           command: (_units, context) =>
             Promise.resolve([{ command: [...command], cwd: context.root }]),
         }),
@@ -1864,7 +2201,7 @@ describe("what a lane does with the batches it was given", () => {
   }
 
   it("passes when every batch passed", async () => {
-    const { ok, measured } = await run([Deno.execPath(), "eval", "0"]);
+    const { ok, measured } = await run(recording(""));
     expect(ok).toBe(true);
     // The measurement says what the lane says. A batch recorded green
     // while the lane reports red, or the other way about, is one commit
@@ -1946,11 +2283,7 @@ describe("what a lane does with the batches it was given", () => {
   it("fails when a batch failed, having run it", async () => {
     // A lane reports what it measured: the batch ran and went red, so
     // the lane is red, and nothing about that is a crash or a timeout.
-    const { ok, measured } = await run([
-      Deno.execPath(),
-      "eval",
-      "Deno.exit(1)",
-    ]);
+    const { ok, measured } = await run(recording("Deno.exit(1);"));
     expect(ok).toBe(false);
     expect(batchOutcome(measured)).toBe("fail");
   });

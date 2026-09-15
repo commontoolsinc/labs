@@ -23,6 +23,7 @@ import {
   testIdentityKey,
 } from "@commonfabric/test-support/records";
 import {
+  ALWAYS_GATING_SUITES,
   DIALS,
   dialValue,
   EXCLUDED_FROM_COVERAGE_GATE,
@@ -242,34 +243,46 @@ export function explainLines(
     `  churn ${entry.inputs.churn.toFixed(4)}, flake rate ` +
     `${entry.flakeRate.toFixed(4)}`,
   ];
+  // Each of these is a fact of its own rather than one arm of a choice.
+  // They do not partition: a withheld identity a change reaches runs,
+  // one in a suite whose failures always gate is not withheld at all,
+  // and every one of them has a number of runs it is given.
   const held = manifest.withheld.find(
     (candidate) => testIdentityKey(candidate.test) === key,
   );
   if (held !== undefined) {
-    lines.push("  withheld: it is too flaky to judge a change by");
-  } else if (verdict.unschedulable) {
+    lines.push(
+      ALWAYS_GATING_SUITES.has(held.suite)
+        ? "  too flaky to judge a change by, and run anyway: its suite's " +
+          "failures always fail the run"
+        : "  withheld: it is too flaky to judge a change by, so it runs on " +
+          "the default branch and not here",
+    );
+  }
+  if (verdict.unschedulable) {
     const seconds = verdict.loneSeconds ?? entry.cost;
     lines.push(
       `  no lane can hold it: ${seconds.toFixed(1)}s is past the bound a ` +
         "lane runs under, so it is reported rather than scheduled. Splitting " +
         "it is the fix.",
     );
-  } else {
-    // The repeat count the packing settled on, which is what will run: a
-    // filling pass trims repeats to fit rather than dropping the test, so
-    // the manifest's own number is what it asked for and not what it got.
-    const repeats = verdict.repeats ?? entry.repeats;
-    if (repeats > 1) {
-      lines.push(`  run ${repeats} times, and every one must pass`);
-    }
-    // The question this mode exists to answer. Withheld and repeated are
-    // facts about the entry; whether it is reached at all is a fact about
-    // the packing, and only the packing knows it.
+  }
+  // The repeat count the packing settled on, which is what will run: a
+  // filling pass trims repeats to fit rather than dropping the test, so
+  // the manifest's own number is what it asked for and not what it got.
+  const repeats = verdict.selected ? verdict.repeats ?? entry.repeats : 0;
+  if (repeats > 1) {
+    lines.push(`  run ${repeats} times, and every one must pass`);
+  }
+  // The question this mode exists to answer. Everything above is a fact
+  // about the entry; whether a lane reaches it is a fact about the
+  // packing, and only the packing knows it.
+  if (verdict.selected) {
+    lines.push("  the current manifest selects it");
+  } else if (!verdict.unschedulable && held === undefined) {
     lines.push(
-      verdict.selected
-        ? "  the current manifest selects it"
-        : "  the current manifest does not reach it: the budget runs out " +
-          "first, on tests worth more per second",
+      "  the current manifest does not reach it: the budget runs out " +
+        "first, on tests worth more per second",
     );
   }
   return lines;

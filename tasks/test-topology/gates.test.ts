@@ -1,4 +1,5 @@
 import { expect } from "@std/expect";
+import { parseArgs } from "../pattern-compat-lib.ts";
 import { describe, it } from "@std/testing/bdd";
 import { DOC_DEMOS } from "../check-verb-session-sync.ts";
 import { TRIPWIRES } from "../check-tripwires.ts";
@@ -351,6 +352,21 @@ describe("the repository's gate suites", () => {
       context,
     );
     expect(invocation!.command).toContain("--only");
+  });
+
+  it("builds a compatibility filter the gate's own parser accepts", async () => {
+    // The task takes one path after each `--only` and throws on the
+    // next, so a list after one flag is a command the gate refuses. This
+    // asks the parser rather than asserting a shape, because the parser
+    // is what decides.
+    const compat = byId("pattern-compat");
+    const [invocation] = await compat.command(
+      compat.units.slice(0, 3).map((unit) => ({ unit, skip: [] })),
+      context,
+    );
+    const at = invocation!.command.lastIndexOf("pattern-compat");
+    const args = invocation!.command.slice(at + 1);
+    expect(parseArgs(args).only.length).toBe(3);
   });
 
   it("asks the compatibility gate for everything without a filter", async () => {
