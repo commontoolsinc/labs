@@ -2,11 +2,10 @@
  * Top-level `export`ed visitor functions.
  */
 
-import { type FabricValue } from "@/interface.ts";
+import type { FabricValue, FabricValuePlus } from "@/interface.ts";
 
 import {
   type BaselineVisitResult,
-  type DomainFor,
   type ValueVisitor,
 } from "./interface.ts";
 import { VisitInProgress } from "./VisitInProgress.ts";
@@ -56,7 +55,7 @@ export function makeVisitFabricValueFunction<ResultType = FabricValue>(
  *   practice,_ this will become an active area of optimization.
  */
 export function visitValue<PlusType, ResultType>(
-  value: NoInfer<DomainFor<PlusType>>,
+  value: NoInfer<FabricValuePlus<PlusType>>,
   visitor: ValueVisitor<PlusType, ResultType>,
   deepTypeCheck: boolean = false,
 ): BaselineVisitResult<ResultType> {
@@ -73,7 +72,7 @@ export function visitValue<PlusType, ResultType>(
 export function makeVisitValueFunction<PlusType, ResultType>(
   visitor: ValueVisitor<PlusType, ResultType>,
   deepTypeCheck: boolean = false,
-): (value: DomainFor<PlusType>) => BaselineVisitResult<ResultType> {
-  return (value: DomainFor<PlusType>) =>
+): (value: FabricValuePlus<PlusType>) => BaselineVisitResult<ResultType> {
+  return (value: FabricValuePlus<PlusType>) =>
     visitValue(value, visitor, deepTypeCheck);
 }

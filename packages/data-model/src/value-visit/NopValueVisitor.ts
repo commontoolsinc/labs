@@ -7,6 +7,7 @@ import {
   type FabricPlainObject,
   FabricPrimitive,
   type FabricValue,
+  type FabricValuePlus,
 } from "@/interface.ts";
 import { type PrimitiveValueTag } from "@/types";
 
@@ -14,7 +15,6 @@ import { BaseValueVisitor } from "./BaseValueVisitor.ts";
 import {
   type BaselineVisitResult,
   type DispatchingVisitorResult,
-  type DomainFor,
   type LeafVisitorResult,
 } from "./interface.ts";
 
@@ -28,13 +28,13 @@ import {
 export class NopValueVisitor<PlusType = never, ResultType = FabricValue>
   extends BaseValueVisitor<PlusType, ResultType> {
   /** @inheritDoc */
-  isPlusType(_value: DomainFor<PlusType>): _value is PlusType {
+  isPlusType(_value: FabricValuePlus<PlusType>): _value is PlusType {
     return false;
   }
 
   /** @inheritDoc */
   visitCycle(
-    _value: DomainFor<PlusType>,
+    _value: FabricValuePlus<PlusType>,
     _originalDepth: number,
     _thisDepth: number,
   ): LeafVisitorResult<PlusType, ResultType> {
@@ -86,7 +86,7 @@ export class NopValueVisitor<PlusType = never, ResultType = FabricValue>
 
   /** @inheritDoc */
   visitValue(
-    _value: DomainFor<PlusType>,
+    _value: FabricValuePlus<PlusType>,
   ): DispatchingVisitorResult<PlusType, ResultType> {
     return undefined;
   }
@@ -95,7 +95,7 @@ export class NopValueVisitor<PlusType = never, ResultType = FabricValue>
   visitedFabricArrayElement(
     _array: FabricArray,
     _index: number,
-    _value: DomainFor<PlusType>,
+    _value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType> {
     return undefined;
   }
@@ -120,8 +120,8 @@ export class NopValueVisitor<PlusType = never, ResultType = FabricValue>
   /** @inheritDoc */
   visitedFabricPlainObjectEntry(
     _container: FabricPlainObject,
-    _key: DomainFor<PlusType>,
-    _value: DomainFor<PlusType>,
+    _key: FabricValuePlus<PlusType>,
+    _value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType> {
     return undefined;
   }

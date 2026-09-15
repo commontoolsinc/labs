@@ -7,6 +7,7 @@ import {
   type FabricPlainObject,
   FabricPrimitive,
   type FabricValue,
+  type FabricValuePlus,
 } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { type PrimitiveValueTag } from "@/types";
@@ -14,7 +15,6 @@ import { type PrimitiveValueTag } from "@/types";
 import {
   type BaselineVisitResult,
   type DispatchingVisitorResult,
-  type DomainFor,
   type LeafVisitorResult,
   ValueVisitor,
 } from "./interface.ts";
@@ -32,11 +32,11 @@ export abstract class BaseValueVisitor<
   //
 
   /** @inheritDoc */
-  abstract isPlusType(value: DomainFor<PlusType>): value is PlusType;
+  abstract isPlusType(value: FabricValuePlus<PlusType>): value is PlusType;
 
   /** @inheritDoc */
   abstract visitCycle(
-    value: DomainFor<PlusType>,
+    value: FabricValuePlus<PlusType>,
     originalDepth: number,
     thisDepth: number,
   ): LeafVisitorResult<PlusType, ResultType>;
@@ -74,14 +74,14 @@ export abstract class BaseValueVisitor<
 
   /** @inheritDoc */
   abstract visitValue(
-    value: DomainFor<PlusType>,
+    value: FabricValuePlus<PlusType>,
   ): DispatchingVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
   abstract visitedFabricArrayElement(
     array: FabricArray,
     index: number,
-    value: DomainFor<PlusType>,
+    value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
@@ -100,8 +100,8 @@ export abstract class BaseValueVisitor<
   /** @inheritDoc */
   abstract visitedFabricPlainObjectEntry(
     container: FabricPlainObject,
-    key: DomainFor<PlusType>,
-    value: DomainFor<PlusType>,
+    key: FabricValuePlus<PlusType>,
+    value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType>;
 
   //
@@ -111,7 +111,7 @@ export abstract class BaseValueVisitor<
   /**
    * Throws an error indicating that this visitor does not handle cycles.
    */
-  protected throwNoCycles(value: DomainFor<PlusType>): never {
+  protected throwNoCycles(value: FabricValuePlus<PlusType>): never {
     const desc = toCompactDebugString(value, { backtickQuote: true });
     throw new Error(`Cannot visit cyclic value: ${desc}`);
   }

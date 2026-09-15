@@ -4,6 +4,7 @@ import {
   FabricInstance,
   type FabricPlainObject,
   type FabricValue,
+  type FabricValuePlus,
 } from "@/interface.ts";
 
 import { BaseValueVisitor } from "./BaseValueVisitor.ts";
@@ -11,7 +12,6 @@ import {
   type BaselineVisitResult,
   type DispatchingVisitorResult,
   DO_RECURSE_VALUES,
-  type DomainFor,
   type LeafVisitorResult,
 } from "./interface.ts";
 
@@ -71,7 +71,7 @@ export abstract class RecursiveValueVisitor<
   visitedFabricArrayElement(
     _array: FabricArray,
     _index: number,
-    _value: DomainFor<PlusType>,
+    _value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType> {
     return undefined;
   }
@@ -96,8 +96,8 @@ export abstract class RecursiveValueVisitor<
   /** @inheritDoc */
   visitedFabricPlainObjectEntry(
     _container: FabricPlainObject,
-    _key: DomainFor<PlusType>,
-    _value: DomainFor<PlusType>,
+    _key: FabricValuePlus<PlusType>,
+    _value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType> {
     return undefined;
   }

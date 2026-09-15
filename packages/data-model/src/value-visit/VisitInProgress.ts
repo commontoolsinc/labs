@@ -11,6 +11,7 @@ import {
   type FabricPlainObject,
   FabricPrimitive,
   type FabricValue,
+  type FabricValuePlus,
 } from "@/interface.ts";
 import {
   type FabricValueTag,
@@ -26,7 +27,6 @@ import {
   type BaselineVisitResult,
   type DispatchingVisitorResult,
   DO_VISIT_SUBTYPE,
-  type DomainFor,
   type LeafVisitorResult,
   type RecurseForm,
   type ReplaceForm,
@@ -42,7 +42,7 @@ import {
  */
 type VisitSubtypeOfForm<PlusType> = {
   readonly type: "visitSubtypeOf";
-  readonly value: DomainFor<PlusType>;
+  readonly value: FabricValuePlus<PlusType>;
 };
 
 /**
@@ -75,7 +75,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
   #visitor: ValueVisitor<PlusType, ResultType>;
 
   /** Container stack of the visit currently in progress. */
-  #stack = new IndexTrackingStack<DomainFor<PlusType>>();
+  #stack = new IndexTrackingStack<FabricValuePlus<PlusType>>();
 
   /** Indicates if a visit is now actually in-progress. */
   #inProgress = false;
@@ -120,7 +120,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
    * See `visitValue()` for details on the `deepTypeCheck` argument.
    */
   visit(
-    value: DomainFor<PlusType>,
+    value: FabricValuePlus<PlusType>,
     deepTypeCheck: boolean,
   ): BaselineVisitResult<ResultType> {
     return this.#mainVisit(value, false, deepTypeCheck);
@@ -134,7 +134,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
 
   /** Helper which implements most of a top-level visit. */
   #mainVisit(
-    value: DomainFor<PlusType>,
+    value: FabricValuePlus<PlusType>,
     assumeValid: boolean,
     deepTypeCheck: boolean,
   ): BaselineVisitResult<ResultType> {
@@ -159,7 +159,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
   /**
    * Visits a top-level value or contained sub-value.
    */
-  #visitValue(value: DomainFor<PlusType>): BaselineVisitResult<ResultType> {
+  #visitValue(value: FabricValuePlus<PlusType>): BaselineVisitResult<ResultType> {
     const result = this.#visitResolvingSubtype(value);
 
     switch (result?.type) {
@@ -220,7 +220,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
    * this method. See comment on the definition of `RecurseOfForm` for details.
    */
   #visitResolvingSubtype(
-    value: DomainFor<PlusType>,
+    value: FabricValuePlus<PlusType>,
   ):
     | RecurseOfForm
     | Exclude<
@@ -328,7 +328,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
    * the visitor returns something other than a `replace` result.
    */
   #visitResolvingCyclesAndReplacement(
-    value: DomainFor<PlusType>,
+    value: FabricValuePlus<PlusType>,
   ):
     | RecurseOfForm
     | VisitSubtypeOfForm<PlusType>
@@ -546,7 +546,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
    */
   #adjustRecurseForm(
     result: RecurseForm,
-    finalValue: DomainFor<PlusType>,
+    finalValue: FabricValuePlus<PlusType>,
     finalValueTagIfKnown?: FabricValueTag | null,
   ): RecurseOfForm {
     const tag = (finalValueTagIfKnown === undefined)
@@ -578,8 +578,8 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
    * based on whether the visited value is a replacement.
    */
   #visitSubtypeFormFor(
-    origValue: DomainFor<PlusType>,
-    finalValue: DomainFor<PlusType>,
+    origValue: FabricValuePlus<PlusType>,
+    finalValue: FabricValuePlus<PlusType>,
   ):
     | VisitSubtypeForm
     | VisitSubtypeOfForm<PlusType> {
@@ -598,7 +598,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
    * type-checking style indicated by the top-level `visit*()` call on this
    * instance.
    */
-  #tagOfValueElseNull(value: DomainFor<PlusType>): FabricValueTag | null {
+  #tagOfValueElseNull(value: FabricValuePlus<PlusType>): FabricValueTag | null {
     if (this.#assumeValid) {
       return tagOfFabricValueElseNull(value as FabricValue);
     } else if (this.#deepTypeCheck) {

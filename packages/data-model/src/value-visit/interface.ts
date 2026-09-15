@@ -13,14 +13,12 @@ import {
   type FabricPlainObject,
   FabricPrimitive,
   type FabricValue,
+  type FabricValuePlus,
 } from "@/interface.ts";
 
 //
 // Individual result form types and associated definitions
 //
-
-/** Full domain for a `ValueVisitor` class, given its `PlusType`. */
-export type DomainFor<PlusType> = FabricValue | PlusType;
 
 /**
  * A `mainResult` form. `value` is a value that is to be returned from the
@@ -67,7 +65,7 @@ export type RecurseForm = {
  */
 export type ReplaceForm<PlusType> = {
   readonly type: "replace";
-  readonly value: DomainFor<PlusType>;
+  readonly value: FabricValuePlus<PlusType>;
 };
 
 /**
@@ -196,7 +194,7 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
    * visitor engine calls it before dispatching to `visitPlusType()`, and will
    * instead `throw` an error if this method returns anything falsy.
    */
-  isPlusType(value: DomainFor<PlusType>): value is PlusType;
+  isPlusType(value: FabricValuePlus<PlusType>): value is PlusType;
 
   /**
    * Visits a value which is already in the process of being visited. The
@@ -206,7 +204,7 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
    */
   visitCycle(
     /** Value to visit. */
-    value: DomainFor<PlusType>,
+    value: FabricValuePlus<PlusType>,
     /** Depth at which `value` was originally encountered. */
     originalDepth: number,
     /** Depth of the current visit. */
@@ -267,7 +265,7 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
    * `visitPlusType()`, or `visitPrimitive()`.
    */
   visitValue(
-    value: DomainFor<PlusType>,
+    value: FabricValuePlus<PlusType>,
   ): DispatchingVisitorResult<PlusType, ResultType>;
 
   /**
@@ -278,7 +276,7 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
   visitedFabricArrayElement(
     array: FabricArray,
     index: number,
-    value: DomainFor<PlusType>,
+    value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType>;
 
   /**
@@ -318,7 +316,7 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
    */
   visitedFabricPlainObjectEntry(
     container: FabricPlainObject,
-    key: DomainFor<PlusType>,
-    value: DomainFor<PlusType>,
+    key: FabricValuePlus<PlusType>,
+    value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType>;
 }
