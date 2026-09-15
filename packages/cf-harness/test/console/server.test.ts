@@ -366,7 +366,7 @@ describe("console/server", () => {
       expect(policy.allowedToolIds).toContain("acquire_skill");
     });
 
-    it("allows the skill scripts a console is launched with", async () => {
+    it("allows a registry-name entry once a skills tree is configured", async () => {
       const resolved = await resolveConsoleConfig(
         [
           "--fabric-identity",
@@ -437,29 +437,6 @@ describe("console/server", () => {
           "/console",
         ),
       ).rejects.toThrow("`cf-tidy` is a registry skill");
-    });
-
-    it("allows a registry-name entry once a skills tree is configured", async () => {
-      const resolved = await resolveConsoleConfig(
-        [
-          "--fabric-identity",
-          "key.pkcs8",
-          "--fabric-space",
-          "console-test",
-          "--session-db",
-          "none",
-          "--skills-root",
-          "/workspace/skills",
-          "--allow-skill-script",
-          "cf-tidy:scripts/tidy.sh",
-        ],
-        {},
-        "/console",
-      );
-
-      expect(resolved.allowedSkillScripts).toEqual([
-        { skill: "cf-tidy", path: "scripts/tidy.sh" },
-      ]);
     });
 
     it("allows an acquired pin with no skills tree at all", async () => {
