@@ -30,6 +30,7 @@ import type { MetaLinkField } from "./meta-seam.ts";
 import type { IReadOptions } from "./storage/interface.ts";
 import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
 
 import {
   type AnyCell,
@@ -241,8 +242,13 @@ let externalizedLinkSchemaCache = new WeakMap<
   object,
   Map<KeepAsCell, JSONSchema>
 >();
+// Only complete closures produce cached values. The registry's retention
+// lease bounds their reuse, and every lookup still checks closure availability.
+let recomposedLinkSchemaCache = new WeakMap<JSONSchemaObj, JSONSchema>();
+const schemaClosureLogger = getLogger("schema-closure");
 onSchemaRegistryClear(() => {
   externalizedLinkSchemaCache = new WeakMap();
+  recomposedLinkSchemaCache = new WeakMap();
 });
 
 /**
@@ -275,7 +281,8 @@ export function externalizeSchema(schema: JSONSchemaObj): JSONSchema {
  * The self-contained schema a link carries across a space boundary. Its
  * external documents are loaded from the space holding the declaration;
  * the target space need not hold them. An incomplete declaration selects
- * nothing until its missing documents arrive.
+ * nothing until its missing documents arrive. A declaration rejected by the
+ * decomposer logs a warning and selects nothing.
  */
 export function schemaForSpaceCrossing(
   tx: IExtendedStorageTransaction,
@@ -284,10 +291,25 @@ export function schemaForSpaceCrossing(
 ): JSONSchema | undefined {
   if (!containsExternalSchemaRef(schema)) return schema;
   if (!ensureExternalSchemaClosure(tx, sourceSpace, schema)) return false;
-  const { rootRef, documents } = decomposeSchema(schema as JSONSchemaObj, {
-    resolveDocument: lookupSchemaDocument,
-  });
-  return recomposeSchema(rootRef, (hash) => documents.get(hash));
+  const interned = internSchema(schema as JSONSchemaObj);
+  const cached = recomposedLinkSchemaCache.get(interned);
+  if (cached !== undefined) return cached;
+  try {
+    const { rootRef, documents } = decomposeSchema(interned, {
+      resolveDocument: lookupSchemaDocument,
+    });
+    const result = recomposeSchema(rootRef, (hash) => documents.get(hash));
+    recomposedLinkSchemaCache.set(interned, result);
+    return result;
+  } catch (error) {
+    if (!(error instanceof SchemaNotDecomposableError)) throw error;
+    schemaClosureLogger.warn("schema-closure", () => [
+      "Link schema cannot be recomposed; it selects nothing:",
+      sourceSpace,
+      error.message,
+    ]);
+    return false;
+  }
 }
 
 /**

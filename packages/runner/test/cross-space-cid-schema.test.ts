@@ -1,6 +1,7 @@
 /**
- * Cross-space reads resolve link schemas in the declaring space. Each case
- * keeps the target space free of schema documents, including transitive refs.
+ * Cross-space reads resolve link schemas in the declaring space. Referenced
+ * declarations preserve reader precedence in either space; malformed ones
+ * hide data only from readers that adopt them.
  */
 
 import { expect } from "@std/expect";
@@ -27,14 +28,25 @@ describe("cross-space-cid-schema", () => {
       "array cell",
       "reader schema",
       "carried reader schema",
+      "same-space carried reader schema",
+      "malformed declaration",
+      "shaped reader over malformed declaration",
       "two space crossings",
     ] as const
   ) {
-    it(`reads through ${route} using schema documents held only in the source space`, async () => {
+    const description = route === "malformed declaration"
+      ? "returns a rejecting schema for a malformed link declaration"
+      : `reads through ${route} using schema documents held only in the source space`;
+    it(description, async () => {
       const signer = await Identity.fromPassphrase("cid schema source");
       const sourceSpace = signer.did();
-      const targetSpace = (await Identity.fromPassphrase("cid schema target"))
-        .did();
+      const carriesReader = route === "carried reader schema" ||
+        route === "same-space carried reader schema";
+      const shapedReader = route === "reader schema" ||
+        route === "shaped reader over malformed declaration";
+      const targetSpace = route === "same-space carried reader schema"
+        ? sourceSpace
+        : (await Identity.fromPassphrase("cid schema target")).did();
       const finalSpace = (await Identity.fromPassphrase("cid schema final"))
         .did();
       const manager = StorageManager.emulate({ as: signer });
@@ -43,7 +55,7 @@ describe("cross-space-cid-schema", () => {
         apiUrl: new URL(import.meta.url),
       });
       const decomposed = decomposeSchema(
-        route === "carried reader schema" ? {} : {
+        carriesReader ? {} : {
           type: "object",
           properties: { name: { $ref: "#/$defs/Name" } },
           required: ["name"],
@@ -78,7 +90,7 @@ describe("cross-space-cid-schema", () => {
           [`cid:${hash}`, { value: schema }] as [string, EntityDocument]
         ),
       ]);
-      if (route === "reader schema" || route === "carried reader schema") {
+      if (shapedReader || carriesReader) {
         for (const [hash, schema] of readerSchema.documents) {
           sourceDocs.set(`cid:${hash}`, { value: schema });
         }
@@ -86,9 +98,29 @@ describe("cross-space-cid-schema", () => {
       if (route === "array cell") {
         sourceDocs.set(sourceId, { value: { targets: [source.value.target] } });
       }
+      if (route.includes("malformed declaration")) {
+        // A malformed declaration below the write API: the referenced closure
+        // is complete, but a numeric definition cannot be recomposed.
+        sourceDocs.set(sourceId, {
+          value: {
+            target: {
+              "/": {
+                [LINK_V1_TAG]: {
+                  ...source.value.target["/"][LINK_V1_TAG],
+                  schema: { $ref: decomposed.rootRef, $defs: { Invalid: 17 } },
+                },
+              },
+            },
+          },
+        });
+      }
       const targetDocs = new Map<string, EntityDocument>([
         [targetId, { value: { name: "Ada", extra: "outside the schema" } }],
       ]);
+      if (targetSpace === sourceSpace) {
+        for (const [id, doc] of targetDocs) sourceDocs.set(id, doc);
+        targetDocs.clear();
+      }
       const finalDocs = new Map<string, EntityDocument>();
       if (route === "two space crossings") {
         const finalId = "of:cid-schema-final" as URI;
@@ -127,6 +159,7 @@ describe("cross-space-cid-schema", () => {
         for (const id of docs.keys()) {
           if (id.startsWith("cid:")) expectedSchemaReads.push(`${space}/${id}`);
         }
+        if (docs.size === 0) continue;
         manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
           if (id.startsWith("cid:")) schemaReads.push(`${space}/${id}`);
           const doc = docs.get(id);
@@ -148,7 +181,19 @@ describe("cross-space-cid-schema", () => {
           path: [],
         });
         await cell.sync();
-        if (route === "carried reader schema") {
+        if (route === "malformed declaration") {
+          const tx = runtime.edit();
+          try {
+            const target = resolveLink(
+              runtime,
+              tx,
+              cell.key("target").getAsNormalizedFullLink(),
+            );
+            expect(target.schema).toBe(false);
+          } finally {
+            tx.abort();
+          }
+        } else if (carriesReader) {
           const tx = runtime.edit();
           let target;
           try {
@@ -158,6 +203,11 @@ describe("cross-space-cid-schema", () => {
             }));
           } finally {
             tx.abort();
+          }
+          if (route === "same-space carried reader schema") {
+            expect(target.getAsNormalizedFullLink().schema).toEqual({
+              $ref: readerSchema.rootRef,
+            });
           }
           const value = await target.pull() as { name: string; extra?: string };
           expect(value?.name).toBe("Ada");
@@ -185,7 +235,7 @@ describe("cross-space-cid-schema", () => {
           expect(value?.target?.name).toBe("Ada");
         } else if (route === "path") {
           expect(await cell.key("target").key("name").pull()).toBe("Ada");
-        } else if (route === "reader schema") {
+        } else if (shapedReader) {
           const value = await cell.asSchema({
             type: "object",
             properties: { target: { $ref: readerSchema.rootRef } },
@@ -198,7 +248,14 @@ describe("cross-space-cid-schema", () => {
           expect(value?.name).toBe("Ada");
         }
         expect(schemaReads).toContain(`${sourceSpace}/${decomposed.rootRef}`);
-        expect(new Set(schemaReads)).toEqual(new Set(expectedSchemaReads));
+        if (route === "same-space carried reader schema") {
+          expect(
+            schemaReads.every((read) => expectedSchemaReads.includes(read)),
+          )
+            .toBe(true);
+        } else {
+          expect(new Set(schemaReads)).toEqual(new Set(expectedSchemaReads));
+        }
       } finally {
         await runtime.dispose();
         await manager.close();
