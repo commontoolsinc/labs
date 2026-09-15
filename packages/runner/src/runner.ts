@@ -7178,12 +7178,14 @@ export class Runner {
         // then report no receipt for it. The identity arm below predates the
         // receipt and covers its own callers; neither subsumes the other.
         //
-        // The verdict is a `Result` error, a plain object, and goes out as an
-        // `Error` carrying its name, message, and fields: thrown as it stands
-        // it fails every `instanceof Error` check on the way up and renders
-        // as `[object Object]`, its message discarded.
+        // A verdict that is a plain `Result` object goes out as an `Error`
+        // carrying its name, message, and fields: thrown as it stands it
+        // fails every `instanceof Error` check on the way up and renders as
+        // `[object Object]`, its message discarded. One that is already an
+        // `Error`, a precondition failure among them, goes out as itself, so
+        // its identity, stack, and `cause` survive.
         if (requireCommit || options?.expectedPatternIdentity) {
-          throw toThrowable(error);
+          throw error instanceof Error ? error : toThrowable(error);
         }
         logger.error("pattern-setup-error", "Error setting up pattern", error);
         setupRes = undefined;

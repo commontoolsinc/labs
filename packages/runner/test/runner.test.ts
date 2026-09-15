@@ -1796,7 +1796,7 @@ describe("setup/start", () => {
     }
   });
 
-  it("runSynced rethrows retry exhaustion when identity is required", async () => {
+  it("runSynced rethrows retry exhaustion as the same `Error` when identity is required", async () => {
     const pattern: Pattern = {
       argumentSchema: { type: "object", properties: {} },
       resultSchema: {},
@@ -1822,7 +1822,7 @@ describe("setup/start", () => {
             symbol: "default",
           },
         },
-      )).rejects.toThrow("precondition retry exhausted");
+      )).rejects.toBe(failure);
     } finally {
       runtime.editWithRetry = originalEditWithRetry;
     }
