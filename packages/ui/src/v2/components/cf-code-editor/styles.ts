@@ -334,7 +334,7 @@ export const styles = css`
     );
   }
 
-  /* The member name a mention's destination publishes, beside its label.
+  /* What the mention universe calls a destination, beside its label.
     Generated content, because the document's own text is the label alone:
     a reference's spelling is computed where it is read and never stored. */
   .cm-mention-ref-pill[data-short-name]::after {

@@ -442,14 +442,13 @@ calls the member; it settles nothing about which collection a reference
 addresses, which stays the reading context's question.
 
 A renderer that shows a published name in place of a round trip takes that limit
-on, and one does. The editor's mention pill shows whatever name a mention's
-destination publishes — whichever collection assigned it, and whatever
-collection the reader is reading through — so a destination named by another
-collection contributes a number that reads as this one's
-([#6985](https://github.com/commontoolsinc/labs/issues/6985)). The round trip
-above is what removes it: take the name from the destination's row in the
-collection the reader is reading through, found by identity, and show none when
-there is no such row.
+on. The editor's mention pill makes its name a round trip through the universe
+the editor completes mentions from. It shows a name only where the mention's
+destination is a row of that universe, found by identity, and the name it shows
+is that row's rather than anything the destination publishes, so a name that is
+shown is one a `#` query in the same editor offers back for the same
+destination. A destination the universe does not list shows no name, whatever it
+publishes.
 
 ### Two modes, chosen by destination
 
