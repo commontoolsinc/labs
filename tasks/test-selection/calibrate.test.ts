@@ -301,6 +301,10 @@ describe("calibrate", () => {
     });
 
     it("refuses a slope saying a batch gets cheaper with more tests", () => {
+      // Such a slope would let a lane pack the suite without limit
+      // against a flat charge. A correction of zero is worse still: a
+      // manifest carrying one is refused whole, so a single suite whose
+      // batches trend downward would leave every lane with no manifest.
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
@@ -308,7 +312,24 @@ describe("calibrate", () => {
           spent: 500 - 0.5 * MIN_CORRECTION_SPAN_SECONDS * (2 + i),
         })),
       );
-      expect(fitted.correction).toBe(0);
+      expect(fitted.correction).toBe(1);
+    });
+
+    it("fits every suite a correction a manifest will carry", () => {
+      // `parseCalibration` refuses a correction at or below zero, and it
+      // refuses the whole manifest with it, so what this returns has to
+      // be a figure that survives being published.
+      for (const slope of [-3, -0.5, 0, 0.25, 4, 50]) {
+        const fitted = fitSuite(
+          Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
+            suite: "s",
+            planned: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
+            spent: 500 + slope * MIN_CORRECTION_SPAN_SECONDS * (2 + i),
+          })),
+        );
+        expect(fitted.correction).toBeGreaterThan(0);
+        expect(fitted.overhead).toBeGreaterThanOrEqual(0);
+      }
     });
 
     it("charges nothing for a suite nothing has measured", () => {

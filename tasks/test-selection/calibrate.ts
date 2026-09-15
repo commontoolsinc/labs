@@ -126,10 +126,11 @@ export function laneObservations(
  * figure is written beside the spent one, so a batch that never finished
  * contributes neither.
  *
- * The pair is keyed by the run and the measurement's name together,
- * because one lane runs a suite once but five lanes of one run may each
- * run the same suite, and adding two lanes' figures would describe a
- * batch neither of them ran.
+ * The pair is keyed by the run, the suite, and whether coverage was on,
+ * because five lanes of one run may each run the same suite and adding
+ * two lanes' figures would describe a batch neither of them ran. Not by
+ * the measurement's name, which is what tells a pair's two halves apart
+ * and would therefore keep them apart.
  */
 export function observationsOf(
   runs: Iterable<{ run: string; records: Iterable<TestRecord> }>,
@@ -215,7 +216,6 @@ export function fitSuite(
   observations: readonly BatchObservation[],
 ): { overhead: number; correction: number } {
   if (observations.length === 0) return { overhead: 0, correction: 1 };
-  const distinct = new Set(observations.map((o) => o.planned));
   const charged = observations.map((o) => o.planned);
   const span = Math.max(...charged) - Math.min(...charged);
   let correction = 1;
@@ -224,8 +224,11 @@ export function fitSuite(
   // thousands the first time a lane packs it whole. So one is fitted
   // only where the suite has been charged enough for a slope to mean
   // anything, and otherwise stays at the reading that needs no evidence.
+  // A span this wide means two batches were charged different figures,
+  // so the observations cannot all sit on one vertical line and the
+  // divisor below is positive.
   if (
-    distinct.size > 1 && observations.length >= MIN_CORRECTION_SAMPLES &&
+    observations.length >= MIN_CORRECTION_SAMPLES &&
     span >= MIN_CORRECTION_SPAN_SECONDS
   ) {
     const n = observations.length;
@@ -237,17 +240,23 @@ export function fitSuite(
       top += (o.planned - meanX) * (o.spent - meanY);
       bottom += (o.planned - meanX) ** 2;
     }
-    // Bounded below and not above. A batch runs its files in parallel,
-    // so the wall time of one is routinely a fraction of the sum of its
-    // tests' own durations: the pattern unit suite takes about a third.
-    // A slope held at one would push that difference into the intercept,
-    // which is charged whatever the batch holds, and a lane would then be
-    // priced out of running the suite at all. Only a negative slope is
-    // meaningless. Above one the intercept absorbs whatever a bound would
-    // have moved, and the intercept is charged for one test of the suite
-    // where the slope is charged in proportion, so bounding the slope
-    // makes a suite dearer to reach rather than cheaper.
-    if (bottom > 0) correction = Math.max(0, top / bottom);
+    // Believed where it is positive, and not otherwise. A slope below
+    // one is ordinary: a batch runs its files in parallel, so the wall
+    // time of one is routinely a fraction of the sum of its tests' own
+    // durations, and the pattern unit suite takes about a third. At or
+    // below zero it says a batch grows no dearer, or grows cheaper, the
+    // more of the suite it holds, which would let a lane pack the suite
+    // without limit against a flat charge; and a manifest carrying a
+    // correction of zero is refused whole, so publishing one would leave
+    // every lane with no manifest at all. The reading that needs no
+    // evidence stands instead.
+    //
+    // Nothing bounds it above. The intercept absorbs whatever a bound
+    // would have moved, and the intercept is charged for one test of the
+    // suite where the slope is charged in proportion, so bounding the
+    // slope makes a suite dearer to reach rather than cheaper.
+    const slope = top / bottom;
+    if (slope > 0) correction = slope;
   }
   const overhead = observations.reduce(
     (most, o) => Math.max(most, o.spent - correction * o.planned),

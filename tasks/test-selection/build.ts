@@ -783,6 +783,16 @@ export class Fold {
     }
   }
 
+  /**
+   * Whether a lane's measurement is recent enough to charge against.
+   * Both ends of the fold ask this rather than spelling the comparison
+   * out twice, so a day that will not parse as one is dropped at both
+   * rather than accepted at one and refused at the other.
+   */
+  #withinCostWindow(lane: LaneObservation): boolean {
+    return daysBetween(lane.day, this.#today) <= COST_WINDOW_DAYS;
+  }
+
   /** Closes the fold, sealing each day's cost and aging the counters. */
   finish(): FoldResult {
     for (const [key, byDay] of this.#samples) {
@@ -795,9 +805,7 @@ export class Fold {
     }
     // Aged the way every other window is, so what a lane cost a week ago
     // stops deciding what the packer charges today.
-    const lanes = this.#lanes.filter((lane) =>
-      daysBetween(lane.day, this.#today) <= COST_WINDOW_DAYS
-    );
+    const lanes = this.#lanes.filter((lane) => this.#withinCostWindow(lane));
     return {
       aggregate: {
         schema: MANIFEST_SCHEMA_VERSION,
@@ -829,8 +837,7 @@ export class Fold {
     // that would keep it, so reading one buys nothing and a bootstrap
     // holds sixty days of them at once.
     for (const lane of read.lanes) {
-      if (daysBetween(lane.day, this.#today) > COST_WINDOW_DAYS) continue;
-      this.#lanes.push(lane);
+      if (this.#withinCostWindow(lane)) this.#lanes.push(lane);
     }
     for (const [key, byDay] of read.durations) {
       let known = this.#samples.get(key);

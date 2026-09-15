@@ -1637,6 +1637,44 @@ describe("what a lane records about itself", () => {
     );
   });
 
+  it("writes what a batch spent beside what it was packed to spend", async () => {
+    // The publisher fits a suite's cost beyond its tests from the pair,
+    // and reads a batch only where both halves are there. What the packer
+    // expected cannot be recovered from the records the batch produced,
+    // because those say what the tests took instead.
+    const workDir = await Deno.makeTempDir({ prefix: "lane-planned-" });
+    const spool = await Deno.makeTempDir({ prefix: "lane-spool-" });
+    try {
+      await runBatch(
+        {
+          suite: suite({ id: "workspace-unit", units: ["one"] }),
+          units: [],
+          runs: new Map(),
+        },
+        lane,
+        workDir,
+        spool,
+        {},
+        undefined,
+        42.5,
+      );
+      const written: string[] = [];
+      for await (const entry of Deno.readDir(spool)) {
+        if (entry.isFile) {
+          written.push(await Deno.readTextFile(`${spool}/${entry.name}`));
+        }
+      }
+      const spooled = written.join("");
+      expect(spooled).toContain('ci-lane batch workspace-unit"');
+      expect(spooled).toContain('ci-lane planned batch workspace-unit"');
+      // The figure travels as a duration, so it arrives in milliseconds.
+      expect(spooled).toContain('"durationMs":42500');
+    } finally {
+      await Deno.remove(workDir, { recursive: true });
+      await Deno.remove(spool, { recursive: true });
+    }
+  });
+
   /**
    * A batch whose one invocation spools exactly this record, run against
    * a suite declaring the surface and variant given.

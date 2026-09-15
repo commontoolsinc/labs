@@ -1103,6 +1103,19 @@ describe("the days a fold keeps a lane's measurements over", () => {
     );
   });
 
+  it("keeps nothing whose day will not parse as one", () => {
+    // Both ends of the fold ask the same question, so a day that answers
+    // neither yes nor no is dropped at both rather than accepted at one.
+    const aggregate = emptyAggregate("2026-08-20");
+    aggregate.lanes = [
+      { day: "whenever", capability: "fuse", seconds: 14.8 },
+      { day: "2026-08-20", capability: "fuse", seconds: 2.1 },
+    ];
+    expect(
+      new Fold(aggregate, NO_ALIASES, "2026-08-20").finish().aggregate.lanes,
+    ).toEqual([{ day: "2026-08-20", capability: "fuse", seconds: 2.1 }]);
+  });
+
   it("drops one it was already keeping once the window has passed it", () => {
     // The two sides age separately. One already in the aggregate was
     // inside the window when it arrived, and the window moved under it.
