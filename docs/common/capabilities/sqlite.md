@@ -127,9 +127,12 @@ takes in at once, and it keeps what one query leaves behind in the space
 proportionate to what the view displays. A view that needs more of the store
 than that pages through it — a bound the reader moves. Paging bounds what one
 query writes rather than what the space accumulates: every page fetched
-materializes its own rows, nothing reclaims the rows of a page the reader has
-left, and returning to an earlier page issues a fresh query rather than reading
-the rows it wrote before. The durable cost is the sum of the pages fetched.
+materializes its rows, and nothing reclaims the rows of a page the reader has
+left. Returning to an earlier page issues a fresh query; its rows land on the
+documents they had before where their keys still hold (content, or a primary
+key), and rewrite the documents at their positions otherwise. The durable
+cost is the number of distinct row documents the pages materialize, which
+grows with every page whose rows the space has not held.
 
 Project the columns the view reads and no others: a row document carries every
 column the statement selected, so a wider projection is paid on every row.
