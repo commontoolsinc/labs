@@ -230,6 +230,72 @@ Deno.test("injectCfHelpers uses JS-only helper-shim syntax for JavaScript file n
   assertFalse(out.includes("function h(...args: any[])"));
 });
 
+Deno.test("injectCfHelpers appends a bare helper use instead of the `h` shim when the source binds `h` at top level", () => {
+  // A second top-level `h` would be a duplicate identifier (TS2300) at the
+  // authored declaration, so the trailer degrades to a plain use of the helper
+  // import — all the shim contributes to binding once JSX dispatches through
+  // `__cfHelpers.h` (js-compiler `jsxFactory`).
+  const declarations: Record<string, string> = {
+    "const": "export const h = [1, 2];",
+    "let": "let h = 1;",
+    "var": "var h = 1;",
+    "function": "export function h(x: number) { return x; }",
+    "ambient function": "declare function h(): void;",
+    "class": "class h {}",
+    "enum": "enum h { A }",
+    "namespace": "namespace h { export const a = 1; }",
+    "object destructuring": "const { a: { h } } = { a: { h: 1 } };",
+    "array destructuring": "const [, [h]] = [0, [1]];",
+    "default import": 'import h from "./h.ts";',
+    "named import alias": 'import { hyperscript as h } from "./h.ts";',
+    "namespace import": 'import * as h from "./h.ts";',
+    "import equals": 'import h = require("./h.ts");',
+    // A type-only import still occupies the binding (TS2440 against a local
+    // declaration), so it counts too.
+    "type-only import": 'import type { h } from "./h.ts";',
+  };
+  const bareTrailer =
+    `// @ts-ignore: Internals\nvoid ${CF_HELPERS_IDENTIFIER};\n`;
+  for (const [label, declaration] of Object.entries(declarations)) {
+    for (const fileName of ["/main.tsx", "/main.jsx"]) {
+      const out = injectCfHelpers(
+        `${declaration}\nexport const ui = <div />;`,
+        fileName,
+      );
+      assert(out.startsWith(`import { ${CF_HELPERS_IDENTIFIER} } from`), label);
+      // The shim's body, not `function h(` — the authored declaration may be
+      // a function itself.
+      assertFalse(
+        out.includes(".h.apply(null, args)"),
+        `${label} (${fileName})`,
+      );
+      assert(out.endsWith(`\n${bareTrailer}`), `${label} (${fileName})`);
+    }
+  }
+});
+
+Deno.test("injectCfHelpers keeps the `h` shim when `h` is only nested, type-only, or not a local binding", () => {
+  const sources: Record<string, string> = {
+    "local inside a function":
+      "export function render() { const h = [1]; return <div>{h}</div>; }",
+    "parameter": "export const f = (h: number) => h + 1;",
+    "interface": "interface h { a: number }",
+    "type alias": "type h = number;",
+    "re-export without a local binding": 'export { h } from "./h.ts";',
+    "property named h": "export const o = { h: 1 };",
+    "other top-level binding": "export const hh = 1;",
+    "anonymous default function": "export default function () {}",
+    "anonymous default class": "export default class {}",
+    "side-effect import": 'import "./side-effect.ts";',
+    "named import of something else": 'import { hyperscript } from "./h.ts";',
+  };
+  for (const [label, source] of Object.entries(sources)) {
+    const out = injectCfHelpers(source);
+    assert(out.includes("function h(...args: any[])"), label);
+    assertFalse(out.includes(`void ${CF_HELPERS_IDENTIFIER};`), label);
+  }
+});
+
 Deno.test("injectCfHelpers throws when the source already uses the reserved helper symbol", () => {
   assertThrows(
     () => injectCfHelpers(`const ${CF_HELPERS_IDENTIFIER} = {};`),

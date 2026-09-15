@@ -39,8 +39,16 @@ Before AST transforms, `transformCfDirective()`:
    import of the internal helper binding, not a namespace import), and appends
    after the source a forwarding `h(...)` helper delegating to
    `__cfHelpers.h` — so authors need not import the JSX factory manually, and
-   the helper module is not tree-shaken before binding. §16.5 depends on that
-   split: exactly one line is prepended.
+   the helper module is not tree-shaken before binding. When the module
+   already declares a top-level value binding named `h` (a function, class,
+   enum, or namespace declaration, a variable declaration including
+   destructuring, or an import binding), the shim would be a duplicate
+   identifier, so a bare `void __cfHelpers;` statement is appended instead;
+   type-only `h` declarations and `h` bindings in inner scopes keep the shim
+   (`declaresTopLevelBinding`, `src/core/cf-helpers.ts`; pinned by
+   `test/core/cf-helpers-coverage.test.ts` and the
+   `ast-transform/top-level-h-binding` fixture). Either trailer is two lines.
+   §16.5 depends on that split: exactly one line is prepended.
 3. Rejects sources that contain identifier `__cfHelpers` anywhere in the AST.
 
 These string-level steps run in `transformCfDirective()`
@@ -51,9 +59,10 @@ TypeScript's subsequent JSX emit uses `__cfHelpers.h` for elements and
 `__cfHelpers.h.fragment` for fragment tags
 (`packages/js-compiler/typescript/options.ts`). Both resolve through the
 reserved helper binding, so authored locals and parameters named `h` retain
-their ordinary meaning inside JSX-producing scopes. The forwarding `h()`
-function remains available for explicit calls and keeps the helper import
-live during binding.
+their ordinary meaning inside JSX-producing scopes, and a top-level `h` does
+too (the bare-use trailer above). The forwarding `h()` function remains
+available for explicit calls when the module does not bind `h` itself, and
+either trailer keeps the helper import live during binding.
 
 Legacy stored-envelope compatibility is deliberately separate from
 `transformCfDirective()` (#4574, CT-1838):
@@ -2918,7 +2927,8 @@ The transformer computes span lines against the file it sees — which, for
 every transformed module, is the helper-injected source of §2.1, not the
 authored bytes. `injectCfHelpers` (`src/core/cf-helpers.ts`) builds
 `[HELPERS_STMT, source, usedStmt].join("\n")`: exactly **one** line (the
-`__cfHelpers` import) is prepended, and the forwarding `h(...)` helper is
+`__cfHelpers` import) is prepended, and the trailer (the forwarding `h(...)`
+helper, or the bare use statement for modules binding `h` — §2.1) is
 appended after the source. The runner compensates in its `mapSpan`
 (`patternCoverageOptionsForCompile`, `packages/runner/src/harness/engine.ts`):
 
@@ -3182,11 +3192,13 @@ statement of the file, including imports**, and only when at least one use
 was emitted (`transform`, the `updateSourceFile` construction). In practice
 the hardening helper appears in essentially every transformed module, because
 the default-on pre-transform (§2.1) injects a forwarding
-`function h(…) { return __cfHelpers.h.apply(null, args); }` declaration,
-which shape 1 then hardens: as of this writing the trailing `__cfHardenFn(h);`
-closes 358 of the 360 `*.expected.*` fixture files (the two exceptions are a
-`.skip` file and the orphaned, input-less
-`closures/map-type-assertion.expected.jsx`, which predates this stage).
+`function h(…) { return __cfHelpers.h.apply(null, args); }` declaration
+(unless the module binds `h` itself — §2.1 — in which case no shim is
+injected), which shape 1 then hardens: as of this writing the trailing
+`__cfHardenFn(h);` closes 358 of the 360 `*.expected.*` fixture files (the
+exceptions are a `.skip` file, the orphaned, input-less
+`closures/map-type-assertion.expected.jsx`, which predates this stage, and
+`ast-transform/top-level-h-binding.expected.jsx`, whose module binds `h`).
 Helper names are `createUniqueName`-minted, so they print as bare
 `__cfHardenFn`/`__cfBindVerifiedBinding` unless the printer must
 disambiguate — and a suffixed name would no longer verify (§17.6).
