@@ -5,14 +5,24 @@ archived: 2026-09-15
 reason: "Record of the local lenient-naming experiment on branch experiment/lenient-naming (head 8a194f9bcf, not pushed) and its follow-up checks: naming the existing members of a collection board, and how a member's name reaches it."
 ---
 
+<!-- deno-fmt-ignore-file -->
+<!--
+  The fenced blocks in this record are verbatim quotes: committed output and
+  pattern source from the experiment branch, and commands re-run against it.
+  The markdown formatter re-indents fenced code and re-aligns tables, so
+  running it over this file would rewrite the evidence the record carries.
+  The prose outside those blocks is wrapped to the settings the formatter
+  would apply, so what this directive protects is the quotes alone.
+-->
+
 # The lenient-naming experiment: naming a board's existing members
 
 [`collection-naming-topics.md`](../../plans/collection-naming-topics.md) rules,
 in decision 13, that a name reaches a member through the member's own wiring to
 the board's names table, and, in decision 14, that a member takes one input
-naming its board. This record reports a local experiment that took a board
-whose members were filed before it had a namespace, upgraded it to one that
-names them, and followed each member's name to the member. It then reports three
+naming its board. This record reports a local experiment that took a board whose
+members were filed before it had a namespace, upgraded it to one that names
+them, and followed each member's name to the member. It then reports three
 follow-up checks: check 3, on when a member's name reaches it; check 4, on the
 two forms in which the board stores a name; and a browser check of the same in
 the shell.
@@ -30,8 +40,8 @@ The section each statement rests on is named in it.
   `string` was refused (§ The lenient upgrade and the strict control).
 - `cf piece survey --retarget` and `cf piece retarget --apply` moved all seven
   members to the generation-1 item; member A's `board` input then held a default
-  record, not a link, and the discovery rig counted all seven unbound
-  (§ Retarget and § The discovery counts).
+  record, not a link, and the discovery rig counted all seven unbound (§
+  Retarget and § The discovery counts).
 - `backfillNames` named the seven in filing order and a second run named none;
   `/top/3` resolved to member C, and C rendered no name (§ Backfill).
 - `cf piece repair` refused to write the board link into five members' `board`
@@ -39,10 +49,10 @@ The section each statement rests on is named in it.
   wrote it into each, and the discovery counts went to zero (§ The repair
   refusal, § Binding by link, and § The discovery counts).
 - A member wired to the board read its own name only after the board's
-  `namesTable` was read with `--step`. Reads of that table without `--step`,
-  and a `--step` read of a different board output, did not deliver it. Lazy
-  materialization off did not change that; with server execution on, measured
-  on copies of the store, the first member read carried the name (§ Check 3).
+  `namesTable` was read with `--step`. Reads of that table without `--step`, and
+  a `--step` read of a different board output, did not deliver it. Lazy
+  materialization off did not change that; with server execution on, measured on
+  copies of the store, the first member read carried the name (§ Check 3).
 - The names map holds two link forms, one written by `addItem` and one by
   `backfillNames`. For the cases checked — double naming, reverse lookup,
   resolution and removal — the second form was not a defect (§ Check 4).
@@ -322,8 +332,8 @@ Block D, from `checks/19-servers-3c-server-exec-on-clean.txt`:
 Experimental flag overrides: serverExecution=true
 ```
 
-Block E, from `checks/22-servers-baseline-2.txt`, with the check of the launching
-shell's environment that precedes it:
+Block E, from `checks/22-servers-baseline-2.txt`, with the check of the
+launching shell's environment that precedes it:
 
 ```
 --- 22: before starting baseline session 2 on the ORIGINAL store
@@ -343,9 +353,8 @@ about them. Each `gitSha` above is the base or a branch commit, and the empty
 diff above shows the code is `51f8c11053`'s at every one of them.
 
 `cf` also printed a version warning on the failed commands quoted here, since
-the CLI ran
-at the worktree's current commit and the toolshed at the commit it was started
-at. From `experiment-output/03-q1-board-check-strict.txt` (added in
+the CLI ran at the worktree's current commit and the toolshed at the commit it
+was started at. From `experiment-output/03-q1-board-check-strict.txt` (added in
 `b7f3f7e32d`):
 
 ```
@@ -429,8 +438,8 @@ export interface ItemIndexRow {
 ```
 
 The board takes `nameOf`, `namesTable` and `backfillNames` from `naming.ts`, and
-its `rows` output puts each member's title beside the name the names table
-gives it:
+its `rows` output puts each member's title beside the name the names table gives
+it:
 
 ```tsx
 import {
@@ -446,9 +455,8 @@ import {
     const rows = boardRows({ members: items, table });
 ```
 
-`v1-item.tsx` is the
-generation-1 item. It takes decision 14's one `board` input, optional, and reads
-its own name out of the board's names table:
+`v1-item.tsx` is the generation-1 item. It takes decision 14's one `board`
+input, optional, and reads its own name out of the board's names table:
 
 ```tsx
 export interface ItemBoardDemand {
@@ -577,8 +585,8 @@ $ cf cell get $BOARD index --select "@,title,createdAt"
 ### The lenient upgrade and the strict control
 
 Four `cf piece setsrc --check` runs, each in its own file added in `b7f3f7e32d`.
-The generation-0 source over the board, as a control that the check accepts
-what the board already runs, from
+The generation-0 source over the board, as a control that the check accepts what
+the board already runs, from
 `experiment-output/03-q1-board-check-control-v0.txt`:
 
 ```
@@ -676,8 +684,8 @@ $ cf cell get $BOARD itemCount --step
 ### Retarget
 
 From `experiment-output/05-q1-item-leg-retarget.txt` (added in `b7f3f7e32d`):
-the survey that stamps the retarget, the plan's header row and first member
-row, the dry run, the apply, and the survey that checks the plan:
+the survey that stamps the retarget, the plan's header row and first member row,
+the dry run, the apply, and the survey that checks the plan:
 
 ```
 $ cf piece survey --cell $BOARD --path items --retarget "items=packages/patterns/cn-lenient/v1-item.tsx" --root "$REPO" --out "$OUT/plans/retarget.jsonl"
@@ -1181,8 +1189,9 @@ $ cf piece render --cell /top/1
 [exit 0, 5.60s]
 ```
 
-The fixer given to `cf piece repair`, `experiment-output/rigs/bind-board.fixer.ts`
-(added in `59bbdfc54e`), with its doc comments elided:
+The fixer given to `cf piece repair`,
+`experiment-output/rigs/bind-board.fixer.ts` (added in `59bbdfc54e`), with its
+doc comments elided:
 
 ```ts
 const BOARD_ID = "of:fid1:Jr9t6W5DMi375rRJOgxQGugGDmlUPSd9rCQKG1LnuwI";
@@ -1280,10 +1289,10 @@ A two-pass repair on member C alone, from
 `experiment-output/18-q3-two-pass-repair-probe-C.txt` (added in `fc77778368`),
 with the plan rows and hint lines elided. The first pass, whose fixer
 `experiment-output/rigs/clear-board-record.fixer.ts` (added in `b334eb4f86`)
-replaces a plain-record `board` with `null`, was planned and then refused by
-the input schema at apply; the stored document was unchanged; the second pass,
-binding the link, was refused as before; and C's input still named a position
-in its own argument document, and C read no name:
+replaces a plain-record `board` with `null`, was planned and then refused by the
+input schema at apply; the stored document was unchanged; the second pass,
+binding the link, was refused as before; and C's input still named a position in
+its own argument document, and C read no name:
 
 ```
 === pass 1: record -> null, member C only ===
@@ -1534,8 +1543,8 @@ curl http://localhost:8470/_health -> 000
 
 Check 3 repeats what § A member filed wired showed for H, on members filed for
 the check, with two controls, and then under two flag variants. It ran on
-servers started for the checks on the experiment's store; their flags are
-block A in § Setup.
+servers started for the checks on the experiment's store; their flags are block
+A in § Setup.
 
 ### The rig
 
@@ -1615,8 +1624,8 @@ index 2bf4361e78..ddb96ff0b2 100755
 
 ### Member K, with no controls
 
-From `experiment-output/checks/01-check3a-minimal-K.txt` (added in `12cdf0d06b`),
-with the table's rows `1` to `10` elided:
+From `experiment-output/checks/01-check3a-minimal-K.txt` (added in
+`12cdf0d06b`), with the table's rows `1` to `10` elided:
 
 ```
 --- file the member through addItem ---
@@ -1672,12 +1681,12 @@ RESULT name=11 member=/of:fid1:wkBkIjs-ITFUgA4cL0YR_iTjNvgTyxhwwssGTgmyjkk mode=
 
 ### Member L, with the two controls
 
-From `experiment-output/checks/02-check3a-controls-L.txt` (added in `12cdf0d06b`),
-with each table's rows before its last two, and both renders before the last,
-elided. The table read without `--step` ended at `11` while L was named `12`;
-neither it nor a `--step` read of `itemCount` was followed by a member read
-carrying the name; the table read with `--step` ended at `12`, and the member
-read after it carried `12`:
+From `experiment-output/checks/02-check3a-controls-L.txt` (added in
+`12cdf0d06b`), with each table's rows before its last two, and both renders
+before the last, elided. The table read without `--step` ended at `11` while L
+was named `12`; neither it nor a `--step` read of `itemCount` was followed by a
+member read carrying the name; the table read with `--step` ended at `12`, and
+the member read after it carried `12`:
 
 ```
 --- file the member through addItem ---
@@ -1973,17 +1982,16 @@ create and the first member read.
 
 ## Check 4: the two stored link forms
 
-Check 4 asked whether the names map holds one form of link or two, and whether
-a second form breaks double naming, reverse lookup, resolution or removal. It
-ran on the servers of block A in § Setup.
+Check 4 asked whether the names map holds one form of link or two, and whether a
+second form breaks double naming, reverse lookup, resolution or removal. It ran
+on the servers of block A in § Setup.
 
 ### What each entry holds
 
 `experiment-output/checks/rigs/map-entries.sh` (added in `932ce1d61e`) reads the
 board's argument document raw from the store, and for each link says what the
-document it names holds. Before it reads the map it checks its own
-normalization on a known case, and its duplicate check on a map built to hold a
-duplicate:
+document it names holds. Before it reads the map it checks its own normalization
+on a known case, and its duplicate check on a map built to hold a duplicate:
 
 ```bash
 kindOf() {
@@ -2081,8 +2089,8 @@ names/12
 ```
 
 An entry of the `addItem` form names a member's slot document and one of the
-backfill form its result document, and the discovery rig's comment quoted in
-§ The discovery rig normalizes both through `cf piece inspect` for that reason.
+backfill form its result document, and the discovery rig's comment quoted in §
+The discovery rig normalizes both through `cf piece inspect` for that reason.
 
 ### Double naming, reverse lookup and resolution
 
@@ -2227,8 +2235,8 @@ duplicates: []
 
 ### Removal
 
-`experiment-output/checks/rigs/check4b-removal.sh` (added in `bb2ee37cbf`) states
-what each snapshot must show:
+`experiment-output/checks/rigs/check4b-removal.sh` (added in `bb2ee37cbf`)
+states what each snapshot must show:
 
 ```bash
 # Removal across both stored forms. Removes A (key 1, backfill form, list
@@ -2381,9 +2389,8 @@ not in the branch's history:
 $ git log --format='%h %s' 8a194f9bcf -- experiment-output/checks/rigs/check4b-removal.sh
 bb2ee37cbf experiment(cn-lenient): check 4b removal across both stored forms; position control rebuilt from raw items after a rig quoting bug
 ```
- What the removal shows is
-carried by the raw-map diff, the `/top/<n>` diff and the rebuilt position diff,
-not by the index snapshot.
+What the removal shows is carried by the raw-map diff, the `/top/<n>` diff and
+the rebuilt position diff, not by the index snapshot.
 
 ### An `equals` caveat, read in code and not verified
 
@@ -2416,25 +2423,25 @@ stack:
     },
 ```
 
-Whether any comparison in this check ran with no transaction frame on the
-stack, and whether one that did would match a member against an entry of the
-`addItem` form, which names a slot document rather than the result document,
-was not tested.
+Whether any comparison in this check ran with no transaction frame on the stack,
+and whether one that did would match a member against an entry of the `addItem`
+form, which names a slot document rather than the result document, was not
+tested.
 
 ### What check 4 established
 
 For the cases checked — a backfill over members of both forms, reverse lookup
 and rendering for one member of each form, resolution of two names of each form,
-and removal of one member of each form — the second form was not a defect.
-§ Stated limitations bounds that.
+and removal of one member of each form — the second form was not a defect. §
+Stated limitations bounds that.
 
 ## Members U and V, and the browser check
 
 ### Member U
 
-Member U was filed on the experiment's own store, not a copy, under the
-posture of block E in § Setup. Before those servers started, the store's
-checksums equaled the source rows of step 10, from
+Member U was filed on the experiment's own store, not a copy, under the posture
+of block E in § Setup. Before those servers started, the store's checksums
+equaled the source rows of step 10, from
 `experiment-output/checks/22-servers-baseline-2.txt` (added in `f4e66301e8` and
 changed in `96546ecaaf`):
 
@@ -2444,9 +2451,9 @@ original store checksums (must equal the source rows of 10-store-copies-for-3c.t
   3328d2168233d3c33a0a643d3b23c21e60440629  ./engine-v3/engine-v3/did:key:z6MkihzwuBQSonCGs58K3VGob3DUAvetPhi5Jqd1iyT1GMrR.sqlite
 ```
 
-From `experiment-output/checks/23-member-U.txt` (added in `96546ecaaf`), with the
-offline reads of U's slot and result documents elided: U was named `14`, and the
-store then held fourteen map keys and eleven list elements:
+From `experiment-output/checks/23-member-U.txt` (added in `96546ecaaf`), with
+the offline reads of U's slot and result documents elided: U was named `14`, and
+the store then held fourteen map keys and eleven list elements:
 
 ```
 --- file U through addItem (the last state-changing step)
@@ -2477,8 +2484,8 @@ The same file gives the command for restarting the servers on that store:
 ### Member V
 
 From `experiment-output/checks/24-member-V.txt` (added in `8a194f9bcf`), whose
-override line is kept here as the file's only record of that session's
-posture from the client side:
+override line is kept here as the file's only record of that session's posture
+from the client side:
 
 ```
 $ cf piece call $BOARD addItem --json '{"title":"Browser check item V","body":"filed for the bounded browser check","agentName":"exp"}' -- --select name
@@ -2523,8 +2530,9 @@ statement above is the record of it. The README's sentences about run 1's
 screenshot are the README's: the screenshot is not reproduced here, and nothing
 below rests on what it shows.
 
-The script's final version, `experiment-output/checks/browser/cn-lenient-look.test.ts`
-(added in `8a194f9bcf`), with its imports, settings and first helper elided.
+The script's final version,
+`experiment-output/checks/browser/cn-lenient-look.test.ts` (added in
+`8a194f9bcf`), with its imports, settings and first helper elided.
 `badgeAppears` returns `false` only when the wait's error says it did not
 resolve within its bound:
 
@@ -2663,9 +2671,9 @@ ok | 1 passed (1 step) | 0 failed (5m1s)
 
 ```
 
-Member V, opened first, showed no badge reading `15` before the wait's bound; the
-board, opened next, showed one; and V, opened again, showed one. Each step was
-run once. The three screenshots of each run are in the branch beside its
+Member V, opened first, showed no badge reading `15` before the wait's bound;
+the board, opened next, showed one; and V, opened again, showed one. Each step
+was run once. The three screenshots of each run are in the branch beside its
 `look.json` and are not reproduced here.
 
 ## Stated limitations
@@ -2675,8 +2683,8 @@ run once. The three screenshots of each run are in the branch beside its
   and the board listed between 7 and 12 members at any read quoted here.
 - **One local server session at a time**, loopback, on one machine. Timings are
   that setup's and are not compared across files.
-- **Check 3's explanation is not measured.** The scheduling explanation in
-  § Why, read in code and not measured, is the rigs' and the code comment's; no
+- **Check 3's explanation is not measured.** The scheduling explanation in §
+  Why, read in code and not measured, is the rigs' and the code comment's; no
   run isolated it.
 - **The flag variants are single members on copies.** Variant A is member N;
   variant B is member Q on a copy a broken run had touched and member R on a
