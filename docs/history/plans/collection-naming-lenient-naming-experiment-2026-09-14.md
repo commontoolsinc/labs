@@ -47,9 +47,9 @@ The section each statement rests on is named in it.
   `backfillNames`. For the cases checked — double naming, reverse lookup,
   resolution and removal — the second form was not a defect (§ Check 4).
 - In the shell, a member opened before its board showed no name badge within
-  300000 ms, and showed it after the board had been opened. A first run whose
-  instrument read the page once is kept, and shows nothing (§ The browser
-  check).
+  300000 ms, and showed it after the board had been opened. A first run, whose
+  reads reported no badge without waiting for one, is kept and shows nothing (§
+  The browser check).
 
 ## Where the evidence is
 
@@ -101,22 +101,27 @@ block is a committed file's content.
 A block shows what a command printed or what a file holds. It cannot show when
 something was done, or that something was not done, so statements of those two
 kinds rest on the author's account. Among them: that the runs took place on
-2026-09-14; that the branch was not pushed; that no deployed space, Estuary
+2026-09-14, Pacific time, where the UTC timestamps in quoted plan rows read
+2026-09-15; that the branch was not pushed; that no deployed space, Estuary
 included, was contacted; the order of steps where no file records it; that
-nothing read the board between filing member V and the second browser run; that
-nothing after filing member U ran a `cf` command against the toolshed; that the
-first `cf piece link` of step 21 may have overlapped a `backfillNames` call; and
-every statement that something was not compared, recorded or tried.
+between filing member U and stopping baseline session 2 nothing ran a `cf`
+command against the toolshed; that the browser check's servers were started
+after that stop, and that on them the first browser run read member U, member V
+was then filed with the `cf piece call` quoted in § Member V, and the second run
+read V; that nothing read the board between filing member V and the second
+browser run; that the first `cf piece link` of step 21 may have overlapped a
+`backfillNames` call; and every statement that something was not compared,
+recorded or tried.
 
 Two trims are used. Lines are elided and marked `…`; in particular, every `cf`
 process printed an `Experimental flag overrides:` line, a `NEXT STEPS` hint and
 `(Use --quiet to suppress hints)` lines, and blocks below replace them with `…`,
-except three member reads in § Check 3 that keep the override line to show
-their server's posture; § Setup quotes the line for the experiment's posture.
-And terminal color codes are removed from the two browser `run.txt` files, which
-hold them; every other file was recorded with them already removed. A `$` line
-that `rec.sh` recorded is quoted as recorded, so `$BOARD` and `$OUT` in it are
-the variables `env.sh` defines.
+except three member reads in § Check 3 and member V's filing in § Member V,
+which keep the override line to show their server's posture; § Setup quotes the
+line for the experiment's posture. And terminal color codes are removed from the
+two browser `run.txt` files, which hold them; every other file was recorded with
+them already removed. A `$` line that `rec.sh` recorded is quoted as recorded,
+so `$BOARD` and `$OUT` in it are the variables `env.sh` defines.
 
 Four statements in this record were read in code rather than measured, and each
 says so where it is made: what the survey's validator reads, in § The discovery
@@ -2421,7 +2426,9 @@ boardBadgeAppeared=true, memberAfterBoardBadgeAppeared=true.
 ```
 
 No file records the `/api/meta` document of that server session; the README's
-statement above is the record of it.
+statement above is the record of it. The README's sentences about run 1's
+screenshot are the README's: the screenshot is not reproduced here, and nothing
+below rests on what it shows.
 
 The script's final version, `experiment-output/checks/browser/cn-lenient-look.test.ts`
 (added in `8a194f9bcf`), with its imports, settings and first helper elided.
@@ -2429,7 +2436,13 @@ The script's final version, `experiment-output/checks/browser/cn-lenient-look.te
 resolve within its bound:
 
 ```ts
+  /**
+   * Whether a member badge reading `name` appears before `waitForCondition`'s
+   * own bound runs out. A badge renders after the title, so this waits for it
+   * rather than reading the page once.
+   */
   const badgeAppears = async (name: string): Promise<boolean> => {
+
     try {
       await waitForCondition(
         shell.page(),
@@ -2488,9 +2501,12 @@ const WAIT_FOR_CONDITION_TIMEOUT = 300_000; // 5 minutes
               `waitForCondition did not resolve within ${WAIT_FOR_CONDITION_TIMEOUT}ms`,
 ```
 
-**Run 1, a broken instrument.** It read the page once per step, and the version
-of the script that did so is not committed; its `look.json` has keys the final
-version does not write. From
+**Run 1, a broken instrument.** The version of the script run 1 used is not
+committed: the script file has one commit, `8a194f9bcf`, and holds the final
+version, whose comment on `badgeAppears` above says it waits for the badge
+"rather than reading the page once". Run 1's `look.json` has keys the final
+version does not write, and records empty lists where the final version records
+a boolean. From
 `experiment-output/checks/browser/run1-single-read-broken/look.json`:
 
 ```
@@ -2516,9 +2532,11 @@ ok | 1 passed (1 step) | 0 failed (2s)
 
 ```
 
-Its empty `memberAfterBoard` disagrees with its own screenshot
-`3-member-after-board.png`, as the README states, so run 1 is a record of an
-instrument that could not see the badge. No conclusion is drawn from it.
+A read that waits, as `badgeAppears` does, reports no badge only once the wait's
+300000 ms bound has passed, which is why run 2 below took 5m1s. Run 1 reported
+no badge on the member page twice and finished in 2 s, so its reads did not wait
+for a badge, and its empty results do not show whether one appeared. No
+conclusion is drawn from run 1.
 
 **Run 2, a bounded wait.** Member V, named `15`. From
 `experiment-output/checks/browser/run2-bounded-wait/look.json`:
