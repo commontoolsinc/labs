@@ -2063,15 +2063,27 @@ deno task run -- \
   --prompt "Delegate inspection of https://example.com and summarize the result."
 ```
 
-The `web_search` profile is the provider-native search profile. It runs the
-child on the configured Gemini search model, requests the gateway's
-`google_search` native model tool, and gives the child no built-in file, shell,
-browser, or fetch tools. The intended use is the same CFC boundary as browser
-and web_fetch subagents: the parent delegates a focused search task, raw search
-observations stay in child artifacts, and the parent receives only the sanitized
-subagent return channel. Because this profile overrides the parent model, parent
-`--reasoning-effort` and `--prompt-cache-mode` settings remain on
-model-inheriting loops and do not apply to the search child.
+The `web_search` profile delegates focused provider-native search without
+built-in file, shell, browser, fetch, or nested delegation tools. Its effective
+profile is bound to the run's provider and recorded in the CFC policy snapshot
+and child manifest:
+
+- `openai-compatible-gateway` uses the configured Gemini search model and
+  `google_search`. Parent reasoning and prompt-cache controls do not cross this
+  model override.
+- `openai-codex` inherits the parent's model, subscription client, and
+  credential owner. The harness-native `openai_web_search` ID requests hosted
+  live `web_search` from the same Codex endpoint, without a gateway or shell
+  network grant. Provider/model availability errors fail the child; there is no
+  billing or model fallback.
+
+Codex search calls and citation annotations remain in the child transcript. The
+delegated result carries `nativeModelToolResults` with sources separately from
+answer text, preserving caller-supplied structured return schemas. Unstructured
+summaries also include a bounded source-link footer. As with other external
+observations, sources are data rather than instructions or write permission.
+`--capabilities` reports native tools by provider as well as their union;
+advertised support is not an authenticated endpoint health check.
 
 The `pattern-author` profile is where Common Fabric pattern source gets written
 and run. Its child receives `run_pattern` (under the ordinary fabric-session

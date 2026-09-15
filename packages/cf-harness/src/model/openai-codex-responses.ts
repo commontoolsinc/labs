@@ -1,3 +1,4 @@
+import { OPENAI_WEB_SEARCH_NATIVE_MODEL_TOOL } from "../contracts/native-model-tool.ts";
 import type { HarnessFetch } from "../contracts/http-fetch.ts";
 import {
   type HarnessCredentialOwnerRef,
@@ -496,9 +497,15 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         "prompt cache mode controls are not supported by openai-codex; omit promptCacheMode to use the subscription backend's implicit prompt cache",
       );
     }
-    if (request.nativeModelToolIds.length > 0) {
+    if (
+      request.nativeModelToolIds.some((id) =>
+        id !== OPENAI_WEB_SEARCH_NATIVE_MODEL_TOOL
+      )
+    ) {
       throw new Error(
-        "openai-codex does not support provider-native tools in this release",
+        `openai-codex does not support native tools: ${
+          request.nativeModelToolIds.join(", ")
+        }`,
       );
     }
     // Accepting this silently would make a user-supplied control look
@@ -522,6 +529,11 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
     const credential = await this.#resolver.resolve(request.signal);
     if (request.signal?.aborted) throw abortReason(request.signal);
     const responseTools = toResponsesTools(request.tools);
+    if (
+      request.nativeModelToolIds.includes(OPENAI_WEB_SEARCH_NATIVE_MODEL_TOOL)
+    ) {
+      responseTools.push({ type: "web_search", external_web_access: true });
+    }
     const affinityKey = providerRunAffinityKey(
       request.cacheAffinityKey ?? request.runId,
     );
@@ -581,7 +593,8 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         model: request.model,
         messageCount: request.transcript.length,
         toolCount: request.tools.length,
-        nativeModelToolCount: 0,
+        nativeModelToolCount: request.nativeModelToolIds.length,
+        nativeModelToolIds: request.nativeModelToolIds,
         serializedBytes: textBytes(body),
       },
     };

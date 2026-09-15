@@ -1,4 +1,4 @@
-import type { LLMNativeModelToolResult } from "@commonfabric/llm/types";
+import type { HarnessNativeModelToolResult } from "./native-model-tool.ts";
 
 import type { HarnessImageAttachment } from "./image.ts";
 import type { HarnessSubagentProfile } from "./subagent.ts";
@@ -13,7 +13,7 @@ export interface HarnessToolCall {
   };
 }
 
-export type HarnessNativeModelToolResult = LLMNativeModelToolResult;
+export type { HarnessNativeModelToolResult } from "./native-model-tool.ts";
 
 export interface HarnessProviderContinuation {
   providerId: string;
