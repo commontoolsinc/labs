@@ -963,11 +963,20 @@ export type DocumentCacheEntry = {
   weight: number;
 };
 
-/** The document cache's lifetime counters. */
+/** One engine's lifetime counters: the document cache's own events, and the
+ * replay a rebuild pays where the cache did not shorten it. */
 export type DocumentCacheStats = {
   hits: number;
   misses: number;
   evictions: number;
+
+  /** Stored patch rows replayed to rebuild a patched document, each row
+   * counted once whatever the length of the patch list it holds. A rebuild
+   * starts at the newest of the document's base, its newest snapshot, and
+   * the newest revision after those that the cache still holds, and replays
+   * the rows after that, so what this counts is how far back the rebuild had
+   * to start. */
+  patchReplays: number;
 };
 
 /** A peek at one engine's document cache. */
@@ -2027,7 +2036,7 @@ export const open = async (
     documentCacheBytes: 0,
     documentCacheBudgetBytes,
     documentCacheMaxEntries,
-    documentCacheStats: { hits: 0, misses: 0, evictions: 0 },
+    documentCacheStats: { hits: 0, misses: 0, evictions: 0, patchReplays: 0 },
     ...(documentCacheCoordinator === undefined
       ? {}
       : { documentCacheCoordinator }),
@@ -7234,6 +7243,7 @@ const reconstructPatchedDocument = (
   }
 
   for (const patch of patches.slice(replayFrom)) {
+    engine.documentCacheStats.patchReplays++;
     document = applyPatchToDocument(
       document,
       decodeStoredPatchList(patch.data),
