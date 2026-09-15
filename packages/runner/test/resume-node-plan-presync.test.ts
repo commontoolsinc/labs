@@ -14,6 +14,7 @@ import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import type { Cell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { entityKey } from "../src/scheduler/keys.ts";
 import type { SessionFactory } from "../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { newSharedServer, TestStorageManager } from "./memory-v2-test-utils.ts";
@@ -728,8 +729,11 @@ describe("resume node plan pre-sync", () => {
       expect(label.get()).toBe("n:Ada");
     } finally {
       releaseLeaf.resolve();
-      await resume;
-      rt2.runner.accessForTestingOnly.dependencySyncer = undefined;
+      try {
+        await resume;
+      } finally {
+        rt2.runner.accessForTestingOnly.dependencySyncer = undefined;
+      }
     }
     expect(commitConflictCount()).toBe(before);
   });
@@ -938,47 +942,112 @@ describe("resume node plan pre-sync", () => {
     expect(resumed.key("label").get()).toBe("n:Ada");
   });
 
-  it("pre-syncs a principal-only family beside its manager's session load", async () => {
-    const compiled = await rt1.patternManager.compilePattern(
-      UNREAD_LINK_PROGRAM,
-      { space },
-    );
-    const resumed = await createAndResume(
-      UNREAD_LINK_PROGRAM,
-      { def: { name: "Ada" } },
-      "principal-only family",
-    );
-    const tx = rt2.edit();
-    tx.tx.scopeKeyIdentity = { principal: signer.did() };
-    const unrelated = rt2.getCell(
-      spaceP,
-      "manager session load",
-      undefined,
-      undefined,
-      "session",
-    );
-    const unrelatedId = unrelated.getAsNormalizedFullLink().id;
-    const replica = managerB.open(spaceP);
-    const sync = replica.sync.bind(replica);
-    const release = Promise.withResolvers<void>();
-    using _held = stub(replica, "sync", async (...args) => {
-      if (args[0] === unrelatedId) await release.promise;
-      return await sync(...args);
+  for (const scope of ["user", "session"] as const) {
+    it(`pre-syncs a principal-only family's ${scope} input beside its manager's session load`, async () => {
+      const txP = rt1.edit();
+      const leaf = rt1.getCell<{ name?: string }>(
+        spaceP,
+        "principal-only leaf",
+        undefined,
+        txP,
+        scope,
+      );
+      leaf.set({ name: "Ada" });
+      rt1.prepareTxForCommit(txP);
+      expect((await txP.commit()).error).toBeUndefined();
+      const tx1 = rt1.edit();
+      const mid = rt1.getCell<{ next?: unknown }>(
+        space,
+        "principal-only mid",
+        undefined,
+        tx1,
+      );
+      mid.set({ next: leaf });
+      const top = rt1.getCell<{ next?: unknown }>(
+        space,
+        "principal-only top",
+        undefined,
+        tx1,
+      );
+      top.set({ next: mid });
+      rt1.prepareTxForCommit(tx1);
+      expect((await tx1.commit()).error).toBeUndefined();
+      const compiled = await rt1.patternManager.compilePattern(
+        DEEP_READ_PROGRAM,
+        { space },
+      );
+      const resumed = await createAndResume(
+        DEEP_READ_PROGRAM,
+        { def: top },
+        "principal-only family",
+      );
+      await rt2.idle();
+      await managerB.synced();
+      await rt2.idle();
+
+      const identity = { principal: signer.did() };
+      const tx = rt2.edit();
+      tx.tx.scopeKeyIdentity = identity;
+      const leafLink = leaf.getAsNormalizedFullLink();
+      const sessionLink = { ...leafLink, scope: "session" as const };
+      const sessionKey = entityKey(sessionLink, rt2.scopeKeyIdentity);
+      const userKey = entityKey({ ...leafLink, scope: "user" }, identity);
+      const replica = managerB.open(spaceP);
+      const sync = replica.sync.bind(replica);
+      const releaseUser = Promise.withResolvers<void>();
+      const releaseSession = Promise.withResolvers<void>();
+      using _held = stub(replica, "sync", async (...args) => {
+        if (args[0] === leafLink.id) {
+          if (args[2] === "user") await releaseUser.promise;
+          if (args[2] === "session") await releaseSession.promise;
+        }
+        return await sync(...args);
+      });
+      const waitedUser = Promise.withResolvers<"user wait">();
+      const waitedSession = Promise.withResolvers<"session wait">();
+      const settle = managerB.loadsSettled.bind(managerB);
+      using _observed = stub(managerB, "loadsSettled", (keys) => {
+        if (keys.includes(userKey)) waitedUser.resolve("user wait");
+        if (keys.includes(sessionKey)) waitedSession.resolve("session wait");
+        return settle(keys);
+      });
+      const sessionLoad = rt2.getCellFromLink(sessionLink).sync();
+      const userLoad = scope === "user"
+        ? rt2.getCellFromLink(leafLink).sync()
+        : Promise.resolve();
+      const presync = rt2.runner.syncStoredPieceCells(
+        resumed.withTx(tx),
+        compiled,
+      );
+      try {
+        const completed = presync.then(() => "synced" as const);
+        expect(
+          await Promise.race([
+            completed,
+            waitedUser.promise,
+            waitedSession.promise,
+          ]),
+        ).toBe(scope === "user" ? "user wait" : "synced");
+        releaseUser.resolve();
+        expect(
+          await Promise.race([completed, waitedSession.promise]),
+        ).toBe("synced");
+        expect(
+          managerB.pendingLoadAddresses().some((address) =>
+            address.id === leafLink.id && address.scope === "session"
+          ),
+        ).toBe(true);
+      } finally {
+        releaseUser.resolve();
+        releaseSession.resolve();
+        try {
+          await Promise.all([userLoad, sessionLoad, presync]);
+        } finally {
+          tx.abort("principal-only pre-sync complete");
+        }
+      }
     });
-    const load = unrelated.sync();
-    try {
-      await rt2.runner.syncStoredPieceCells(resumed.withTx(tx), compiled);
-      expect(
-        managerB.pendingLoadAddresses().some((address) =>
-          address.id === unrelatedId && address.scope === "session"
-        ),
-      ).toBe(true);
-    } finally {
-      release.resolve();
-      await load;
-      tx.abort("principal-only pre-sync complete");
-    }
-  });
+  }
 
   it("names a document a body reads three links deep", async () => {
     const tx = rt1.edit();

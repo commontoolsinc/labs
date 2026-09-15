@@ -105,6 +105,7 @@ import {
 import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
 import { writeResultSchemaMeta } from "./result-schema-meta.ts";
 import {
+  canResolveScopeKey,
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
@@ -7849,12 +7850,15 @@ export class Runner {
       const pending = manager.pendingLoadAddresses();
       if (pending.length === 0) return;
       const readIdentity = identity ?? this.#runtime.scopeKeyIdentity;
-      const readKeys = new Set(
-        Array.from(
-          getTransactionReadActivities(readTx),
-          (read) => entityKey(read, readIdentity),
-        ),
-      );
+      const readKeys = new Set<string>();
+      for (const read of getTransactionReadActivities(readTx)) {
+        if (
+          read.scopeKey !== undefined ||
+          canResolveScopeKey(read.scope, readIdentity)
+        ) {
+          readKeys.add(entityKey(read, readIdentity));
+        }
+      }
       const keys = pending
         .map((address) => entityKey(address, this.#runtime.scopeKeyIdentity))
         .filter((key) => readKeys.has(key) && !awaited.has(key));
