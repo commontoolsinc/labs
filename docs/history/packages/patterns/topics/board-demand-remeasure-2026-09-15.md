@@ -2,28 +2,38 @@
 status: historical
 created: 2026-09-15
 archived: 2026-09-15
-reason: "Record of the measurement #7439 reports, run again at e1bbc1d549 on main after #7480: each figure against #7439's, the demand without boardNames, and a prototype pivot row holding topic identities as strings."
+reason: "Record of the measurement #7439 reports, run again on a rig branch based on main after #7480: each figure against #7439's, the demand without boardNames, and a prototype pivot row holding topic identities as strings."
 ---
 
-# A topic's demand over its board, measured again on main
+# A topic's demand over its board, measured again after #7480
 
 #7439 reports what one topic's declared demand over its Topics board reaches:
 the documents the memory server's graph query returns when it is rooted at that
 topic's argument document under the schema recorded on the topic's argument
-link. This record runs that measurement again at `e1bbc1d549` on `main`, whose
-history includes #7480, and compares each figure with the figure #7439's body
-and comments report for the same input and member count. It also measures the
-demand with `boardNames` removed from it, which storing a member's name on the
-member allows, and one prototype of the row shape #7439 names as its fix: a
-pivot row carrying identity as a value rather than as a reference.
+link. This record runs that measurement again on a rig branch whose base is a
+`main` commit that includes #7480 (§ Provenance), and compares each figure with
+the figure #7439's body and comments report for the same input and member count.
+It also measures the demand with `boardNames` removed from it, which storing a
+member's name on the member allows, and one prototype of the row shape #7439
+names as its fix: a pivot row carrying identity as a value rather than as a
+reference.
 
-The work is on the local branch `experiment/7439-remeasure`. Its base, the
-presence of #7480 in that base, and the branch's commits up to the one holding
-the last output quoted here:
+## Provenance
+
+The work is on the local branch `experiment/7439-remeasure`, whose base is
+`e1bbc1d549` on `main`. The rig is not in that base; the branch's own commits
+add it. So no figure here was produced at `e1bbc1d549`: the measurement run ran
+at `8a029b7dab`, and the control run at `a7ac8e4317` (§ What changed in the
+rig). Each run printed the commit it ran at, and that line is quoted with its
+figures. The base, its place on `main`, the presence of #7480 in it, the
+branch's commits up to the one holding the last output quoted here, and the
+commit among them that adds the rig:
 
 ```
 $ git log -1 --format='%H %ad %s' --date=iso e1bbc1d549
 e1bbc1d5497a0a975b906ff9677bf6451f94ef11 2026-09-15 11:42:40 -0700 Show only arrows on dashboard tile links (#7508)
+$ git merge-base --is-ancestor e1bbc1d549 origin/main && echo 'e1bbc1d549 is an ancestor of origin/main'
+e1bbc1d549 is an ancestor of origin/main
 $ git log -1 --format='%h %s' c08e5d41f0
 c08e5d41f0 fix(topics): a topic listed twice on a board gets one cross-reference row (#7480)
 $ git merge-base --is-ancestor c08e5d41f0 e1bbc1d549 && echo 'c08e5d41f0 is an ancestor of e1bbc1d549'
@@ -37,7 +47,11 @@ c59c55d2a1 experiment(topics): drop the `schema: true` controls from the rig
 8937f84128 experiment(topics): the whole-table `true` selector is refused
 a7ac8e4317 experiment(topics): run the #7439 demand rig on main, with a row-shape prototype
 5a3b020f43 chore(topics): the #7439 demand rig, as archived at cbdf66c3cf
+$ git log --format='%h %s' --diff-filter=A e1bbc1d549..a06fd0ea66 -- packages/patterns/topics/measure-topic-demand.ts
+5a3b020f43 chore(topics): the #7439 demand rig, as archived at cbdf66c3cf
 ```
+
+## How to read this record
 
 A block shows what a command printed or what a file contains. It cannot show
 when something was done, or that something was not done, so statements of those
