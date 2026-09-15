@@ -253,9 +253,14 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
       }
     }
     const omissions = createHarnessTranscriptOmissions(transcript, previous);
-    const hasToolResult = transcript.some((message) => message.role === "tool");
+    const hasResultProvenance = transcript.some((message) =>
+      message.role === "tool" ||
+      (message.role === "user" &&
+        message.toolResultProvenance !== undefined)
+    );
     if (
-      previous !== undefined || omissions.results.length > 0 || !hasToolResult
+      previous !== undefined || omissions.results.length > 0 ||
+      !hasResultProvenance
     ) {
       await writeJsonFile(omissionsPath, omissions);
     }

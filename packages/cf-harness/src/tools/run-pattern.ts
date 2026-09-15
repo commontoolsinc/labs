@@ -73,30 +73,12 @@ import {
   runtimeProgramFromIndex,
 } from "../pattern-index/composition.ts";
 import type { HarnessToolDefinition } from "./types.ts";
+import {
+  RUN_PATTERN_INPUT_SCHEMA,
+  type RunPatternToolInput,
+} from "../contracts/run-pattern.ts";
 
-export interface RunPatternToolInput {
-  sourceText?: string;
-
-  /**
-   * What the pattern is for, in one line. Published with the pattern when the
-   * run contributes to the index; a run that gives none publishes nothing,
-   * since a pattern nobody can read the purpose of is a pattern nobody finds.
-   */
-  description?: string;
-
-  /** Tags the published pattern is found under. */
-  hashtags?: readonly string[];
-
-  /**
-   * A pattern published to the index, run in place of inline source. The
-   * program is fetched host-side and compiled down the same path; its source
-   * never reaches the model, on the success path or on any error path.
-   */
-  patternId?: string;
-
-  inputs?: Record<string, unknown>;
-  resultSchema?: JSONSchema;
-}
+export type { RunPatternToolInput } from "../contracts/run-pattern.ts";
 
 /** Upper bound on `sourceText`, enforced with a structured tool error. */
 export const RUN_PATTERN_MAX_SOURCE_TEXT_BYTES = 256 * 1024;
@@ -342,50 +324,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
   description:
     `Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. Give it either your own sourceText or the patternId of a pattern search_patterns found. Source you write imports the runtime from "${RUNTIME_MODULE_SPECIFIER}" and from no other module — every pattern opens with a line of the form ${RUNTIME_MODULE_IMPORT_LINE} — and no package named after the product resolves. When the run's session reads under a confidentiality ceiling, every db.query result must be declared per session (PerSession<> on the result type, or the query's { scope: "session" } option); a query left space-scoped is refused under a ceiling rather than read. Bound every query's rows with a LIMIT — a few hundred is a sensible ceiling for a view — because an ordinary result row is materialized as its own document in the space, so an unbounded query over a large store writes a document per row it returns; an aggregate returning one row per group — count(*), sum(), a GROUP BY — is bounded by its own shape and needs no LIMIT. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.`,
   effectClass: "side-effect",
-  inputSchema: {
-    type: "object",
-    properties: {
-      sourceText: {
-        type: "string",
-        description:
-          "Pattern source (TypeScript/TSX). At most 256 KiB. Return a durable result object directly. A whole-result derived wrapper is a known smell, but not a deterministic failure: after the run the harness checks the actual pattern pointer and refuses any piece materialized under a session-only identity.",
-      },
-      patternId: {
-        type: "string",
-        description:
-          "Id of a pattern published to the index, as search_patterns reports it. Exactly one of sourceText and patternId is given; the published program is fetched and compiled without passing through this conversation.",
-      },
-      description: {
-        type: "string",
-        description:
-          'One line saying what the pattern you are running does, e.g. "Totals an invoice\'s line items and applies a discount". Source you wrote is recorded in the pattern index when it runs, so fill this in for later evaluation and discovery. A run without one publishes nothing.',
-      },
-      hashtags: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          'Tags the recorded pattern will be found under if it earns discoverability, e.g. ["invoice", "arithmetic"]. Use the words someone searching for this capability would type.',
-      },
-      inputs: {
-        type: "object",
-        additionalProperties: true,
-        description:
-          'Input values for the pattern. A string value that is a whole-string LLM-friendly link (e.g. "/of:fid1:abc.../path") is passed as a live cell reference; everything else passes through as plain JSON.',
-      },
-      resultSchema: {
-        anyOf: [
-          { type: "boolean" },
-          { type: "object", additionalProperties: true },
-        ],
-        description:
-          'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself; anything else is withheld as text and comes back as a reference token addressing that position, which describe_handle can inspect and a later run_pattern can wire by reference. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared. When the space\'s policy does not admit releasing the values to you, value is withheld, valueError says why and which input carried the refused label, and resultRef still names the result: pass it on by reference.',
-      },
-    },
-    // Exactly one of `sourceText` and `patternId` is required, which is a
-    // condition on the pair rather than on either alone; the tool states it
-    // in prose here and enforces it on invocation.
-    additionalProperties: false,
-  } satisfies JSONSchema,
+  inputSchema: RUN_PATTERN_INPUT_SCHEMA,
   outputSchema: {
     oneOf: [{
       type: "object",

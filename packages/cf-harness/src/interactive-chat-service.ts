@@ -1533,6 +1533,7 @@ export class HarnessInteractiveChatService {
       observedTranscriptLength = transcript.length;
       const result = await loop.runTranscript({
         transcript,
+        openingResearchTask: params.input.text,
         model: session.model,
         promptSlotBinding: policy.promptSlot,
         signal,

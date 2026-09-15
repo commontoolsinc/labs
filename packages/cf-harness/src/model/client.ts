@@ -1,5 +1,5 @@
 import type { LLMNativeModelToolId } from "@commonfabric/llm/types";
-import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import type { HarnessModelToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type {
   HarnessAssistantTranscriptMessage,
   HarnessTranscriptMessage,
@@ -72,7 +72,7 @@ export interface HarnessModelAttemptDiagnostic {
 export interface HarnessModelTurnRequest {
   model: string;
   transcript: readonly HarnessTranscriptMessage[];
-  tools: readonly HarnessToolDescriptor[];
+  tools: readonly HarnessModelToolDescriptor[];
   nativeModelToolIds: readonly LLMNativeModelToolId[];
   runId: string;
   cacheAffinityKey?: string;

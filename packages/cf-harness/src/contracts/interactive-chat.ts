@@ -139,6 +139,19 @@ export const resolveHarnessChatPolicy = (
   context?: HarnessChatContext,
   allowCommentLoomAuthoring = false,
 ): HarnessChatPolicy => {
+  // Durable sessions can retain the legacy tool id in their policy bytes.
+  // Normalize only at the use boundary so that allowlist grants the replacement
+  // capability without rewriting session history.
+  const normalizedPolicy: HarnessChatPolicy = {
+    ...policy,
+    allowedToolIds: [
+      ...new Set(
+        (policy.allowedToolIds as readonly string[]).map((toolId) =>
+          toolId === "query_docs" ? "research" : toolId
+        ),
+      ),
+    ] as BuiltinToolId[],
+  };
   if (context?.type === "comment-thread") {
     return {
       ...COMMENT_THREAD_HARNESS_CHAT_POLICY,
@@ -146,27 +159,27 @@ export const resolveHarnessChatPolicy = (
         ? {
           allowedToolIds: [
             ...READONLY_INTERACTIVE_CHAT_TOOL_IDS,
-            ...policy.allowedToolIds.filter((id) =>
+            ...normalizedPolicy.allowedToolIds.filter((id) =>
               LOOM_AUTHORING_TOOL_IDS.has(id)
             ),
           ],
         }
         : {}),
-      ...(policy.cfcEnforcementMode !== undefined
-        ? { cfcEnforcementMode: policy.cfcEnforcementMode }
+      ...(normalizedPolicy.cfcEnforcementMode !== undefined
+        ? { cfcEnforcementMode: normalizedPolicy.cfcEnforcementMode }
         : {}),
-      ...(policy.promptSlot !== undefined
-        ? { promptSlot: policy.promptSlot }
+      ...(normalizedPolicy.promptSlot !== undefined
+        ? { promptSlot: normalizedPolicy.promptSlot }
         : {}),
     };
   }
-  if (policy.toolMode !== "read-only") {
-    return policy;
+  if (normalizedPolicy.toolMode !== "read-only") {
+    return normalizedPolicy;
   }
   return {
-    ...policy,
+    ...normalizedPolicy,
     toolMode: "read-only",
-    allowedToolIds: policy.allowedToolIds.filter((toolId) =>
+    allowedToolIds: normalizedPolicy.allowedToolIds.filter((toolId) =>
       READONLY_INTERACTIVE_CHAT_TOOL_ID_SET.has(toolId)
     ),
     allowedSubagentProfiles: [],

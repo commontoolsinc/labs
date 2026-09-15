@@ -4935,7 +4935,7 @@ Deno.test("formatCfHarnessCliResult includes policy event summaries", () => {
       "status: completed",
       "modelTurns: 1",
       "cfcMode: observe (harness)",
-      "docsCorpus: none — query_docs is absent and children cannot look documentation up",
+      "docsCorpus: none — research cannot consult local documentation",
       "skillsRoot: none — this run scanned no skills tree, so no profile preloads any skill",
       "policyEvents: 1",
       "- warning bash: bash would require direct-command authorization in enforce modes",

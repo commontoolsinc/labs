@@ -388,12 +388,12 @@ that address and no lookup stands between the two.
 
 Each step is one line — the tool, how it ended, and what it was about: the
 numbered `run_pattern` attempt and the compiler's word on it, the slug
-`assign_slug` registered, the query a search was given, the question
-`query_docs` asked. Under a line whose run recorded a CFC decision sits the same
-CFC line the console's timeline draws, and a result that held anything back from
-the model carries the same omission block, openable in place. A completed turn
-ends the pane with the piece link the turn produced, which is what the pane is
-watched for.
+`assign_slug` registered, the query a search was given, the question legacy
+`query_docs` asked, or the Common Fabric task `research` investigated. Under a
+line whose run recorded a CFC decision sits the same CFC line the console's
+timeline draws, and a result that held anything back from the model carries the
+same omission block, openable in place. A completed turn ends the pane with the
+piece link the turn produced, which is what the pane is watched for.
 
 ## Sessions
 

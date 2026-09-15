@@ -1,6 +1,7 @@
 import type {
   CfcEnforcementMode,
   CfcLabelView,
+  IFCLabel,
 } from "@commonfabric/runner/cfc";
 import type {
   HarnessCfcInvocationContext,
@@ -19,7 +20,9 @@ import type {
 } from "../contracts/skill.ts";
 import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
 import type { HarnessDocsCorpus } from "../docs-corpus/corpus.ts";
-import type { HarnessExploreQueryRunner } from "../docs-corpus/explore.ts";
+import type { HarnessResearchRunSummary } from "../contracts/research.ts";
+import type { HarnessPatternRef } from "../contracts/pattern-refs.ts";
+import type { HarnessResearchRunner } from "../research/runner.ts";
 import type { HarnessHandleTable } from "../contracts/handle-table.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
 import type { openProbeRuntime } from "../pattern-index/probe-runtime.ts";
@@ -91,18 +94,31 @@ export interface HarnessToolContext {
 
   /**
    * The run's documentation corpus, lazy and cached by the engine. Undefined
-   * when the run configures no corpus root, which also keeps `query_docs` out
-   * of the tool surface.
+   * when the run configures no corpus root.
    */
   getDocsCorpus?: () => Promise<HarnessDocsCorpus>;
 
   /**
-   * Answers one documentation question out of the sections the tool selected,
-   * on the trusted host side. The tool holds the corpus and the caller's
-   * question; this holds the model. Undefined for an invocation outside a
-   * prompt loop, which has no model to spend.
+   * Runs one bounded Common Fabric research loop on the trusted host side.
+   * Undefined for an invocation outside a prompt loop, which has no model to
+   * spend.
    */
-  runExploreQuery?: HarnessExploreQueryRunner;
+  runResearch?: HarnessResearchRunner;
+
+  /** Prior admitted kits retained by this run for follow-up and delegation. */
+  researchRuns?: readonly HarnessResearchRunSummary[];
+
+  /** Existing CFC label on a research task and its accumulated model context. */
+  researchTaskCfcLabel?: IFCLabel;
+
+  /** Pattern attachments resolved by the host before the first model turn. */
+  patternRefs?: readonly HarnessPatternRef[];
+
+  /** Adds one admitted kit and its trusted records to durable run state. */
+  recordResearchRun?(run: HarnessResearchRunSummary): void | Promise<void>;
+
+  /** Counts a bounded research call that returned no implementation kit. */
+  recordResearchFailure?(): void | Promise<void>;
 
   /**
    * The run's skills.sh discovery client, lazy and cached by the engine.

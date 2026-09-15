@@ -18,7 +18,7 @@ export type BuiltinToolId =
   | "record_feedback"
   | "search_skills"
   | "acquire_skill"
-  | "query_docs"
+  | "research"
   | "loom_compose"
   | "loom_inspect"
   | "loom_authoring_context";
@@ -52,13 +52,11 @@ const PATTERN_INDEX_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
 );
 
 /**
- * The tool gated on a configured documentation corpus. A run given no corpus
- * root has nothing for an explore child to answer out of, so the tool is
- * absent rather than present and answering every question with the same
- * refusal.
+ * The tool gated on at least one trusted research source. A run with neither
+ * corpus nor pattern index has nothing for its private loop to investigate.
  */
-const DOCS_CORPUS_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
-  ["query_docs"] as const,
+const RESEARCH_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["research"] as const,
 );
 
 /** The metadata-only tool gated on configured skills.sh discovery. */
@@ -141,7 +139,9 @@ export const withheldToolIds = (
         availability.acquiredSkillsAvailable
       ? []
       : SKILL_SCRIPT_TOOL_IDS),
-    ...(availability.docsCorpusAvailable ? [] : DOCS_CORPUS_TOOL_IDS),
+    ...(availability.docsCorpusAvailable || availability.patternIndexAvailable
+      ? []
+      : RESEARCH_TOOL_IDS),
     ...(availability.loomAuthoringAvailable ? [] : LOOM_AUTHORING_TOOL_IDS),
   ]);
 
@@ -167,7 +167,9 @@ export const parentToolIdsForBacking = (
     ...(availability.skillsShAcquisitionAvailable
       ? SKILLS_SH_ACQUISITION_TOOL_IDS
       : []),
-    ...(availability.docsCorpusAvailable ? DOCS_CORPUS_TOOL_IDS : []),
+    ...(availability.docsCorpusAvailable || availability.patternIndexAvailable
+      ? RESEARCH_TOOL_IDS
+      : []),
     ...(availability.loomAuthoringAvailable ? LOOM_AUTHORING_TOOL_IDS : []),
   ].filter((toolId, index, ids) =>
     !withheld.has(toolId) && ids.indexOf(toolId) === index
@@ -176,12 +178,32 @@ export const parentToolIdsForBacking = (
 
 export type HarnessToolEffectClass = "read" | "write" | "side-effect";
 
-export interface HarnessToolDescriptor {
-  toolId: BuiltinToolId;
+/** A function tool descriptor accepted by the harness model transports. */
+export interface HarnessModelToolDescriptor {
+  /** Function name sent to the model. */
+  toolId: string;
+
+  /** Short display name for operator-facing surfaces. */
   title: string;
+
+  /** Instructions that tell the model when and how to call the tool. */
   description: string;
+
+  /** Whether invoking the tool only reads or can change external state. */
   effectClass: HarnessToolEffectClass;
+
+  /** JSON Schema for the function arguments. */
   inputSchema: JSONSchema;
+
+  /** JSON Schema for the function result, when one is declared. */
   outputSchema?: JSONSchema;
+
+  /** Search and presentation labels for the tool. */
   tags?: readonly string[];
+}
+
+/** A registered harness builtin, whose id participates in run policy. */
+export interface HarnessToolDescriptor extends HarnessModelToolDescriptor {
+  /** Stable builtin id used by policy, transcripts, and the registry. */
+  toolId: BuiltinToolId;
 }

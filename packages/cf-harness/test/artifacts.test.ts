@@ -571,7 +571,7 @@ Deno.test({
           "write_file",
           "delegate_task",
           "describe_handle",
-          "query_docs",
+          "research",
         ],
       });
       assertEquals(persistedPolicySnapshot.subagents.allowedProfiles, [
