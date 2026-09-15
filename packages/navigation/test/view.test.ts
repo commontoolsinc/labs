@@ -123,13 +123,61 @@ describe("view", () => {
   });
 
   it("reads one segment after a slug as the member", () => {
-    // A member's own fields are a cell path inside the piece it resolves to,
-    // so nothing past the first segment is part of the address.
-    expect(urlToAppView(new URL("http://common.test/space/top/42/title")))
+    // A trailing separator adds no segment, so the member stays the last one.
+    expect(urlToAppView(new URL("http://common.test/space/top/42/")))
       .toEqual({ spaceName: "space", pieceSlug: "top", pieceMember: "42" });
     // An id names its piece outright, and member names belong to collections.
     expect(urlToAppView(new URL("http://common.test/space/fid1:abc/42")))
       .toEqual({ spaceName: "space", pieceId: "fid1:abc" });
+  });
+
+  it("carries the segments past a member apart from the member", () => {
+    // Only the member is read. What the address holds past it is still part
+    // of what the address says, so the view read from it is not the view of
+    // the member alone.
+    expect(
+      urlToAppView(new URL("http://common.test/space/top/42/comments/7")),
+    ).toEqual({
+      spaceName: "space",
+      pieceSlug: "top",
+      pieceMember: "42",
+      pieceExtraPath: "comments/7",
+    });
+    expect(
+      urlToAppView(new URL(`http://common.test/${SPACE_DID}/top/42/title`)),
+    ).toEqual({
+      spaceDid: SPACE_DID,
+      pieceSlug: "top",
+      pieceMember: "42",
+      pieceExtraPath: "title",
+    });
+    expect(
+      urlToAppView(new URL("http://common.test/.embed/@space/top/42/title")),
+    ).toEqual({
+      spaceName: "space",
+      pieceSlug: "top",
+      pieceMember: "42",
+      pieceExtraPath: "title",
+      mode: "embed",
+    });
+  });
+
+  it("writes the segments past a member back after the member", () => {
+    expect(
+      appViewToUrlPath({
+        spaceName: "space",
+        pieceSlug: "top",
+        pieceMember: "42",
+        pieceExtraPath: "comments/7",
+      }),
+    ).toBe("/space/top/42/comments/7");
+    // A page opened at the longer address keeps it, rather than settling on
+    // the member's.
+    expect(
+      appViewToUrlPath(
+        urlToAppView(new URL("http://common.test/space/top/42/comments/7")),
+      ),
+    ).toBe("/space/top/42/comments/7");
   });
 
   it("routes a bare origin to the home view", () => {
@@ -283,6 +331,31 @@ describe("view", () => {
     // `..` resolves away before a parser ever sees it as a segment.
     expect(
       isAppView({ spaceName: "space", pieceSlug: "top", pieceMember: ".." }),
+    ).toBe(false);
+  });
+
+  it("returns `false` for segments past a member with no member before them", () => {
+    expect(
+      isAppView({
+        spaceName: "space",
+        pieceSlug: "top",
+        pieceMember: "42",
+        pieceExtraPath: "comments/7",
+      }),
+    ).toBe(true);
+    // Written with no member, the segments would land where a member goes and
+    // read back as naming one.
+    expect(
+      isAppView({ spaceName: "space", pieceSlug: "top", pieceExtraPath: "7" }),
+    ).toBe(false);
+    // Holding nothing, the field adds nothing to the member's own address.
+    expect(
+      isAppView({
+        spaceName: "space",
+        pieceSlug: "top",
+        pieceMember: "42",
+        pieceExtraPath: "",
+      }),
     ).toBe(false);
   });
 
