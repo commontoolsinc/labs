@@ -186,7 +186,7 @@ describe("CFC prefix-provenance precision counters (Stage 0, doc §6)", () => {
       )
         .toHaveLength(1);
     } finally {
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storageManager.close();
     }
   });

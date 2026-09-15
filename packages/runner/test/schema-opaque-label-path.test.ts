@@ -48,7 +48,7 @@ describe("validateAndTransform()", () => {
         }],
       });
     } finally {
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storage.close();
     }
   });

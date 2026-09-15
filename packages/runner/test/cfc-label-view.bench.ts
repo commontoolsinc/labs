@@ -1,8 +1,9 @@
 /**
  * Carried label-view work as the number of labeled message fields grows.
  * Fixtures stay outside timing. Cloning and merging retain every field;
- * child rebasing selects one message from the same view. The repeated-read cases
- * hold width fixed while varying how often a child view is requested.
+ * child rebasing selects one message from the same view. The uncached
+ * repeated-read baselines hold width fixed while varying how often a child view
+ * is requested directly from the core helper.
  */
 
 import {
@@ -63,8 +64,8 @@ for (const messages of [1, 8, 50, 200]) {
 const repeatedView = makeView(50);
 for (const reads of [1, 6, 50]) {
   Deno.bench({
-    name: `${reads} child reads: 300 entries`,
-    group: "cfc label view frequency",
+    name: `uncached ${reads} child reads: 300 entries`,
+    group: "cfc label view frequency (uncached baseline)",
     fn: () => {
       for (let read = 0; read < reads; read++) {
         rebaseCfcLabelView(repeatedView, ["messages", "0"]);

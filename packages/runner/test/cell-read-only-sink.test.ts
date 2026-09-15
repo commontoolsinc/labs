@@ -69,7 +69,7 @@ const setup = async (separateChild = false) => {
     write,
     dispose: async () => {
       await storage.synced();
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storage.close();
     },
   };
