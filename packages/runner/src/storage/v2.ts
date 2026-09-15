@@ -58,6 +58,7 @@ import {
   type SqliteDbRef,
   type SqliteOperation,
   type SqliteParamsWire,
+  type SqliteQueryReader,
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
@@ -3305,9 +3306,10 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    reader?: SqliteQueryReader,
   ): Promise<SqliteQueryResult> {
     return this.#followReplacement((replica) =>
-      replica.sqliteQuery(db, sql, params)
+      replica.sqliteQuery(db, sql, params, reader)
     );
   }
 
@@ -4532,9 +4534,10 @@ export class SpaceReplica
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    reader?: SqliteQueryReader,
   ): Promise<SqliteQueryResult> {
     const { session } = await this.#activeSessionHandle();
-    return await session.sqliteQuery(db, sql, params);
+    return await session.sqliteQuery(db, sql, params, reader);
   }
 
   async listEntityIds(): Promise<string[] | undefined> {

@@ -459,7 +459,7 @@ function factoryFromPattern<T, R>(
   allCellsAndInternalRoots.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === (inputs as unknown)) return;
-    const { cell: top, path, value, schema, external } = cell.export();
+    const { cell: top, path, value, schema, scope, external } = cell.export();
     if (path.length > 0 || external) return;
 
     const cellReference = cellReferenceForCell(cell);
@@ -473,6 +473,7 @@ function factoryFromPattern<T, R>(
       derivedInternalPartialCausesByRoot.set(top, partialCause);
       derivedInternalCells.push({
         partialCause,
+        ...(scope !== undefined && scope !== "space" && { scope }),
         ...(descriptorSchema !== undefined && { schema: descriptorSchema }),
       });
     }

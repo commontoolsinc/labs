@@ -42,6 +42,7 @@ import type {
   SqliteDbRef,
   SqliteOperation,
   SqliteParamsWire,
+  SqliteQueryReader,
   SqliteQueryResult,
   SqliteRegisterDiskSourceResult,
   ViewInterest,
@@ -755,6 +756,7 @@ export interface IStorageProvider {
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    reader?: SqliteQueryReader,
   ): Promise<SqliteQueryResult>;
 
   // No `sqliteExecute`: SQLite writes go through the commit fold

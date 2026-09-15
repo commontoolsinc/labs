@@ -10,6 +10,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Discovering Loom resources with wish](loom-resource-discovery.md) proposes
+  publishing existing database and companion-cell references once per Loom
+  environment, with a staged person-inbox migration and compiled integration
+  acceptance gates.
 - [View-scoped client replication](view-scoped-client-replication.md) tracks
   rollout, recovery, and adversarial verification of active-view delivery and
   guarded speculative computation. It separates execution demand from delivery

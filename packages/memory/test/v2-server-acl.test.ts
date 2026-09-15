@@ -1488,6 +1488,110 @@ describe("v2-server-acl", () => {
       }
     });
 
+    it("authorizes carried SQLite readers and refuses reader impersonation", async () => {
+      const diskPath = Deno.makeTempFileSync({ suffix: ".sqlite" });
+      const database = new Database(diskPath);
+      database.exec("CREATE TABLE lookup (value TEXT)");
+      database.exec("INSERT INTO lookup VALUES ('visible')");
+      database.close();
+      const server = createAclServer("memory://acl-sqlite-carried-reader", {
+        mode: "enforce",
+        delegatingDids: [SERVICE],
+      });
+      const space = "did:key:z6Mk-acl-sqlite-reader";
+      try {
+        await initializeSpaceAcl(server, space, {
+          [ALICE]: "OWNER",
+          [BOB]: "READ",
+        });
+        const ownerHarness = await connect(server);
+        const owner = await openSession(ownerHarness, space, ALICE);
+        const service = await openSession(
+          await connect(server),
+          space,
+          SERVICE,
+          {
+            actingAs: "space-owner",
+          },
+        );
+        expectExists(owner.ok);
+        expectExists(service.ok);
+        const registered = await server.sqliteRegisterDiskSource({
+          type: "sqlite.register-disk-source",
+          requestId: nextRequestId("register"),
+          space,
+          sessionId: owner.ok.sessionId,
+          id: "of:carried-reader-db",
+          path: diskPath,
+        });
+        expectExists(registered.ok);
+        const query = (sessionId: string, principal: string) =>
+          server.sqliteQuery({
+            type: "sqlite.query",
+            requestId: nextRequestId("query"),
+            space,
+            sessionId,
+            db: { id: "of:carried-reader-db" },
+            sql: "SELECT value FROM lookup",
+            reader: { principal },
+          });
+        expect((await query(service.ok.sessionId, BOB)).ok?.rows).toEqual([{
+          value: "visible",
+        }]);
+        expect((await query(service.ok.sessionId, CAROL)).error?.name).toBe(
+          "AuthorizationError",
+        );
+        expect((await query(owner.ok.sessionId, BOB)).error?.name).toBe(
+          "AuthorizationError",
+        );
+        const readStarted = Promise.withResolvers<void>();
+        const resumeRead = Promise.withResolvers<void>();
+        let opens = 0;
+        server.accessForTestingOnly.engineOpener = async (
+          requestedSpace,
+          open,
+        ) => {
+          if (++opens === 2) {
+            readStarted.resolve();
+            await resumeRead.promise;
+          }
+          return await open(requestedSpace);
+        };
+        const reading = server.sqliteQuery({
+          type: "sqlite.query",
+          requestId: nextRequestId("in-flight"),
+          space,
+          sessionId: service.ok.sessionId,
+          db: { id: "of:carried-reader-cell-db", tables: {} },
+          sql: "SELECT 1",
+          reader: { principal: BOB },
+        });
+        await readStarted.promise;
+        let revoked;
+        try {
+          revoked = await transactSet(
+            ownerHarness,
+            space,
+            owner.ok.sessionId,
+            `of:${space}`,
+            { [ALICE]: "OWNER" },
+            1,
+          );
+        } finally {
+          resumeRead.resolve();
+          server.accessForTestingOnly.engineOpener = undefined;
+        }
+        expect((await reading).error?.name).toBe("AuthorizationError");
+        expectExists(revoked.ok);
+        expect((await query(service.ok.sessionId, BOB)).error?.name).toBe(
+          "AuthorizationError",
+        );
+      } finally {
+        await server.close();
+        Deno.removeSync(diskPath);
+      }
+    });
+
     it("gates the auxiliary read and operator surfaces by capability", async () => {
       const diskPath = Deno.makeTempFileSync({ suffix: ".sqlite" });
       const database = new Database(diskPath);

@@ -1683,7 +1683,8 @@ export class Server {
         serviceDids?: readonly string[];
 
         /**
-         * Principals whose `session.open` may carry the delegated READ
+         * Principals allowed to carry a SQLite query reader and whose
+         * `session.open` may carry the delegated READ
          * binding `actingAs: "space-owner"` (OW31, READ side RULED
          * 2026-08-19). Such a session's READ-class capability decisions
          * resolve as the space's ACL OWNER — the user whose space it
@@ -2966,6 +2967,19 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       );
     }
+    if (
+      message.reader !== undefined &&
+      (session.principal === undefined ||
+        !this.#isDelegatingPrincipal(session.principal))
+    ) {
+      return respondTypedError<never>(
+        message.requestId,
+        toError(
+          "AuthorizationError",
+          "SQLite reader carriage requires a delegating principal",
+        ),
+      );
+    }
     const aclEngine = this.#aclMode() === "off"
       ? undefined
       : await this.#openEngine(message.space);
@@ -2982,7 +2996,14 @@ export class Server {
           message.sessionId,
           session,
           "READ",
-        );
+        ) ?? (message.reader === undefined
+          ? null
+          : this.#authorizeMessageWithEngine(
+            aclEngine,
+            message.space,
+            message.reader.principal,
+            "READ",
+          ));
       if (deny) {
         return respondTypedError<never>(message.requestId, deny);
       }
@@ -3029,10 +3050,13 @@ export class Server {
           message.db,
           message.sql,
           queryParams,
-          Engine.resolveScopeKey(message.db.scope, {
-            principal: session.principal,
-            sessionId: message.sessionId,
-          }),
+          Engine.resolveScopeKey(
+            message.db.scope,
+            message.reader ?? {
+              principal: session.principal,
+              sessionId: message.sessionId,
+            },
+          ),
           wantColumns,
         );
       // SQLite reads necessarily await filesystem work. Re-check both the
@@ -3045,7 +3069,14 @@ export class Server {
           message.sessionId,
           session,
           "READ",
-        );
+        ) ?? (message.reader === undefined
+          ? null
+          : this.#authorizeMessageWithEngine(
+            aclEngine,
+            message.space,
+            message.reader.principal,
+            "READ",
+          ));
         if (deny) {
           return respondTypedError<never>(message.requestId, deny);
         }
@@ -7969,6 +8000,13 @@ export const parseClientMessage = (
 
   if (
     parsed.type === "sqlite.query" &&
+    (parsed.reader === undefined ||
+      (isObjectNotArray(parsed.reader) &&
+        typeof parsed.reader.principal === "string" &&
+        parsed.reader.principal.length > 0 &&
+        (parsed.reader.sessionId === undefined ||
+          (typeof parsed.reader.sessionId === "string" &&
+            parsed.reader.sessionId.length > 0)))) &&
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
@@ -8004,6 +8042,7 @@ export const parseClientMessage = (
       db,
       sql: parsed.sql,
       params,
+      ...(parsed.reader === undefined ? {} : { reader: parsed.reader }),
     } as SqliteQueryRequest;
   }
 

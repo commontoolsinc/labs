@@ -110,6 +110,27 @@ describe("compiled pattern node alias schemas", () => {
     ) as any;
   }
 
+  it("reads child paths of a user-scoped computed object", async () => {
+    const { live } = await compileSource(`
+      import { computed, pattern, type PerUser } from "commonfabric";
+      export default pattern(() => {
+        const state = computed<PerUser<{ count: number }>>(() => ({ count: 7 }));
+        return { count: state.count };
+      });
+    `);
+    const tx = runtime.edit();
+    const result = runtime.run(
+      tx,
+      live,
+      {},
+      runtime.getCell(space, "scoped computed child", undefined, tx),
+    );
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    await result.pull();
+    expect(result.key("count").get()).toBe(7);
+  });
+
   it("preserves asCell on flat, recursive, and union node aliases", async () => {
     const flat = (await compileSource(FLAT_LINKED_SOURCE)).serialized;
     expect(
