@@ -30,7 +30,7 @@ describe("UndefinedCodec", () => {
     describe("canEncode()", () => {
       it("claims `undefined`, rejects `null` (and other values)", () => {
         // `undefined` encodes to the `Undefined@1` tag with `null` state,
-        // whereas `null` is a JSON-JS value that is not codec-handled.
+        // whereas `null` is a JSON-native value that is not codec-handled.
         expect(codec.canEncode(undefined)).toBe(true);
         expect(codec.canEncode(null)).toBe(false);
         expect(codec.canEncode(0)).toBe(false);
