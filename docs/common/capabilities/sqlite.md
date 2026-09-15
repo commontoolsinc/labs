@@ -101,16 +101,16 @@ join expressed in the pattern.
 
 ## Bound the rows
 
-An ordinary result row is written into the space as a document of its own —
-which is what gives a per-row label somewhere to sit — so the row count of a
+Every result row is written into the space as a document of its own — which
+is what gives a per-row label somewhere to sit — so the row count of a
 statement is a durable cost of the space rather than the cost of one render. A
-query that returns a million such rows writes a million documents, and they stay
-written after the view that asked for them is gone. One row shape is carried
-differently: a row projecting a column name a Fabric record reserves
-(`constructor`, `__proto__`) crosses the wire as a list of entries, and unless
-it carries a label it stays inline in the query's own document. That row still
-costs the space — it enlarges the document holding it — so the bound below is
-what a query needs either way.
+query that returns a million distinct rows writes a million documents, and they
+stay written after the view that asked for them is gone. The document is keyed
+on the row's content and label under the query's result: a re-run whose rows
+are unchanged writes no row documents, two equal rows share one, and a row the
+result held before takes its old document back rather than a new one. A row
+projecting a column name a Fabric record reserves (`constructor`, `__proto__`)
+crosses the wire as a list of entries and is stored the same way.
 
 A statement therefore bounds its rows, and a filter is not a bound. A `WHERE`
 clause narrows the candidates and says nothing about how many survive it: a
