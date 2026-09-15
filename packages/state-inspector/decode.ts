@@ -21,6 +21,8 @@ import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isObjectNotArray, isPlainObject } from "@commonfabric/utils/types";
 
+import { shortDid } from "./did-display.ts";
+
 /** Decode a stored payload string, routing the `data-model` codec envelope. */
 export function decodeStored(data: string): unknown {
   return JsonCodecEngine.seemsLikeEncoded(data)
@@ -123,11 +125,9 @@ export function isStream(v: Json): boolean {
   return isNameWalkable(v) && v["$stream"] === true;
 }
 
-function shortDid(did?: string): string | undefined {
-  if (!did) return undefined;
+function shortSpace(space?: string): string | undefined {
   // did:key:z6Mk…wQ2n  ->  z6Mk…wQ2n
-  const tail = did.startsWith("did:key:") ? did.slice("did:key:".length) : did;
-  return tail.length > 12 ? `${tail.slice(0, 6)}…${tail.slice(-4)}` : tail;
+  return space ? shortDid(space) : undefined;
 }
 
 function shortId(id?: string): string | undefined {
@@ -183,7 +183,7 @@ export function summarizeLink(link: DecodedLink): string {
   const id = escapeTerminalText(shortId(link.id) ?? "?");
   const path = link.path && link.path.length ? summarizePath(link.path) : "";
   const space = link.space
-    ? ` @${escapeTerminalText(shortDid(link.space) ?? "")}`
+    ? ` @${escapeTerminalText(shortSpace(link.space) ?? "")}`
     : "";
   const schema = link.schema !== undefined ? " +schema" : "";
   return `🔗 ${id}${path}${space}${schema}`;

@@ -8,6 +8,7 @@ import {
   isEmbeddedView,
   isViewingDefaultPatternView,
   preserveAppViewMode,
+  spaceViewRef,
   urlToAppView,
 } from "@commonfabric/navigation";
 
@@ -402,6 +403,46 @@ describe("view", () => {
       spaceName: "space",
       pieceSlug: "top",
       pieceMember: "NOPE",
+    });
+  });
+
+  it("returns `false` for a view whose space name is a DID", () => {
+    // The URL such a view produces reads back as a space DID, which addresses
+    // a different space than deriving the name would.
+    expect(isAppView({ spaceName: SPACE_DID })).toBe(false);
+    expect(isAppView({ spaceName: "did:" })).toBe(false);
+    // The prefix is compared exactly, so this one is an ordinary name.
+    expect(isAppView({ spaceName: "DID:key:z6Mk" })).toBe(true);
+  });
+
+  it("throws when asked for the URL of a view whose space name is a DID", () => {
+    expect(() => appViewToUrlPath({ spaceName: SPACE_DID })).toThrow(
+      "A space name must not be a DID",
+    );
+  });
+
+  it("addresses a space by name, by DID, or by neither", () => {
+    expect(spaceViewRef("space", undefined)).toEqual({ spaceName: "space" });
+    expect(spaceViewRef(undefined, SPACE_DID)).toEqual({
+      spaceDid: SPACE_DID,
+    });
+    expect(spaceViewRef(undefined, undefined)).toBeUndefined();
+    // A name wins over a DID given alongside it, which is what keeps a
+    // readable URL where the caller knows the name.
+    expect(spaceViewRef("space", SPACE_DID)).toEqual({ spaceName: "space" });
+  });
+
+  it("addresses a space by DID when its name is one", () => {
+    // Deriving a space key from the string would reach a different space than
+    // the string names as a DID.
+    expect(spaceViewRef(SPACE_DID, undefined)).toEqual({
+      spaceDid: SPACE_DID,
+    });
+    expect(spaceViewRef(SPACE_DID, "did:key:z6MkOther" as typeof SPACE_DID))
+      .toEqual({ spaceDid: SPACE_DID });
+    // The prefix is compared exactly, so this one stays an ordinary name.
+    expect(spaceViewRef("DID:key:z6Mk", undefined)).toEqual({
+      spaceName: "DID:key:z6Mk",
     });
   });
 

@@ -1,4 +1,4 @@
-import { DID, isDID } from "@commonfabric/identity";
+import { assertNotDID, DID, isDID } from "@commonfabric/identity/did";
 import { asSpaceSegment } from "@commonfabric/runner/fabric-url";
 import { isSlugAddress, isValidSlug } from "@commonfabric/runner/slugs";
 
@@ -64,6 +64,36 @@ export type AppView =
     & AppOpenPathRef
   );
 
+/**
+ * How a view addresses a space, given a name and a DID that may both be
+ * present and may both be absent.
+ *
+ * A name that is a DID addresses the space by DID. Taken as a name it would
+ * instead name the space a key derived from that string reaches, which is a
+ * different space; and the URL it produced would be read back as a space DID
+ * anyway, so the view would not survive its own round trip.
+ *
+ * Returns `undefined` only when neither is given, which is a view that
+ * addresses no space at all; a caller holding a DID always gets one back.
+ */
+export function spaceViewRef(
+  spaceName: string | undefined,
+  spaceDid: DID,
+): { spaceName: string } | { spaceDid: DID };
+export function spaceViewRef(
+  spaceName: string | undefined,
+  spaceDid: DID | undefined,
+): { spaceName: string } | { spaceDid: DID } | undefined;
+export function spaceViewRef(
+  spaceName: string | undefined,
+  spaceDid: DID | undefined,
+): { spaceName: string } | { spaceDid: DID } | undefined {
+  if (isDID(spaceName)) return { spaceDid: spaceName };
+  if (spaceName) return { spaceName };
+  if (spaceDid) return { spaceDid };
+  return undefined;
+}
+
 export function isAppBuiltInView(view: unknown): view is AppBuiltInView {
   switch (view as AppBuiltInView) {
     case "home":
@@ -80,7 +110,11 @@ export function isAppView(view: unknown): view is AppView {
   if (!isAppViewModeRef(view)) return false;
   if (!isPieceViewRef(view)) return false;
   if ("spaceName" in view) {
-    return typeof view.spaceName === "string" && !!view.spaceName;
+    // A name that is also a DID is refused rather than tolerated: the URL a
+    // named space produces is read back as a space DID, so such a view would
+    // address one space going out and a different one coming back.
+    return typeof view.spaceName === "string" && !!view.spaceName &&
+      !isDID(view.spaceName);
   }
   if ("spaceDid" in view) {
     return isDID(view.spaceDid);
@@ -193,6 +227,10 @@ export function appViewToUrlPath(view: AppView): `/${string}` {
         return `/`;
     }
   } else if ("spaceName" in view) {
+    // `urlToAppView` reads a DID-shaped first segment back as a space DID, so
+    // a name that is a DID would round-trip into a different space. Refuse it
+    // here, where the name is still attached to the view that carried it.
+    assertNotDID(view.spaceName, "A space name");
     return `${prefix}/${view.spaceName}${pieceUrlSegments(view)}`;
   } else if ("spaceDid" in view) {
     return `${prefix}/${view.spaceDid}${pieceUrlSegments(view)}`;

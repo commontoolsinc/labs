@@ -7,7 +7,7 @@
  * Each doc below says where its particular guarantee stops.
  */
 
-import { isDID } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   AttachPortNotification,

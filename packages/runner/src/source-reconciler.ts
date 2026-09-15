@@ -31,6 +31,7 @@
  * "Saying when a piece has stopped following its origin" in the lifecycle spec.
  */
 
+import { isDID } from "@commonfabric/identity/did";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -930,11 +931,11 @@ export class SourceReconciler {
       return "unusable";
     }
     const named = ref.space ?? destinationSpace;
-    if (!named.startsWith("did:")) {
+    if (!isDID(named)) {
       this.#unwatchFabricSource(resultCell);
       return "unusable";
     }
-    const sourceSpace = named as MemorySpace;
+    const sourceSpace = named;
     if (
       ref.host !== undefined &&
       !fabricAuthorityMatchesSpaceHost(

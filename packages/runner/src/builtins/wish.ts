@@ -10,6 +10,7 @@ import {
   toCompactDebugString,
 } from "@commonfabric/data-model";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
+import { type DID, isDID } from "@commonfabric/identity/did";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { extractHashtags } from "@commonfabric/utils/hashtags";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -315,19 +316,30 @@ function getSpaceCell(ctx: WishContext): Cell<unknown> {
 
 function getSpaceCellForDID(
   runtime: Runtime,
-  did: string,
+  did: DID,
   tx: IExtendedStorageTransaction,
 ): Cell<unknown> {
-  return runtime.getCell(
-    did as `did:${string}:${string}`,
-    did,
-    spaceCellSchema,
-    tx,
-  );
+  return runtime.getCell(did, did, spaceCellSchema, tx);
 }
 
-function getArbitraryDIDs(scope?: string[]): string[] {
-  return (scope ?? []).filter((s) => s !== "~" && s !== "." && s !== "profile");
+/**
+ * The scope entries that name a space outright, as opposed to the three
+ * keywords. Each one becomes a space to search, so an entry that is not a DID
+ * would be read as the id of a space nobody named; say so instead.
+ */
+export function getArbitraryDIDs(scope?: string[]): DID[] {
+  const named = (scope ?? []).filter((s) =>
+    s !== "~" && s !== "." && s !== "profile"
+  );
+  for (const entry of named) {
+    if (!isDID(entry)) {
+      throw new WishError(
+        `Invalid scope "${entry}": expected "~", ".", "profile", or a ` +
+          `space DID.`,
+      );
+    }
+  }
+  return named as DID[];
 }
 
 function resolvePath(
