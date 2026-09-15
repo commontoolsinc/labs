@@ -1793,7 +1793,7 @@ export abstract class FabricInstance extends BaseFabricSpecialObject {
    * Declared the way the brand above is, and for the same reasons; `api.ts`
    * declares the identical member.
    */
-  declare readonly [FABRIC_INSTANCE_PLUS_BRAND]?: never;
+  declare readonly [FABRIC_INSTANCE_PLUS_BRAND]: never;
 
   /**
    * Returns a new deep clone of this instance with equivalent data but no
