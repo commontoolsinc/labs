@@ -146,6 +146,25 @@ export type VerifiedExternalIdentity = RequiresIntegrity<
 
 export type VerifiedExternalIdentityCell = Cell<VerifiedExternalIdentity>;
 
+/**
+ * Where things shared with this profile's owner are delivered: the owner's
+ * share inbox — a dedicated space their daemon minted, holding one inbox piece
+ * whose `receive` stream other daemons call (loom `shares/inbox.py`; the
+ * design is loom's weaver-multiuser-sharing D8 and share-inbox proposal).
+ * Public on purpose and no secret in it: the inbox space's ACL is the gate,
+ * the pointer only says where to knock. Empty strings mean "no inbox yet".
+ */
+export type ProfileInboxPointer = {
+  /** The inbox space's DID. */
+  space: string;
+  /** The memory host the space lives on (an http(s) origin). */
+  host: string;
+};
+export type SetProfileInboxEvent = {
+  space?: string;
+  host?: string;
+};
+
 type VerifiedIdentityListWrite<Binding> = OwnerProtectedProfileWrite<
   VerifiedExternalIdentityCell[],
   Binding
@@ -170,6 +189,14 @@ export type ProfileHomeOutput = {
   // (masked until now only because `addExternalLink` sorts earlier in the
   // required check).
   bio: Default<OwnerProtectedProfileWrite<string, typeof setBio>, "">;
+  // The owner's share inbox pointer (2026-09-15). Owner-protected like bio;
+  // readable by anyone who can read the profile, which is what a sender
+  // needs. Default outside the wrapper for the same reason as bio: stored
+  // profiles predating it have no such property.
+  inbox: Default<
+    OwnerProtectedProfileWrite<ProfileInboxPointer, typeof setInbox>,
+    { space: ""; host: "" }
+  >;
   // Public web profiles the owner has chosen to associate with this profile.
   // The owner-protected list is distinct from `elements`, whose entries are
   // Common Fabric piece references.
@@ -202,6 +229,7 @@ export type ProfileHomeOutput = {
   setName: Stream<SetProfileNameEvent>;
   setAvatar: Stream<SetProfileAvatarEvent>;
   setBio: Stream<SetProfileBioEvent>;
+  setInbox: Stream<SetProfileInboxEvent>;
   addExternalLink: Stream<MutateExternalProfileLinksEvent>;
   removeExternalLink: Stream<MutateExternalProfileLinksEvent>;
   publishVerifiedIdentities: Stream<MutateVerifiedIdentitiesEvent>;
@@ -256,6 +284,7 @@ export type BackwardsCompatibleProfile = PartialBy<
   & Omit<ProfileHomeOutput, typeof UI>
   & { [UI]: unknown },
   | "setBio"
+  | "setInbox"
   | "addExternalLink"
   | "removeExternalLink"
   | "publishVerifiedIdentities"
@@ -508,6 +537,28 @@ const setBio = handler<
   },
 );
 
+const INBOX_SPACE_DID = /^did:[a-z0-9]+:[^\s/]+$/;
+const INBOX_HOST_ORIGIN = /^https?:\/\/[^\s/]+$/;
+
+// The single authorized writer for the share inbox pointer. A pointer is
+// both parts shaped or nothing: a DID for the space, an http(s) origin for
+// the host; both empty clears it (the owner retired their inbox). Anything
+// else is dropped, never half-written — a sender that read a half pointer
+// would knock on nothing.
+const setInbox = handler<
+  SetProfileInboxEvent,
+  { inbox: Writable<ProfileInboxPointer> }
+>((event, state) => {
+  const space = (event.space ?? "").trim();
+  const host = (event.host ?? "").trim().replace(/\/+$/, "");
+  if (space === "" && host === "") {
+    state.inbox.set({ space: "", host: "" });
+    return;
+  }
+  if (!INBOX_SPACE_DID.test(space) || !INBOX_HOST_ORIGIN.test(host)) return;
+  state.inbox.set({ space, host });
+});
+
 // The single authorized writer for externally hosted profile links. Add and
 // remove streams are instances of this handler so the owner-protected list has
 // one stable write identity, like `elements` above.
@@ -653,6 +704,9 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     const bio = new Writable<
       OwnerProtectedProfileWrite<string, typeof setBio>
     >("").for("bio");
+    const inbox = new Writable<
+      OwnerProtectedProfileWrite<ProfileInboxPointer, typeof setInbox>
+    >({ space: "", host: "" }).for("inbox");
     const externalLinks = new Writable<
       OwnerProtectedProfileWrite<
         ExternalProfileLink[],
@@ -740,12 +794,14 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       name,
       avatar,
       bio,
+      inbox,
       externalLinks,
       verifiedIdentities,
       elements,
       setName: setName({ name }),
       setAvatar: setAvatar({ avatar }),
       setBio: setBio({ bio, draft: bioDraft }),
+      setInbox: setInbox({ inbox }),
       addExternalLink: mutateExternalProfileLinks({
         externalLinks,
         mode: "add",

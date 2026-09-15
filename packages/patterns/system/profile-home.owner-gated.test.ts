@@ -64,6 +64,7 @@ describe("host embedding contract: profile pinning is owner-gated", () => {
     for (
       const lateStream of [
         "setBio",
+        "setInbox",
         "addExternalLink",
         "removeExternalLink",
         "publishVerifiedIdentities",
@@ -80,6 +81,12 @@ describe("host embedding contract: profile pinning is owner-gated", () => {
       'bio: Default<OwnerProtectedProfileWrite<string, typeof setBio>, "">',
     );
     expect(home).toContain("isEditing: Default<boolean, false>");
+    // The share inbox pointer (2026-09-15) rides the same split: data with a
+    // Default, its writer an optional late stream.
+    expect(home).toContain(
+      "OwnerProtectedProfileWrite<ProfileInboxPointer, typeof setInbox>,",
+    );
+    expect(home).toContain('{ space: ""; host: "" }');
   });
 
   it("weakens the rendered screen in the consumer view", () => {

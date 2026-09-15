@@ -16,6 +16,37 @@ export default pattern(() => {
   const action_set_avatar = action(() => {
     profile.setAvatar.send({ avatar: "AL" });
   });
+  // The share inbox pointer (2026-09-15): both parts shaped or nothing.
+  const INBOX_SPACE = "did:key:z6MkinboxAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const action_set_inbox = action(() => {
+    profile.setInbox.send({
+      space: INBOX_SPACE,
+      host: "https://estuary.example.ts.net/",
+    });
+  });
+  const action_set_inbox_half = action(() => {
+    profile.setInbox.send({
+      space: INBOX_SPACE,
+      host: "estuary.example.ts.net",
+    });
+  });
+  const action_clear_inbox = action(() => {
+    profile.setInbox.send({});
+  });
+  const assert_inbox_empty_at_birth = assert(() =>
+    profile.inbox.space === "" && profile.inbox.host === ""
+  );
+  const assert_inbox_set_with_the_host_trimmed = assert(() =>
+    profile.inbox.space === INBOX_SPACE &&
+    profile.inbox.host === "https://estuary.example.ts.net"
+  );
+  const assert_inbox_kept_over_a_half_pointer = assert(() =>
+    profile.inbox.space === INBOX_SPACE &&
+    profile.inbox.host === "https://estuary.example.ts.net"
+  );
+  const assert_inbox_cleared = assert(() =>
+    profile.inbox.space === "" && profile.inbox.host === ""
+  );
 
   // CT-1828: same empty-after-trim guard applies to setAvatar.
   const action_clear_avatar = action(() => {
@@ -144,6 +175,13 @@ export default pattern(() => {
 
   return {
     [TESTS]: [
+      { assertion: assert_inbox_empty_at_birth },
+      { action: action_set_inbox },
+      { assertion: assert_inbox_set_with_the_host_trimmed },
+      { action: action_set_inbox_half },
+      { assertion: assert_inbox_kept_over_a_half_pointer },
+      { action: action_clear_inbox },
+      { assertion: assert_inbox_cleared },
       { assertion: assert_initial_state },
       // CT-1748: a freshly-visited profile starts in the read-only
       // presentation, not the edit form.
