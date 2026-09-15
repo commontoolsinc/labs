@@ -13,6 +13,7 @@ import {
   parseMemoryProtocolFlags,
 } from "../v2.ts";
 import { parseClientMessage } from "../v2/server.ts";
+import { parseViewInterests, parseViewQuery } from "../v2/view-interest.ts";
 import { wireAuthorizationOf } from "../v2/session-open-auth.ts";
 
 /**
@@ -229,6 +230,53 @@ describe("wire record shape", () => {
       // nothing to reject and would otherwise call it an ACL.
       it(`returns \`false\` for ${label}`, () => {
         expect(isACL(value)).toBe(false);
+      });
+    }
+  });
+
+  describe("parseViewQuery()", () => {
+    const root = {
+      id: "of:one",
+      selector: { path: ["value"] },
+    };
+
+    it("returns the query for a plain record", () => {
+      expect(parseViewQuery({ roots: [root] })).toEqual({ roots: [root] });
+    });
+
+    for (const [label, value] of hostileValues) {
+      it(`returns \`null\` for a query that is ${label}`, () => {
+        expect(parseViewQuery(value)).toBe(null);
+      });
+
+      it(`returns \`null\` for a root that is ${label}`, () => {
+        expect(parseViewQuery({ roots: [value] })).toBe(null);
+      });
+
+      it(`returns \`null\` for a selector that is ${label}`, () => {
+        expect(parseViewQuery({ roots: [{ id: "of:one", selector: value }] }))
+          .toBe(null);
+      });
+
+      // A schema position takes a record or a boolean, and this is the one
+      // position here that a following field check does not reach.
+      it(`returns \`null\` for a selector schema that is ${label}`, () => {
+        expect(
+          parseViewQuery({
+            roots: [{
+              id: "of:one",
+              selector: { path: ["value"], schema: value },
+            }],
+          }),
+        ).toBe(null);
+      });
+    }
+  });
+
+  describe("parseViewInterests()", () => {
+    for (const [label, value] of hostileValues) {
+      it(`returns \`null\` for a view interest that is ${label}`, () => {
+        expect(parseViewInterests([value])).toBe(null);
       });
     }
   });
