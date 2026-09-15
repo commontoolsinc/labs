@@ -87,21 +87,41 @@ lives in the event lines, and history stays append-only.
 ## Keys
 
 Small, vim-flavored, and stable: `q` back to prompt; `j`/`k`/arrows
-selection; `g`/`G` ends; `enter` drill, `backspace` up; `/` filter within
-the view, `n`/`N` next; `e` edit the selection in `$EDITOR` (the substrate
-already suspends and restores the terminal for this); `:` opens the
-command line.
+selection; `g`/`G` ends; `enter` drill, `backspace` up; `/` narrows or
+finds within the view, `n`/`N` next; `e` edit the selection in `$EDITOR`
+(the substrate already suspends and restores the terminal for this); `:`
+opens the command line.
+
+What `/` does is the one key that differs by view, and it differs because
+a view's rows do. A view of rows filters, dropping the rows that do not
+match; a view of one value searches, moving to the next line of the
+rendering that holds what was typed — a rendering with lines dropped out
+of it is no longer the value's rendering. `n` and `N` move to the next and
+the previous either way, wrapping, and the view says which match of how
+many it is on.
 
 `:` is the general mechanism instead of a key per verb: any shuttle
 command runs with the view's `%n` handles bound to its rows, and the view
 repaints on the result. On `q`, the last view's handles stay valid at the
-prompt (decision 17), so "look, leave, act" needs no retyping.
+prompt (decision 17), so "look, leave, act" needs no retyping. The line
+runs where a line typed at the prompt runs, under the same cancel, so one
+line is in flight at a time whichever of the two took it, and what it
+produced reaches the transcript the way every line's output does. The view
+carries its first line, which is the acknowledgement rather than the
+answer. A line that opens a view of its own is the one thing turned down:
+one frame at a time, the line itself standing.
 
-The value view answers to the motions and the way out — `q`, `j`/`k` and
-the arrows, `g` and `G` — and to `ctrl-c` beside `q`, a full screen wanting
-the way out every terminal program answers to. The rest of the table above
-arrives with the slice that adds it, which
-[`build-sequence.md`](build-sequence.md) names.
+The command line is where a frame is typed at, and it is the only place
+one is. A frame carries the cursor on that row while a line is open on it,
+and hides the cursor otherwise — a frame that is read with a cursor
+sitting on it reads as one that could be typed at.
+
+The value view answers to the motions and the two ways out — `q` and
+`ctrl-c`, `j`/`k` and the arrows, `g` and `G` — and to `/`, `n`/`N`, `e`
+and `:`. `e` there is the cell the view watches, opened through the `edit`
+verb. `enter` and `backspace` arrive with the list view: both want a row
+to drill from, and a value view has a scroll position rather than a
+selection.
 
 ## Reuse of the `cf view` substrate
 

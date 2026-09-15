@@ -1111,8 +1111,9 @@ async function watch(
   }
   // Made and handed over before anything is held, so the lens has its owner
   // before it holds a subscription, and a handover that throws has nothing to
-  // undo.
-  const lens = new ValueLens(armed.label);
+  // undo. It is given both names the watch carries: the short one the frame is
+  // titled with, and the reference `e` composes a line out of.
+  const lens = new ValueLens(armed.label, armed.key);
   deps.adoptLens?.(lens);
   const watching = await subscribed(shuttle, place, at.input, deps, (value) => {
     armed.settled(value);
