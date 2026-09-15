@@ -295,6 +295,29 @@ $ git show 8a029b7dab:packages/patterns/topics/measure-topic-demand.ts | sed -n 
     const others = entities.filter((entity) =>
 ```
 
+`others` counts the attributed documents and `topics` the distinct topics among
+them, and the comparison's `oth` column is `others`. The two are equal in every
+row of the run's figures table, so each other-topic count this record states is
+both a document count and a count of distinct topics:
+
+```
+$ git show 8a029b7dab:packages/patterns/topics/measure-topic-demand.ts | sed -n '/otherDocs: others.length,/,/otherTopics:/p'
+      otherDocs: others.length,
+      otherTopics: new Set(others.map((entity) => owner.get(entity.id))).size,
+$ /usr/bin/grep -c '|  *[0-9][0-9]*  *[0-9][0-9]*  *[0-9][0-9]*  *[0-9][0-9]*  *[0-9][0-9]*  *[0-9][0-9]*\.[0-9]%' packages/patterns/topics/demand-runs/02-ladder.stdout.txt
+208
+$ /usr/bin/grep -c '|  *[0-9][0-9]*  *[0-9][0-9]*  *\([0-9][0-9]*\)  *\1  *[0-9][0-9]*  *[0-9][0-9]*\.[0-9]%' packages/patterns/topics/demand-runs/02-ladder.stdout.txt
+208
+```
+
+The first pattern matches a row of that table: after the scope column, five
+numbers and a percentage. The second matches a row whose third and fourth
+numbers, `others` and `topics`, hold the same value, and it matches all 208 of
+them. The table holds one row per scope for each of the 16 boards the run built,
+and the comparison reads the same figures from the run's JSON lines.
+`/usr/bin/grep` is BSD grep, whose basic regular expressions carry the
+back-reference the second pattern needs.
+
 ## What changed in the rig
 
 The archived rig ran at `cbdf66c3cf`. Commits `a7ac8e4317` to `8a029b7dab`
@@ -342,10 +365,45 @@ So the message of commit `a7ac8e4317`, which says `internal` "is no longer a
 meta link field", is wrong: it was not one at `cbdf66c3cf` either. What the
 archived rig's call returned at `cbdf66c3cf` is not established.
 
-A `schema: true` control on both tables was tried and dropped. The run printed
-its header and no measurement line, and the last stage marker before the
-rejection is the `schema true` query on the `boardCrossrefs` root. Color codes
-removed:
+A `schema: true` control was tried and dropped. The rig carried one on the
+`boardCrossrefs` root and one on the `mentionable` root, the last entry of each
+control table, and none on `boardNames`:
+
+```
+$ git show a7ac8e4317:packages/patterns/topics/measure-topic-demand.ts | sed -n '/const crossrefMutations = await mutationsOf(/,/^  );/p'
+  const crossrefMutations = await mutationsOf(
+    "boardCrossrefs",
+    (base) => [
+      ["nothing named", rowsUnder(base, {})],
+      ["topic only", rowsUnder(base, { topic: { type: "unknown" } })],
+      [
+        "mentionedBy only",
+        rowsUnder(base, {
+          mentionedBy: { type: "array", items: { type: "unknown" } },
+        }),
+      ],
+      ["as declared", base],
+      ["schema true", true],
+    ],
+  );
+$ git show a7ac8e4317:packages/patterns/topics/measure-topic-demand.ts | sed -n '/const mentionableMutations = await mutationsOf(/,/^  );/p'
+  const mentionableMutations = await mutationsOf(
+    "mentionable",
+    (base) => [
+      ["as declared", base],
+      ["piece named", rowsUnder(base, { piece: { type: "unknown" } })],
+      ["schema true", true],
+    ],
+  );
+```
+
+The control run took `--arms=current`, so it built only the board as it stands,
+and it printed its header and no measurement line. The last stage marker before
+the rejection is the `schema true` query on the `boardCrossrefs` root, and no
+stage marker for the `mentionable` control follows it, so the `boardCrossrefs`
+control is the one this block shows refused and the `mentionable` one was never
+reached. No `schema: true` query on `boardNames`, and none on the prototype
+board, is part of this record. Color codes removed:
 
 ```
 $ cat packages/patterns/topics/demand-runs/01-schema-true-control.stdout.txt
@@ -1118,8 +1176,9 @@ $ grep -n -e '^export type NamesMap' -e '^export const ownName' packages/pattern
   reads was not measured. Its comments outside the regions that differ describe
   the originals. `cf check` of `main-rows.tsx` is the only check run on it; no
   pattern test was run against it.
-- **The widest control is a demand naming a reference.** The `schema: true`
-  control was refused (§ What changed in the rig).
+- **The widest control that returned figures is a demand naming a reference.**
+  The `schema: true` control on the `boardCrossrefs` root was refused, and no
+  `schema: true` figure is part of this record (§ What changed in the rig).
 - **One store per board.** Figures from different boards are compared as counts,
   and the returned documents' contents were not compared.
 - **The density of #7439's table.** #7439's body states inbound degree 2 at N =
