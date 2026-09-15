@@ -10,9 +10,15 @@
  * The browser half is carried over, because no compile produces it: the
  * preview a board's graph snapshot reported for each lift and for
  * `cardsByActivity`, and a preview from a compile with pattern coverage on.
- * Each preview carried over is checked against the compiled text recorded
+ * Each preview a board reported is checked against the compiled text recorded
  * beside it, so sources that have moved past the recording fail here, naming
  * what to record again, rather than in the unit tests.
+ *
+ * `instrumentedPreview` is the one field nothing here checks. It stands for
+ * what coverage instrumentation emits, and the tests reading it ask only
+ * whether it holds a coverage hit call, which a compile with coverage off
+ * never writes. A recorded hit call stays one however the Topics sources move,
+ * so the field is carried without a check.
  *
  * Run it from anywhere in the checkout:
  *
@@ -66,7 +72,10 @@ interface Fixture {
   /** The preview the browser reported for {@link COLLIDING_LIFT}. */
   cardsByActivityPreview: string;
 
-  /** A preview recorded from a compile with pattern coverage on. */
+  /**
+   * A preview recorded from a compile with pattern coverage on, carried over
+   * unchecked; the module comment says why.
+   */
   instrumentedPreview: string;
 
   /** Content identity of each compiled Topics module, by `/<module>`. */

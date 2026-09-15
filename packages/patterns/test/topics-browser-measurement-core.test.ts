@@ -11,7 +11,9 @@
  *
  * `packages/patterns/tools/regenerate-topics-measurement-fixture.ts` writes
  * everything a compile produces and carries the previews over, failing when a
- * carried preview no longer matches what the sources compile to.
+ * preview recorded from a board no longer matches what the sources compile to.
+ * The coverage preview is carried unchecked, because the cases reading it ask
+ * only whether it holds a coverage hit call.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -170,6 +172,18 @@ describe("topics-browser-measurement-core", () => {
           "}",
         ].join("\n"),
       );
+    });
+
+    it("reads no declaration out of a comma expression whose left operand is not `0`", () => {
+      const emitted = [
+        "const glazed = (1, commonfabric_2.lift)((value) => value);",
+        "const frosted = (count(), commonfabric_2.lift)((value) => value);",
+      ].join("\n");
+
+      expect(() => compiledLiftText(emitted, "glazed", "/fryer.js"))
+        .toThrow("declaration in /fryer.js, found 0");
+      expect(() => compiledLiftText(emitted, "frosted", "/fryer.js"))
+        .toThrow("declaration in /fryer.js, found 0");
     });
 
     it("throws for a module declaring the lift twice or not at all", () => {

@@ -84,12 +84,16 @@ export const COVERAGE_HIT_CALL = "__cfPatternCoverage?.hit(";
 const SRC_PATTERN = /^cf:module\/([^/]+)(\/.+:\d+:\d+)$/;
 
 /**
- * Returns where the function argument of `name`'s `const <name> = lift(...)`
- * declaration starts in `text`, which is the position the transformer records
- * for a hoisted builder and the runtime reports in each run's `src`. `text` is
- * parsed as TSX, so declaration-shaped text in a string, a comment, a template
- * literal, or a regular expression is not a declaration, and a comment between
- * the call's parenthesis and the function is not part of the argument.
+ * Returns where the first argument of `name`'s `const <name> = lift(...)`
+ * declaration starts in `text`. Where the declaration is written
+ * `lift(<function>)`, that argument is the function, and its position is the
+ * one the transformer records for a hoisted builder and the runtime reports in
+ * each run's `src`. Where it is written `lift(<schema>, <function>)`, the
+ * first argument is the schema, so the position returned is the schema's and
+ * not the one the runs carry. `text` is parsed as TSX, so declaration-shaped
+ * text in a string, a comment, a template literal, or a regular expression is
+ * not a declaration, and a comment between the call's parenthesis and the
+ * first argument is not part of it.
  *
  * @throws If `text` holds no such declaration or more than one; `source` names
  *   the text in the message.
@@ -608,13 +612,16 @@ function liftArguments(
 /**
  * Helper for {@link compiledLiftText}, which returns whether `callee` is the
  * `(0, <alias>.lift)` the compiler emits where the authored source calls an
- * imported `lift`.
+ * imported `lift`. The comma expression's left operand has to be the literal
+ * `0`, so a call that evaluates anything else before reading the same property
+ * is not one of these.
  */
 function isCompiledLiftCallee(callee: ts.Expression): boolean {
   if (!ts.isParenthesizedExpression(callee)) return false;
   const comma = callee.expression;
   return ts.isBinaryExpression(comma) &&
     comma.operatorToken.kind === ts.SyntaxKind.CommaToken &&
+    ts.isNumericLiteral(comma.left) && comma.left.text === "0" &&
     ts.isPropertyAccessExpression(comma.right) &&
     ts.isIdentifier(comma.right.expression) &&
     comma.right.name.text === "lift";

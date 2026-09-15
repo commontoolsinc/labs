@@ -350,13 +350,17 @@ with `packages/patterns` as the program root, as the topic board fixture deploys
 it. The compile takes about a second, so a caller prepares one program and
 passes it to each measurement. A lift is found by name: the helper parses the
 module with the TypeScript compiler's parser, finds the one
-`const <name> = lift(<function>)` declaration in it, and takes the position
-where that function starts, which is the position a run's `src` names, so a
-candidate whose lines moved is measured under the same names. It reads a lift's
-compiled function out of the emitted module the same way, so a bracket or a
-declaration inside a string, a comment, a template literal, or a regular
-expression is read as part of that literal or comment rather than as code. Three checks then tie the running
-code to the compiled program, and each failure names the check that failed.
+`const <name> = lift(...)` declaration in it, and takes the position where that
+call's first argument starts, so a candidate whose lines moved is measured
+under the same names. For the one-argument `lift(<function>)` the Topics lifts
+are written as, that argument is the function, whose position is the one a
+run's `src` names. A lift written `lift(<schema>, <function>)` would yield the
+schema's position instead, which the runs do not carry. The helper reads a
+lift's compiled function out of the emitted module the same way, so a bracket
+or a declaration inside a string, a comment, a template literal, or a regular
+expression is read as part of that literal or comment rather than as code.
+Three checks then tie the running code to the compiled program, and each
+failure names the check that failed.
 Every Topics module an action's `src` names must carry the compiled module's
 content identity, the `<identity>` in `cf:module/<identity>/topics/...`; any
 other identity means the sources read are not the program the board runs. The
@@ -417,7 +421,11 @@ under a plain `deno test`, partly against compiled text, previews, and module
 identities recorded from the Topics sources in a fixture beside that test.
 `packages/patterns/tools/regenerate-topics-measurement-fixture.ts` rewrites
 everything in that fixture a compile produces, and fails when a preview
-recorded from a browser no longer matches what those sources compile to.
+recorded from a browser no longer matches what those sources compile to. The
+one field it carries over without a check is the preview recorded from a
+compile with pattern coverage on: the tests read that preview only for the
+coverage hit call it holds, which a compile with coverage off never writes, and
+a recorded hit call stays one however the Topics sources move.
 
 ## The multiplayer contention benchmark
 
