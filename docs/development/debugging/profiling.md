@@ -573,9 +573,13 @@ process:
   document's base, its newest snapshot, and the newest revision after those that
   the cache still holds, so a document under a run of patch commits costs one
   row per commit while it stays resident and the whole chain since its base or
-  snapshot once it does not. `patchReplays` far above `misses` is that second
-  case: the document is being lost between the commits that write it, and each
-  of them is rebuilding it from the chain.
+  snapshot once it does not. The count climbing is therefore ordinary;
+  `patchReplays` far above `misses` is the second case, where the document is
+  being lost between the commits that write it and each of them is rebuilding it
+  from the chain. Two callers rebuild: a read the cache did not serve, and the
+  commit-time check that the pre-state a patch lands on carries no reserved
+  schema reference, which reads only in a space whose commits or stored rows
+  carry one.
 - `servingLoop` — the serving loop's counters
   ([`serving-loop.md` §7](../../specs/server-side-execution/serving-loop.md)),
   present only when this process serves. `settle.series` is a ready-made

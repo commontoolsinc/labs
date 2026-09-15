@@ -975,7 +975,14 @@ export type DocumentCacheStats = {
    * starts at the newest of the document's base, its newest snapshot, and
    * the newest revision after those that the cache still holds, and replays
    * the rows after that, so what this counts is how far back the rebuild had
-   * to start. */
+   * to start.
+   *
+   * Every rebuild counts, whichever of the two callers asked for it: a read
+   * the cache did not serve, and the commit-time check that the pre-state a
+   * patch lands on carries no reserved schema reference. The second reads
+   * only in a space whose commits or stored rows carry such a reference, and
+   * resumes from the same cache, so it is replay work of the same kind rather
+   * than a separate population. */
   patchReplays: number;
 };
 

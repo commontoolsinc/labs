@@ -29,6 +29,7 @@ import {
   type OpenOptions,
   read,
 } from "../v2/engine.ts";
+import { SYNC_SCHEMA_REF_PREFIX } from "../v2/sync-schema-ref.ts";
 
 /** The one document every test here installs and then patches. */
 const ENTITY = "of:doc";
@@ -160,6 +161,31 @@ describe("v2 document reconstruction", () => {
       installThenPatch(engine);
 
       expect(snapshotSeqs(engine)).toEqual(SNAPSHOT_SEQS);
+    });
+  });
+
+  it("counts the rebuild a commit-time schema-reference check drives", async () => {
+    // A commit whose serialization carries the reserved prefix anywhere — here
+    // as ordinary text, in no schema position, so the check passes — rebuilds
+    // the pre-state to look at it. That rebuild replays rows like any other.
+    await withEngine((engine) => {
+      install(engine);
+      const patch = (localSeq: number, path: string, value: unknown) =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(localSeq, [{
+            op: "patch",
+            id: ENTITY,
+            patches: [{ op: "replace", path, value }],
+          }]),
+        } as never);
+
+      patch(2, "/value/n", 1);
+      const plain = documentCacheDiagnostics(engine).patchReplays;
+      patch(3, "/value/rows/0", `${SYNC_SCHEMA_REF_PREFIX}not-a-schema`);
+
+      expect(plain).toBe(1);
+      expect(documentCacheDiagnostics(engine).patchReplays - plain).toBe(2);
     });
   });
 
