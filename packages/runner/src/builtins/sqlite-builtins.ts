@@ -22,6 +22,7 @@
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { parseLink } from "../link-utils.ts";
 import { settleAbandonedRequest } from "./abandoned-request.ts";
+import { resultRowKeys } from "./sqlite/row-identity.ts";
 import {
   computeRowLabelRead,
   resolveCeilingPlaceholders,
@@ -1400,6 +1401,25 @@ export function sqliteQuery(
                 },
               }
               : labelSchema;
+            // Every row is an entity document of its own under the result
+            // cell, keyed as `resultRowKeys()` decides: a key stands still
+            // across runs for a row that did not change, so the diff finds
+            // nothing to write for it, and a key is drawn only from what a
+            // reader of the unlabeled row links may already see. The
+            // selected database and the handle's `tables` declaration are
+            // namespaces the keys carry on purpose, so a query whose `db`
+            // input moves to another database, or whose handle is
+            // re-declared, lands its rows on documents of their own. Nothing
+            // else that varies between runs may reach a key, or an
+            // unchanged result would mint a document per row per run.
+            const rowKeys = resultRowKeys({
+              rows: resultRows,
+              columns: res.columns,
+              tables: db.tables,
+              database: { space: databaseSpace, id: db.id },
+              columnLabeled: labelSchema !== undefined,
+              rowLabel: (i) => perRow[i],
+            });
             const wrote = await runtime.editWithRetry((wtx) => {
               markEffectCompletion(wtx, effectKey);
               applyRunIdentity(wtx);
@@ -1410,30 +1430,35 @@ export function sqliteQuery(
                 return;
               }
               const base = result.getAsNormalizedFullLink();
+              // The stored link is bare. The row's schema, per-column labels
+              // and row label included, goes on the write alone, whose policy
+              // input is what carries the labels to the row document. A link
+              // carrying a schema would install that schema as a
+              // content-addressed document, and two scoped instances of one
+              // result settling in separate waves would both write it, which
+              // the second wave refuses.
               const storedRows = resultRows.map((row, i) => {
-                if (
-                  !Array.isArray(row) ||
-                  (labelSchema === undefined && perRow[i] === undefined)
-                ) {
-                  return row;
-                }
-                const rowLink = {
-                  ...base,
-                  id: toURI(createRef({ id: i }, {
-                    parent: { id: base.id, space: base.space },
-                    path: [...base.path, "result"],
-                    context: "sqlite-entry-row",
-                  })),
-                  path: [],
-                  schema: {
-                    ...rowSchemas[i],
-                    ...(perRow[i] !== undefined && { ifc: perRow[i] }),
-                  },
+                const schema = {
+                  ...rowSchemas[i],
+                  ...(perRow[i] !== undefined && { ifc: perRow[i] }),
                 };
-                const rowCell = createCell(runtime, rowLink, wtx).asSchema(
-                  rowLink.schema as Parameters<Cell<unknown>["asSchema"]>[0],
-                ).withTx(wtx);
-                rowCell.set(row);
+                const rowCell = createCell(
+                  runtime,
+                  {
+                    ...base,
+                    id: toURI(createRef(rowKeys[i], {
+                      parent: { id: base.id, space: base.space },
+                      path: [...base.path, "result"],
+                      context: "sqlite-result-row",
+                    })),
+                    path: [],
+                    schema: undefined,
+                  },
+                  wtx,
+                );
+                rowCell.asSchema(
+                  schema as Parameters<Cell<unknown>["asSchema"]>[0],
+                ).set(row);
                 return rowCell;
               });
               const target = writeSchema
@@ -1445,11 +1470,11 @@ export function sqliteQuery(
                 requestHash: hash,
                 ...(withheld !== undefined ? { withheld } : {}),
               });
-              // Per-row label attachment (CFC Phase 3): object rows split into
-              // entity docs. Labeled entry-list rows are anchored explicitly
-              // because arrays otherwise remain inline. Both forms attach the
-              // row label at the entity root and retain the per-column labels
-              // in `rowSchemas`.
+              // Per-row label attachment (CFC Phase 3): the row label goes on
+              // the row's own document, at its root, beside the per-column
+              // labels `rowSchemas` carries. The document is read back through
+              // the stored link rather than taken from `storedRows`, so a row
+              // that was not stored as a document of its own is caught here.
               if (anyPerRow) {
                 for (let i = 0; i < resultRows.length; i++) {
                   const ifc = perRow[i];

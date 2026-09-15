@@ -22,6 +22,35 @@ long way without a query-dependency analyzer.
   invalidation pass a narrower cell (e.g. a per-table or per-topic cell they bump
   themselves from the same handler that writes), trading precision for manual
   bookkeeping. v1 does not parse SQL to compute fine-grained read sets.
+- **A row keeps its document across re-runs.** The write-back stores each
+  result row as an entity document of its own under the query's result cell,
+  keyed so that a row which did not change keeps its document and writes
+  nothing to it, and so that the id, which any reader of the result's
+  unlabeled row links can see and recompute, is drawn only from what such a
+  reader may already see. A row carrying no confidentiality is keyed on its
+  content: equal rows share one document, and content the result cell has
+  stored before, in the previous run or any earlier one, reuses that
+  document. A row with per-column labels is keyed on its origin table's
+  primary key when the projection carries the whole key from one table, no
+  key column is labeled, and no two rows share a key, so the row keeps its
+  document wherever it lands in the result and a changed row is rewritten in
+  place. A row without such a key is keyed on its position, and a row under a
+  row label on its position and its label: a document's confidentiality can
+  never weaken, so a document may only ever hold rows of one label, and the
+  label is metadata every document carries in the open, so the id gives away
+  nothing the document does not. The keys that are not content also carry
+  the selected database, its space and id, since a query's `db` input can
+  move to another database whose rows would otherwise land on the same
+  documents; the projection, each output column and its origin, since a
+  query's `sql` input can move to a projection whose columns carry other
+  labels; and the handle's `tables`
+  declaration, because a commit attaches label metadata only to the documents
+  it writes: a stricter re-declaration of a label moves every row to a new
+  document that the commit writes and labels, rather than leaving a row with
+  unchanged content under the label its old document carries. What a re-run
+  writes is the result cell (its `pending` flag, request hash, and the array
+  of row links) plus one document per row whose key is new to this result
+  cell or whose content changed — not one document per row per run.
 
 This is deliberately the same shape the runtime uses elsewhere: reactivity is
 driven by observing cells, and the handle cell's changing `rev` stands in for
