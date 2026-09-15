@@ -23,6 +23,9 @@ import { describe, it } from "@std/testing/bdd";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import { deepFreeze } from "@commonfabric/data-model";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
+import {
+  formatExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
 
 import type { JSONSchema } from "../src/builder/types.ts";
 import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
@@ -38,10 +41,7 @@ import {
 } from "../src/cfc/schema-refs.ts";
 import { validateSchemaValue } from "../src/cfc/schema-sanitization.ts";
 import { resolveSchema, schemaHasIfc } from "../src/schema.ts";
-import {
-  decomposeSchema,
-  formatExternalSchemaRef,
-} from "../src/schema-decompose.ts";
+import { decomposeSchema } from "../src/schema-decompose.ts";
 import {
   acquireSchemaRegistryLease,
   registerSchemaDocument,

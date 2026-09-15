@@ -1,7 +1,10 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { isObjectOrArray } from "@commonfabric/utils/types";
+import {
+  forEachSubschema,
+  isSubschema,
+} from "@commonfabric/data-model-schema/schema-walk";
 import { ContextualFlowControl } from "../cfc.ts";
-import { forEachSubschema, isSubschema } from "../schema-walk.ts";
 import {
   cfcSchemaResolvedRoot,
   resolveCfcSchemaRefRoot,

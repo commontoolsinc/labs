@@ -2,8 +2,6 @@ import {
   type AgentDriver,
   type AgentSessionCommandReceipt,
   type AgentSourceConfig,
-  type CollectedSource,
-  collectSource,
   commandIdentity,
   type CommandTarget,
   type CommandTaskFailure,
@@ -12,6 +10,9 @@ import {
   type PublishedSessionState,
   sessionKey,
   type SessionSummary,
+  type SourceCollection,
+  type StreamingCollectedSource,
+  streamSource,
 } from "@commonfabric/agents-connector";
 import type { CommandLedger } from "@commonfabric/agents-connector/command-ledger";
 import { abortable } from "./abort.ts";
@@ -105,7 +106,7 @@ export interface AgentsHostTarget extends CommandTarget {
   publishedSessions(): Promise<ReadonlyMap<string, PublishedSessionState>>;
   beginSessionObservation(): number;
   publish(
-    collected: CollectedSource[],
+    collected: SourceCollection[],
     options?: {
       observationSequence?: number;
       checkoutDirectories?: string[];
@@ -685,10 +686,14 @@ export class AgentsHost {
     try {
       await this.#publishHealth(signal);
       const published = await this.#publishedSessions(signal);
-      const collected = await Promise.all(
-        [...this.#drivers.entries()].map(([sourceId, driver]) =>
-          this.#collectSource(sourceId, driver, published, signal)
-        ),
+      const collected = [...this.#drivers.entries()].map(
+        ([sourceId, driver]) =>
+          this.#streamSource(
+            sourceId,
+            driver,
+            published,
+            () => publicationCommitted ? undefined : signal,
+          ),
       );
       signal?.throwIfAborted();
       const checkoutDirectories = this.#checkoutRoots.length > 0
@@ -706,6 +711,13 @@ export class AgentsHost {
         signal,
         onCommit: markPublicationCommitted,
       });
+      for (const source of collected) {
+        this.#completeSourceCollection(
+          source.source.id,
+          source,
+          previousSourceStates.get(source.source.id),
+        );
+      }
       const completedAt = this.#now();
       this.#lastSync = {
         reason,
@@ -797,13 +809,12 @@ export class AgentsHost {
     }
   }
 
-  async #collectSource(
+  #streamSource(
     sourceId: string,
     driver: AgentDriver,
     published: ReadonlyMap<string, PublishedSessionState>,
-    signal?: AbortSignal,
-  ): Promise<CollectedSource> {
-    const state = this.#sources.get(sourceId)!;
+    signal: () => AbortSignal | undefined,
+  ): StreamingCollectedSource {
     this.#recordActivity(
       "source-collection-started",
       "Source collection began",
@@ -823,42 +834,62 @@ export class AgentsHost {
         summary.updatedAt !== null && prior.updatedAt === summary.updatedAt &&
         prior.archived === summary.archived && prior.active === summary.active;
     };
-    let collected: CollectedSource;
-    try {
-      collected = await collectSource(driver, { signal, retain });
-    } catch (error) {
-      signal?.throwIfAborted();
-      collected = {
-        source: driver.source,
-        sessions: [],
-        errors: [{ message: errorMessage(error) }],
-        complete: false,
-      };
-    }
+    const collected = streamSource(driver, signal, retain);
+    return {
+      ...collected,
+      sessions: (async function* () {
+        for await (const session of collected.sessions) {
+          readSinceStart.add(
+            sessionKey(sourceId, session.summary.nativeSessionId),
+          );
+          yield session;
+        }
+      })(),
+    };
+  }
 
-    for (const session of collected.sessions) {
-      readSinceStart.add(sessionKey(sourceId, session.summary.nativeSessionId));
+  #completeSourceCollection(
+    sourceId: string,
+    collected: StreamingCollectedSource,
+    previous?: {
+      status: SourceStatus;
+      lastCollectionStartedAt?: string;
+    },
+  ): void {
+    const state = this.#sources.get(sourceId)!;
+    const outcome = collected.outcome;
+    if (!outcome.consumed) {
+      if (previous) {
+        state.status = previous.status;
+        state.lastCollectionStartedAt = previous.lastCollectionStartedAt;
+      }
+      this.#recordActivity(
+        "source-collection-superseded",
+        "Source collection was superseded before it began",
+        undefined,
+        sourceId,
+      );
+      return;
     }
-    const retainedCount = collected.retained?.length ?? 0;
-    state.capabilities = structuredClone(driver.source.capabilities);
-    state.sessionCount = collected.sessions.length + retainedCount;
-    state.complete = collected.complete;
-    state.errors = structuredClone(collected.errors);
+    const retainedCount = collected.retained.length;
+    state.capabilities = structuredClone(collected.source.capabilities);
+    state.sessionCount = outcome.sessionCount + retainedCount;
+    state.complete = outcome.complete;
+    state.errors = structuredClone(outcome.errors);
     state.lastCollectionCompletedAt = this.#now();
-    state.lastError = collected.errors[0]?.message;
-    state.status = collected.complete ? "ready" : "degraded";
+    state.lastError = outcome.errors[0]?.message;
+    state.status = outcome.complete ? "ready" : "degraded";
     this.#recordActivity(
       "source-collection-completed",
       "Source collection completed",
       {
-        complete: collected.complete,
-        errorCount: collected.errors.length,
-        sessionCount: collected.sessions.length,
+        complete: outcome.complete,
+        errorCount: outcome.errors.length,
+        sessionCount: outcome.sessionCount,
         retainedCount,
       },
       sourceId,
     );
-    return collected;
   }
 
   #operationalStatus(): "ready" | "degraded" {

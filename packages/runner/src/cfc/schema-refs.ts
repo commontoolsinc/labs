@@ -5,17 +5,23 @@ import {
   toCompactDebugString,
 } from "@commonfabric/data-model";
 import { internSchema } from "@commonfabric/data-model-schema";
-import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
-import { utf8Compare } from "@commonfabric/utils/utf8";
-
-import { decodeJsonPointer, encodeJsonPointer } from "../link-types.ts";
 import {
   forEachSubschema,
   isSubschema,
   mapSubschemas,
   type SchemaWalkOptions,
-} from "../schema-walk.ts";
+} from "@commonfabric/data-model-schema/schema-walk";
+import {
+  type ExternalSchemaRef,
+  formatExternalSchemaRef,
+  isExternalSchemaRef,
+  parseExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import { utf8Compare } from "@commonfabric/utils/utf8";
+
+import { decodeJsonPointer, encodeJsonPointer } from "../link-types.ts";
 
 // `$ref` discovery / rewriting must be COMPLETE over every subschema keyword,
 // including the ones we never emit: a ref this walk misses is a schema doc that
@@ -27,12 +33,6 @@ import {
   embeddedSchemas,
   isEmbeddedCfcSchemaRef,
 } from "../embedded-schemas.ts";
-import {
-  type ExternalSchemaRef,
-  formatExternalSchemaRef,
-  isExternalSchemaRef,
-  parseExternalSchemaRef,
-} from "../schema-decompose.ts";
 import {
   externalResolutionMissCount,
   isSchemaDocumentClosureComplete,

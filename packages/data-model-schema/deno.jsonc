@@ -27,6 +27,9 @@
     ]
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./schema-closure": "./src/schema-closure.ts",
+    "./schema-refs": "./src/schema-refs.ts",
+    "./schema-walk": "./src/schema-walk.ts"
   }
 }

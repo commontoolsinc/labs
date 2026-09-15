@@ -1,6 +1,10 @@
 import { JSONSchemaObj, type JSONValue } from "@commonfabric/api";
 import { isDeepFrozen } from "@commonfabric/data-model";
 import { internSchema } from "@commonfabric/data-model-schema";
+import { forEachSubschema } from "@commonfabric/data-model-schema/schema-walk";
+import {
+  isExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
@@ -26,8 +30,6 @@ import {
   resolveCfcSchemaRefsOrThrow,
   selectReferencedCfcSchemaDefs,
 } from "./cfc/schema-refs.ts";
-import { isExternalSchemaRef } from "./schema-decompose.ts";
-import { forEachSubschema } from "./schema-walk.ts";
 import {
   externalResolutionMissCount,
   onSchemaRegistryClear,

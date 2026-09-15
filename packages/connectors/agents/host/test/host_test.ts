@@ -10,6 +10,7 @@ import {
   type PromptInput,
   type PublishedSessionState,
   type SessionPage,
+  type SourceCollection,
 } from "@commonfabric/agents-connector";
 import {
   assertEquals,
@@ -200,6 +201,8 @@ class FakeTarget implements AgentsHostTarget {
   failedTerminalAttempt = Promise.withResolvers<void>();
   commandFailureHealth = Promise.withResolvers<Record<string, unknown>>();
   afterPublish?: () => void;
+  commitAfterFirstSession = false;
+  consumeCollections = true;
   healthGate?: {
     entered: PromiseWithResolvers<void>;
     release: PromiseWithResolvers<void>;
@@ -223,8 +226,8 @@ class FakeTarget implements AgentsHostTarget {
     return sequence;
   }
 
-  publish(
-    collected: CollectedSource[],
+  async publish(
+    collections: SourceCollection[],
     options?: {
       observationSequence?: number;
       checkoutDirectories?: string[];
@@ -232,6 +235,33 @@ class FakeTarget implements AgentsHostTarget {
       onCommit?: () => void;
     },
   ): Promise<number> {
+    const collected: CollectedSource[] = [];
+    let committed = false;
+    const commit = () => {
+      if (committed) return;
+      committed = true;
+      options?.onCommit?.();
+      this.afterPublish?.();
+    };
+    for (const source of collections) {
+      if (!this.consumeCollections && "outcome" in source) continue;
+      const sessions: NativeSessionSnapshot[] = [];
+      for await (const snapshot of source.sessions) {
+        sessions.push(snapshot);
+        if (this.commitAfterFirstSession) commit();
+      }
+      const outcome = "outcome" in source ? source.outcome : {
+        errors: source.errors,
+        complete: source.complete,
+      };
+      collected.push({
+        source: source.source,
+        sessions,
+        retained: source.retained,
+        errors: outcome.errors,
+        complete: outcome.complete,
+      });
+    }
     this.publications.push(structuredClone(collected));
     if (options?.observationSequence !== undefined) {
       this.observationSequences.push(options.observationSequence);
@@ -239,10 +269,11 @@ class FakeTarget implements AgentsHostTarget {
     if (options?.checkoutDirectories !== undefined) {
       this.checkoutDirectories.push([...options.checkoutDirectories]);
     }
-    options?.onCommit?.();
-    this.afterPublish?.();
-    return Promise.resolve(
-      collected.reduce((count, source) => count + source.sessions.length, 0),
+    commit();
+    return collected.reduce(
+      (count, source) =>
+        count + source.sessions.length + (source.retained?.length ?? 0),
+      0,
     );
   }
 
@@ -462,6 +493,37 @@ Deno.test("AgentsHost publishes sessions, health, and lifecycle activity", async
       target.healthValues.some((value) => value.status === "stopping"),
       true,
     );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("AgentsHost preserves source health for a superseded collection", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const target = new FakeTarget();
+    const host = new AgentsHost({
+      sources: [sourceConfig("codex")],
+      target,
+      targetDescription: TARGET_DESCRIPTION,
+      ledger: await openLedger(directory),
+      createDriver: () => new FakeDriver("codex"),
+      clock: clock(),
+    });
+
+    assertEquals(await host.start({ acceptCommands: false }), 1);
+    target.consumeCollections = false;
+    assertEquals(await host.synchronize("superseded"), 0);
+    assertEquals(host.health().status, "ready");
+    assertEquals(host.health().sources[0].status, "ready");
+    assertEquals(host.health().sources[0].sessionCount, 1);
+    assertEquals(
+      host.health().activity.some((event) =>
+        event.type === "source-collection-superseded"
+      ),
+      true,
+    );
+    await host.stop();
   } finally {
     await Deno.remove(directory, { recursive: true });
   }
@@ -1132,7 +1194,22 @@ Deno.test("AgentsHost completes a sync committed before cancellation", async () 
   const directory = await Deno.makeTempDir();
   try {
     const driver = new FakeDriver("codex");
+    const secondSnapshot = structuredClone(driver.snapshot);
+    secondSnapshot.summary.nativeSessionId = "codex-session-2";
+    driver.listSessions = (cursor?: string) =>
+      Promise.resolve(
+        cursor
+          ? { sessions: [secondSnapshot.summary] }
+          : { sessions: [driver.snapshot.summary], nextCursor: "next" },
+      );
+    driver.readSession = (nativeSessionId?: string) =>
+      Promise.resolve(
+        nativeSessionId === secondSnapshot.summary.nativeSessionId
+          ? secondSnapshot
+          : driver.snapshot,
+      );
     const target = new FakeTarget();
+    target.commitAfterFirstSession = true;
     const host = new AgentsHost({
       sources: [sourceConfig("codex")],
       target,
@@ -1149,7 +1226,7 @@ Deno.test("AgentsHost completes a sync committed before cancellation", async () 
     };
     assertEquals(
       await host.synchronize("committed", controller.signal),
-      1,
+      2,
     );
     assertEquals(host.health().sync?.status, "complete");
     assertEquals(host.health().sync?.reason, "committed");

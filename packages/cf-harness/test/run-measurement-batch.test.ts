@@ -2442,6 +2442,79 @@ describe("run-measurement-batch", () => {
       expect(allowed.code).toBe(0);
     });
 
+    it("runs against `origin/main` by default when local `main` is stale, while honoring `--base=main`", async () => {
+      const repository = await Deno.makeTempDir();
+      temporaryDirectories.push(repository);
+      const runGit = (args: readonly string[]) =>
+        new Deno.Command("git", {
+          args: [...args],
+          cwd: repository,
+          clearEnv: true,
+          env: {
+            PATH: Deno.env.get("PATH") ?? "",
+            GIT_CONFIG_NOSYSTEM: "1",
+            GIT_CONFIG_GLOBAL: "/dev/null",
+            GIT_AUTHOR_NAME: "Test",
+            GIT_AUTHOR_EMAIL: "test@example.com",
+            GIT_COMMITTER_NAME: "Test",
+            GIT_COMMITTER_EMAIL: "test@example.com",
+          },
+        }).output();
+      const git = async (...args: string[]): Promise<string> => {
+        const output = await runGit(args);
+        expect(output.code, new TextDecoder().decode(output.stderr)).toBe(0);
+        return new TextDecoder().decode(output.stdout).trim();
+      };
+      await git("init", "--bare", "--template=");
+      const tree = await git("mktree");
+      const stale = await git("commit-tree", tree, "-m", "Local main");
+      const current = await git(
+        "commit-tree",
+        tree,
+        "-p",
+        stale,
+        "-m",
+        "Server commit",
+      );
+      await git("update-ref", "refs/heads/main", stale);
+      await git("update-ref", "refs/remotes/origin/main", current);
+      const postureReader = postureAsking(runGit);
+      const options = {
+        streams: [completedStream()],
+        runId: "fixture-run",
+        artifactRoot: FIXTURE_ROOT,
+        meta: { ...META, gitSha: current },
+      };
+
+      const explicit = await runMain(
+        options,
+        ONE_TASK,
+        ["--base=main"],
+        postureReader,
+      );
+      expect(explicit.code).toBe(4);
+      const refused = JSON.parse(
+        await Deno.readTextFile(`${explicit.dir}/out/report.json`),
+      );
+      expect(refused.posture.ancestry).toEqual({
+        kind: "diverged",
+        base: "main",
+      });
+      expect(refused.results).toEqual([]);
+
+      const { code, dir } = await runMain(options, ONE_TASK, [], postureReader);
+      expect(code).toBe(0);
+      const report = JSON.parse(
+        await Deno.readTextFile(`${dir}/out/report.json`),
+      );
+      expect(report.posture.ancestry).toEqual({
+        kind: "ancestor",
+        base: "origin/main",
+      });
+      expect(report.results).toHaveLength(1);
+      expect(report.results[0].outcome.kind).toBe("turn_completed");
+    });
+
     it("returns 5 and runs no task when status names no top-level artifact root", async () => {
       const { code, dir, logs } = await runMain({
         streams: [completedStream()],

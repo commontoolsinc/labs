@@ -4,6 +4,10 @@ import {
   linkRefFrom,
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
+import {
+  decodeJsonPointer,
+  encodeJsonPointer,
+} from "@commonfabric/utils/json-pointer";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   type CellScope,
@@ -24,6 +28,8 @@ import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
+
+export { decodeJsonPointer, encodeJsonPointer };
 
 /** The scopes an `@scope` suffix on a link handle may name. */
 export const CELL_SCOPE_VALUES: ReadonlySet<string> = new Set([
@@ -375,30 +381,6 @@ export function addressKey(
     addr.scope,
     addr.path,
   ]);
-}
-
-/**
- * Encodes a JSON Pointer path according to RFC 6901.
- * Each token has ~ replaced with ~0 and / replaced with ~1, then joined with /.
- * @param path - Array of path tokens to encode
- * @returns The encoded JSON Pointer string
- */
-export function encodeJsonPointer(path: readonly string[]): string {
-  return path
-    .map((token) => token.replace(/~/g, "~0").replace(/\//g, "~1"))
-    .join("/");
-}
-
-/**
- * Decodes a JSON Pointer string according to RFC 6901.
- * Splits by / then replaces ~1 with / and ~0 with ~ in each token.
- * @param pointer - The JSON Pointer string to decode
- * @returns Array of decoded path tokens
- */
-export function decodeJsonPointer(pointer: string): string[] {
-  return pointer
-    .split("/")
-    .map((token) => token.replace(/~1/g, "/").replace(/~0/g, "~"));
 }
 
 /** A canonical array-index token: `0`, or digits without a leading zero. */

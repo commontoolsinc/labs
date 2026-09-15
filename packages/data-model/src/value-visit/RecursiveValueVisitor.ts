@@ -31,7 +31,7 @@ import {
  * selectively, by overriding `visitFabricContainer()` to return
  * `DO_VISIT_SUBTYPE` and then whatever specific subtypes need to be altered.
  */
-export abstract class ContainerIteratingValueVisitor<
+export abstract class RecursiveValueVisitor<
   DomainExtra = never,
   ResultType = FabricValue,
 > extends BaseValueVisitor<DomainExtra, ResultType> {

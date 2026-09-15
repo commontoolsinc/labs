@@ -95,3 +95,18 @@ export function renderValue(
     ? `The value is a ${typeof value}, which JSON has no way to write.`
     : escapeControlCharactersInJson(json);
 }
+
+/**
+ * The name of `value`'s class, for prose naming what a value is rather than
+ * writing it out.
+ *
+ * Read off the prototype rather than the value, as the fabric's own refusals
+ * read it: an own `constructor` property is ordinary data, so a value could
+ * otherwise choose the name it is named under. A class that will not say what
+ * it is called — a class expression with no name — is named for what it is
+ * instead.
+ */
+export function classOf(value: object): string {
+  const named = Object.getPrototypeOf(value)?.constructor?.name;
+  return typeof named === "string" && named !== "" ? named : "fabric value";
+}

@@ -7,6 +7,10 @@ import {
   internSchemaAsTaggedHashString,
 } from "@commonfabric/data-model-schema";
 import {
+  containsExternalSchemaRef,
+  parseExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
+import {
   acquireSchemaRegistryLease,
   isSchemaDocumentClosureComplete,
   lookupSchemaDocument,
@@ -15,10 +19,8 @@ import {
 } from "../src/schema-registry.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
-  containsExternalSchemaRef,
   type DecomposedSchema,
   decomposeSchema,
-  parseExternalSchemaRef,
 } from "../src/schema-decompose.ts";
 import { resolveSchema, schemaHasIfc } from "../src/schema.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";

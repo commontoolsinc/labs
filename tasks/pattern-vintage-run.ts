@@ -54,6 +54,7 @@ import {
   acceptedDropsFor,
   withoutAcceptedDrops,
 } from "./pattern-vintage-accepted-drops.ts";
+import { derivedCorrectionsFor } from "./pattern-vintage-derived-corrections.ts";
 
 export interface GateRoots {
   /** Repo root, used only to shorten paths in reports. */
@@ -377,6 +378,7 @@ export async function replayVintage(
     }/ deliberately, then \`deno task pattern-vintage --update ` +
     `${vintage.testKey}\``;
 
+  const corrections = await derivedCorrectionsFor(vintage, roots.repoRoot);
   return await withRuntime(roots, vintage.path, async (runtimeVintage) => {
     // The control, before anything is applied. A fixture that did not restore
     // presents as a fresh empty space, and today's source materializes onto a
@@ -848,10 +850,11 @@ export async function replayVintage(
             report.dropsApplied.add(acceptedDropKey(drops.pattern, path));
           }
         }
-        const findings = strandedKeys(
+        const rawFindings = strandedKeys(
           keptBefore.value as Record<string, unknown>,
           keptAfter.value,
         );
+        const findings = corrections?.grade(entry, rawFindings) ?? rawFindings;
         const describe = (finding: typeof findings[number]) =>
           `${finding.key} (was ${snippet(finding.before)}, now ${
             snippet(finding.after)
@@ -910,6 +913,13 @@ export async function replayVintage(
       // route — which has no changed answer — is not one of them. It was still
       // materialized and compared; any finding above has already been reported.
       if (!servedRoute) report.updated++;
+    }
+    for (const cellId of corrections?.unused() ?? []) {
+      report.failures.push({
+        ...where,
+        detail: `approved derived-state correction for ${cellId} was unused; ` +
+          "remove or re-evaluate its decision",
+      });
     }
     return report;
   });

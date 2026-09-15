@@ -9116,21 +9116,16 @@ supply; OW29/OW32/OW34 closed):
     `SchemaMismatchError` subclass, so the action-run boundary's
     existing "argument did not resolve" disposal treats it identically
     — output `undefined`, no action failure, re-triggered when any
-    registered read changes; for a synchronous lift body the previous
-    result stands today, the pinning test's case has no previous
-    result, and the fix is the one the [design plan's Stage
-    5](../../plans/lazy-cell-materialization.md) names), UNLESS the
-    reader's schema declares a default (the stated absent value still
-    flows — the `get() ?? fallback` idiom and a not-yet-produced
-    computed are unchanged). A dead-end at the handle's OWN root doc
-    is likewise not this shape. The (ii) lift-throw clause holds by
-    inheritance for an asynchronous body's rejection: the refusal
-    propagating out of the body takes the same disposal, while a
-    synchronous body's throw leaves the previous result standing until
-    the fix named above lands; a pattern body MINTING the error is the
-    FLAGGED pattern-facing-export question, still with the owner.
-    Server matches client by construction (`servingPosture` gates
-    nothing on this path). Pinned:
+    registered read changes), UNLESS the reader's schema declares a
+    default (the stated absent value still flows — the
+    `get() ?? fallback` idiom and a not-yet-produced computed are
+    unchanged). A dead-end at the handle's OWN root doc is likewise
+    not this shape. The (ii) lift-throw clause holds by inheritance:
+    the refusal propagating out of the body takes the same disposal; a
+    pattern body MINTING the error is the FLAGGED
+    pattern-facing-export question, still with the owner. Server
+    matches client by construction (`servingPosture` gates nothing on
+    this path). Pinned:
     `packages/runner/test/unresolved-input-lift.test.ts` (the
     hop-target dead-end disposes and re-triggers on arrival; the
     stated-null control still flows), the full schema-view suite

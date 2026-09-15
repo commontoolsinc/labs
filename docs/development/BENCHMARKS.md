@@ -555,3 +555,23 @@ are part of their respective measurements.
 
 The [phase measurement report](../history/development/performance/2026-09-11-index-maintenance-phases.md)
 records the validated local count matrix and its limits.
+
+## JSON Pointer encoding
+
+`packages/memory/test/v2-path.bench.ts` measures encoding 256 distinct paths and
+looking each result up in a prebuilt Map. The lookup consumes the encoded
+string, including hashing or flattening deferred by string construction. Fixture
+construction and checksum validation are outside the timed interval.
+
+The plain-path cases sweep depths 1, 4, and 12. Separate depth-4 cases use long
+segments or both JSON Pointer escape characters in every segment. These
+synthetic controls distinguish segment traversal from character scanning and
+escaping; their proportions do not estimate a deployed workload. Run with:
+
+```sh
+deno bench --no-lock --json packages/memory/test/v2-path.bench.ts
+```
+
+The
+[local encoding measurement](../history/development/performance/2026-09-14-encode-pointer.md)
+records interleaved comparisons and their limits.

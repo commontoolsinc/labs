@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Stale derived-state correction decision](development/2026-09-14-derived-state-correction.md) — approval and exact fixture scope for two calculated lunch-poll status corrections, consequences, and alternatives.
+
 - [Lazy-off integration evidence](development/performance/2026-09-14-lazy-off-integration.md) — isolated runner, runtime-client, and shell/browser integration results with eager materialization, explicit execution postures, and retirement evidence limits.
 - [Notebook reload materialization evidence](development/performance/2026-09-14-lazy-materialization-reload-evidence.md) — 2026-09-14: eager-mode browser errors, an unresolved default-on control failure, and a passing instrumented control on isolated synthetic data.
 
@@ -188,6 +190,10 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [pr3154-review-guide.md](specs/ts-transformer/pr3154-review-guide.md) — reviewer entrypoint for the shipped PR-3154 transformer architecture.
 
 ## Investigations, journals, and working notes
+
+- [JSON Pointer encoding](development/performance/2026-09-14-encode-pointer.md) — interleaved encoder and Map lookup measurements, guarded escaping, semantic checks, and limits on deployed impact.
+- [JSON Pointer encoding replay](development/performance/2026-09-14-encode-pointer-replay.py) — portable adjacent-pair driver accepting baseline and fixed checkout roots and an output path.
+- [JSON Pointer encoding measurements](development/performance/2026-09-14-encode-pointer.results.json) — raw Deno reports, adjacent paired samples, source hashes, and replay drivers.
 
 - [Consumed label-map width](development/performance/2026-09-14-cfc-consumed-label-index.md) — paired measurements of per-document metadata validation and indexed path lookup, predicate and order regressions, and bounded nested-array probes that leave the Loom gap unresolved.
 - [Consumed label-map width measurements](development/performance/2026-09-14-cfc-consumed-label-index.results.json) — paired collector samples, load readings, source hashes, diagnostic drivers, and nested-array probe output.
