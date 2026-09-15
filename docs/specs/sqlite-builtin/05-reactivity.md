@@ -31,8 +31,8 @@ long way without a query-dependency analyzer.
   row it has never stored, or has stored only under another schema, gets a
   new document; two rows of equal content and label share one. What a re-run
   writes is the result cell (its `pending` flag, request hash, and the array
-  of row links) plus one document per row that is new to this result cell —
-  not one document per row per run. The schema is part of the key because a
+  of row links) plus one document per distinct content-and-schema key that is
+  new to this result cell — not one document per row per run. The schema is part of the key because a
   commit attaches label metadata only to the documents it writes: a row whose
   content is unchanged but whose label is stricter than before takes a new
   document rather than keeping the label its old one carries.
