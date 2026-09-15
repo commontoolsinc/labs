@@ -5,6 +5,7 @@ import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 
 import type { JSONSchema } from "../../src/builder/types.ts";
+import { isKnownCfcMetadataVersion } from "../../src/cfc/metadata.ts";
 import { Runtime } from "../../src/runtime.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import {
@@ -281,6 +282,9 @@ describe("prepareBoundaryCommit()", () => {
     ] as const
   ) {
     it(`fails closed on a consumed ${name} envelope even when the target declares no gate`, async () => {
+      if (name === "unknown-version") {
+        expect(isKnownCfcMetadataVersion(cfc.version)).toBe(false);
+      }
       const { runtime, storageManager } = makeRuntime("off");
       try {
         const seed = runtime.edit();
