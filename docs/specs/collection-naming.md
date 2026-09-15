@@ -734,11 +734,32 @@ in `NamingDeclaration` (`packages/patterns/collection-naming/naming.ts`) — and
 resolver reading it could verify that a binding and its target agree and report
 a mismatch. Nothing reads the declaration: no collection sets `name`, no
 resolver compares one, and member resolution
-(`packages/runner/src/slug-resolution.ts`) is a map lookup that consults neither
-the declared grammar nor the policy. Making one consumer real is
-[#6986](https://github.com/commontoolsinc/labs/issues/6986), whose natural first
-consumer is that check, with a name assigned onto a collection written into the
-declaration.
+(`packages/runner/src/slug-resolution.ts`) reads no part of it. Making one
+consumer real is [#6986](https://github.com/commontoolsinc/labs/issues/6986),
+whose natural first consumer is that check, with a name assigned onto a
+collection written into the declaration.
+
+**Whether member resolution applies a collection's grammar.** It applies no
+member-name grammar
+([#6994](https://github.com/commontoolsinc/labs/issues/6994)):
+`resolveSlugReference` (`packages/runner/src/slug-resolution.ts`) looks the
+segment after a collection's name up as a key of that collection's map. The
+allocator's grammar lives in the collection's library, as `isMemberName` in
+`packages/patterns/collection-naming/naming.ts`. So a key the allocator would
+never issue still resolves: `top/007` resolves to whatever piece a writer stored
+under the key `007`, while the names table publishes no row for it.
+
+The resolver does not hardcode that grammar because the two sit at opposite ends
+of the pace layers in `AGENTS.md`: the decimal grammar belongs to the
+collection's library, in `packages/patterns` at the top, and the resolver sits
+in `runner`, at the foundation. Hardcoded, it would also refuse the members of
+any collection that names them some other way, such as `docs/getting-started` in
+"Names resolve through collections". Applying each collection's own grammar
+would take reading it from the collection's `naming` declaration. Nothing reads
+that declaration today (the question above,
+[#6986](https://github.com/commontoolsinc/labs/issues/6986)), and it carries no
+rule a key could be tested against: its fields are `name`, `policy`, and
+`compact`. That route is open, not planned.
 
 **Whether a collection accepting names from people** reuses the space-level
 claim path or needs its own.
