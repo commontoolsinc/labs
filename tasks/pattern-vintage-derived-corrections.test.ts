@@ -84,6 +84,36 @@ describe("pattern-vintage-derived-corrections", () => {
     expect(findings.every((finding) => finding.lost)).toBe(true);
   });
 
+  it("fails unused approvals when the recorded patterns cannot be replayed", async () => {
+    const dir = await Deno.makeTempDir();
+    const record =
+      "docs/history/development/2026-09-14-derived-state-correction.md";
+    try {
+      await Deno.mkdir(dir + "/docs/history/development", { recursive: true });
+      await Deno.copyFile(repoRoot + "/" + record, dir + "/" + record);
+      const report = await replayVintage({
+        repoRoot: dir,
+        patternsRoot: dir + "/packages/patterns",
+        vintagesRoot: dir + "/packages/piece/test/vintages",
+        signer: await Identity.fromPassphrase("pattern vintage fixture"),
+      }, fixture);
+      expect(report.targets).toBeGreaterThan(0);
+      expect(report.updated).toBe(0);
+      expect(
+        report.failures.filter((failure) =>
+          failure.detail.startsWith("approved derived-state correction")
+        ).map((failure) => failure.detail),
+      ).toEqual(
+        [entry.cellId, secondRoot].map((root) =>
+          `approved derived-state correction for ${root} was unused; ` +
+          "remove or re-evaluate its decision"
+        ),
+      );
+    } finally {
+      await Deno.remove(dir, { recursive: true });
+    }
+  });
+
   it("keeps losses on other roots, scopes, patterns, exports, and identities", async () => {
     const policy = (await derivedCorrectionsFor(fixture, repoRoot))!;
     const findings = strandedKeys({ artSyncState: "generated" }, {
