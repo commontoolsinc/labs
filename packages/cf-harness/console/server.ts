@@ -115,6 +115,12 @@ import {
 } from "../src/sandbox/docker-runsc.ts";
 import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
+import {
+  ALLOWED_SKILL_SCRIPTS_VARIABLE,
+  assertAllowedSkillScriptsAddressable,
+  parseAllowedSkillScriptsVariable,
+  resolveAllowedSkillScripts,
+} from "./allowed-skill-scripts.ts";
 import { parseConnectorGrants } from "./connector-grants.ts";
 import { type ConsolePolicyReport, consolePolicyReport } from "./policy.ts";
 import { liveCanonicalRedirect } from "./src/mount.ts";
@@ -534,13 +540,14 @@ export const resolveConsoleConfig = async (
       "fabric-cfc-flow-labels",
       "fabric-cfc-posture",
       "system-prompt-file",
+      "allow-skill-script",
     ],
     boolean: [
       "no-child-composition-guidance",
       "no-pattern-index-publish",
       "pattern-index-publish-discoverable",
     ],
-    collect: ["host-mount"],
+    collect: ["host-mount", "allow-skill-script"],
   });
   const flag = (name: string): string | undefined =>
     typeof parsed[name] === "string" ? nonEmpty(parsed[name]) : undefined;
@@ -671,6 +678,29 @@ export const resolveConsoleConfig = async (
     nonEmpty(env.CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE) === "1";
   const skillsRegistryUrl = flag("skills-registry-url") ??
     nonEmpty(env.CF_HARNESS_SKILLS_REGISTRY_URL);
+
+  // Which skill script a run may execute, as the operator decided it: the
+  // flag where a launch names entries, else the variable a launcher resolved
+  // them into. A console given neither allows none, and a run that asks for a
+  // script then reads a refusal rather than finding the tool absent.
+  const namedSkillScripts = parsed["allow-skill-script"] as string[];
+  const inheritedSkillScripts = nonEmpty(env[ALLOWED_SKILL_SCRIPTS_VARIABLE]);
+  const allowedSkillScripts = namedSkillScripts.length > 0
+    ? resolveAllowedSkillScripts(namedSkillScripts, "--allow-skill-script")
+    : inheritedSkillScripts === undefined
+    ? []
+    : resolveAllowedSkillScripts(
+      parseAllowedSkillScriptsVariable(inheritedSkillScripts),
+      ALLOWED_SKILL_SCRIPTS_VARIABLE,
+    );
+  // The CONFIGURED root, not any resolved one. A checkout fallback is read on
+  // the host and carries no sandbox mapping, so it gives a registry script no
+  // address inside the sandbox it runs in — the same reason the batch CLI asks
+  // for the flag rather than accepting its own fallback.
+  assertAllowedSkillScriptsAddressable(
+    allowedSkillScripts,
+    skillsRootRecord?.source === "configured",
+  );
   const sessionDb = flag("session-db") ??
     nonEmpty(env.CF_HARNESS_CONSOLE_SESSION_DB) ??
     join(dataDir, "sessions.sqlite");
@@ -733,11 +763,11 @@ export const resolveConsoleConfig = async (
       cwd,
     ),
     // The rest of the session description this surface does not vary. Skills
-    // are scanned rather than preloaded by name, scripts are not allowlisted,
-    // handles materialize nowhere, and a task's input cells and pattern
-    // references arrive per task on `/api/task` rather than at startup.
+    // are scanned rather than preloaded by name, handles materialize nowhere,
+    // and a task's input cells and pattern references arrive per task on
+    // `/api/task` rather than at startup.
     skillNames: [],
-    allowedSkillScripts: [],
+    allowedSkillScripts,
     skillScriptExecutionTarget: "sandbox",
     handleValueOrigins: [],
     inputCells: [],

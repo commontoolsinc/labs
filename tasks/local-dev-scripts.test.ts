@@ -92,6 +92,20 @@ describe("local-dev-scripts", () => {
       expect(stderr).toContain("shell exited before it became ready");
     });
 
+    it("refuses `--allow-skill-script` with no value", async () => {
+      // Without this the next flag becomes the value, and
+      // `--allow-skill-script --cf-harness` starts no console at all — a
+      // failure that reads as the flag simply not working.
+      const { code, stderr } = await runScript(
+        "start-local-dev.sh",
+        REACHABLE_OFFSET,
+        { args: ["--allow-skill-script", "--cf-harness"] },
+      );
+
+      expect(code).toBe(1);
+      expect(stderr).toContain("--allow-skill-script requires a value");
+    });
+
     it("answers from the recorded list, not from the environment", async () => {
       const { code, stderr } = await runScript(
         "start-local-dev.sh",

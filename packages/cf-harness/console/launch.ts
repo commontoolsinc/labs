@@ -39,6 +39,12 @@ import {
   DEFAULT_DOCKER_BINARY,
   registeredCfcSidecarHostDirs,
 } from "../src/sandbox/docker-runsc.ts";
+import { allowedSkillScriptKey } from "../src/skills/scripts.ts";
+import {
+  ALLOWED_SKILL_SCRIPTS_VARIABLE,
+  parseAllowedSkillScriptsVariable,
+  resolveAllowedSkillScripts,
+} from "./allowed-skill-scripts.ts";
 import { resolveConnectorGrants } from "./connector-grants.ts";
 import { startConsoleServer } from "./server.ts";
 
@@ -57,6 +63,22 @@ const RUNSC_CFC_RUNTIME = "runsc-cfc";
 export const DEPLOYMENT_PATTERN_INDEX_URL =
   "https://us-central1-pattern-index.cloudfunctions.net";
 export const DEPLOYMENT_SKILLS_REGISTRY_URL = "https://skills.sh";
+
+/**
+ * The acquired-skill script every console in this deployment allows, so that
+ * the budget experience runs from the pill with no entry typed at launch.
+ *
+ * An entry keys on the pin its bytes were read at, so the commit is part of
+ * the decision rather than a detail of it: what is allowed here is one version
+ * of one script in one repository. Changing
+ * `packages/cf-harness/fixtures/acquirable-skills/cf-spend-digest` therefore
+ * means changing this constant to the commit that carries the change, and a
+ * console whose operator wants neither this entry nor any other passes
+ * `--no-allow-skill-script`.
+ */
+export const DEPLOYMENT_DEMO_ALLOWED_SKILL_SCRIPT =
+  "commontoolsinc/labs/cf-spend-digest@" +
+  "dfc2ddb4a432c4bb5f26413542c35a42c79a131e:scripts/category-budgets.sh";
 
 /**
  * Proxy variables reach the console as ambient environment and break it two
@@ -96,6 +118,7 @@ export const LAUNCHER_OWNED_VARIABLES = [
   "CF_HARNESS_CONNECTOR_GRANTS",
   "CF_HARNESS_PATTERN_INDEX_URL",
   "CF_HARNESS_SKILLS_REGISTRY_URL",
+  ALLOWED_SKILL_SCRIPTS_VARIABLE,
   "CF_HARNESS_SPACE_DB",
   "MEMORY_DIR",
 ] as const;
@@ -183,6 +206,9 @@ export interface ConsoleLaunchOptions {
   skillsRegistryUrl?: string;
   noPatternIndex?: boolean;
   noSkillsRegistry?: boolean;
+  allowedSkillScripts?: readonly string[];
+  noAllowedSkillScripts?: boolean;
+  inheritedAllowedSkillScripts?: readonly string[];
   cfcResultDir?: string;
   cfcInvocationContextDir?: string;
   posture?: string;
@@ -449,6 +475,15 @@ export const resolveConsoleLaunchPlan = (
         "other; name a registry or waive it, not both",
     );
   }
+  if (
+    options.allowedSkillScripts !== undefined &&
+    options.noAllowedSkillScripts === true
+  ) {
+    throw new Error(
+      "`--allow-skill-script` and `--no-allow-skill-script` contradict each " +
+        "other; allow scripts or allow none, not both",
+    );
+  }
   // Not derived and not required: these belong to the deployment rather than
   // to the fabric, so the constant is the answer and the flag moves it.
   const patternIndexUrl = options.noPatternIndex === true
@@ -476,6 +511,37 @@ export const resolveConsoleLaunchPlan = (
   const deploymentDefault = "labs deployment default";
   const registrationSourceName =
     `\`${RUNSC_CFC_RUNTIME}\` as \`docker info\` reports it`;
+
+  // The scripts a run of this console may execute. An entry is the operator's
+  // decision about the tool, so nothing about the fabric offers one and the
+  // deployment's own entry is what a launch naming none resolves to. Each is
+  // normalized before the server binds, because a spec no allowlist can key on
+  // grants nothing: a run given one refuses the operator's own script as a
+  // script they never allowed. `holder` names whatever the specs came from, so
+  // that refusal names the place to edit.
+  const skillScripts = options.noAllowedSkillScripts === true
+    ? { specs: [], source: NAMED, holder: "--no-allow-skill-script" }
+    : options.allowedSkillScripts !== undefined
+    ? {
+      specs: options.allowedSkillScripts,
+      source: NAMED,
+      holder: "--allow-skill-script",
+    }
+    : options.inheritedAllowedSkillScripts !== undefined
+    ? {
+      specs: options.inheritedAllowedSkillScripts,
+      source: `\`${ALLOWED_SKILL_SCRIPTS_VARIABLE}\`, inherited`,
+      holder: ALLOWED_SKILL_SCRIPTS_VARIABLE,
+    }
+    : {
+      specs: [DEPLOYMENT_DEMO_ALLOWED_SKILL_SCRIPT],
+      source: `${deploymentDefault} (demo)`,
+      holder: "DEPLOYMENT_DEMO_ALLOWED_SKILL_SCRIPT",
+    };
+  const allowedSkillScripts = resolveAllowedSkillScripts(
+    skillScripts.specs,
+    skillScripts.holder,
+  ).map(allowedSkillScriptKey);
 
   const resolved: ResolvedValue[] = [
     ...(instance === undefined ? [] : [{
@@ -548,6 +614,17 @@ export const resolveConsoleLaunchPlan = (
         ? NAMED
         : deploymentDefault,
     },
+    ...(allowedSkillScripts.length === 0
+      ? [{
+        name: "allow script",
+        value: "(none)",
+        source: skillScripts.source,
+      }]
+      : allowedSkillScripts.map((entry) => ({
+        name: "allow script",
+        value: entry,
+        source: skillScripts.source,
+      }))),
     ...connectorResolved,
     {
       name: "proxy",
@@ -576,6 +653,11 @@ export const resolveConsoleLaunchPlan = (
       : {}),
     ...(skillsRegistryUrl !== undefined
       ? { CF_HARNESS_SKILLS_REGISTRY_URL: skillsRegistryUrl }
+      : {}),
+    ...(allowedSkillScripts.length > 0
+      ? {
+        [ALLOWED_SKILL_SCRIPTS_VARIABLE]: JSON.stringify(allowedSkillScripts),
+      }
       : {}),
   };
 
@@ -757,8 +839,14 @@ export const prepareConsoleLaunch = async (
       "fabric-cfc-posture",
       "fabric-cfc-flow-labels",
       "fabric-cfc-enforcement-mode",
+      "allow-skill-script",
     ],
-    boolean: ["no-pattern-index", "no-skills-registry"],
+    boolean: [
+      "no-pattern-index",
+      "no-skills-registry",
+      "no-allow-skill-script",
+    ],
+    collect: ["allow-skill-script"],
     "--": true,
   });
   // A flag present but empty is a value someone typed that did not survive
@@ -829,6 +917,31 @@ export const prepareConsoleLaunch = async (
   const inheritedSpace = nonEmpty(env.CF_HARNESS_FABRIC_SPACE) ??
     nonEmpty(env.CF_SPACE);
 
+  // A repeated flag collects, so this one reads its values off the array
+  // rather than through `flag()`. An entry that is empty after trimming is the
+  // same mistake `flag()` refuses — a value someone typed that did not survive
+  // parsing — and is refused here for the same reason.
+  const namedSkillScripts = (parsed["allow-skill-script"] as string[]).map(
+    (spec) => {
+      const trimmed = nonEmpty(spec);
+      if (trimmed === undefined) {
+        throw new Error(
+          "`--allow-skill-script` was given no value; a value starting with " +
+            "`-` needs the `--allow-skill-script=<value>` spelling",
+        );
+      }
+      return trimmed;
+    },
+  );
+  // Read only when it can still decide the allowlist. An inherited value a
+  // flag or the waiver is about to override is one this launch does not use,
+  // and failing the launch over its spelling would refuse a command that
+  // named its entries correctly.
+  const inheritedSkillScripts = namedSkillScripts.length > 0 ||
+      parsed["no-allow-skill-script"] === true
+    ? undefined
+    : nonEmpty(env[ALLOWED_SKILL_SCRIPTS_VARIABLE]);
+
   // Not configurable: the sandbox runs `docker`, so a launcher reading the
   // runtime table from anything else would print directories the runs never
   // reach.
@@ -883,6 +996,17 @@ export const prepareConsoleLaunch = async (
       : {}),
     noPatternIndex: parsed["no-pattern-index"] === true,
     noSkillsRegistry: parsed["no-skills-registry"] === true,
+    ...(namedSkillScripts.length > 0
+      ? { allowedSkillScripts: namedSkillScripts }
+      : {}),
+    noAllowedSkillScripts: parsed["no-allow-skill-script"] === true,
+    ...(inheritedSkillScripts !== undefined
+      ? {
+        inheritedAllowedSkillScripts: parseAllowedSkillScriptsVariable(
+          inheritedSkillScripts,
+        ),
+      }
+      : {}),
     ...(flag("cfc-result-dir") !== undefined
       ? { cfcResultDir: flag("cfc-result-dir")! }
       : {}),
@@ -900,7 +1024,25 @@ export const prepareConsoleLaunch = async (
       : {}),
   });
 
-  return { plan, consoleArgs: (parsed["--"] ?? []).map(String) };
+  // The allowlist is printed as one of the values this launch resolved, so a
+  // console argument setting it again would leave that report describing
+  // scripts the console does not permit. Every other flag stays reachable
+  // through the passthrough; these two are named here instead.
+  const consoleArgs = (parsed["--"] ?? []).map(String);
+  const passedThrough = consoleArgs.find((argument) =>
+    argument === "--allow-skill-script" ||
+    argument.startsWith("--allow-skill-script=") ||
+    argument === "--no-allow-skill-script"
+  );
+  if (passedThrough !== undefined) {
+    throw new Error(
+      `\`${passedThrough}\` cannot be passed through to the console: the ` +
+        `allowlist is one of the values this launch resolves and prints, so ` +
+        `name it before \`--\` instead`,
+    );
+  }
+
+  return { plan, consoleArgs };
 };
 
 /**

@@ -357,6 +357,13 @@ Current v1 behavior:
 - `--skill` requires `--skills-root`.
 - Multiple `--skill` values are allowed and loaded in the provided order after
   deduplication.
+- The console takes the same entries at launch rather than per task, an
+  allowlist being the operator's decision about the server:
+  `--allow-skill-script` and `--no-allow-skill-script` on `console:launch` and
+  on `start-local-dev.sh --cf-harness`, and `CF_HARNESS_ALLOWED_SKILL_SCRIPTS`
+  carrying a JSON array of entries. A launch naming none allows this
+  deployment's own demo entry, and every resolved entry is printed with the
+  source that decided it before the server binds.
 - `--allow-skill-script` is repeatable and deduplicates exact normalized
   entries. An entry keyed on a registry name requires `--skills-root`, since
   that is what gives the script a sandbox path; an entry keyed on an acquired

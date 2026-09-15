@@ -84,9 +84,13 @@ instance the identity and the space are named — by the flags above, or by
 `CF_HARNESS_FABRIC_IDENTITY` and `CF_HARNESS_FABRIC_SPACE`, or by the `cf` CLI's
 own `CF_IDENTITY` and `CF_SPACE` — and their absence is an error naming them.
 The pattern index and skills registry are this deployment's constants rather
-than any fabric's. It prints every value with the record that decided it, and
-serves on the port Weaver pairs with. Arguments after `--` reach this server
-untouched, so every flag in the tables below is reachable through it.
+than any fabric's, as is the one skill script every console here allows — see
+[Skill scripts](#skill-scripts) below. It prints every value with the record
+that decided it, and serves on the port Weaver pairs with. Arguments after `--`
+reach this server untouched, so every other flag in the tables below is
+reachable through it — the two allowlist flags excepted, which the launcher
+refuses after `--` because it resolves and prints that value itself, and which
+are therefore given to the launcher before the separator.
 [`../docs/WEAVER.md`](../docs/WEAVER.md) is the operator procedure it belongs
 to, including the tailnet topology and the pre-demo preflight.
 
@@ -134,7 +138,50 @@ Every environment variable has a flag, and the flag wins:
 | `--space-db`            | `CF_HARNESS_SPACE_DB`                | the space's own database, discovered  |
 | `--max-model-turns`     | `CF_HARNESS_CONSOLE_MAX_MODEL_TURNS` | the prompt loop's default             |
 | `--skills-root`         | `CF_HARNESS_CONSOLE_SKILLS_ROOT`     | the repository's `skills/` tree       |
+| `--allow-skill-script`  | `CF_HARNESS_ALLOWED_SKILL_SCRIPTS`   | none; repeatable                      |
 | `--host-mount`          | —                                    | none; repeatable                      |
+
+### Skill scripts
+
+Which script a run may execute through `run_skill_script` is the operator's
+decision, and a console takes it at launch:
+
+```sh
+./scripts/start-local-dev.sh --cf-harness \
+  --allow-skill-script commontoolsinc/labs/cf-spend-digest@<commit>:scripts/category-budgets.sh
+```
+
+An entry is `skill:scripts/path`, where `skill` is a registry skill's name or an
+acquired skill's pin — `owner/repo/slug@<commit sha>`, the exact bytes the
+acquisition read. `--allow-skill-script` repeats, `--no-allow-skill-script`
+allows none, and `CF_HARNESS_ALLOWED_SKILL_SCRIPTS` carries a JSON array of
+entries where a launcher resolved them. A spec no allowlist can key on ends the
+launch naming itself, rather than reaching the run as an entry that matches
+nothing.
+
+Every console in this deployment allows one entry where a launch names none: the
+`cf-spend-digest` fixture's budget script, at the commit the
+`DEPLOYMENT_DEMO_ALLOWED_SKILL_SCRIPT` constant in [`launch.ts`](launch.ts)
+holds. It is printed as `labs deployment default (demo)` alongside everything
+else the launch resolved, so what a console allows is on screen before it binds.
+That entry keys on a commit, so changing the fixture under
+`packages/cf-harness/fixtures/acquirable-skills/` means changing that constant
+to the commit carrying the change.
+
+Two shapes are refused at launch rather than at the call. An entry keyed on a
+registry name needs a skills tree, since that is what gives its script a sandbox
+path — an acquired pin needs none, its bytes arriving through the acquisition's
+own mount. And neither flag may be passed after `--`: the allowlist is one of
+the values the launch resolves and prints, so a console argument setting it
+again would leave that report describing other scripts.
+
+An entry authorizes a script; it does not by itself put a tool anywhere, and the
+two decisions stay separate. What an entry at an acquired pin adds is
+`run_skill_script` on a child that actually receives that matching acquisition —
+a child holding no such acquisition gains nothing from it. And it bounds the
+tool rather than the bytes: the mount is added for any acquisition-sourced
+handle whatever the allowlist says, so what stops an acquired script being run
+some other way is the sandbox it would run in, not this entry.
 
 Publishing to the index is configured the way the CLI configures it, by the same
 names:
@@ -787,6 +834,9 @@ Each turn is its own run, so what that run holds is established per turn and
 announced in the messages it opens with: the skills registry scanned from the
 skills root, the well-known grants of the session's space — which is what lets a
 task explore what the space holds — and the input cells the request attached.
+The skill-script allowlist is the console's rather than a turn's, since it is
+the operator's decision about the server and not about the task, so every turn
+runs under the entries resolved at launch.
 
 ## Connector grants
 

@@ -123,7 +123,12 @@ The current package provides:
   acquisition; the tool output and the execution record carry that acquisition
   in place of the registry digest fields, and the invocation is labeled with
   confidentiality alone, because a non-empty `integrity` array in
-  `cfcInputLabels` makes the sandbox fail to start (CT-2302);
+  `cfcInputLabels` makes the sandbox fail to start (CT-2302). The console takes
+  that allowlist at launch — `--allow-skill-script` and
+  `--no-allow-skill-script` on `console:launch` and on
+  `start-local-dev.sh --cf-harness`, `CF_HARNESS_ALLOWED_SKILL_SCRIPTS` as a
+  JSON array of entries — and a launch naming none allows this deployment's one
+  demo entry;
 - recoverable rejection of a malformed tool call: a name no tool answers to,
   arguments that are not a JSON object, or a `delegate_task` argument of the
   wrong shape comes back as a `cf-harness.invalid-tool-call` tool result naming
