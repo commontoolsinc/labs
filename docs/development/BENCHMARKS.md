@@ -848,7 +848,8 @@ redirecting it straight into the table empties the table before the command
 can load it. A count that does not repeat identically across the five runs is
 printed as ungated, with the value each run observed, and is not checked; the
 command then fails, naming it, and leaves `topics-read-budget-limits.derived`
-holding what it printed.
+holding what it printed. `.gitignore` covers that file; delete it once you have
+read it.
 
 A failing read-budget test has found a count that grew. Attribute the added
 reads or graph size to a phase and a role in the probe's records before
