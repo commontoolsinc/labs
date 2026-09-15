@@ -44,6 +44,10 @@ labels.
   its DID. They do not carry a host query parameter.
 - This change contains no partial support for future names. Display labels are
   Home metadata and have no resolution semantics.
+- Labs owns the complete space-creation protocol and its provider-neutral
+  routing contract. Deployment repositories only adapt that contract to their
+  placement and routing primitives. In particular, `common-cluster` must remain
+  a thin layer over labs rather than acquire a second creation state machine.
 - Generate at least 256 bits of entropy with the platform cryptographic random
   source. The label, user DID, operation identifier, clock, and process state do
   not contribute key material.
@@ -104,10 +108,11 @@ labels.
   [`SpacePlacement`](https://github.com/commontoolsinc/common-cluster/blob/dc70d63f2ce44930a1b23793a998e78eeac863bf/docs/design.md#july-2026-architecture-amendment-per-space-first-per-user-later)
   maps a DID to a Toolshed shard, and its
   [router](https://github.com/commontoolsinc/common-cluster/blob/dc70d63f2ce44930a1b23793a998e78eeac863bf/cmd/toolshed-router-extproc/router.go)
-  rejects unknown placements. Both implement the route-readiness boundary in
-  the random-identity specification. The control spaces use the same
-  space-keyed route as ordinary spaces; they do not assume that embedded
-  servers share process memory.
+  rejects unknown placements. Labs owns the route-readiness boundary in the
+  random-identity specification and the code that invokes, verifies, records,
+  and resumes it. `common-cluster` supplies only the placement adapter for that
+  boundary. The control spaces use the same space-keyed route as ordinary
+  spaces; they do not assume that embedded servers share process memory.
 - The server-side execution
   [per-space lease](../specs/server-side-execution/serving-loop.md#2-the-lease-single-deriver-operationally)
   already fences competing processes. Creation events reuse that lease instead
@@ -175,15 +180,22 @@ labels.
   ordinary Memory route writable and reports when it is ready. It must not
   expose a process identity or permit the caller to bypass ordinary
   space-addressed routing.
+- Define that operation's request, result, error model, client, postcondition
+  check, and conformance tests in labs. Keep Kubernetes resources and
+  `common-cluster` types out of the labs interface. The operation accepts a DID;
+  successful completion means the ASP's normal routed Memory endpoint is
+  writable for that DID.
 - In the current Estuary and Rapids VM topology, confirm that every production
   `MEMORY_URL` uses the host-internal nginx endpoint rather than the Memory
   server embedded in the request process. Confirm that the nginx hash route
   admits an arbitrary new DID and that its assigned backend retains the same
   durable history across process restarts.
-- In a `common-cluster` deployment, define the route-readiness operation as an
-  idempotent create-or-find of the DID's `SpacePlacement`, followed by waiting
-  for the selected shard to become writable. Pre-create placements for every
-  provider control-space DID before enabling creation.
+- In a `common-cluster` deployment, implement a thin adapter for the labs-owned
+  route-readiness contract. Its only semantic work is an idempotent
+  create-or-find of the DID's `SpacePlacement` and reporting when the selected
+  shard is writable. Keep key generation, genesis, creation records,
+  idempotency, recovery, Home registration, and ACL policy in labs. Pre-create
+  placements for every provider control-space DID before enabling creation.
 - Load-test each append-only namespace's fixed set of provider-private control
   shards and choose enough shards for the expected creation rate. Record their
   DIDs and immutable hash-to-shard mapping in the existing catalog.
@@ -247,6 +259,15 @@ labels.
     the ASP's existing Common Memory route, and use existing Fabric
     transactions, content authorization, and background execution for
     consistency and recovery.
+  - Implement the creation API, state machine, content rules, durable event
+    handlers, route-readiness client, readiness verification, and recovery in
+    labs. These components must be identical for a single-process Toolshed, the
+    current nginx fleet, and `common-cluster`.
+  - Put the provider-neutral route-readiness request and response schema in
+    labs. A deployment adapter may expose it through an ASP-internal endpoint,
+    but transport and placement details do not enter the creation document or
+    state graph. Prefer extending an existing internal provider boundary over
+    adding a cluster-specific call path to creation.
   - Provision each catalogued namespace as a fixed set of provider-owned
     control spaces. Select one with a stable hash of namespace version,
     normalized target public ASP origin, creator DID, and idempotency key.
@@ -267,6 +288,13 @@ labels.
     readiness creates or finds exactly one `SpacePlacement` for the accepted DID
     and waits until its selected shard is writable. An unknown placement must
     fail closed before genesis rather than fall back to the request process.
+  - Limit `common-cluster` changes to adapting the labs-owned contract to
+    `SpacePlacement`, exposing the adapter to Toolshed, and supplying the
+    deployment configuration and permissions it needs. Do not copy labs
+    validation or state transitions into Go controllers, Custom Resource
+    Definitions, admission policy, or deployment scripts. If another provider
+    could use a piece of the implementation, place it in labs and keep only the
+    Kubernetes translation in `common-cluster`.
   - Treat the creation document's stable Fabric address as the uniqueness
     boundary. Two frontend processes carrying the same signed creation intent
     therefore contend on the same document even when they receive the requests
@@ -606,6 +634,11 @@ labels.
   - In a `common-cluster` topology, prove an unknown DID fails closed before
     genesis, concurrent route-readiness attempts converge on one placement, and
     genesis succeeds only after that placement's shard is writable.
+  - Keep the provider-neutral conformance suite in labs and run it against the
+    single-process implementation, the current nginx topology, and the
+    `common-cluster` adapter. Keep cluster-only tests limited to DID-to-placement
+    translation, idempotent placement creation, readiness reporting, routing,
+    and failure closure.
   - Replay a committed handler event and prove it refers to the original new
     space. Trigger a second event with identical inputs and prove it creates a
     different space.
