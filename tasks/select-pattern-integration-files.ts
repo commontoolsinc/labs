@@ -74,6 +74,12 @@ export const PATTERN_INTEGRATION_TEST_WEIGHTS: Readonly<
   "chat-note.test.ts": 0.3,
   "chatbot.test.ts": 0.4,
   "fetch-json.test.ts": 0.4,
+  // The Topics read-budget files' wall times in seconds, each measured with
+  // `deno test` on a 10-core arm64 macOS machine while no other test ran.
+  "topics-read-budget-mentions-16.test.ts": 58.3,
+  "topics-read-budget-high-degree.test.ts": 42.1,
+  "topics-read-budget-single-bucket.test.ts": 38.6,
+  "topics-read-budget-small-and-threads.test.ts": 28.2,
 };
 // Files at or above this measured duration occupy distinct shards.
 export const PATTERN_INTEGRATION_DISTINCT_WEIGHT_MINIMUM = 31;
