@@ -3668,7 +3668,14 @@ export class SpaceServer implements TransactionSealDestination {
     this.#eventVisibilityFloor = undefined;
     const { engine, space } = this.#options;
     const pendingDocs = Engine.selectPendingStreamEventDocs(engine);
-    if (pendingDocs.length === 0) return 0;
+    if (pendingDocs.length === 0) {
+      // A scan was owed and this is it: the pass ended, having queued
+      // nothing. Reported here as anywhere else, so that a waiter on
+      // the pass boundary sees every pass rather than only the ones
+      // with work in them.
+      this.#options.onEventDrainPass?.(0);
+      return 0;
+    }
     let queued = 0;
     // The load-park barrier's mid-pass half (see #loadParkDeferredInPass).
     // Cleared here so each pass judges its own deferrals.

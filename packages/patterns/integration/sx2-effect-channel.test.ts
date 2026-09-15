@@ -43,6 +43,7 @@ import {
 } from "@commonfabric/memory/v2";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { defer } from "@commonfabric/utils/defer";
+import { withStuckNet } from "@commonfabric/test-support/stuck-net";
 import {
   initializePiecesController,
   type PieceController,
@@ -74,8 +75,15 @@ describe("sx2 effect channel (Phase 4 gates)", () => {
   const navigations: string[] = [];
   /** Resolves as the controller enacts its first navigation — the
    * callback's own report, so the wait names the enactment rather than
-   * a length turning into a number. */
+   * a length turning into a number. Awaited through `awaitNavigation`,
+   * which nets it. */
   const firstNavigation = defer<void>();
+
+  /** The first navigation, under a stuck-condition net: this process
+   * holds a live connection to the toolshed, so a navigation that never
+   * comes has nothing to fail the wait. */
+  const awaitNavigation = (): Promise<void> =>
+    withStuckNet(firstNavigation.promise, "the first navigation");
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -123,7 +131,7 @@ describe("sx2 effect channel (Phase 4 gates)", () => {
       // enacts locally; no effects doc exists anywhere.
       resultCell.key("go").send(undefined as never);
       await cc.runtime.idle();
-      await firstNavigation.promise;
+      await awaitNavigation();
       await cc.runtime.storageManager.synced();
       await effectsCell.sync();
       const value = effectsCell.get();
@@ -152,7 +160,7 @@ describe("sx2 effect channel (Phase 4 gates)", () => {
     // The OPTIMISTIC enactment (speculation.md §2's allowlisted
     // navigateTo): the navigation happens before the authoritative
     // intent's round-trip.
-    await firstNavigation.promise;
+    await awaitNavigation();
 
     // The served intent lands in THIS session's instance and the
     // channel acks it (the authored `acks[nonce]` mark); the next wave

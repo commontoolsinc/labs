@@ -44,3 +44,21 @@ export const stuckNet = (
   const timer = setTimeout(() => failed.reject(error), ms);
   return { rejects: failed.promise, clear: () => clearTimeout(timer) };
 };
+
+/**
+ * `promise` under a stuck-condition net: whichever settles first wins, and the
+ * net is cleared either way. For a wait that is a single promise rather than a
+ * loop; a loop arms one {@link stuckNet} and races it on each turn.
+ */
+export const withStuckNet = async <T>(
+  promise: Promise<T>,
+  label: string,
+  ms: number = STUCK_NET_MS,
+): Promise<T> => {
+  const net = stuckNet(label, ms);
+  try {
+    return await Promise.race([promise, net.rejects]);
+  } finally {
+    net.clear();
+  }
+};

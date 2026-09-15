@@ -6,7 +6,7 @@
 // Each wait here names the event it sleeps on instead.
 
 import { defer, type Deferred } from "@commonfabric/utils/defer";
-import { stuckNet } from "@commonfabric/test-support/stuck-net";
+import { stuckNet, withStuckNet } from "@commonfabric/test-support/stuck-net";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import type { Runtime } from "../../src/runtime.ts";
 import type {
@@ -96,23 +96,26 @@ export class ArrivalLog<T> {
     for (const watcher of [...this.#watchers]) watcher();
   };
 
-  /** Resolves once the `n`th entry has arrived. `n` counts from one. */
+  /** Resolves once the `n`th entry has arrived. `n` counts from one.
+   * Carries the same stuck-condition net as {@link awaitEdges}, for the
+   * same reason: an arrival that never comes would otherwise hang the
+   * run rather than fail it. */
   reached(n: number): Promise<void> {
     if (n < 1) throw new RangeError(`arrival ${n} is not a position`);
     if (this.entries.length >= n) return Promise.resolve();
     while (this.#counts.length < n) this.#counts.push(defer<void>());
-    return this.#counts[n - 1].promise;
+    return withStuckNet(this.#counts[n - 1].promise, `arrival ${n}`);
   }
 
   /** Resolves with the first entry `predicate` accepts, one already
-   * recorded included. */
+   * recorded included. Netted like {@link reached}. */
   matching(predicate: (entry: T) => boolean): Promise<T> {
     for (const entry of this.entries) {
       if (predicate(entry)) return Promise.resolve(entry);
     }
     const deferred = defer<T>();
     this.#matchers.add({ predicate, deferred });
-    return deferred.promise;
+    return withStuckNet(deferred.promise, "an arrival matching a predicate");
   }
 
   /** How many entries `predicate` accepts. */
