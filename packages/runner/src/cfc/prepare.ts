@@ -7894,14 +7894,17 @@ export const prepareBoundaryCommit = (
     // content-verified) via loadSchemaDocument above — it exists, so there is
     // nothing to ensure.
     //
-    // The stored VERSION is compared beside the labels: an envelope whose
-    // labels are unchanged but whose spelling is not the one the flag
-    // selects is rewritten in the selected spelling, which is how a store
-    // migrates between versions — each document at most once, on its next
-    // persist — and the only case equal labels do not skip.
+    // One exception to the skip, in one direction: a version-1 envelope
+    // whose labels are unchanged is rewritten in version 2 when the flag
+    // selects it, which is how a store migrates — each document at most
+    // once, on its next persist. A stored version 2 is left alone by a
+    // writer selecting version 1, so writers on either setting sharing a
+    // document do not rewrite it at each other (SC-11).
+    const migrates = existing !== undefined && existing.version === 1 &&
+      metadata.version === 2;
     if (
       existing !== undefined &&
-      existing.version === metadata.version &&
+      !migrates &&
       deepEqual(
         canonicalizeCfcMetadata(existing),
         canonicalizeCfcMetadata(metadata),

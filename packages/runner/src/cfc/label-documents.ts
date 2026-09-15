@@ -105,8 +105,10 @@ export const isStoredLabelMapEntry = (
  * The canonical content of a label document: the label with its clauses
  * normalized and every `undefined` member dropped, so a label written with
  * `integrity: undefined` and one written without the member are one
- * document. Only the two label members survive, each as a fresh array, so
- * freezing the content leaves the caller's label untouched.
+ * document. Only the two label members survive, each as a fresh array;
+ * the clause and atom objects inside them are shared with the caller's
+ * label, and registration deep-freezes them in place, which the CFC
+ * immutability contract already promises of every label value.
  */
 export const cfcLabelDocumentContent = (label: IFCLabel): IFCLabel => {
   const canonical = canonicalizeCfcLabel(label);
@@ -247,4 +249,23 @@ export const referencedCfcLabelDocumentHashes = (
     hashes.push(hash);
   }
   return hashes;
+};
+
+/**
+ * The label document hashes the value at a document's reserved `cfc`
+ * member references, for a value of any shape: none unless it is a
+ * version-2 envelope with an entries array, since only version 2 defines
+ * the reference, and otherwise {@link referencedCfcLabelDocumentHashes}
+ * over whatever entries it holds. This is the one scan every delivery seam
+ * — traversal, direct loads, arrival hydration — applies, so they agree on
+ * which documents an envelope is owed.
+ */
+export const cfcEnvelopeLabelDocumentHashes = (cfc: unknown): string[] => {
+  if (!isObjectNotArray(cfc) || cfc.version !== 2) return [];
+  const labelMap = cfc.labelMap;
+  const entries = isObjectNotArray(labelMap) ? labelMap.entries : undefined;
+  if (!Array.isArray(entries)) return [];
+  return referencedCfcLabelDocumentHashes(
+    entries.filter(isObjectNotArray) as StoredLabelMapEntry[],
+  );
 };

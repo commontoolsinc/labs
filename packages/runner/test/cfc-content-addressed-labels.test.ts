@@ -21,6 +21,7 @@ import { cfcLabelViewForDereference } from "../src/cfc/label-view-state.ts";
 import type { IFCLabel } from "../src/cfc/label-view-core.ts";
 import {
   readStoredCfcMetadata,
+  resolveStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
   StoredCfcMetadataError,
   UnreadableCfcMetadataError,
@@ -496,6 +497,15 @@ describe("CFC content-addressed labels", () => {
           note: "n",
         }, true);
         expect(third.envelopeWritten).toBe(false);
+        // The migration runs one way: a writer with the flag off leaves a
+        // stored version 2 alone rather than rewriting it back.
+        await runtime.storageManager.synced();
+        const fourth = await declaredWrite(runtime, "migrate", {
+          secret: "classified",
+          note: "n",
+        }, false);
+        expect(fourth.envelopeWritten).toBe(false);
+        expect(fourth.stored?.version).toBe(2);
       });
     });
 
@@ -605,6 +615,67 @@ describe("CFC content-addressed labels", () => {
           scope: "space",
           path: ["value", "secret"],
         })).toBe(true);
+        tx.abort();
+        return Promise.resolve();
+      });
+    });
+
+    it("answers the applies-to-path probe from the paths alone", async () => {
+      await withRuntime((runtime) => {
+        const tx = runtime.edit();
+        const id = writeReferencingEnvelope(
+          runtime,
+          tx,
+          "absent-paths",
+          absentHash,
+        );
+        // The label document is nowhere, yet a path no entry covers is
+        // answered without it: the probe reads paths, not labels.
+        expect(storedCfcMetadataAppliesToPath(tx, {
+          space,
+          id: id as URI,
+          scope: "space",
+          path: ["value", "elsewhere"],
+        })).toBe(false);
+        tx.abort();
+        return Promise.resolve();
+      });
+    });
+
+    it("memoizes resolved entries, not the envelope around them", async () => {
+      await withRuntime((runtime) => {
+        const content: IFCLabel = { confidentiality: ["memo-label"] };
+        const hash = cfcLabelDocumentHash(content);
+        registerCfcLabelDocument(hash, content);
+        const tx = runtime.edit();
+        const labelMap = {
+          version: 1 as const,
+          entries: [{ path: ["secret"], label: { $ref: `cid:${hash}` } }],
+        };
+        const first: StoredCfcMetadata = {
+          version: 2,
+          schemaHash: "fid1:first",
+          labelMap,
+        };
+        // A rewrite that shares the `labelMap` subtree by reference must
+        // still answer with its own schema hash.
+        const second: StoredCfcMetadata = {
+          version: 2,
+          schemaHash: "fid1:second",
+          labelMap,
+        };
+        const meta = { meta: {} };
+        expect(resolveStoredCfcMetadata(tx, space, "of:memo", first, meta))
+          .toMatchObject({ schemaHash: "fid1:first" });
+        const resolved = resolveStoredCfcMetadata(
+          tx,
+          space,
+          "of:memo",
+          second,
+          meta,
+        );
+        expect(resolved.schemaHash).toBe("fid1:second");
+        expect(resolved.labelMap.entries[0].label).toEqual(content);
         tx.abort();
         return Promise.resolve();
       });

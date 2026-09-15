@@ -70,10 +70,11 @@ What the numbers say:
   unit that reuse actually happens at: 6 label values serve 196k
   documents across several tables, and a map that introduces one new
   label writes one new ~600-byte document while every other entry keeps
-  its existing reference. Every consumer that only needs paths and
-  origins — the applies-to-path probe on every write, cross-space copy
-  prohibition, the state inspector — reads them without resolving
-  anything.
+  its existing reference. Paths and origins stay readable without
+  resolving anything, and the applies-to-path probe that runs on every
+  write reads only them (`readStoredCfcLabelPaths`), so the hot path pays
+  no label-document read; consumers that need the labels themselves
+  resolve them once per distinct document.
 - **Map-level references are 7× smaller again at rest**, because the
   measured store repeats 11 maps across 196k entities. They cost a second
   reference level on every seam (commit validation, traversal, client
@@ -230,6 +231,11 @@ read must be synchronous, so the document travels with the entity:
 - **Direct loads.** A `syncCell` load, which pulls the envelope's schema
   document after the document arrives, pulls its label documents too, in
   parallel with the schema document.
+- **Arrivals.** A frame that delivers a document's envelope without a
+  document it names — a label the writer introduced to the space in the
+  same commit — kicks a pull of that document, exactly as the arrival
+  hydration does for the schema document, so a reader that fails closed on
+  the first read resolves once it arrives.
 - **Writers.** The persist loop stages every referenced label document
   into the transaction that writes the envelope, so the commit carries
   what it references, and the boundary refuses it otherwise.
@@ -247,11 +253,13 @@ spelling the document holds. Canonicalization drops `undefined` label
 members so that a label resolved from a document (which never carries
 them) compares equal to a freshly derived one (which may).
 
-One exception to "equal means skip": when the flag selects version 2 and
-the stored envelope is version 1 (or the reverse), the envelope is
-rewritten in the selected spelling even though its labels are unchanged.
-That is how an existing store migrates — each document rewrites at most
-once, on its next persist — without a data migration.
+One exception to "equal means skip", in one direction: when the flag
+selects version 2 and the stored envelope is version 1, the envelope is
+rewritten in version 2 even though its labels are unchanged. That is how
+an existing store migrates — each document rewrites at most once, on its
+next persist — without a data migration. A stored version 2 is left alone
+by a writer with the flag off, so writers on either setting that share a
+document do not rewrite it at each other.
 
 ## Migration
 
@@ -259,9 +267,9 @@ once, on its next persist — without a data migration.
   resolves to the same metadata. Ships regardless of the flag.
 - **Writers behind `cfcContentAddressedLabels`** (registered in
   [EXPERIMENTAL_OPTIONS.md](../development/EXPERIMENTAL_OPTIONS.md)). Off,
-  the persist path writes version 1. On, it writes version 2, stages the
-  label documents, and rewrites a version-1 envelope it would otherwise
-  leave alone. The flip is gated on deployment reach: a reader that
+  the persist path writes version 1 and leaves a stored version 2 as it
+  is. On, it writes version 2, stages the label documents, and rewrites a
+  version-1 envelope it would otherwise leave alone. The flip is gated on deployment reach: a reader that
   predates version 2 fails closed on a version-2 envelope, which is
   correct and also unusable, so every deployed reader must interpret
   version 2 before any space sees one.

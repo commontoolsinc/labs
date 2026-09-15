@@ -186,7 +186,11 @@ item).
 **SC-11 [normative] Idempotent label persistence — §4.6.4.** Reactive runtimes
 re-derive labels on every recompute; require that persisting an unchanged
 effective label is a no-op (no envelope write, no version bump, no replication
-traffic), with equality defined over the canonical form (§4.1.3 c14n). Without
+traffic), with equality defined over the canonical form (§4.1.3 c14n). One
+exception, taken once per document: a stored version-1 envelope is rewritten
+in version 2 with unchanged labels by a writer selecting version 2
+([content-addressed-cfc-labels.md](content-addressed-cfc-labels.md)), and
+never the reverse. Without
 this, label persistence and reactive scheduling interact pathologically.
 
 **SC-12 [clarify] Degenerate CNF join — §8.9.3.** `concatClauses` over

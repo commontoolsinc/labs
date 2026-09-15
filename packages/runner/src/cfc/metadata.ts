@@ -120,11 +120,14 @@ export class UnresolvableCfcLabelDocumentError extends StoredCfcMetadataError {
   }
 }
 
-// Resolved envelopes by the identity of their stored `labelMap`. Content
-// addressing makes a resolution permanent for the bytes it was computed
-// from — every referenced label verified against its id — so the memo can
-// only ever hold the one answer, and a failure never enters it.
-const resolvedByLabelMap = new WeakMap<object, CfcMetadata>();
+// Resolved entries by the identity of the stored `labelMap` they came
+// from. Content addressing makes a resolution permanent for the bytes it
+// was computed from — every referenced label verified against its id — so
+// the memo can only ever hold the one answer, and a failure never enters
+// it. Only the entries are memoized: the envelope around them is rebuilt
+// per call from the stored envelope at hand, so a rewrite that shares the
+// `labelMap` subtree by reference cannot serve a stale `schemaHash`.
+const resolvedEntriesByLabelMap = new WeakMap<object, LabelMapEntry[]>();
 
 /**
  * Helper for {@link resolveStoredCfcMetadata}, which produces the label a
@@ -227,22 +230,69 @@ export const resolveStoredCfcMetadata = (
     if (holdsReference) throw new UnreadableCfcMetadataError(id);
     return stored;
   }
-  const memoized = resolvedByLabelMap.get(stored.labelMap);
-  if (memoized !== undefined) return memoized;
-  if (!stored.labelMap.entries.every(isStoredLabelMapEntry)) {
-    throw new UnreadableCfcMetadataError(id);
+  let entries = resolvedEntriesByLabelMap.get(stored.labelMap);
+  if (entries === undefined) {
+    if (!stored.labelMap.entries.every(isStoredLabelMapEntry)) {
+      throw new UnreadableCfcMetadataError(id);
+    }
+    entries = stored.labelMap.entries.map((entry) => ({
+      ...entry,
+      label: resolveStoredLabel(tx, space, entry, meta),
+    }));
+    resolvedEntriesByLabelMap.set(stored.labelMap, entries);
   }
-  const entries: LabelMapEntry[] = stored.labelMap.entries.map((entry) => ({
-    ...entry,
-    label: resolveStoredLabel(tx, space, entry, meta),
-  }));
-  const resolved: CfcMetadata = {
+  return {
     version: stored.version,
     schemaHash: stored.schemaHash,
     labelMap: { version: 1, entries },
   };
-  resolvedByLabelMap.set(stored.labelMap, resolved);
-  return resolved;
+};
+
+/**
+ * The paths a stored envelope labels, read without resolving any label:
+ * paths are inline in every version, so a consumer that asks only where
+ * policy applies pays no label-document read. Fails closed exactly as the
+ * resolving reader does — an unknown version, a version-1 envelope holding
+ * a reference, or a version-2 entry that is not entry-shaped throws a
+ * {@link StoredCfcMetadataError} — and returns `undefined` for a document
+ * storing no envelope.
+ */
+export const readStoredCfcLabelPaths = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: string;
+    scope?: NormalizedFullLink["scope"];
+  },
+): readonly (readonly string[])[] | undefined => {
+  const document = tx.readOrThrow({
+    space: target.space,
+    id: target.id as URI,
+    scope: normalizeCellScope(target.scope),
+    type: "application/json",
+    path: ["cfc"],
+  }, { meta: INTERNAL_VERIFIER_META });
+  refuseUnknownMetadataVersion(document);
+  const stored = isCfcMetadata(document)
+    ? document
+    : isObjectOrArray(document) && isCfcMetadata(document.cfc)
+    ? document.cfc
+    : undefined;
+  if (stored === undefined) {
+    if (isObjectOrArray(document)) refuseUnknownMetadataVersion(document.cfc);
+    return undefined;
+  }
+  const entries: readonly unknown[] = stored.labelMap.entries;
+  const readable = stored.version === 1
+    ? entries.every((entry) =>
+      isObjectNotArray(entry) && Array.isArray(entry.path) &&
+      !isCfcLabelReference(entry.label)
+    )
+    : entries.every(isStoredLabelMapEntry);
+  if (!readable) throw new UnreadableCfcMetadataError(target.id);
+  return (entries as readonly { path: readonly string[] }[]).map((entry) =>
+    entry.path
+  );
 };
 
 // A record at the reserved metadata position whose `version` this build does
@@ -330,9 +380,9 @@ export const storedCfcMetadataAppliesToPath = (
   tx: IExtendedStorageTransaction,
   target: Pick<NormalizedFullLink, "space" | "id" | "scope" | "path">,
 ): boolean => {
-  let metadata: CfcMetadata | undefined;
+  let paths: readonly (readonly string[])[] | undefined;
   try {
-    metadata = readStoredCfcMetadata(tx, target);
+    paths = readStoredCfcLabelPaths(tx, target);
   } catch (error) {
     // An envelope this build cannot produce labels from still marks the
     // document as policy-carrying: "applies" is the fail-closed answer, and
@@ -341,7 +391,7 @@ export const storedCfcMetadataAppliesToPath = (
     if (error instanceof StoredCfcMetadataError) return true;
     throw error;
   }
-  if (metadata === undefined) {
+  if (paths === undefined) {
     return false;
   }
   const logicalPath = canonicalizeLogicalPath(target.path);
@@ -352,7 +402,7 @@ export const storedCfcMetadataAppliesToPath = (
   // mere presence of an entry signals "policy applies on this path"; do NOT
   // filter on `hasLabelValues` here, or claim-only entries get silently
   // bypassed.
-  return metadata.labelMap.entries.some((entry) =>
-    isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path)
+  return paths.some((path) =>
+    isPrefix(path, logicalPath) || isPrefix(logicalPath, path)
   );
 };

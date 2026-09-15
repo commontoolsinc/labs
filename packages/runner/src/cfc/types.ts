@@ -432,7 +432,7 @@ export type CfcMetadata = {
 export type EntityDocumentWithCfc = {
   value?: unknown;
   source?: unknown;
-  cfc?: CfcMetadata;
+  cfc?: StoredCfcMetadata;
 };
 
 // CFC value types are deeply immutable by contract. The chokepoints

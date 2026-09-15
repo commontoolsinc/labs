@@ -3488,9 +3488,9 @@ export class PatternManager {
             undefined,
             readTx,
           ).getAsNormalizedFullLink().id;
-          // An UnknownCfcMetadataVersionError propagates, deliberately: a
-          // stored-source envelope this build cannot interpret must not
-          // read as unprotected source.
+          // A `StoredCfcMetadataError` propagates, deliberately: a
+          // stored-source envelope this build cannot produce labels from
+          // must not read as unprotected source.
           const metadata = readStoredCfcMetadata(readTx, {
             space,
             id: sourceId,

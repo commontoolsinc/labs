@@ -479,8 +479,8 @@ function renderDetail(id){
       const tb=el("tbody");
       d.cfc.entries.forEach(e=>tb.append(el("tr",{},[
         el("td",{text:e.path||"(root)"}),
-        el("td",{text:e.confidentiality.join(", ")||"—"}),
-        el("td",{text:e.integrity.join(", ")||"—"}),
+        el("td",{text:e.unresolved?"(label document not read)":(e.confidentiality.join(", ")||"—")}),
+        el("td",{text:e.unresolved?"(label document not read)":(e.integrity.join(", ")||"—")}),
         el("td",{class:"muted",text:e.origin||""}),
       ])));
       body.push(el("table",{},[el("thead",{},el("tr",{},[

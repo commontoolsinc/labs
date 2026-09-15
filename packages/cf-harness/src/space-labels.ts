@@ -137,8 +137,20 @@ const storedLabelOf = (
   }
   if (!ref.startsWith("cid:")) return undefined;
   const content = read(ref)?.value;
-  return isRecord(content) ? content : undefined;
+  return isLabelShaped(content) ? content : undefined;
 };
+
+/**
+ * Whether a label document's value is label-shaped: a record whose every
+ * member is `confidentiality` or `integrity` holding an array. A document
+ * of any other shape holds no label the reader can report.
+ */
+const isLabelShaped = (value: unknown): value is Record<string, unknown> =>
+  isRecord(value) &&
+  Object.entries(value).every(([key, member]) =>
+    (key === "confidentiality" || key === "integrity") &&
+    Array.isArray(member)
+  );
 
 /**
  * The labelled paths of one stored document. The document's `cfc` path holds

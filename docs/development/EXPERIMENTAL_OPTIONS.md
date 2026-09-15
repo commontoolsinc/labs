@@ -954,7 +954,8 @@ the per-epic implementation notes).
   whose envelope references a label document it neither includes nor the
   space stores. With the flag on, a stored version-1 envelope is rewritten
   in version 2 on its next persist even when its labels are unchanged,
-  which is how a store migrates without a data migration.
+  which is how a store migrates without a data migration; with it off, a
+  stored version 2 is left as it is.
 - **Current default and planned end state.** `false` by default. The target
   is `true`; version-1 envelopes remain readable indefinitely.
 - **Status on 2026-09-15.** Implemented, off by default. The flip is gated

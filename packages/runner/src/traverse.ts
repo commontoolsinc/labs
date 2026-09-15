@@ -72,6 +72,7 @@ import type {
 } from "./builder/types.ts";
 import { isOpaqueReference, opaqueReference } from "./back-to-cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { cfcEnvelopeLabelDocumentHashes } from "./cfc/label-documents.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
@@ -2820,30 +2821,16 @@ function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
 
 /**
  * The same-space `cid:` links a `cfc` envelope names its label documents
- * by: one per entry whose `label` is a single-member `{ "$ref": "cid:…" }`
- * record, deduplicated. Only version 2 defines the reference, so an
- * envelope of any other version names none, whatever its entries hold.
+ * by, one per distinct reference; only version 2 defines the reference,
+ * so an envelope of any other version names none.
  */
 function cfcLabelDocumentLinks(envelope: unknown): SigilLink[] {
-  if (!isObjectOrArray(envelope) || envelope["version"] !== 2) return [];
-  const labelMap = envelope["labelMap"];
-  const entries = isObjectOrArray(labelMap) ? labelMap["entries"] : undefined;
-  if (!Array.isArray(entries)) return [];
-  const links: SigilLink[] = [];
-  const seen = new Set<string>();
-  for (const entry of entries) {
-    const label = isObjectOrArray(entry) ? entry["label"] : undefined;
-    if (!isObjectOrArray(label) || Object.keys(label).length !== 1) continue;
-    const ref = label["$ref"];
-    if (typeof ref !== "string" || !ref.startsWith("cid:") || seen.has(ref)) {
-      continue;
-    }
-    seen.add(ref);
-    links.push(
-      linkRefFrom<CellLinkRefPayload>({ id: ref as URI, scope: "space" }),
-    );
-  }
-  return links;
+  return cfcEnvelopeLabelDocumentHashes(envelope).map((hash) =>
+    linkRefFrom<CellLinkRefPayload>({
+      id: `cid:${hash}` as URI,
+      scope: "space",
+    })
+  );
 }
 
 /**

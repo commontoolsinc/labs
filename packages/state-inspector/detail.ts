@@ -75,6 +75,13 @@ export interface CfcSummary {
     confidentiality: string[];
     integrity: string[];
     origin?: string;
+
+    /**
+     * Set when the entry holds its label by a reference the space could
+     * not supply a label for, so the empty atom lists above say "not
+     * read" rather than "no label".
+     */
+    unresolved?: true;
   }[];
 }
 
@@ -197,22 +204,23 @@ function atomLabel(a: unknown): string {
 /**
  * The label a stored entry holds: its own when inline, else the value of
  * the `cid:` label document its single-member `$ref` names, read out of the
- * space. A reference the space does not hold, or one outside the `cid:`
- * namespace — which names no label document and is not followed into
- * whatever entity it names — renders as an empty label.
+ * space. `undefined` for a reference the space cannot supply a label for —
+ * no document, one holding no record, or a reference outside the `cid:`
+ * namespace, which names no label document and is not followed into
+ * whatever entity it names.
  */
 function storedLabelOf(
   entry: Record<string, unknown>,
   readDocument: DetailContext["readDocument"],
-): Record<string, unknown> {
+): Record<string, unknown> | undefined {
   const label = isObjectNotArray(entry.label) ? entry.label : {};
   const ref = label.$ref;
   if (typeof ref !== "string" || Object.keys(label).length !== 1) {
     return label;
   }
-  if (!ref.startsWith("cid:")) return {};
+  if (!ref.startsWith("cid:")) return undefined;
   const content = readDocument(ref)?.value;
-  return isObjectNotArray(content) ? content : {};
+  return isObjectNotArray(content) ? content : undefined;
 }
 
 function parseCfc(
@@ -233,13 +241,14 @@ function parseCfc(
     const label = storedLabelOf(e, readDocument);
     out.entries.push({
       path: Array.isArray(e.path) ? (e.path as string[]).join("/") : "",
-      confidentiality: Array.isArray(label.confidentiality)
+      confidentiality: Array.isArray(label?.confidentiality)
         ? label.confidentiality.map(atomLabel)
         : [],
-      integrity: Array.isArray(label.integrity)
+      integrity: Array.isArray(label?.integrity)
         ? label.integrity.map(atomLabel)
         : [],
       origin: typeof e.origin === "string" ? e.origin : undefined,
+      ...(label === undefined ? { unresolved: true as const } : {}),
     });
   }
   return out;

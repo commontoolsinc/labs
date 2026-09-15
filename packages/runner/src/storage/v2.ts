@@ -80,8 +80,10 @@ import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { referencedCfcLabelDocumentHashes } from "../cfc/label-documents.ts";
-import type { StoredLabelMapEntry } from "../cfc/types.ts";
+import {
+  cfcEnvelopeLabelDocumentHashes,
+  lookupCfcLabelDocument,
+} from "../cfc/label-documents.ts";
 import {
   isPrimitiveCellLink,
   type NormalizedLink,
@@ -193,17 +195,6 @@ export type CfcSchemaDocumentSyncer = (
 // part of the write; that read is dropped from its conflict set.
 const isCfcLabelPath = (path: readonly string[]): boolean =>
   path.length === 1 && path[0] === "cfc";
-
-// The `labelMap.entries` of a stored envelope, or none for a value that is
-// not envelope-shaped; the entries are not validated here, since only the
-// references among them are read.
-const cfcLabelMapEntriesOf = (
-  cfc: Record<string, unknown> | undefined,
-): StoredLabelMapEntry[] => {
-  const labelMap = cfc?.labelMap;
-  const entries = isObjectNotArray(labelMap) ? labelMap.entries : undefined;
-  return Array.isArray(entries) ? entries as StoredLabelMapEntry[] : [];
-};
 
 const isStrictPrefixPath = (
   prefix: readonly string[],
@@ -2594,11 +2585,7 @@ export class StorageManager implements IStorageManager {
     if (typeof schemaHash === "string" && schemaHash.length > 0) {
       ids.push(`cid:${schemaHash}` as URI);
     }
-    for (
-      const hash of referencedCfcLabelDocumentHashes(
-        cfcLabelMapEntriesOf(cfc),
-      )
-    ) {
+    for (const hash of cfcEnvelopeLabelDocumentHashes(cfc)) {
       ids.push(`cid:${hash}` as URI);
     }
     if (ids.length === 0) return undefined;
@@ -7872,48 +7859,68 @@ export class SpaceReplica
       const cfc = (doc as { cfc?: unknown }).cfc;
       if (!isObjectNotArray(cfc)) continue;
       const schemaHash = (cfc as { schemaHash?: unknown }).schemaHash;
-      if (typeof schemaHash !== "string" || schemaHash.length === 0) {
-        continue;
+      if (typeof schemaHash === "string" && schemaHash.length > 0) {
+        this.#kickCfcDocumentPull(schemaHash, lookupSchemaDocument);
       }
-      if (this.#kickedCfcSchemaPulls.has(schemaHash)) continue;
-      if (
-        lookupSchemaDocument(schemaHash) !== undefined ||
-        this.getDocument(`cid:${schemaHash}` as URI) !== undefined
-      ) {
-        continue;
+      // A version-2 envelope is owed its label documents on the same
+      // terms: a reader resolves every reference synchronously, and one
+      // that arrives without its document fails closed on every read
+      // until the document is at hand.
+      for (const hash of cfcEnvelopeLabelDocumentHashes(cfc)) {
+        this.#kickCfcDocumentPull(hash, lookupCfcLabelDocument);
       }
-      this.#kickedCfcSchemaPulls.add(schemaHash);
-      queueMicrotask(() => {
-        this.sync(`cid:${schemaHash}` as URI)
-          .then((result) => {
-            if (result.error !== undefined) {
-              logger.warn("cfc-schema-hydration-failed", () => [
-                "arrived-metadata schema pull failed; a later frame " +
-                "carrying the reference re-kicks",
-                { schemaHash, error: String(result.error) },
-              ]);
-              this.#kickedCfcSchemaPulls.delete(schemaHash);
-              return;
-            }
-            if (
-              lookupSchemaDocument(schemaHash) === undefined &&
-              this.getDocument(`cid:${schemaHash}` as URI) === undefined
-            ) {
-              // Completed empty: the document is not installed
-              // server-side yet. Re-arm, so the next reference-carrying
-              // frame retries instead of the window going permanent.
-              this.#kickedCfcSchemaPulls.delete(schemaHash);
-            }
-          }, (error) => {
-            logger.warn("cfc-schema-hydration-failed", () => [
-              "arrived-metadata schema pull threw; a later frame " +
-              "carrying the reference re-kicks",
-              { schemaHash, error: String(error) },
-            ]);
-            this.#kickedCfcSchemaPulls.delete(schemaHash);
-          });
-      });
     }
+  }
+
+  /**
+   * Helper for `#hydrateArrivedCfcSchemaRefs()`, which pulls one `cid:`
+   * document an arrived envelope names, unless the replica or the realm
+   * registry `registered` consults already holds it: one pull per hash per
+   * frame batch, re-armed on a failure or an empty completion so a later
+   * frame carrying the reference retries.
+   */
+  #kickCfcDocumentPull(
+    hash: string,
+    registered: (hash: string) => unknown,
+  ): void {
+    if (this.#kickedCfcSchemaPulls.has(hash)) return;
+    if (
+      registered(hash) !== undefined ||
+      this.getDocument(`cid:${hash}` as URI) !== undefined
+    ) {
+      return;
+    }
+    this.#kickedCfcSchemaPulls.add(hash);
+    queueMicrotask(() => {
+      this.sync(`cid:${hash}` as URI)
+        .then((result) => {
+          if (result.error !== undefined) {
+            logger.warn("cfc-schema-hydration-failed", () => [
+              "arrived-metadata document pull failed; a later frame " +
+              "carrying the reference re-kicks",
+              { hash, error: String(result.error) },
+            ]);
+            this.#kickedCfcSchemaPulls.delete(hash);
+            return;
+          }
+          if (
+            registered(hash) === undefined &&
+            this.getDocument(`cid:${hash}` as URI) === undefined
+          ) {
+            // Completed empty: the document is not installed
+            // server-side yet. Re-arm, so the next reference-carrying
+            // frame retries instead of the window going permanent.
+            this.#kickedCfcSchemaPulls.delete(hash);
+          }
+        }, (error) => {
+          logger.warn("cfc-schema-hydration-failed", () => [
+            "arrived-metadata document pull threw; a later frame " +
+            "carrying the reference re-kicks",
+            { hash, error: String(error) },
+          ]);
+          this.#kickedCfcSchemaPulls.delete(hash);
+        });
+    });
   }
 
   /**
