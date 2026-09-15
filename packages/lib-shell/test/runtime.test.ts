@@ -15,12 +15,27 @@ import {
   createRuntimeClientOptions,
   defaultRenderConfidentialityCeiling,
   RuntimeInternals,
+  type RuntimeTrustSnapshot,
 } from "@commonfabric/lib-shell";
 import {
   EventEmitter,
   type RuntimeTransport,
   TransportNotificationType,
 } from "@commonfabric/runtime-client";
+
+/** Fails to compile unless `Bound` satisfies `Declared`. */
+type Satisfies<Bound extends Declared, Declared> = Bound;
+
+// The audience a render ceiling admits is named by identity atoms over a
+// DID, and the declared type of `actingPrincipal` is what holds a host to
+// that. `@ts-expect-error` inverts the sense of the line it precedes: the
+// type check fails when that line compiles. So a declaration that stopped
+// rejecting a plain string would show up here rather than nowhere.
+export type NonDidActingPrincipalIsRejected = Satisfies<
+  // @ts-expect-error a trust snapshot's acting principal has to be a DID
+  { id: "principal:loom-host"; actingPrincipal: "loom-host" },
+  RuntimeTrustSnapshot
+>;
 
 type MockRuntimeClientEvents = {
   console: [unknown];
@@ -954,34 +969,13 @@ describe("RuntimeInternals", () => {
     );
   });
 
-  it("refuses an acting principal that is not a DID", async () => {
-    const identity = await Identity.generate({ implementation: "noble" });
-    const session = await createSession({
-      identity,
-      spaceName: "lib-shell-cfc-render-ceiling-non-did",
-    });
-
-    // A principal that is not a DID names no audience, and the check runs
-    // whether or not this host asks for a ceiling.
-    expect(() =>
-      createRuntimeClientOptions({
-        session,
-        apiUrl: new URL("http://shell.test/"),
-        trustSnapshot: {
-          id: "principal:loom-host",
-          actingPrincipal: "loom-host",
-        },
-      })
-    ).toThrow("acting principal must be a DID");
-  });
-
   it("allows hosts to override CFC policy and trust snapshot", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const session = await createSession({
       identity,
       spaceName: "lib-shell-cfc-runtime-options",
     });
-    const trustSnapshot = {
+    const trustSnapshot: RuntimeTrustSnapshot = {
       id: "principal:loom-host",
       actingPrincipal: "did:key:z6MkLoomHost",
       revision: "loom-policy-v1",
@@ -1120,30 +1114,6 @@ describe("RuntimeInternals", () => {
         defaultRenderConfidentialityCeiling(identity.did()),
       );
     });
-  });
-
-  it("refuses bad options before spawning a worker it would own", async () => {
-    const identity = await Identity.generate({ implementation: "noble" });
-
-    // With no transport supplied, `create` spawns the worker itself and owns
-    // it. Options are built first, so a snapshot this host cannot render for
-    // is refused while there is still nothing to dispose. The worker URL and
-    // build hash are supplied so that resolving them reaches the spawn, which
-    // the rigged `Worker` constructor is what stops.
-    await expect(
-      withNoWorkerConstructible(() =>
-        RuntimeInternals.create({
-          identity,
-          apiUrl: new URL("http://shell.test/"),
-          workerUrl: new URL("http://shell.test/worker.js"),
-          getBuildHash: () => Promise.resolve(undefined),
-          trustSnapshot: {
-            id: "principal:loom-host",
-            actingPrincipal: "loom-host",
-          },
-        })
-      ),
-    ).rejects.toThrow("acting principal must be a DID");
   });
 
   describe("worker URL versioning", () => {

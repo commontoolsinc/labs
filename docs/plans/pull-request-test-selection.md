@@ -4,10 +4,8 @@ Status: in progress. Part one is built. Part two is built apart from its
 continuous-integration configuration, the coverage work and the full run's
 treatment of flaky tests; part three has the reporter and nothing else.
 [The work](#the-work) carries the detail. The record store this plan
-consumes is live and holds the data the design needs; the gaps it does not
-yet hold are listed under [What the store is
-missing](#what-the-store-is-missing) and closed by the first part of the
-work.
+consumes is live and holds the data the design needs, apart from what
+[What the store is missing](#what-the-store-is-missing) names.
 
 Continuous integration for a pull request currently runs 67 jobs and every
 test in the repository. This plan replaces that with five jobs that run a
@@ -325,9 +323,8 @@ record of it exists.
 identities; the runners take file paths and section names. For a pattern
 test the identity name is its path, while the suite supplies its record
 surface and variant. For a unit test `locate()` needs the file the identity
-came from, which is metadata the store does not reliably carry today;
-closing that gap is the first thing [part
-one](#part-one--the-data-and-what-it-already-tells-us) does.
+came from, which the record carries as metadata; [the test-record
+spec](../specs/test-records.md) says where a producer gets it.
 
 Most identities locate to an item and take part in scoring and item cost.
 An overlapping task-level record locates only to the suite. For example,
@@ -385,7 +382,7 @@ table is the migration's checklist.
 
 | Suite | Today's jobs | Record variant | Capabilities |
 | --- | --- | --- | --- |
-| `repo-gates` | `Check` (all but the type check) | — | `deno` |
+| `repo-gates` | `Check` (all but the type check) | — | `deno`, `github-api` |
 | `repo-history-gates` | the two append-only gates in `Pattern Update State and Baseline Integrity` | — | `deno`, `git-history` |
 | `typecheck` | `Check` (the type check) | — | `deno` |
 | `workspace-unit` | `Test (1..8)` | — | `deno`, `fuse`, `browser` |
@@ -550,14 +547,13 @@ else a run needs — the permissions, `--no-check`, a fake-clock preload,
 an `ENV` assignment in front — so the topology reads the task for those
 and replaces its paths with the chosen ones.
 
-Thirty-two of the forty-seven members are readable that way, which makes
-1,342 test files individually selectable. The rest are one unit each and
-run whole, which is what every member does today. A member whose task is
-written as a dependency list resolves through it to the `deno test`
-underneath, and the one command substitution the workspace writes —
-naming the running Deno in an `--allow-run` list — is resolved rather
-than treated as a shell metacharacter, so neither shape costs a member
-its granularity.
+Most of the forty-seven members are readable that way, and nearly every
+unit the topology holds is one test file. The rest are one unit each and
+run whole. A member whose task is written as a dependency list resolves
+through it to the `deno test` underneath, and the one command
+substitution the workspace writes — naming the running Deno in an
+`--allow-run` list — is resolved rather than treated as a shell
+metacharacter, so neither shape costs a member its granularity.
 
 Two things a member's own `deno test` would apply are applied during
 enumeration instead: the task's `--ignore` globs and the member's
@@ -1051,12 +1047,13 @@ file is what the topology places it by, and an identity the topology
 cannot place is one the publisher leaves out of the manifest, which
 makes every lane run it forever and score it never: of the 3,660
 identities one reproduction of the publisher could not claim, 3,648 had
-no file at all. The report cannot carry it, since Deno puts a bdd leaf's
-describe chain in the class name rather than a path, and a class name
-names whichever module called `Deno.test` in any case. The registrar
-knows the file and does not write the record; `ingestJUnit` writes it in
-another process after `deno test` has exited. The map is what passes
-between the two.
+no file at all. A class name names whichever module called `Deno.test`,
+so a bdd leaf's names the runner's own module and reaches a file only
+through the case its `describe` registered; once a registrar of ours
+stands there, that case names the registrar and the report carries
+nothing. The registrar knows the file and does not write the record;
+`ingestJUnit` writes it in another process after `deno test` has exited.
+The map is what passes between the two.
 
 What does get simpler is the lookup. `fileForName` walks the whole map
 for each leaf and takes the longest registered name that leaf's own name
@@ -1208,6 +1205,7 @@ batches.
 | `jq` | `jq` | about 2 seconds |
 | `browser` | Relaxes the AppArmor user-namespace restriction | under a second |
 | `git-history` | Unshallows the checkout | 3–10 seconds |
+| `github-api` | Exports the GitHub token the runner is holding, to the suites that declared it | under a second |
 | `toolshed` | A Toolshed server listening on an allocated port | see below |
 | `local-dev-servers` | The whole local dev stack, brought up by `deno task integration` on a chosen port offset | 15–20 seconds |
 | `toolshed-baked` | The same, from a compiled binary, whose baked shell a browser can drive | 42 seconds to build, or 17 to restore |
@@ -1271,7 +1269,7 @@ cheaply.
 
 ## What the store gives us and what it is missing
 
-The store gives, for every execution of every test: the identity, the
+The store gives, for every execution it records: the identity, the
 outcome, the runner's own duration measurement, the commit, the branch,
 the workflow run and job, whether the run was a push or a pull request,
 whether it came from a fork, and for local runs the reporting person. That
@@ -1294,48 +1292,36 @@ section](#how-far-back-each-term-looks).
 
 ### What the store is missing
 
-**Records do not carry the file for the suites that matter most.** The
-`file` field is optional metadata, and today only the package integration
-suites populate it, because their JUnit class names happen to be file
-paths. A sample of 5,333 unit records carried it zero times. Without it,
-`locate()` cannot map a unit identity to a file, and unit selection cannot
-work at all.
+**The workspace runner records nothing for a test task it cannot read.**
+It hands a `--junit-path` to a member's Deno-only half where it can read
+a `deno test` in the member's `test` task, or where the member is one of
+the few runner scripts listed as forwarding the flag to the one
+`deno test` underneath. A member it can read neither way produces no
+report for that half. What its tests reach the store by then is a
+harness of the member's own — the browser runner, or the pattern test
+runner — and a half with neither is not recorded at all.
 
-The reason is mechanical. Deno's JUnit output names a leaf case by its
-describe chain and puts the describe chain in the class name too, so
-`ingestJUnit` has nothing that looks like a path to join onto its
-`filePrefix`. Only file-level suites, where the class name happens to be
-the path, come out with a file.
+The two readers of a task disagree about which members those are. The
+topology reads whichever half a member declares, and then the tasks that
+half names as its own dependencies, taking the first that reads as a
+single `deno test`; a `deno test` any deeper than that it does not
+reach. The runner reads only the `test` task's own command. Every member
+whose `test` task is written as the list of tasks it depends on falls in
+that gap: the topology enumerates it a file at a time, and no report
+those files could be recorded in is ever produced. The store half of
+[the drift guard](#the-drift-guard) is where those items are reported.
 
-Closing this comes first, and the mechanism that works without touching a
-single test file is a preload module. `deno test --preload` already runs
-in this repository — `packages/runner` uses it for its fake clock — and a
-preload runs before every test module. A module in
-`@commonfabric/test-support` wraps `Deno.test`, reads the registering
-module out of the stack at registration time, and writes the resulting
-name-to-file map into the spool beside the record fragments when the
-process unloads.
-
-A file written in the repository's `describe`/`it` style registers exactly
-one `Deno.test`, named for its single top-level `describe()`, so the
-captured map is from that title to the file. Every leaf identity from that
-file begins with the same title followed by the separator, which is the
-join `ingestJUnit` performs to set each leaf's file. Two files sharing a
-top-level title make the join ambiguous, and that is already a name
-collision the report tool surfaces as one.
-
-This was tried before being written down: wrapping `Deno.test` from a
-preload works on Deno 2.9.4, the stack names the registering module, and
-the unload handler runs.
-
-That covers everything built on `Deno.test`, which is the workspace unit
-suites, the runner suite, and the generated-pattern suites. The browser
-runner in `packages/deno-web-test/runner.ts` records through
-`FragmentWriter` directly and sets the file there. The pattern suites need
-nothing: their identity is the path already.
-
-The record schema already carries the field, so no format changes, and
-nothing downstream of the store has to know this happened.
+What that costs is an item scored at the floor rather than a selection
+that cannot run. `locate()` places a unit record on an item by its file,
+so a member with no records has no identity landing on any of its files.
+Each of them is then an item no manifest knows, and [an identity with no
+records must run](#two-rules-that-force-a-test-in) makes every one of
+them mandatory, so all of them run, on a stand-in entry rather than on
+anything measured about them. It also holds the full run short of the
+precondition this design sets itself: a successful run whose records
+account for every item the topology enumerates, with no absences but the
+ones a skip registry declares. Closing it reaches the members' tasks and
+the runner that reads them rather than the store.
 
 **Compaction is live.** The compactor's identity was provisioned on
 2026-08-31 and its daily workflow has rolled up every day from 2026-08-19
@@ -2580,6 +2566,7 @@ pr-tests:
   timeout-minutes: *lane-job-timeout
   env:
     CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   permissions:
     contents: read
   strategy:
@@ -2616,6 +2603,16 @@ pr-tests:
 The full-depth checkout and the `origin/<base>` spelling are what the
 `pattern-vintage` job already does to diff against the merge base, so the
 mechanism is proven in this workflow rather than newly invented here.
+
+The token in the job's environment is what the `github-api` capability
+distributes. A job may not name a secret per step here the way the
+`Check` job does, because which step a gate runs in is a fact about the
+lane's packing rather than about the workflow, so the token arrives
+job-wide and the runner narrows it: it takes the token out of its own
+environment before it opens anything, and only a suite that declared
+`github-api` is given it back. The `contents: read` permission bounds
+what the token can do to reading this repository, which is what
+`check-action-pins` asks the service for.
 
 Two new timeout anchors join the block at the top of the file:
 `LANE_WORK_TIMEOUT_MINUTES` at five and `LANE_JOB_TIMEOUT_MINUTES` at 15,
@@ -2662,42 +2659,46 @@ alternate execution of one test.
 
 What the runner does, in order:
 
-1. Resolve the manifest from the commit's date and fetch it. No manifest
+1. Take the GitHub token out of its own environment and hold it. Every
+   child the lane spawns inherits what the lane holds, so this comes
+   before the lane reads, plans, opens or runs anything, and a suite that
+   declared `github-api` is given the token back through that capability.
+2. Resolve the manifest from the commit's date and fetch it. No manifest
    at or before that date, or a fetch failure, takes the fallback (see
    [Failure modes](#failure-modes)).
-2. Enumerate every suite against the working tree, and read the manifest
+3. Enumerate every suite against the working tree, and read the manifest
    against that enumeration. The tree decides which tests exist and the
    manifest decides what each is worth and costs, so an entry naming a
    unit the tree no longer has drops out and a unit the manifest has
    never seen gains a stand-in. Everything after this reads the result
    rather than the manifest the store gave, which is what keeps the full
    run and a pull request working from one answer about what exists.
-3. Compute the diff against the merge base, and ask each suite which of
+4. Compute the diff against the merge base, and ask each suite which of
    its units the diff touched. The full run skips this: it has no diff.
-4. Call `plan()`, take this lane's plan. The full run calls it with the
-   `everything` policy, and with the empty diff step 3 left it. Those two
+5. Call `plan()`, take this lane's plan. The full run calls it with the
+   `everything` policy, and with the empty diff step 4 left it. Those two
    values are the whole of the difference between the two runs.
-5. Print the plan to the job summary: which batches, which items, what
+6. Print the plan to the job summary: which batches, which items, what
    each is expected to cost, why each was chosen, which items were
    withheld and why, which of them a failure would not fail the lane for,
    and which manifest the plan came from.
-6. Set up the union of the capabilities the batches need, recording each
+7. Set up the union of the capabilities the batches need, recording each
    one's duration.
-7. Run each batch execution with fresh spool and JUnit output paths,
+8. Run each batch execution with fresh spool and JUnit output paths,
    recording planned and actual durations and continuing past a failure so
    that one failure does not hide later batches or repeats.
-8. Immediately after each execution, gather its direct records and
+9. Immediately after each execution, gather its direct records and
    described JUnit outputs into the lane spool through the shared gather
    function. Validate record surfaces and apply the suite's optional
    variant before another execution can reuse any runner-owned path. Then
    convert the coverage this lane produced into one report per workspace
    member and upload it for `Status` to join.
-9. Exit non-zero if any batch failed, or if any repeat of any item
-   failed. A failure the full run's non-gating rule covers is left out of
-   that, and a batch that did not account for every identity it was asked
-   to run is never left out of it. [An excluded test still runs on
-   `main`](#an-excluded-test-still-runs-on-main) says which failures those
-   are and how the runner tells them apart.
+10. Exit non-zero if any batch failed, or if any repeat of any item
+    failed. A failure the full run's non-gating rule covers is left out
+    of that, and a batch that did not account for every identity it was
+    asked to run is never left out of it. [An excluded test still runs on
+    `main`](#an-excluded-test-still-runs-on-main) says which failures
+    those are and how the runner tells them apart.
 
 ## The full run on `main`
 
@@ -3773,8 +3774,8 @@ answers somewhere people can see them.
 
 - [x] A preload module in `@commonfabric/test-support` that captures the
       registering module for every `Deno.test` and writes the name-to-file
-      map into the spool; `ingestJUnit` joins on it; every `deno test`
-      invocation carries the preload.
+      map into the spool; `ingestJUnit` joins on it; the runners append
+      the preload to the invocations that can take one.
 - [x] `packages/deno-web-test/runner.ts` sets `file` on the records it
       writes directly.
 - [x] `tasks/test-selection/{policy,score,manifest,store}.ts` — the dials,
