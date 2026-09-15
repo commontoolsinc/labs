@@ -997,10 +997,10 @@ leaves the tree consistent.
 
 1. **Read the new forms.** `parseReferenceParts` reads `//<space>/`,
    `@name=value`, repeated qualifiers, and `@inherit`; `parseScopedIdSegment`
-   becomes the qualifier parser. The `/@<space>/` prefix stays readable as an
-   alias for `//<space>/` — with a DID because it has been rendered into harness
-   refs, messages, and markdown, and with a name because `cf --url` renders one
-   today; the [alias table](#aliases) says when each goes. `parseFabricUrl`
+   becomes the qualifier parser. The `/@did:…/` prefix stays readable as an
+   alias for `//did:…/` because it occurs in harness refs, messages, and
+   markdown. Named-space `/@name/` prefixes are refused; callers use `//name/`.
+   The [alias table](#aliases) records the retained forms. `parseFabricUrl`
    reads `//<space>/` alongside the alias. The CLI's `validateEmbeddedSpaces`
    and completion providers follow the same split. The reader takes a context
    ([D10](#d10-reader-and-writer-share-one-context)) and reads the

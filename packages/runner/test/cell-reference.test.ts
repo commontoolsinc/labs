@@ -258,6 +258,15 @@ describe("cell-reference", () => {
   });
 
   describe("renderCellReference()", () => {
+    it("refuses spaces that would change the reference structure", () => {
+      for (
+        const space of ["", "foo/bar", "foo@user", "foo#argument", "foo:bar"]
+      ) {
+        expect(() => renderCellReference({ space, id: "glaze", path: [] }))
+          .toThrow(/Invalid space/);
+      }
+    });
+
     it("keeps an unscoped cell in base scope under a scoped context", () => {
       const link = { space: "bakery", id: "glaze", path: [] };
       for (const scope of ["user", "session"] as const) {

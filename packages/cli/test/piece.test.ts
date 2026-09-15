@@ -279,6 +279,10 @@ describe("cli piece parsing", () => {
       .toThrow(/not a URL/);
     expect(() => parseSpaceOptions({ url: API_URL, identity: ID }))
       .toThrow(/does not contain a space/);
+    expect(() =>
+      parseSpaceOptions({ url: `${API_URL}/foo%2Fbar/${PIECE}`, identity: ID })
+    )
+      .toThrow(/Invalid space/);
     for (
       const url of [
         `${API_URL}/${SPACE}/${PIECE}%23argument`,

@@ -304,6 +304,7 @@ export function renderCellReference(
   context: ReferenceContext = {},
 ): string {
   if (link.pin !== undefined) checkPin(link.pin);
+  if (link.space !== undefined) checkSpace(link.space);
   if (link.space === undefined && context.space !== undefined) {
     throw new Error(
       "An unresolved reference space cannot inherit a known context space.",

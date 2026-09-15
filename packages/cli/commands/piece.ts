@@ -5542,15 +5542,20 @@ function decomposeUrl(
       { exitCode: 1 },
     );
   }
-  return {
-    apiUrl,
-    space,
-    reference: renderCellReference({
+  let reference: string;
+  try {
+    reference = renderCellReference({
       ...parseCellReference(`/${encodeJsonPointer([piece])}`),
       space,
       path,
-    }),
-  };
+    });
+  } catch (error) {
+    throw new ValidationError(
+      error instanceof Error ? error.message : String(error),
+      { exitCode: 1 },
+    );
+  }
+  return { apiUrl, space, reference };
 }
 
 // We use stdin for piece input which must be an `Object`
