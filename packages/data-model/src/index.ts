@@ -1,10 +1,10 @@
+export { fabricAwareEqual, valueEqual } from "@/comparison";
+
 export {
   deepFreeze,
   isDeepFrozen,
   isValidDeepFrozenFabricValue,
 } from "./deep-freeze.ts";
-
-export { fabricAwareEqual } from "./fabricAwareEqual.ts";
 
 export type * from "./interface.ts";
 
@@ -82,5 +82,3 @@ export {
   VALUE_TAGS,
   type ValueTag,
 } from "@/value-tags";
-
-export { valueEqual } from "./valueEqual.ts";

@@ -7,6 +7,7 @@
   "imports": {
     // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@/": "./src/",
+    "@/comparison": "./src/comparison/index.ts",
     "@/value-tags": "./src/value-tags/index.ts",
     "@/value-visit": "./src/value-visit/index.ts",
     "@node/crypto": "node:crypto"
@@ -53,7 +54,6 @@
     "./fabric-bases": "./src/fabric-bases/index.ts",
     "./fabric-instances": "./src/fabric-instances/index.ts",
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
-    "./frozen-builtins": "./src/frozen-builtins.ts",
-    "./value-tags": "./src/value-tags/index.ts"
+    "./frozen-builtins": "./src/frozen-builtins.ts"
   }
 }
