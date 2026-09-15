@@ -313,6 +313,61 @@ run stays green.
 Because that ceiling is the board's cost and not a property of the benchmark,
 the two skipped sizes should be enabled as part of whatever lowers it.
 
+## Topics browser measurement
+
+`packages/patterns/integration/topics-browser-measurement.ts` measures one
+operation a caller drives in a Topics board's browser page, for the browser tier
+of [the Topics computation plan](../plans/topics-computation-cost.md). It adds
+no benchmark series of its own; a board benchmark calls it around a workload.
+
+`measureTopicsReads()` turns telemetry and body read accounting on in the
+shell's runtime client, runs the operation, waits until the view has settled and
+the runtime is idle, and turns both off again. From the `scheduler.run.complete`
+markers it sums runs, `durationMs`, proxy accesses, the largest single run's
+accesses, link resolutions, distinct documents, and registered dependencies, in
+one row for the board's pivot (`crossrefTable`, the producer), one for each
+per-topic consumer (`backlinksOf`, `presentCommentCountOf`, and
+`lastActivityOf`), and one for every other run. It also records the scheduler
+graph's node and edge counts before and after, the operation's elapsed time, and
+the timing statistics the main thread and the worker accumulated over it, less
+the helper's own requests. A timing row sums spans that can overlap, so its total
+can exceed the elapsed time. Accounting is on for that elapsed time and timing,
+and the sample says so. `timeTopicsOperation()` records the same graph, elapsed
+time, and timing with telemetry and accounting off, brackets a `Deno.bench`
+interval when given one, and records no reads.
+
+A lift is found by name. The helper reads its module from the program root the
+board was deployed from, finds `const <name> = lift(`, and takes the position
+where the lift's function starts, which is the position a run's `src` names. A
+candidate whose lines moved is therefore measured under the same names. A name
+not declared that way fails the measurement. So does a lift's module that is
+running but holds no action at the lift's position, or runs in two versions:
+either way the sources read are not the ones the board runs. A lift whose module
+is not running, such as a topic lift on a board with no topic open, is reported
+with zero runs.
+
+A measured operation fails when it completes no runs, when an event commit
+fails, or when the page raises an error. A timed operation fails on a page error,
+and reports the count of the worker's `scheduler/run` timing, which misses a run
+that starts while another is being timed.
+
+The helper does not record:
+
+- Transaction-attempt reads. The runtime client's read-stats request enables
+  body accounting only, so attempt reads come from the headless tier.
+- Rendering beyond VDOM application. The main thread's
+  `vdom-applicator/apply-batch` timing, which covers applying worker VDOM
+  batches to the DOM, is the only rendering time the shell records. Lit element
+  updates, style, layout, and paint have no timing of their own and appear only
+  in the elapsed time. The main thread's `runtime-client/ipc/*` rows are waits
+  on the worker, not main-thread work.
+- Network bytes, subscriptions, and storage work outside reactive bodies.
+
+`topics-browser-measurement.test.ts` runs both samplers on a two-topic board in
+which one topic cites the other: opening a topic and returning to the board runs
+each named lift at least once, and an operation that demands nothing fails the
+measurement.
+
 ## The multiplayer contention benchmark
 
 `packages/patterns/integration/lunch-poll-vote-burst.bench.ts` measures what
