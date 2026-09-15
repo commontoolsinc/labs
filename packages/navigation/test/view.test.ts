@@ -180,6 +180,22 @@ describe("view", () => {
     ).toBe("/space/top/42/comments/7");
   });
 
+  it("writes back segments past a member in the spelling the URL carried them in", () => {
+    // A `?` or `#` inside a segment reaches the view percent-encoded, as the
+    // URL holds it, so writing the view back starts no query and no fragment.
+    const view = urlToAppView(
+      new URL("http://common.test/space/top/42/a%3Fb/c%23d"),
+    );
+    expect(view).toEqual({
+      spaceName: "space",
+      pieceSlug: "top",
+      pieceMember: "42",
+      pieceExtraPath: "a%3Fb/c%23d",
+    });
+    expect(isAppView(view)).toBe(true);
+    expect(appViewToUrlPath(view)).toBe("/space/top/42/a%3Fb/c%23d");
+  });
+
   it("routes a bare origin to the home view", () => {
     expect(urlToAppView(new URL("http://common.test/"))).toEqual({
       builtin: "home",
@@ -343,8 +359,8 @@ describe("view", () => {
         pieceExtraPath: "comments/7",
       }),
     ).toBe(true);
-    // Written with no member, the segments would land where a member goes and
-    // read back as naming one.
+    // Written with no member, the segments have nothing to follow, and the
+    // address written for the view names the collection alone.
     expect(
       isAppView({ spaceName: "space", pieceSlug: "top", pieceExtraPath: "7" }),
     ).toBe(false);
@@ -357,6 +373,24 @@ describe("view", () => {
         pieceExtraPath: "",
       }),
     ).toBe(false);
+  });
+
+  it("returns `false` for segments past a member that a URL path does not keep as written", () => {
+    // Each of these writes an address that reads back as another view: `?`
+    // and `#` start a query and a fragment, `..` resolves away and takes the
+    // member with it, so `../43` reads back as member `43`, and a backslash or
+    // a space is rewritten into another spelling.
+    const accepted = ["a?b", "a#b", "../43", "a\\b", "a b"].filter((
+      pieceExtraPath,
+    ) =>
+      isAppView({
+        spaceName: "space",
+        pieceSlug: "top",
+        pieceMember: "42",
+        pieceExtraPath,
+      })
+    );
+    expect(accepted).toEqual([]);
   });
 
   it("reads a member out of a URL without holding it to that grammar", () => {

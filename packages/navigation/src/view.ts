@@ -105,10 +105,13 @@ function isAppViewModeRef(view: object): view is AppViewModeRef {
  * rather than a member of it.
  *
  * Segments past a member are held only beside a member, because they are
- * written after it: without one, `appViewToUrlPath` would put them where a
- * member goes, and the address would read back as naming that member. Their
- * own spelling is not held to a grammar, since a view carrying them is refused
- * by them rather than resolved through them.
+ * written after it: without one, `appViewToUrlPath` has nothing to write them
+ * after and leaves them out, so the address it writes names the collection
+ * alone. They are also held to a spelling a URL path keeps as written. Any
+ * other spelling writes an address that reads back as another view: a `?` or
+ * `#` starts a query or a fragment, and `../43` reads back as member `43`.
+ * Past that they are not held to a grammar, since a view carrying them is
+ * refused by them rather than resolved through them.
  */
 function isPieceViewRef(view: object): view is PieceViewRef {
   if ("pieceId" in view && "pieceSlug" in view) return false;
@@ -120,7 +123,25 @@ function isPieceViewRef(view: object): view is PieceViewRef {
       typeof slug === "string" && !!slug);
   return memberHeld &&
     (extraPath === undefined ||
-      (typeof extraPath === "string" && !!extraPath && member !== undefined));
+      (typeof extraPath === "string" && !!extraPath && member !== undefined &&
+        isKeptAsWrittenInPath(extraPath)));
+}
+
+/**
+ * Whether `path`, written after a segment of a URL path, comes back out of
+ * that path as it went in: nothing in it starts a query or a fragment,
+ * resolves away as a dot segment, or is rewritten into another spelling.
+ *
+ * A URL hands its path back parsed and percent-encoded, so every spelling
+ * `urlToAppView` carries out of one passes.
+ */
+function isKeptAsWrittenInPath(path: string): boolean {
+  // Reading the answer off a URL is what keeps this from restating a parser's
+  // rules for dot segments, backslashes, and what each byte encodes to: the
+  // parser these addresses are read by decides, rather than a copy of it here
+  // that would have to be kept in step.
+  const written = `/segment/${path}`;
+  return new URL(written, "http://view.invalid").pathname === written;
 }
 
 /**

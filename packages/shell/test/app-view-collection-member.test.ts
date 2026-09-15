@@ -8,6 +8,10 @@
  * error it shows as its own, and how the watch behind it behaves as the
  * reference stops and starts resolving.
  *
+ * `/<space>/<id>` is here too: settling an id on the slug the space gives it
+ * is the rewrite that says the refusals above are about the member, rather
+ * than about rewriting at all.
+ *
  * The view is driven directly rather than through a runtime. Every fact these
  * tests are about is settled between a resolution's answer and the view's own
  * state, so a stub answering as the worker would is the whole environment they
@@ -233,6 +237,12 @@ interface StubRuntime {
 
   /** Release the held answers, newest first. */
   releaseNewestFirst(): Promise<void>;
+
+  /**
+   * Name every piece from here on with `slug`, or with nothing when given
+   * `undefined`.
+   */
+  nameWithSlug(slug: string | undefined): void;
 }
 
 function stubRuntime(
@@ -243,12 +253,16 @@ function stubRuntime(
   const started: unknown[][] = [];
   let answer = first;
   let poll: (() => void) | undefined;
+  let pieceSlug: string | undefined;
   const stub: StubRuntime = {
     resolved,
     started,
     cancels: 0,
     answer: (next) => {
       answer = next;
+    },
+    nameWithSlug: (slug) => {
+      pieceSlug = slug;
     },
     poll: async () => {
       poll?.();
@@ -343,6 +357,7 @@ function stubRuntime(
       setTelemetryEnabled: () => Promise.resolve(),
       setBreakpoints: () => Promise.resolve(),
     }),
+    getSlug: () => Promise.resolve(pieceSlug),
     getSlugCell: () =>
       Promise.resolve({
         subscribe: () => () => {
@@ -594,6 +609,72 @@ describe("AppView collection members", () => {
     } finally {
       globalThis.removeEventListener("cf-replace-navigation", listener);
       errors.restore();
+      restore();
+    }
+  });
+
+  it("settles an address naming a piece by id on the slug that names it", async () => {
+    // Refusing a member is about the member. An address the space can name
+    // better is still written back, and this is the case that does it: the
+    // slug stands in for the id, and every other field of the view — the
+    // space, the mode it is read in — comes through untouched.
+
+    const restore = installBrowserGlobals();
+    const replaced: AppView[] = [];
+    const listener = (event: Event) => {
+      replaced.push((event as CustomEvent<AppView>).detail);
+    };
+    globalThis.addEventListener("cf-replace-navigation", listener);
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:plain", pathAfter: [] });
+      stub.nameWithSlug("top");
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceId: "fid1:plain", mode: "embed" }),
+      );
+
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      expect(replaced).toEqual([{
+        spaceName: "naming-demo",
+        pieceSlug: "top",
+        mode: "embed",
+      }]);
+    } finally {
+      globalThis.removeEventListener("cf-replace-navigation", listener);
+      restore();
+    }
+  });
+
+  it("leaves an address naming a piece by id alone when the name the space gives it is no slug", async () => {
+    // A name carrying a separator would write two segments where the address
+    // holds one, and the second would read back as a member.
+
+    const restore = installBrowserGlobals();
+    const replaced: AppView[] = [];
+    const listener = (event: Event) => {
+      replaced.push((event as CustomEvent<AppView>).detail);
+    };
+    globalThis.addEventListener("cf-replace-navigation", listener);
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:plain", pathAfter: [] });
+      stub.nameWithSlug("top/42");
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceId: "fid1:plain" }),
+      );
+
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      expect(replaced).toEqual([]);
+    } finally {
+      globalThis.removeEventListener("cf-replace-navigation", listener);
       restore();
     }
   });
