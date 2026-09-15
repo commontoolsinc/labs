@@ -230,21 +230,23 @@ runtime. Seven runtime and build packages (`js-compiler`, `ts-transformers`,
 out whether it holds any executable code, and `patterns` imports it for the
 Topics browser-measurement helper, which parses authored and compiled sources
 to find a lift's declaration. All ten workspace members pin the same version in
-their `deno.jsonc` import maps.
+their `deno.jsonc` import maps. This npm dependency is separate from the
+TypeScript that `deno check` uses: Deno bundles its own copy of the compiler.
+Keeping the npm pin on the same minor version as the Deno-bundled compiler
+(`deno --version` prints it) avoids the two disagreeing about what type-checks.
 
 `packages/patterns` pins it twice. Its lane 1 unit tests run under
 `packages/patterns/test-import-map.json`, which replaces the package's import
 map rather than extending it, so a dependency a unit test reaches is declared
 in both files. `deno outdated` rewrites the `deno.jsonc` pin alone, so rolling
-the version means editing that file by hand as well. This npm dependency is separate from the TypeScript that `deno check`
-uses: Deno bundles its own copy of the compiler. Keeping the npm pin on the
-same minor version as the Deno-bundled compiler (`deno --version` prints it)
-avoids the two disagreeing about what type-checks.
+the version means editing that file by hand as well.
 
-To roll the version, update every pin and the lockfile in one step, then verify:
+To roll the version, update both pins and the lockfile, then verify:
 
 ```bash
 deno outdated --update --recursive typescript@<version>
+# `deno outdated` leaves the second pin alone: set `typescript` in
+# packages/patterns/test-import-map.json to the same version by hand.
 deno task check
 deno task test
 (cd packages/static && deno task check-cfc-types)
