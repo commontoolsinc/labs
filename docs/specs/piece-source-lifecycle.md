@@ -48,8 +48,10 @@ program manifest specified below. Fabric URL creation, the remaining web URL
 creation paths, live mutable fabric subscriptions, complete cross-space policy
 enforcement, forking, and runtime-fingerprint handling still require work.
 Common Fabric browser-link receipt is retained below as a concept, but is not
-planned for deployment. Cross-space history repoint is rejected until the
-checked source-replication path exists.
+planned for deployment or included in the
+[lifecycle implementation plan](../plans/piece-source-lifecycle-completion.md).
+Cross-space history repoint is rejected until the checked source-replication
+path exists.
 
 Following an origin is ONE mechanism, triggered by opening a piece — which a
 user does for most pieces and the runtime does for the surfaces it supplies. No

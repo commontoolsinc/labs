@@ -32,11 +32,12 @@ What is missing falls into two groups that barely touch each other:
    hydrates durable ones, but nothing appends a route with commit
    acknowledgment.
 
-The build order below is **four pull requests in two tracks**, which can run
-concurrently. The count is held down by grouping each pull request around one
-guarantee rather than one file, and the tracks are separated along the lines
-where two authors would otherwise be editing `piece-controller.ts`,
-`source-reconciler.ts`, and `runner.ts` at the same time.
+The build order below, summarized in the [plan index](README.md), is **four pull
+requests in two tracks**, which can run concurrently. The count is held down by
+grouping each pull request around one guarantee rather than one file, and the
+tracks are separated along the lines where two authors would otherwise be
+editing `piece-controller.ts`, `source-reconciler.ts`, and `runner.ts` at the
+same time.
 
 ## Findings
 
