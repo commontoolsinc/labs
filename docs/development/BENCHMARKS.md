@@ -603,8 +603,9 @@ The pivot cases hold 32, 128, and 512 topics under the `low-degree`,
 `high-degree`, and `single-bucket` mention graphs, at four mentions per source.
 At 32 and at 128 topics a sweep varies mentions per source over 0, 1, 4, and
 16, where 0 is the `none` graph: 32 topics is the size the read budget gates,
-and 128 is the size the probe reports the effect of mention degree at. The small pivot cases hold 4 topics, with as many mentions
-per source, up to four, as each graph allows. The fixture's documentation of
+and 128 is the size the probe reports the effect of mention degree at. The
+small pivot cases hold 4 topics, with as many mentions per source, up to four,
+as each graph allows. The fixture's documentation of
 `MentionGraph` says how each graph spreads its mentions.
 
 The thread cases hold four topics, each with 10, 100, or 1,000 comments and
