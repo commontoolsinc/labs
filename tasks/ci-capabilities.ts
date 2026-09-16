@@ -430,6 +430,43 @@ interface ToolshedOptions {
   role: ServerExecutionCiRole;
 }
 
+/**
+ * How much of a capability's log a report carries. A server's log is mostly
+ * one line per request, so a whole one would bury the report it sits in; the
+ * end of it is where a run that went wrong says so.
+ */
+export const CAPABILITY_LOG_TAIL_LINES = 200;
+
+/**
+ * The end of the log at `at`, under a line saying how much was left out, or
+ * one line saying why it could not be read.
+ *
+ * Never throws. Every caller is reporting something that has already gone
+ * wrong, and a report that threw would replace the failure it was written for.
+ */
+export async function logTail(
+  at: string,
+  read: (path: string) => Promise<string> = Deno.readTextFile,
+): Promise<string> {
+  let contents: string;
+  try {
+    contents = await read(at);
+  } catch (error) {
+    return `  (unreadable: ${error})`;
+  }
+  const lines = contents.split("\n");
+  // A trailing newline ends the last line rather than starting another.
+  if (lines.at(-1) === "") lines.pop();
+  const tail = lines.slice(-CAPABILITY_LOG_TAIL_LINES);
+  const dropped = lines.length - tail.length;
+  return [
+    `  last ${tail.length} of ${lines.length} line(s)${
+      dropped > 0 ? `; ${dropped} earlier dropped` : ""
+    }`,
+    ...tail,
+  ].join("\n");
+}
+
 /** The process identifier a background launch reports having detached. */
 export function pidOfBackgroundLaunch(output: string): number | undefined {
   const match = /\(pid (\d+)\)/.exec(output);
@@ -500,7 +537,15 @@ async function startToolshed(
     );
   } catch (error) {
     stop();
-    throw error;
+    // The server started and then failed its posture check, so its own log
+    // is the account of why. Nothing is holding the path at this point --
+    // the capability never opened -- so the log is carried in the throw or
+    // it goes with the work directory unread.
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n` +
+        `toolshed log:\n${await logTail(logFile)}`,
+      { cause: error },
+    );
   }
   return {
     env,

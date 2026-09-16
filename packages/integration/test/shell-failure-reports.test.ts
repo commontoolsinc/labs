@@ -189,6 +189,9 @@ async function rejectionMessage(work: Promise<unknown>): Promise<string> {
   throw new Error("Expected the call to throw, and it returned instead.");
 }
 
+/** The variable the wait reads its safety net's length from. */
+const NET_VARIABLE = "CF_WAIT_FOR_CONDITION_TIMEOUT_MS";
+
 // The stuck-condition safety net is five minutes, which no test can sit
 // through. This drives it through the environment variable the wait reads for
 // exactly that, and returns the message it gave up with. Everything past the
@@ -197,11 +200,16 @@ async function rejectionMessage(work: Promise<unknown>): Promise<string> {
 async function shortNetRejectionMessage(
   work: () => Promise<unknown>,
 ): Promise<string> {
-  Deno.env.set("CF_WAIT_FOR_CONDITION_TIMEOUT_MS", "1500");
+  // Put back whatever the run was started with, rather than removing it:
+  // somebody running this file with a net of their own chose that, and a
+  // test that dropped it would change every wait after itself.
+  const before = Deno.env.get(NET_VARIABLE);
+  Deno.env.set(NET_VARIABLE, "1500");
   try {
     return await rejectionMessage(work());
   } finally {
-    Deno.env.delete("CF_WAIT_FOR_CONDITION_TIMEOUT_MS");
+    if (before === undefined) Deno.env.delete(NET_VARIABLE);
+    else Deno.env.set(NET_VARIABLE, before);
   }
 }
 
@@ -481,6 +489,23 @@ describe("shell-failure-reports", () => {
       expect(described).toContain("  condition arguments:\n");
       expect(described).toContain('    [0] "members-7"');
       expect(described).toContain('    [1] {"member":"2"}');
+    });
+
+    it("spells out the numbers JSON would render as something else", async () => {
+      await load("/shell");
+
+      // Rendered by JSON alone these read back as `null`, `null` and `0`,
+      // so a wait told apart from its neighbours by one of them would be
+      // told apart wrongly.
+      const described = await describeConditionWaitFailure(
+        page,
+        "() => false",
+        [NaN, Infinity, -0, { attempts: -Infinity }],
+      );
+      expect(described).toContain('    [0] "NaN"');
+      expect(described).toContain('    [1] "Infinity"');
+      expect(described).toContain('    [2] "-0"');
+      expect(described).toContain('    [3] {"attempts":"-Infinity"}');
     });
 
     it("collapses a predicate written over several lines onto one", async () => {

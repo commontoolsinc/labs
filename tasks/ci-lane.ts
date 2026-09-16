@@ -39,6 +39,7 @@ import {
 } from "@commonfabric/test-support/records";
 import {
   type CapabilityId,
+  logTail,
   openCapabilities,
   takeGithubToken,
 } from "./ci-capabilities.ts";
@@ -892,13 +893,6 @@ export function describeAccounting(
 }
 
 /**
- * How much of a capability's log a failing lane prints. A server's log is
- * mostly one line per request, so a whole one would bury the report it is
- * printed beside; the end of it is where a run that went wrong says so.
- */
-export const CAPABILITY_LOG_TAIL_LINES = 200;
-
-/**
  * Prints the end of every log the opened capabilities named.
  *
  * A capability runs outside the test process, so a failure on its side is
@@ -916,25 +910,8 @@ export async function describeCapabilityLogs(
   read: (path: string) => Promise<string> = Deno.readTextFile,
 ): Promise<void> {
   for (const { capability, path: at } of logs) {
-    let contents: string;
-    try {
-      contents = await read(at);
-    } catch (error) {
-      // A capability that wrote nothing is one of the answers, and a
-      // report must not replace the failure it is printed beside.
-      console.log(`\n--- ${capability} log (unreadable: ${error}) ---`);
-      continue;
-    }
-    const lines = contents.split("\n");
-    // A trailing newline ends the last line rather than starting another.
-    if (lines.at(-1) === "") lines.pop();
-    const tail = lines.slice(-CAPABILITY_LOG_TAIL_LINES);
-    const dropped = lines.length - tail.length;
-    console.log(
-      `\n--- ${capability} log, last ${tail.length} of ${lines.length} ` +
-        `line(s)${dropped > 0 ? `; ${dropped} earlier dropped` : ""} ---`,
-    );
-    for (const line of tail) console.log(line);
+    console.log(`\n--- ${capability} log ---`);
+    console.log(await logTail(at, read));
     console.log(`--- end of ${capability} log ---`);
   }
 }
@@ -1389,12 +1366,19 @@ export async function runLane(
         failedUnits.add(`${batch.suite.id}\t${unit}`);
       }
     }
+  } catch (error) {
+    // A lane whose loop threw has failed, whatever the batches it got
+    // through said, and it is the one that most needs what the server
+    // wrote. Recorded before the finally below reads it.
+    ok = false;
+    throw error;
   } finally {
-    await opened.close();
-    // What a capability wrote is read before the directory goes, and only
-    // for a lane that failed: a green run has nothing to explain, and the
-    // logs are large.
+    // Read while the servers are still up: closing one signals it and
+    // returns, so a read after that races a shutdown still writing.
+    // Only for a lane that failed -- a green run has nothing to explain,
+    // and the logs are large.
     if (!ok) await describeCapabilityLogs(opened.logs);
+    await opened.close();
     // The lane owns this directory and nothing outside the lane reads
     // it, so it goes whether the batches passed, failed, or never ran.
     await Deno.remove(workDir, { recursive: true }).catch(() => {});

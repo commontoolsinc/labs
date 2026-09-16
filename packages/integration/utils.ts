@@ -77,10 +77,17 @@ export async function describeConditionWaitFailure(
     lines.push("  condition arguments:");
     args.forEach((arg, index) => {
       // A value JSON cannot carry is reported as one: a report must not
-      // replace the failure it describes with a failure of its own.
+      // replace the failure it describes with a failure of its own. The
+      // numbers JSON renders as something else are spelled out instead,
+      // since a wait told apart from its neighbours by an argument is told
+      // apart wrongly when that argument reads back as `null` or `0`.
       let rendered: string;
       try {
-        rendered = JSON.stringify(arg) ?? String(arg);
+        rendered = JSON.stringify(arg, (_key, value) =>
+          typeof value === "number" &&
+            (!Number.isFinite(value) || Object.is(value, -0))
+            ? (Object.is(value, -0) ? "-0" : String(value))
+            : value) ?? String(arg);
       } catch (error) {
         rendered = `(unrenderable: ${describeThrown(error)})`;
       }

@@ -5,7 +5,10 @@ import {
   testIdentityKey,
   type TestRecord,
 } from "@commonfabric/test-support/records";
-import type { CapabilityId } from "./ci-capabilities.ts";
+import {
+  CAPABILITY_LOG_TAIL_LINES,
+  type CapabilityId,
+} from "./ci-capabilities.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 
 import {
@@ -13,7 +16,6 @@ import {
   batchCoverage,
   batchesOf,
   batchRepeats,
-  CAPABILITY_LOG_TAIL_LINES,
   changedFiles,
   convertCoverage,
   COVERAGE_FAILURE_MARKER,
@@ -1097,8 +1099,9 @@ describe("running a lane's work", () => {
       console.log = log;
     }
     const printed = lines.join("\n");
+    expect(printed).toContain("--- toolshed log ---");
     expect(printed).toContain(
-      `toolshed log, last ${CAPABILITY_LOG_TAIL_LINES} of ${written.length} ` +
+      `last ${CAPABILITY_LOG_TAIL_LINES} of ${written.length} ` +
         "line(s); 30 earlier dropped",
     );
     // The end is what a run that went wrong wrote last, so it is the end
@@ -1121,7 +1124,8 @@ describe("running a lane's work", () => {
     } finally {
       console.log = log;
     }
-    expect(lines.join("\n")).toContain("toolshed log (unreadable:");
+    expect(lines.join("\n")).toContain("--- toolshed log ---");
+    expect(lines.join("\n")).toContain("(unreadable:");
     expect(lines.join("\n")).toContain("no such file");
   });
 
