@@ -20,7 +20,6 @@
 // this read path.
 
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { parseLink } from "../link-utils.ts";
 import { settleAbandonedRequest } from "./abandoned-request.ts";
 import { resultRowKeys } from "./sqlite/row-identity.ts";
 import {
