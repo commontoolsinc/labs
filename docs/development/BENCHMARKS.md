@@ -853,11 +853,10 @@ command then fails, naming it, and leaves `topics-read-budget-limits.derived`
 holding what it printed. `.gitignore` covers that file; delete it once you have
 read it.
 
-Once the module is printed, the command runs each gated case once more under
-every variant its limits are assigned to, and fails when a variant leaves one of
-those limits unexceeded, naming the workload, case, phase, count, variant,
-observed value, and limit of each. A limit written as ungated is assigned no
-variant and is not controlled.
+The control pass runs only when every count repeated. The command then runs
+each gated case once more under every variant its limits are assigned to, and
+fails when a variant leaves one of those limits unexceeded, naming the workload,
+case, phase, count, variant, observed value, and limit of each.
 
 A failing read-budget test has found a count that grew. Attribute the added
 reads or graph size to a phase and a role in the probe's records before
