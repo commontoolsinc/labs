@@ -4,9 +4,12 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Prepared digest cache selection](development/performance/2026-09-15-prepared-digest-cache-selection/) ([report](development/performance/2026-09-15-prepared-digest-cache-selection/README.md)) — four-arm comparison, repeated reactive executions, GC retention, paired timings, profiles, and replay patches selecting epoch-only memoization.
+
 - [Prepared digest unit ladder: paired summary](development/performance/2026-09-15-prepared-digest-paired-summary.md) — median timings and same-round speedups supplementing the original minimum-based summary.
 
 - [Prepared CFC digest measurements](development/performance/2026-09-15-prepared-digest.md) — alternating unit and labeled SQLite arm-B ladders, frozen-record cache counts, native-hasher profiles, and the cold-composition tradeoff.
+- [Wildcard-source path indexes](development/performance/2026-09-15-cfc-wildcard-source-index.md) — generated-corpus equivalence, paired source-wildcard query measurements, and shared arm-B profiles locating the remaining authoritative-cover scan.
 
 - [Loom investigation review clarifications](development/performance/2026-09-15-loom-person-inbox-review-clarifications.md) — complete 203-document access-shape accounting and raw repetitions explaining independently calculated policy and opening medians.
 

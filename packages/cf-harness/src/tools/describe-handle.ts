@@ -19,6 +19,11 @@ import {
 } from "@commonfabric/runner/cfc";
 import { mergeLabel } from "@commonfabric/runner/cfc/label-view-core";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
+import {
+  cfcLabelAtomTypes,
+  type DisclosedCfcLabel,
+  disclosedCfcLabels,
+} from "../cfc-label-disclosure.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
 import { resolveHandleToken } from "../handle-table.ts";
@@ -177,22 +182,15 @@ export interface DescribeHandleTableFill {
   unread?: string;
 }
 
-/** The label at one path inside a referent, as atom types and nothing else. */
-export interface DescribeHandleLabel {
-  /** Path within the referent, absent for the referent itself. */
-  path?: string[];
-
-  /**
-   * Confidentiality requirements: one entry per clause, each clause listing
-   * the atom types that satisfy it. A clause of several types is satisfied by
-   * any one of them, so the nesting is the requirement rather than a
-   * formatting choice.
-   */
-  confidentiality: string[][];
-
-  /** Integrity atom types, all of which the value carries. */
-  integrity: string[];
-}
+/**
+ * The label at one path inside a referent, as atom types and nothing else.
+ *
+ * A clause of several types is satisfied by any one of them, so the nesting
+ * in `confidentiality` is the requirement rather than a formatting choice.
+ * The projection is shared with every other reply that discloses a label —
+ * see [`cfc-label-disclosure.ts`](../cfc-label-disclosure.ts).
+ */
+export type DescribeHandleLabel = DisclosedCfcLabel;
 
 /**
  * Describes the SHAPE of a handle's referent: property names, types, nesting,
@@ -372,55 +370,6 @@ const pathSegmentsOf = (ref: string): string[] | undefined => {
   }
 };
 
-/** The type an atom names: its `type` field, or the whole of a string atom. */
-const atomType = (atom: unknown): string | undefined => {
-  if (typeof atom === "string") {
-    return atom;
-  }
-  const type = (atom as { type?: unknown } | null)?.type;
-  return typeof type === "string" ? type : undefined;
-};
-
-/**
- * One confidentiality clause's alternatives, as atom types. A bare atom is
- * its own single alternative, and a clause whose atoms this cannot name is
- * dropped rather than reported as an empty — that is, unconditional —
- * requirement.
- */
-const clauseTypes = (clause: unknown): string[] => {
-  const alternatives = (clause as { anyOf?: unknown } | null)?.anyOf;
-  return (Array.isArray(alternatives) ? alternatives : [clause])
-    .map(atomType)
-    .filter((type): type is string => type !== undefined);
-};
-
-/**
- * One stored label as atom types alone. Only atom TYPES cross: an atom's
- * other fields are whatever minted it wrote, and a label is disclosed here so
- * a run can tell what it is holding, not so it can read what a label was
- * computed from. The same projection serves a cell's own labels and a
- * database column's `ifc`, which are the same structure stored in two places.
- */
-const labelAtomTypes = (
-  label: { confidentiality?: unknown[]; integrity?: unknown[] },
-): Omit<DescribeHandleLabel, "path"> => ({
-  confidentiality: (label.confidentiality ?? [])
-    .map(clauseTypes)
-    .filter((clause) => clause.length > 0),
-  integrity: (label.integrity ?? [])
-    .map(atomType)
-    .filter((type): type is string => type !== undefined),
-});
-
-/** The labels the referent carries, projected for the public shape reply. */
-const describedLabels = (
-  view: CfcLabelView | undefined,
-): DescribeHandleLabel[] =>
-  (view?.entries ?? []).map((entry) => ({
-    ...(entry.path.length > 0 ? { path: [...entry.path] } : {}),
-    ...labelAtomTypes(entry.label),
-  }));
-
 /** Full existing CFC metadata across every path of one referent. */
 const referentLabel = (view: CfcLabelView | undefined): IFCLabel =>
   (view?.entries ?? []).reduce<IFCLabel>(
@@ -494,7 +443,7 @@ const describedDatabase = (
     if (columnDeclaresIfc(ifc)) {
       labels.push({
         path: [table, column],
-        ...labelAtomTypes(ifc as Parameters<typeof labelAtomTypes>[0]),
+        ...cfcLabelAtomTypes(ifc as Parameters<typeof cfcLabelAtomTypes>[0]),
       });
     }
   }
@@ -764,7 +713,7 @@ const describeInFabric = async (
       (link.path.length === 0 ? root : root.key(...link.path)) as Cell<unknown>;
     const { view: labelView, readFailed } =
       cfcLabelViewForCellFailClosedWithStatus(referent);
-    const labels = describedLabels(labelView);
+    const labels = disclosedCfcLabels(labelView);
     const cfcLabel = referentLabel(labelView);
     const cfcLabelAvailable = !readFailed;
     const documentSchema = readResultSchemaMeta(root);

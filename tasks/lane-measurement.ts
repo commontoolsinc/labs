@@ -26,25 +26,31 @@ export const LANE_MEASUREMENT_PREFIX = "ci-lane ";
  * How a batch run with coverage on is named apart from one run without.
  *
  * Instrumenting a run costs it time, and how much is a property of the
- * suite rather than a constant. The two are separate measurements for
- * that reason: fitting one correction over both would charge every
- * unmeasured run part of what an instrumented one costs, and charge a
- * measured one less than it takes.
+ * suite rather than a constant, so a measurement records which kind of
+ * run it came from.
  */
 export const MEASURED_BATCH_SUFFIX = " with coverage";
 
-/** What a lane's measurement of one batch is called. */
+/**
+ * What a lane's measurement of one batch is called.
+ *
+ * A lane writes two of these per batch: what it spent, and what it was
+ * packed to spend. The pair is what the calibration is fitted from.
+ */
 export function batchMeasurementName(
   suite: string,
   measured: boolean,
+  kind: "spent" | "planned" = "spent",
 ): string {
-  return `${LANE_MEASUREMENT_PREFIX}batch ${suite}` +
+  const lead = kind === "planned" ? "planned " : "";
+  return `${LANE_MEASUREMENT_PREFIX}${lead}batch ${suite}` +
     (measured ? MEASURED_BATCH_SUFFIX : "");
 }
 
 /**
- * The suite one batch measurement names, and whether coverage was on for
- * it. Nothing else for the name: a reader that took it apart itself
+ * The suite one batch measurement names, whether coverage was on for it,
+ * and whether the figure is what the lane was packed to spend or what it
+ * spent. Nothing else for the name: a reader that took it apart itself
  * would be a second answer to how it is composed, and the two would
  * part company the first time either moved.
  *
@@ -56,13 +62,27 @@ export function batchMeasurementName(
  */
 export function batchMeasurement(
   name: string,
-): { suite: string; measured: boolean } | undefined {
-  const prefix = `${LANE_MEASUREMENT_PREFIX}batch `;
+): { suite: string; measured: boolean; kind: "spent" | "planned" } | undefined {
+  for (const kind of ["planned", "spent"] as const) {
+    const prefix = `${LANE_MEASUREMENT_PREFIX}` +
+      `${kind === "planned" ? "planned " : ""}batch `;
+    if (!name.startsWith(prefix)) continue;
+    const rest = name.slice(prefix.length);
+    const measured = rest.endsWith(MEASURED_BATCH_SUFFIX);
+    const suite = measured
+      ? rest.slice(0, -MEASURED_BATCH_SUFFIX.length)
+      : rest;
+    return suite.length === 0 ? undefined : { suite, measured, kind };
+  }
+  return undefined;
+}
+
+/** The capability one setup measurement names. */
+export function setupMeasurement(name: string): string | undefined {
+  const prefix = `${LANE_MEASUREMENT_PREFIX}setup `;
   if (!name.startsWith(prefix)) return undefined;
-  const rest = name.slice(prefix.length);
-  const measured = rest.endsWith(MEASURED_BATCH_SUFFIX);
-  const suite = measured ? rest.slice(0, -MEASURED_BATCH_SUFFIX.length) : rest;
-  return suite.length === 0 ? undefined : { suite, measured };
+  const capability = name.slice(prefix.length);
+  return capability.length === 0 ? undefined : capability;
 }
 
 /** Whether an identity is the lane measuring itself rather than a test. */

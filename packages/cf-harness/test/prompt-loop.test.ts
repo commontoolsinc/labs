@@ -3765,6 +3765,37 @@ Deno.test("CfHarnessPromptLoop advertises run_pattern from an explicit allowlist
   );
 });
 
+Deno.test("CfHarnessPromptLoop drops a subagent-only tool from a parent's explicit allowlist", async () => {
+  // A parent surface is named from three places — a CLI flag, an interactive
+  // client's chat policy, and any library caller — and each validates against
+  // the tools this build defines. This loop is the one boundary all three pass
+  // through, so a subagent-only tool asked for here is what the rule has to
+  // stop; the run has a fabric session, which is what would otherwise back it.
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "read_piece_source", "revise_piece"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "piece-source-parent-allowlist",
+      model: "gpt-5.4",
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file"],
+  );
+});
+
 Deno.test("CfHarnessPromptLoop drops run_pattern from an explicit allowlist when no fabric session is configured", async () => {
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
@@ -4061,6 +4092,8 @@ Deno.test("CfHarnessPromptLoop withholds the pattern-index tools from the patter
     "read_skill_resource",
     "describe_handle",
     "run_pattern",
+    "read_piece_source",
+    "revise_piece",
     "research",
   ]);
 });

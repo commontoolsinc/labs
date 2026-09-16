@@ -518,23 +518,42 @@ Construction, initial hashing for warm cases, validation, and abort are outside
 the timed interval. Policy names are distinct, so sorting does not repeatedly
 hash large records to break name ties.
 
-The four series measure the first digest, an unchanged second digest, a
-second digest after one additional write, and direct composition over warmed
-records in a fresh input wrapper. The last series bypasses the transaction
-epoch memo to isolate per-record hash reuse. Diagnostics on stderr report the
-immutable-object hash-cache hits during the measured interval; an epoch-memo
-hit performs no hashing. Stdout remains the benchmark JSON report.
+The five series measure the first digest, an unchanged second digest, a
+second digest after one additional write, direct hashing over warmed records
+in a fresh input wrapper, and preparation plus its unchanged recheck in one
+interval. The direct-hashing series bypasses the transaction epoch memo; the
+combined series measures the normal two-request shape. Diagnostics on stderr
+report the immutable-object hash-cache hits during the measured interval; an
+epoch-memo hit performs no hashing. Stdout remains the benchmark JSON report.
 
 ```sh
 deno bench --no-lock -A --json packages/runner/test/cfc-prepared-digest.bench.ts
 ```
 
-Prepared digests are process-local equality tokens. Composition preserves the
-canonicalizer's ordering, multiplicity, trace deduplication, and optional-field
-rules, while each immutable record has its own hash-cache boundary. Canonical
-projections are memoized only for deeply frozen inputs. The transaction reuses
-the complete token until its activity epoch changes; decision-input recorders
-and write paths advance that epoch.
+Prepared digests are process-local equality tokens over canonical activity.
+The transaction reuses the complete token until its activity epoch changes;
+decision-input recorders and write paths advance that epoch. A changed snapshot
+is canonicalized and hashed in full. The token belongs to one transaction: a
+fresh transaction prepares independently even when its effective CFC label is
+unchanged.
+
+## CFC path index queries
+
+`packages/runner/test/cfc-path-index.bench.ts` measures `PathPrefixIndex` and
+`ConsumedLabelIndex` over 50, 250, and 1,000 sources with wildcard fractions
+of 0, 0.05, and 0.3 (rounded down to a whole source count). Templates end in
+`"*"` at segment depths 2–5. Concrete queries have 2–7 segments and mix hits,
+misses, and ancestor reads. The same corpus checks both indexes against
+`isPrefix` in unit tests, including label-map encounter order.
+
+Each timed sample performs 8,192 queries after explicit warmup. Divide the
+reported nanoseconds by 8,192 for per-query cost. Index construction and
+scan-equivalence checks stay outside timing. The fixture spreads templates
+across distinct container prefixes; wildcard tails sharing one prefix still
+require a scan of that bucket, and overlap queries returning many entries
+still pay for collecting and ordering them. The wildcard-query scan fallback
+and index construction are measured separately in
+`packages/runner/test/cfc-dereference-coverage.bench.ts`.
 
 ## Scoped snapshot memo reuse
 

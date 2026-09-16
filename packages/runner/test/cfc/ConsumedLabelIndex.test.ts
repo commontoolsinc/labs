@@ -5,6 +5,7 @@ import { canonicalizeLogicalPath } from "../../src/cfc/canonical.ts";
 import { ConsumedLabelIndex } from "../../src/cfc/consumed-label-index.ts";
 import { isPrefix } from "../../src/cfc/path-prefix-index.ts";
 import type { LabelMapEntry } from "../../src/cfc/types.ts";
+import { PATH_INDEX_GRID, pathIndexCorpus } from "./path-index-corpus.ts";
 
 const entry = (path: string[], ordinal: number): LabelMapEntry => ({
   path,
@@ -12,6 +13,22 @@ const entry = (path: string[], ordinal: number): LabelMapEntry => ({
 });
 
 describe("ConsumedLabelIndex", () => {
+  for (const { size, fraction } of PATH_INDEX_GRID) {
+    it(`retains scan order for ${size} sources with ${fraction} wildcard fraction`, () => {
+      const { sources, queries } = pathIndexCorpus(size, fraction);
+      const entries = sources.map(entry);
+      const index = new ConsumedLabelIndex(entries);
+      for (const query of queries) {
+        const expected = entries.filter((item) =>
+          isPrefix(item.path, query) || isPrefix(query, item.path)
+        );
+        expect(index.overlapping(query).map((item) => item.entry)).toEqual(
+          expected,
+        );
+      }
+    });
+  }
+
   it("retains label-map order across ancestors, descendants, and duplicate paths", () => {
     const entries = [
       ["a", "b", "child"],
@@ -76,5 +93,38 @@ describe("ConsumedLabelIndex", () => {
     expect(index.overlapping(logicalPath).map((item) => item.entry)).toEqual([
       wanted,
     ]);
+  });
+
+  it("matches wildcard tails and shorter queries in label-map order", () => {
+    const entries = [
+      ["a", "*", "tail", "*"],
+      ["a", "b", "leaf"],
+      ["*", "b", "other"],
+      ["a", "b", "*"],
+      ["a", "*", "tail", "*"],
+      [],
+      ["elsewhere", "*"],
+    ].map(entry);
+    const index = new ConsumedLabelIndex(entries);
+    for (
+      const query of [
+        [],
+        ["a"],
+        ["a", "b"],
+        ["a", "b", "tail"],
+        ["a", "b", "tail", "c", "d"],
+        ["a", "b", "other"],
+        ["a", "b", "missing"],
+        ["missing"],
+        ["a", "*", "tail"],
+      ]
+    ) {
+      const expected = entries.filter((item) =>
+        isPrefix(item.path, query) || isPrefix(query, item.path)
+      );
+      expect(index.overlapping(query).map((item) => item.entry)).toEqual(
+        expected,
+      );
+    }
   });
 });

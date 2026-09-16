@@ -36,7 +36,15 @@ function write(tx: ExtendedStorageTransaction, index: number, bytes: number) {
 
 for (const writes of [5, 50, 200]) {
   for (const bytes of [1024, 10240]) {
-    for (const phase of ["first", "unchanged", "one-write", "warm-parts"]) {
+    for (
+      const phase of [
+        "first",
+        "unchanged",
+        "one-write",
+        "warm-parts",
+        "prepare-and-recheck",
+      ]
+    ) {
       let reported = false;
       Deno.bench({
         name: `${writes} writes / ${bytes / 1024} KiB / ${phase}`,
@@ -61,18 +69,25 @@ for (const writes of [5, 50, 200]) {
             const input = phase === "warm-parts"
               ? access.buildPreparedDigestInput()
               : undefined;
-            const first = phase === "first"
+            const first = phase === "first" || phase === "prepare-and-recheck"
               ? undefined
               : input === undefined
               ? access.preparedDigest()
               : preparedDigestFor(input);
             if (phase === "one-write") write(tx, writes, bytes);
             const hitsBefore = getFrozenObjectHashCacheHits();
+            let recheck: string | undefined;
             b.start();
             const digest = input === undefined
               ? access.preparedDigest()
               : preparedDigestFor({ ...input });
+            if (phase === "prepare-and-recheck") {
+              recheck = access.preparedDigest();
+            }
             b.end();
+            if (recheck !== undefined && recheck !== digest) {
+              throw new Error("Recheck changed the digest");
+            }
             const hits = getFrozenObjectHashCacheHits() - hitsBefore;
             if (!digest || (phase === "one-write" && digest === first)) {
               throw new Error("Digest did not bind the added write");
