@@ -3036,6 +3036,148 @@ describe("piece schema compatibility", () => {
     }
   });
 
+  describe("bare enums spanning several types", () => {
+    // A literal union with `null` among its members compiles to one bare enum,
+    // `{enum: ["open", "closed", null]}`, and a `string | null` consumer to a
+    // type list or an `anyOf`.
+
+    const nullableUnion: JSONSchema = { enum: ["open", "closed", null] };
+    const stringOrNull: JSONSchema = {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    };
+
+    it("does not throw when a type list or `anyOf` candidate has a branch accepting each listed value's type", () => {
+      expect(() =>
+        assertSchemaSubset(nullableUnion, { type: ["string", "null"] })
+      ).not.toThrow();
+      expect(() => assertSchemaSubset(nullableUnion, stringOrNull))
+        .not.toThrow();
+      expect(() =>
+        assertSchemaSubset(nullableUnion, {
+          anyOf: [{ enum: ["open", "closed"] }, { type: "null" }],
+        })
+      ).not.toThrow();
+      expect(() =>
+        assertSchemaSubset({ enum: ["a", 1] }, { type: ["string", "integer"] })
+      ).not.toThrow();
+    });
+
+    it("throws when a listed value has no candidate branch accepting it", () => {
+      // No branch of the first candidate admits `null`. The `string` branch
+      // of the second lists `open` alone, and the enum rule refuses `closed`.
+
+      expect(() =>
+        assertSchemaSubset({ enum: ["open", null] }, {
+          type: ["string", "integer"],
+        })
+      ).toThrow(/schema alternative accepted previously/);
+      expect(() =>
+        assertSchemaSubset(nullableUnion, {
+          anyOf: [{ enum: ["open"] }, { type: "null" }],
+        })
+      ).toThrow(/schema alternative accepted previously/);
+    });
+
+    it("throws for an enum listing a `FabricPrimitive` value beside values the candidate's branches accept", () => {
+      // A listed `FabricPrimitive` leaves the enum unbounded on type, so its
+      // values are not taken apart by type, and no typed branch accepts the
+      // enum whole. Here `open` and `null` each have a branch, and the
+      // `FabricBytes` value has none.
+
+      const listed = {
+        enum: ["open", null, new FabricBytes(new Uint8Array([1]))],
+      } as unknown as JSONSchema;
+      expect(() => assertSchemaSubset(listed, stringOrNull))
+        .toThrow(/schema alternative accepted previously/);
+    });
+
+    it("does not throw for a typed enum with a type list against branches accepting its values", () => {
+      // Each `type` in the list narrows the listed values to its own: the
+      // `string` branch reads as `open` alone and the `null` branch as `null`
+      // alone, which a `string` candidate refuses.
+
+      const typed: JSONSchema = {
+        type: ["string", "null"],
+        enum: ["open", null],
+      };
+      expect(() => assertSchemaSubset(typed, { type: ["string", "null"] }))
+        .not.toThrow();
+      expect(() => assertSchemaSubset(typed, stringOrNull)).not.toThrow();
+      expect(() => assertSchemaSubset(typed, { type: "string" }))
+        .toThrow(/schema alternative accepted previously/);
+    });
+
+    it("does not throw for a source branch listing values of several types against a bare enum candidate listing them all", () => {
+      // A candidate enum stays whole. A source branch has to fit inside a
+      // single candidate branch, and one listing values of several types fits
+      // only the whole enum.
+
+      expect(() =>
+        assertSchemaSubset(
+          { type: ["string", "null"], enum: ["open", null] },
+          nullableUnion,
+        )
+      ).not.toThrow();
+      expect(() =>
+        assertSchemaSubset(
+          { anyOf: [{ enum: ["open", null] }, { enum: [1] }] },
+          { enum: ["open", null, 1] },
+        )
+      ).not.toThrow();
+    });
+
+    it("throws for a type list or `anyOf` source against a bare enum candidate", () => {
+      // The `string` branch of either source meets the candidate enum whole,
+      // and a `string` schema admits values the enum does not list. The last
+      // case is that branch alone, refused by the enum rule.
+
+      const candidate: JSONSchema = { enum: ["open", null] };
+      expect(() => assertSchemaSubset({ type: ["string", "null"] }, candidate))
+        .toThrow(/schema alternative accepted previously/);
+      expect(() => assertSchemaSubset(stringOrNull, candidate))
+        .toThrow(/schema alternative accepted previously/);
+      expect(() => assertSchemaSubset({ type: "string" }, candidate))
+        .toThrow(/enum\/const became more restrictive/);
+    });
+
+    it("throws for a pattern update across the union only where it narrows an argument or widens a result", () => {
+      const argumentWith = (state: JSONSchema): Pattern =>
+        pattern(
+          { type: "object", properties: { state } },
+          oldPattern.resultSchema,
+        );
+      const resultWith = (state: JSONSchema): Pattern =>
+        pattern(
+          oldPattern.argumentSchema,
+          { type: "object", properties: { state } },
+        );
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          argumentWith(nullableUnion),
+          argumentWith(stringOrNull),
+        )
+      ).not.toThrow();
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          argumentWith(stringOrNull),
+          argumentWith(nullableUnion),
+        )
+      ).toThrow(/argument\.state: a schema alternative accepted previously/);
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          resultWith(stringOrNull),
+          resultWith(nullableUnion),
+        )
+      ).not.toThrow();
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          resultWith(nullableUnion),
+          resultWith(stringOrNull),
+        )
+      ).toThrow(/result\.state: a schema alternative accepted previously/);
+    });
+  });
+
   it("keeps a composition unstable under defaults while a branch a default reaches lists the whole value", () => {
     // Disjoint branch types keep a value from moving between branches, but a
     // default inserted from a sibling `properties` still lands inside an

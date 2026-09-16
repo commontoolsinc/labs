@@ -854,8 +854,8 @@ function schemaSubsetIssue(
       source.anyOf || target.anyOf ||
       Array.isArray(source.type) || Array.isArray(target.type)
     ) {
-      const sources = schemaAlternatives(source);
-      const targets = schemaAlternatives(target);
+      const sources = schemaAlternatives(source, "source");
+      const targets = schemaAlternatives(target, "target");
       for (const sourceAlternative of sources) {
         const accepted = targets.some((targetAlternative) =>
           schemaConjunctionSubsetIssue(
@@ -1575,8 +1575,21 @@ function schemaMayProduceType(
  * checks the node's own keywords ({@link NODE_LEVEL_KEYWORDS}). Fragments omit
  * the parent node's default and extensions, including for a single-type node.
  * Branch and descendant schemas retain their own defaults and extensions.
+ *
+ * A source node with neither `anyOf` nor a `type` list, whose `enum` values
+ * {@link schemaTypes} reads as more than one type, expands into one fragment
+ * per type, each listing only that type's values. The fragments together
+ * accept exactly what the node does, and the nullable literal union
+ * `{enum: ["open", null]}` meets a `string` branch and a `null` branch one
+ * type at a time. A node listing a value {@link valueSchemaType} cannot name,
+ * such as a `FabricPrimitive`, stays whole. A target node stays whole too: a
+ * source alternative has to fit inside a single target alternative, and one
+ * listing values of several types fits only the whole node.
  */
-function schemaAlternatives(schema: SchemaObject): JSONSchema[][] {
+function schemaAlternatives(
+  schema: SchemaObject,
+  side: "source" | "target",
+): JSONSchema[][] {
   const fragment = withoutNodeLevelKeywords(schema);
   if (fragment.anyOf) {
     const { anyOf, ...base } = fragment;
@@ -1584,6 +1597,18 @@ function schemaAlternatives(schema: SchemaObject): JSONSchema[][] {
   }
   if (Array.isArray(fragment.type)) {
     return fragment.type.map((type) => [{ ...fragment, type }]);
+  }
+  // With no `type` list, `schemaTypes` names more than one type only when it
+  // can name every listed value, and a `const` lists a single value. So each
+  // `enum` value lands in exactly one fragment, and a value the declared
+  // `type` rejects lands in none.
+  const types = side === "source" ? schemaTypes(fragment) : undefined;
+  const values = fragment.enum;
+  if (types !== undefined && types.length > 1 && values !== undefined) {
+    return types.map((type) => [{
+      ...fragment,
+      enum: values.filter((value) => valueSchemaType(value) === type),
+    }]);
   }
   return [[fragment]];
 }
