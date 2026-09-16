@@ -5,11 +5,10 @@
 // clock such a backstop fires the moment nothing else is pending, so a test
 // whose awaited event never arrives still passes, riding a silent logical
 // jump instead of the event. This guard turns that ride into a failure: it
-// snapshots the counts behind each listed backstop around every test body,
-// and a count that moved fails the test with the backstop named.
+// records every firing of a listed backstop and fails a test body across which
+// one fired, naming the backstop.
 
 import { registerFrameworkModule } from "@commonfabric/test-support/records";
-import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 
 // A test registered through this guard is attributed to the file that called
 // `Deno.test`, not to the frame this guard adds between them.
@@ -34,28 +33,84 @@ export interface FiredBackstop {
 const countKey = (backstop: SilentBackstop): string =>
   `${backstop.logger}\0${backstop.key}`;
 
+// A firing is recorded here the instant the backstop's `warn` runs, and
+// nothing a test does clears it. This is the difference from reading the
+// logger's own counters: a test may `resetCounts()` (or `resetAllLoggerCounts`)
+// mid-run — `scheduler-events.test.ts` and the resume-presync suite do — and
+// because the guard wraps a whole `describe` as one `Deno.test`, a reset in a
+// later `it` would erase a firing from an earlier one before the wrapper could
+// read it. A store the reset cannot reach closes that hole. Keyed by
+// `logger\0key`.
+const firedTotals = new Map<string, number>();
+const wrappedLoggers = new WeakSet<object>();
+
+/** A logger as the guard uses it: something whose `warn(key, …)` it can wrap. */
+type CountingLogger = { warn: (key: string, ...rest: unknown[]) => void };
+
 /**
- * The current count behind each backstop, keyed by logger and message key.
- * Read through the registry breakdown rather than `getLogger`, which would
- * CREATE a logger the production module has not made yet — with default
- * options in place of the module's own.
+ * The process-global logger registry the utils logger writes into, keyed by
+ * the module name a backstop names. Undefined before any logger is created.
  */
-export function readBackstopCounts(
-  backstops: readonly SilentBackstop[],
-): Map<string, number> {
-  const breakdown = getLoggerCountsBreakdown();
-  const counts = new Map<string, number>();
-  for (const backstop of backstops) {
-    const entry = breakdown[backstop.logger]?.[backstop.key];
-    counts.set(
-      countKey(backstop),
-      typeof entry === "object" && entry !== null ? entry.total : 0,
-    );
-  }
-  return counts;
+function loggerRegistry(): Record<string, CountingLogger> | undefined {
+  return (globalThis as {
+    commonfabric?: { logger?: Record<string, CountingLogger> };
+  }).commonfabric?.logger;
 }
 
-/** The backstops whose count rose between two readings. */
+/**
+ * Wrap each watched logger's `warn` so a firing lands in `firedTotals`.
+ * Idempotent per logger instance, and only ever adds a side counter — `warn`
+ * still counts and prints exactly as before. Only a logger the production
+ * module has already created is wrapped, so the guard never creates one with
+ * options that differ from the module's. A test that could fire a backstop
+ * imports the module that owns it, which creates the logger at load, before
+ * the test body runs — so by the guard's pre-body read the logger is present.
+ */
+function ensureWrapped(backstops: readonly SilentBackstop[]): void {
+  const registry = loggerRegistry();
+  if (registry === undefined) return;
+  const keysByLogger = new Map<string, Set<string>>();
+  for (const backstop of backstops) {
+    let keys = keysByLogger.get(backstop.logger);
+    if (keys === undefined) {
+      keys = new Set();
+      keysByLogger.set(backstop.logger, keys);
+    }
+    keys.add(backstop.key);
+  }
+  for (const [name, keys] of keysByLogger) {
+    const logger = registry[name];
+    if (logger === undefined || wrappedLoggers.has(logger)) continue;
+    const original = logger.warn.bind(logger);
+    logger.warn = (key: string, ...rest: unknown[]): void => {
+      if (keys.has(key)) {
+        const k = `${name}\0${key}`;
+        firedTotals.set(k, (firedTotals.get(k) ?? 0) + 1);
+      }
+      original(key, ...rest);
+    };
+    wrappedLoggers.add(logger);
+  }
+}
+
+/**
+ * The number of firings recorded for each backstop so far this process. Read
+ * before and after a test body; a positive difference is a firing across it,
+ * whatever the test did to the logger's own counters in between.
+ */
+export function readBackstopFirings(
+  backstops: readonly SilentBackstop[],
+): Map<string, number> {
+  ensureWrapped(backstops);
+  const firings = new Map<string, number>();
+  for (const backstop of backstops) {
+    const k = countKey(backstop);
+    firings.set(k, firedTotals.get(k) ?? 0);
+  }
+  return firings;
+}
+
+/** The backstops whose firing total rose between two readings. */
 export function firedBackstops(
   backstops: readonly SilentBackstop[],
   before: ReadonlyMap<string, number>,
@@ -95,13 +150,14 @@ export function describeFiredBackstops(
 export function installSilentBackstopGuard(
   backstops: readonly SilentBackstop[],
 ): void {
+  ensureWrapped(backstops);
   const previousTest = Deno.test;
 
   const guard = (
     fn: (t: Deno.TestContext) => void | Promise<void>,
   ): (t: Deno.TestContext) => Promise<void> =>
   async (t: Deno.TestContext) => {
-    const before = readBackstopCounts(backstops);
+    const before = readBackstopFirings(backstops);
     let failure: { error: unknown } | undefined;
     try {
       await fn(t);
@@ -111,7 +167,7 @@ export function installSilentBackstopGuard(
     const fired = firedBackstops(
       backstops,
       before,
-      readBackstopCounts(backstops),
+      readBackstopFirings(backstops),
     );
     if (fired.length > 0) {
       throw new Error(

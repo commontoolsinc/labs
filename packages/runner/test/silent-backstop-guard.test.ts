@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { fromFileUrl } from "@std/path";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
   describeFiredBackstops,
@@ -13,6 +14,41 @@ const backstop: SilentBackstop = {
   meaning: "the read-repair wait gave up",
 };
 
+// Run one fixture file under the package preload the way the task runs a test
+// file, and return its combined transcript and whether it passed. The paths
+// come from `import.meta.url` through `fromFileUrl` rather than `.pathname`,
+// which keeps its percent escapes — a checkout path with a space would reach
+// the filesystem as a literal `%20` and the run would fail before the fixture.
+async function runFixture(
+  fixture: string,
+): Promise<{ success: boolean; transcript: string }> {
+  const fixtureUrl = new URL(`./support/${fixture}`, import.meta.url);
+  const output = await runDenoCommandWithTemporaryLock({
+    root: fromFileUrl(new URL("../../../", import.meta.url)),
+    cwd: fromFileUrl(new URL("../", import.meta.url)),
+    args: (tempLock) => [
+      "test",
+      "--no-check",
+      "--lock",
+      tempLock,
+      "--frozen=true",
+      "--preload=test/clock-preload.ts",
+      "--allow-ffi",
+      "--allow-env",
+      "--allow-read",
+      "--allow-write=/tmp,/var/folders",
+      fromFileUrl(fixtureUrl),
+    ],
+    env: { ENV: "test" },
+  });
+  return {
+    success: output.success,
+    transcript: `${new TextDecoder().decode(output.stdout)}\n${
+      new TextDecoder().decode(output.stderr)
+    }`,
+  };
+}
+
 describe("silent-backstop-guard", () => {
   describe("installSilentBackstopGuard()", () => {
     it("fails a test whose conflict retry could only ride the read-repair backstop", async () => {
@@ -23,33 +59,11 @@ describe("silent-backstop-guard", () => {
       // Run under the package preload as the task runs a test file, it fails
       // through the guard the preload installs, and through nothing else: its
       // own assertion — the commit came back as the conflict — holds.
-      const fixture = new URL(
-        "./support/conflict-read-repair-backstop.fixture.ts",
-        import.meta.url,
+      const { success, transcript } = await runFixture(
+        "conflict-read-repair-backstop.fixture.ts",
       );
-      const output = await runDenoCommandWithTemporaryLock({
-        root: new URL("../../../", import.meta.url).pathname,
-        cwd: new URL("../", import.meta.url).pathname,
-        args: (tempLock) => [
-          "test",
-          "--no-check",
-          "--lock",
-          tempLock,
-          "--frozen=true",
-          "--preload=test/clock-preload.ts",
-          "--allow-ffi",
-          "--allow-env",
-          "--allow-read",
-          "--allow-write=/tmp,/var/folders",
-          fixture.pathname,
-        ],
-        env: { ENV: "test" },
-      });
-      const transcript = `${new TextDecoder().decode(output.stdout)}\n${
-        new TextDecoder().decode(output.stderr)
-      }`;
       expect(
-        output.success,
+        success,
         `the fixture passed: the backstop carried it silently\n${transcript}`,
       ).toBe(false);
       expect(transcript).toContain("silent backstop fired during this test");
@@ -57,6 +71,25 @@ describe("silent-backstop-guard", () => {
         'storage.v2 "conflict-read-repair-timeout" fired 1 time',
       );
       expect(transcript).not.toContain("AssertionError");
+    });
+
+    it("fails the ride even when a later step resets the logger counters", async () => {
+      // A `describe` whose first `it` rides the backstop and whose second `it`
+      // resets the logger counters. The guard wraps the whole `describe` as one
+      // `Deno.test`, so reading the logger's own count would see it zeroed
+      // before the wrapper ran and the ride would pass. The guard records the
+      // firing where the reset cannot reach it, so this still fails.
+      const { success, transcript } = await runFixture(
+        "conflict-read-repair-backstop-reset.fixture.ts",
+      );
+      expect(
+        success,
+        `the reset erased the firing: the guard was defeated\n${transcript}`,
+      ).toBe(false);
+      expect(transcript).toContain("silent backstop fired during this test");
+      expect(transcript).toContain(
+        'storage.v2 "conflict-read-repair-timeout"',
+      );
     });
   });
 
