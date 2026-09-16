@@ -650,9 +650,15 @@ handlers its graph installed, so the next send to one of those
 streams finds no handler and the scheduler drops the event. A list
 that grows by handler sends stops growing, one send at a time, with
 no error anywhere near the send. Reading durably is what keeps that
-commit exportable. The mark covers only the transaction the runner
-mints for itself; a start handed a caller's transaction keeps that
-caller's read semantics.
+commit exportable. The mark covers a transaction the runner mints
+for itself; a start handed a caller's transaction keeps that
+caller's read semantics. A start that waits for a piece's
+execution family mints a SECOND transaction once that family
+lands, and that one carries the mark when the transaction it
+continues did — the view the start read before the wait is the
+view it commits against after. Without it a standing echo over
+the child's argument enters the authored commit's basis, and the
+refusal above takes the child's registration with it.
 
 One retirement wake completes the ruling's "fix infinitely stuck
 things" half (§4's evaluation detail): a sweep that runs while an
