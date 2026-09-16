@@ -102,74 +102,79 @@ async function fileBoardWithMembers(
   slug: string,
   titles: readonly string[],
 ): Promise<string> {
-  const expectedTitle = titles.at(-1);
-  if (expectedTitle === undefined) {
+  if (titles.length === 0) {
     throw new Error("A collection fixture needs at least one member.");
   }
   const boardId = await fileBoard(identityPath);
-  for (const title of titles) {
+  for (const [index, title] of titles.entries()) {
+    // Under server execution the detached call acknowledges the event append,
+    // not the served handler's result. Observe each publication before
+    // allocating the next name so the sequence cannot race the previous one.
     await cf(
       identityPath,
-      ["piece", "call", "--cell", `/of:${boardId}`],
+      ["piece", "call", "--cell", `/of:${boardId}`, "--no-wait"],
       ["addItem", JSON.stringify({ title, agentName: "shell integration" })],
     );
-  }
 
-  // A served handler returns when its own transaction commits. The board and
-  // the member publish their derived results in the serving cycle after it,
-  // so prove that a fresh reader sees the exact member before publishing the
-  // collection's name.
-  const pieces = await PiecesController.initialize({
-    apiUrl: new URL(API_URL),
-    identity,
-    space: SPACE_NAME,
-  });
-  try {
-    const board = await pieces.get(boardId, true);
-    const memberName = String(titles.length);
-    const memberSlot = (await board.result.getCell())
-      .key("names")
-      .key(memberName);
-    // The namespace deliberately keeps an unread link. Wait for that stored
-    // slot first, then open its piece to derive the member's own result.
-    await memberSlot.pull();
-    await waitForCellValue(
-      pieces.runtime,
-      memberSlot,
-      () => memberSlot.getRaw({ lastNode: "value" }) !== undefined,
-      { stuckLabel: "collection member link publication" },
-    );
-    const member = (await pieces.getPieceCell(memberSlot, true))
-      .asSchema<{ title?: string; shortName?: string }>();
-    await member.pull();
-    let observed: unknown;
+    const pieces = await PiecesController.initialize({
+      apiUrl: new URL(API_URL),
+      identity,
+      space: SPACE_NAME,
+    });
     try {
-      await waitForCellValue<{ title?: string; shortName?: string }>(
+      const board = await pieces.get(boardId, true);
+      const memberName = String(index + 1);
+      const memberSlot = (await board.result.getCell())
+        .key("names")
+        .key(memberName);
+      // The namespace deliberately keeps an unread link. Wait for that stored
+      // slot first, then open its piece to derive the member's own result.
+      await memberSlot.pull();
+      await waitForCellValue(
         pieces.runtime,
-        member,
-        (value) => {
-          observed = value === undefined
-            ? undefined
-            : { title: value.title, shortName: value.shortName };
-          return value?.title === expectedTitle &&
-            value?.shortName === memberName;
+        memberSlot,
+        () => memberSlot.getRaw({ lastNode: "value" }) !== undefined,
+        { stuckLabel: "collection member link publication" },
+      );
+      // Server execution derives only fields a subscription's schema reaches,
+      // so this readiness read demands the two fields it checks.
+      const member = await pieces.getPieceCell(memberSlot, true, {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          shortName: { type: "string" },
         },
-        { stuckLabel: "collection member result publication" },
-      );
-    } catch (cause) {
-      throw new Error(
-        `Collection member publication failed: ${
-          toCompactDebugString({
-            expected: { title: expectedTitle, shortName: memberName },
-            observed,
-            member: member.getAsNormalizedFullLink(),
-          })
-        }`,
-        { cause },
-      );
+        required: ["title", "shortName"],
+      });
+      await member.pull();
+      let observed: unknown;
+      try {
+        await waitForCellValue<{ title?: string; shortName?: string }>(
+          pieces.runtime,
+          member,
+          (value) => {
+            observed = value === undefined
+              ? undefined
+              : { title: value.title, shortName: value.shortName };
+            return value?.title === title && value?.shortName === memberName;
+          },
+          { stuckLabel: "collection member result publication" },
+        );
+      } catch (cause) {
+        throw new Error(
+          `Collection member publication failed: ${
+            toCompactDebugString({
+              expected: { title, shortName: memberName },
+              observed,
+              member: member.getAsNormalizedFullLink(),
+            })
+          }`,
+          { cause },
+        );
+      }
+    } finally {
+      await pieces.dispose();
     }
-  } finally {
-    await pieces.dispose();
   }
 
   await cf(identityPath, [
