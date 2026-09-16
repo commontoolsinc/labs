@@ -23,7 +23,7 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
  * behavior. The subclass contract is not under test here, so those members
  * throw.
  */
-class TestCodec extends BaseFabricCodec<FabricValue> {
+class TestCodec extends BaseFabricCodec<never, FabricValue> {
   encode(_value: FabricValue): FabricValue {
     throw new Error("Unimplemented.");
   }

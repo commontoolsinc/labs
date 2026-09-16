@@ -149,7 +149,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   //
 
   static #jsonCodec = Object.freeze(
-    new (class HashCodec extends BaseNonterminalCodec<FabricHashState> {
+    new (class HashCodec extends BaseNonterminalCodec<never, FabricHashState> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Hash, FabricHash);

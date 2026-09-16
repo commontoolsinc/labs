@@ -285,7 +285,7 @@ export interface FabricInstancePlus<PlusType> {
    * The nominal brand that carries `PlusType`. It exists only in the type
    * system, as the brand above does.
    */
-  readonly [FABRIC_INSTANCE_PLUS_BRAND]?: PlusType;
+  readonly [FABRIC_INSTANCE_PLUS_BRAND]: PlusType;
 
   /**
    * Returns a new deep clone of this instance with equivalent data but no

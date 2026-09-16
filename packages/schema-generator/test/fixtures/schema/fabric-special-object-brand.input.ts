@@ -25,7 +25,7 @@ const FABRIC_INSTANCE_PLUS_BRAND = Symbol.for(
 
 interface FabricInstance {
   readonly [FABRIC_INSTANCE_BRAND]: true;
-  readonly [FABRIC_INSTANCE_PLUS_BRAND]?: never;
+  readonly [FABRIC_INSTANCE_PLUS_BRAND]: never;
   deepClone(frozen: boolean): FabricInstance;
 }
 
