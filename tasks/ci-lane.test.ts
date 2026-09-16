@@ -2376,6 +2376,52 @@ describe("what a lane does with the batches it was given", () => {
     }
   });
 
+  it("fails on the way out when running a batch throws", async () => {
+    // A lane whose loop threw has failed, whatever the batches before it
+    // said, and it is the one that most needs what its capabilities
+    // wrote: the teardown reads their logs out of the work directory
+    // before removing it, and a lane still holding `ok` true would have
+    // removed them unread.
+    const log = console.log;
+    console.log = () => {};
+    let thrown: unknown;
+    try {
+      await runLane(
+        {
+          lane: 1,
+          of: 1,
+          full: false,
+          dryRun: false,
+          laneCount: false,
+          root: REPOSITORY,
+          at: "2026-09-01T00:00:00Z",
+        },
+        {
+          manifest: selecting(),
+          topology: () =>
+            Promise.resolve([
+              suite({
+                id: "workspace-unit",
+                units: [UNIT],
+                locate: () => ({ level: "unit" as const, unit: UNIT }),
+                command: () =>
+                  Promise.reject(new Error("the command could not be built")),
+              }),
+            ]),
+          spool: () => undefined,
+        },
+      );
+    } catch (error) {
+      thrown = error;
+    } finally {
+      console.log = log;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain(
+      "the command could not be built",
+    );
+  });
+
   it("fails when a batch failed, having run it", async () => {
     // A lane reports what it measured: the batch ran and went red, so
     // the lane is red, and nothing about that is a crash or a timeout.
