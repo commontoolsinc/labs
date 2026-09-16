@@ -14,6 +14,5 @@
 export * from "./interface.ts";
 export { BaseValueVisitor } from "./BaseValueVisitor.ts";
 export { RecursiveValueVisitor } from "./RecursiveValueVisitor.ts";
-export { NopValueVisitor } from "./NopValueVisitor.ts";
 
 export { makeVisitValueFunction, visitValue } from "./impl.ts";

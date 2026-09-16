@@ -26,9 +26,9 @@ import {
  * The implementation includes a definition for all container-specific
  * `visit*()` methods, which all return `DO_RECURSE_VALUES` (per the above
  * description), and also implements no-op (empty) `visited*()` methods. Every
- * other method of the interface remains `abstract`. The `visit*()` method
- * implementations are intended to make it easy to override implementations
- * selectively, by overriding `visitFabricContainer()` to return
+ * other method of the interface is left as defined by `BaseValueVisitor`. The
+ * `visit*()` method implementations are intended to make it easy to override
+ * implementations selectively, by overriding `visitFabricContainer()` to return
  * `DO_VISIT_SUBTYPE` and then whatever specific subtypes need to be altered.
  */
 export abstract class RecursiveValueVisitor<
@@ -40,35 +40,35 @@ export abstract class RecursiveValueVisitor<
   //
 
   /** @inheritDoc */
-  visitFabricArray(
+  override visitFabricArray(
     _value: FabricArrayPlus<PlusType>,
   ): LeafVisitorResult<PlusType, ResultType> {
     return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
-  visitFabricInstance(
+  override visitFabricInstance(
     _value: FabricInstancePlus<PlusType>,
   ): LeafVisitorResult<PlusType, ResultType> {
     return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
-  visitFabricPlainObject(
+  override visitFabricPlainObject(
     _value: FabricPlainObjectPlus<PlusType>,
   ): LeafVisitorResult<PlusType, ResultType> {
     return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
-  visitFabricContainer(
+  override visitFabricContainer(
     _value: FabricContainerValuePlus<PlusType>,
   ): DispatchingVisitorResult<PlusType, ResultType> {
     return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
-  visitedFabricArrayElement(
+  override visitedFabricArrayElement(
     _array: FabricArrayPlus<PlusType>,
     _index: number,
     _value: FabricValuePlus<PlusType>,
@@ -77,7 +77,7 @@ export abstract class RecursiveValueVisitor<
   }
 
   /** @inheritDoc */
-  visitedFabricArrayGap(
+  override visitedFabricArrayGap(
     _array: FabricArrayPlus<PlusType>,
     _start: number,
     _count: number,
@@ -86,7 +86,7 @@ export abstract class RecursiveValueVisitor<
   }
 
   /** @inheritDoc */
-  visitedFabricInstance(
+  override visitedFabricInstance(
     _instance: FabricInstancePlus<PlusType>,
     _state: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType> {
@@ -94,7 +94,7 @@ export abstract class RecursiveValueVisitor<
   }
 
   /** @inheritDoc */
-  visitedFabricPlainObjectEntry(
+  override visitedFabricPlainObjectEntry(
     _container: FabricPlainObjectPlus<PlusType>,
     _key: FabricValuePlus<PlusType>,
     _value: FabricValuePlus<PlusType>,
