@@ -44,7 +44,7 @@ import {
   KeepAsCell,
   type NormalizedFullLink,
   parseLink,
-  sanitizeSchemaForLinks,
+  sanitizeAndInternSchemaForLinks,
   sigilLinkAddressOnly,
 } from "./link-utils.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
@@ -192,7 +192,7 @@ const sanitizeAliasSchemaForBinding = (schema: JSONSchema): JSONSchema =>
   // Compiled aliases retain asCell for schema fidelity. Live redirects use link
   // schemas without cell wrappers so scoped asCell entries do not stamp the
   // redirect link's own scope and bypass stored argument links.
-  sanitizeSchemaForLinks(schema, KeepAsCell.OnlyStream);
+  sanitizeAndInternSchemaForLinks(schema, KeepAsCell.OnlyStream);
 
 /**
  * Returns a link with a canonical schema without freezing the caller's input.
@@ -201,9 +201,7 @@ const canonicalSchemaLink = (
   link: NormalizedFullLink | undefined,
 ): NormalizedFullLink | undefined => {
   if (link === undefined || !isObjectOrArray(link.schema)) return link;
-  const schema = deepFrozenCloneAndInternSchema(
-    sanitizeSchemaForLinks(link.schema, KeepAsCell.All),
-  );
+  const schema = sanitizeAndInternSchemaForLinks(link.schema, KeepAsCell.All);
   return schema === link.schema ? link : { ...link, schema };
 };
 
