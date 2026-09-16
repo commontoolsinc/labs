@@ -8,7 +8,7 @@ the same library. The design is
 directory is its first customer. Member names here are decimal strings, dense
 from `1`, so a member is cited as `<collection>/42`.
 
-## The library: `naming.ts`
+## The library: `naming.ts` and `allocator.ts`
 
 The namespace is one map cell on the collection, `names: { "42": <member> }`,
 holding each member as an unread reference. The library owns everything a
@@ -43,6 +43,15 @@ collection does with it:
   holds no hyphen. Its `name` — the collection's own — is optional and absent on
   the exemplar: the stage that binds the board's namespace as a slug fills it,
   and that binding is what a resolver can then check the declaration against.
+
+The library is two modules, and which one a declaration sits in turns on what it
+needs at runtime. `allocator.ts` holds the allocation rule — `nextNameAmong`,
+`createNamed`, `assignName`, and the `NamesMap` and `NamesMapCell` shapes — and
+takes no value from `commonfabric`, so a plain `deno test` can import it and run
+the allocator with no pattern runtime behind it. `naming.ts` holds what does
+take one — the names table, the reverse lookup, the backfill — and re-exports
+the whole of `allocator.ts`, so a collection reaches the library through
+`naming.ts` alone.
 
 Nothing in `naming.ts` knows what kind of piece a member is. A member is a cell,
 compared by identity and never read through, which is what keeps every read
@@ -206,6 +215,14 @@ cf piece call --cell /of:<board> backfillNames --json '{"agentName":"Sol"}'
 
 ## Tests
 
+- `allocator.test.ts` — a plain Deno unit test, run by `deno test` with no
+  pattern runtime: the name grammar, the length-then-lexicographic comparison
+  that keeps names distinct past `2^53`, the carry over a trailing run of nines,
+  and `createNamed` and `assignName` driven over a stand-in namespace cell.
+  Importing `allocator.ts` is half of what it checks. `commonfabric` declares
+  `lift`, `equals` and `Writable` with `export declare const`, which binds
+  nothing at runtime, so a module taking one of them as a value fails to link
+  here — this test is what holds the allocator to needing none of them.
 - `naming.test.tsx` — the sequence rule, the allocator re-run against a stale
   read (a first allocation, a concurrent writer's key landing, and a re-run over
   the map as the winner left it, which takes the next distinct name), the
@@ -241,6 +258,14 @@ needs more than one runtime:
   owning piece runs and something pulls it, so this is the read that tells a
   stored name from one looked up in the board's names table; a single-runtime
   pattern test shows the name either way.
+
+One more lives in the shell package, because it needs a browser as well:
+
+- `../../shell/integration/collection-member.test.ts` — the shell opening
+  `/<space>/<collection>/<member>` over an exemplar board filed by `cf`. What it
+  proves is the whole chain standing up at once: a slug bound inside a piece, a
+  worker resolving the reference through it, and a rendered page that is the
+  member rather than the board.
 
 ## Topics
 
