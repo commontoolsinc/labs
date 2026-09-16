@@ -175,8 +175,14 @@ export default pattern(() => {
       { assertion: assert(() => count.matching === 3) },
 
       // A caller forwarding a predicate nobody supplied counts every row too.
-      // Forwarding reads `undefined` rather than leaving the key out, so the
-      // input's own default is not what makes this hold.
+      //
+      // A TRIPWIRE rather than a proof. This atom interpolates its predicate
+      // into the SQL text and binds no params at all, so the undefined-param
+      // failure the other two readers were fixed for cannot reach it, and
+      // nothing that can be done to the atom today makes these three fail.
+      // What they hold is the property a rewrite would break: one that binds
+      // the predicate as a param has to read it out of its input, the way
+      // those readers now do, or these stop passing.
       { assertion: assert(() => forwarded.errorMessage === "") },
       { assertion: assert(() => forwarded.total === 3) },
       { assertion: assert(() => forwarded.matching === 3) },

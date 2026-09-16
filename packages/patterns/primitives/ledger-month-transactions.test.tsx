@@ -332,6 +332,11 @@ export default pattern(() => {
       // reads `undefined` rather than leaving the key out, so the input's own
       // default is not what makes this hold.
       //
+      // The seed dates the row from the database's clock and the read
+      // resolves the month from it again, so a month boundary crossed
+      // between the two makes this fail — microseconds once a month, and
+      // every alternative pins the test to a month the clock will leave.
+      //
       // Read for the first time HERE, after the seed, and that is what makes
       // the row visible: the atom takes no `reactOn`, so a read that already
       // settled over an empty table would not run again for a write. An

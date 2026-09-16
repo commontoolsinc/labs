@@ -10,9 +10,10 @@
  *
  * The projection carries `status` because the connector store's row-label rule
  * reads it, and a query that does not project every column its table's rule
- * reads is refused rather than returned unlabeled — a refusal that reports an
- * empty ledger over a full table exactly as the wrong tombstone filter does.
- * `describe_handle` names the columns a handle's rules read.
+ * reads is refused rather than returned unlabeled — the refusal names the
+ * missing column in `error`, unlike the wrong tombstone filter, which reports
+ * an empty ledger and no reason at all. `describe_handle` names the columns a
+ * handle's rules read.
  *
  * @hashtags plaid, bank, transactions, ledger, finance, month, connector
  * @keywords bank transactions, plaid ledger, this month's transactions,
