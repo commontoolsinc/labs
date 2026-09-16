@@ -10,9 +10,11 @@
  * index marks its session deleted, attaching it by hand as well records no
  * second row, and Detach drops it; a second start can be withdrawn, which
  * takes its command back out of the queue; a start with no queue stays
- * starting and can be withdrawn), Start is disabled with its reason when the
- * picked harness cannot start, when no index or no startable harness is
- * linked, and when the kickoff is empty, an index that is not the complete
+ * starting and can be withdrawn; a second click while a start is
+ * unconfirmed sends nothing, and the words a start sent clear from the
+ * composer), Start is disabled with its reason when the picked harness
+ * cannot start, when no index or no startable harness is linked, when the
+ * kickoff is empty, and while a start is unconfirmed, an index that is not the complete
  * bucket is called out, a start carries the configured mode and a shown
  * harness no source runs is listed but starts nothing, the rail's own
  * buttons attach and detach a row and add the topic's words to the prompt,
@@ -393,7 +395,9 @@ export default pattern(() => {
     firstCommand(commands.get())?.payload?.cwd === "/w/labs" &&
     firstCommand(commands.get())?.payload?.title ===
       "topic #7: Workbench topic" &&
-    firstCommand(commands.get())?.payload?.text === wb.kickoff
+    (firstCommand(commands.get())?.payload?.text ?? "").startsWith(
+      "Work on topic #7, it's time.",
+    )
   );
   const assert_start_pending = assert(() =>
     wb.attachedSessions.length === 1 &&
@@ -404,7 +408,22 @@ export default pattern(() => {
     wb.startingSessions[0]?.title === "topic #7: Workbench topic" &&
     starts.get().length === 1 &&
     hasText(wb[UI], "Starting · 1") &&
-    hasText(wb[UI], "Withdraw takes the command out of the queue")
+    hasText(wb[UI], "Withdraw takes the command out of the queue") &&
+    // The composer answers at once: the sent words clear, and Start is
+    // disabled with the start it waits on.
+    wb.spawnPrompt.get() === "" &&
+    wb.startBlocker.startsWith('Starting "topic #7: Workbench topic"') &&
+    startDisabled(wb[UI]) &&
+    hasText(wb[UI], 'Starting "topic #7: Workbench topic"')
+  );
+  // A second click while the start is unconfirmed sends nothing: one start
+  // at a time for the topic.
+  const action_start_twice = action(() => {
+    wb.startSession.send();
+  });
+  const assert_start_once = assert(() =>
+    commands.get().length === 1 && starts.get().length === 1 &&
+    wb.startingSessions.length === 1
   );
 
   // The connector publishes the session: the start is confirmed and counts
@@ -443,6 +462,11 @@ export default pattern(() => {
     wb.recentSessions.every((row) =>
       row.nativeSessionId !== firstCommand(commands.get())?.nativeSessionId
     )
+  );
+
+  // Once the start is confirmed, Start is free again.
+  const assert_start_enabled_again = assert(() =>
+    wb.startBlocker === "" && !startDisabled(wb[UI])
   );
 
   // A confirmed start stays attached when the connector later marks the
@@ -512,7 +536,8 @@ export default pattern(() => {
     commands.get().length === 3 &&
     wb.startingSessions.length === 1 &&
     wb.startingSessions[0]?.commandId === lastCommand(commands.get())?.id &&
-    starts.get().length === 1
+    starts.get().length === 1 &&
+    startDisabled(wb[UI])
   );
   const action_withdraw = action(() => {
     clickInRow(wb[UI], "topic #7: Workbench topic", "Withdraw");
@@ -522,7 +547,8 @@ export default pattern(() => {
     commands.get()[1] === "not a command" &&
     wb.startingSessions.length === 0 &&
     starts.get().length === 0 &&
-    wb.attachedSessions.length === 1
+    wb.attachedSessions.length === 1 &&
+    wb.startBlocker === ""
   );
 
   // With no queue bound, a start records nothing as attached: it stays
@@ -534,14 +560,17 @@ export default pattern(() => {
   const assert_start_without_queue_pending = assert(() =>
     noQueue.attachedSessions.length === 0 &&
     noQueue.startingSessions.length === 1 &&
-    noQueueStarts.get().length === 1
+    noQueueStarts.get().length === 1 &&
+    noQueue.spawnPrompt.get() === "" &&
+    noQueue.startBlocker.startsWith('Starting "topic #7: Workbench topic"')
   );
   const action_withdraw_without_queue = action(() => {
     clickInRow(noQueue[UI], "topic #7: Workbench topic", "Withdraw");
   });
   const assert_withdrawn_without_queue = assert(() =>
     noQueue.startingSessions.length === 0 &&
-    noQueueStarts.get().length === 0
+    noQueueStarts.get().length === 0 &&
+    noQueue.startBlocker === ""
   );
 
   // A start through the Codex source sends nothing: its driver cannot start
@@ -606,8 +635,10 @@ export default pattern(() => {
   );
 
   // "Add the topic's words" appends the default sentence to what the person
-  // typed rather than replacing it.
+  // typed rather than replacing it (the earlier words went with the start,
+  // so they are typed again here).
   const action_click_topic_words = action(() => {
+    wb.spawnPrompt.set("Work on topic #7, it's time.");
     clickButton(wb[UI], "Add the topic's words");
   });
   const assert_topic_words_appended = assert(() =>
@@ -688,8 +719,12 @@ export default pattern(() => {
       { assertion: assert_start_command },
       { render: wb[UI] },
       { assertion: assert_start_pending },
+      { action: action_start_twice },
+      { assertion: assert_start_once },
       { action: action_confirm_start },
       { assertion: assert_start_attached },
+      { render: wb[UI] },
+      { assertion: assert_start_enabled_again },
       { action: action_delete_started },
       { assertion: assert_deleted_still_attached },
       { action: action_attach_started },

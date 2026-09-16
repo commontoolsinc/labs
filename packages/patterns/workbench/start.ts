@@ -111,13 +111,17 @@ export interface StartPreconditions {
   /** Whether there is a subject to start from, for a workbench whose
    * subject can be missing; absent means there always is one. */
   hasSubject?: boolean;
+  /** The title of a start for this subject the index has not confirmed, or
+   * "" when there is none: one start at a time per subject, so a second
+   * click while the first is on its way starts nothing. */
+  pending?: string;
 }
 
 /** Why Start would send nothing, or "" when it would send. The one
  * predicate behind the disabled control, its caption, and the handler's own
  * refusal, so the three cannot drift apart. */
 export const startBlockerReason = (
-  { ownerDid, picked, options, startable, kickoff, hasSubject }:
+  { ownerDid, picked, options, startable, kickoff, hasSubject, pending }:
     StartPreconditions,
 ): string => {
   if (hasSubject === false) return "No workstream to start from.";
@@ -132,6 +136,9 @@ export const startBlockerReason = (
     return `${sourceId} is not a harness this Mac runs; pick one that is.`;
   }
   if (!kickoff.trim()) return "Write a prompt to start from.";
+  if (pending?.trim()) {
+    return `Starting "${pending.trim()}"; it shows as starting until the connector confirms it. Withdraw it there to start another.`;
+  }
   return "";
 };
 
@@ -140,6 +147,27 @@ export const startBlockerReason = (
 export const startBlockerOf = lift((
   preconditions: StartPreconditions,
 ): string => startBlockerReason(preconditions));
+
+/**
+ * The title of the first start for a subject that the index has not yet
+ * confirmed, or "" when there is none. Without a `workstreamId` every
+ * unconfirmed start counts, which is the topic workbench's case (one
+ * subject); with one, only the starts made for that workstream. The title is
+ * read where the row is live.
+ */
+export const pendingStartOf = lift((
+  { starting, workstreamId }: {
+    starting: SessionStart[];
+    workstreamId?: string;
+  },
+): string => {
+  for (const start of starting) {
+    if (workstreamId === undefined || start.workstreamId === workstreamId) {
+      return start.title || "(untitled session)";
+    }
+  }
+  return "";
+});
 
 /** A version 4 UUID, which is the shape a Claude session id must have. */
 export const mintSessionId = (): string =>

@@ -18,7 +18,9 @@
  * be withdrawn through the same handler. A confirmed start's record stays,
  * being what attaches its session. The composed shell command stays
  * as the fallback for a person whose host has no queue for this piece. What
- * this shares with the person workbench lives in `../workbench/`.
+ * this shares with the person workbench lives in `../workbench/`. One start
+ * at a time: while a start is unconfirmed, Start is disabled with the reason,
+ * and the words a start sent clear from the composer.
  */
 
 import {
@@ -72,6 +74,7 @@ import {
   checkoutOptionsOf,
   configuredSourcesOf,
   mintSessionId,
+  pendingStartOf,
   sourceOptionsOf,
   startBlockerOf,
   startBlockerReason,
@@ -341,6 +344,8 @@ export const startSessionCommand = handler<void, {
   starts: Writable<SessionStart[] | Default<[]>>;
   spawnRoot: Writable<string>;
   spawnSource: Writable<string>;
+  /** The person's words, cleared once a start has sent them. */
+  spawnPrompt: Writable<string>;
   sourceOptions: CheckoutOption[];
   configuredSources: string[];
   kickoff: string;
@@ -348,6 +353,9 @@ export const startSessionCommand = handler<void, {
   shortName: string;
   title: string;
   startMode: string;
+  /** The title of a start the index has not confirmed, or "": one start at
+   * a time, so a second click while the first is on its way sends nothing. */
+  pending: string;
   /** Bound on a Withdraw control: the id of the command to take back. The
    * start's own fields are then not read. */
   withdraw?: string;
@@ -365,6 +373,7 @@ export const startSessionCommand = handler<void, {
     options: state.sourceOptions,
     startable: state.configuredSources,
     kickoff: state.kickoff,
+    pending: state.pending,
   });
   if (blocked) return;
   const sourceId = startSourceOf(
@@ -397,6 +406,9 @@ export const startSessionCommand = handler<void, {
     title: sessionTitle,
     startedAt: Date.now(),
   });
+  // The words went with the start; the composer is ready for the next one,
+  // and Start stays disabled until this one is confirmed or withdrawn.
+  state.spawnPrompt.set("");
 });
 
 //
@@ -430,6 +442,7 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
     const confirmedStarts = confirmedStartsOf({ starts, index: sessions });
     const attachments = attachmentsOf({ attached, confirmed: confirmedStarts });
     const startingSessions = startingOf({ starts, index: sessions });
+    const pendingStart = pendingStartOf({ starting: startingSessions });
     const rows = sessionRowsOf({ index: sessions, attached: attachments });
     const attachedSessions = attachedRowsOf({ attached: attachments, rows });
     const relatedSessions = relatedRowsOf({ rows, shortName, title });
@@ -465,6 +478,7 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
       options: sourceOptions,
       startable: configuredSources,
       kickoff,
+      pending: pendingStart,
     });
     const canStart = isEmptyText({ text: startBlocker });
     // The one handler the queue accepts writes from, bound here for Start
@@ -476,11 +490,13 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
       spawnSource,
       sourceOptions,
       configuredSources,
+      spawnPrompt,
       kickoff,
       ownerDid,
       shortName,
       title,
       startMode: mode,
+      pending: pendingStart,
     });
 
     const hasAttached = attachedSessions.length > 0;
@@ -750,11 +766,13 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                                     spawnSource,
                                     sourceOptions,
                                     configuredSources,
+                                    spawnPrompt,
                                     kickoff,
                                     ownerDid,
                                     shortName,
                                     title,
                                     startMode: mode,
+                                    pending: pendingStart,
                                     withdraw: start.commandId,
                                   })}
                                 >
