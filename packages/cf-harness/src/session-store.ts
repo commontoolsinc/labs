@@ -90,7 +90,7 @@ export class HarnessChatStoreAliasedError extends Error {
   /** Constructs an instance for the database at `store`, with `names` names. */
   constructor(store: string, names: number) {
     super(
-      `cf-harness chat session store ${store} has ${names} names on the file system (hard links), and a database is opened under one name only`,
+      `cf-harness chat session store ${store} has ${names} names (hard links); cf-harness holds a store by its one path, so an open through another name would not see the hold — remove the extra links (or point the host at the single canonical path) and reopen`,
     );
     this.name = "HarnessChatStoreAliasedError";
     this.#store = store;
