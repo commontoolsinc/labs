@@ -645,19 +645,33 @@ has a unit for, and the answer is in the topology rather than in the job.
 
 ### When the cost model is empty
 
-A cost model with no suite in it charges every lane nothing beyond the
-tests it runs, and a lane packed against it overruns the bound it is
-killed at. A run says so rather than publishing the empty map in
-silence:
+Every run says what the cost model holds, so that one nobody measured is
+as visible as one somebody did:
 
 ```
-test selection: no lane measurement of the last 7 day(s) reached the
-cost model, so it charges every lane nothing beyond the tests it runs.
-A lane packed against this manifest overruns.
+test selection: the cost model holds 12 suite(s) and 5 capability
+setup(s)
+```
+
+The two halves are counted apart because they come from different
+records. A lane writes one per capability it opens and a pair per batch,
+and a lane killed part way through a batch leaves the pair unmatched, so
+a model can hold a capability setup and no suite at all.
+
+What a lane is charged for holding a suite is the suite's own figure, so
+a model with no suite in it charges every lane nothing beyond the tests
+it runs and a lane packed against it overruns the bound it is killed at.
+A run with no suite in its model says so rather than publishing the
+empty map in silence:
+
+```
+test selection: no suite has a measured cost in the last 7 day(s), so
+the model charges every lane nothing beyond the tests it runs and a lane
+packed against this manifest overruns.
 ```
 
 Four different things end there. One of them the run can tell you
-about, and a second line says so when it applies:
+about, and a third line says so when it applies:
 
 ```
 test selection: 15 lane measurement(s) this run read came from a run

@@ -755,21 +755,30 @@ function summarize(
     `test selection: folded ${observations} execution(s); the manifest ` +
       `holds ${manifest.entries.length} identities`,
   );
-  // A cost model with no suite in it charges every lane nothing beyond
-  // the tests it runs, so a lane packed to its budget runs past the
-  // bound it is killed at. Every way that happens ends in the same
-  // place — no lane has run, none has recorded what it measured, the
-  // fold declines the records of the ones that did, or the fold stopped
-  // reading a figure it used to read — and none of them is visible in a
-  // manifest that carries an empty map and no complaint.
+  // Said every run, so that a model nobody measured is as visible as one
+  // somebody did. The two halves are counted apart because they come
+  // from different records: a lane writes one per capability it opens,
+  // and a pair per batch, and a lane killed part way through a batch
+  // leaves the pair unmatched and contributes a setup cost alone.
   const suites = Object.keys(manifest.calibration.suites).length;
+  console.log(
+    `test selection: the cost model holds ${suites} suite(s) and ` +
+      `${Object.keys(manifest.calibration.setupCost).length} ` +
+      `capability setup(s)`,
+  );
+  // What a lane is charged for holding a suite at all is the suite's
+  // own figure, so a model with no suite in it charges every lane
+  // nothing beyond the tests it runs and a lane packed to its budget
+  // runs past the bound it is killed at. Four things end there — no
+  // lane has run, none recorded what it measured, the fold declines the
+  // records of the ones that did, or the fold stopped reading a figure
+  // it used to read — and the empty map alone says none of them.
   if (suites === 0) {
     console.log(
-      `test selection: no lane measurement of the last ` +
-        `${COST_WINDOW_DAYS} day(s) reached the cost model, so it charges ` +
-        `every lane nothing beyond the tests it runs. A lane packed ` +
-        `against this manifest overruns. See ` +
-        `docs/development/test-selection.md.`,
+      `test selection: no suite has a measured cost in the last ` +
+        `${COST_WINDOW_DAYS} day(s), so the model charges every lane ` +
+        `nothing beyond the tests it runs and a lane packed against this ` +
+        `manifest overruns. See docs/development/test-selection.md.`,
     );
     // Said only where there is a figure to say, so that a run with
     // nothing to report claims nothing. A lane that ran and whose
@@ -782,12 +791,6 @@ function summarize(
           `them, so the model was fitted without them.`,
       );
     }
-  } else {
-    console.log(
-      `test selection: the cost model holds ${suites} suite(s) and ` +
-        `${Object.keys(manifest.calibration.setupCost).length} ` +
-        `capability setup(s)`,
-    );
   }
   if (unplaced.suiteLevel.length > 0) {
     console.log(
