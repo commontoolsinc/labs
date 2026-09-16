@@ -156,35 +156,45 @@ const ForwardedMonthCaller = pattern<
 });
 
 /**
- * One live row in whatever month the database's own clock is in, dated in SQL
- * because a handler is denied the clock inside the sandbox. It is what the
- * atom answers a caller that named no month, so it sits in a database of its
- * own where it cannot join the month the rows above are read from.
+ * One live row in the month the database's own clock is in, and one in the
+ * month after it, both dated in SQL because a handler is denied the clock
+ * inside the sandbox. It is what the atom answers a caller that named no
+ * month, so it sits in a database of its own where it cannot join the month
+ * the rows above are read from.
+ *
+ * TWO rows, because the seed reads the clock and the atom reads it again: a
+ * month boundary crossed between them resolves the read to the month after
+ * the one seeded. With a row in each, exactly one of them is inside whichever
+ * month the read resolves, so the count the assertions make is the same on
+ * both sides of the boundary rather than right for all but an instant.
  */
+const monthOffsetDate = (months: string): string =>
+  `date(strftime('%Y-%m', 'now', 'localtime') || '-15', '${months}')`;
+
 const seedCurrentMonth = handler<void, { db: SqliteDb }>((_, { db }) => {
-  db.exec(
+  const insert = (offset: string): string =>
     "INSERT INTO rows_plaid_transaction (record_id, transaction_id, " +
-      "account_id, date, amount, signed_amount, merchant_name, name, " +
-      "pending, category_primary, iso_currency_code, status, deleted, " +
-      "deleted_at) " +
-      "VALUES (?, ?, ?, strftime('%Y-%m', 'now', 'localtime') || '-15', " +
-      "?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    [
-      "current",
-      "txn-current",
-      "acct-1",
-      31.5,
-      -31.5,
-      "This Month Co",
-      "This Month Co charge",
-      0,
-      "GENERAL_SERVICES",
-      "USD",
-      "posted",
-      0,
-      "",
-    ],
-  );
+    "account_id, date, amount, signed_amount, merchant_name, name, " +
+    "pending, category_primary, iso_currency_code, status, deleted, " +
+    `deleted_at) VALUES (?, ?, ?, ${offset}, ` +
+    "?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+  const row = (id: string) => [
+    id,
+    `txn-${id}`,
+    "acct-1",
+    31.5,
+    -31.5,
+    "This Month Co",
+    "This Month Co charge",
+    0,
+    "GENERAL_SERVICES",
+    "USD",
+    "posted",
+    0,
+    "",
+  ];
+  db.exec(insert(monthOffsetDate("+0 month")), row("current"));
+  db.exec(insert(monthOffsetDate("+1 month")), row("next"));
 });
 
 export default pattern(() => {
@@ -332,10 +342,9 @@ export default pattern(() => {
       // reads `undefined` rather than leaving the key out, so the input's own
       // default is not what makes this hold.
       //
-      // The seed dates the row from the database's clock and the read
-      // resolves the month from it again, so a month boundary crossed
-      // between the two makes this fail — microseconds once a month, and
-      // every alternative pins the test to a month the clock will leave.
+      // The seed writes a row in this month and one in the next, so the row
+      // the read finds is one whichever side of a month boundary the read's
+      // own clock lands on.
       //
       // Read for the first time HERE, after the seed, and that is what makes
       // the row visible: the atom takes no `reactOn`, so a read that already
