@@ -1,9 +1,10 @@
 /**
- * Shared library for the CI coverage-debt gate.
+ * Shared library for the repository's coverage accounting.
  *
  * Used by:
- *   - coverage-check.ts        (per-PR coverage-debt gate)
- *   - post-coverage-comment.ts (posts the gate's coverage comment)
+ *   - coverage-gate.ts   (the measured-set gate a pull request passes)
+ *   - coverage-report.ts (the figures the full run publishes)
+ *   - test-selection/    (the notes the run report puts on a pull request)
  */
 
 //
