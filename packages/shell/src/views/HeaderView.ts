@@ -2,11 +2,13 @@ import type { FavoriteEntry } from "@commonfabric/home-schemas";
 import { type DID, KeyStore } from "@commonfabric/identity";
 import { navigate } from "@commonfabric/navigation";
 import { hasEntityUriScheme } from "@commonfabric/runner/entity-kind";
+import { type NameSchema, nameSchema } from "@commonfabric/runner/schemas";
+import { NAME } from "@commonfabric/runner/shared";
 import {
   type CellHandle,
   type FavoritePieceAddress,
 } from "@commonfabric/runtime-client";
-import { Task } from "@lit/task";
+import { Task, TaskStatus } from "@lit/task";
 import { css, html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 
@@ -680,6 +682,9 @@ export class XHeaderView extends BaseView {
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
+    this.#pieces.abort();
+    this.headerPieceDropdownOpen = false;
+    this.pieceListExpanded = false;
     this.#cleanupFavoritesSubscription();
     this.removeEventListener("keydown", this.#handleKeyDown);
     globalThis.removeEventListener("resize", this.#handleResize);
@@ -738,27 +743,25 @@ export class XHeaderView extends BaseView {
     }
   }
 
-  /**
-   * Eagerly fetch registered pieces in the current space as soon as the
-   * runtime is available. Results are cached until the runtime or the
-   * viewed space changes. This ensures the piece list is ready by the
-   * time the user opens a dropdown.
-   * Fetches are parallelized with Promise.allSettled; pieces that fail
-   * to resolve are silently skipped.
-   */
+  /** Names fetched on first open, cached until the runtime or space changes. */
   #piecesCache: PieceItem[] | undefined;
 
+  get #piecesVisible(): boolean {
+    return this.headerPieceDropdownOpen ||
+      (this.menuOpen && this.pieceListExpanded);
+  }
+
   #pieces = new Task(this, {
-    task: async ([rt, space]): Promise<PieceItem[]> => {
-      if (!rt || !space) {
-        this.#piecesCache = undefined;
-        return [];
-      }
+    task: async ([rt, space, visible], { signal }): Promise<PieceItem[]> => {
+      if (!rt || !space || !visible) return [];
       if (this.#piecesCache) return this.#piecesCache;
 
       await rt.synced(space);
+      signal.throwIfAborted();
       const piecesListCell = await rt.getPiecesListCell(space);
+      signal.throwIfAborted();
       await piecesListCell.sync();
+      signal.throwIfAborted();
       const piecesList = piecesListCell.get() as any[];
       if (!piecesList) return [];
 
@@ -770,18 +773,20 @@ export class XHeaderView extends BaseView {
 
       const results = await Promise.allSettled(
         ids.map(async (id) => {
-          // Names come from the persisted result cells — do NOT start every
-          // piece in the space just to label a menu (CT-1623: that cost ~10s
-          // of dependency collection per reload or on first interaction).
+          // Project the persisted result to its name so menu labels do not
+          // materialize each piece's output graph or start its pattern.
           const piece = await rt.getPattern(space, id, { start: false });
-          await piece.cell().sync();
+          signal.throwIfAborted();
+          const name = await piece.cell().asSchema<NameSchema>(nameSchema)
+            .sync();
           return {
             id: piece.id(),
-            name: piece.name() ?? `Piece #${piece.id().slice(0, 6)}`,
+            name: name?.[NAME] ?? `Piece #${piece.id().slice(0, 6)}`,
           };
         }),
       );
 
+      signal.throwIfAborted();
       this.#piecesCache = results
         .filter(
           (r): r is PromiseFulfilledResult<PieceItem> =>
@@ -790,7 +795,7 @@ export class XHeaderView extends BaseView {
         .map((r) => r.value);
       return this.#piecesCache;
     },
-    args: () => [this.rt, this.space] as const,
+    args: () => [this.rt, this.space, this.#piecesVisible] as const,
   });
 
   /** Clear the keystore and identity, logging the user out. */
@@ -1092,7 +1097,9 @@ export class XHeaderView extends BaseView {
                         ? html`
                           <div class="header-piece-dropdown">
                             <x-piece-list
-                              .pieces="${this.#pieces.value ?? []}"
+                              .pieces="${this.#piecesCache ?? []}"
+                              .loading="${!this.#piecesCache &&
+                                this.#pieces.status === TaskStatus.PENDING}"
                               .activePieceId="${this.pieceId}"
                               @piece-selected="${this
                                 .#handlePieceSelected}"
@@ -1152,7 +1159,9 @@ export class XHeaderView extends BaseView {
               ${this.pieceListExpanded
                 ? html`
                   <x-piece-list
-                    .pieces="${this.#pieces.value ?? []}"
+                    .pieces="${this.#piecesCache ?? []}"
+                    .loading="${!this.#piecesCache &&
+                      this.#pieces.status === TaskStatus.PENDING}"
                     .activePieceId="${this.pieceId}"
                     @piece-selected="${this.#handlePieceSelected}"
                   ></x-piece-list>
