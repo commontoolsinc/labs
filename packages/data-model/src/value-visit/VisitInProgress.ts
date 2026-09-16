@@ -3,7 +3,6 @@ import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import { type Primitive } from "@commonfabric/utils/types";
 
 import { codecOf, NULL_LIVE_ENVIRONMENT } from "@/codec-common/index.ts";
-import { isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import type {
   FabricArrayPlus,
   FabricContainerValuePlus,
@@ -14,10 +13,8 @@ import type {
   FabricValuePlus,
 } from "@/interface.ts";
 import {
-  type FabricValueTag,
-  isValidFabricValue,
-  isValidFabricValueLayer,
-  tagOfFabricValue,
+  type FabricValuePlusTag,
+  type PlusTypePredicate,
   tagOfFabricValueElseNull,
   VALUE_TAGS,
 } from "@/types";
@@ -74,6 +71,9 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
   /** Concrete visitor implementation. */
   #visitor: ValueVisitor<PlusType, ResultType>;
 
+  /** Bound method call to `#visitor.isPlusType()`. */
+  #isPlusType: PlusTypePredicate<PlusType>;
+
   /** Container stack of the visit currently in progress. */
   #stack = new IndexTrackingStack<FabricValuePlus<PlusType>>();
 
@@ -81,22 +81,11 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
   #inProgress = false;
 
   /**
-   * Indicates if the value being visited is assumed to be a valid
-   * `FabricValue`.
-   */
-  #assumeValid = false;
-
-  /**
-   * When `#assumeValid` is `false`, whether to do deep type checks (vs.
-   * shallow).
-   */
-  #deepTypeCheck = false;
-
-  /**
    * Constructs an instance.
    */
   constructor(visitor: ValueVisitor<PlusType, ResultType>) {
     this.#visitor = visitor;
+    this.#isPlusType = visitor.isPlusType.bind(visitor);
   }
 
   //
@@ -104,40 +93,11 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
   //
 
   /**
-   * Visits the indicated value as a top-level operation, where the domain and
-   * result type are assumed to all be known-valid `FabricValue`. This is only
-   * appropriate to call when this class is instantiated with default type
-   * parameters _and_ `value` can safely be assumed to be valid (either because
-   * of an explicit check or by fiat).
-   */
-  visitFabricValue(value: FabricValue): BaselineVisitResult<ResultType> {
-    return this.#mainVisit(value, true, false);
-  }
-
-  /**
    * Visits the indicated value as a top-level operation, checking every
    * encountered value to determine whether or not it is a `FabricValue`.
    * See `visitValue()` for details on the `deepTypeCheck` argument.
    */
-  visit(
-    value: FabricValuePlus<PlusType>,
-    deepTypeCheck: boolean,
-  ): BaselineVisitResult<ResultType> {
-    return this.#mainVisit(value, false, deepTypeCheck);
-  }
-
-  //
-  // Visitor engine implementation
-  //
-  // This is arranged in approximately top-down fashion, to aid in readability.
-  //
-
-  /** Helper which implements most of a top-level visit. */
-  #mainVisit(
-    value: FabricValuePlus<PlusType>,
-    assumeValid: boolean,
-    deepTypeCheck: boolean,
-  ): BaselineVisitResult<ResultType> {
+  visit(value: FabricValuePlus<PlusType>): BaselineVisitResult<ResultType> {
     if (this.#inProgress) {
       // This is a defense-in-depth protection against bugs in this submodule,
       // and also serves as documentation for the intended use of this class.
@@ -148,13 +108,17 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
 
     this.#inProgress = true;
     try {
-      this.#assumeValid = assumeValid;
-      this.#deepTypeCheck = deepTypeCheck;
       return this.#visitValue(value);
     } finally {
       this.#inProgress = false;
     }
   }
+
+  //
+  // Visitor engine implementation
+  //
+  // This is arranged in approximately top-down fashion, to aid in readability.
+  //
 
   /**
    * Visits a top-level value or contained sub-value.
@@ -283,22 +247,17 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
           break;
         }
 
+        case VALUE_TAGS.PlusType: {
+          result = vis.visitPlusType(value as PlusType);
+          break;
+        }
+
         case null: {
           // `null` means that `value` was not recognized as a `FabricValue`.
-          if (this.#assumeValid) {
-            const desc = toCompactDebugString(value);
-            throw new Error(
-              `Encountered a non-\`FabricValue\` while doing an "assume valid" visit: ${desc}`,
-            );
-          } else if (vis.isPlusType(value)) {
-            result = vis.visitPlusType(value);
-          } else {
-            const desc = toCompactDebugString(value);
-            throw new Error(
-              `Encountered a value outside of the visitor's domain: ${desc}`,
-            );
-          }
-          break;
+          const desc = toCompactDebugString(value);
+          throw new Error(
+            `Encountered a value outside of the visitor's domain: ${desc}`,
+          );
         }
 
         default: {
@@ -372,7 +331,9 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
    * Recurses into a `FabricArray`, iterating over all its elements, in response
    * to a `recurse` result.
    */
-  #recurseFabricArray(result: RecurseOfForm<PlusType>): BaselineVisitResult<ResultType> {
+  #recurseFabricArray(
+    result: RecurseOfForm<PlusType>,
+  ): BaselineVisitResult<ResultType> {
     const { container, doValues } = result;
     const array = container as FabricArrayPlus<PlusType>;
     const vis = this.#visitor;
@@ -549,7 +510,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
   #adjustRecurseForm(
     result: RecurseForm,
     finalValue: FabricValuePlus<PlusType>,
-    finalValueTagIfKnown?: FabricValueTag | null,
+    finalValueTagIfKnown?: FabricValuePlusTag | null,
   ): RecurseOfForm<PlusType> {
     const tag = (finalValueTagIfKnown === undefined)
       ? this.#tagOfValueElseNull(finalValue)
@@ -600,20 +561,9 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
    * type-checking style indicated by the top-level `visit*()` call on this
    * instance.
    */
-  #tagOfValueElseNull(value: FabricValuePlus<PlusType>): FabricValueTag | null {
-    if (this.#assumeValid) {
-      return tagOfFabricValueElseNull(value as FabricValue);
-    } else if (this.#deepTypeCheck) {
-      // TODO(danfuzz): If cached, `isValidDeepFrozenFabricValue()` is faster
-      // than `isValidFabricValue()`. The latter should actually sniff at the
-      // frozen cache.
-      const isFabricValue = isValidDeepFrozenFabricValue(value) ||
-        isValidFabricValue(value);
-      return isFabricValue ? tagOfFabricValue(value) : null;
-    } else {
-      return isValidFabricValueLayer(value)
-        ? tagOfFabricValue(value as FabricValue)
-        : null;
-    }
+  #tagOfValueElseNull(
+    value: FabricValuePlus<PlusType>,
+  ): FabricValuePlusTag | null {
+    return tagOfFabricValueElseNull(value, this.#isPlusType);
   }
 }
