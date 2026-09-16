@@ -21,9 +21,11 @@ import {
 import { storeBucket, storePrefix } from "../test-records-config.ts";
 import {
   type Manifest,
-  MANIFEST_SCHEMA_VERSION,
+  MANIFESTS_LOOKED_BACK,
   parseManifest,
+  SELECTION_AREA,
   serializeManifest,
+  writtenAhead,
 } from "./manifest.ts";
 
 /**
@@ -40,13 +42,14 @@ export function selectionPrefix(env: Environment = Deno.env.get): string {
 }
 
 /**
- * Where manifests of the version this reader understands are created. The
- * segment is part of every name rather than part of the configured area,
- * so a workstation and a job agree on it, and an incompatible schema
- * writes under `v2/` with readers migrating at their own pace.
+ * Where manifests are created. The segment is part of every name rather
+ * than part of the configured area, so a workstation and a job agree on
+ * it, and it is `SELECTION_AREA` rather than the schema version, so that
+ * a change to what is stored leaves every reader looking where the
+ * publisher is still writing.
  */
 export function manifestPrefix(env: Environment = Deno.env.get): string {
-  return `${selectionPrefix(env)}/v${MANIFEST_SCHEMA_VERSION}`;
+  return `${selectionPrefix(env)}/${SELECTION_AREA}`;
 }
 
 /** The area the publisher's rolling aggregate is created under. */
@@ -105,23 +108,32 @@ export function newestAtOrBefore(
   objects: readonly TimedObject[],
   at: string,
 ): string | undefined {
-  let best: string | undefined;
-  let bestAt = "";
-  for (const { name, createdAt } of objects) {
-    if (generatedAtOf(name) === undefined || createdAt > at) continue;
-    // Two manifests can be created in the same millisecond, and then the
-    // creation time does not order them. The name does, and every reader
-    // sorts it the same way, so the lanes and the wall obey one manifest
-    // rather than two that happen to share an instant.
-    if (
-      best === undefined || createdAt > bestAt ||
-      (createdAt === bestAt && name > best)
-    ) {
-      best = name;
-      bestAt = createdAt;
-    }
-  }
-  return best;
+  return newestFirstAtOrBefore(objects, at)[0];
+}
+
+/**
+ * The same, as every manifest at or before that moment with the newest
+ * first, which is the order a reader tries them in when the newest is one
+ * it cannot read.
+ */
+export function newestFirstAtOrBefore(
+  objects: readonly TimedObject[],
+  at: string,
+): string[] {
+  // Two manifests can be created in the same millisecond, and then the
+  // creation time does not order them. The name does, and every reader
+  // sorts it the same way, so the lanes and the wall obey one manifest
+  // rather than two that happen to share an instant.
+  return objects
+    .filter(({ name, createdAt }) =>
+      generatedAtOf(name) !== undefined && createdAt <= at
+    )
+    .sort((a, b) =>
+      a.createdAt === b.createdAt
+        ? b.name.localeCompare(a.name)
+        : b.createdAt.localeCompare(a.createdAt)
+    )
+    .map(({ name }) => name);
 }
 
 /** What a fetch of the newest manifest found, or why it found nothing. */
@@ -155,44 +167,65 @@ export async function fetchManifest(options: {
   try {
     objects = await listObjectTimes({
       bucket,
-      // The trailing slash keeps the listing inside this version: a bare
-      // "v1" prefix also matches "v10", whose manifests would sort above
-      // these and hide the newest one this reader may use.
+      // The trailing slash keeps the listing inside the area: a bare
+      // "v1" prefix also matches "v10".
       prefix: `${prefix}/`,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
   } catch (error) {
     return { absent: `listing ${prefix} failed: ${error}` };
   }
-  const objectName = newestAtOrBefore(objects, options.at);
-  if (objectName === undefined) {
+  const candidates = newestFirstAtOrBefore(objects, options.at)
+    .slice(0, MANIFESTS_LOOKED_BACK);
+  if (candidates.length === 0) {
     return { absent: `no manifest under ${prefix} at or before ${options.at}` };
   }
   const doFetch = options.fetch ?? fetch;
-  let text: string;
-  try {
-    const url = objectUrl(bucket, objectName);
-    const response = await doFetch(url);
-    if (!response.ok) {
+  let ahead: string | undefined;
+  for (const objectName of candidates) {
+    let text: string;
+    try {
+      const url = objectUrl(bucket, objectName);
+      const response = await doFetch(url);
+      if (!response.ok) {
+        return {
+          absent: `reading ${objectName} failed: HTTP ${response.status}`,
+        };
+      }
+      // The store serves these with transcoding, so a plain fetch has
+      // already decoded the gzip the object is stored under.
+      text = await response.text();
+    } catch (error) {
+      return { absent: `reading ${objectName} failed: ${error}` };
+    }
+    // One parse for both questions, because a manifest is the whole
+    // corpus and this asks them of every candidate.
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = undefined;
+    }
+    const manifest = parseManifest(body);
+    if (manifest !== undefined) return { manifest, objectName };
+    // A manifest saying it was written in a shape from further ahead than
+    // this reader is one the reader is behind, and the one before it
+    // answers instead. Anything else unreadable ends the search: a
+    // corrupt object is not a reader waiting to be deployed.
+    if (!writtenAhead(body)) {
       return {
-        absent: `reading ${objectName} failed: HTTP ${response.status}`,
+        objectName,
+        absent: `${objectName} is not a manifest this ` +
+          `reader understands`,
       };
     }
-    // The store serves these with transcoding, so a plain fetch has
-    // already decoded the gzip the object is stored under.
-    text = await response.text();
-  } catch (error) {
-    return { absent: `reading ${objectName} failed: ${error}` };
+    ahead ??= objectName;
   }
-  const manifest = parseManifest(text);
-  if (manifest === undefined) {
-    return {
-      objectName,
-      absent: `${objectName} is not a manifest this ` +
-        `reader understands`,
-    };
-  }
-  return { manifest, objectName };
+  return {
+    ...(ahead === undefined ? {} : { objectName: ahead }),
+    absent: `every manifest under ${prefix} at or before ${options.at} this ` +
+      `reader looked at was written in a newer shape than it reads`,
+  };
 }
 
 /** The gzipped body one manifest object holds. */

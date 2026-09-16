@@ -11,13 +11,24 @@ import {
   stateObjectName,
   statePrefix,
 } from "./store.ts";
-import { MANIFEST_SCHEMA_VERSION, serializeManifest } from "./manifest.ts";
+import {
+  MANIFEST_SCHEMA_VERSION,
+  SELECTION_AREA,
+  serializeManifest,
+} from "./manifest.ts";
 import { sampleManifest } from "./testing.ts";
 
 const NO_ENV = () => undefined;
 
-/** The area a manifest of the version this reader understands is in. */
-const AREA = `labs/test-selection/v${MANIFEST_SCHEMA_VERSION}`;
+/**
+ * The area every manifest is in, whatever shape it was written in.
+ *
+ * Written out rather than built from `SELECTION_AREA`, so that moving
+ * the area is a deliberate edit here as well. Every object the store
+ * holds is under this one, and the publisher's identity cannot move
+ * them, so a changed segment abandons the whole of it.
+ */
+const AREA = "labs/test-selection/v1";
 
 /**
  * A fetch that answers a listing and one object, and nothing else.
@@ -155,6 +166,10 @@ describe("store", () => {
   });
 
   describe("fetchManifest()", () => {
+    it("reads the area every stored object is under", () => {
+      expect(`labs/test-selection/${SELECTION_AREA}`).toBe(AREA);
+    });
+
     const at = "2026-08-20T05:00:00.000Z";
     const name = `${AREA}/manifest-2026-08-20T04:00:00.000Z-b.json.gz`;
 
@@ -177,6 +192,55 @@ describe("store", () => {
       });
       expect(found.manifest).toBeUndefined();
       expect(found.absent).toContain("no manifest");
+    });
+
+    it("takes the newest manifest written in a shape it reads", async () => {
+      // A manifest published after a change to what one holds is ahead
+      // of a lane that has not been deployed since. Taking none would
+      // make the whole corpus mandatory, where the one before it costs
+      // a figure some hours old.
+      const older = `${AREA}/manifest-2026-08-20T03:00:00.000Z-a.json.gz`;
+      const ahead = JSON.parse(serializeManifest(sampleManifest()));
+      ahead.schema = MANIFEST_SCHEMA_VERSION + 1;
+      const found = await fetchManifest({
+        at,
+        env: NO_ENV,
+        fetch: storeOf({
+          [older]: serializeManifest(sampleManifest()),
+          [name]: JSON.stringify(ahead),
+        }),
+      });
+      expect(found.objectName).toBe(older);
+      expect(found.manifest).toBeDefined();
+    });
+
+    it("reports nothing when every manifest it reads is ahead of it", async () => {
+      const ahead = JSON.parse(serializeManifest(sampleManifest()));
+      ahead.schema = MANIFEST_SCHEMA_VERSION + 1;
+      const found = await fetchManifest({
+        at,
+        env: NO_ENV,
+        fetch: storeOf({ [name]: JSON.stringify(ahead) }),
+      });
+      expect(found.manifest).toBeUndefined();
+      expect(found.absent).toContain("newer shape");
+    });
+
+    it("stops at a corrupt manifest rather than taking the one before it", async () => {
+      // Being behind the publisher and reading a store nobody should be
+      // reporting from are different, and only the first is a reason to
+      // answer with an older figure.
+      const older = `${AREA}/manifest-2026-08-20T03:00:00.000Z-a.json.gz`;
+      const found = await fetchManifest({
+        at,
+        env: NO_ENV,
+        fetch: storeOf({
+          [older]: serializeManifest(sampleManifest()),
+          [name]: "{not a manifest",
+        }),
+      });
+      expect(found.manifest).toBeUndefined();
+      expect(found.objectName).toBe(name);
     });
 
     it("treats a malformed manifest as absent", async () => {

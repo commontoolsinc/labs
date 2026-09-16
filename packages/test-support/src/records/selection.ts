@@ -33,16 +33,89 @@ export interface ScoreInputs {
 }
 
 /**
- * The version a reader understands; anything else is treated as absent.
+ * The newest shape a reader here knows how to read. A stored body says
+ * which shape it was written in, and a reader reads anything at or under
+ * this. A body above it is treated as absent, because a reader that does
+ * not know a field cannot know what obeying the rest would mean.
  *
- * It is a segment of every name the store writes under, so a change here
- * leaves what came before where it is and starts a fresh area: readers of
- * either version see only their own manifests and their own aggregate,
- * and neither reads the other's half-understood. Moving it means the
- * publisher has no aggregate to carry forward, which it stops and asks
- * for a bootstrap over.
+ * Most of the reading forward is done field by field and asks this
+ * nothing: a field a body does not carry has a defined reading, and
+ * bodies of several shapes stand under one number. What this is for is
+ * the change that cannot be read that way, where the same field means
+ * different things on either side of it and a reader has to know which.
+ * Raise it for one of those, and read the shape below it by this number.
  */
 export const MANIFEST_SCHEMA_VERSION = 2;
+
+/**
+ * The shape in which a suite's fit gained the figure for what one more
+ * of its units costs a batch already running others. A fit written
+ * before it carries no such figure and charged nothing per unit; one
+ * written in this shape carries it, so a body of this shape without it
+ * is one this reader cannot read rather than one it reads forward.
+ */
+const UNIT_OVERHEAD_SINCE = 2;
+
+/**
+ * The segment naming the area the selection store writes under.
+ *
+ * It does not move when the schema does. The area holds the publisher's
+ * rolling aggregate, which is where every catch a test has ever been
+ * credited with lives, and an area that moved with the schema would
+ * leave that behind: the publisher would have no aggregate to carry
+ * forward and would stop and ask for a bootstrap, which an operator runs
+ * by hand and which reads only as far back as its window. Between the
+ * two, nothing publishes, and a consumer with no manifest runs the whole
+ * corpus.
+ *
+ * The publisher's identity holds create and not delete or overwrite, so
+ * what is already stored stays in the area it was written under, which
+ * is the one this names.
+ */
+export const SELECTION_AREA = "v1";
+
+/**
+ * How far back a reader looks for a body written in a shape it knows.
+ *
+ * Every reader uses this one figure. A reader looking back further than
+ * another would obey a manifest the other passed over, and two readers
+ * obeying different manifests is what the whole store is arranged to
+ * avoid: a wall would then report a figure no pull request obeys.
+ */
+export const MANIFESTS_LOOKED_BACK = 8;
+
+/**
+ * The shape a stored body declares, when it declares one at all. It says
+ * whether a body a reader cannot read is one from further ahead than the
+ * reader or one that is simply not a manifest, which are different
+ * enough to be reported differently.
+ *
+ * It takes a parsed value rather than the text, so that a reader asking
+ * both this and `parseManifest` about one body parses it once. A body is
+ * the whole corpus.
+ */
+export function declaredSchema(value: unknown): number | undefined {
+  if (!isRecord(value)) return undefined;
+  const schema = value.schema;
+  return typeof schema === "number" && Number.isInteger(schema) && schema > 0
+    ? schema
+    : undefined;
+}
+
+/**
+ * Whether a body says it was written in a shape from further ahead than
+ * this reader, which is the one reason to pass over it and read the one
+ * before it instead.
+ *
+ * Every reader asks this rather than comparing a declared shape against
+ * a bound of its own, so that what counts as too far ahead is answered
+ * in one place and a reader passing over a body and a validator refusing
+ * it cannot come to disagree.
+ */
+export function writtenAhead(value: unknown): boolean {
+  const schema = declaredSchema(value);
+  return schema !== undefined && schema > MANIFEST_SCHEMA_VERSION;
+}
 
 /** One selectable identity, with everything selection needs to know. */
 export interface ManifestEntry {
@@ -442,7 +515,10 @@ function parseUnschedulable(value: unknown): UnschedulableEntry | undefined {
   return { test, suite: value.suite, cost: value.cost };
 }
 
-function parseCalibration(value: unknown): Calibration | undefined {
+function parseCalibration(
+  value: unknown,
+  schema: number,
+): Calibration | undefined {
   if (!isRecord(value)) return undefined;
   const numbers = (raw: unknown): Record<string, number> | undefined => {
     if (!isRecord(raw)) return undefined;
@@ -462,15 +538,27 @@ function parseCalibration(value: unknown): Calibration | undefined {
     if (!isRecord(fitted)) return undefined;
     if (
       !isFiniteNumber(fitted.overhead) || fitted.overhead < 0 ||
-      !isFiniteNumber(fitted.correction) || fitted.correction <= 0 ||
-      !isFiniteNumber(fitted.unitOverhead) || fitted.unitOverhead < 0
+      !isFiniteNumber(fitted.correction) || fitted.correction <= 0
     ) {
       return undefined;
     }
+    // Absent from a fit written before the figure existed, where it
+    // reads as the nothing per unit such a fit charged. Absent from one
+    // written since is a body this reader cannot read, and reading that
+    // as nothing would hide it while the packer under-charged every unit
+    // a lane opens.
+    //
+    // A body of the earlier shape carries a map of its own beside the
+    // suites, keyed by invocation unit. It is dropped rather than read
+    // here: nothing ever wrote an entry into one, and a suite is the
+    // grain a batch's timing supports.
+    const unitOverhead = fitted.unitOverhead ??
+      (schema < UNIT_OVERHEAD_SINCE ? 0 : undefined);
+    if (!isFiniteNumber(unitOverhead) || unitOverhead < 0) return undefined;
     suites[suite] = {
       overhead: fitted.overhead,
       correction: fitted.correction,
-      unitOverhead: fitted.unitOverhead,
+      unitOverhead,
     };
   }
   return { setupCost, suites, prologue: value.prologue };
@@ -536,8 +624,10 @@ function parseAll<T>(
 
 /**
  * Validates a manifest whole. Returns undefined for anything that is not
- * one of this schema version, including a newer one: a reader that does
- * not know a field cannot know what obeying the rest would mean.
+ * a manifest this reader knows a shape for, which is one declaring a
+ * schema at or under `MANIFEST_SCHEMA_VERSION`. An older one is read
+ * forward field by field. A newer one is refused, because a reader that
+ * does not know a field cannot know what obeying the rest would mean.
  */
 export function parseManifest(value: unknown): Manifest | undefined {
   if (typeof value === "string") {
@@ -548,7 +638,8 @@ export function parseManifest(value: unknown): Manifest | undefined {
     }
   }
   if (!isRecord(value)) return undefined;
-  if (value.schema !== MANIFEST_SCHEMA_VERSION) return undefined;
+  const schema = declaredSchema(value);
+  if (schema === undefined || writtenAhead(value)) return undefined;
   if (
     !isTimestamp(value.generatedAt) || !isNonEmptyString(value.seed) ||
     !isNonEmptyString(value.commit) || !isFiniteNumber(value.runs) ||
@@ -556,7 +647,7 @@ export function parseManifest(value: unknown): Manifest | undefined {
   ) {
     return undefined;
   }
-  const calibration = parseCalibration(value.calibration);
+  const calibration = parseCalibration(value.calibration, schema);
   const entries = parseAll(value.entries, parseEntry);
   const withheld = parseWithheldEntries(value.withheld);
   const unavailable = parseAll(value.unavailable, parseUnavailable);

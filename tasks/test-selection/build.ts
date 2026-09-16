@@ -52,12 +52,14 @@ import {
 import { type Suite, unavailableUnits } from "../test-topology/suite.ts";
 import {
   type Calibration,
+  declaredSchema,
   dialSnapshot,
   digestIdentities,
   type Manifest,
   MANIFEST_SCHEMA_VERSION,
   type ManifestEntry,
   type WithheldEntry,
+  writtenAhead,
 } from "./manifest.ts";
 import { ObservationSpool } from "./observation-spool.ts";
 import {
@@ -185,7 +187,13 @@ export function parseAggregate(text: string): AggregateState | undefined {
   }
   if (typeof value !== "object" || value === null) return undefined;
   const state = value as Record<string, unknown>;
-  if (state.schema !== MANIFEST_SCHEMA_VERSION) return undefined;
+  // An aggregate written under an older shape is read forward, field by
+  // field, the way each field below says. Refusing it instead would cost
+  // every catch it holds, which accumulate over unbounded history and
+  // cannot be recovered from a window of records.
+  if (declaredSchema(state) === undefined || writtenAhead(state)) {
+    return undefined;
+  }
   if (typeof state.day !== "string" || !Array.isArray(state.folded)) {
     return undefined;
   }

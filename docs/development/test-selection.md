@@ -313,6 +313,16 @@ does; carrying the old days instead would have figures the new rules
 would never produce deciding what a pull request runs for that same
 stretch.
 
+A change to what a manifest or an aggregate holds needs no cold start.
+The area both are written under is named rather than numbered and does
+not move, so a run finds the aggregate the run before it left; a stored
+body says which shape it was written in, and a reader reads anything at
+or under its own forward, field by field. What a reader will not read is
+a body from further ahead than itself, which it passes over for the
+newest one behind it. So raising `MANIFEST_SCHEMA_VERSION` means giving
+the reader of whatever changed a way to read the shape before it, and
+nothing else.
+
 **Nothing gates on it.** When the publisher fails, the previous manifest is
 still the newest one and consumers keep using it. A manifest going stale
 degrades selection quality slowly rather than failing anything, which is
@@ -460,9 +470,11 @@ replaces score history with only the selected window.
   incremental one: it folds onto the state already there rather than
   replacing it, which is what separates it from a bootstrap.
 - If the complete paginated listing has no state objects under the intended
-  prefix and schema version, this is a cold start. Dispatch the workflow from
-  `main` once with bootstrap on and leave `days` empty so the landed sixty-day
-  default applies. Then require the three acceptance checks above.
+  prefix, this is a cold start. Dispatch the workflow from `main` once with
+  bootstrap on and leave `days` empty so the landed sixty-day default applies.
+  Then require the three acceptance checks above. A change to what a manifest
+  or an aggregate holds is not a cold start: the area is named rather than
+  numbered, so it does not move, and both are read forward.
 - If listing or pagination fails, the newest state cannot be read, or its schema
   is invalid, that is not absence. The publisher refuses to write by design.
   Leave the append-only manifests and state objects intact: they and the raw

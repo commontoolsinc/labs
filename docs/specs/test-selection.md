@@ -564,9 +564,23 @@ inside `LOCAL_COVERAGE_BASELINE_DAYS`.
 
 A manifest is **untrusted input**. It is validated whole, and one bad
 field rejects the object rather than leaving a consumer obeying half of
-it. A manifest whose schema version a reader does not know is treated as
-absent, because a reader that does not know a field cannot know what
-obeying the rest would mean.
+it. A manifest declaring a shape from further ahead than the reader is
+treated as absent, because a reader that does not know a field cannot
+know what obeying the rest would mean; the reader takes the newest one
+behind it instead, and that is a figure hours old where refusing would
+leave it with none.
+
+A manifest declaring an earlier shape is read forward field by field. So
+is the publisher's own rolling aggregate, and for a stronger reason: the
+aggregate is where every catch a test has been credited with lives, over
+unbounded history, and no window of records gives those back.
+
+The area of the store both are written under is named rather than
+numbered, and does not move when a shape changes. An area that moved
+with the shape would leave the aggregate behind in the old one, which
+costs the catches and puts a manual cold start between one shape and the
+next, during which nothing publishes and every consumer runs the whole
+corpus.
 
 A withheld entry naming a reason the reader has no rule for is the one
 thing dropped rather than refused. Refusing it would refuse the whole

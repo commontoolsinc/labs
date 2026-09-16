@@ -61,6 +61,51 @@ describe("selection", () => {
       expect(parseManifest(JSON.stringify(ahead))).toBeUndefined();
     });
 
+    it("refuses a body that does not say which shape it is", () => {
+      // The shapes differ in what a field means, so a body that names
+      // none is one no reader can say it understands. Reading it as the
+      // current shape would obey a body nobody claimed was current.
+      for (const schema of [undefined, "1", 1.5, 0, -1, null]) {
+        const object = JSON.parse(serializeManifest(sampleManifest()));
+        if (schema === undefined) delete object.schema;
+        else object.schema = schema;
+        expect(parseManifest(JSON.stringify(object))).toBeUndefined();
+      }
+    });
+
+    it("refuses a suite of this shape carrying no unit overhead", () => {
+      // Absent from the shape that introduced it is a body this reader
+      // cannot read. Reading it as charging nothing would hide the
+      // fault while the packer under-charged every unit a lane opens.
+      const object = JSON.parse(serializeManifest(sampleManifest()));
+      object.calibration.suites = { unit: { overhead: 3, correction: 1 } };
+      expect(parseManifest(JSON.stringify(object))).toBeUndefined();
+    });
+
+    it("reads a manifest written in an earlier shape forward", () => {
+      // Every manifest in the store was written in the shape of its own
+      // day. Refusing the ones behind this reader would leave it with
+      // none the moment a shape changed, and a consumer with no manifest
+      // runs the whole corpus.
+      const older = JSON.parse(serializeManifest(sampleManifest()));
+      older.schema = MANIFEST_SCHEMA_VERSION - 1;
+      older.calibration.suites = { unit: { overhead: 3, correction: 1 } };
+      const parsed = parseManifest(JSON.stringify(older));
+      expect(parsed?.calibration.suites.unit)
+        .toEqual({ overhead: 3, correction: 1, unitOverhead: 0 });
+    });
+
+    it("refuses a unit overhead it cannot read, rather than reading it as none", () => {
+      // Absent and unreadable are different: one is a fit made before
+      // the figure existed, the other is a figure that will not read as
+      // one, and charging nothing for the second hides it.
+      const older = JSON.parse(serializeManifest(sampleManifest()));
+      older.calibration.suites = {
+        unit: { overhead: 3, correction: 1, unitOverhead: "free" },
+      };
+      expect(parseManifest(JSON.stringify(older))).toBeUndefined();
+    });
+
     it("returns undefined rather than obeying part of a manifest", () => {
       const manifest = sampleManifest();
       // Written into the JSON rather than the object: `JSON.stringify`
@@ -442,13 +487,6 @@ describe("selection", () => {
         withField("calibration", {
           ...CALIBRATION,
           suites: { unit: { overhead: 0, correction: 1, unitOverhead: -1 } },
-        }),
-      ],
-      [
-        "a suite with no unit overhead at all",
-        withField("calibration", {
-          ...CALIBRATION,
-          suites: { unit: { overhead: 0, correction: 1 } },
         }),
       ],
       [

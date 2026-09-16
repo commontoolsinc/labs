@@ -910,6 +910,46 @@ describe("build", () => {
       expect(costSeconds(parsed.states[KEY]!, "2026-08-20")).toBe(4);
     });
 
+    it("reads an aggregate written in an earlier shape forward", () => {
+      // An aggregate holds every catch a test has ever been credited
+      // with, over unbounded history, and a window of records cannot
+      // give them back. Refusing one written before the newest shape
+      // would cost all of them and leave nothing to publish from until
+      // an operator ran a bootstrap by hand.
+      const aggregate = emptyAggregate("2026-08-20");
+      const held = emptyState();
+      held.mainCatches = 4;
+      aggregate.states[KEY] = held;
+      const older = {
+        ...JSON.parse(JSON.stringify(aggregate)),
+        schema: MANIFEST_SCHEMA_VERSION - 1,
+      };
+      expect(parseAggregate(JSON.stringify(older))?.states[KEY]?.mainCatches)
+        .toBe(4);
+    });
+
+    it("refuses an aggregate that does not say which shape it is", () => {
+      for (const schema of [undefined, "1", 1.5, 0, -1, null]) {
+        const object = JSON.parse(
+          JSON.stringify(emptyAggregate("2026-08-20")),
+        );
+        if (schema === undefined) delete object.schema;
+        else object.schema = schema;
+        expect(parseAggregate(JSON.stringify(object))).toBeUndefined();
+      }
+    });
+
+    it("refuses an aggregate written in a shape from further ahead", () => {
+      // A reader that does not know a field cannot know what folding on
+      // top of the rest would mean, and what it would write back is an
+      // aggregate carrying half of each.
+      const ahead = {
+        ...JSON.parse(JSON.stringify(emptyAggregate("2026-08-20"))),
+        schema: MANIFEST_SCHEMA_VERSION + 1,
+      };
+      expect(parseAggregate(JSON.stringify(ahead))).toBeUndefined();
+    });
+
     it("reads a day a stored state holds under the stamp it carries", () => {
       // The days in a stored state were sealed by whatever rules were in
       // force then, and a state written before the stamps carries none,
