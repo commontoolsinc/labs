@@ -703,11 +703,15 @@ evidence when it appears and says nothing when it does not: a run that
 folds nothing new prints no such line whatever the store holds.
 
 What `provenance` declines is what the record specification asks it to.
-A run marked `fork: true` is a team member's fork run under the
+Under the
 [trust boundaries](../specs/test-records.md#trust-boundaries-for-consumers)
-the store holds every object to, and the flag bears on taking a baseline
-rather than on reading an observation, so a lane exercised from a fork's
-pull request is read like a lane exercised from any other. What is left
+the store holds every object to, a run marked `fork: true` was authored
+under the repository's write access like any other, so a lane exercised
+from a fork's pull request is read like a lane exercised from any other.
+The flag marks a run whose head repository is not the base one, and
+marks a run whose payload named fewer than both, so it is never a claim
+that a fork ran the tests — which is why it settles whether a run may be
+a baseline and says nothing about reading its observations. What is left
 unplaceable is a run whose own facts do not say where it ran.
 
 The other three the line cannot separate. No lane has run: nothing to

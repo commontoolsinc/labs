@@ -196,6 +196,27 @@ Deno.test("collectDay resolves identities through the alias file", async () => {
   assertEquals(aggregates[0]?.key, '["unit","bakery","glaze > sets"]');
 });
 
+Deno.test("collectDay asks the alias file nothing about a lane measurement", async () => {
+  // What a record is, is read from the identity the lane wrote, so the
+  // alias file cannot turn a lane's overhead into a test's history.
+
+  const laneBatch = JSON.stringify({
+    line: "record",
+    test: { k: "gate", s: "ci", n: "ci-lane batch runner-unit" },
+    outcome: "pass",
+    durationMs: 322_500,
+  });
+  const aggregates = await collectDay("2026/08/16", {
+    fetchImpl: storeFetch([laneBatch]),
+    aliases: new AliasResolver([{
+      date: "2026-08-17",
+      from: { k: "gate", s: "ci", n: "ci-lane batch runner-unit" },
+      to: { k: "unit", s: "bakery", n: "glaze" },
+    }]),
+  });
+  assertEquals(aggregates, []);
+});
+
 Deno.test("isDayAggregate rejects inconsistent aggregates", () => {
   const sound: DayAggregate = {
     key: '["unit","bakery","glaze"]',

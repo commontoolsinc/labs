@@ -115,10 +115,10 @@ export async function collectDay(
     const report = await readObject(readOptions);
     for (const group of report.reports) {
       for (const record of group.records) {
+        if (isLaneMeasurement(record.test)) continue;
         const test = options.aliases !== undefined
           ? options.aliases.resolve(record.test, day)
           : record.test;
-        if (isLaneMeasurement(test)) continue;
         const key = testIdentityKey(test);
         let entry = byKey.get(key);
         if (entry === undefined) {

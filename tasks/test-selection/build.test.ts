@@ -178,6 +178,15 @@ describe("build", () => {
       });
     });
 
+    it("declines a run carrying no continuous-integration facts", () => {
+      // Where a run ran is read from those facts, so a context that is
+      // not a workstation's and carries none says nothing this can use.
+
+      const bare = context();
+      delete bare.ci;
+      expect(provenance(bare, CI_NAME)).toBeUndefined();
+    });
+
     it("declines a report with no context", () => {
       expect(provenance(undefined, CI_NAME)).toBeUndefined();
     });
