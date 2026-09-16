@@ -159,6 +159,7 @@ import {
   type URI,
 } from "./storage/interface.ts";
 import {
+  isDurableReadTx,
   machineryRead,
   markDurableReadTx,
   schedulerDependencyRead,
@@ -6267,6 +6268,7 @@ export class Runner {
     const startLifecycleEpoch = this.#lifecycleEpoch;
     const ownership = this.#createDeferredStartOwnership(resultCell);
     const speculationContext = speculationRunContextOf(tx);
+    const durableReads = isDurableReadTx(tx);
     const navigateContext = navigateEventContextFromRunInfo(
       waveRunContextOf(tx) ?? speculationContext,
     );
@@ -6276,6 +6278,7 @@ export class Runner {
         await this.#nameFamilyBeforeRun(resultCell, toName, argument);
         if (ownership.isCancelled()) return;
         const startTx = this.#runtime.edit();
+        if (durableReads) markDurableReadTx(startTx);
         if (identity !== undefined) startTx.tx.scopeKeyIdentity = identity;
         // A speculative child's continuation keeps its origin across the
         // data load. Authored and served starts use piece bookkeeping.

@@ -118,6 +118,7 @@ export default pattern<{ shortName: string }>(({ shortName }) => ({
       reached,
       argument,
       storedArgument,
+      failures,
       async start(
         context?: ServerRunInfo,
         wrap: (tx: IExtendedStorageTransaction) => IExtendedStorageTransaction =
@@ -297,5 +298,35 @@ export default pattern<{ shortName: string }>(({ shortName }) => ({
         fixture.reader.scopeKeyIdentity,
       ),
     )).toBe(true);
+  });
+
+  it("keeps an unmarked deferred caller's speculative read basis subject to refusal", async () => {
+    const fixture = await setup();
+    await fixture.argument.sync();
+    const echo = fixture.reader.edit();
+    stampSpeculationRunContext(echo, {
+      actionId: "argument-echo",
+      kind: "event-handler",
+      eventId: "argument-event",
+    });
+    fixture.argument.withTx(echo).set({ shortName: "4" });
+    fixture.reader.prepareTxForCommit(echo);
+    expect((await echo.commit()).error).toBeUndefined();
+    expect(fixture.argument.get()).toEqual({ shortName: "4" });
+
+    await fixture.start();
+    await fixture.reader.idle();
+    await fixture.reader.storageManager.synced();
+    expect(fixture.failures).toMatchObject([{ name: "SpeculativeBasisError" }]);
+    expect(fixture.storedArgument()).toEqual({ shortName: "2" });
+    expect(fixture.argument.get()).toEqual({ shortName: "4" });
+    expect(
+      fixture.reader.runner.cancels.has(
+        entityKey(
+          fixture.reached.getAsNormalizedFullLink(),
+          fixture.reader.scopeKeyIdentity,
+        ),
+      ),
+    ).toBe(false);
   });
 });
