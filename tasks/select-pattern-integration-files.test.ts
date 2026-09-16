@@ -181,6 +181,31 @@ Deno.test("pattern integration assignments separate expensive files", async () =
   );
 });
 
+// `assignWeightedShards` gives the group distinct shards only while the group
+// fits in them: once it holds more files than there are shards, the constraint
+// is dropped for every member, and nothing reports that. The other tests here
+// stay green through it, since the five files they name would still land on
+// five shards.
+Deno.test("pattern integration assignments keep the expensive group inside the shard count", async () => {
+  const files = await listPatternIntegrationTests();
+  const expensiveFiles = files.filter((name) =>
+    !INTERNALLY_SHARDED_FILE_NAMES.has(name) &&
+    (PATTERN_INTEGRATION_TEST_WEIGHTS[name] ?? 1) >=
+      PATTERN_INTEGRATION_DISTINCT_WEIGHT_MINIMUM
+  );
+
+  assertEquals(
+    expensiveFiles.length <= PATTERN_INTEGRATION_SHARD_COUNT,
+    true,
+    `${expensiveFiles.length} files weigh at least ` +
+      `${PATTERN_INTEGRATION_DISTINCT_WEIGHT_MINIMUM}s and so ask for ` +
+      `distinct shards, more than the ${PATTERN_INTEGRATION_SHARD_COUNT} ` +
+      `shards there are: ${expensiveFiles.join(", ")}. A group this large ` +
+      `runs no distinct-shard constraint at all, so raise the minimum until ` +
+      `the group fits, or cut what the heaviest files cost.`,
+  );
+});
+
 Deno.test("pattern integration weights stay within the internal-work floor", async () => {
   const files = await listPatternIntegrationTests();
   const assignments = assignPatternIntegrationShards(
