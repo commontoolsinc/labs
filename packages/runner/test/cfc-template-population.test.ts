@@ -779,6 +779,41 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
     });
     expect(unmarked).toContainEqual("memb-secret");
   });
+
+  it("a machineryRead-marked slot probe still consumes the slot's link-origin label", async () => {
+    // `machineryRead` withholds the `*`-path templates and nothing else.
+    // CFC §4.6.3 puts the whole of the standalone/machinery boundary on
+    // the dereference trace, so this probe — marked, and covered by no
+    // trace — is a standalone reference-identity read: it consumes the
+    // slot's own link-origin pointer label and not the container's
+    // membership template.
+
+    const rt = makeRuntime();
+    await seedDoc(rt, "gp-el-mp", { n: 3 }, [
+      { path: [], label: { confidentiality: ["el-label"] } },
+    ]);
+    const criteriaId = await seedDoc(rt, "gp-criteria-mp", { keep: true }, [
+      { path: [], label: { confidentiality: ["memb-secret"] } },
+    ]);
+    const listId = await buildGenericList(rt, "gp-list-mp", criteriaId, [
+      "gp-el-mp",
+    ]);
+
+    const slotProbe = (tx: ReturnType<Runtime["edit"]>) =>
+      tx.read(readAddress(listId, ["0"]), { meta: linkResolutionProbe });
+
+    const marked = await flowJoinOf(rt, (tx) => {
+      tx.runWithAmbientReadMeta(machineryRead, () => slotProbe(tx));
+    });
+    expect(marked).toContainEqual("el-label");
+    expect(marked).not.toContainEqual("memb-secret");
+
+    // Unmarked, the same probe consumes the assignment J on top of the
+    // pointer label: the marker's whole effect is that one exclusion.
+    const unmarked = await flowJoinOf(rt, (tx) => slotProbe(tx));
+    expect(unmarked).toContainEqual("el-label");
+    expect(unmarked).toContainEqual("memb-secret");
+  });
 });
 
 describe("CFC template population (Stage A): class-split resolution", () => {

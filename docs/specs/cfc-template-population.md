@@ -278,9 +278,12 @@ minted into the same entries, not the mechanism.
      forbidden direction; a missed machinery read merely leaves residual
      over-taint). The re-smear scenario is pinned green by the
      `cfc-flow-pointwise` map test running with the generic route on;
-     the non-coordinator closures and the marked-reads-consume-nothing
-     asymmetry are pinned in `cfc-template-population.test.ts` ("SC-8
-     remainder" block).
+     the non-coordinator closures are pinned in
+     `cfc-template-population.test.ts` ("SC-8 remainder" block), together
+     with both halves of what the marker does: marked wiring reads consume
+     no templates, and a marked probe covered by no dereference trace
+     still consumes the slot's link-origin pointer label, CFC §4.6.3
+     putting the standalone/machinery boundary on the trace alone.
   2. **Two machinery boundaries on template consumption**, both
      inherited-from-existing disciplines rather than new semantics: a
      transaction re-deriving a container's membership stamps does not
