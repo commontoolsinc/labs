@@ -206,6 +206,19 @@ interface HarnessCommonConfig {
    */
   docsCorpus?: HarnessDocsCorpusRecord;
 
+  /**
+   * Whether a skill this run holds may have its scripts run in the sandbox.
+   *
+   * The operator's one decision about skill scripts, and it covers a registry
+   * skill and an acquired one alike: what a script is trusted with is the
+   * sandbox it runs in, which does not vary with where the skill came from.
+   * Off unless set, so a run that says nothing runs none.
+   *
+   * {@link allowedSkillScripts} names individual scripts and remains for a
+   * caller that wrote entries; a run with this set needs none.
+   */
+  allowSkillScripts?: boolean;
+
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
@@ -281,6 +294,7 @@ export interface ResolveHarnessConfigOptions {
   skillsRoot?: string;
   skillsRootRecord?: HarnessSkillsRootRecord;
   docsCorpus?: HarnessDocsCorpusRecord;
+  allowSkillScripts?: boolean;
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget?: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
@@ -731,6 +745,7 @@ export const resolveHarnessConfig = (
       ? { skillsRoot: skillsRootRecord.hostPath, skillsRootRecord }
       : {}),
     ...(docsCorpus !== undefined ? { docsCorpus } : {}),
+    ...(options.allowSkillScripts === true ? { allowSkillScripts: true } : {}),
     ...(options.allowedSkillScripts !== undefined
       ? { allowedSkillScripts: options.allowedSkillScripts }
       : {}),

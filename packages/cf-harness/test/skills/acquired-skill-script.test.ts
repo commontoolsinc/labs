@@ -119,6 +119,7 @@ const activationsHoldingTheAcquiredSkill = (): HarnessSkillActivations => ({
 });
 
 interface ContextOptions {
+  allowSkillScripts?: boolean;
   sandbox: SandboxRuntime;
   skillScriptExecutionTarget?: "sandbox" | "host";
   executions: HarnessSkillScriptExecution[];
@@ -134,6 +135,7 @@ const createContext = (options: ContextOptions): HarnessToolContext => {
     cfcEnforcementMode: "observe",
     workspaceHostPath: "/tmp/cf-harness-workspace",
     skillActivations: options.skillActivations,
+    allowSkillScripts: options.allowSkillScripts,
     allowedSkillScripts: options.allowedSkillScripts,
     acquiredSkills: options.acquiredSkills,
     skillScriptExecutionTarget: options.skillScriptExecutionTarget ?? "sandbox",
@@ -431,6 +433,40 @@ describe("run_skill_script on an acquired skill's script", () => {
 
     expect(output.status).toBe("error");
     expect(output.error?.code).toBe("skill_not_activated");
+    expect(sandbox.calls.length).toBe(0);
+  });
+
+  it("runs an acquired script when the operator allows skill scripts", async () => {
+    // The operator's one decision: no entry names this script, and it runs.
+    const output = await runSkillScriptTool.invoke(
+      createContext({
+        sandbox,
+        executions,
+        acquiredSkills: [acquiredSkill()],
+        skillActivations: activationsHoldingTheAcquiredSkill(),
+        allowSkillScripts: true,
+      }),
+      { skill: PIN, path: SCRIPT_PATH },
+    );
+
+    expect(output.status).toBe("executed");
+    expect(sandbox.calls.length).toBe(1);
+  });
+
+  it("refuses an acquired script when the operator allows none", async () => {
+    const output = await runSkillScriptTool.invoke(
+      createContext({
+        sandbox,
+        executions,
+        acquiredSkills: [acquiredSkill()],
+        skillActivations: activationsHoldingTheAcquiredSkill(),
+      }),
+      { skill: PIN, path: SCRIPT_PATH },
+    );
+
+    expect(output.status).toBe("error");
+    expect(output.error?.code).toBe("script_not_allowlisted");
+    expect(output.error?.message).toContain("does not run skill scripts");
     expect(sandbox.calls.length).toBe(0);
   });
 

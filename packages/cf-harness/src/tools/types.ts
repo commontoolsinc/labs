@@ -41,6 +41,7 @@ export interface HarnessToolContext {
   cfcEnforcementMode: CfcEnforcementMode;
   skillRegistry?: HarnessSkillRegistry;
   skillActivations?: HarnessSkillActivations;
+  allowSkillScripts?: boolean;
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
