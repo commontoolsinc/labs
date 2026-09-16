@@ -31,6 +31,7 @@ import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import {
   CFC_ENFORCEMENT_MODES,
   type CfcEnforcementMode,
+  type CfcFlowLabelsMode,
   isCfcEnforcementMode,
 } from "@commonfabric/runner/cfc";
 import {
@@ -108,6 +109,9 @@ export interface ParticipantInitResult {
    * named, so a participant that came up on another rung says so.
    */
   cfcEnforcementMode: CfcEnforcementMode;
+
+  /** Flow-label mode resolved by this participant runtime. */
+  cfcFlowLabels: CfcFlowLabelsMode;
 }
 
 const SETUP_CAUSE = "multi-user-test-setup";
@@ -320,6 +324,17 @@ const handlers: Record<
    */
   async init(args) {
     const requestedMode = requestedEnforcementMode(args.cfcEnforcementMode);
+    const flowLabels = args.cfcFlowLabels;
+    if (
+      flowLabels !== undefined && flowLabels !== "off" &&
+      flowLabels !== "observe" && flowLabels !== "persist"
+    ) {
+      throw new Error(
+        `Initialization cfcFlowLabels is ${
+          String(flowLabels)
+        }, not off, observe, or persist`,
+      );
+    }
     const identity = await Identity.fromKeyPair(
       keyPairFromRealmValue(
         args.identity as RealmEncodedValue,
@@ -355,6 +370,7 @@ const handlers: Record<
       experimental: experimentalOptionsFromEnv(Deno.env.get),
       errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
       moduleByteCache: getDefaultModuleByteCache(),
+      ...(flowLabels !== undefined ? { cfcFlowLabels: flowLabels } : {}),
       ...(requestedMode !== undefined
         ? { cfcEnforcementMode: requestedMode }
         : {}),
@@ -532,6 +548,7 @@ const handlers: Record<
         await (resultCell.key("allowConsoleWarnings") as Cell<unknown>)
           .pull() === true,
       cfcEnforcementMode: rt().cfcEnforcementMode,
+      cfcFlowLabels: rt().cfcFlowLabels,
     };
     return result;
   },

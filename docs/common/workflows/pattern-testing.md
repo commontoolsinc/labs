@@ -81,6 +81,17 @@ deno task cf test packages/patterns/my-pattern/main.test.tsx --verbose
 deno task cf test packages/patterns/my-pattern/
 ```
 
+### Testing labeled data
+
+Use `cf test <file> --cfc-shell-posture --verbose --stats-threshold 0` to run
+with the shell's `enforce-explicit` enforcement and `persist` flow labels.
+Individual dials are `--cfc-enforcement-mode` and `--cfc-flow-labels`; the latter
+accepts `off`, `derive` (the runtime's `observe`), `observe`, and `persist`.
+The run prints the resolved posture. The
+[CLI guide](../../../packages/cli/README.md#pattern-test-cfc-posture-and-labeled-fixtures)
+shows how a test declares a local SQLite store with per-column `ifc` labels and
+explains the per-step CFC preparation timings.
+
 ### Import roots
 
 A test pattern's imports resolve within its root directory. Without `--root`,

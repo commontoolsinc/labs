@@ -104,6 +104,30 @@ const scriptedDestination = () => {
   return { scripted, destination, edits: () => edits };
 };
 
+Deno.test("intent listener stops visiting hinted indices once the only pending intent is found", async () => {
+  const { scripted, destination } = scriptedDestination();
+  scripted.seed(SPACE, SIDECAR, {
+    entries: [
+      { eventId: "mine", stream: { id: "s", path: [] }, seq: 1 },
+      { eventId: "other", stream: { id: "s", path: [] }, seq: 2 },
+    ],
+  });
+  destination.trackIntent(SPACE, SIDECAR, "mine");
+  const visitsBefore = destination.intentCheckVisits;
+
+  scripted.deliver(SPACE, SIDECAR, (value) => {
+    value.entries![0].consequenced = true;
+  }, [
+    ["value", "entries", "0", "consequenced"],
+    ["value", "entries", "1", "consequenced"],
+  ]);
+  await flushMicrotasks();
+
+  expect(destination.pendingIntentCount).toBe(0);
+  expect(destination.intentCheckVisits - visitsBefore).toBe(1);
+  destination.close();
+});
+
 describe("intent listener — scripted notification seam (design (e) pins 1–5, 7–9; review pins MAJ-1, MIN-1, MIN-4)", () => {
   it("pin 1 + 3 + 4: a consequenced mark retires SILENTLY; errored and dropped marks retire AND signal; waitForIntentConsequence resolves per terminal kind (memo consumed); the listener releases with the last tracked id", async () => {
     const { scripted, destination, edits } = scriptedDestination();

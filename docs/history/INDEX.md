@@ -4,6 +4,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Pattern-test CFC posture measurement](development/performance/2026-09-15-cfc-pattern-test-posture.md) — 2026-09-15; five alternating headless mapped-render and labeled-copy samples at N=11/50/150, with resolved postures and preparation spans.
 - [Prepared digest cache selection](development/performance/2026-09-15-prepared-digest-cache-selection/) ([report](development/performance/2026-09-15-prepared-digest-cache-selection/README.md)) — four-arm comparison, repeated reactive executions, GC retention, paired timings, profiles, and replay patches selecting epoch-only memoization.
 
 - [Prepared digest unit ladder: paired summary](development/performance/2026-09-15-prepared-digest-paired-summary.md) — median timings and same-round speedups supplementing the original minimum-based summary.

@@ -35,6 +35,7 @@ import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { STREAM_ENTRIES_DOC_PREFIX } from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { getLogger } from "@commonfabric/utils/logger";
 import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
@@ -2454,12 +2455,8 @@ const isReplacedMembershipEntry = (
     containers.has(pathKey(entryPath.slice(0, -1)));
 };
 
-// Exported for tests: the trigger-read cid: guard above defends
-// construction paths that bypass the addCfcTriggerReads ingest filter, and
-// with the tx state sealed (getCfcState() is a read-only view) the only way
-// to exercise it is to hand deriveFlowJoin a state carrying a smuggled
-// entry directly.
-export const deriveFlowJoin = (
+/** Helper for `deriveFlowJoin`, which computes labels from transaction reads. */
+const deriveFlowJoinImpl = (
   tx: IExtendedStorageTransaction,
   options?: {
     /**
@@ -5562,7 +5559,7 @@ export const loadStoredCfcEnvelope = (
  * A sink request can depend on any handler read, so the consumed set is
  * transaction-global (docs/specs/cfc-write-prefix-provenance.md §7.4).
  */
-export const collectConsumedLabel = (
+const collectConsumedLabelImpl = (
   tx: IExtendedStorageTransaction,
 ): {
   confidentiality: readonly CfcConfClause[];
@@ -8115,4 +8112,32 @@ export const prepareBoundaryCommit = (
     instrumentation!.onPrefixProvenance!(prefixProvenance);
   }
   return reasons;
+};
+
+const cfcLogger = getLogger("cfc", { enabled: false });
+
+/**
+ * Derives the transaction flow join and records its preparation span.
+ *
+ * Exported so tests can supply transaction state containing a `cid:` trigger
+ * read that bypassed `addCfcTriggerReads` and verify its exclusion. A live
+ * transaction exposes sealed state through the read-only `getCfcState()` view.
+ */
+export const deriveFlowJoin: typeof deriveFlowJoinImpl = (tx, options) => {
+  const started = performance.now();
+  try {
+    return deriveFlowJoinImpl(tx, options);
+  } finally {
+    cfcLogger.time(started, "deriveFlowJoin");
+  }
+};
+
+/** Collects consumed labels and records its preparation span. */
+export const collectConsumedLabel: typeof collectConsumedLabelImpl = (tx) => {
+  const started = performance.now();
+  try {
+    return collectConsumedLabelImpl(tx);
+  } finally {
+    cfcLogger.time(started, "collectConsumedLabel");
+  }
 };

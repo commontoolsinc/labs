@@ -398,10 +398,11 @@ PR):
   (`executor-outbox.test.ts`), and the E2E's exactly-once
   external-call pins under repeated load runs; (ii) the sqliteQuery
   memo decision distinguishes a SETTLED result (a hit) from a bare
-  claim marker — an orphaned claim re-issues under the serving
-  posture only (`sqliteQueryMemoDecision`, unit-pinned), restoring
-  §6 step 3's re-miss premise for the one builtin whose key commits
-  ahead of its result; (iii) userless/grantless outbound appends
+  claim marker — a pending claim with no local in-flight read re-issues
+  in serving and direct execution, while speculative execution continues
+  to dedupe the effect it cannot enact (`sqliteQueryMemoDecision`, unit- and
+  multi-runtime-pinned), restoring §6 step 3's re-miss premise for the one
+  builtin whose key commits ahead of its result; (iii) userless/grantless outbound appends
   are refused at the SOURCE (`enqueueOutboundAppend`), fail-closed
   ahead of the delegated floor that would deterministically destroy
   them at delivery — the Phase-3 floor carve-out for sessionless
