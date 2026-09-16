@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { taggedHashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
-import type { URI } from "@commonfabric/memory/interface";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import {
@@ -295,7 +295,7 @@ describe("extended-storage-transaction", () => {
       expect([...narrowed.getWriteDetailsForTarget(target)]).toEqual(details);
 
       const compatible = new TransactionWrapper({
-        getWriteDetails: (requestedSpace) => {
+        getWriteDetails: (requestedSpace: MemorySpace) => {
           expect(requestedSpace).toBe(space);
           return details;
         },
