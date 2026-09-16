@@ -787,18 +787,40 @@ describe("run-pattern", () => {
         getCellFromLink: typeof pristineFromLink;
       };
       let settled = false;
+      // Counted, because every assertion below also holds for a scan that
+      // read every instance cleanly: what says the failure path ran is that
+      // it ran, not that the run came back.
+      let refusedReads = 0;
+      // `withTx` answers a cell of its own, and the scan pulls THAT one, so
+      // the refusal has to follow the cell across it rather than sit on the
+      // one the link produced.
+      const refusingRead = <T>(cell: T): T =>
+        new Proxy(cell as object, {
+          get: (target, property, receiver) => {
+            if (property === "pull") {
+              return () => {
+                refusedReads += 1;
+                return Promise.reject(
+                  new Error("the store stopped answering"),
+                );
+              };
+            }
+            const member = Reflect.get(target, property, receiver);
+            if (property === "withTx" && typeof member === "function") {
+              return (...args: unknown[]) =>
+                refusingRead((member as (...a: unknown[]) => unknown).apply(
+                  target,
+                  args,
+                ));
+            }
+            return member;
+          },
+        }) as T;
       runtimeWithLink.getCellFromLink = ((
         ...args: Parameters<typeof pristineFromLink>
       ) => {
         const cell = pristineFromLink(...args);
-        return settled
-          ? new Proxy(cell, {
-            get: (target, property, receiver) =>
-              property === "pull"
-                ? () => Promise.reject(new Error("the store stopped answering"))
-                : Reflect.get(target, property, receiver),
-          })
-          : cell;
+        return settled ? refusingRead(cell) : cell;
       }) as typeof pristineFromLink;
       const syncedBefore = pieces.synced.bind(pieces);
       (pieces as unknown as { synced: () => Promise<void> }).synced =
@@ -814,6 +836,7 @@ describe("run-pattern", () => {
       });
       const output = result.output as RunPatternToolSuccessOutput;
 
+      expect(refusedReads).toBeGreaterThan(0);
       expect(output.status).toBe("ok");
       expect((output.value as { doubled: number }).doubled).toBe(42);
       expect(output.outputConcerns).toBeUndefined();

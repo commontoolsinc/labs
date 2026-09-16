@@ -280,51 +280,55 @@ The current package provides:
   convergence-budget episode whose deferred actions name this pattern — and
   otherwise still reports ok, since an empty result with no observed cause is
   not evidence of failure; discloses beside a successful result, as
-  `outputConcerns`, every declared top-level output of every pattern the run
+  `outputConcerns`, declared top-level outputs of the patterns the run
   materialized — composed ones included, so a reader whose failure the composing
   source passed on nowhere is still named — that reports a failure or, on a
   result declaring a read, holds no rows, naming the output and the pattern
   under the identity a `cf:pattern:` import addresses while the failure's own
-  text stays in the artifact; returns the result cell's canonical reference plus
-  an optionally schema-sanitized value, and leaves the piece detached (no
-  recorded origin) and out of the space's registered piece list, with run→piece
-  provenance carried by the run's persisted artifacts. `assign_slug` names a
-  piece afterwards, from any handle token referring to one: it validates the
-  slug, fails closed on an availability question the space cannot answer,
-  refuses a slug already naming another piece (one already naming the same piece
-  answers ok), refuses a token that names a position inside a piece, another
-  space, or a document with no pattern identity, and otherwise registers the
-  piece in the space's piece list and points the slug at it, returning the slug
-  and, when composable without a bare fabric identifier, an openable URL.
-  Without the session configuration both tools are absent from the tool surface,
-  for a `default`- or `pattern-author`-profile subagent as much as for the
-  parent — a child shares the one session the parent built;
-  `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
-  `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
-  set the session runtime's CFC dials, so with labels persisted a
-  confidentiality-tainted pattern write is refused at commit under strict, and
-  `--fabric-cfc-posture max-enforcement` opts the session runtime into the
-  runner's named posture bundle (every staged enforcement dial on, the standard
-  prompt-caveat policy loaded, public-only ceilings on the network-fetch sinks),
-  with the two per-dial flags applying over it — these are the fabric session's
-  dials, independent of the harness's own `--cfc-enforcement-mode` up to one tie
-  — under a session raised to `enforce-strict` a harness dial nobody set follows
-  the session, and one stated weaker refuses startup naming both flags — and the
-  resolved posture (each dial's value and whether the operator, the named
-  bundle, or the default supplied it) is recorded as `fabricSessionCfc` in run
-  state and the run report, and printed in the operator summary — the whole
-  posture record with it, which a delegated child carries from its parent
-  stamped `inherited` because it runs on that parent's session; the session
-  runtime can further run under a read ceiling — the `--max-confidentiality`
-  flag, or `cfc.maxConfidentiality` (with `cfc.onExceed`) in the run manifest,
-  met when both are given — that bounds every `db.query` the run issues, a
-  query's own declaration met with it rather than replacing it; the ceiling
-  governs only query results declared per session (`PerSession<>`,
-  `scope: "session"`, `.asScope("session")`, or a session-scoped db) and the
-  runtime refuses any other query under it, so a pattern authored for a bounded
-  run declares its results per session; it is refused without a fabric session,
-  recorded with its source as `readMaxConfidentiality` in `fabricSessionCfc`,
-  printed in the operator summary, and inherited unchanged by a delegated child;
+  text stays in the artifact, and under-reporting rather than over-reporting
+  wherever it cannot read — an output reached through a `$ref` or a combinator,
+  a nested one, an instance the recorder's bounded buffer evicted, and an
+  instance that will not read back are each passed over; returns the result
+  cell's canonical reference plus an optionally schema-sanitized value, and
+  leaves the piece detached (no recorded origin) and out of the space's
+  registered piece list, with run→piece provenance carried by the run's
+  persisted artifacts. `assign_slug` names a piece afterwards, from any handle
+  token referring to one: it validates the slug, fails closed on an availability
+  question the space cannot answer, refuses a slug already naming another piece
+  (one already naming the same piece answers ok), refuses a token that names a
+  position inside a piece, another space, or a document with no pattern
+  identity, and otherwise registers the piece in the space's piece list and
+  points the slug at it, returning the slug and, when composable without a bare
+  fabric identifier, an openable URL. Without the session configuration both
+  tools are absent from the tool surface, for a `default`- or
+  `pattern-author`-profile subagent as much as for the parent — a child shares
+  the one session the parent built; `--fabric-cfc-enforcement-mode` (raise-only:
+  `enforce-explicit` or `enforce-strict`) and `--fabric-cfc-flow-labels`
+  (`off`/`observe`/`persist`) set the session runtime's CFC dials, so with
+  labels persisted a confidentiality-tainted pattern write is refused at commit
+  under strict, and `--fabric-cfc-posture max-enforcement` opts the session
+  runtime into the runner's named posture bundle (every staged enforcement dial
+  on, the standard prompt-caveat policy loaded, public-only ceilings on the
+  network-fetch sinks), with the two per-dial flags applying over it — these are
+  the fabric session's dials, independent of the harness's own
+  `--cfc-enforcement-mode` up to one tie — under a session raised to
+  `enforce-strict` a harness dial nobody set follows the session, and one stated
+  weaker refuses startup naming both flags — and the resolved posture (each
+  dial's value and whether the operator, the named bundle, or the default
+  supplied it) is recorded as `fabricSessionCfc` in run state and the run
+  report, and printed in the operator summary — the whole posture record with
+  it, which a delegated child carries from its parent stamped `inherited`
+  because it runs on that parent's session; the session runtime can further run
+  under a read ceiling — the `--max-confidentiality` flag, or
+  `cfc.maxConfidentiality` (with `cfc.onExceed`) in the run manifest, met when
+  both are given — that bounds every `db.query` the run issues, a query's own
+  declaration met with it rather than replacing it; the ceiling governs only
+  query results declared per session (`PerSession<>`, `scope: "session"`,
+  `.asScope("session")`, or a session-scoped db) and the runtime refuses any
+  other query under it, so a pattern authored for a bounded run declares its
+  results per session; it is refused without a fabric session, recorded with its
+  source as `readMaxConfidentiality` in `fabricSessionCfc`, printed in the
+  operator summary, and inherited unchanged by a delegated child;
 - an opt-in pattern index (`--pattern-index-url`, or its
   `CF_HARNESS_PATTERN_INDEX_URL` environment fallback), which needs the fabric
   session configuration: index requests are signed with the session identity
