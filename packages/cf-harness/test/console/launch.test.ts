@@ -974,13 +974,20 @@ describe("launch", () => {
     });
 
     it("refuses the skill-script switch passed through to the console", async () => {
-      await expect(
-        prepareConsoleLaunch(
-          [...NAMED_ARGS, "--", "--allow-skill-scripts"],
-          {},
-          io(),
-        ),
-      ).rejects.toThrow("cannot be passed through");
+      // Every spelling that would enable it on the server: a boolean flag
+      // still parses `=true` and `=1`, so the bare token is not the whole of
+      // what has to be caught.
+      for (
+        const argument of [
+          "--allow-skill-scripts",
+          "--allow-skill-scripts=true",
+          "--allow-skill-scripts=1",
+        ]
+      ) {
+        await expect(
+          prepareConsoleLaunch([...NAMED_ARGS, "--", argument], {}, io()),
+        ).rejects.toThrow("cannot be passed through");
+      }
     });
 
     it("passes other console flags through unchanged", async () => {

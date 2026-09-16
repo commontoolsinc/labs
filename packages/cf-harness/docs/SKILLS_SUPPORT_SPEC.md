@@ -113,7 +113,7 @@ metadata and container path. See
   and an acquired script answers to the same operator allowlist a registry
   skill's script does.
 - Managing user-global skill directories outside an explicitly configured root.
-- Running skill scripts automatically or without an exact operator allowlist.
+- Running skill scripts automatically, or without the operator allowing them.
 - Treating `allowed-tools` as a permission grant.
 - Defining Pattern Factory's general orchestration or fulfillment contract.
 - Implementing a broad filesystem discovery tool as a prerequisite.
@@ -235,7 +235,8 @@ observations, writes, or CFC downgrades.
 
 ## Skill Script Execution
 
-Status: implemented for exact-allowlisted scripts in already activated skills.
+Status: implemented for scripts of already activated skills the operator allows
+— the run-wide switch, or an exact entry.
 
 `run_skill_script` is a built-in side-effect tool. It is not available in the
 default parent tool set; callers must explicitly include

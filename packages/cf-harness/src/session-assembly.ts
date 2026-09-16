@@ -187,14 +187,37 @@ export const harnessSessionToolBacking = (
  * reaches every surface at once — and a tool whose backing this session lacks
  * is absent rather than offered and failing.
  */
+/**
+ * The parent tool surface a session offers when nothing narrows it: what its
+ * backings support, plus `run_skill_script` where the operator allows skill
+ * scripts and a registry backs one.
+ *
+ * Backing and authorization are different questions, and
+ * {@link parentToolIdsForBacking} answers only the first: `run_skill_script`
+ * appears in its withheld set and never in the list it builds, so a backing
+ * alone never offers the tool. The switch is what offers it — and offering it
+ * here is what makes the registry half of that decision reach the run holding
+ * the registry, rather than only the child holding an acquisition, which gets
+ * it from its own surface.
+ */
+const sessionParentToolIds = (
+  config: HarnessSessionConfig,
+): readonly BuiltinToolId[] => {
+  const backing = harnessSessionToolBacking(config);
+  const backed = parentToolIdsForBacking(backing);
+  return config.allowSkillScripts === true && backing.skillRegistryAvailable &&
+      !backed.includes("run_skill_script")
+    ? [...backed, "run_skill_script"]
+    : backed;
+};
+
 export const harnessSessionChatPolicy = (
   config: HarnessSessionConfig,
   promptSlot?: PromptSlotBinding,
 ): HarnessChatPolicy => ({
   type: "cf-harness.chat-policy",
   toolMode: "workspace-write",
-  allowedToolIds: config.allowedToolIds ??
-    parentToolIdsForBacking(harnessSessionToolBacking(config)),
+  allowedToolIds: config.allowedToolIds ?? sessionParentToolIds(config),
   allowedSubagentProfiles: config.allowedSubagentProfiles,
   ...(config.cfcEnforcementModeOverride !== undefined
     ? { cfcEnforcementMode: config.cfcEnforcementModeOverride }

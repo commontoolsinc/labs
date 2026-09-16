@@ -933,11 +933,18 @@ export const prepareConsoleLaunch = async (
   // describing a console that does something else. Every other server flag
   // still passes through.
   const consoleArgs = (parsed["--"] ?? []).map(String);
-  if (consoleArgs.includes("--allow-skill-scripts")) {
+  // Both spellings: a boolean flag still parses `--flag=true` and `--flag=1`,
+  // so an exact-token check leaves the enabling form through and the printed
+  // report then describes a console that does something else.
+  const passedThrough = consoleArgs.find((argument) =>
+    argument === "--allow-skill-scripts" ||
+    argument.startsWith("--allow-skill-scripts=")
+  );
+  if (passedThrough !== undefined) {
     throw new Error(
-      "`--allow-skill-scripts` cannot be passed through to the console: it " +
-        "is one of the values this launch resolves and prints, so name it " +
-        "before `--` instead",
+      `\`${passedThrough}\` cannot be passed through to the console: ` +
+        `\`--allow-skill-scripts\` is one of the values this launch ` +
+        `resolves and prints, so name it before \`--\` instead`,
     );
   }
 

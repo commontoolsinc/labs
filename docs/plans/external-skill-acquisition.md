@@ -257,8 +257,9 @@ on names**:
 
 Admitting the scripts is not admitting them to the registry. The acquired tree
 is host-side, nothing is written into the skills root, and whether a script may
-run is decided by the same operator allowlist a registry skill's script answers
-to — the third of the three properties below, unchanged by this.
+run is decided the same way a registry skill's script is — the operator's
+run-wide switch, or an exact entry — the third of the three properties below,
+unchanged by this.
 
 For GitHub commit acquisition, the inventory is the recursive tree API at the
 pinned SHA. A response marked `truncated` refuses with its own reason: an unread
@@ -275,8 +276,10 @@ handle-delivered skill **bypasses the registry entirely**, and
 `run_skill_script` resolves its target by name against the registry
 (`skills.find((skill) => skill.name === name)`) and requires a match against
 the run-start registry digest — so a transient skill has no record for a
-script to resolve through. And `isSkillScriptAllowlisted` returns `false` for
-an absent or empty allowlist, so the operator allowlist defaults to refusing.
+script to resolve through. And the operator decision defaults to
+refusing: `allowSkillScripts` is off unless set, and
+`isSkillScriptAllowlisted` returns `false` for an absent or empty entry list,
+so a run that says neither runs no script.
 The path whitelist is the first of three, and the only one that is about this
 plan rather than inherited.
 
