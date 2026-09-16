@@ -19,14 +19,18 @@ import {
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
+  type FabricValuePlus,
   type FabricValueLayer,
+  type FabricValuePlusLayer,
 } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
+import { type PlusTypePredicate } from "./interface.ts";
 import {
   type ConvertibleJsValueTag,
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
+  type FabricValuePlusTag,
   type FabricValueTag,
   VALUE_TAGS,
 } from "./tags.ts";
@@ -70,14 +74,23 @@ export function tagOfFabricPrimitiveElseNull(
 }
 
 /**
- * Maps a presumed valid `FabricValue` or `FabricValueLayer` to its tag, based
- * on a shallow evaluation of its type. This `throw`s if it determines that the
- * given value cannot possibly be valid.
+ * Maps a presumed valid `FabricValue`, `FabricValueLayer`, or corresponding
+ * `*Plus` value to its tag, based on a shallow evaluation of its type. This
+ * `throw`s if it determines that the given value cannot possibly be valid. For
+ * `*Plus` values, a corresponding type predicate must be passed as the second
+ * argument, and that function is used to make a determination if the value
+ * would otherwise be considered invalid.
  */
 export function tagOfFabricValue(value: FabricValueLayer): FabricValueTag;
-export function tagOfFabricValue(value: FabricValue): FabricValueTag;
-export function tagOfFabricValue(value: FabricValueLayer): FabricValueTag {
-  const result = tagOfFabricValueElseNull(value);
+export function tagOfFabricValue<PlusType = never>(
+  value: NoInfer<FabricValuePlusLayer<PlusType>>,
+  isPlusType?: PlusTypePredicate<PlusType>,
+): FabricValuePlusTag;
+export function tagOfFabricValue<PlusType = never>(
+  value: FabricValuePlusLayer<PlusType>,
+  isPlusType?: PlusTypePredicate<PlusType> | undefined,
+): FabricValuePlusTag {
+  const result = tagOfFabricValueElseNull(value, isPlusType);
 
   if (result !== null) {
     return result;
@@ -88,23 +101,30 @@ export function tagOfFabricValue(value: FabricValueLayer): FabricValueTag {
 }
 
 /**
- * Maps a presumed valid `FabricValue` or `FabricValueLayer` to its tag, based
- * on a shallow evaluation of its type. This returns `null` if it determines
- * that the given value cannot possibly be valid. To be clear, this function
- * does not go out of its way to make a validity determination.
+ * Maps a presumed valid `FabricValue`, `FabricValueLayer`, or corresponding
+ * `*Plus` value to its tag, based on a shallow evaluation of its type. This
+ * returns `null` if it determines that the given value cannot possibly be
+ * valid. For `*Plus` values, a corresponding type predicate must be passed as
+ * the second argument, and that function is used to make a determination if the
+ * value would otherwise be considered invalid.
  */
 export function tagOfFabricValueElseNull(
   value: FabricValueLayer,
-): FabricValueTag;
-export function tagOfFabricValueElseNull(value: FabricValue): FabricValueTag;
-export function tagOfFabricValueElseNull(
-  value: FabricValue | FabricValueLayer,
-): FabricValueTag | null {
+): FabricValueTag | null;
+export function tagOfFabricValueElseNull<PlusType = never>(
+  value: NoInfer<FabricValuePlusLayer<PlusType>>,
+  isPlusType?: PlusTypePredicate<PlusType>,
+): FabricValuePlusTag | null;
+export function tagOfFabricValueElseNull<PlusType = never>(
+  value: FabricValuePlusLayer<PlusType>,
+  isPlusType?: PlusTypePredicate<PlusType> | undefined,
+): FabricValuePlusTag | null {
   const jsType = typeOfIncludingNull(value);
 
   if (jsType === VALUE_TAGS.function) {
-    // A function is no `FabricValue`, so its tag is not one this returns.
-    return null;
+    return isPlusType?.(value)
+      ? VALUE_TAGS.PlusType
+      : null;
   } else if (jsType !== "object") {
     return jsType;
   }
@@ -117,6 +137,8 @@ export function tagOfFabricValueElseNull(
     return tagOfFabricPrimitiveElseNull(value);
   } else if (value instanceof FabricInstance) {
     return VALUE_TAGS.FabricInstance;
+  } else if (isPlusType?.(value)) {
+    return VALUE_TAGS.PlusType;
   } else {
     return null;
   }
