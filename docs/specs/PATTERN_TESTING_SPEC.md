@@ -189,9 +189,11 @@ The `cf test` runner processes the `[TESTS]` array **in order**:
 
 1. For each item in `[TESTS]`:
    - If it has `action` key: call `.send()`, then `await runtime.idle()`
-   - If it has `assertion` key: read `.get()`; an `AssertRecord` passes when
-     its `ok` is true, any other value passes when it equals `true`. If the
-     first read fails, await the async work it started and read again.
+   - If it has `assertion` key: demand it with `.sink()`, await the async work
+     that demand started, then read `.pull()` once, which settles the
+     scheduler before it takes the value; an `AssertRecord` passes when its
+     `ok` is true, any other value passes when it equals `true`. That read is
+     the only one, so a value arriving later is a failure.
 2. Report pass/fail for each assertion
 3. Await cleanup before returning the results
 
@@ -277,11 +279,10 @@ expense-tracker.test.tsx
 
 The runner itself is `packages/cli/lib/test-runner.ts`. The sketch below is a
 reading aid for the shape of the loop, not a second copy of it: it leaves out
-settling, the wait an assertion gets for the async work its own read started,
-the retry it gets after an action to let the graph settle, and the multi-user
-paths. Behavior that matters belongs in the code
-and in the prose above — change one of those and this sketch needs the same
-edit, so keep it short enough to be worth having.
+settling, the demand an assertion is held under and the wait for the async work
+that demand starts, and the multi-user paths. Behavior that matters belongs in the code and in the
+prose above — change one of those and this sketch needs the same edit, so keep
+it short enough to be worth having.
 
 ```typescript
 // Shown for illustration only.

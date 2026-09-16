@@ -519,6 +519,35 @@ the stuck-condition net above is for. The CLI suite's readiness probe is such a
 client. It disposes its controller once the wait returns, which also keeps a
 finished wait from holding the loop open for the rest of the suite.
 
+### Reading a pattern-test assertion
+
+A pattern test (`*.test.tsx`, run by `cf test`) states each expectation as an
+assertion step, and the runner reads each one exactly once. A false value is a
+failure rather than a reason to read again. The count does not depend on what a
+read found, which is the point: reading again because the first read said
+`false` is a retry however tightly it is bounded, and a pattern whose value
+converges only sometimes passes on the second attempt.
+
+Reading once takes a separation that a single read cannot make on its own. An
+asynchronous built-in — a fetch, a model call, a query — is a computation that
+runs only while something demands its result, so a read is also what starts
+one, and a read that starts the work cannot be the read that observes it. The
+runner therefore demands the assertion first, through `cell.sink()`, and holds
+that demand while `runtime.settled()` waits for the work the demand set going.
+Holding it across the wait is what keeps the built-in's cascade alive long
+enough to reach the assertion. Then the assertion is read, once, and reported.
+With nothing in flight the wait returns at once, so an assertion that is false
+on its own terms is reported as fast as one that never waited.
+
+`Cell.pull()` is what makes a single read enough. It subscribes an effect that
+reads the cell, awaits `scheduler.idle()`, drives to convergence the
+link-target loads that read kicked off, and only then takes the value, so the
+read is never taken against a graph with work still outstanding.
+
+`packages/cli/test/test-runner-assertion-reads.test.ts` states the count, for
+an assertion that holds, one that does not, and one whose value an async
+built-in produces.
+
 ### Naming the arrival, across runtimes
 
 A wait for state a *different* runtime wrote takes the same `defer()`-from-a-sink
