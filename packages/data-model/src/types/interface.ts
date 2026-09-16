@@ -1,5 +1,3 @@
-import type { FabricValuePlusLayer } from "@/interface.ts";
-
 /**
  * Type predicate function used to determine if an arbitrary value is in fact
  * considered to be the `PlusType`. The `data-model` generally aims to only ever
