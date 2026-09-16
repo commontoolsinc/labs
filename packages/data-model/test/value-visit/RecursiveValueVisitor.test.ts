@@ -2,31 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
-import {
-  type DispatchingVisitorResult,
-  DO_RECURSE_VALUES,
-  type LeafVisitorResult,
-  RecursiveValueVisitor,
-} from "@/value-visit";
+import { DO_RECURSE_VALUES, RecursiveValueVisitor } from "@/value-visit";
 
 describe("RecursiveValueVisitor", () => {
-  class Recursive extends RecursiveValueVisitor<never, never> {
-    override isPlusType(_value: unknown): _value is never {
-      return false;
-    }
-    override visitCycle(): LeafVisitorResult<never, never> {
-      return undefined;
-    }
-    override visitPlusType(): LeafVisitorResult<never, never> {
-      return undefined;
-    }
-    override visitPrimitive(): LeafVisitorResult<never, never> {
-      return undefined;
-    }
-    override visitValue(): DispatchingVisitorResult<never, never> {
-      return undefined;
-    }
-  }
+  class Recursive extends RecursiveValueVisitor<never, never> {}
 
   describe("instance members", () => {
     describe("visitFabricContainer()", () => {

@@ -51,7 +51,7 @@ export abstract class BaseValueVisitor<
   ResultType = FabricValue,
 > implements ValueVisitor<PlusType, ResultType> {
   /** @inheritDoc */
-  isPlusType(_value: unknown): value is PlusType {
+  isPlusType(_value: unknown): _value is PlusType {
     return false;
   }
 

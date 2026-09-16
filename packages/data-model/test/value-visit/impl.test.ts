@@ -6,11 +6,10 @@ import type { Primitive } from "@commonfabric/utils/types";
 import { type FabricPrimitive } from "@/interface.ts";
 import {
   type BaselineVisitResult,
-  type DispatchingVisitorResult,
-  DO_VISIT_SUBTYPE,
+  BaseValueVisitor,
   type LeafVisitorResult,
   makeVisitValueFunction,
-  NopValueVisitor,
+  RecursiveValueVisitor,
   visitValue,
 } from "@/value-visit";
 
@@ -37,19 +36,7 @@ describe("value-visit/impl", () => {
     });
 
     it("returns a `mainResult` typed by the visitor's `ResultType`", () => {
-      class FirstNumber extends NopValueVisitor<never, number> {
-        override visitValue(): DispatchingVisitorResult<never, number> {
-          return DO_VISIT_SUBTYPE;
-        }
-        override visitFabricContainer(): DispatchingVisitorResult<
-          never,
-          number
-        > {
-          return DO_VISIT_SUBTYPE;
-        }
-        override visitFabricArray(): LeafVisitorResult<never, number> {
-          return { type: "recurse", doKeys: false, doValues: true };
-        }
+      class FirstNumber extends RecursiveValueVisitor<never, number> {
         override visitPrimitive(
           value: Primitive | FabricPrimitive,
         ): LeafVisitorResult<never, number> {
@@ -70,16 +57,9 @@ describe("value-visit/impl", () => {
       // call to type-check, the directive would be reported as unused and
       // the file would fail to compile. The line still runs, and the runtime
       // half is that the engine, told by `isPlusType()` that the value is
-      // outside the domain, throws rather than handing it to
-      // `visitPlusType()`, whose parameter type is `never`.
-      class Strict extends NopValueVisitor<never, number> {
-        override visitValue(): DispatchingVisitorResult<never, number> {
-          return DO_VISIT_SUBTYPE;
-        }
-        override visitPlusType(): LeafVisitorResult<never, number> {
-          throw new Error("should not be reached");
-        }
-      }
+      // outside the domain, throws the domain error rather than reaching
+      // `visitPlusType()`, whose base implementation throws a different one.
+      class Strict extends BaseValueVisitor<never, number> {}
 
       const vis = new Strict();
       const date = new Date(0);
