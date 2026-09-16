@@ -68,11 +68,11 @@ const ERROR_KEYS: readonly string[] = ["error", "errorMessage"];
  * look at that output, and there is no name to disclose in its place.
  */
 const declaredOutputNames = (schema: JSONSchema | undefined): Set<string> => {
-  const properties = isObjectNotArray(schema) &&
-      isObjectNotArray((schema as { properties?: unknown }).properties)
-    ? (schema as { properties: Record<string, unknown> }).properties
-    : undefined;
-  return new Set(properties === undefined ? [] : Object.keys(properties));
+  if (!isObjectNotArray(schema)) return new Set();
+  const properties = schema.properties;
+  return new Set(
+    isObjectNotArray(properties) ? Object.keys(properties) : [],
+  );
 };
 
 /**

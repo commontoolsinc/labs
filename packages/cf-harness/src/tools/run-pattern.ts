@@ -38,7 +38,6 @@ import {
   type HarnessReleaseDecision,
 } from "../contracts/policy-refusal.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
-import type { RunPatternOutputConcern } from "../run-pattern-output-concerns.ts";
 import { keylessInstantiation } from "../fabric-instantiations.ts";
 import {
   comparableEntityHash,
@@ -50,6 +49,7 @@ import {
   type ObservedOutput,
   observedOutputCause,
   observedOutputsIn,
+  type RunPatternOutputConcern,
 } from "../run-pattern-output-concerns.ts";
 import {
   addressSealedPositions,
@@ -1664,61 +1664,6 @@ export const runPatternTool: HarnessToolDefinition<
         valueError = errorMessage(error);
       }
     }
-    // What every pattern this run materialized says about its own reads,
-    // read off each one's result rather than off the single value this call
-    // answers with. A composed reader exposes its failure and its emptiness
-    // as outputs, and a pattern composing it need pass neither on — which is
-    // how a run answers `ok` over a result of zeros. The reads are
-    // host-side and nothing they find travels as text, so they are not part
-    // of the release measurement above and are taken on a transaction of
-    // their own, abandoned like every other measurement here.
-    //
-    // Every instantiation in the window is read, the run's own root
-    // included, so a failure the caller's own query reported is disclosed on
-    // the same terms as a composed one. The recorder's buffer is what bounds
-    // the work: a pattern materialized once per row of a list reports the
-    // same output many times, and `dedupedOutputConcerns` states each once.
-    const ownCellHash = comparableEntityHash(piece.id);
-    const concernsTx = pieces.runtime.edit();
-    const found: ObservedOutput[] = [];
-    const scan = (async () => {
-      for (
-        const record of session.instantiations?.since(instantiationStart) ?? []
-      ) {
-        try {
-          const instance = pieces.runtime.getCellFromLink(record.link)
-            .withTx(concernsTx);
-          await instance.pull();
-          // The `required` relaxation is the one the result read above uses,
-          // so a scoped link this session cannot materialize degrades its
-          // member rather than voiding the whole read. It is applied AFTER
-          // the pull, because it decides what to relax by reading what the
-          // cell holds, and before the pull it holds nothing.
-          const materialized = cellWithScopedLinkRequiredsRelaxed(instance);
-          found.push(...observedOutputsIn(
-            asSerializableValue(materialized.get()),
-            record.link.schema,
-            record.cell === ownCellHash ? undefined : record.identity,
-          ));
-        } catch {
-          // One instance that will not read back says nothing about the
-          // others, and this report is a disclosure: what a failed read
-          // costs is the reason to look at that one instance, so it is
-          // dropped rather than taking the report down with it.
-        }
-      }
-    })();
-    // Raced with the signal like every other wait this tool performs: the
-    // scan resolves a graph, and a caller that gave up while it was in flight
-    // is told it was cancelled rather than handed an answer it stopped
-    // waiting for. The transaction is abandoned whichever way the race goes.
-    const scanned = await raceWithAbort(scan, signal);
-    concernsTx.abort("run_pattern output-concern read");
-    if (scanned === "aborted") {
-      stopPiece(piece.getCell());
-      return cancelledOutput();
-    }
-    const observedOutputs = dedupedObservedOutputs(found);
     // A result that settled to nothing is not a success to report. When the
     // sanitized value failed its schema, or the raw result holds no fields of
     // its own beyond the framework keys, the runtime's observation window
@@ -1801,6 +1746,64 @@ export const runPatternTool: HarnessToolDefinition<
         };
       }
     }
+    // What every pattern this run materialized says about its own reads,
+    // read off each one's result rather than off the single value this call
+    // answers with. A composed reader exposes its failure and its emptiness
+    // as outputs, and a pattern composing it need pass neither on — which is
+    // how a run answers `ok` over a result of zeros. The reads are
+    // host-side and nothing they find travels as text, so they are not part
+    // of the release measurement above and are taken on a transaction of
+    // their own, abandoned like every other measurement here. Read after the
+    // exits above rather than before them, so a run that reports a failure
+    // pays for none of it: what these answer is only ever carried by a
+    // success.
+    //
+    // Every instantiation in the window is read, the run's own root
+    // included, so a failure the caller's own query reported is disclosed on
+    // the same terms as a composed one. The recorder's buffer is what bounds
+    // the work: a pattern materialized once per row of a list reports the
+    // same output many times, and `dedupedObservedOutputs` states each once.
+    const ownCellHash = comparableEntityHash(piece.id);
+    const concernsTx = pieces.runtime.edit();
+    const found: ObservedOutput[] = [];
+    const scan = (async () => {
+      for (
+        const record of session.instantiations?.since(instantiationStart) ?? []
+      ) {
+        try {
+          const instance = pieces.runtime.getCellFromLink(record.link)
+            .withTx(concernsTx);
+          await instance.pull();
+          // The `required` relaxation is the one the result read above uses,
+          // so a scoped link this session cannot materialize degrades its
+          // member rather than voiding the whole read. It is applied AFTER
+          // the pull, because it decides what to relax by reading what the
+          // cell holds, and before the pull it holds nothing.
+          const materialized = cellWithScopedLinkRequiredsRelaxed(instance);
+          found.push(...observedOutputsIn(
+            asSerializableValue(materialized.get()),
+            record.link.schema,
+            record.cell === ownCellHash ? undefined : record.identity,
+          ));
+        } catch {
+          // One instance that will not read back says nothing about the
+          // others, and this report is a disclosure: what a failed read
+          // costs is the reason to look at that one instance, so it is
+          // dropped rather than taking the report down with it.
+        }
+      }
+    })();
+    // Raced with the signal like every other wait this tool performs: the
+    // scan resolves a graph, and a caller that gave up while it was in flight
+    // is told it was cancelled rather than handed an answer it stopped
+    // waiting for. The transaction is abandoned whichever way the race goes.
+    const scanned = await raceWithAbort(scan, signal);
+    concernsTx.abort("run_pattern output-concern read");
+    if (scanned === "aborted") {
+      stopPiece(piece.getCell());
+      return cancelledOutput();
+    }
+    const observedOutputs = dedupedObservedOutputs(found);
     // A result the caller's own `resultSchema` refused is reported as neither
     // outcome: the pattern ran and landed a result, and the schema it did not
     // match was written by whoever called the tool, so it is evidence about

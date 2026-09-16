@@ -1375,6 +1375,31 @@ describe("run-pattern over the pattern index", () => {
       ]);
     });
 
+    it("keeps the composed failure's own text for the run's artifact", async () => {
+      const { pieces: recorded, instantiations } =
+        await sessionRecordingInstantiations();
+      const readerId = await entryIdentityOf(READER_SOURCE);
+      const index = stubIndex({
+        [readerId]: indexRecord(readerId, READER_SOURCE),
+      });
+      const result = await createEngine(index, {
+        pieces: recorded,
+        instantiations,
+      }).invokeBuiltinTool("run_pattern", {
+        sourceText: digestSource(readerId),
+        inputs: { n: 3 },
+        resultSchema: TOTAL_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+
+      // The prompt loop strips `rawCauseMessage` from what the model is
+      // shown, so this is the operator's copy and the only one there is.
+      expect(output.rawCauseMessage).toContain(
+        `${readerId} errorMessage (error-branch): sqlite: param is undefined`,
+      );
+      expect(output.rawCauseMessage).toContain(`${readerId} rows (no-rows)`);
+    });
+
     it("keeps the composed failure's own text out of what it discloses", async () => {
       const { pieces: recorded, instantiations } =
         await sessionRecordingInstantiations();
