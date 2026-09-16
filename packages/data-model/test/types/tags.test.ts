@@ -504,6 +504,20 @@ describe("tags", () => {
         });
       }
 
+      it("returns `Object` for a proxy over a plain object without consulting the predicate", () => {
+        // A proxy reports its target's prototype, so the plain-object question
+        // is decided before the predicate could be asked, whatever the proxy
+        // is standing in for.
+
+        const { asked, isPlusType } = recordingPredicate();
+        const value = new Proxy({ a: 1 }, {}) as FabricValuePlusLayer<
+          PlusProbe
+        >;
+
+        expect(tagOfFabricValue(value, isPlusType)).toBe(VALUE_TAGS.Object);
+        expect(asked).toEqual([]);
+      });
+
       it("returns `PlusType` for a class instance the predicate accepts", () => {
         expect(tagOfFabricValue(new PlusProbe(), isPlusProbe)).toBe(
           VALUE_TAGS.PlusType,
@@ -614,6 +628,18 @@ describe("tags", () => {
           expect(asked).toEqual([]);
         });
       }
+
+      it("returns `Object` for a proxy over a plain object without consulting the predicate", () => {
+        const { asked, isPlusType } = recordingPredicate();
+        const value = new Proxy({ a: 1 }, {}) as FabricValuePlusLayer<
+          PlusProbe
+        >;
+
+        expect(tagOfFabricValueElseNull(value, isPlusType)).toBe(
+          VALUE_TAGS.Object,
+        );
+        expect(asked).toEqual([]);
+      });
 
       it("returns `PlusType` for a class instance the predicate accepts", () => {
         expect(tagOfFabricValueElseNull(new PlusProbe(), isPlusProbe)).toBe(
