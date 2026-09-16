@@ -351,8 +351,9 @@ describe("plan", () => {
     // overrule.
     const grouped: Calibration = {
       setupCost: {},
-      suites: { "workspace-unit": { overhead: 10, correction: 1 } },
-      unitOverhead: {},
+      suites: {
+        "workspace-unit": { overhead: 10, correction: 1, unitOverhead: 0 },
+      },
       prologue: 0,
     };
 
@@ -535,7 +536,6 @@ describe("plan", () => {
         calibration: {
           setupCost: { toolshed: 40 },
           suites: {},
-          unitOverhead: {},
           prologue: 0,
         },
       });
@@ -557,7 +557,6 @@ describe("plan", () => {
         calibration: {
           setupCost: { toolshed: 40 },
           suites: {},
-          unitOverhead: {},
           prologue: 0,
         },
       });
@@ -593,8 +592,13 @@ describe("plan", () => {
         ),
         calibration: {
           setupCost: { toolshed: 60 },
-          suites: { "pattern-integration": { overhead: 50, correction: 1 } },
-          unitOverhead: {},
+          suites: {
+            "pattern-integration": {
+              overhead: 50,
+              correction: 1,
+              unitOverhead: 0,
+            },
+          },
           prologue: 0,
         },
       });
@@ -619,8 +623,13 @@ describe("plan", () => {
         })),
         calibration: {
           setupCost: { toolshed: 60 },
-          suites: { "pattern-integration": { overhead: 50, correction: 2 } },
-          unitOverhead: { "packages/patterns/one.test.ts": 10 },
+          suites: {
+            "pattern-integration": {
+              overhead: 50,
+              correction: 2,
+              unitOverhead: 10,
+            },
+          },
           prologue: 0,
         },
       });
@@ -670,8 +679,9 @@ describe("plan", () => {
         entries: entries(3, () => ({ cost: 1 })),
         calibration: {
           setupCost: {},
-          suites: { "workspace-unit": { overhead: 10, correction: 1 } },
-          unitOverhead: {},
+          suites: {
+            "workspace-unit": { overhead: 10, correction: 1, unitOverhead: 0 },
+          },
           prologue: 0,
         },
       });
@@ -679,7 +689,25 @@ describe("plan", () => {
       expect(result.lanes[0]!.projectedSeconds).toBeCloseTo(13, 6);
     });
 
-    it("charges an invocation unit's overhead once per lane", () => {
+    it("charges a suite's per-unit overhead once per unit it opens", () => {
+      const manifest = sampleManifest({
+        entries: entries(3, (i) => ({
+          cost: 1,
+          unit: `packages/memory/test/${i}.test.ts`,
+        })),
+        calibration: {
+          setupCost: {},
+          suites: {
+            "workspace-unit": { overhead: 0, correction: 1, unitOverhead: 5 },
+          },
+          prologue: 0,
+        },
+      });
+      const result = run(manifest, { lanes: 1 });
+      expect(result.lanes[0]!.projectedSeconds).toBeCloseTo(18, 6);
+    });
+
+    it("charges a suite's per-unit overhead once for a shared unit", () => {
       const manifest = sampleManifest({
         entries: entries(3, () => ({
           cost: 1,
@@ -687,8 +715,9 @@ describe("plan", () => {
         })),
         calibration: {
           setupCost: {},
-          suites: {},
-          unitOverhead: { "packages/memory/test/one.test.ts": 5 },
+          suites: {
+            "workspace-unit": { overhead: 0, correction: 1, unitOverhead: 5 },
+          },
           prologue: 0,
         },
       });
@@ -701,8 +730,9 @@ describe("plan", () => {
         entries: entries(1, () => ({ cost: 2 })),
         calibration: {
           setupCost: {},
-          suites: { "workspace-unit": { overhead: 0, correction: 1.5 } },
-          unitOverhead: {},
+          suites: {
+            "workspace-unit": { overhead: 0, correction: 1.5, unitOverhead: 0 },
+          },
           prologue: 0,
         },
       });
@@ -985,8 +1015,9 @@ describe("how many lanes the full run needs", () => {
       entries: entries(24, () => ({ cost: 60 })),
       calibration: {
         setupCost: {},
-        suites: { "workspace-unit": { overhead: 150, correction: 1 } },
-        unitOverhead: {},
+        suites: {
+          "workspace-unit": { overhead: 150, correction: 1, unitOverhead: 0 },
+        },
         prologue: 0,
       },
     });

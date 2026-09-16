@@ -850,7 +850,7 @@ contains.
 
 Nothing is left to charge, either. `whole` was a coarse way of saying that
 running one thing costs you its neighbours, and
-[`fileOverhead`](#what-it-costs-to-run-one-test) says that better: an
+[`unitOverhead`](#what-it-costs-to-run-one-test) says that better: an
 invocation with an empty skip list costs its overhead plus every identity
 in it, which is exactly what `whole` meant, and it falls out of the cost
 model rather than being a case in the packer.
@@ -891,21 +891,25 @@ identity is skipped not invoked at all.
 The cost model gains one term:
 
 ```text
-invocationCost(file) = fileOverhead(file)
+invocationCost(unit) = unitOverhead(suite)
                      + sum over the identities not skipped of cost(identity)
 ```
 
-`fileOverhead` is fitted per file from the lane runner's own records,
+`unitOverhead` is fitted per suite from the lane runner's own records,
 exactly as `suiteOverhead` and `correction` are, and is measured rather
-than chosen.
+than chosen. Per suite rather than per unit because that is the grain the
+measurement supports: a lane times a whole batch, so what a batch says is
+one equation over the units it opened, and a figure for each unit
+separately is not in it. It is charged per unit all the same, once for
+each unit a lane opens.
 
 The packer changes shape because of it. An identity's cost now depends on
-whether its file is already being invoked: the first identity chosen from
+whether its unit is already being invoked: the first identity chosen from
 a file pays the overhead and every later one pays only itself. So the
-density pass sorts by marginal cost rather than by cost, and choosing one
-test from a file makes its siblings cheaper to add. That is a better model
-of the machine than per-file items ever were, and it falls out rather than
-being imposed.
+density pass wants to sort by marginal cost rather than by cost, and
+choosing one test from a file makes its siblings cheaper to add. That is a
+better model of the machine than per-file items ever were, and it falls
+out rather than being imposed.
 
 ### What does not change
 
@@ -1102,13 +1106,16 @@ what a `beforeAll` that throws should do to the rest of its group.
       from the preload's name map.
 - [x] Every `deno test` suite in the topology passes the preload, appended
       the way `--junit-path` already is.
-- [ ] `cost` and the packing passes key on identities, with
-      `fileOverhead(file)` fitted from the lane runner's records and the
-      density pass sorting by marginal cost.
+- [x] `cost` and the packing passes key on identities, with
+      `unitOverhead(suite)` fitted from the lane runner's records and
+      charged for each unit a lane opens.
+- [ ] The density pass sorting by marginal cost, so that choosing one test
+      from a file moves its siblings up the ordering rather than leaving
+      them where their own cost puts them.
 - [x] `command()` returns one invocation per file with its skip list, and
       omits a file whose every identity is skipped. A suite's runner takes
       several files at once, so the skip list is per file and the
-      invocation is per package; module load is charged per file either
+      invocation is per package; module load is charged per unit either
       way, which is what `unitOverhead` measures.
 - [ ] The independence flag: a `main`-side check that runs an identity as
       the only test in its file, a rotating slice per run plus every
@@ -2086,16 +2093,18 @@ lane = prologue
 
 batchCost(batch) = suiteOverhead(suite)
                  + correction(suite) * sum over items of cost(item)
+                 + unitOverhead(suite) * the units the batch opens
 ```
 
 The setup costs are the table in
 [Capabilities and setup](#capabilities-and-setup).
 
-`suiteOverhead(suite)` and `correction(suite)` are the two numbers that
-make this work without constant tending, and they are fitted from
-observation rather than written down. A suite's items do not cost what the
-runners measured them at: suites run their items in parallel to differing
-degrees, and they carry startup costs the per-test measurements never see.
+`suiteOverhead(suite)`, `correction(suite)` and `unitOverhead(suite)` are
+the three numbers that make this work without constant tending, and they
+are fitted from observation rather than written down. A suite's items do
+not cost what the runners measured them at: suites run their items in
+parallel to differing degrees, and they carry startup costs the per-test
+measurements never see.
 In the reference build the eight workspace unit shards recorded 2,737
 seconds of measured test time inside 1,839 seconds of test steps. The
 eight runner unit shards recorded only 1,120 seconds inside 1,583 seconds
@@ -2105,33 +2114,53 @@ second of test step in the workspace shards and about 0.71 in the runner
 shards. The two suites are a factor of two apart, so no one static
 multiplier captures both.
 
+A third of the cost tracks neither the suite nor its tests. A unit suite
+starts a runner and loads a module per unit, which no test's own duration
+holds and which grows with the number of units the batch opens rather than
+with what is inside them: the runner unit suite has spent about half a
+second a unit across batches of five units and batches of three hundred.
+A model with only an intercept and a slope on the tests has to put that
+somewhere, and the only place left is the intercept, which is charged once
+however few units the batch holds. A suite whose whole set is expensive
+then prices out its own smallest batch.
+
 So the model is fitted instead. Every batch the lane runner executes
-records what it was planned to take and what it actually took. The
-publisher regresses those pairs per suite over the last week — the
-intercept is `suiteOverhead`, the slope multiplies into `correction` — and
-publishes the result in the next manifest. Both start at zero and one
-respectively, and converge within a few days of lanes running. Two numbers
-per suite, both measured, neither maintained by hand.
+records what it was planned to take, what it actually took, and how many
+units it opened. The publisher regresses those per suite over the last
+week — the intercept is `suiteOverhead`, the slope on the planned seconds
+multiplies into `correction`, and the slope on the unit count is
+`unitOverhead` — and publishes the result in the next manifest. They start
+at zero, one and zero, and converge within a few days of lanes running.
+Three numbers per suite, all measured, none maintained by hand.
 
 The intercept is then raised until no batch anybody has seen is
 under-predicted, because a least-squares line sits in the middle of its
 observations and half the lanes would otherwise run past the budget they
-were packed against. The slope is fitted at all only once a suite has
-enough batches, charged far enough apart, for a slope to mean something:
-it is read far outside the range it was fitted over, since a suite
-charged six seconds in every batch anybody has seen may be charged
-thousands the first time a lane packs it whole. Nothing bounds it from
-above. A slope fitted too high only over-charges, and what a bound took
-off it would land on the intercept, which a lane pays to run one test of
-the suite where the slope is charged in proportion.
+were packed against. A slope is fitted at all only once a suite has enough
+batches, spread far enough apart in what that slope reads, for it to mean
+something: each is read far outside the range it was fitted over, since a
+suite charged six seconds in every batch anybody has seen may be charged
+thousands the first time a lane packs it whole, and one that has never
+held more than five units may be asked to hold nine hundred. A suite whose
+batches all held the same seconds of tests per unit says nothing that
+separates the two slopes, and keeps the one it has always been fitted.
+Nothing bounds either from above. A slope fitted too high only
+over-charges, and what a bound took off it would land on the intercept,
+which a lane pays to run one test of the suite where the slopes are
+charged in proportion.
 
 The measurements travel through the machinery that already exists: the
 lane runner writes them as ordinary test records of kind `gate` and
 scope `ci`, named `ci-lane setup <capability>` and `ci-lane batch
-<suite>`. A batch is written twice, the second named `ci-lane planned
-batch <suite>`, because what the packer expected its tests to take
-cannot be recovered from the records the batch produced: those say what
-the tests took and not what the packer thought they would. A batch run
+<suite>`. A batch is written three times, the others named `ci-lane
+planned batch <suite>` and `ci-lane units batch <suite>`, because neither
+what the packer expected its tests to take nor how many units it opened
+can be recovered from the records the batch produced: those say what the
+tests took rather than what the packer thought they would, and a unit
+whose tests all recorded nothing leaves no trace of having been opened.
+The record format carries one number and calls it a duration, so the unit
+count travels in that field as a count, and the measurement's name is what
+says which of the three figures it is. A batch run
 with coverage on carries `with coverage` on the end of its name, because
 instrumenting a run costs it time and how much is a property of the
 suite. A calibration is keyed by suite alone, so the two are fitted
@@ -2427,9 +2456,16 @@ The manifest is one gzipped JSON object per publisher run, created —
 never overwritten — under a new dataset area beside the records:
 
 ```text
-labs/test-selection/v1/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
-labs/test-selection/v1/state/<yyyy-mm-dd>-<ULID>.json.gz
+labs/test-selection/v<schema>/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
+labs/test-selection/v<schema>/state/<yyyy-mm-dd>-<ULID>.json.gz
 ```
+
+The schema segment is `MANIFEST_SCHEMA_VERSION`, so a format a reader
+cannot understand is one it never lists: an incompatible change moves the
+segment and leaves what came before where it is, and readers of either
+version see only their own manifests and their own state. What that costs
+is the state, since the publisher has none to carry forward under the new
+segment and stops asking for a bootstrap.
 
 Write-once naming is not a stylistic choice: the store's writer
 credentials hold `objectCreator` and nothing else, cannot overwrite, and

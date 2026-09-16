@@ -32,8 +32,17 @@ export interface ScoreInputs {
   churn: number;
 }
 
-/** The version a reader understands; anything else is treated as absent. */
-export const MANIFEST_SCHEMA_VERSION = 1;
+/**
+ * The version a reader understands; anything else is treated as absent.
+ *
+ * It is a segment of every name the store writes under, so a change here
+ * leaves what came before where it is and starts a fresh area: readers of
+ * either version see only their own manifests and their own aggregate,
+ * and neither reads the other's half-understood. Moving it means the
+ * publisher has no aggregate to carry forward, which it stops and asks
+ * for a bootstrap over.
+ */
+export const MANIFEST_SCHEMA_VERSION = 2;
 
 /** One selectable identity, with everything selection needs to know. */
 export interface ManifestEntry {
@@ -143,11 +152,15 @@ export interface Calibration {
   /** Seconds each capability's setup takes. */
   setupCost: Record<string, number>;
 
-  /** Per suite: the intercept and slope fitted from planned against actual. */
-  suites: Record<string, { overhead: number; correction: number }>;
-
-  /** Per invocation unit: what running it at all costs before any test. */
-  unitOverhead: Record<string, number>;
+  /**
+   * Per suite: the intercept, the slope on what its tests were planned to
+   * take, and what one more of its units costs a batch already running
+   * others.
+   */
+  suites: Record<
+    string,
+    { overhead: number; correction: number; unitOverhead: number }
+  >;
 
   /** Seconds a lane spends outside its batches. */
   prologue: number;
@@ -441,8 +454,7 @@ function parseCalibration(value: unknown): Calibration | undefined {
     return out;
   };
   const setupCost = numbers(value.setupCost);
-  const unitOverhead = numbers(value.unitOverhead);
-  if (setupCost === undefined || unitOverhead === undefined) return undefined;
+  if (setupCost === undefined) return undefined;
   if (!isRecord(value.suites)) return undefined;
   if (!isFiniteNumber(value.prologue) || value.prologue < 0) return undefined;
   const suites: Calibration["suites"] = {};
@@ -450,16 +462,18 @@ function parseCalibration(value: unknown): Calibration | undefined {
     if (!isRecord(fitted)) return undefined;
     if (
       !isFiniteNumber(fitted.overhead) || fitted.overhead < 0 ||
-      !isFiniteNumber(fitted.correction) || fitted.correction <= 0
+      !isFiniteNumber(fitted.correction) || fitted.correction <= 0 ||
+      !isFiniteNumber(fitted.unitOverhead) || fitted.unitOverhead < 0
     ) {
       return undefined;
     }
     suites[suite] = {
       overhead: fitted.overhead,
       correction: fitted.correction,
+      unitOverhead: fitted.unitOverhead,
     };
   }
-  return { setupCost, suites, unitOverhead, prologue: value.prologue };
+  return { setupCost, suites, prologue: value.prologue };
 }
 
 function parseLane(value: unknown): LanePlan | undefined {

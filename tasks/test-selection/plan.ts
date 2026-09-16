@@ -229,9 +229,10 @@ function capabilityCost(manifest: Manifest, capability: string): number {
 
 /**
  * What adding this identity to this lane would cost: its own time times
- * its suite's correction, plus its suite's overhead and its unit's
- * overhead where the lane is not paying those already, plus any
- * capability setup this lane has not opened yet.
+ * its suite's correction, plus its suite's overhead where the lane is not
+ * holding that suite already and its suite's per-unit overhead where the
+ * lane has not opened that unit already, plus any capability setup this
+ * lane has not opened yet.
  */
 function marginalCost(
   manifest: Manifest,
@@ -244,9 +245,7 @@ function marginalCost(
   const correction = fitted?.correction ?? 1;
   let cost = entry.cost * correction * repeats;
   if (!lane.suites.has(entry.suite)) cost += fitted?.overhead ?? 0;
-  if (!lane.units.has(entry.unit)) {
-    cost += manifest.calibration.unitOverhead[entry.unit] ?? 0;
-  }
+  if (!lane.units.has(entry.unit)) cost += fitted?.unitOverhead ?? 0;
   for (const capability of input.capabilities.get(entry.suite) ?? []) {
     if (!lane.capabilities.has(capability)) {
       cost += capabilityCost(manifest, capability);

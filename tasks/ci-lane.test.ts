@@ -48,7 +48,11 @@ import {
   type Selection,
   type SelectionReason,
 } from "./test-selection/plan.ts";
-import type { Manifest, ManifestEntry } from "./test-selection/manifest.ts";
+import {
+  type Manifest,
+  MANIFEST_SCHEMA_VERSION,
+  type ManifestEntry,
+} from "./test-selection/manifest.ts";
 import {
   FULL_LANE_BOUND_SECONDS,
   FULL_LANE_BUDGET_SECONDS,
@@ -78,18 +82,13 @@ function suite(partial: Partial<Suite> & { id: string }): Suite {
 /** A manifest carrying exactly these entries. */
 function manifestOf(entries: readonly Partial<ManifestEntry>[]): Manifest {
   return {
-    schema: 1,
+    schema: MANIFEST_SCHEMA_VERSION,
     generatedAt: "2026-09-01T00:00:00.000Z",
     seed: "seed",
     commit: "c".repeat(40),
     runs: 1,
     dials: {},
-    calibration: {
-      setupCost: {},
-      suites: {},
-      unitOverhead: {},
-      prologue: 40,
-    },
+    calibration: { setupCost: {}, suites: {}, prologue: 40 },
     entries: entries.map((entry) => ({
       test: { k: "unit", s: "bakery", n: "glaze > sets" },
       suite: "workspace-unit",
@@ -516,9 +515,10 @@ describe("how many lanes the full run asks for", () => {
     manifest.calibration = {
       setupCost: { deno: 15, browser: 60, toolshed: 45 },
       suites: Object.fromEntries(
-        suites.map((s) => [s.id, { overhead: 12, correction: 1.3 }]),
+        suites.map((
+          s,
+        ) => [s.id, { overhead: 12, correction: 1.3, unitOverhead: 0 }]),
       ),
-      unitOverhead: {},
       prologue: 40,
     };
     return {

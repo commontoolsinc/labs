@@ -24,6 +24,7 @@ import {
   type TestIdentity,
   testIdentityKey,
 } from "@commonfabric/test-support/records";
+import { isLaneMeasurement } from "./lane-measurement.ts";
 import { ciSubmissionsPrefix, storeBucket } from "./test-records-config.ts";
 
 /** A test's aggregate over the report window. */
@@ -51,9 +52,17 @@ export function formatIdentity(key: string): string {
 }
 
 /**
- * Aggregates every record of every report by identity. Identities are
- * resolved through the alias file as of each report's own start day, so a
- * renamed test's history aggregates under its current name.
+ * Aggregates every record of a run by identity, leaving out the lane's
+ * measurements of itself. Identities are resolved through the alias file
+ * as of each report's own start day, so a renamed test's history
+ * aggregates under its current name.
+ *
+ * A lane's own measurements are not test surfaces: nothing enumerates
+ * them and no lane can be asked to run one, so an aggregate over them
+ * counts runs of nothing. Their figures are not durations either — one
+ * says what a batch was packed to spend and another counts the units it
+ * opened — so summing them alongside a test's duration reports a number
+ * that means nothing.
  */
 export function aggregate(
   reports: readonly StoredReport[],
@@ -65,6 +74,7 @@ export function aggregate(
       ? datePartition(report.context.startedAt)
       : undefined;
     for (const record of report.records) {
+      if (isLaneMeasurement(record.test)) continue;
       const test = aliases !== undefined && day !== undefined
         ? aliases.resolve(record.test, day)
         : record.test;

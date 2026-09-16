@@ -78,6 +78,33 @@ describe("test-records-report", () => {
       });
     });
 
+    it("leaves out a lane's measurements of itself", () => {
+      // A lane's own measurements are not test surfaces: nothing
+      // enumerates them and no lane can be asked to run one. Their
+      // figures are not durations either — one says what a batch was
+      // packed to spend, and another counts the units it opened — so an
+      // aggregate that took them would report the worst duration of
+      // something that never ran.
+      const byIdentity = aggregate([
+        report("a", [
+          record("glaze", "pass", 10),
+          {
+            line: "record",
+            test: { k: "gate", s: "ci", n: "ci-lane batch runner-unit" },
+            outcome: "pass",
+            durationMs: 252_500,
+          },
+          {
+            line: "record",
+            test: { k: "gate", s: "ci", n: "ci-lane units batch runner-unit" },
+            outcome: "pass",
+            durationMs: 338,
+          },
+        ]),
+      ]);
+      expect([...byIdentity.keys()]).toEqual(['["unit","bakery","glaze"]']);
+    });
+
     it("joins a renamed test's history under its current name", () => {
       const resolver = new AliasResolver([{
         date: "2026-08-15",

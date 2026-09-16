@@ -31,28 +31,41 @@ export const LANE_MEASUREMENT_PREFIX = "ci-lane ";
  */
 export const MEASURED_BATCH_SUFFIX = " with coverage";
 
+/** What each of a batch's three measurements is, as its name says it. */
+export type BatchMeasurementKind = "spent" | "planned" | "units";
+
+/**
+ * The word a measurement's name carries to say which of the three it is.
+ * What a batch spent is the one the lane has always written, and it is
+ * unmarked.
+ */
+const BATCH_MEASUREMENT_LEAD: Record<BatchMeasurementKind, string> = {
+  spent: "",
+  planned: "planned ",
+  units: "units ",
+};
+
 /**
  * What a lane's measurement of one batch is called.
  *
- * A lane writes two of these per batch: what it spent, and what it was
- * packed to spend. The pair is what the calibration is fitted from.
+ * A lane writes three of these per batch: what it spent, what it was
+ * packed to spend, and how many units it opened. The three together are
+ * what the calibration is fitted from.
  */
 export function batchMeasurementName(
   suite: string,
   measured: boolean,
-  kind: "spent" | "planned" = "spent",
+  kind: BatchMeasurementKind = "spent",
 ): string {
-  const lead = kind === "planned" ? "planned " : "";
-  return `${LANE_MEASUREMENT_PREFIX}${lead}batch ${suite}` +
-    (measured ? MEASURED_BATCH_SUFFIX : "");
+  return `${LANE_MEASUREMENT_PREFIX}${BATCH_MEASUREMENT_LEAD[kind]}batch ` +
+    suite + (measured ? MEASURED_BATCH_SUFFIX : "");
 }
 
 /**
  * The suite one batch measurement names, whether coverage was on for it,
- * and whether the figure is what the lane was packed to spend or what it
- * spent. Nothing else for the name: a reader that took it apart itself
- * would be a second answer to how it is composed, and the two would
- * part company the first time either moved.
+ * and which of the three figures it carries. Nothing else for the name: a
+ * reader that took it apart itself would be a second answer to how it is
+ * composed, and the two would part company the first time either moved.
  *
  * A suite whose id ended with the suffix would be read as a shorter
  * suite's measured run, and the two would be fitted as one.
@@ -62,10 +75,12 @@ export function batchMeasurementName(
  */
 export function batchMeasurement(
   name: string,
-): { suite: string; measured: boolean; kind: "spent" | "planned" } | undefined {
-  for (const kind of ["planned", "spent"] as const) {
+):
+  | { suite: string; measured: boolean; kind: BatchMeasurementKind }
+  | undefined {
+  for (const kind of ["planned", "units", "spent"] as const) {
     const prefix = `${LANE_MEASUREMENT_PREFIX}` +
-      `${kind === "planned" ? "planned " : ""}batch `;
+      `${BATCH_MEASUREMENT_LEAD[kind]}batch `;
     if (!name.startsWith(prefix)) continue;
     const rest = name.slice(prefix.length);
     const measured = rest.endsWith(MEASURED_BATCH_SUFFIX);

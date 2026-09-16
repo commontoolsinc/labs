@@ -18,10 +18,11 @@ import {
 import {
   MIN_CORRECTION_SAMPLES,
   MIN_CORRECTION_SPAN_SECONDS,
+  MIN_UNIT_SPAN_UNITS,
 } from "./policy.ts";
 
-/** One measurement, as a lane spools it. */
-function measured(name: string, seconds: number): TestRecord {
+/** One figure a lane spooled, as the record format carries it. */
+function figure(name: string, durationMs: number): TestRecord {
   return {
     line: "record",
     test: {
@@ -30,16 +31,56 @@ function measured(name: string, seconds: number): TestRecord {
       n: name,
     },
     outcome: "pass",
-    durationMs: Math.round(seconds * 1000),
+    durationMs: Math.round(durationMs),
   };
 }
 
-/** What a lane writes about one batch: what it cost, and what it took. */
-function batch(suite: string, planned: number, spent: number): TestRecord[] {
+/** One measurement of a span of time, as a lane spools it. */
+function measured(name: string, seconds: number): TestRecord {
+  return figure(name, seconds * 1000);
+}
+
+/** What a lane writes about one batch: the three figures, together. */
+function batch(
+  suite: string,
+  planned: number,
+  spent: number,
+  units = 1,
+  coverage = false,
+): TestRecord[] {
   return [
-    measured(batchMeasurementName(suite, false), spent),
-    measured(batchMeasurementName(suite, false, "planned"), planned),
+    measured(batchMeasurementName(suite, coverage), spent),
+    measured(batchMeasurementName(suite, coverage, "planned"), planned),
+    figure(batchMeasurementName(suite, coverage, "units"), units),
   ];
+}
+
+/**
+ * Observations that say what each of the two slopes is worth on its own.
+ * Every combination of a small and a large reading of each, which is what
+ * stops one slope explaining the other's effect, over spans wide enough
+ * that both slopes are believed.
+ */
+function separable(
+  spent: (planned: number, units: number) => number,
+): BatchObservation[] {
+  const observations: BatchObservation[] = [];
+  for (
+    const planned of [
+      MIN_CORRECTION_SPAN_SECONDS,
+      MIN_CORRECTION_SPAN_SECONDS * 3,
+    ]
+  ) {
+    for (const units of [MIN_UNIT_SPAN_UNITS, MIN_UNIT_SPAN_UNITS * 3]) {
+      observations.push({
+        suite: "s",
+        planned,
+        units,
+        spent: spent(planned, units),
+      });
+    }
+  }
+  return observations;
 }
 
 describe("calibrate", () => {
@@ -62,56 +103,62 @@ describe("calibrate", () => {
       expect(seen.setup.get("toolshed")).toEqual([2.8]);
     });
 
-    it("pairs what a batch cost with what it took", () => {
+    it("joins what a batch cost, what it took, and what it opened", () => {
       const seen = observationsOf([
-        { run: "a", records: batch("workspace-unit", 40, 92) },
+        { run: "a", records: batch("workspace-unit", 40, 92, 17) },
       ]);
       expect(seen.batches).toEqual([
-        { suite: "workspace-unit", planned: 40, spent: 92 },
+        { suite: "workspace-unit", planned: 40, spent: 92, units: 17 },
       ]);
     });
 
-    it("takes nothing from a batch with only one half", () => {
-      // A lane writes both together, so one alone is a record that
-      // arrived without its partner rather than a batch to fit from.
-      const seen = observationsOf([{
-        run: "a",
-        records: [measured(batchMeasurementName("workspace-unit", false), 92)],
-      }]);
-      expect(seen.batches).toEqual([]);
+    it("reads a unit count as a count rather than as a span of time", () => {
+      // The record format carries one number and calls it a duration, so
+      // a count read the way a duration is would arrive a thousand times
+      // too small.
+      const seen = observationsOf([
+        { run: "a", records: batch("workspace-unit", 40, 92, 250) },
+      ]);
+      expect(seen.batches[0]!.units).toBe(250);
+    });
+
+    it("takes nothing from a batch missing one of the three", () => {
+      // A lane writes all three together, so two alone are records that
+      // arrived without the third rather than a batch to fit from.
+      for (let left = 0; left < 3; left++) {
+        const records = batch("workspace-unit", 40, 92, 17)
+          .filter((_, at) => at !== left);
+        expect(observationsOf([{ run: "a", records }]).batches).toEqual([]);
+      }
     });
 
     it("keeps two lanes of one run apart", () => {
       // Five lanes of a run may each hold the same suite, and adding two
       // lanes' figures would describe a batch neither of them ran.
       const seen = observationsOf([
-        { run: "run-1-lane-1", records: batch("runner-unit", 10, 30) },
-        { run: "run-1-lane-2", records: batch("runner-unit", 20, 50) },
+        { run: "run-1-lane-1", records: batch("runner-unit", 10, 30, 4) },
+        { run: "run-1-lane-2", records: batch("runner-unit", 20, 50, 9) },
       ]);
       expect(seen.batches.sort((a, b) => a.spent - b.spent)).toEqual([
-        { suite: "runner-unit", planned: 10, spent: 30 },
-        { suite: "runner-unit", planned: 20, spent: 50 },
+        { suite: "runner-unit", planned: 10, spent: 30, units: 4 },
+        { suite: "runner-unit", planned: 20, spent: 50, units: 9 },
       ]);
     });
 
-    it("pairs a batch run with coverage with its own planned figure", () => {
+    it("joins a batch run with coverage to its own figures", () => {
       // Its planned figure is the same as the uninstrumented batch's, so
-      // a pairing that ignored the marker could read either batch's
-      // spent figure against either's planned one.
+      // a join that ignored the marker could read either batch's spent
+      // figure against either's planned one.
       const seen = observationsOf([{
         run: "a",
         records: [
-          ...batch("workspace-unit", 40, 92),
-          measured(batchMeasurementName("workspace-unit", true), 150),
-          measured(
-            batchMeasurementName("workspace-unit", true, "planned"),
-            40,
-          ),
+          ...batch("workspace-unit", 40, 92, 17),
+          ...batch("workspace-unit", 40, 150, 17, true),
         ],
       }]);
       expect(seen.batches.sort((a, b) => a.spent - b.spent)).toEqual([
-        { suite: "workspace-unit", planned: 40, spent: 92 },
-        { suite: "workspace-unit", planned: 40, spent: 150 },
+        { suite: "workspace-unit", planned: 40, spent: 92, units: 17 },
+        { suite: "workspace-unit", planned: 40, spent: 150, units: 17 },
       ]);
     });
 
@@ -119,7 +166,7 @@ describe("calibrate", () => {
       // A batch that failed stopped at the first invocation that did,
       // and what it spent says the suite is cheap rather than saying
       // what running it costs.
-      const failed = batch("workspace-unit", 460, 3)
+      const failed = batch("workspace-unit", 460, 3, 12)
         .map((record) => ({ ...record, outcome: "fail" as const }));
       expect(observationsOf([{ run: "a", records: failed }]).batches)
         .toEqual([]);
@@ -169,14 +216,20 @@ describe("calibrate", () => {
       const kept = laneObservationsOf(
         "object-1",
         [
-          ...batch("runner-unit", 10, 30),
+          ...batch("runner-unit", 10, 30, 4),
           measured(`${LANE_MEASUREMENT_PREFIX}setup fuse`, 14.8),
         ],
         "2026-09-12",
       );
       expect(kept).toEqual([
         { day: "2026-09-12", capability: "fuse", seconds: 14.8 },
-        { day: "2026-09-12", suite: "runner-unit", planned: 10, spent: 30 },
+        {
+          day: "2026-09-12",
+          suite: "runner-unit",
+          planned: 10,
+          spent: 30,
+          units: 4,
+        },
       ]);
     });
   });
@@ -185,16 +238,27 @@ describe("calibrate", () => {
     it("puts the whole of one observation into the intercept", () => {
       // With one sample there is nothing to say about how the cost grows,
       // so the intercept carries what the lane was seen to spend.
-      expect(fitSuite([{ suite: "s", planned: 40, spent: 92 }])).toEqual({
-        overhead: 52,
-        correction: 1,
-      });
+      expect(fitSuite([{ suite: "s", planned: 40, spent: 92, units: 6 }]))
+        .toEqual({ overhead: 52, correction: 1, unitOverhead: 0 });
+    });
+
+    it("tells what the tests cost from what the units cost", () => {
+      // The whole point of measuring the unit count: a suite that opens a
+      // runner and loads a module per unit pays for that whatever its
+      // tests take, and nothing in a test's own duration holds it.
+      const fitted = fitSuite(
+        separable((planned, units) => 10 + 2 * planned + 0.5 * units),
+      );
+      expect(fitted.correction).toBeCloseTo(2, 6);
+      expect(fitted.unitOverhead).toBeCloseTo(0.5, 6);
+      expect(fitted.overhead).toBeCloseTo(10, 6);
     });
 
     it("finds the slope enough disagreeing observations carry", () => {
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
+          units: 1,
           planned: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
           spent: 10 + 2 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
         })),
@@ -209,10 +273,21 @@ describe("calibrate", () => {
       // far enough apart to clear the span guard, so the count is the
       // only thing that can refuse a slope here.
       const fitted = fitSuite([
-        { suite: "s", planned: MIN_CORRECTION_SPAN_SECONDS, spent: 80 },
-        { suite: "s", planned: MIN_CORRECTION_SPAN_SECONDS * 3, spent: 100 },
+        {
+          suite: "s",
+          units: 1,
+          planned: MIN_CORRECTION_SPAN_SECONDS,
+          spent: 80,
+        },
+        {
+          suite: "s",
+          units: MIN_UNIT_SPAN_UNITS * 4,
+          planned: MIN_CORRECTION_SPAN_SECONDS * 3,
+          spent: 100,
+        },
       ]);
       expect(fitted.correction).toBe(1);
+      expect(fitted.unitOverhead).toBe(0);
       expect(fitted.overhead).toBeCloseTo(80 - MIN_CORRECTION_SPAN_SECONDS, 6);
     });
 
@@ -223,6 +298,7 @@ describe("calibrate", () => {
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
+          units: 1,
           planned: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
           spent: 20 + 50 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
         })),
@@ -232,21 +308,24 @@ describe("calibrate", () => {
     });
 
     it("never predicts a batch costing less than one was seen to", () => {
-      // A least-squares line sits in the middle of its observations,
+      // A least-squares plane sits in the middle of its observations,
       // which for this quantity is half the lanes running past the
       // budget they were packed against.
       const seen: BatchObservation[] = [
-        ...Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
+        ...separable((planned, units) => 10 + 2 * planned + 0.5 * units),
+        {
           suite: "s",
-          planned: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
-          spent: 10 + 2 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
-        })),
-        { suite: "s", planned: MIN_CORRECTION_SPAN_SECONDS, spent: 900 },
+          units: MIN_UNIT_SPAN_UNITS,
+          planned: MIN_CORRECTION_SPAN_SECONDS,
+          spent: 900,
+        },
       ];
       const fitted = fitSuite(seen);
       for (const one of seen) {
-        expect(fitted.overhead + fitted.correction * one.planned)
-          .toBeGreaterThanOrEqual(one.spent - 1e-9);
+        expect(
+          fitted.overhead + fitted.correction * one.planned +
+            fitted.unitOverhead * one.units,
+        ).toBeGreaterThanOrEqual(one.spent - 1e-9);
       }
     });
 
@@ -260,6 +339,7 @@ describe("calibrate", () => {
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES + 3 }, (_, i) => ({
           suite: "s",
+          units: 1,
           planned: 2 + 0.5 * i,
           spent: 41,
         })),
@@ -276,11 +356,90 @@ describe("calibrate", () => {
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES + 1 }, (_, i) => ({
           suite: "s",
+          units: 1,
           planned: most + i,
           spent: 200 + i / 10,
         })),
       );
       expect(fitted.correction).toBe(1);
+    });
+
+    it("charges a suite per unit where its tests say too little", () => {
+      // The shape a workspace unit suite arrives in: every batch charged
+      // about the same seconds of tests, and batches of wildly different
+      // sizes. There is no correction to fit, and the whole of what
+      // separates one batch from another is how many units it opened.
+      const fitted = fitSuite(
+        Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
+          suite: "s",
+          units: MIN_UNIT_SPAN_UNITS * (1 + i),
+          planned: MIN_CORRECTION_SPAN_SECONDS,
+          spent: MIN_CORRECTION_SPAN_SECONDS + 8 +
+            3 * MIN_UNIT_SPAN_UNITS * (1 + i),
+        })),
+      );
+      expect(fitted.correction).toBe(1);
+      expect(fitted.unitOverhead).toBeCloseTo(3, 6);
+      expect(fitted.overhead).toBeCloseTo(8, 6);
+    });
+
+    it("believes no correction where the tests track the units", () => {
+      // The mirror of the reading below: a correction fitted beside a
+      // unit count it moves in lockstep with is as much a choice as a
+      // per-unit cost fitted beside the tests would be. The suite keeps
+      // the slope it has always been fitted, which is the one on its
+      // tests, and that slope carries both readings together.
+      const fitted = fitSuite(
+        Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
+          suite: "s",
+          units: MIN_UNIT_SPAN_UNITS * (1 + i),
+          planned: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+          spent: 10 + 2 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+        })),
+      );
+      expect(fitted.correction).toBeCloseTo(2, 6);
+      expect(fitted.unitOverhead).toBe(0);
+    });
+
+    it("believes no per-unit cost from batches of about one size", () => {
+      // The same reasoning in the units the regressor counts: a suite
+      // whose batches have all held four or five units says nothing about
+      // what the nine hundredth would cost, and the difference between
+      // those batches is the runner rather than the suite.
+      const fitted = fitSuite(
+        Array.from({ length: MIN_CORRECTION_SAMPLES + 1 }, (_, i) => ({
+          suite: "s",
+          units: MIN_UNIT_SPAN_UNITS + i,
+          planned: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
+          spent: 100 + 40 * i,
+        })),
+      );
+      expect(fitted.unitOverhead).toBe(0);
+    });
+
+    it("believes no per-unit cost where the units track the tests", () => {
+      // Nothing separates the two where every batch held about the same
+      // seconds of tests per unit, however wide a range of sizes those
+      // batches covered. Splitting what they cost between them would be
+      // a choice rather than a reading, so the suite keeps the one slope
+      // it has always been fitted. The second reading bends off the line,
+      // by a quarter of what a unit count has to vary by before it is
+      // believed. That is the case the widest gap between two batches'
+      // sizes passes — 50 units against 166 — and the gap left after the
+      // tests are accounted for does not.
+      const bends = Math.round(MIN_UNIT_SPAN_UNITS / 4);
+      for (const bend of [0, bends]) {
+        const fitted = fitSuite(
+          Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
+            suite: "s",
+            units: MIN_UNIT_SPAN_UNITS * (1 + i) + bend * i * i,
+            planned: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+            spent: 10 + 2 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+          })),
+        );
+        expect(fitted.correction).toBeCloseTo(2, 6);
+        expect(fitted.unitOverhead).toBe(0);
+      }
     });
 
     it("fits a suite whose batch runs faster than the sum of its tests", () => {
@@ -292,6 +451,7 @@ describe("calibrate", () => {
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
+          units: 1,
           planned: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
           spent: MIN_CORRECTION_SPAN_SECONDS * (2 + i) / 3,
         })),
@@ -308,6 +468,7 @@ describe("calibrate", () => {
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
+          units: 1,
           planned: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
           spent: 500 - 0.5 * MIN_CORRECTION_SPAN_SECONDS * (2 + i),
         })),
@@ -315,25 +476,49 @@ describe("calibrate", () => {
       expect(fitted.correction).toBe(1);
     });
 
-    it("fits every suite a correction a manifest will carry", () => {
-      // `parseCalibration` refuses a correction at or below zero, and it
-      // refuses the whole manifest with it, so what this returns has to
-      // be a figure that survives being published.
-      for (const slope of [-3, -0.5, 0, 0.25, 4, 50]) {
-        const fitted = fitSuite(
-          Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
-            suite: "s",
-            planned: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
-            spent: 500 + slope * MIN_CORRECTION_SPAN_SECONDS * (2 + i),
-          })),
-        );
-        expect(fitted.correction).toBeGreaterThan(0);
-        expect(fitted.overhead).toBeGreaterThanOrEqual(0);
+    it("keeps the per-unit cost when the correction comes out negative", () => {
+      // The two are fitted together, so a reading refused takes the other
+      // one's figure with it: what a unit costs beside a correction of
+      // minus a half is not what it costs beside a correction of one.
+      const fitted = fitSuite(
+        separable((planned, units) => units - 0.5 * planned),
+      );
+      expect(fitted.correction).toBe(1);
+      expect(fitted.unitOverhead).toBeGreaterThan(0);
+    });
+
+    it("keeps the correction when the per-unit cost comes out negative", () => {
+      const fitted = fitSuite(
+        separable((planned, units) => 2 * planned - units),
+      );
+      expect(fitted.correction).toBeCloseTo(2, 6);
+      expect(fitted.unitOverhead).toBe(0);
+    });
+
+    it("fits every suite figures a manifest will carry", () => {
+      // `parseCalibration` refuses a correction at or below zero and a
+      // per-unit cost below zero, and it refuses the whole manifest with
+      // either, so what this returns has to survive being published.
+      for (const perSecond of [-3, -0.5, 0, 0.25, 4, 50]) {
+        for (const perUnit of [-2, 0, 0.5, 9]) {
+          const fitted = fitSuite(
+            separable((planned, units) =>
+              500 + perSecond * planned + perUnit * units
+            ),
+          );
+          expect(fitted.correction).toBeGreaterThan(0);
+          expect(fitted.unitOverhead).toBeGreaterThanOrEqual(0);
+          expect(fitted.overhead).toBeGreaterThanOrEqual(0);
+        }
       }
     });
 
     it("charges nothing for a suite nothing has measured", () => {
-      expect(fitSuite([])).toEqual({ overhead: 0, correction: 1 });
+      expect(fitSuite([])).toEqual({
+        overhead: 0,
+        correction: 1,
+        unitOverhead: 0,
+      });
     });
   });
 
@@ -342,8 +527,8 @@ describe("calibrate", () => {
       const fitted = calibrate({
         setup: new Map([["fuse", [14.8, 2.1]], ["browser", [0]]]),
         batches: [
-          { suite: "workspace-unit", planned: 40, spent: 92 },
-          { suite: "runner-unit", planned: 10, spent: 20 },
+          { suite: "workspace-unit", planned: 40, spent: 92, units: 3 },
+          { suite: "runner-unit", planned: 10, spent: 20, units: 2 },
         ],
       });
       expect(Object.keys(fitted.setupCost).sort()).toEqual(["browser", "fuse"]);
@@ -353,13 +538,6 @@ describe("calibrate", () => {
       ]);
       expect(fitted.suites["workspace-unit"].overhead).toBe(52);
     });
-
-    it("charges nothing per unit, because nothing measures one", () => {
-      // A lane times its batches and not the units inside them, so a
-      // suite's intercept carries what one more file costs.
-      expect(calibrate({ setup: new Map(), batches: [] }).unitOverhead)
-        .toEqual({});
-    });
   });
 
   describe("isLaneObservation()", () => {
@@ -367,7 +545,13 @@ describe("calibrate", () => {
       expect(isLaneObservation({ day: "d", capability: "fuse", seconds: 14.8 }))
         .toBe(true);
       expect(
-        isLaneObservation({ day: "d", suite: "s", planned: 10, spent: 30 }),
+        isLaneObservation({
+          day: "d",
+          suite: "s",
+          planned: 10,
+          spent: 30,
+          units: 4,
+        }),
       ).toBe(true);
     });
 
@@ -378,7 +562,13 @@ describe("calibrate", () => {
       expect(isLaneObservation({ day: "d", capability: "fuse", seconds: null }))
         .toBe(false);
       expect(
-        isLaneObservation({ day: "d", suite: "s", planned: 10, spent: "30" }),
+        isLaneObservation({
+          day: "d",
+          suite: "s",
+          planned: 10,
+          spent: "30",
+          units: 4,
+        }),
       ).toBe(false);
       expect(
         isLaneObservation({
@@ -386,6 +576,7 @@ describe("calibrate", () => {
           suite: "s",
           planned: Infinity,
           spent: 3,
+          units: 4,
         }),
       ).toBe(false);
     });
@@ -395,6 +586,9 @@ describe("calibrate", () => {
       expect(isLaneObservation({ day: "d", seconds: 1 })).toBe(false);
       expect(isLaneObservation({ day: "d", suite: "s", planned: 10 }))
         .toBe(false);
+      expect(
+        isLaneObservation({ day: "d", suite: "s", planned: 10, spent: 30 }),
+      ).toBe(false);
       expect(isLaneObservation("fuse took a while")).toBe(false);
       expect(isLaneObservation(null)).toBe(false);
     });
@@ -404,12 +598,18 @@ describe("calibrate", () => {
     it("sorts stored observations back into the two kinds", () => {
       const seen = laneObservations([
         { day: "2026-09-12", capability: "fuse", seconds: 14.8 },
-        { day: "2026-09-12", suite: "runner-unit", planned: 10, spent: 30 },
+        {
+          day: "2026-09-12",
+          suite: "runner-unit",
+          planned: 10,
+          spent: 30,
+          units: 4,
+        },
         { day: "2026-09-13", capability: "fuse", seconds: 2.1 },
       ]);
       expect(seen.setup.get("fuse")).toEqual([14.8, 2.1]);
       expect(seen.batches).toEqual([
-        { suite: "runner-unit", planned: 10, spent: 30 },
+        { suite: "runner-unit", planned: 10, spent: 30, units: 4 },
       ]);
     });
   });

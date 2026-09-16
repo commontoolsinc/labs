@@ -61,7 +61,7 @@ export function emptyManifest(): Manifest {
     commit: "",
     runs: 0,
     dials: dialSnapshot(),
-    calibration: { setupCost: {}, suites: {}, unitOverhead: {}, prologue: 0 },
+    calibration: { setupCost: {}, suites: {}, prologue: 0 },
     entries: [],
     withheld: [],
     unavailable: [],

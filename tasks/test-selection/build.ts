@@ -605,7 +605,6 @@ export function buildManifest(input: BuildInput): Manifest {
     calibration: {
       setupCost: input.calibration?.setupCost ?? {},
       suites: input.calibration?.suites ?? {},
-      unitOverhead: input.calibration?.unitOverhead ?? {},
       prologue: input.calibration?.prologue ?? LANE_PROLOGUE_SECONDS,
     },
     entries,
