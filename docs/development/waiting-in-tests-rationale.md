@@ -296,15 +296,20 @@ look.
 
 The first is that an early fire drops writes. It would: the reply the teardown
 waits for is the worker's confirmation that it has flushed, so terminating the
-worker before that reply arrives loses whatever was still buffered. What
-narrows it is that a worker which never replies never flushed either, so a
-bound firing on a genuinely stuck worker costs nothing that was not already
-lost. The exposure is the slow-but-healthy disposal — a large flush, a
-contended machine, a clock jump — which the bound would kill mid-flush. In
-this suite even that is local: each test opens a space under a fresh random
-name and disposes as the last thing in its scope, so no later read reaches the
-writes a killed flush dropped. By the test in [Wall-clock time is not a
-measure of
+worker before that reply arrives loses whatever was still buffered. How much
+that is, the main thread cannot tell. The worker flushes before it replies, so
+a reply that never arrived leaves every state open: nothing written, part of
+it, or all of it with the reply lost afterwards.
+
+What narrows the objection is not how far the flush got but what terminating
+adds to it. A worker that is genuinely stuck writes nothing further whether it
+is terminated or left alone, so a bound firing on one costs only the wait it
+ends. The exposure is the slow-but-healthy disposal — a large flush, a
+contended machine, a clock jump — which a bound would kill mid-flush, losing
+writes that were still on their way. In this suite even that is local: each
+test opens a space under a fresh random name and disposes as the last thing in
+its scope, so no later read reaches the writes a killed flush dropped. By the
+test in [Wall-clock time is not a measure of
 progress](waiting-in-tests.md#wall-clock-time-is-not-a-measure-of-progress),
 an early fire there is safe.
 
