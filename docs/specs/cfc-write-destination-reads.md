@@ -108,9 +108,13 @@ so only runtime code importing `writeDestinationRead` can set it, and the
 runner's public surface does not export it.
 
 The cost of the type probe's half is measured the same way as the
-comparison's, and it is smaller: the probe's answer selects between an event
-send and a stored write, and which of those a transaction did is visible in
-its write set whatever the probe consumed.
+comparison's, and it is smaller. The probe's answer selects between an event
+send and a stored write, and each route discloses itself by its own effect
+rather than by the join: a stored write appears in the write set, and a send
+reaches the listeners and the delivery the event is queued for. The send need
+not write storage at all, in which case the probe's answer leaves the
+transaction's write set untouched and there is nothing there to read it
+from.
 
 ## The objection §8.11.3 raises
 
@@ -207,8 +211,11 @@ existence channel is the neighboring disclosure, carried as SC-4 in
 
 ## What this does not change
 
-The exclusion is scoped to the flow join. A read carrying
-`writeDestinationRead` still carries `markReadAsAttemptedWrite`, so:
+The exclusion is scoped to the flow join, and the marker changes nothing else
+about either read. What each read is recorded as follows from the rest of its
+metadata, which this marker sits beside rather than replaces.
+
+The diff's destination read carries `markReadAsAttemptedWrite`, so:
 
 - it is still recorded in `attemptedWrites`, which is what gives the label
   machinery a record of the paths a transaction meant to write before a
@@ -217,6 +224,11 @@ The exclusion is scoped to the flow join. A read carrying
   carries its concurrency precondition and a conflicting concurrent write is
   still detected;
 - it still seeds scheduler dependencies exactly as it did.
+
+The type probe carries `ignoreReadForScheduling` and no attempted-write
+marker, so it is in neither of those logs, and it was in neither before this
+marker existed. What it has always been is a read the journal records for
+label purposes and the reactivity log does not.
 
 The exclusion is also scoped to the flow join among the three consumed sets
 CFC derives. The transaction-global consumed set the egress and sink ceilings

@@ -1250,9 +1250,13 @@ not others.
 ## From the write-path self-read exclusion (2026-09-15)
 
 **SC-41 [normative] A write path's read of its own destination is a
-runtime-internal read — §18.6.2.** §18.6.2 derives the consumed set and the
-conservative flow-path confidentiality from the attempt's journal minus
-runtime-internal reads, and enumerates four kinds: verifier-internal reads,
+runtime-internal read — §18.6.2.** §18.6.2 derives two things from the
+attempt's journal minus runtime-internal reads: the consumed set, and the
+conservative flow-path confidentiality. This entry proposes a fifth kind of
+runtime-internal read, and the runner subtracts it from the second alone —
+the boundary at the end of this entry says so, and a runtime that adopts the
+amended list owes either the wider application or that boundary stated.
+§18.6.2 enumerates four kinds today: verifier-internal reads,
 label-metadata reads at the envelope's own metadata paths, program and source
 text loaded to run the handler, and content-addressed schema documents. The
 list does not contemplate a write path that reads its own destination, and the

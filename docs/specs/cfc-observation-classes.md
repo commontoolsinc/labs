@@ -113,12 +113,14 @@ The load-bearing change is the third row: the `followRef` observation, today
 dropped from the flow join, becomes a consumed class carrying the link entry's
 label — closing SC-8.
 
-Two runtime reads have no row here because they are subtracted before they
-are classified: the stream-marker probe the write path makes to choose
-between an event send and a stored write, and the diff's read of the address
-it is about to write. Per §18.6.2 each is a runtime-internal read rather than
-a handler observation, so each leaves the flow join without consuming a class
-— [`cfc-write-destination-reads.md`](./cfc-write-destination-reads.md) covers
+Two runtime reads have no row here, though the walk classifies them like any
+other: the stream-marker probe the write path makes to choose between an
+event send and a stored write, and the diff's read of the address it is about
+to write. `deriveFlowJoin()` drops them after classification, so neither
+consumes any of the classes above, and the walk's other consumers see them
+unchanged. Per §18.6.2 each is a runtime-internal read rather than a handler
+observation —
+[`cfc-write-destination-reads.md`](./cfc-write-destination-reads.md) covers
 them.
 
 **Where `count` went.** The spec's fifth class (§4.6.3) deliberately does not
