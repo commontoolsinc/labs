@@ -3,7 +3,11 @@
 **Status:** stages 1 and 2 are implemented in open pull requests, #7583 and
 #7589, stacked in that order on `main`; neither has merged. Stage 3 is not
 started. Investigated against `main` at `59e8a2540` (2026-09-15); line
-references are to that tree unless an item names a stage branch.
+references are to that tree unless an item names a stage branch. A file is
+named by its path under `packages/` the first time and by its basename after
+that (`runner.ts` is `packages/runner/src/runner.ts`, `builder/pattern.ts` is
+`packages/runner/src/builder/pattern.ts`); `docs/` and `scripts/` paths are
+from the repository root.
 
 **Summary.** A handler's event stream is stored today as a document whose value
 is the sentinel `{ "$stream": true }`. That sentinel is the only thing handler
@@ -29,31 +33,31 @@ it through the owner.**
 ### The one real producer
 
 - `stream()` creates a kind-`"stream"` cell whose schema is the bare event
-  schema with no `asCell` stamp (`runner/src/builder/reactive.ts:81`,
-  `runner/src/builder/module.ts:255`).
+  schema with no `asCell` stamp (`packages/runner/src/builder/reactive.ts:81`,
+  `packages/runner/src/builder/module.ts:255`).
 - `Cell.export()` reports `{ $stream: true }` as that cell's value, purely
-  because of its kind (`runner/src/cell.ts:3514`).
-- The builder folds the exported value into the derived-internal-cell
-  descriptor as `schema.default` (`runner/src/builder/pattern.ts:472`, via
+  because of its kind (`packages/runner/src/cell.ts:3514`).
+- The builder folds the exported value into the derived-internal-cell descriptor
+  as `schema.default` (`packages/runner/src/builder/pattern.ts:472`, via
   `schemaWithDefault`).
 - Setup seeds that default into the derived document, but only when the
-  manifest has no entry for the cell yet (`runner/src/runner.ts:3004`).
+  manifest has no entry for the cell yet (`packages/runner/src/runner.ts:3004`).
 
 Every other writer is hand-rolled: four fields in the llm-dialog builtin
-(`runner/src/builtins/llm-dialog.ts:3908`), the CLI test harness
-(`cli/lib/test-runner.ts:1369`), and the tests: eight files build a stream
-cell with `setRaw({ $stream: true })`, and some 45 more carry the literal in
-fakes and stored-document fixtures.
+(`packages/runner/src/builtins/llm-dialog.ts:3908`), the CLI test harness
+(`packages/cli/lib/test-runner.ts:1369`), and the tests: eight files build a
+stream cell with `setRaw({ $stream: true })`, and some 45 more carry the literal
+in fakes and stored-document fixtures.
 
 ### The load-bearing reader
 
-`#resolveJavaScriptStreamLink` (`runner/src/runner.ts:9394`) follows the
-`$event` input through write redirects and reads the terminal value. Anything
-but the sentinel becomes a "Handler used as lift" failure (`runner.ts:10492`,
-`:10902`, `describeHandlerStreamFailure` at `:11806`). That failure class is
-the trigger for the cold-start repairs, whose causes are structural (a setup
-marker naming another version, a manifest missing an internal cell) and which
-therefore outlive the sentinel; only the keying goes:
+`#resolveJavaScriptStreamLink` (`packages/runner/src/runner.ts:9394`) follows
+the `$event` input through write redirects and reads the terminal value.
+Anything but the sentinel becomes a "Handler used as lift" failure
+(`runner.ts:10492`, `:10902`, `describeHandlerStreamFailure` at `:11806`). That
+failure class is the trigger for the cold-start repairs, whose causes are
+structural (a setup marker naming another version, a manifest missing an
+internal cell) and which therefore outlive the sentinel; only the keying goes:
 
 - `isMissingStreamMarkerFailure` (`runner.ts:11862`) and the cold-start
   nested-piece setup repair keyed on it (`runner.ts:4942`).
@@ -61,40 +65,43 @@ therefore outlive the sentinel; only the keying goes:
   (`runner.ts:4470`), and the wave-withdrawal note that names it as the
   failure class a withdrawn setup produces (`runner.ts:4558`).
 - The pieces-controller cold-start repair comments
-  (`piece/src/ops/pieces-controller.ts:2168`, `:2402`).
+  (`packages/piece/src/ops/pieces-controller.ts:2168`, `:2402`).
 
 ### Secondary readers
 
-- `Cell.isStream` (`runner/src/cell.ts:1320`): kind first, then the resolved
-  link's schema, then the stored value. The schema branch compares the first
-  `asCell` entry with the string `"stream"` (`:1339`), so an object entry
+- `Cell.isStream` (`packages/runner/src/cell.ts:1320`): kind first, then the
+  resolved link's schema, then the stored value. The schema branch compares the
+  first `asCell` entry with the string `"stream"` (`:1339`), so an object entry
   `{ kind: "stream" }` is not recognized; `runner-utils.ts:164` does this
   correctly through `getAsCellKind`.
 - The schema-less query-result proxy returns a stream-kind cell when the value
-  is the sentinel (`runner/src/query-result-proxy.ts:349`). Added for the case
-  where an unspecified Output type lost stream-ness from the result schema.
+  is the sentinel (`packages/runner/src/query-result-proxy.ts:349`). Added for
+  the case where an unspecified Output type lost stream-ness from the result
+  schema.
 - `processDefaultValue` mints an in-memory immutable cell holding the sentinel
-  for an `asCell: ["stream"]` default (`runner/src/schema.ts:574`).
+  for an `asCell: ["stream"]` default (`packages/runner/src/schema.ts:574`).
 - The default-seeding guard skips a default that is the sentinel
-  (`runner/src/data-updating.ts:1193`).
+  (`packages/runner/src/data-updating.ts:1193`).
 - Two build-time checks read `value.$stream` from the in-memory export
-  (`runner/src/builder/pattern.ts:390`, `:1053`).
-- Out of runtime: `fuse/callables.ts:50`, `fuse/tree-builder.ts:166` and
-  `:554`, the shuttle listing's `kindOf` (`cli/lib/shuttle/listing.ts:434`),
-  `state-inspector/model.ts:216` and `decode.ts:122`,
-  `ui/.../cf-piece-menu.ts:155`. The CLI read guard
-  (`cli/lib/piece.ts:4707`) refuses on two signals, as its comment says: the
-  link-derived schema, and the stored value, which `detectCallableKind` reads
-  through `getRaw()` (`cli/lib/callable.ts:1226`) and hands to
-  `classifyCallableEntry` (`fuse/callables.ts:98`); `piece.test.ts:2617` pins
-  the value-only case.
+  (`packages/runner/src/builder/pattern.ts:390`, `:1053`).
+- Out of runtime: `packages/fuse/callables.ts:50`,
+  `packages/fuse/tree-builder.ts:166` and `:554`, the shuttle listing's `kindOf`
+  (`packages/cli/lib/shuttle/listing.ts:434`),
+  `packages/state-inspector/model.ts:216` and `decode.ts:122`,
+  `packages/ui/src/v2/components/cf-piece-menu/cf-piece-menu.ts:155`. The CLI
+  read guard (`packages/cli/lib/piece.ts:4707`) refuses on two signals, as its
+  comment says: the link-derived schema, and the stored value, which
+  `detectCallableKind` reads through `getRaw()`
+  (`packages/cli/lib/callable.ts:1226`) and hands to `classifyCallableEntry`
+  (`packages/fuse/callables.ts:98`); `piece.test.ts:2617` pins the value-only
+  case.
 
 ### What already knows stream-ness without the value
 
 - The cell kind at construction.
 - `asCell: ["stream"]` in a schema. The schema generator emits it from the
   `Stream<T>` brand, and the schema read path mints a stream-kind cell from it
-  without reading the value (`runner/src/schema.ts:1622`).
+  without reading the value (`packages/runner/src/schema.ts:1622`).
 - `wrapper: "handler"` on the module. `handler()` stamps it
   (`builder/module.ts:230`), the serializer keeps it
   (`builder/to-encodable-form.ts:277` spreads every non-function member), the
@@ -103,16 +110,16 @@ therefore outlive the sentinel; only the keying goes:
   for writer classification (`builder/pattern.ts:840`, `:980`).
 - `$kind: "stream"` in anonymous partial causes (`builder/pattern.ts:379`).
 - The `result` back-link meta that setup writes onto every derived document
-  regardless of value (`runner/src/result-utils.ts:31`, called from
+  regardless of value (`packages/runner/src/result-utils.ts:31`, called from
   `runner.ts:2986`). Event auto-start finds the owning piece through it with
-  no value read (`runner/src/ensure-piece-running.ts:173`).
+  no value read (`packages/runner/src/ensure-piece-running.ts:173`).
 
 ## Three design decisions
 
 ### 1. Stream-ness rides in the link schema, not the descriptor kind
 
 The descriptor's `kind` field is minted into the entity URI scheme
-(`runner/src/link-utils.ts:845`) and compared during manifest matching
+(`packages/runner/src/link-utils.ts:845`) and compared during manifest matching
 (`runner.ts:2971`); changing it re-materializes the cell under a new id.
 `EntityKind` is only `"computed"` today. So the stamp goes into the schema,
 which is not part of the id: derived-cell ids hash the cause, so existing
@@ -121,23 +128,23 @@ of this plan takes that migration on for streams; this plan does not.
 
 Two schemas need the stamp, not one. When a partial-cause alias is bound to a
 link, `scopedLinkForPath` prefers the alias's own schema over the descriptor's
-(`runner/src/pattern-binding.ts:179`, `:295`), and result-field aliases are
-emitted with the cell's sanitized schema (`builder/pattern.ts:509`). So the
+(`packages/runner/src/pattern-binding.ts:179`, `:295`), and result-field aliases
+are emitted with the cell's sanitized schema (`builder/pattern.ts:509`). So the
 builder must stamp `asCell: ["stream"]` on both the descriptor schema and the
 alias schema it emits for a stream-kind cell.
 
 Once stamped, every path that reaches the stream through a link the builder or
 setup emits sees it: the `$event` sigil in stored node inputs and the
-result-field redirect both carry the descriptor/alias schema (manifest links
-are emitted with `includeSchema: true` at `runner.ts:2979`), and link
-resolution copies a stored redirect's schema onto the resolved link
-(`runner/src/link-resolution.ts:722`). `Cell.isStream` already resolves a
-content-addressed schema reference before looking for the stamp, so a stamp
+result-field redirect both carry the descriptor/alias schema (manifest links are
+emitted with `includeSchema: true` at `runner.ts:2979`), and link resolution
+copies a stored redirect's schema onto the resolved link
+(`packages/runner/src/link-resolution.ts:722`). `Cell.isStream` already resolves
+a content-addressed schema reference before looking for the stamp, so a stamp
 that rides as a reference is read the same way.
 
 A builtin that re-serializes a branch at run time is a separate writer.
 `getAsLink({ base })` carries a schema only when asked
-(`runner/src/link-utils.ts:391`), so `ifElse`, `when` and `unless`
+(`packages/runner/src/link-utils.ts:391`), so `ifElse`, `when` and `unless`
 (`builtins/if-else.ts:77`, `when.ts:48`, `unless.ts:48`) must each ask for it
 when the selected branch declares a stream, or the link they store names the
 stream's document with nothing on it that says so.
@@ -151,12 +158,11 @@ resolved link.
 
 ### 2. Handler dispatch keys on the module wrapper, not the `$event` key
 
-Keying on `$event` alone is unsafe: the lunch-poll pattern documents a real
-trap where an onClick inside a computed-returned VNode mis-lowers so a lift
-node ends up with `$event` in its inputs
-(`patterns/lunch-poll/main.tsx:1423`). Today only the sentinel read catches
-that. Under a `$event`-keyed rule the node would be silently instantiated as a
-handler that never fires.
+Keying on `$event` alone is unsafe: the lunch-poll pattern documents a real trap
+where an onClick inside a computed-returned VNode mis-lowers so a lift node ends
+up with `$event` in its inputs (`packages/patterns/lunch-poll/main.tsx:1423`).
+Today only the sentinel read catches that. Under a `$event`-keyed rule the node
+would be silently instantiated as a handler that never fires.
 
 The dispatch rule:
 
@@ -164,51 +170,54 @@ The dispatch rule:
    link and register on it. No value read. Stage 3 adds the assertion that
    the parsed link's schema declares a stream; that still reads nothing.
 2. Wrapper is `"handler"` and `$event` absent: throw, the node is malformed.
-3. No wrapper and `$event` present: throw with a message naming the
-   lift-with-event-input mistake. This replaces every "Handler used as lift"
-   variant. The guard at `runner.ts:10492` is unreachable today (the resolver
-   always claims a node with `$event`) and becomes the live check here; its
-   message must be rewritten.
+3. No wrapper and `$event` present: refuse the node by name, with a message
+   naming the lift-with-event-input mistake. This replaces every "Handler
+   used as lift" variant, including the guard at `runner.ts:10492`, which is
+   unreachable today (the resolver always claims a node with `$event`) and
+   goes with the value read rather than becoming the live check.
 4. Neither: ordinary action node.
 
 Hand-built handler nodes already carry the wrapper
-(`runner/test/ensure-piece-running.test.ts:694`,
-`cli/test/piece-verbs.test.ts:103`). Of the seven tests at
-`runner/test/runner.test.ts:1528` through `:1738` that omit it, four exist to
-read a value at `$event` (a missing marker, an overwritten marker, the
+(`packages/runner/test/ensure-piece-running.test.ts:694`,
+`packages/cli/test/piece-verbs.test.ts:103`). Of the seven tests at
+`packages/runner/test/runner.test.ts:1528` through `:1738` that omit it, four
+exist to read a value at `$event` (a missing marker, an overwritten marker, the
 pre-manifest hint, the truncated diagnostic) and go with the value read; the
-three that bind `$event` to a literal stay and fail on the structural check,
-and a positive test beside them registers a handler on a stream whose document
-holds no value.
+three that bind `$event` to a literal stay and fail on the structural check, and
+a positive test beside them registers a handler on a stream whose document holds
+no value.
 
 A user-authored lift that legitimately wants an input named `$event` stays
 rejected, exactly as today. Rule 3 keeps that restriction on purpose.
 
 ### 3. The stream's document carries only the back-link
 
-Without the sentinel the derived document holds the `result` back-link meta
-and nothing else. It is still listed (the memory server's entity page selects
-current ids with no value condition, `memory/v2/engine.ts:2188`), still the
-id a served event's sidecar entry names (`of:stream-events:` docs,
-`memory/v2/engine.ts:2577`), and still found by event auto-start. What it no
-longer does is describe itself: a reader that has only the document cannot
+Without the sentinel the derived document holds the `result` back-link meta and
+nothing else. It is still listed (the memory server's entity page selects
+current ids with no value condition, `packages/memory/v2/engine.ts:2188`), still
+the id a served event's sidecar entry names (`of:stream-events:` docs,
+`packages/memory/v2/engine.ts:2577`), and still found by event auto-start. What
+it no longer does is describe itself: a reader that has only the document cannot
 tell it is a stream.
 
 - The state inspector would classify it as `owned-cell` labeled "(lineage)"
-  (`state-inspector/model.ts:383`) and the `stream` entity kind would stop
-  firing.
+  (`packages/state-inspector/model.ts:383`) and the `stream` entity kind would
+  stop firing.
 - The shuttle listing classifies a position from its materialized value alone
-  (`cli/lib/shuttle/listing.ts:434`) and would label every stream a plain
-  value. Its own comment says the listing and the CLI read guard must agree
-  about which positions are callables; today they agree through the sentinel.
+  (`packages/cli/lib/shuttle/listing.ts:434`) and would label every stream a
+  plain value. Its own comment says the listing and the CLI read guard must
+  agree about which positions are callables; today they agree through the
+  sentinel.
 - The FUSE entities view would project an empty owned document.
 - The FUSE piece view is mostly fine, because the bridge reads results through
-  the pattern's result schema (`piece/src/ops/piece-controller.ts:4990`) and
-  its classifier falls back to the child handle when the value says nothing
-  (`fuse/cell-bridge.ts:4782`, keeping the entry at `:4787` even when the
-  value is undefined; the schema argument only detects tools until stage 2).
+  the pattern's result schema
+  (`packages/piece/src/ops/piece-controller.ts:4990`) and its classifier falls
+  back to the child handle when the value says nothing
+  (`packages/fuse/cell-bridge.ts:4782`, keeping the entry at `:4787` even when
+  the value is undefined; the schema argument only detects tools until stage 2).
   The gap is nested objects: the tree builder's JSON sibling is built from
-  values (`fuse/tree-builder.ts:544`), so an undefined value drops the key.
+  values (`packages/fuse/tree-builder.ts:544`), so an undefined value drops the
+  key.
 
 The plan does not put a declaration back onto the document. A `schema` meta
 beside the back-link would be the sentinel moved from value to meta: safer
@@ -219,20 +228,20 @@ document resolves it through the owner: follow the `result` back-link to the
 owner's result document, read its `internal` manifest, and take the schema of
 the entry whose link names the document. That is the stamped link decision 1
 emits (`includeSchema: true` at `runner.ts:2979`), so there is one source of
-truth. `followResultCellChain` (`runner/src/ensure-piece-running.ts:45`) is
-the first half of that walk already; the manifest lookup is the second. Cost:
-one extra document per classification for a reader that starts from a bare
-document. The inspector holds the whole space and pays it from memory; the
-shuttle listing and the CLI read guard start from a parent cell and its link
-and never pay it. The walk is interim: the follow-up puts the owner into the
-stream's address and deletes it, so stage 3 keeps it to one function that the
-inspector and the runtime share.
+truth. `followResultCellChain`
+(`packages/runner/src/ensure-piece-running.ts:45`) is the first half of that
+walk already; the manifest lookup is the second. Cost: one extra document per
+classification for a reader that starts from a bare document. The inspector
+holds the whole space and pays it from memory; the shuttle listing and the CLI
+read guard start from a parent cell and its link and never pay it. The walk is
+interim: the follow-up puts the owner into the stream's address and deletes it,
+so stage 3 keeps it to one function that the inspector and the runtime share.
 
 The runtime pays it in one place. `Cell.isStream` and the proxy decide from
 the handle's kind and the resolved link's schema, and a bare address to the
 stream document, with no stored link hop to carry a stamp, has neither. The
 llm-dialog read and invoke tools dispatch on such an address
-(`runner/src/builtins/llm-dialog.ts:2067`, `:2078`), built from an
+(`packages/runner/src/builtins/llm-dialog.ts:2067`, `:2078`), built from an
 LLM-supplied path with no schema (`:2050`). Stage 3 resolves a bare address
 through the owner before the stream decision, with the same walk; that is what
 replaces the value read there.
@@ -313,9 +322,9 @@ than what the list first said, the item says what it does now and why.
       manifest it read.
 - [x] Shuttle listing: a key is a `callable` off the child's link-derived
       schema, the same signal the CLI read guard refuses on, through a new
-      `listCallableKeys` read (`cli/lib/piece.ts`) that runs beside the value
-      read and fails open the way the guard does. The listing skips it for a
-      keyless cell. A position still reading as the sentinel counts as a
+      `listCallableKeys` read (`packages/cli/lib/piece.ts`) that runs beside the
+      value read and fails open the way the guard does. The listing skips it for
+      a keyless cell. A position still reading as the sentinel counts as a
       callable until stage 3.
 - [x] FUSE, in part. `classifyCallableEntry` takes a schema that declares a
       stream as a handler whatever stands at the position; the bridge's
@@ -328,11 +337,11 @@ than what the list first said, the item says what it does now and why.
       projection of a bare stream document, which `#materializeTreeValue`
       already leaves empty rather than failing. Both are follow-ups if anyone
       wants them.
-- [ ] CLI read guard: the comment at `cli/lib/piece.ts:4694` keeps naming
-      both of its signals, the link-derived schema and the stored value,
+- [ ] CLI read guard: the comment at `packages/cli/lib/piece.ts:4694` keeps
+      naming both of its signals, the link-derived schema and the stored value,
       because `detectCallableKind` reads the value through `getRaw()`
-      (`cli/lib/callable.ts:1226`) until stage 3 removes that read. Stage 2's
-      rewrite of the comment claims one signal and reverts to two.
+      (`packages/cli/lib/callable.ts:1226`) until stage 3 removes that read.
+      Stage 2's rewrite of the comment claims one signal and reverts to two.
 - [x] Piece menu: already schema-first with a parent-schema fallback
       (`cf-piece-menu.ts:1851`); remove `isRawStreamMarker`.
 - [x] Test fixtures, in part. Every fixture that built a stream through a real
@@ -352,13 +361,16 @@ than what the list first said, the item says what it does now and why.
 - [x] Docs. The six live documents and the formal spec's encoding table now
       describe the declaration, and the formal spec says the marker is retired
       rather than renamed to `/Stream@1`. The builder README and the lunch-poll
-      deploy guide follow. Comments in pattern sources (`sidebar.tsx:84`,
-      `gmail-agentic-search.tsx:1136`) still mention the marker: editing a
-      pattern's source changes its identity, so they are left alone.
-      `gideon-tests/test-cross-piece-client.tsx:71` is not a comment: its
-      handler branches on `innerValue.$stream` and reports "Stream not found"
-      for a stream set up under stage 1. It is a manual fixture that no CI
-      job dispatches; stage 3 rewrites it (see there).
+      deploy guide follow. Two pattern comments still mention the marker,
+      `packages/patterns/catalog/ui/sidebar/sidebar.tsx:84` and line 1136 of
+      `packages/patterns/google/core/experimental/gmail-agentic-search.tsx`:
+      editing a pattern's source changes its identity,
+      so each waits for the next edit its pattern gets for a reason of its own,
+      and stage 3's sweep names both as the allowed residue.
+      `packages/patterns/gideon-tests/test-cross-piece-client.tsx:71` is not a
+      comment: its handler branches on `innerValue.$stream` and reports "Stream
+      not found" for a stream set up under stage 1. It is a manual fixture that
+      no CI job dispatches; stage 3 rewrites it (see there).
 - [x] Not foreseen: a stream declared through a `$ref` into the schema's own
       `$defs`, or through a composition whose branches agree (`allOf` with
       plain constraints beside it, a uniform `anyOf`/`oneOf`), was not a
@@ -386,7 +398,7 @@ than what the list first said, the item says what it does now and why.
       `query-result-proxy-shape-reactivity.test.ts` pins), the inspector's
       value check (`model.ts` and `decode.ts`), the shuttle listing's
       (`kindOf`), FUSE's `isStreamValue` in `callables.ts`, and `isStreamValue`
-      in `runner/src/builder/types.ts` (and its re-export).
+      in `packages/runner/src/builder/types.ts` (and its re-export).
 - [ ] A bare address to a stream document resolves through the owner before
       any stream decision: follow the `result` back-link, read the owner's
       `internal` manifest, and take the stamped link's schema (decision 3).
@@ -396,11 +408,21 @@ than what the list first said, the item says what it does now and why.
       only a new write), and the llm-dialog dispatch at
       `builtins/llm-dialog.ts:2067`. One function, shared with the inspector's
       classification; the follow-up deletes it.
+- [ ] Decide compatibility for pieces last set up before stage 1, before the
+      value branch goes. Owner resolution covers a bare address whose owner
+      manifest is stamped; a piece set up before stage 1 has an unstamped
+      stored link and an unstamped owner manifest, so nothing declares its
+      streams once the value is not read. The choice is to migrate, a setup
+      pass over such pieces that re-emits stamped manifest links, or to
+      accept the break: sends through those links become value writes rather
+      than events. The follow-up below re-materializes every stream under a
+      new id in any case, so the question is whether old pieces break once or
+      twice. Record the choice here.
 - [ ] Handler dispatch asserts that the parsed `$event` link's schema declares
       a stream (decision 2, rule 1).
-- [ ] `detectCallableKind` stops reading the value (`cli/lib/callable.ts:1226`),
-      and the read-guard comment at `cli/lib/piece.ts:4694` then names one
-      signal.
+- [ ] `detectCallableKind` stops reading the value
+      (`packages/cli/lib/callable.ts:1226`), and the read-guard comment at
+      `packages/cli/lib/piece.ts:4694` then names one signal.
 - [ ] Rewrite the pure fakes deferred from stage 2, whose `getRaw` returns the
       sentinel: the CLI's `piece-call`, `piece-connection`, `exec`,
       `exec-read-options`, `read-options-four-ways` and
@@ -408,31 +430,38 @@ than what the list first said, the item says what it does now and why.
       `piece.test.ts` that exists to pin the sentinel path. Each should carry
       `schema: { asCell: ["stream"] }` or `isStream: () => true` and return
       `undefined` from `getRaw`.
-- [ ] `gideon-tests/test-cross-piece-client.tsx` sends without inspecting the
-      stream's value, and its baseline is refreshed with
+- [ ] `packages/patterns/gideon-tests/test-cross-piece-client.tsx` sends without
+      inspecting the stream's value, and its baseline is refreshed with
       `deno task pattern-compat --update`, the documented remedy for the
       identity change.
-- [ ] Decide the raw-document fixtures that model older data:
-      `scripts/topics-export.test.ts`, `storage-subscription-filter.bench.ts`
-      and the codec round-trip case in `data-model/test/codecs.test.ts`. The
-      first two seed a sentinel where nothing reads it, so they can stay as
-      history or switch to a stamped link; the codec case is about `$`-keyed
-      records in general and should keep the key under another name.
+- [ ] The raw-document fixtures that model older data switch off the
+      sentinel: `scripts/topics-export.test.ts` and
+      `packages/runner/test/storage-subscription-filter.bench.ts` seed a
+      stamped link where they seed `{ $stream: true }` today (nothing reads
+      the value in either), and the codec round-trip case in
+      `packages/data-model/test/codecs.test.ts`, which is about `$`-keyed
+      records in general, keeps its record under another key.
 - [ ] Confirm no `$stream` remains outside `docs/history/`, the plan docs, and
-      pattern sources whose comments cannot change without changing the
-      pattern's identity.
+      exactly two pattern comments,
+      `packages/patterns/catalog/ui/sidebar/sidebar.tsx:84` and line 1136 of
+      `packages/patterns/google/core/experimental/gmail-agentic-search.tsx`.
+      Each is rewritten the next time its pattern changes for a reason of its
+      own; an edit changes the pattern's identity, and a comment does not earn
+      one.
 
 Stage 3 has no observable precondition in the data. Setup re-emits only
 manifest links; a running piece reuses its setup without re-emitting them
 (`runner.ts:2838`); the setup marker records pattern identity, not a format
 (`runner.ts:3257`); and links written into data before stage 1 are never
-rewritten. So the owner resolution above is what lets the value read go, not
-a waiting period. Documents that still hold a sentinel are harmless after
-stage 3: the value is ignored, and nothing reads it.
+rewritten. So what lets the value read go is the owner resolution above for
+pieces whose manifests are stamped and the compatibility decision above for
+pieces whose manifests are not; a waiting period settles neither. Documents
+that still hold a sentinel are harmless after stage 3: the value is ignored,
+and nothing reads it.
 
 ## Testing
 
-- Every handler node in `runner/test` instantiates with no value at its
+- Every handler node in `packages/runner/test` instantiates with no value at its
   `$event` target. Assert the derived document holds no value after setup.
 - The three `refuses ...` tests at `runner.test.ts:1528` onward fail on the
   structural check, with its message, and the positive test beside them
@@ -472,9 +501,10 @@ stage 3: the value is ignored, and nothing reads it.
 - **Unstamped stored links.** Pieces whose last setup ran before stage 1 carry
   unstamped manifest links until their next setup pass, and links a handler or
   lift wrote into data before stage 1 are never rewritten. The value fallback
-  covers both until stage 3 and the owner resolution after it; a `send()`
-  through a link neither covers becomes a value write with no error, which is
-  the failure to watch for.
+  covers both until stage 3; after it, the owner resolution covers a link
+  whose owner manifest is stamped and the stage 3 compatibility decision
+  governs the rest. A `send()` through a link nothing covers becomes a value
+  write with no error, which is the failure to watch for.
 - **The `.map` sub-pattern case.** The proxy fallback was added for it, and the
   sidebar pattern still documents the failure. Do not remove the fallback
   before the regression test is green.
@@ -507,8 +537,8 @@ happens. What it changes:
   declines here, and the follow-up's first section states it and the cutover
   for it.
 - **Sidecars.** A stream's event sidecar hashes the stream link
-  (`memory/v2.ts:407`), so it moves with the id; entries in flight at the
-  cutover drain first or are rewritten.
+  (`packages/memory/v2.ts:407`), so it moves with the id; entries in flight at
+  the cutover drain first or are rewritten.
 - **Readers.** The inspector, FUSE, the shuttle listing and the runtime's
   bare-address case classify a stream from its id alone. The owner walk stage
   3 adds is deleted; the link-schema stamp and the handle kind stay, since
@@ -517,7 +547,8 @@ happens. What it changes:
   and skips the back-link chain for it.
 - **The document.** Nothing writes to it and nothing reads it. Whether the
   record exists at all becomes the storage question the unification in
-  `2-storage-format.md:95` answers, and can be settled there.
+  `docs/specs/space-model/2-storage-format.md:95` answers, and can be settled
+  there.
 
 What this plan does in anticipation: stream-ness decisions key on the link
 schema and the handle kind, both of which survive an id change; the owner
@@ -526,8 +557,9 @@ new is written onto the stream document that a migration would have to carry.
 
 ## Not in scope
 
-- Unifying streams with value cells, which `2-storage-format.md:95` floats;
-  the follow-up above is the step toward it this plan commits to.
+- Unifying streams with value cells, which
+  `docs/specs/space-model/2-storage-format.md:95` floats; the follow-up above is
+  the step toward it this plan commits to.
 - Changing derived-cell identity or the manifest format; the follow-up takes
   the identity change for streams.
 - Allowing a lift to take an input named `$event`.
