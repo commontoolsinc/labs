@@ -185,6 +185,26 @@ describe("store", () => {
   });
 
   describe("fetchManifest()", () => {
+    /**
+     * A store that lists one manifest and answers for the object itself
+     * however the caller says. The listing has to succeed for the reader
+     * to reach the object at all.
+     */
+    const listingOnly = (answer: () => Promise<Response>): typeof fetch =>
+      ((input: string | URL | Request) => {
+        const url = new URL(
+          String(input instanceof Request ? input.url : input),
+        );
+        if (!url.pathname.endsWith("/o")) return answer();
+        const items = [{
+          name: `${AREA}/manifest-2026-08-20T04:00:00.000Z-b.json.gz`,
+          timeCreated: "2026-08-20T04:00:00.000Z",
+        }];
+        return Promise.resolve(
+          new Response(JSON.stringify({ items }), { status: 200 }),
+        );
+      }) as typeof fetch;
+
     it("reads the area every stored object is under", () => {
       expect(`labs/test-selection/${SELECTION_AREA}`).toBe(AREA);
     });
@@ -312,6 +332,31 @@ describe("store", () => {
         expect(found.absent).toContain("no usable creation time");
       });
     }
+
+    it("reports an object the listing named and the store would not give", async () => {
+      // A manifest deleted between the listing and the read looks like
+      // this. Every way a fetch can go wrong ends as no manifest with a
+      // sentence saying so, rather than as an exception out of a lane.
+      const found = await fetchManifest({
+        at,
+        env: NO_ENV,
+        fetch: listingOnly(() =>
+          Promise.resolve(new Response("", { status: 404 }))
+        ),
+      });
+      expect(found.manifest).toBeUndefined();
+      expect(found.absent).toContain("HTTP 404");
+    });
+
+    it("reports a read of one object that threw", async () => {
+      const found = await fetchManifest({
+        at,
+        env: NO_ENV,
+        fetch: listingOnly(() => Promise.reject(new Error("connection lost"))),
+      });
+      expect(found.manifest).toBeUndefined();
+      expect(found.absent).toContain("connection lost");
+    });
 
     it("treats an unreachable store as absent", async () => {
       const found = await fetchManifest({

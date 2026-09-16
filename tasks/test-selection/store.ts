@@ -134,8 +134,7 @@ export function newestFirstAtOrBefore(
       if (a.createdAt !== b.createdAt) {
         return a.createdAt < b.createdAt ? 1 : -1;
       }
-      if (a.name === b.name) return 0;
-      return a.name < b.name ? 1 : -1;
+      return a.name < b.name ? 1 : a.name > b.name ? -1 : 0;
     })
     .map(({ name }) => name);
 }
