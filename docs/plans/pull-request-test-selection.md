@@ -1497,7 +1497,10 @@ publisher computes:
   arrives in combine into the percentile of the whole. Only passing
   executions are measured: a failure ended where the failure was
   reached, and where a wait's safety net ended it, its duration is that
-  net's bound.
+  net's bound. A day records the set of cost rules that sealed it, or
+  carries no record where it was sealed before any were kept, and a day
+  an earlier set sealed answers only until the rules in force have
+  sealed one for that test.
 
 Variants never fold into one another for scoring. A default test and its
 `server-execution` counterpart have independent catches, flake rates, and

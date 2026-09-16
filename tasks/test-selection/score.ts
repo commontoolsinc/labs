@@ -643,7 +643,23 @@ export interface DaySamples {
 
   /** How many ran in all, which is what a percentile's rank is taken over. */
   count: number;
+
+  /**
+   * Which set of cost rules measured them, on a day a state holds. A
+   * batch on its way into one carries none, since the day it is sealed
+   * into is what records the set that sealed it.
+   */
+  rule?: number;
 }
+
+/**
+ * Which set of cost rules a day a state holds was sealed under: which
+ * executions reach a day's sample, and what the sample holds. Change it
+ * to any other value in the same change that alters either. The values
+ * are not ordered and nothing but equality is asked of them; a day
+ * carrying none was sealed before the stamps began, under the first set.
+ */
+export const COST_RULE = 2;
 
 /** A fresh, empty sample. */
 export function emptySamples(): DaySamples {
@@ -719,16 +735,22 @@ export function sealDay(
   day: string,
   batch: DaySamples,
 ): void {
+  if (batch.count === 0) return;
+  // A day another set of rules sealed answers only until these rules
+  // have sealed one, and this is that sealing, so the rest of what that
+  // set left goes here. What is left afterwards is one set's days.
+  for (const [sealed, samples] of Object.entries(state.costByDay)) {
+    if (samples.rule !== COST_RULE) delete state.costByDay[sealed];
+  }
   // The only writer of a day's sample, so what is already there is
   // another sealing of the same day from an earlier run and can be
   // combined with this one. Nothing writes a provisional value alongside
   // it, whose count would then be added to a count that already includes
   // it.
-  if (batch.count === 0) return;
-  state.costByDay[day] = mergeSamples(
-    state.costByDay[day] ?? emptySamples(),
-    batch,
-  );
+  state.costByDay[day] = {
+    ...mergeSamples(state.costByDay[day] ?? emptySamples(), batch),
+    rule: COST_RULE,
+  };
 }
 
 /** A day as an older state wrote it: the percentile rather than the samples. */

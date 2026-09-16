@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 
 import {
   churn,
+  COST_RULE,
   COST_SAMPLE_CAP,
   costSeconds,
   type DaySamples,
@@ -29,6 +30,7 @@ import {
 } from "./score.ts";
 import {
   CATCH_BREADTH_WINDOW_DAYS,
+  COST_WINDOW_DAYS,
   FLAKE_COMMIT_REACH,
   FLAKE_EXCLUSION_RATE,
   SAME_COMMIT_REACH_DAYS,
@@ -714,6 +716,17 @@ describe("sealDay()", () => {
     expect(state.costByDay["2026-08-20"]).toBeUndefined();
   });
 
+  it("leaves the other days these rules sealed where they are", () => {
+    // Sealing clears what another set of rules left, and every day this
+    // set sealed is not that.
+    const state = emptyState();
+    sealDay(state, "2026-08-19", samplesOf([900]));
+    sealDay(state, "2026-08-20", samplesOf([10]));
+    expect(Object.keys(state.costByDay).sort())
+      .toEqual(["2026-08-19", "2026-08-20"]);
+    expect(costSeconds(state, "2026-08-20")).toBe(0.9);
+  });
+
   it("keeps the sample it was handed out of the state it wrote", () => {
     const state = emptyState();
     const batch = samplesOf([10, 20]);
@@ -722,6 +735,7 @@ describe("sealDay()", () => {
     expect(state.costByDay["2026-08-20"]).toEqual({
       slowest: [10, 20],
       count: 2,
+      rule: COST_RULE,
     });
   });
 });
@@ -748,15 +762,14 @@ describe("readCostsForward()", () => {
     expect(costSeconds(state, "2026-08-20")).toBe(4);
   });
 
-  it("weighs such a day by its executions when the rest of it lands", () => {
-    // A day arrives over as many runs as it takes, so a day read forward
-    // is still open. One execution standing for the whole of it would be
-    // outweighed by the next part to arrive, and a day of slow runs
-    // would come to report a fast one.
+  it("gives way to the day these rules seal, on the same day", () => {
+    // The figure it carries is one an earlier set of rules produced, so
+    // the part of the day that lands under these replaces it rather
+    // than joining it.
     const state = held(30_000, 45);
     readCostsForward(state);
     sealDay(state, "2026-08-20", samplesOf([10, 20]));
-    expect(costSeconds(state, "2026-08-20")).toBe(30);
+    expect(costSeconds(state, "2026-08-20")).toBe(0.02);
   });
 
   it("reads a day whose stored figures are not numbers as empty", () => {
@@ -791,6 +804,74 @@ describe("readCostsForward()", () => {
     const kept = state.costByDay["2026-08-20"];
     readCostsForward(state);
     expect(state.costByDay["2026-08-20"]).toBe(kept);
+  });
+});
+
+describe("a day another set of cost rules sealed", () => {
+  /** A state holding one day of executions, sealed by no known set. */
+  const sealedBefore = (day: string, ms: number): IdentityState => {
+    const state = emptyState();
+    state.costByDay[day] = samplesOf(Array.from({ length: 20 }, () => ms));
+    return state;
+  };
+
+  it("answers while these rules have sealed nothing", () => {
+    // A test that has not passed since the rules changed has only what
+    // the earlier ones measured, and that is a better answer than none.
+    const state = sealedBefore("2026-08-20", 300_000);
+    expect(costSeconds(state, "2026-08-20")).toBe(300);
+  });
+
+  it("stops answering once these rules have sealed anything", () => {
+    // The day the earlier rules sealed is the larger figure, and the
+    // largest day is what a cost otherwise is, so this says the day is
+    // out of the reckoning rather than merely outweighed.
+    const state = sealedBefore("2026-08-20", 300_000);
+    sealDay(state, "2026-08-20", samplesOf([20_000, 20_000]));
+    expect(costSeconds(state, "2026-08-20")).toBe(20);
+  });
+
+  it("stops answering on a day of its own, not only on the same day", () => {
+    // A record of an older day can reach the store late, so the day
+    // these rules seal need not be the newest the state holds. Left
+    // behind, the earlier rules' figure would come back the moment the
+    // sealed day aged out from under it.
+    const state = sealedBefore("2026-08-19", 300_000);
+    state.costByDay["2026-08-20"] = samplesOf([300_000, 300_000]);
+    sealDay(state, "2026-08-19", samplesOf([1000, 1000]));
+    expect(costSeconds(state, "2026-08-20")).toBe(1);
+    trimWindows(state, "2026-08-27");
+    expect(costSeconds(state, "2026-08-27")).toBe(0);
+  });
+
+  it("gives way to a day these rules sealed under any other stamp", () => {
+    // Nothing orders the stamps; a day answers as one of these days or
+    // it does not.
+    for (const rule of [undefined, COST_RULE - 1, COST_RULE + 1]) {
+      const state = sealedBefore("2026-08-20", 300_000);
+      state.costByDay["2026-08-20"]!.rule = rule;
+      sealDay(state, "2026-08-20", samplesOf([1000]));
+      expect(costSeconds(state, "2026-08-20")).toBe(1);
+    }
+    const held = sealedBefore("2026-08-20", 300_000);
+    held.costByDay["2026-08-20"]!.rule = COST_RULE;
+    sealDay(held, "2026-08-20", samplesOf([1000]));
+    expect(costSeconds(held, "2026-08-20")).toBe(300);
+  });
+
+  it("ages out of the window as a day these rules sealed does", () => {
+    const inside = sealedBefore(
+      dayBefore("2026-08-20", COST_WINDOW_DAYS),
+      300_000,
+    );
+    trimWindows(inside, "2026-08-20");
+    expect(costSeconds(inside, "2026-08-20")).toBe(300);
+    const past = sealedBefore(
+      dayBefore("2026-08-20", COST_WINDOW_DAYS + 1),
+      300_000,
+    );
+    trimWindows(past, "2026-08-20");
+    expect(costSeconds(past, "2026-08-20")).toBe(0);
   });
 });
 

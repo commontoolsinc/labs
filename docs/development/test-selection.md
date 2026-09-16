@@ -295,6 +295,24 @@ ones it could no longer reach. An aggregate written before those files
 were carried holds none, and each identity rejoins the manifest as its
 records name a file again.
 
+A day of an identity's cost window carries the set of cost rules that
+sealed it, as `COST_RULE`. A day carrying no such stamp was sealed
+before the stamps began, which is every day an aggregate written before
+them holds, and it counts as another set's day like any other.
+
+Sealing a day drops every day of that identity another set sealed, so a
+state holds one set's days. Another set's day is charged while it is all
+there is, which for a test that has not passed since the change is until
+the day ages out of the window, and is dropped the moment the rules in
+force seal a day for that test.
+
+Changing which executions reach a day's sample, or what the sample
+holds, means changing `COST_RULE` in the same change. The cost window
+then refills over its own length, charging fewer days' figures while it
+does; carrying the old days instead would have figures the new rules
+would never produce deciding what a pull request runs for that same
+stretch.
+
 **Nothing gates on it.** When the publisher fails, the previous manifest is
 still the newest one and consumers keep using it. A manifest going stale
 degrades selection quality slowly rather than failing anything, which is
