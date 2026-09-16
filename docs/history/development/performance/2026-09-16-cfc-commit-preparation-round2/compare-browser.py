@@ -12,7 +12,7 @@ def normalized(x):
    for k,y in v.items():
     if k=='space' and isinstance(y,str):spaces.add(y)
     else:collect_spaces(y)
- payload={k:x[k] for k in ['contents','sourceLabel','resolvedLabels','strictReason','elementLabels']}
+ payload={k:x[k] for k in ['label','count','contents','sourceLabel','resolvedLabels','strictReason','elementLabels']}
  collect_spaces(payload)
  if len(spaces)!=1:raise ValueError('Expected exactly one harness space')
  harness_space=next(iter(spaces))
@@ -20,7 +20,8 @@ def normalized(x):
   if isinstance(v,list):return [visit(y) for y in v]
   if isinstance(v,dict):
    r={}
-   for k,y in v.items():
+   for k in sorted(v):
+    y=v[k]
     if k=='id' and v.get('space')==harness_space and isinstance(y,str) and y.startswith('of:'):
      r[k]=ids.setdefault(y,f'<ref{len(ids)}>')
     elif k=='space' and y==harness_space:r[k]='<harness-space>'

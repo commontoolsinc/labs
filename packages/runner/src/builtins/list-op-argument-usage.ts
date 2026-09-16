@@ -1,5 +1,5 @@
 import type { Pattern } from "../builder/types.ts";
-import { schemaPathSelection } from "../schema-path.ts";
+import { ContextualFlowControl } from "../cfc.ts";
 
 export type ListOpArgumentUsage = {
   usesElement: boolean;
@@ -14,7 +14,9 @@ function hasArgumentSchema(
   pattern: Pattern,
   path: readonly string[],
 ): boolean {
-  return schemaPathSelection(pattern.argumentSchema, path).selected;
+  return ContextualFlowControl.getSchemaAtPath(pattern.argumentSchema, [
+    ...path,
+  ]) !== undefined;
 }
 
 export function inferListOpArgumentUsage(
