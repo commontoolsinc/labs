@@ -137,7 +137,7 @@ export function tagOfUnknownElseNull<PlusType = never>(
 export function tagOfFabricValue(value: FabricValueLayer): FabricValueTag;
 export function tagOfFabricValue<PlusType = never>(
   value: NoInfer<FabricValuePlusLayer<PlusType>>,
-  isPlusType: PlusTypePredicate<PlusType>,
+  isPlusType: PlusTypePredicate<PlusType> | undefined,
 ): FabricValuePlusTag;
 export function tagOfFabricValue<PlusType = never>(
   value: FabricValuePlusLayer<PlusType>,
@@ -168,7 +168,7 @@ export function tagOfFabricValueElseNull(
 ): FabricValueTag | null;
 export function tagOfFabricValueElseNull<PlusType = never>(
   value: NoInfer<FabricValuePlusLayer<PlusType>>,
-  isPlusType?: PlusTypePredicate<PlusType> | undefined,
+  isPlusType: PlusTypePredicate<PlusType> | undefined,
 ): FabricValuePlusTag | null;
 export function tagOfFabricValueElseNull<PlusType = never>(
   value: FabricValuePlusLayer<PlusType>,
