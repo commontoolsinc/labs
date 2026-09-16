@@ -59,8 +59,10 @@ const SPACE = "did:key:z6Mk-s";
 /** Builds a whole message with `value` at the position under test. */
 type Place = (value: FabricValue) => Record<string, FabricValue>;
 
-/** Frames the message that `place` builds, carrying one peer-sendable
- *  instance at the position under test. */
+/**
+ * Frames the message that `place` builds, carrying one peer-sendable
+ * instance at the position under test.
+ */
 type FrameFor = (place: Place) => string;
 
 /**
@@ -70,8 +72,10 @@ type FrameFor = (place: Place) => string;
  */
 const PLACEHOLDER = "placeholder-for-an-unrecognized-tag";
 
-/** A tagged value no codec version builds, which decodes to an
- *  `UnknownValue`. */
+/**
+ * A tagged value no codec version builds, which decodes to an
+ * `UnknownValue`.
+ */
 const UNRECOGNIZED = '{"/NotActuallyValid@123":0}';
 
 const frameForBytes: FrameFor = (place) =>
