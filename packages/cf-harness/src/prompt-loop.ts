@@ -110,6 +110,7 @@ import type {
 } from "./contracts/tool-descriptor.ts";
 import {
   type HarnessToolBackingAvailability,
+  isSubagentOnlyToolId,
   parentToolIdsForBacking,
   withheldToolIds,
 } from "./contracts/tool-descriptor.ts";
@@ -2877,8 +2878,19 @@ export class CfHarnessPromptLoop {
     const requestedToolIds = options.allowedToolIds ??
       parentToolIdsForBacking(availability);
     const withheld = withheldToolIds(availability);
+    // A subagent-only tool never reaches a parent, however it was asked for.
+    // `parentToolIdsForBacking` already omits them, but an explicit
+    // `allowedToolIds` arrives here from a CLI flag, an interactive client's
+    // chat policy, and any library caller, and each of those validates against
+    // the tools this build defines. This is the one boundary all of them pass
+    // through, so it is where the rule is enforced rather than restated; a
+    // run with a lineage is a subagent, and only a subagent may hold them.
+    const isSubagent = this.engine.getRunState().lineage !== undefined;
     this.#allowedToolIds = new Set(
-      requestedToolIds.filter((toolId) => !withheld.has(toolId)),
+      requestedToolIds.filter((toolId) =>
+        !withheld.has(toolId) &&
+        (isSubagent || !isSubagentOnlyToolId(toolId))
+      ),
     );
     this.#nativeModelToolIds = options.nativeModelToolIds ?? [];
     this.#allowedSubagentProfiles = new Set(

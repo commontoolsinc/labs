@@ -23,7 +23,10 @@ import {
   HARNESS_SUBAGENT_PROFILES,
   type HarnessSubagentProfile,
 } from "./contracts/subagent.ts";
-import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import {
+  type BuiltinToolId,
+  isSubagentOnlyToolId,
+} from "./contracts/tool-descriptor.ts";
 import type { HarnessFabricSessionConfig } from "./config.ts";
 import {
   HARNESS_FABRIC_SESSION_OPTION_NAMES,
@@ -370,11 +373,15 @@ const SUPPORTED_TURN_STATUSES = new Set([
   "completed",
   "failed",
 ]);
-// Every tool the harness defines, taken from the registry that defines them:
-// a client naming a tool this build offers is submitting a policy this build
-// can honour, and a second list here would refuse one the run advertises.
-const SUPPORTED_POLICY_TOOL_IDS = new Set<BuiltinToolId>(
-  BUILTIN_TOOLS.map((tool) => tool.descriptor.toolId),
+// Every tool the harness defines, taken from the registry that defines them,
+// less the ones no parent surface may offer: a client naming a tool this build
+// offers is submitting a policy this build can honour, and a second list here
+// would refuse one the run advertises — but a policy configures a PARENT, so a
+// subagent-only tool named in one is refused rather than granted.
+export const SUPPORTED_POLICY_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  BUILTIN_TOOLS.map((tool) => tool.descriptor.toolId).filter((toolId) =>
+    !isSubagentOnlyToolId(toolId)
+  ),
 );
 const SUPPORTED_POLICY_SUBAGENT_PROFILES = new Set<HarnessSubagentProfile>(
   HARNESS_SUBAGENT_PROFILES,
