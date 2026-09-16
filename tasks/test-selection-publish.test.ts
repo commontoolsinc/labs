@@ -703,6 +703,29 @@ describe("publish()", () => {
     expect(lines).toContain("the topology has no unit for 1 identities");
   });
 
+  it("keeps an identity placed by name through a window it did not run in", async () => {
+    // A suite whose units are not files places an identity by the name
+    // its records carry, so the aggregate holds no file for it and the
+    // seeded surface is the identity's own name. That path has to span
+    // the window the same way the file-backed one does, and it is the
+    // one every identity travels while an aggregate written before the
+    // files fills in.
+    const objects: Record<string, string> = {
+      [CI(DAY, "1")]: object("c1", "pass", "2026-08-20T01:00:00.000Z"),
+    };
+    const { store, created } = fakeStore(objects);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      suites,
+      noBaselines,
+    );
+    expect(await newestManifest(created)).toEqual(["space > writes"]);
+    await publish(["--days", "1"], store, LATER, suites, noBaselines);
+    expect(await newestManifest(created)).toEqual(["space > writes"]);
+  });
+
   it("carries a file into a run whose records do not name one", async () => {
     // A suite whose units are files places an identity by the file its
     // records named, and a report that could not name one says nothing
