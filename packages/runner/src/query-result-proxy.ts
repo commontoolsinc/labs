@@ -1,4 +1,5 @@
 import {
+  FabricInstance,
   FabricPrimitive,
   isWalkableObjectOrArray,
 } from "@commonfabric/data-model";
@@ -383,6 +384,11 @@ function createViewProxy<T>(
   // the walk proceeds to rebuild the value as a bare `{}`. That is around ten
   // sites and counting, so they are not listed here to go stale;
   // `grep -rn 'instanceof FabricInstance' packages/runner/src` finds them.
+  //
+  // `isFabricInstanceOrView()` below is the interim test for a client that
+  // has an answer for an instance and must not lose one this way: it asks
+  // the view for `constructor`, which the `get` trap resolves against the
+  // stored value as a prototype member, without a storage read.
   //
   // `test/llm-dialog-special-objects.test.ts` pins that end to end, so closing
   // this turns that test red rather than letting it pass silently.
@@ -811,6 +817,31 @@ export function getCellOrThrow<T = any>(value: any): Cell<T> {
 export function isCellResult(value: any): value is CellResult<any> {
   return isObjectOrArray(value) &&
     typeof (value as Partial<BackToCellInternals>)[toCell] === "function";
+}
+
+/**
+ * Whether `value` is a `FabricInstance`, held directly or seen through a cell
+ * read.
+ *
+ * A read hands back a view whose proxy target is an empty stub with no
+ * `getPrototypeOf` trap (the marker above the proxy construction says why), so
+ * `instanceof FabricInstance` is `false` for a view over an instance, and a
+ * plain-object test takes it for a record with no keys. What the view does
+ * carry is `constructor`: a prototype member resolves through the `get` trap
+ * against the stored value, with no storage read, and an instance's class is
+ * one. This asks that, for a walk that has an answer for an instance and would
+ * otherwise copy the view -- which cannot even fail quietly: the copy's
+ * descriptor query meets the instance's non-configurable freeze shield, which
+ * the stub target lacks, and the proxy invariant throws.
+ *
+ * TODO(danfuzz): once a view over a `FabricInstance` is perceived as one (the
+ * marker above the proxy construction), this collapses to `instanceof`.
+ */
+export function isFabricInstanceOrView(value: unknown): boolean {
+  if (value instanceof FabricInstance) return true;
+  if (!isCellResult(value)) return false;
+  const ctor = (value as { constructor?: unknown }).constructor;
+  return typeof ctor === "function" && ctor.prototype instanceof FabricInstance;
 }
 
 /**
