@@ -4006,6 +4006,10 @@ export function fabricFromConvertibleJsValue(
 > internal slot and so holds across realms, for a subclass nobody here knows,
 > and whatever the value's prototype names: an `Error` re-pointed at
 > `Object.prototype` is still `"JsError"`.
+> Then the `typeof` question, ahead of every object question: a primitive,
+> and `null`, is tagged by its `typeof` name, and a function comes back
+> `null`, whatever its prototype names, since a function is never asked an
+> object question.
 > An array is tagged next, by `Array.isArray()`, so a subclass instance, a
 > severed-prototype array, and a cross-realm array all reach array handling and
 > are handled by the array rule of Section 1.5, rather than being rejected as
@@ -4016,16 +4020,17 @@ export function fabricFromConvertibleJsValue(
 > lets the object rule of Section 1.5 reject the value by name rather than as
 > some unrecognized class. Then a `FabricPrimitive`, by the tag its instance
 > reports, one of `FABRIC_PRIMITIVE_VALUE_TAGS`, and a `FabricInstance`, by
-> class. A function goes no further and comes back `null`, whatever its
-> prototype names. What remains is a JS class instance, decided last by its
-> class, read from its prototype, by a `switch` on constructor identity; a
+> class. What remains is a JS class instance, decided last by its class, read
+> from its prototype, by a `switch` on constructor identity; a
 > recognized one is a value the conversion has yet to import, the heavier
 > path, so the lookup's cost sits on it alone. That `switch` names only the
 > classes no earlier question decides: an object merely built on a plain
 > object, or on the prototype of `Array` or of an `Error` class, is none of
 > those by the test that decides it, and comes back `null`, unrecognized
 > rather than misidentified. Constructor identity is a per-realm question, so
-> a builtin from another realm comes back `null` the same way. A
+> a `Map`, `Set`, `Date`, `Uint8Array`, or `RegExp` from another realm comes
+> back `null` the same way, where an array or an error from another realm is
+> decided by the earlier test that holds across realms. A
 > `FabricPrimitive` subclass that reports no tag of its own is tagged as its
 > parent, which is a defect in that subclass rather than one the dispatch
 > guards against.
