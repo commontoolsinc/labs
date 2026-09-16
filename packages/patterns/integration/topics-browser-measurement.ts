@@ -107,7 +107,7 @@ export const TOPICS_LIFTS: readonly TopicsLift[] = [
 const TOPICS_MAIN = "topics/main.tsx";
 
 /** One module of a compiled Topics program. */
-export interface CompiledTopicsModule {
+interface CompiledTopicsModule {
   /** Module path, grounded at the program root. */
   readonly filename: string;
 
@@ -116,15 +116,6 @@ export interface CompiledTopicsModule {
 
   /** The JavaScript the compiler emitted for it. */
   readonly js: string;
-}
-
-/** Options for {@link compileTopicsProgram}. */
-export interface CompileTopicsProgramOptions {
-  /** Program root the sources are read from. */
-  readonly sourceRoot?: string;
-
-  /** Replaces a resolved source file's contents before it is compiled. */
-  readonly rewrite?: (name: string, contents: string) => string;
 }
 
 /** The Topics program compiled from the sources a board was seeded from. */
@@ -313,7 +304,7 @@ export async function prepareTopicsProgram(
   sourceRoot: string = TOPICS_SOURCE_ROOT,
   lifts: readonly TopicsLift[] = TOPICS_LIFTS,
 ): Promise<TopicsProgram> {
-  const modules = await compileTopicsProgram({ sourceRoot });
+  const modules = await compileTopicsProgram(sourceRoot);
   const identities = new Map(
     modules.filter((module) => module.filename.startsWith("/topics/"))
       .map((module) => [module.filename, module.identity]),
@@ -346,16 +337,14 @@ export async function prepareTopicsProgram(
 }
 
 /**
- * Compiles the Topics program under `sourceRoot` the way the topic board
- * fixture deploys it, with that directory as the program root, on an emulated
- * runtime, and returns every module it emits. `rewrite`, when given, replaces
- * each resolved source file's contents before the compile, so a caller can
- * record what a change to those sources compiles to.
+ * Helper for {@link prepareTopicsProgram}, which compiles the Topics program
+ * under `sourceRoot` the way the topic board fixture deploys it, with that
+ * directory as the program root, on an emulated runtime, and returns every
+ * module it emits.
  */
-export async function compileTopicsProgram(
-  options: CompileTopicsProgramOptions = {},
+async function compileTopicsProgram(
+  sourceRoot: string,
 ): Promise<CompiledTopicsModule[]> {
-  const sourceRoot = options.sourceRoot ?? TOPICS_SOURCE_ROOT;
   const runtime = new Runtime(runtimePresets.localDev({
     apiUrl: new URL(import.meta.url),
     storageManager: StorageManager.emulate({
@@ -368,15 +357,8 @@ export async function compileTopicsProgram(
       (resolver) => runtime.harness.resolve(resolver),
       { main: join(sourceRoot, TOPICS_MAIN), root: sourceRoot },
     );
-    const { rewrite } = options;
     const { modules } = await runtime.harness.compileToRecordGraph(
-      rewrite === undefined ? resolved : {
-        ...resolved,
-        files: resolved.files.map((file) => ({
-          ...file,
-          contents: rewrite(file.name, file.contents),
-        })),
-      },
+      resolved,
       { noCheck: true },
     );
     return modules.map(({ filename, identity, js }) => ({

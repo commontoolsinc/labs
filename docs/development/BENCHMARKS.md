@@ -419,13 +419,24 @@ browser live in `topics-browser-measurement-core.ts` beside the helper, and
 `packages/patterns/test/topics-browser-measurement-core.test.ts` tests them
 under a plain `deno test`, partly against compiled text, previews, and module
 identities recorded from the Topics sources in a fixture beside that test.
-`packages/patterns/tools/regenerate-topics-measurement-fixture.ts` rewrites
-everything in that fixture a compile produces, and fails when a preview
-recorded from a browser no longer matches what those sources compile to. The
-one field it carries over without a check is the preview recorded from a
-compile with pattern coverage on: the tests read that preview only for the
-coverage hit call it holds, which a compile with coverage off never writes, and
-a recorded hit call stays one however the Topics sources move.
+That fixture is a recording, and nothing recompiles the Topics sources to check
+it, which is what lets those cases hold still as the sources move. It is taken
+again by hand, when a case needs material the recording does not hold. The
+compiled half comes from one command:
+
+```bash
+deno task cf check packages/patterns/topics/main.tsx --json --no-check \
+  --root packages/patterns
+```
+
+It emits the whole compiled program, each module preceded by the
+`// cf:module/<identity>` comment naming the identity it compiles to, which is
+the identity the helper's own compile produces. A lift's compiled text is its
+`const <name> = (0, <alias>.lift)(...)` declaration there, and the fixture's
+shifted identity is what the same command reports for `/topics/main.tsx` with
+the recorded number of lines added above the pivot. The previews come from a
+board seeded from those sources, as a graph snapshot reports them at each
+lift's site, and the instrumented one from a compile with pattern coverage on.
 
 ## The multiplayer contention benchmark
 

@@ -9,11 +9,9 @@
  * with 68 lines added above it; and a preview from a compile with pattern
  * coverage on.
  *
- * `packages/patterns/tools/regenerate-topics-measurement-fixture.ts` writes
- * everything a compile produces and carries the previews over, failing when a
- * preview recorded from a board no longer matches what the sources compile to.
- * The coverage preview is carried unchecked, because the cases reading it ask
- * only whether it holds a coverage hit call.
+ * Nothing recompiles those sources to check the recording against them, which
+ * is what lets these cases hold still as the Topics sources move.
+ * `docs/development/BENCHMARKS.md` says how the recording is taken again.
  */
 
 import { describe, it } from "@std/testing/bdd";
