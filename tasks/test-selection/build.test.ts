@@ -799,6 +799,22 @@ describe("build", () => {
       expect(fold.declined).toBe(0);
     });
 
+    it("counts an object once when one batch carries it twice", () => {
+      // The rule lives in the fold rather than in each caller, because a
+      // caller filtering by what the aggregate already holds cannot see
+      // a copy the same batch folded a moment ago.
+      const report = stored(CI_NAME, context(), [record()]);
+      const folded = foldReports(
+        emptyAggregate("2026-08-20"),
+        [report, report],
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      expect(folded.observations).toBe(1);
+      expect(folded.states.get(KEY)!.runsByDay["2026-08-20"]).toBe(1);
+      expect(folded.aggregate.folded).toEqual([CI_NAME]);
+    });
+
     it("counts a shard once however often it is handed over", async () => {
       const report = stored(CI_NAME, context(), [record()]);
       const fold = new Fold(
