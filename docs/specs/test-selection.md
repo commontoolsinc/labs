@@ -568,7 +568,11 @@ it. A manifest declaring a shape from further ahead than the reader is
 treated as absent, because a reader that does not know a field cannot
 know what obeying the rest would mean. A reader whose answer decides
 what runs takes the newest one behind it instead, since a figure hours
-old is what it costs and the whole corpus is what refusing costs.
+old is what it costs and the whole corpus is what refusing costs. It
+looks back over a bounded number of them, since every candidate is a
+whole corpus to fetch. A reader that reaches the end of that bound says
+so rather than reporting the store as holding none: it holds several,
+and this reader can read none of the ones it looked at.
 
 A manifest declaring an earlier shape is read forward field by field. So
 is the publisher's own rolling aggregate, and for a stronger reason: the

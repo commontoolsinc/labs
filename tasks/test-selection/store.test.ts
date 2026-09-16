@@ -7,6 +7,7 @@ import {
   manifestObjectName,
   manifestPrefix,
   newestAtOrBefore,
+  newestFirstAtOrBefore,
   selectionPrefix,
   stateObjectName,
   statePrefix,
@@ -113,6 +114,24 @@ describe("store", () => {
       expect(generatedAtOf(`${AREA}/state/x.json.gz`))
         .toBeUndefined();
       expect(generatedAtOf("something-else")).toBeUndefined();
+    });
+  });
+
+  describe("newestFirstAtOrBefore()", () => {
+    it("breaks a tie on the name by code point, not by locale", () => {
+      // Every reader orders a name the same way, and a locale's order is
+      // not that: two manifests created in one millisecond would leave a
+      // lane and the wall obeying different ones. A locale collation
+      // sorts a capital after the small letter it matches, where a code
+      // point puts every capital first.
+      const createdAt = "2026-08-20T04:00:00.000Z";
+      const upper = `${AREA}/manifest-${createdAt}-Z.json.gz`;
+      const lower = `${AREA}/manifest-${createdAt}-a.json.gz`;
+      expect("Z".localeCompare("a")).toBeGreaterThan(0);
+      expect(newestFirstAtOrBefore(
+        [{ name: upper, createdAt }, { name: lower, createdAt }],
+        "2026-08-20T05:00:00.000Z",
+      )).toEqual([lower, upper]);
     });
   });
 

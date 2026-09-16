@@ -95,15 +95,20 @@ describe("selection", () => {
         .toEqual({ overhead: 3, correction: 1, unitOverhead: 0 });
     });
 
-    it("refuses a unit overhead it cannot read, rather than reading it as none", () => {
-      // Absent and unreadable are different: one is a fit made before
-      // the figure existed, the other is a figure that will not read as
-      // one, and charging nothing for the second hides it.
-      const older = JSON.parse(serializeManifest(sampleManifest()));
-      older.calibration.suites = {
-        unit: { overhead: 3, correction: 1, unitOverhead: "free" },
-      };
-      expect(parseManifest(JSON.stringify(older))).toBeUndefined();
+    it("refuses a unit overhead an earlier shape carries unreadably", () => {
+      // Absent and unreadable are different, and the difference only
+      // arises in a shape whose absent figure has a reading: a fit made
+      // before it existed charged nothing per unit, where a figure that
+      // will not read as one is a body this reader cannot read, and
+      // charging nothing for that would hide it.
+      for (const unitOverhead of ["free", null, -1]) {
+        const older = JSON.parse(serializeManifest(sampleManifest()));
+        older.schema = MANIFEST_SCHEMA_VERSION - 1;
+        older.calibration.suites = {
+          unit: { overhead: 3, correction: 1, unitOverhead },
+        };
+        expect(parseManifest(JSON.stringify(older))).toBeUndefined();
+      }
     });
 
     it("returns undefined rather than obeying part of a manifest", () => {

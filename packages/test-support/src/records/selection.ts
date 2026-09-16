@@ -552,8 +552,10 @@ function parseCalibration(
     // suites, keyed by invocation unit. It is dropped rather than read
     // here: nothing ever wrote an entry into one, and a suite is the
     // grain a batch's timing supports.
-    const unitOverhead = fitted.unitOverhead ??
-      (schema < UNIT_OVERHEAD_SINCE ? 0 : undefined);
+    const carried = fitted.unitOverhead;
+    const unitOverhead = carried === undefined && schema < UNIT_OVERHEAD_SINCE
+      ? 0
+      : carried;
     if (!isFiniteNumber(unitOverhead) || unitOverhead < 0) return undefined;
     suites[suite] = {
       overhead: fitted.overhead,

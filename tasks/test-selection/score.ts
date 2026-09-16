@@ -769,16 +769,25 @@ interface StoredPercentile {
  * how a day of slow runs would come to report a fast one.
  */
 export function readCostsForward(state: IdentityState): void {
-  const days = state.costByDay ?? {};
+  const held = state.costByDay;
+  const days = typeof held === "object" && held !== null && !Array.isArray(held)
+    ? held
+    : {};
   state.costByDay = days;
   // A stored day is one shape or the other, which the state's own
   // declared type cannot say.
   const read: Record<string, DaySamples | StoredPercentile> = days;
   for (const [day, held] of Object.entries(read)) {
+    // A day whose stored figures are not numbers, and one that is not a
+    // record of figures at all, are both read as a day with nothing in
+    // it, which is what a day this cannot make sense of is worth.
+    // Ending the read of the whole state is not, and a state is read
+    // back through this before anything has looked at what it holds.
+    if (typeof held !== "object" || held === null) {
+      days[day] = emptySamples();
+      continue;
+    }
     if ("slowest" in held) continue;
-    // A day whose stored figures are not numbers is read as a day with
-    // nothing in it, which is what a day this cannot make sense of is
-    // worth. Ending the read of the whole state is not.
     days[day] = Number.isInteger(held.count) && held.count > 0 &&
         Number.isFinite(held.p90)
       ? {

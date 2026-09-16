@@ -128,11 +128,15 @@ export function newestFirstAtOrBefore(
     .filter(({ name, createdAt }) =>
       generatedAtOf(name) !== undefined && createdAt <= at
     )
-    .sort((a, b) =>
-      a.createdAt === b.createdAt
-        ? b.name.localeCompare(a.name)
-        : b.createdAt.localeCompare(a.createdAt)
-    )
+    .sort((a, b) => {
+      // By code point rather than by locale, because every reader sorts
+      // a name the same way and a locale's order is not that.
+      if (a.createdAt !== b.createdAt) {
+        return a.createdAt < b.createdAt ? 1 : -1;
+      }
+      if (a.name === b.name) return 0;
+      return a.name < b.name ? 1 : -1;
+    })
     .map(({ name }) => name);
 }
 

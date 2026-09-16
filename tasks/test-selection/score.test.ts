@@ -789,6 +789,28 @@ describe("readCostsForward()", () => {
     }
   });
 
+  it("reads a day that is not a record of figures as an empty one", () => {
+    // A state is read back through this before anything has looked at
+    // what it holds, and the reader of a stored aggregate reports one it
+    // cannot read rather than ending over it. A day holding a string
+    // would end it here.
+    for (const stored of ["slowest", 7, null, true]) {
+      const state = emptyState();
+      (state.costByDay as Record<string, unknown>)["2026-08-20"] = stored;
+      readCostsForward(state);
+      expect(state.costByDay["2026-08-20"]).toEqual({ slowest: [], count: 0 });
+    }
+  });
+
+  it("reads days that are not a record at all as none", () => {
+    for (const stored of ["days", 7, [], null]) {
+      const state = emptyState();
+      (state as { costByDay: unknown }).costByDay = stored;
+      readCostsForward(state);
+      expect(state.costByDay).toEqual({});
+    }
+  });
+
   it("reads a state carrying no days at all as carrying none", () => {
     // The aggregate reports a state it cannot read rather than throwing
     // partway through one.
