@@ -130,6 +130,14 @@ export function tagOfFabricValueElseNull<PlusType = never>(
   } else if (isPlainObject(value)) {
     return VALUE_TAGS.Object;
   } else if (value instanceof FabricPrimitive) {
+    // Note: If `value` turns out to be an invalid `FabricPrimitive`, this will
+    // return `null` instead of falling through to an `isPlusType()` check. The
+    // reasoning here is that the full class hierarchy under `FabricPrimitive`
+    // is meant to be controlled by the `data-model`, and so any invalid
+    // `FabricPrimitive` is de facto a bug in the `data-model`, and that makes
+    // it _more correct_ to return `null` here compared to blithely calling
+    // through to an `isPlusType()` predicate which should never have been
+    // called with such a value.
     return tagOfFabricPrimitiveElseNull(value);
   } else if (value instanceof FabricInstance) {
     return VALUE_TAGS.FabricInstance;
