@@ -17,8 +17,6 @@ export { RecursiveValueVisitor } from "./RecursiveValueVisitor.ts";
 export { NopValueVisitor } from "./NopValueVisitor.ts";
 
 export {
-  makeVisitFabricValueFunction,
   makeVisitValueFunction,
-  visitFabricValue,
   visitValue,
 } from "./impl.ts";
