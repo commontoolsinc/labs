@@ -57,6 +57,35 @@ const seedLedger = handler<void, { db: SqliteDb }>((_, { db }) => {
   db.exec(insertSql(), ["gone", "2026-03-06", 9, 1, "2026-03-07T12:00:00Z"]);
 });
 
+/**
+ * A caller that takes a predicate of its own and does not require it, and
+ * hands it to the atom — the shape the atom meets inside a larger pattern that
+ * has a predicate input to forward. An input nobody supplied reads
+ * `undefined`, and `undefined` is not a predicate.
+ */
+interface ForwardedInput {
+  source: SqliteDb;
+  table: string;
+  predicate?: string;
+}
+
+interface ForwardedOutput {
+  total: number;
+  matching: number;
+  errorMessage: string;
+}
+
+const ForwardingCaller = pattern<ForwardedInput, ForwardedOutput>(
+  ({ source, table: name, predicate }) => {
+    const count = SourceRowCount({ source, table: name, predicate });
+    return {
+      total: count.total,
+      matching: count.matching,
+      errorMessage: count.errorMessage,
+    };
+  },
+);
+
 export default pattern(() => {
   const db = sqliteDatabase({
     tables: { rows_plaid_transaction: ledgerTable() },
@@ -72,6 +101,11 @@ export default pattern(() => {
     source: db,
     table: "rows_plaid_transaction",
     predicate,
+  });
+
+  const forwarded = ForwardingCaller({
+    source: db,
+    table: "rows_plaid_transaction",
   });
 
   const missingTable = new Writable("rows_plaid_transaction");
@@ -139,6 +173,13 @@ export default pattern(() => {
       { action: action(() => predicate.set("")) },
       { assertion: assert(() => count.total === 3) },
       { assertion: assert(() => count.matching === 3) },
+
+      // A caller forwarding a predicate nobody supplied counts every row too.
+      // Forwarding reads `undefined` rather than leaving the key out, so the
+      // input's own default is not what makes this hold.
+      { assertion: assert(() => forwarded.errorMessage === "") },
+      { assertion: assert(() => forwarded.total === 3) },
+      { assertion: assert(() => forwarded.matching === 3) },
 
       // A table the store does not carry reports why rather than a zero, and
       // the view says so.

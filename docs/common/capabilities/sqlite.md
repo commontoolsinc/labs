@@ -90,6 +90,38 @@ Where a pattern also writes to the database, pass `{ reactOn: db }` so the read
 re-runs after a committed write. An input a pattern only reads has nothing to
 react to.
 
+## A param is a value
+
+A bind param is resolved as the statement is issued, and `undefined` is refused
+rather than bound: the whole read fails with "sqlite: param is undefined",
+`error` carries that text, and every field computed from the result is empty.
+`null` is what binds SQL NULL.
+
+An input's declared default is applied when the input is READ, so an input
+handed to `params` as itself rather than as a value read out of it arrives
+undefaulted. That costs nothing until someone composes the pattern: a caller
+forwards an optional input of its own, which reads `undefined` while nobody has
+supplied one, and the read the pattern's own default was written to cover is
+the read that fails. Leaving the argument key out is the only shape the default
+covers on its own.
+
+```tsx
+// Shown at module scope.
+export default pattern<{ ledger: SqliteDb; month?: string | Default<""> }>(
+  ({ ledger, month }) => {
+    // Read out of `month` rather than `month` itself, so a caller forwarding a
+    // month nobody supplied gets the empty string the statement resolves.
+    const monthParam = computed(() => month);
+
+    return ledger.query<{ id: number }>(
+      "SELECT id FROM rows_plaid_transaction WHERE substr(date, 1, 7) = " +
+        "COALESCE(NULLIF(?, ''), strftime('%Y-%m', 'now')) LIMIT 200",
+      { params: [monthParam] },
+    );
+  },
+);
+```
+
 ## One statement, one database
 
 A query is a single read-only `SELECT` (a read-only CTE counts). Multiple

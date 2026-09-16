@@ -122,6 +122,65 @@ const seedNarrow = handler<void, { db: SqliteDb }>((_, { db }) => {
   );
 });
 
+/**
+ * A caller that takes a month of its own and does not require it, and hands it
+ * to the atom — the shape the atom meets inside a larger pattern that has a
+ * month input to forward. An input nobody supplied reads `undefined`, and
+ * `undefined` is not a value a query can bind.
+ */
+interface ForwardedMonthInput {
+  bank: SqliteDb;
+  month?: string;
+}
+
+interface ForwardedMonthOutput {
+  month: string;
+  rowCount: number;
+  errorMessage: string;
+}
+
+const ForwardedMonthCaller = pattern<
+  ForwardedMonthInput,
+  ForwardedMonthOutput
+>(({ bank, month }) => {
+  const ledger = LedgerMonthTransactions({ bank, month });
+  return {
+    month: ledger.month,
+    rowCount: ledger.rowCount,
+    errorMessage: ledger.errorMessage,
+  };
+});
+
+/**
+ * One live row in whatever month the database's own clock is in, dated in SQL
+ * because a handler is denied the clock inside the sandbox. It is what the
+ * atom answers a caller that named no month, so it sits in a database of its
+ * own where it cannot join the month the rows above are read from.
+ */
+const seedCurrentMonth = handler<void, { db: SqliteDb }>((_, { db }) => {
+  db.exec(
+    "INSERT INTO rows_plaid_transaction (record_id, transaction_id, " +
+      "account_id, date, amount, signed_amount, merchant_name, name, " +
+      "pending, category_primary, iso_currency_code, deleted, deleted_at) " +
+      "VALUES (?, ?, ?, strftime('%Y-%m', 'now', 'localtime') || '-15', " +
+      "?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [
+      "current",
+      "txn-current",
+      "acct-1",
+      31.5,
+      -31.5,
+      "This Month Co",
+      "This Month Co charge",
+      0,
+      "GENERAL_SERVICES",
+      "USD",
+      0,
+      "",
+    ],
+  );
+});
+
 export default pattern(() => {
   const db = sqliteDatabase({
     tables: { rows_plaid_transaction: ledgerTable() },
@@ -149,6 +208,14 @@ export default pattern(() => {
   const brokenMonth = new Writable("1970-01");
   const broken = LedgerMonthTransactions({ bank: narrow, month: brokenMonth });
 
+  // A database of its own, so the row dated by the clock cannot land in the
+  // month the assertions above read.
+  const current = sqliteDatabase({
+    tables: { rows_plaid_transaction: ledgerTable() },
+  });
+  const seedCurrent = seedCurrentMonth({ db: current });
+  const forwarded = ForwardedMonthCaller({ bank: current });
+
   return {
     // The one warning this allows is normalizeAndDiff's "Storing a
     // session-scoped link in space-scoped data", raised when reading `[UI]`
@@ -163,6 +230,7 @@ export default pattern(() => {
 
       { action: action(() => seed.send()) },
       { action: action(() => seedNarrowRow.send()) },
+      { action: action(() => seedCurrent.send()) },
       { action: action(() => brokenMonth.set("2026-03")) },
 
       // A store of another shape reports why rather than an empty month, and
@@ -249,6 +317,14 @@ export default pattern(() => {
       { assertion: assert(() => ledger.month.length === 7) },
       { assertion: assert(() => ledger.month.charAt(4) === "-") },
       { assertion: assert(() => ledger.errorMessage === "") },
+
+      // A caller forwarding a month input nobody supplied gets the same
+      // month from the clock, and the row the seed dated in it. Forwarding
+      // reads `undefined` rather than leaving the key out, so the input's own
+      // default is not what makes this hold.
+      { assertion: assert(() => forwarded.errorMessage === "") },
+      { assertion: assert(() => forwarded.month.length === 7) },
+      { assertion: assert(() => forwarded.rowCount === 1) },
     ],
   };
 });
