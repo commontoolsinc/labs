@@ -94,6 +94,7 @@ export type {
   TransactionCommitOptions,
 } from "./storage/interface.ts";
 export { hasOperationStorageCapability } from "./storage/interface.ts";
+export { isCfcEnforcementRejection } from "./storage/rejection.ts";
 export type {
   EntityIdListOptions,
   EntityIdListResult,
@@ -119,6 +120,7 @@ export {
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
+export { cellOfOpaqueReference, isOpaqueReference } from "./back-to-cell.ts";
 export {
   CompilerStackLoadError,
   computeEntryIdentity,

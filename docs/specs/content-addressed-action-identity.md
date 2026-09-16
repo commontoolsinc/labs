@@ -110,18 +110,21 @@ exports by export name, hoisted/non-exported artifacts by their `__cfReg` key
 introduced the `$patternRef` sentinel, `builtins/op-pattern-ref.ts`).
 
 `piece setsrc` supplies the one explicit update-chain exception to strict hash
-equality. Its old/new recursive source closures are matched by canonical full
-filename, and successor module documents accumulate the predecessor hashes they
-may act as. A loaded successor can satisfy a `writeAuthorizedBy` claim stamped
-by one of those predecessors only in the space whose authenticated module
-documents carry that delegation, and only when the binding path still matches.
-Source file spelling is diagnostic at verification; a rename grants no
-authority because canonical filename matching derives no delegation. Ordinary
-recompilation and unrelated or cross-space module loads grant no such authority.
+equality. Its old and new entries match each other, the rest of their
+recursive source closures are matched by canonical full filename — directly,
+or under the root substitution the two entry names define — and successor
+module documents accumulate the predecessor hashes they may act as. A loaded
+successor can satisfy a `writeAuthorizedBy` claim stamped by one of those
+predecessors only in the space whose authenticated module documents carry that
+delegation, and only when the binding path still matches. Source file spelling
+is diagnostic at verification; a renamed module below the entry grants no
+authority because canonical filename matching derives no delegation for it.
+Ordinary recompilation and unrelated or cross-space module loads grant no such
+authority.
 
 ## Last Updated
 
-2026-07-21
+2026-09-15
 
 ## Motivation
 

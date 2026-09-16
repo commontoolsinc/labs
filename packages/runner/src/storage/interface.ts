@@ -55,6 +55,7 @@ import type { Cancel } from "../cancel.ts";
 import { Cell } from "../cell.ts";
 import type {
   CfcAddress,
+  CfcContentAddressedLabels,
   CfcDeclaredMonotonicityMode,
   CfcDeclaredWideningExemption,
   CfcDecomposedEnvelopes,
@@ -1844,6 +1845,15 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   setCfcDecomposedEnvelopes(enabled: CfcDecomposedEnvelopes): void;
 
   /**
+   * Selects the envelope version the persist path writes: version 2, which
+   * holds each label above the inline limit as a reference to a
+   * content-addressed label document and shorter ones inline, or version 1
+   * with every label inline. A spelling dial: neither setting is pinned,
+   * and the value is read when the transaction prepares.
+   */
+  setCfcContentAddressedLabels(enabled: CfcContentAddressedLabels): void;
+
+  /**
    * Set the exchange-rule policy evaluation dial (Epic B5, spec §4.4.5).
    * Anti-downgrade pinned: once `enforce`, weakening throws.
    */
@@ -2223,6 +2233,9 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * detail names the INPUT to drop, which the reason alone cannot.
    */
   recordCfcRefusalDetail(detail: CfcRefusalDetail): void;
+
+  /** Counts a full consumed-label collection without changing CFC state. */
+  noteCfcConsumedLabelWalk(): void;
 
   /**
    * The trusted policy-writer path for CFC grant documents (§8.12.7 route

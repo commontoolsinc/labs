@@ -89,7 +89,7 @@ import {
 import PollOptionCard from "./poll-option-card.tsx";
 import ParticipantIdentityCard from "./participant-identity-card.tsx";
 import { safeImageUrl } from "./generated-art.tsx";
-import { memoBy } from "./voter-memo.ts";
+import { indexBy } from "./voter-index.ts";
 
 /**
  * The minimal profile shape this pattern reads: the stable identity cell for
@@ -1019,31 +1019,16 @@ interface OptionTally {
 }
 
 /**
- * The key a voter's cell is looked up under, so that a lookup made for one of
- * a voter's votes serves the rest. The key is a hint, not an identity: it is
- * built from the entity id and path alone, and two profile cells in different
- * spaces or scopes can share one. A remembered answer is served only to a
- * voter whose link equals the one it was computed for; other voters under the
- * same key are kept apart.
+ * The key a roster row and a vote's voter are indexed under, so a vote reaches
+ * its row without searching the roster. The key is a hint, not an identity: it
+ * is built from the entity id and path alone, so two profile cells in
+ * different spaces or scopes can share one, and the `equals` comparison the
+ * lookup makes is what tells them apart.
  */
 const voterKey = (voter: LunchProfileCell): string | undefined => {
   const id = getEntityId(voter);
   return id === undefined ? undefined : entityRefToString(id);
 };
-
-/**
- * Remembers `compute(voter)` per voter, so a voter who cast several votes is
- * looked up once. A hit is a remembered voter whose link equals this one, not
- * merely one whose key matches.
- */
-const memoByVoter = <T,>(
-  compute: (voter: LunchProfileCell) => T,
-): (voter: LunchProfileCell) => T =>
-  memoBy(
-    voterKey,
-    (remembered, voter) => remembered.equalLinks(voter),
-    compute,
-  );
 
 /** Maintains linked vote groups for per-option tally consumers. */
 const indexVotesByOption = pattern<
@@ -1064,9 +1049,11 @@ const tallyOption = (
   viewer: LunchProfile | LunchProfileCell | undefined,
 ): OptionTally => {
   // A vote carries its voter's identity, so the display name and swatch color
-  // are looked up from the roster by comparison. A voter who has left the
-  // roster still tallies; they just render without a name. The roster is read
-  // once per option, and repeated voters share identity comparisons.
+  // are looked up from the roster by comparison. The roster is read once per
+  // option and indexed by voter key, so a vote whose voter is on the roster
+  // costs the comparisons its key narrows to. A voter who has left the roster
+  // still tallies: their key names no row, so the lookup compares the whole
+  // roster and they render without a name.
   const roster = users.map((u) => {
     const profile = u.profile;
     return {
@@ -1077,16 +1064,20 @@ const tallyOption = (
   });
   const participantNames = roster.map((u) => u.name);
   const initialsByName = getInitialsByName(participantNames);
-  const rosterEntryOf = memoByVoter((voter) =>
-    roster.find((u) => u.profile !== undefined && equals(u.profile, voter))
+  const rosterEntryOf = indexBy(
+    roster,
+    (u) => u.profile === undefined ? undefined : voterKey(u.profile),
+    voterKey,
+    (u, voter) => u.profile !== undefined && equals(u.profile, voter),
   );
   const rosterOf = (
     voter: LunchProfileCell | undefined,
   ): (typeof roster)[number] | undefined =>
     voter === undefined ? undefined : rosterEntryOf(voter);
-  const viewerIs = memoByVoter((voter) => equals(voter, viewer));
+  // One comparison per vote. The poll addresses a vote by its voter and
+  // option, so a voter holds at most one vote in the group tallied here.
   const isSelf = (voter: LunchProfileCell | undefined): boolean =>
-    viewer !== undefined && voter !== undefined && viewerIs(voter);
+    viewer !== undefined && voter !== undefined && equals(voter, viewer);
   let green = 0;
   let yellow = 0;
   let red = 0;
@@ -1405,9 +1396,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // (local calendar), per the shared tick. While `#now/300` is still
     // resolving, the day key reads "" and the current-day vote set is empty.
     const todayKey = computed(() => (nowTick ? dayKeyOf(nowTick) : ""));
+    // The scan reads the day key rather than the tick, so it runs when the
+    // day changes rather than on every tick within a day.
     const todaysVotes = computed(() => {
-      if (!nowTick) return EMPTY_VOTES;
-      const key = dayKeyOf(nowTick);
+      const key = todayKey;
+      if (!key) return EMPTY_VOTES;
       return votes.filter((v) =>
         typeof v.castAt === "number" && dayKeyOf(v.castAt) === key
       );

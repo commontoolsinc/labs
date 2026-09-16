@@ -61,68 +61,79 @@ The current package provides:
   no delegation may name;
 - Common Fabric implementation research over the operator-provisioned docs and
   skills corpus, published pattern metadata and complete multi-file source,
-  dependencies, and safe handle shapes. Fresh CLI root tasks and each
-  interactive turn start with research before the first parent model turn,
-  subject to the ordinary tool policy. A durable checkpoint retains its
-  host-supplied handoff immediately before the task and recovers it without
-  another private call on resume. The handoff carries the research result
-  identity, so the sibling omission record retains a proven `/researchRecord`
-  join to the raw artifact while recording no location for a source-free error;
-  no private record enters parent context. Delegated children consume the
-  inherited kit and start no opening pass. Private tools support search followed
-  by exact bounded reads with continuation, and cannot execute, write, browse,
-  delegate, or mutate Fabric. The host verifies indexed source identities,
-  admits citations and successfully described handle bindings, and returns a
-  structured complete or incomplete kit with a full invocation or source recipe
-  when one is required. Section selectors and citation ids are distinct; a
+  dependencies, and safe handle shapes. Fresh CLI root tasks and interactive
+  sessions without retained research start with an `orient` pass before the
+  first parent model turn, subject to the ordinary tool policy. Later chat turns
+  reuse the findings and let the parent request targeted follow-ups. A durable
+  checkpoint retains its host-supplied handoff immediately before the task and
+  recovers it without another private call on resume. The handoff carries the
+  research result identity, so the sibling omission record retains a proven
+  `/researchRecord` join to the raw artifact while recording no location for a
+  source-free error; no private record enters parent context. Delegated children
+  consume the inherited findings and start no opening pass. `orient` establishes
+  a useful approach from available data and composable pieces; `answer` resolves
+  a follow-up question in the context of the current user goal. Both can inspect
+  indexed source and return optional examples within eight model turns,
+  twenty-four calls, and 96,000 read characters. Private tools return matching
+  passages, paginated document outlines, and batch section reads with exact
+  continuation. They cannot execute, write, browse, delegate, or mutate Fabric.
+  The host verifies indexed source identities, admits citations and successfully
+  described handle bindings, and returns a structured complete or incomplete kit
+  with a full invocation or source recipe when one is required. Docs retain
+  document titles and ancestor headings; search supports a path prefix to focus
+  on the relevant guide. Section selectors and citation ids are distinct; a
   current-read catalog supports synthesis and at most one tool-free citation
   repair within the existing model-turn budget. Unread ids remain inadmissible.
-  Invocation examples must match the shared `run_pattern` input contract and
-  select an inspected identity. Rule and example citations close over the kit's
-  exact source catalog. Every metadata or source read respects the
-  8,000-character read limit; oversized metadata is refused before pattern
-  admission. Complete pattern-source examples receive a host-side syntax-only
-  parser check; exact parser diagnostics keep a claimed-complete kit incomplete
-  while preserving its full source and citations for local correction. Parser
-  success does not establish imports, types, compilation, or runtime behavior.
-  Each result separately carries a CFC projection: its full known source label,
-  a confidentiality-only output label for later model context, and explicit
-  missing-label coverage for unclassified pattern-index metadata/source,
-  unavailable handle-label metadata, or legacy research summaries. Documentation
-  search accounts for unselected leads that influenced ranking. Publication
-  never promotes private indexed source to public, and retained source integrity
-  does not endorse a model rewrite. Opening handoff, resume, and delegated-child
-  paths preserve the confidentiality influence and diagnostic projection. Exact
-  handle-label acquisition returns availability independently of its fail-closed
-  restriction. Model projection has one owner across tool, reconstructed
-  opening, and child handoffs: free text is scrubbed, raw schemas stay in
-  artifacts, and exact import identities and source/CFC records remain usable.
-  The audit and omission writer share the same tool-or-host result provenance
-  reader. Exact reads and the complete private transcript remain in the tool
-  artifact; the caller receives the derived kit plus explicit incomplete-kit
-  guidance. Partial evidence survives malformed output, provider failure, budget
-  exhaustion, and cancellation, with private usage and failure counts included
-  in the parent record. Delegation and focused research retain the latest
-  implementation kit plus two focused answers. Child handle transfer reads only
-  those kits' declared bindings; its inherited CFC context retains the full
-  parent influence even when no kit is selected. Kits and confirmed records
-  persist through delegation, while local authored-source artifacts record the
-  research ids that shaped them. `query_docs` is accepted only as a legacy CLI
-  or persisted-policy alias and is normalized without rewriting old transcript
-  or run-state evidence;
+  Invocation objects are host-serialized to JSON, match the shared `run_pattern`
+  input contract, and select an inspected identity. Rule and example citations
+  close over the kit's exact source catalog. Every metadata or source read
+  respects the 32,000-character read limit; oversized metadata is refused before
+  pattern admission. Complete pattern-source examples receive a host-side
+  syntax-only parser check; exact parser diagnostics keep a claimed-complete kit
+  incomplete while preserving its full source and citations for local
+  correction. Parser success does not establish imports, types, compilation, or
+  runtime behavior. Each result separately carries a CFC projection: its full
+  known source label, a confidentiality-only output label for later model
+  context, and explicit missing-label coverage for unclassified pattern-index
+  metadata/source, unavailable handle-label metadata, or legacy research
+  summaries. Documentation search accounts for unselected leads that influenced
+  ranking. Publication never promotes private indexed source to public, and
+  retained source integrity does not endorse a model rewrite. Opening handoff,
+  resume, and delegated-child paths preserve the confidentiality influence and
+  diagnostic projection. Exact handle-label acquisition returns availability
+  independently of its fail-closed restriction. Model projection has one owner
+  across tool, reconstructed opening, and child handoffs: free text is scrubbed,
+  raw schemas stay in artifacts, and exact import identities and source/CFC
+  records remain usable. The audit and omission writer share the same
+  tool-or-host result provenance reader. Exact reads and the complete private
+  transcript remain in the tool artifact; the caller receives the derived kit
+  plus explicit incomplete-kit guidance. Partial evidence survives malformed
+  output, provider failure, budget exhaustion, and cancellation, with private
+  usage and failure counts included in the parent record. Context selection
+  retains the latest orientation and two answers. Private follow-ups receive
+  selected findings and source locations without copying prior examples or
+  bindings. Interactive sessions persist that context, the original user goal,
+  and full CFC influence with completed history. Follow-ups retain that goal
+  alongside the current request; old bindings remain historical. Child handle
+  transfer reads only selected current bindings; its inherited CFC context
+  retains the full parent influence even when no kit is selected. Kits and
+  confirmed records persist through delegation, while local authored-source
+  artifacts record the research ids that shaped them. `query_docs` is accepted
+  only as a legacy CLI or persisted-policy alias and is normalized without
+  rewriting old transcript or run-state evidence;
 - schema-validated, sanitized child returns with raw child evidence retained
   outside the ordinary parent return channel;
 - image inputs and structured top-level batch results;
 - a skills registry over `--skills-root`, defaulting for a run out of a labs
   checkout to that checkout's own `skills/` tree, with the resolved tree and its
   source recorded in run state and printed in operator output; skill preload by
-  name, indexed supporting-resource reads, and exact allowlisted Deno/Bash skill
-  scripts (which run in the sandbox, and so still ask for the flag). The same
-  allowlist and the same execution path take an acquired skill's script, keyed
-  by the pin its bytes were read at and checked against the digest taken at
-  acquisition; the tool output and the execution record carry that acquisition
-  in place of the registry digest fields, and the invocation is labeled with
-  confidentiality alone, because a non-empty `integrity` array in
+  name, indexed supporting-resource reads, and Deno/Bash skill scripts run in
+  the sandbox where the operator allows them — `--allow-skill-scripts` for every
+  skill the run holds, registry and acquired alike, or an exact entry for one.
+  The same execution path takes an acquired skill's script, checked against the
+  digest taken at acquisition; the tool output and the execution record carry
+  that acquisition in place of the registry digest fields, and the invocation is
+  labeled with confidentiality alone, because a non-empty `integrity` array in
   `cfcInputLabels` makes the sandbox fail to start (CT-2302);
 - recoverable rejection of a malformed tool call: a name no tool answers to,
   arguments that are not a JSON object, or a `delegate_task` argument of the

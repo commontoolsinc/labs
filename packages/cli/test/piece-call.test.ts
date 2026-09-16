@@ -3514,7 +3514,7 @@ describe("collectInvocationResultLinks", () => {
     expect(collectInvocationResultLinks(receiptLink, cell, value, contextSpace))
       .toEqual({
         "/": receiptRef,
-        "/shared": "/@did:key:other-space/of:shared-1",
+        "/shared": "//did:key:other-space/of:shared-1",
       });
   });
 

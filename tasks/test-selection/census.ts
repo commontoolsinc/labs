@@ -30,6 +30,9 @@ import {
 import type { SelectionReason } from "./plan.ts";
 import { UNMEASURED_COST_SECONDS, VALUE_FLOOR } from "./policy.ts";
 
+/** How a stand-in's name is built, and what recognizes one again. */
+const UNRECORDED = "unrecorded ";
+
 /**
  * A stand-in identity for a unit no manifest has ever seen. Records exist
  * only for tests that ran, so a unit with none is either brand new or
@@ -43,10 +46,22 @@ export function unknownIdentity(suite: Suite, unit: string): TestIdentity {
   const test: TestIdentity = {
     k: surface?.kind ?? "unit",
     s: surface?.scope ?? "repo",
-    n: `unrecorded ${unit}`,
+    n: `${UNRECORDED}${unit}`,
   };
   if (suite.variant !== undefined) test.v = suite.variant;
   return test;
+}
+
+/**
+ * Whether a manifest entry is a stand-in for a unit no manifest has
+ * seen, rather than a real identity some run recorded.
+ *
+ * A reader that asks which identities a batch accounted for needs this:
+ * no record will ever carry a stand-in's name, because a real record is
+ * named for a test and a stand-in is named for a file.
+ */
+export function isStandIn(entry: ManifestEntry): boolean {
+  return entry.test.n === `${UNRECORDED}${entry.unit}`;
 }
 
 /**
@@ -93,6 +108,33 @@ export function standIn(
     flakeEvidence: { flakes: 0, runs: 0 },
     repeats: 1,
   };
+}
+
+/**
+ * The unit an entry belongs to in this tree.
+ *
+ * A manifest's `unit` is what its suite said at publication, and a suite
+ * that re-grains its units leaves every entry it published naming a unit
+ * the tree no longer has. Those entries would be read as covering
+ * nothing, and every unit that replaced them as never recorded, so a
+ * corpus whose whole history is present would be charged as new until
+ * the next publication.
+ *
+ * So an entry whose stored unit the tree still holds keeps it, and only
+ * one whose unit has gone is put back through the suite that owns it.
+ * Where the suite cannot place it — its record carries no file, or it
+ * belongs to the suite rather than to any unit — the stored unit stands
+ * and the entry drops out as before, which is what makes this unable to
+ * lose anything that reading the stored value would have kept.
+ */
+function unitNow(
+  suites: ReadonlyMap<string, Suite>,
+  held: ReadonlyMap<string, ReadonlySet<Unit>>,
+  entry: ManifestEntry,
+): Unit {
+  if (held.get(entry.suite)?.has(entry.unit) === true) return entry.unit;
+  const located = suites.get(entry.suite)?.locate({ test: entry.test });
+  return located?.level === "unit" ? located.unit : entry.unit;
 }
 
 /** What this working tree holds, and what has to run whatever it is worth. */
@@ -163,9 +205,17 @@ export function census(
   // repository — so charging it what one test costs would charge a new
   // file a fraction of what running it takes.
   const unitTotal = new Map<string, number>();
+  const held = new Map<string, Set<Unit>>(
+    suites.map((suite) => [suite.id, new Set(suite.units)]),
+  );
+  const suiteById = new Map(suites.map((suite) => [suite.id, suite]));
   for (const entry of manifest?.entries ?? []) {
-    const key = `${entry.suite}\t${entry.unit}`;
-    inUnit.set(key, [...inUnit.get(key) ?? [], entry]);
+    // The entry carries the unit it was placed under, since everything
+    // downstream reads that field rather than the key it was found by.
+    const unit = unitNow(suiteById, held, entry);
+    const key = `${entry.suite}\t${unit}`;
+    const placed = unit === entry.unit ? entry : { ...entry, unit };
+    inUnit.set(key, [...inUnit.get(key) ?? [], placed]);
     unitTotal.set(key, (unitTotal.get(key) ?? 0) + entry.cost);
   }
   const costs = new Map<string, number[]>();

@@ -1074,16 +1074,6 @@ spelling reaches any of them. Adding one item to a collection is therefore
 `get`, edit, `set`: the read-modify-write those operations were made
 first-class to avoid.
 
-**A space written after `/@`.** The reference grammar writes a space as
-`//<space>/`, and `@` is a qualifier on a piece and nothing else. The reader
-a rooted operand goes through still takes `/@<space>/` as an alias for the
-space slot, so `/@user/<handle>@session` names a space called `user` and the
-scope `session` at once, and space names are unvalidated. Retiring that alias
-is the reference grammar's step rather than shuttle's, and shuttle writes no
-`/@`. In v1 a space named by name is refused unless it resolves to the
-connected space, which is what keeps it dormant; multi-space sessions are
-where it wakes.
-
 The base-overlay spelling is settled above, and so is what the prompt shows
 where no slug is confirmed: the whole handle, for the reasons the Prompt
 section carries. One further open item for shuttle overall (shallow-sink

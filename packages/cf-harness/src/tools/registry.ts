@@ -11,6 +11,7 @@ import { browserTool } from "./browser.ts";
 import { delegateTaskTool } from "./delegate-task.ts";
 import { describeHandleTool } from "./describe-handle.ts";
 import { editFileTool } from "./edit-file.ts";
+import { readPieceSourceTool, revisePieceTool } from "./piece-source.ts";
 import { researchTool } from "./research.ts";
 import { readFileTool } from "./read-file.ts";
 import { readSkillResourceTool } from "./read-skill-resource.ts";
@@ -36,6 +37,8 @@ export const BUILTIN_TOOLS = [
   writeFileTool,
   delegateTaskTool,
   runPatternTool,
+  readPieceSourceTool,
+  revisePieceTool,
   assignSlugTool,
   describeHandleTool,
   searchPatternsTool,

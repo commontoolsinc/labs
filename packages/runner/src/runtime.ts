@@ -7,6 +7,7 @@ import {
 import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import { sameAcl } from "@commonfabric/memory/acl";
 import {
   acquireServerExecutionEnabler,
@@ -55,6 +56,7 @@ import {
   buildCfcReadCeiling,
   buildCfcTrustConfig,
   type CfcConfClause,
+  type CfcContentAddressedLabels,
   type CfcDeclaredMonotonicityMode,
   type CfcDecomposedEnvelopes,
   type CfcEnforcementMode,
@@ -628,6 +630,16 @@ export interface RuntimeOptions {
   cfcDecomposedEnvelopes?: CfcDecomposedEnvelopes;
 
   /**
+   * Defaults to `false`. When true, the envelope persist path stores
+   * version-2 envelopes: each label above the inline limit is a reference
+   * to a content-addressed label document shared by every envelope that
+   * carries the label (`docs/specs/content-addressed-cfc-labels.md`). Off
+   * stores version 1 with every label inline. Reading resolves either
+   * version.
+   */
+  cfcContentAddressedLabels?: CfcContentAddressedLabels;
+
+  /**
    * Exchange-rule policy evaluation dial (Epic B5, spec §4.4.5). Defaults to
    * `off` (gates decide on raw labels, byte-identical to before the dial).
    * `observe` evaluates gated labels to fixpoint and emits diagnostics while
@@ -819,6 +831,13 @@ export interface CfcRuntimeStats {
   dereferenceTracesRecorded: number;
 
   dereferenceTracesMax: number;
+
+  /** Structured refusal details recorded across transaction prepares. */
+  refusalDetailsRecorded: number;
+
+  /** Full consumed-label collections, including sink and host release checks. */
+  consumedLabelWalks: number;
+
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
   cfcDigestInvalidations: number;
@@ -864,6 +883,8 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   flowLabelProbeMemoHits: 0,
   dereferenceTracesRecorded: 0,
   dereferenceTracesMax: 0,
+  refusalDetailsRecorded: 0,
+  consumedLabelWalks: 0,
   cfcPreparedTx: 0,
   cfcPrepareRejects: 0,
   cfcDigestInvalidations: 0,
@@ -940,10 +961,6 @@ type RuntimeSetupOptions = {
   prepareForResume?: boolean;
 };
 
-function isMemorySpaceDID(value: string): boolean {
-  return /^did:[^:]+:.+/.test(value);
-}
-
 /**
  * Helper for `Runtime.getImmutableCell()`, which tells the storage preflight
  * what a `Cell` stands for -- the sigil link naming it -- and leaves everything
@@ -997,6 +1014,7 @@ export class Runtime {
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
   readonly cfcDecomposedEnvelopes: CfcDecomposedEnvelopes;
+  readonly cfcContentAddressedLabels: CfcContentAddressedLabels;
   readonly cfcPolicyEvaluation: CfcPolicyEvaluationMode;
   readonly cfcLabelMetadataProtection: CfcLabelMetadataProtectionMode;
   readonly cfcDeclaredMonotonicity: CfcDeclaredMonotonicityMode;
@@ -1694,6 +1712,7 @@ export class Runtime {
       this.cfcWriteFloor = dials.cfcWriteFloor;
       this.cfcTriggerReadGating = dials.cfcTriggerReadGating;
       this.cfcDecomposedEnvelopes = dials.cfcDecomposedEnvelopes;
+      this.cfcContentAddressedLabels = dials.cfcContentAddressedLabels;
       this.cfcPolicyEvaluation = dials.cfcPolicyEvaluation;
       this.cfcLabelMetadataProtection = dials.cfcLabelMetadataProtection;
       this.cfcDeclaredMonotonicity = dials.cfcDeclaredMonotonicity;
@@ -2299,6 +2318,12 @@ export class Runtime {
       onPreparedTx: () => {
         this.#cfcStats.cfcPreparedTx += 1;
       },
+      onRefusalDetail: () => {
+        this.#cfcStats.refusalDetailsRecorded += 1;
+      },
+      onConsumedLabelWalk: () => {
+        this.#cfcStats.consumedLabelWalks += 1;
+      },
       onPrepareReject: (refusal) => {
         this.#cfcStats.cfcPrepareRejects += 1;
         // Every refusal is reported here, terminal or not. The scheduler's
@@ -2352,6 +2377,7 @@ export class Runtime {
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
     wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
     wrapped.setCfcDecomposedEnvelopes(this.cfcDecomposedEnvelopes);
+    wrapped.setCfcContentAddressedLabels(this.cfcContentAddressedLabels);
     wrapped.setCfcPolicyEvaluationMode(this.cfcPolicyEvaluation);
     wrapped.setCfcLabelMetadataProtectionMode(this.cfcLabelMetadataProtection);
     wrapped.setCfcDeclaredMonotonicityMode(this.cfcDeclaredMonotonicity);
@@ -3602,7 +3628,7 @@ export class Runtime {
    * re-running the handler/action (see RetryImmediately).
    */
   resolveSpaceNameSync(name: string): MemorySpace | undefined {
-    if (isMemorySpaceDID(name)) return name as MemorySpace;
+    if (isDID(name)) return name;
     return this.#spaceNameToDid.get(name);
   }
 
@@ -3682,7 +3708,7 @@ export class Runtime {
     if (options?.genesisAcl !== undefined) {
       // A document the resolution cannot honor is refused, never dropped:
       // the caller asked for a space born closed.
-      if (isMemorySpaceDID(name)) {
+      if (isDID(name)) {
         throw new Error(
           `space-name resolution for the DID ${name} cannot register a ` +
             "genesisAcl: the runtime derives no space key for a bare DID, " +

@@ -722,11 +722,9 @@ Serves R4, R5, R10, R12.
 **Confirms.** `createLLMFriendlyLink`'s two omission rules, as the case of a
 one-part context whose scope is `space`.
 
-**Replaces.** The writer's no-context default, which omits the space:
-`createLLMFriendlyLink(link)` writes `/of:X`, a space-relative form against a
-context nobody stated. Under this decision the same call writes the complete
-form, and the placeholder space `packages/cf-harness/src/handle-table.ts` passes
-to defeat the omission is no longer needed.
+**No context.** `createLLMFriendlyLink(link)` writes the complete form,
+including space and scope. The harness handle table renders resolved links
+with the same empty context.
 
 ### D8. The space segment's vocabulary
 
@@ -851,10 +849,9 @@ The prose says _reader_ and _writer_; the code says `parse` and `render`,
 because `render` is what this tree already calls structure-to-text and `write`
 is what it calls a store operation. The context is for resolving, not parsing:
 `parseCellReference` parses the same with or without one, and uses it only to
-fill the parts the string omits. `parseReferenceParts` is the reader today,
-without the context argument, and is folded into `parseCellReference`.
-`parseLLMFriendlyLink` and `createLLMFriendlyLink` become wrappers over the
-pair, kept for their callers — the name records an audience, and the grammar is
+fill the parts the string omits. `parseReferenceParts` aliases
+`parseCellReference`. `parseLLMFriendlyLink` and `createLLMFriendlyLink` wrap
+the pair for their callers — the name records an audience, and the grammar is
 for every reader.
 
 Serves R3 (the shape is the string's; the values are the context's), R10, R5,
@@ -863,9 +860,8 @@ R4.
 **Confirms.** `parseLLMFriendlyLink(target, space?)` and
 `parseLinkPrimitive(value, base)` on the read side,
 `createLLMFriendlyLink(link, contextSpace?)` on the write side: each is this
-decision with a one-part context. `HANDLE_REF_CONTEXT_SPACE` in
-`packages/cf-harness/src/handle-table.ts` — a placeholder space passed to force
-the real DID out — is the empty context, written by hand because none exists.
+decision with a one-part context. The harness handle table renders resolved
+links against an empty context, so their space and scope remain explicit.
 
 **Rejected.** A single chain in which the scope is a level below the piece, so
 that writing a piece resets the scope to the base. It would make `/X` at a
@@ -991,21 +987,20 @@ A named slot is as cheap to add to and cannot collide with the last one.
 
 ## Migration
 
-Little durable state holds a reference string (R12), so the migration is in
-readers, writers, and prose, in this order. Each step is a separate change that
-leaves the tree consistent.
+Readers and writers share the grammar below. Persisted DID-prefixed strings
+remain readable through the compatibility alias (R12).
 
 1. **Read the new forms.** `parseReferenceParts` reads `//<space>/`,
    `@name=value`, repeated qualifiers, and `@inherit`; `parseScopedIdSegment`
-   becomes the qualifier parser. The `/@<space>/` prefix stays readable as an
-   alias for `//<space>/` — with a DID because it has been rendered into harness
-   refs, messages, and markdown, and with a name because `cf --url` renders one
-   today; the [alias table](#aliases) says when each goes. `parseFabricUrl`
+   reads scope abbreviations. The `/@did:…/` prefix stays readable as an
+   alias for `//did:…/` because it occurs in harness refs, messages, and
+   markdown. Named-space `/@name/` prefixes are refused; callers use `//name/`.
+   The [alias table](#aliases) records the retained forms. `parseFabricUrl`
    reads `//<space>/` alongside the alias. The CLI's `validateEmbeddedSpaces`
    and completion providers follow the same split. The reader takes a context
    ([D10](#d10-reader-and-writer-share-one-context)) and reads the
-   piece-relative form against it; `cf`'s positional path is one already, and
-   gains the `.` and `..` heads; every reader of the piece-relative form — an
+   piece-relative form against it; `cf`'s positional path supports the `.` and
+   `..` heads; every reader of the piece-relative form — an
    interactive reader with a position among them — takes them from the shared
    reader rather than reading them on its own. A trailing empty segment inside
    a piece names the key `""`; shared readers and shuttle preserve it.
@@ -1015,27 +1010,24 @@ leaves the tree consistent.
    addressable; they cannot distinguish a literal key from an intended
    member selection written in the wrong slot.
 2. **Write the new forms.** `renderCellReference` is the reader's inverse, in
-   the same module, and takes the same context, and every writer moves onto it.
-   `createLLMFriendlyLink` becomes a wrapper that passes a context holding its
-   `contextSpace` and scope `space`, so a caller that passes a space today keeps
-   its output, and one that passes none gets the complete form under
-   [D7](#d7-what-a-writer-writes) instead of `/of:X` — each such caller is
-   visited, and the placeholder space in
-   `packages/cf-harness/src/handle-table.ts` retires. `linkAddress` in
-   `packages/patterns/notes/reference-address.ts` takes the same wrapper, or
-   imports it; `canonicalAddress` in `packages/cli/lib/callable.ts` and
+   the same module, and takes the same context. Writers delegate to it.
+   `createLLMFriendlyLink` is a wrapper that passes a context holding its
+   `contextSpace` and scope `space`, so a caller that passes a space gets
+   its context-relative output, and one that passes none gets the complete form
+   under [D7](#d7-what-a-writer-writes). The harness handle table and
+   `linkAddress` in `packages/patterns/notes/reference-address.ts` call the
+   shared renderer directly; `canonicalAddress` in
+   `packages/cli/lib/callable.ts` and
    `decomposeUrl` in `packages/cli/commands/piece.ts` write `//<space>/`, and
-   the name alias retires with them. `renderPosition` in
+   the name alias is refused. `renderPosition` in
    `packages/cli/lib/shuttle/place.ts` delegates to `renderCellReference` — its
-   scope half, `renderScope`, writes the `@scope` suffix D3 keeps and does not
-   move — and gains what one renderer with a context parameter gives its
-   callers: `pwd` passes no context and prints the complete form, a listing
+   scope half, `renderScope`, writes the `@scope` suffix D3 keeps. The context
+   controls abbreviation: `pwd` passes no context and prints the complete form, a listing
    passes the place and abbreviates its rows, under the listing's own rule that
    a row abbreviates only where the abbreviated spelling is not itself a
    reading. That listing's round-trip check — every printed name driven back
    through `cd` onto the row it named — is the writer migration's test where it
-   has landed before this step. From here every address the CLI publishes is in
-   this grammar.
+   is used. Every address the CLI publishes is in this grammar.
 3. **Documents and tests.** The live documents that quote the form: the grammar
    line in `packages/cli/README.md` and `docs/common/verbs/over-the-cli.md`; the
    examples in `docs/tutorial/06-workflow.md`; the doc comment on
@@ -1050,13 +1042,14 @@ leaves the tree consistent.
 
 ### Aliases
 
+The named-space prefix `/@name/` is refused; callers use `//name/`.
+
 A form a reader accepts and no writer writes, each for one reason and with its
 exit (R12):
 
 | Form                                                    | Read because                                                             | Confined to                                                            | Retires when                                                                                                                                                                                                       |
 | ------------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `/@did:key:…/` space prefix                             | the writers rendered it into harness refs, stored messages, and markdown | a segment beginning `@did:`, which no scope word or qualifier name can | a migration rewrites the stored strings — harness `ref`s re-render from the fields beside them; messages and markdown are people's content, which is the real decision — or the owner rules the residue acceptable |
-| `/@<name>/` space prefix                                | `cf --url` renders one from a page URL today                             | the same segment, holding a name                                       | step 2, when that writer moves; no stored string holds it                                                                                                                                                          |
 | the CLI's bare form, `pieceId[@scope]` and a slug alone | a typing convenience the README already calls an alias                   | slots where no path competes: `--cell`, link endpoints                 | a CLI decision — the [open question](#open-questions) on retiring it in favor of `/slug`                                                                                                                           |
 
 ## Relationship to existing decisions
@@ -1070,7 +1063,7 @@ exit (R12):
 | The space rides in front only when it differs; the scope only when not the base                                          | `createLLMFriendlyLink`; `packages/cli/README.md`                       | confirms, as the case of a context that knows the space and holds scope `space` (D7, D10)                                         |
 | The positional path is a path against the target cell and never begins with `/`                                          | `packages/cli/README.md`, "Writing the target"                          | confirms as the piece-relative form (R4, D1)                                                                                      |
 | A stored link with no `id` is the base cell's document, path from its root                                               | `parseLinkPrimitive` in `packages/runner/src/link-types.ts`             | confirms as a reader with a one-part context: the base cell (D10)                                                                 |
-| A link's space is embedded only when it differs from the context, so a caller with no context passes a placeholder space | `HANDLE_REF_CONTEXT_SPACE` in `packages/cf-harness/src/handle-table.ts` | **replaces**: the empty context writes every part, and the placeholder retires (D7)                                               |
+| A resolved link rendered without context states its space and scope | `canonicalRef` in `packages/cf-harness/src/handle-table.ts` | the empty context writes every known part of a resolved link (D7)                                               |
 | `#argument` is the one suffix, split off before anything else parses                                                     | `splitArgumentSuffix`                                                   | confirms the token; **replaces** its slot — the member sits on the piece segment, `#` in a path is data — and adds `#result` (D6) |
 | The projection grammar is its own; `--schema @` is the file form                                                         | `packages/cli/README.md`, "Shell completion"                            | confirms as out of scope; records the borrowed characters                                                                         |
 | The space is written `/@<space>/`                                                                                        | `parseReferenceParts`; `createLLMFriendlyLink`                          | **replaces** (D1)                                                                                                                 |

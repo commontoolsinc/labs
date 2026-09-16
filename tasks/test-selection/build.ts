@@ -44,6 +44,11 @@ import {
 } from "./score.ts";
 import { claimsFor } from "../test-topology.ts";
 import { isLaneMeasurement } from "../lane-measurement.ts";
+import {
+  isLaneObservation,
+  type LaneObservation,
+  laneObservationsOf,
+} from "./calibrate.ts";
 import type { Suite } from "../test-topology/suite.ts";
 import {
   type Calibration,
@@ -106,17 +111,28 @@ export interface AggregateState {
   states: Record<string, IdentityState>;
 
   /**
-   * Every identity no run has worked out a unit for, kept from one
-   * publish to the next. A run reads surfaces only from the objects it
-   * folds for the first time, so a surface recording less often than the
-   * publisher runs is absent from most runs; keeping the list across them
-   * is what lets a run tell an identity recorded once and not yet given a
-   * unit from one whose records keep arriving and keep saying too little.
-   * An entry is removed when the topology has a unit for its identity, or
-   * when it names something the count no longer holds, so the list is
-   * what the tree still says nothing about.
+   * The file each identity's records named, by identity key, for the
+   * identities whose records named one at all. Everything else about an
+   * identity's surface follows from the identity, and an identity absent
+   * here is its own invocation unit.
+   *
+   * Carried so that a manifest holds every identity the aggregate scores
+   * rather than the ones that ran lately. A run reads records only from
+   * the objects it folds for the first time, so surfaces gathered from
+   * those alone name the identities that ran inside that run's window;
+   * the publisher keeps the identities it can place, and an identity it
+   * has no surface for is not one of them.
    */
-  unclaimed?: string[];
+  files: Record<string, string>;
+
+  /**
+   * What lanes have measured about themselves, against the day each ran.
+   * A lane's cost beyond its tests is fitted from this, and it is kept
+   * here rather than recomputed because a publisher run folds a few
+   * hours of objects and a fit wants the window `COST_WINDOW_DAYS`
+   * names.
+   */
+  lanes?: LaneObservation[];
 }
 
 /** A fresh aggregate, for a cold start. */
@@ -128,6 +144,7 @@ export function emptyAggregate(day: string): AggregateState {
     context: serializeContext(emptyContext()),
     compacted: [],
     states: {},
+    files: {},
   };
 }
 
@@ -202,13 +219,26 @@ export function parseAggregate(text: string): AggregateState | undefined {
   const compacted = state.compacted === undefined
     ? (written as string[]).map((day) => sourceDateKey(CI_SOURCE, day))
     : written as string[];
-  // What was unplaced last time is compared against rather than folded,
-  // so an aggregate written without it, or with something that is not a
-  // list of identities, is read as having nothing to compare against.
-  const unclaimed = Array.isArray(state.unclaimed) &&
-      state.unclaimed.every((key) => typeof key === "string")
-    ? state.unclaimed as string[]
+  // Each lane observation stands alone, so one that will not read is
+  // dropped by itself rather than taking the rest with it. What the list
+  // holds is a week of measurements, and the fit reads every figure in
+  // it as a number.
+  const lanes = Array.isArray(state.lanes)
+    ? state.lanes.filter(isLaneObservation)
     : undefined;
+  // An aggregate written before the files were carried holds none, and
+  // an empty map is the truthful reading of it: each identity is then
+  // read as its own invocation unit until one of its records names a
+  // file again. Anything else in that place is a state this cannot read,
+  // and reading it wrongly would decide which identities the manifest
+  // holds, so the aggregate is refused instead.
+  const files = state.files === undefined ? {} : state.files;
+  if (typeof files !== "object" || files === null || Array.isArray(files)) {
+    return undefined;
+  }
+  for (const file of Object.values(files as Record<string, unknown>)) {
+    if (typeof file !== "string") return undefined;
+  }
   const states = state.states as Record<string, IdentityState>;
   for (const identity of Object.values(states)) readCostsForward(identity);
   return {
@@ -218,7 +248,8 @@ export function parseAggregate(text: string): AggregateState | undefined {
     context: serializeContext(parseContext(state.context)),
     compacted,
     states,
-    ...(unclaimed === undefined ? {} : { unclaimed }),
+    files: files as Record<string, string>,
+    ...(lanes === undefined ? {} : { lanes }),
   };
 }
 
@@ -266,6 +297,9 @@ export interface ReadReport {
 
   /** Every passing duration, by identity key and then by day. */
   durations: Map<string, Map<string, number[]>>;
+
+  /** What the lanes in this object measured about themselves. */
+  lanes: LaneObservation[];
 }
 
 /**
@@ -281,6 +315,7 @@ export function readReport(
   const observations: Observation[] = [];
   const surfaces = new Map<string, Surface>();
   const durations = new Map<string, Map<string, number[]>>();
+  const lanes: LaneObservation[] = [];
   for (const group of report.reports) {
     const where = provenance(group.context, report.objectName);
     if (
@@ -290,6 +325,13 @@ export function readReport(
       continue;
     }
     const day = dayOf(group.context.startedAt);
+    // What a lane spent on its own setup and on each of its batches is
+    // not scored, and not discarded either: it is what the packer's
+    // charges for both are fitted from. One group is one lane's
+    // artifact, so a batch's two halves are here together.
+    lanes.push(
+      ...laneObservationsOf(report.objectName, group.records, day),
+    );
     for (const record of group.records) {
       const test = resolver.resolve(record.test, day);
       // A lane measuring its own setup or one of its batches is not a
@@ -331,7 +373,7 @@ export function readReport(
       byDay.set(day, [...(byDay.get(day) ?? []), record.durationMs]);
     }
   }
-  return { observations, surfaces, durations };
+  return { observations, surfaces, durations, lanes };
 }
 
 /** The invocation unit and suite a record belongs to. */
@@ -398,12 +440,8 @@ export interface Unplaced {
    * that says too little. The lane's measurements of itself are not here:
    * they are not test surfaces, and `isLaneMeasurement` is what says so.
    *
-   * A count of these alone says nothing about which of those it holds. A
-   * run reads surfaces only from the objects it folds for the first time,
-   * so an identity here that `AggregateState.unclaimed` already held has
-   * recorded more since and still has no unit. That is a surface whose
-   * records never say which unit, rather than one whose next record
-   * will.
+   * These span the aggregate's whole history rather than one run's
+   * reads, because the surfaces they are read from do.
    */
   unclaimed: string[];
 }
@@ -592,6 +630,7 @@ export class Fold {
   readonly #folded: string[];
   readonly #foldedIndex: Set<string>;
   readonly #compacted: string[];
+  readonly #lanes: LaneObservation[];
 
   /**
    * The source-and-date pairs `folded` holds raw objects from, which is
@@ -620,7 +659,19 @@ export class Fold {
         })
         .map(([key, state]) => [key, { ...emptyState(), ...state }]),
     );
+    // A record produces a state and a surface together, so an identity
+    // the aggregate holds a state for has a surface, and the file its
+    // records named is the only part of that surface the identity does
+    // not already say. Seeding these is what makes the manifest hold
+    // every identity the aggregate scores rather than the ones whose
+    // records this run happened to read.
+    for (const key of this.#states.keys()) {
+      const test = testIdentityOfKey(key);
+      if (test === undefined) continue;
+      this.#surfaces.set(key, recordSurface(test, aggregate.files[key]));
+    }
     this.#context = parseContext(aggregate.context);
+    this.#lanes = [...aggregate.lanes ?? []];
     this.#folded = [...aggregate.folded];
     // The array is what is persisted; membership is asked once per listed
     // object per run, and the list grows without bound, so the question
@@ -748,6 +799,16 @@ export class Fold {
     }
   }
 
+  /**
+   * Whether a lane's measurement is recent enough to charge against.
+   * Both ends of the fold ask this rather than spelling the comparison
+   * out twice, so a day that will not parse as one is dropped at both
+   * rather than accepted at one and refused at the other.
+   */
+  #withinCostWindow(lane: LaneObservation): boolean {
+    return daysBetween(lane.day, this.#today) <= COST_WINDOW_DAYS;
+  }
+
   /** Closes the fold, sealing each day's cost and aging the counters. */
   finish(): FoldResult {
     for (const [key, byDay] of this.#samples) {
@@ -758,6 +819,9 @@ export class Fold {
     for (const state of this.#states.values()) {
       trimWindows(state, this.#today);
     }
+    // Aged the way every other window is, so what a lane cost a week ago
+    // stops deciding what the packer charges today.
+    const lanes = this.#lanes.filter((lane) => this.#withinCostWindow(lane));
     return {
       aggregate: {
         schema: MANIFEST_SCHEMA_VERSION,
@@ -766,6 +830,12 @@ export class Fold {
         context: serializeContext(this.#context),
         compacted: this.#compacted,
         states: Object.fromEntries(this.#states),
+        lanes,
+        files: Object.fromEntries(
+          [...this.#surfaces]
+            .filter(([, surface]) => surface.fromFile)
+            .map(([key, surface]) => [key, surface.unit]),
+        ),
       },
       states: this.#states,
       surfaces: this.#surfaces,
@@ -783,6 +853,12 @@ export class Fold {
       if (known === undefined || isFileBacked(surface)) {
         this.#surfaces.set(key, surface);
       }
+    }
+    // A day past the cost window is dropped again by the same `finish`
+    // that would keep it, so reading one buys nothing and a bootstrap
+    // holds sixty days of them at once.
+    for (const lane of read.lanes) {
+      if (this.#withinCostWindow(lane)) this.#lanes.push(lane);
     }
     for (const [key, byDay] of read.durations) {
       let known = this.#samples.get(key);

@@ -716,7 +716,7 @@ mechanism is a skip list rather than a selection list.
 
 ### Every invocation unit, and the identities inside it
 
-There are eight kinds of invocation unit across the topology, and two of
+There are nine kinds of invocation unit across the topology, and two of
 them hold more than one identity. One of the two holds almost everything:
 the workspace and runner unit shards alone carry 15,997 of the reference
 build's 17,999 executions.
@@ -726,17 +726,18 @@ build's 17,999 executions.
 | A `deno test` file | `workspace-unit`, `runner-unit`, `pattern-integration` and its ON arm, `package-integration` and its ON arm, `generated-patterns`, `cli-deno`, `pattern-reload` | Every bare `Deno.test` in the file, and every `it`, named as its describe chain joined with `" > "`. The container testcase Deno also reports is dropped at ingestion, so a `describe` is not an identity | The skip list, through the preload for a bare `Deno.test` and through the remapped `describe`/`it` for the rest. This is the row the whole section is about. |
 | A pattern file run by `cf test` | `pattern-unit` | One. The runner writes one record per pattern file | Nothing to reach: the file is the identity. |
 | A pattern file checked by the compatibility gate | `pattern-compat` | One, named `pattern-compat <key>`, which the task appends itself as each file's verdict is known | Nothing to reach. The task already takes `--only` to restrict which files it reads. |
+| A pattern file type-checked by `cfcheck` | `cfcheck` | One, named `cfcheck <path>`, carrying what the batch spent on that pattern's own files | Nothing to reach. The task takes `--only` the same way, and the unit is the path the diff names. |
 | A single-step arm of `integration.sh` | `cli-core` | One, named for its step | Nothing to reach. The script's own whole-invocation record is suite-level and belongs to no invocation unit at all. |
 | One gate command | `repo-gates`, `repo-history-gates` | One, named for the gate that ran | Nothing to reach. |
 | One `deno check` invocation | `typecheck` | One, named for the path group it checked, which the task records itself | Nothing to reach. |
-| A whole task carrying one record | `cfcheck`, `pattern-vintage` | One, for everything the task did | Nothing to reach, and nothing finer exists: the suite is its own identity. |
+| A whole task carrying one record | `pattern-vintage` | One, for everything the task did | Nothing to reach, and nothing finer exists: the suite is its own identity. |
 | A section of `fuse-exec.sh` | `cli-fuse` | The phases that section alone selects. The phases more than one section runs record against the suite instead, since they name no single section | Nothing to reach below the section. A mount comes up for the section, not for the phase, so its phases run or are skipped together. |
 
-Six of the eight rows are one identity per invocation, which is why this
+Seven of the nine rows are one identity per invocation, which is why this
 change is smaller than removing a concept sounds. The topology does not
 gain a mechanism for them; they simply stop being described as items
 holding one identity each and start being described as identities. The
-seventh, `cli-fuse`, holds the phases of whichever section ran, and there
+eighth, `cli-fuse`, holds the phases of whichever section ran, and there
 is nothing finer for the topology to reach, since a mount comes up for the
 section rather than for the phase.
 
@@ -1986,14 +1987,17 @@ tests, once per commit; the first rule multiplies that by the count. A
 nobody anything they did not already know, and several times per commit it
 tells them nothing several times.
 
-The rule is for tests and not for repository gates. Formatting, linting,
-the cycle check and the drift guard are withheld from pull requests by the
-same threshold as everything else, and a gate is exactly where this must
-not reach: a gate's failure is a statement about the tree rather than
-about one change, and the drift guard is what this design leans on to
-notice a suite that has silently stopped running. So the lane reads a
-`reason` of `flaky` on a withheld entry whose unit is a test, and every
-other withheld entry gates as it does today. Reading membership of the
+The rule reaches a repository gate like anything else. Formatting,
+linting, the cycle check and the drift guard are withheld from pull
+requests by the same threshold as everything else and excused on the
+default branch by the same one. A gate introspects the tree where a test
+runs the code, which decides what it reads and how it is invoked and
+nothing about what its failures are worth to a change: a gate that
+disagrees with itself fails somebody's change for something its author
+cannot act on, which is what the threshold answers. What asks for such a
+gate to be fixed is the flake tile, the same thing that asks for a flaky
+test. So the lane reads a `reason` of `flaky` on a withheld entry, and an
+entry held back for any other reason gates. Reading membership of the
 withheld set instead would make every reason somebody adds later
 non-gating without anybody deciding it.
 
@@ -2109,13 +2113,34 @@ publishes the result in the next manifest. Both start at zero and one
 respectively, and converge within a few days of lanes running. Two numbers
 per suite, both measured, neither maintained by hand.
 
+The intercept is then raised until no batch anybody has seen is
+under-predicted, because a least-squares line sits in the middle of its
+observations and half the lanes would otherwise run past the budget they
+were packed against. The slope is fitted at all only once a suite has
+enough batches, charged far enough apart, for a slope to mean something:
+it is read far outside the range it was fitted over, since a suite
+charged six seconds in every batch anybody has seen may be charged
+thousands the first time a lane packs it whole. Nothing bounds it from
+above. A slope fitted too high only over-charges, and what a bound took
+off it would land on the intercept, which a lane pays to run one test of
+the suite where the slope is charged in proportion.
+
 The measurements travel through the machinery that already exists: the
-lane runner writes them as ordinary test records of kind `gate` and scope
-`ci`, named `ci-lane setup <capability>` and `ci-lane batch <suite>`. They
-ship in the lane's normal test-records artifact, the relay stores them
-like anything else, and the publisher reads them with the same reader it
-uses for everything else. No new pipeline, and the numbers show up in the
-existing dashboards for free.
+lane runner writes them as ordinary test records of kind `gate` and
+scope `ci`, named `ci-lane setup <capability>` and `ci-lane batch
+<suite>`. A batch is written twice, the second named `ci-lane planned
+batch <suite>`, because what the packer expected its tests to take
+cannot be recovered from the records the batch produced: those say what
+the tests took and not what the packer thought they would. A batch run
+with coverage on carries `with coverage` on the end of its name, because
+instrumenting a run costs it time and how much is a property of the
+suite. A calibration is keyed by suite alone, so the two are fitted
+together for now and an uninstrumented batch is charged what an
+instrumented one cost; telling them apart wants a calibration keyed by
+both. They ship in the lane's normal test-records artifact, the relay
+stores them like anything else, and the publisher reads them with the
+same reader it uses for everything else. No new pipeline, and the
+numbers show up in the existing dashboards for free.
 
 ### The budget, and why it is derived rather than chosen
 
@@ -3611,9 +3636,9 @@ The full run's treatment of a flaky test is tested at both ends. In
 `plan()`, a withheld and independent identity is placed under the
 `everything` policy with the count its share asks for and named in
 `nonGating`; a withheld identity without the independence flag is placed
-once; a withheld gate is named in neither; and an identity whose runs do
-not fit gives them up until they do rather than putting its lane past the
-bound. In the lane runner, a fixture of batch results and records proves
+once; a withheld entry whose reason is not `flaky` is held back and not
+named in `nonGating`; and an identity whose runs do not fit gives them up
+until they do rather than putting its lane past the bound. In the lane runner, a fixture of batch results and records proves
 four cases: a batch failing only on non-gating identities does not fail the
 lane, a batch failing on one other identity does, a batch failing on a
 non-gating identity in one run and not another does not, and a batch that
@@ -3902,31 +3927,49 @@ exercised on the branch on its own.
       into the unmarked lane spool. It also includes `--full`, `--dry-run`,
       and repeats.
 - [ ] `deno.yml`: `plan-full` and `full-tests` on push, with the build,
-      attestation, coverage and deploy jobs repointed at them.
-- [ ] The full run's treatment of a test too flaky for pull requests.
+      attestation, coverage and deploy jobs repointed at them. The lane's
+      coverage upload carries the whole of the lane's coverage directory
+      rather than its `.lcov` files: a measured set the lane saw fail is
+      marked by a file beside the report, and a glob over one extension
+      would drop it and publish the baseline anyway.
+- [x] The full run's treatment of a test too flaky for pull requests.
       The count is placed already: `tasks/test-selection/plan.ts` gives
       every mandatory identity the count `executionsFor` returns for its
       share, and gives up runs until what is left fits rather than
       putting a lane past its bound. What is left is that it returns a
       `nonGating` list beside `withheld` naming the identities whose
-      failures do not fail the run, and that a withheld repository gate
-      is in neither list.
+      failures do not fail the run. A repository gate is one of those
+      identities like any other: a gate introspects the tree where a test
+      runs the code, which says nothing about what its failures are worth
+      to a change.
       `tasks/ci-lane.ts` reads each batch's gathered records, exits
-      non-zero only where a failing identity is outside `nonGating`, fails
-      the lane whenever a batch did not account for every identity it was
-      asked to run, and names every non-gating failure in the job summary.
+      non-zero only where a failing identity is outside `nonGating`, and
+      names every non-gating failure in the job summary. Three rules
+      decide a lane. An excusal takes the specification's: an invocation
+      is excused only when it accounted for every identity it was asked
+      to run, and an execution that ended badly having recorded no
+      failure accounted for nothing, whatever the batch's other
+      executions recorded. A unit that recorded nothing recorded nothing
+      under any name, and that fails the lane whether or not anything was
+      there to excuse. And an identity no record accounts for costs the
+      batch its excusal rather than costing the run, since failing
+      outright would fail the run for every rename: a manifest is hours
+      old by construction and a test renamed since records under its new
+      name.
       The manifest gains no field and `executionsFor` needs no change: its
       line already runs past the exclusion rate. `fullLaneCount`'s work
-      sum counts the extra runs, which it does not today, so the floor its
-      search starts from is not an underestimate.
-- [ ] `pendingMain` joins the windows `trimWindows` ages. A `main` failure
+      sum counts the extra runs, so the count its search starts from is
+      close to the answer rather than far below it, and the search walks
+      down as well as up so that where it starts cannot decide how many
+      lanes the run gets.
+- [x] `pendingMain` joins the windows `trimWindows` ages. A `main` failure
       waits there until a later run judges it, and an excluded test that
       stays broken no longer turns `main` red, so nothing bounds what
       accumulates.
-- [ ] A measured set whose lane held a non-gating failure is reported
+- [x] A measured set whose lane held a non-gating failure is reported
       rather than having a baseline published from it, the same way the
       gate already reports a run with a failing test.
-- [ ] `explain <identity>` gains the runs it is given and whether it is
+- [x] `explain <identity>` gains the runs it is given and whether it is
       withheld, replacing the three-way answer that no longer partitions.
 - [ ] Repository-wide coverage measurement moves to the full run and stops
       failing anything.

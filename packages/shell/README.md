@@ -11,7 +11,7 @@
 
 ## Routes
 
-The shell supports these browser URL forms:
+The shell currently supports these browser URL forms:
 
 - `/<space-name-or-did>`: opens the space root pattern.
 - `/<space-name-or-did>/<piece-id-or-slug>`: opens a specific piece. Where the
@@ -24,8 +24,10 @@ The shell supports these browser URL forms:
   offers the member's portable reference, `/@<space>/<collection>/<member>`,
   which carries its own space and so depends on no binding of the reader's.
   Where the slug names a piece rather than a collection there are no members to
-  name, so the segment is dropped and the address settles on the piece the page
-  is showing.
+  name, so the segment is reported by name, alongside the slug, and nothing
+  opens. An address carrying segments past the member opens nothing either: no
+  segment after a member is resolved, so a nested address such as
+  `/<space>/top/42/comments/7` is reported by the segments past the member.
 - `/@<space-name-or-did>/...`: any of the other forms, `.embed` included,
   written with the mark that says which segment is the space. This is the
   spelling the portable reference above is written in, so what one page copies
@@ -36,6 +38,12 @@ The shell supports these browser URL forms:
   a segment that is nothing but the mark names no space and opens the home view.
 - `/.embed/<space-name-or-did>/<piece-id-or-slug>`: opens the same piece in
   embed mode.
+
+[Common Fabric URLs](../../docs/specs/fabric-urls.md) and the
+[space name registry](../../docs/plans/space-name-registry.md) describe a
+possible future ASP, namespace, registered-name, DID, and displayed-URL
+contract. No deployment is planned. The forms above remain the authoritative
+shell behavior.
 
 Embed mode is intended for rendering the shell inside another web view, such as
 an iframe. It removes shell-owned chrome around the pattern, including the

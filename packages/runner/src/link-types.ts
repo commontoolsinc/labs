@@ -1,5 +1,5 @@
-import { parseCellReference } from "./cell-reference.ts";
 import { toCompactDebugString } from "@commonfabric/data-model";
+import { isDID } from "@commonfabric/identity/did";
 import {
   isLinkRef,
   linkRefFrom,
@@ -10,6 +10,7 @@ import {
   encodeJsonPointer,
 } from "@commonfabric/utils/json-pointer";
 import { isObjectNotArray } from "@commonfabric/utils/types";
+import { parseCellReference, renderCellReference } from "./cell-reference.ts";
 import {
   type CellScope,
   type JSONSchema,
@@ -415,9 +416,6 @@ export const matchLLMFriendlyLink = new RegExp(
   "^/(?:/[^/]+/|@[^/]+/)?[a-zA-Z0-9]+:",
 );
 
-// Matches the space DID a link's leading `@` segment names, the `@` removed.
-const matchSpaceDid = new RegExp("^did:[^:]+:[^/]+$");
-
 /**
  * The shortest an id segment may be and still be a piece handle.
  *
@@ -480,12 +478,12 @@ export function parseLLMFriendlyLink(
   // are: a space name and a slug each need a session to look up, and there is
   // none here.
   if (parsed.space !== undefined) {
-    if (!matchSpaceDid.test(parsed.space)) {
+    if (!isDID(parsed.space)) {
       throw new Error(
         `Link spaces must be DIDs (e.g., "/@did:key:z6Mk.../of:fid1:abc123"), not names (e.g., "${parsed.space}").`,
       );
     }
-    space = parsed.space as MemorySpace;
+    space = parsed.space;
   }
   if (!isPieceHandle(parsed.id)) {
     throw new Error(
@@ -503,8 +501,8 @@ export function parseLLMFriendlyLink(
 
 /**
  * Creates an LLM-friendly link string from a normalized link.
- * If contextSpace is provided and differs from the link's space,
- * includes the space DID in the link for cross-space resolution.
+ * Uses the caller's space and base scope as context when supplied. Without a
+ * context, writes the complete address, including its space and scope.
  *
  * @param link - The normalized link to encode
  * @param contextSpace - The current execution space (optional)
@@ -514,12 +512,8 @@ export function createLLMFriendlyLink(
   link: NormalizedFullLink,
   contextSpace?: MemorySpace,
 ): string {
-  const id = link.scope && link.scope !== "space"
-    ? `${link.id}@${link.scope}`
-    : link.id;
-  // If contextSpace provided and differs, include space in link
-  if (contextSpace && link.space && link.space !== contextSpace) {
-    return encodeJsonPointer(["", `@${link.space}`, id, ...link.path]);
-  }
-  return encodeJsonPointer(["", id, ...link.path]);
+  return renderCellReference(
+    link,
+    contextSpace === undefined ? {} : { space: contextSpace, scope: "space" },
+  );
 }

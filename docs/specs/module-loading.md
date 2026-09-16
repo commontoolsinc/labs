@@ -617,11 +617,19 @@ model).
 `piece setsrc` is the temporary authority handoff while pattern files remain
 local, content-addressed modules. Compilation persists artifacts without
 granting update authority. Setup prepares a proposal from the current and
-candidate entries' verified recursive source closures, matching their modules by
-canonical full authored filename (resolved relative imports meet at the same
-stored path; basenames are never matched). For every unambiguous match, the
-successor inherits the direct predecessor plus the predecessor's cumulative
-delegation list ([`deriveModuleDelegations`][c14]). Each setup attempt pins the
+candidate entries' verified recursive source closures. The two entries match
+each other outright, since the update is what names the one as the other's
+successor. Every other module matches by canonical full authored filename
+(resolved relative imports meet at the same stored path; basenames are never
+matched), and additionally under the root substitution the two entry names
+define: when the entries end the same way, the roots each sits under read as
+the same authored tree grounded at two places — the program the toolshed
+serves under `/api/patterns` and the same checkout supplied from a repository
+root under `/packages/patterns` — and a module matches the previous module
+named by its own name under the previous root. For every unambiguous match,
+the successor inherits the direct predecessor plus the predecessor's
+cumulative delegation list ([`deriveModuleDelegations`][c14]). Each setup
+attempt pins the
 proposal alongside committed authority in its own transaction; ordinary
 transactions cannot observe it. The authority fields commit atomically with the
 source transition. Rejection publishes no proposed authority, while success
@@ -636,11 +644,17 @@ store, outside the wave, and registers its authority from that verdict
 ([`server-pattern-lifecycle.md`](../features/server-pattern-lifecycle.md)).
 
 `piece setsrc --check` compiles and reviews the candidate without saving it or
-repairing the current source's compiled cache. It issues no storage writes and
-creates no module update authority. Verified byte caches and in-memory compiler
-state may be reused by later operations. Normal storage reads can demand
-materialization by an active server executor; preflight does not freeze the
-space or suppress other actors' writes.
+repairing the current source's compiled cache. The review includes the CFC
+schema-envelope merge the setup transaction performs at commit, run in dry run
+over the envelopes stored on the piece's argument document and on the piece's
+own document — the latter only where setup would rewrite the result
+projection, as the commit merges it only then — so a stored `writeAuthorizedBy`
+claim the candidate's schema cannot reconcile with is reported by the check
+rather than by the commit. It issues no storage writes and creates no module
+update authority. Verified byte caches and in-memory compiler state may be
+reused by later operations. Normal storage reads can demand materialization by
+an active server executor; preflight does not freeze the space or suppress
+other actors' writes.
 
 Asynchronous source and compiled closure loads register authority only when the
 transaction carries no uncommitted writes (`tx.hasWrites()` is false). Source
@@ -672,10 +686,13 @@ snapshot, while its binding path must still match exactly. Delegation metadata
 loaded from another space grants no authority. Source and compiled closure loaders
 reject a cache graph containing any cross-space import link, so a child document's
 local attestation cannot be flattened into the root's space. Source-file spelling
-is diagnostic at verification because it is resolver-dependent; a rename still
-receives no delegation because old and new modules no longer match by canonical
-authored filename. Ambiguous canonical filenames and unauthenticated metadata
-fail closed by receiving no delegation. If a runtime-version miss recompiles
+is diagnostic at verification because it is resolver-dependent. A renamed
+entry still succeeds the entry it replaces; a renamed module below the entry
+receives no delegation, because old and new no longer match by canonical
+authored filename under either root. A module with candidates under both its
+own name and the substituted root, one that two successors claim, an
+ambiguous canonical filename, and unauthenticated metadata all fail closed by
+receiving no delegation. If a runtime-version miss recompiles
 from source, the compiled-cache repair carries the authenticated map forward so
 later warm loads retain the same authority chain. Cross-space closure
 replication copies code and imports but omits the origin space's delegation

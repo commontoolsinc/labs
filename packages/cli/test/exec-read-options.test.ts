@@ -367,10 +367,8 @@ describe("cf exec read options", () => {
       { write: (text) => out.push(text), writeError: (text) => err.push(text) },
     );
 
-    // stdout stays exactly the tool's result; the address rides stderr as the
-    // canonical `/@<space>/<id>@<scope>` reference `--piece` parses, rather
-    // than the prose spelling `<id> (space <space>, scope <scope>)` that no
-    // command accepts.
+    // The result stays on stdout; stderr carries a complete reference with
+    // explicit scope for a reader whose context is unknown.
     expect(out).toEqual(["{}"]);
     expect(err).toHaveLength(1);
     expect(err[0]).not.toContain("(space ");
@@ -381,11 +379,11 @@ describe("cf exec read options", () => {
     // command name no `--space` at all.
     expect(err[0]).not.toContain("--space");
     expect(err[0]).toContain(
-      "cf cell get /@did:key:test-home/of:tool-result@user",
+      "cf cell get //did:key:test-home/of:tool-result@user",
     );
   });
 
-  it("writes a space-scoped address bare, which is the form that means space", () => {
+  it("writes an explicit space scope for a reader with unknown context", () => {
     const err: string[] = [];
     renderExecOutcome(
       {
@@ -401,9 +399,8 @@ describe("cf exec read options", () => {
     );
 
     expect(err[0]).toContain(
-      "cf cell get /@did:key:test-home/of:tool-result`)",
+      "cf cell get //did:key:test-home/of:tool-result@space`)",
     );
-    expect(err[0]).not.toContain("@space");
   });
 
   it("refuses a malformed selection as a data error, before any lookup", async () => {

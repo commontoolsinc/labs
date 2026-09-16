@@ -264,11 +264,14 @@ ordinary cell references. The `internal` field is raw metadata, not a direct
 metadata link. It stores a manifest array, and each manifest-entry `link` names
 an internal cell owned by the result cell. The `cfc` metadata field is also
 special: it uses a compact metadata object, and traversal converts its
-`schemaHash` into a CID sigil link before loading the referenced document. The
+`schemaHash` into a CID sigil link before loading the referenced document, and
+does the same for every label document a version-2 envelope's entries
+reference by `{ "$ref": "cid:…" }`
+([content-addressed-cfc-labels.md](../content-addressed-cfc-labels.md)). Each
 synthesized link MUST declare
 [space scope](../content-addressed-schemas.md#schema-documents) even when the
 document carrying the metadata is user- or session-scoped: content-addressed
-schema documents never inherit a referrer's scope.
+documents never inherit a referrer's scope.
 
 What the evaluation loads of that metadata is the same for every document it
 delivers, whether a query NAMED the document as a root or the walk reached it
@@ -279,6 +282,11 @@ through a link crossing:
   resolve the envelope's hash to a CID document, load it, add it to the query
   result and the watch tracker, and track an absent one so that it is
   delivered when it is written.
+
+- The label documents its `cfc` envelope references, one per distinct
+  reference. A reader resolves the envelope's labels from them synchronously,
+  so the server MUST load, deliver, and track each of them exactly as it does
+  the schema document.
 
 - Nothing else. The server MUST NOT load, deliver, or track the target of a
   `pattern`, `argument`, or `result` link, or the cells an `internal`

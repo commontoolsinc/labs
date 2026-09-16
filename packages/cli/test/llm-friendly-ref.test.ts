@@ -8,6 +8,7 @@ import {
   validateEmbeddedSpaces,
 } from "../lib/llm-friendly-ref.ts";
 import { createSession, Identity } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 
 // The 43-character id length matches the entity ids the runtime mints, and
 // clears the runner parser's handle-length threshold.
@@ -21,8 +22,8 @@ const signer = await Identity.fromPassphrase("cf-llm-friendly-ref");
 /** A session on `space`, the way `loadPieces` opens one. */
 const sessionOn = (space: string) =>
   createSession(
-    space.startsWith("did:")
-      ? { identity: signer, spaceDid: space as `did:${string}:${string}` }
+    isDID(space)
+      ? { identity: signer, spaceDid: space }
       : { identity: signer, spaceName: space },
   );
 
@@ -114,12 +115,11 @@ describe("llm-friendly-ref", () => {
     });
   });
 
-  it("reads the named-space migration alias", () => {
-    expect(normalizeLLMFriendlyRef("/@my-space/tracker/items")).toEqual({
-      pieceId: "tracker",
-      embeddedSpace: "my-space",
-      path: ["items"],
-    });
+  it("refuses the retired named-space migration alias", () => {
+    expect(() => normalizeLLMFriendlyRef("/@my-space/tracker/items"))
+      .toThrow(
+        "The named-space prefix `/@my-space/` is retired; use `//my-space/`.",
+      );
   });
 
   it("settles two space names against each other at parse time", () => {

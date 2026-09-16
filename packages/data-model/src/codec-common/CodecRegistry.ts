@@ -138,6 +138,11 @@ export class CodecRegistry<Encoded> {
    * out. A registry is built at module scope, so the refusal still lands
    * before anything has been encoded.
    *
+   * What it does not check is the codec's `PlusType`. A `[CODEC]` is read as
+   * the one at `never`, the only kind with a wire form, and a class binding
+   * one at another `PlusType` registers all the same; its state is refused by
+   * the encode walk instead, as holding a value no codec claims.
+   *
    * @throws If the class supplies a codec under neither symbol.
    */
   registerClass(cls: Constructor): void {

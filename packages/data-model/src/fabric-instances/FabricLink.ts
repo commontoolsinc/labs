@@ -112,7 +112,8 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   //
 
   static #codec = Object.freeze(
-    new (class LinkCodec extends BaseNonterminalCodec<FabricPlainObject> {
+    new (class LinkCodec
+      extends BaseNonterminalCodec<never, FabricPlainObject> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Link, FabricLink);

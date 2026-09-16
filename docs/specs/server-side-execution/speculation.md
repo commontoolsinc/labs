@@ -94,7 +94,11 @@ currency. The existing overlay and retirement rules below still apply.
   identity — a session-blind recomputation would misread "inputs
   changed" for every such node.
 - `navigate-to`: may enact optimistically (protocol.md §5) — navigation
-  is reversible. The overlay records the nonce it acted on. When the
+  is reversible. The overlay records the nonce it acted on, and stands
+  aside when that nonce is already recorded: the authoritative intent
+  reached the channel and enacted before this speculative run sealed,
+  which is the ordering whenever the served round trip beats the
+  client's own run of the same handler. When the
   AUTHORITATIVE run's branch computes NO navigation (a speculative read
   diverged — the 2026-08-27 r06/r09 root cause, register OW45), the
   optimistic enactment STANDS: ruled PUNT (owner, 2026-08-27) — the

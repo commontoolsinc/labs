@@ -3,6 +3,7 @@
  * to. Names remain names; resolving a space name or piece slug requires a session.
  */
 
+import { isDID } from "@commonfabric/identity/did";
 import type {
   CellScope,
   LinkScope,
@@ -100,7 +101,7 @@ function readHead(segment: string): {
 function checkSpace(space: string): void {
   if (
     !space || /[/@#]/.test(space) ||
-    (space.includes(":") && !/^did:[^:]+:[^/]+$/.test(space))
+    (space.includes(":") && !isDID(space))
   ) {
     throw new Error(
       "Invalid space: expected a DID or a name without `/`, `@`, `#`, or `:`.",
@@ -214,6 +215,11 @@ export function parseCellReference(
     if (text.startsWith("//") || text.startsWith("/@")) {
       space = text.startsWith("//") ? segments[2] : segments[1].slice(1);
       checkSpace(space);
+      if (text.startsWith("/@") && !space.startsWith("did:")) {
+        throw new Error(
+          `The named-space prefix \`/@${space}/\` is retired; use \`//${space}/\`.`,
+        );
+      }
       offset = text.startsWith("//") ? 3 : 2;
     } else {
       space = context?.space;

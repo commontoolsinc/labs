@@ -273,7 +273,8 @@ session's `scope_key` (protocol.md §5, T9) — as part of the wave's
 derived commit. The CLIENT half
 subscribes to its effects doc, enacts, acks by nonce. Optimistic
 enactment from the speculative handler run is allowed; the nonce
-reconciles it.
+reconciles it in either order, so an intent that arrives before the
+speculative run seals stands that run's enactment down.
 
 Implementation note: the served half needs the firing session's
 identity — it comes from the event's `firedAt`, which is

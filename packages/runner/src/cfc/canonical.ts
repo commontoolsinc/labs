@@ -342,6 +342,34 @@ export const canonicalizeCfcLabel = (label: IFCLabel): IFCLabel => {
   };
 };
 
+/**
+ * Helper for `canonicalizeCfcMetadata`, which drops a label's `undefined`
+ * members: a label resolved from a label document never carries one, and a
+ * freshly derived label may, so the comparison form holds neither. A label
+ * with none to drop is returned by reference.
+ */
+const withoutUndefinedLabelMembers = (label: IFCLabel): IFCLabel => {
+  const hasUndefinedMember = Object.keys(label).some((key) =>
+    label[key as keyof IFCLabel] === undefined
+  );
+  if (!hasUndefinedMember) return label;
+  const result: IFCLabel = {};
+  if (label.confidentiality !== undefined) {
+    result.confidentiality = label.confidentiality;
+  }
+  if (label.integrity !== undefined) {
+    result.integrity = label.integrity;
+  }
+  return result;
+};
+
+/**
+ * The comparison form of an envelope: entries sorted, paths and clauses
+ * canonical, `undefined` label members dropped, and `version` fixed at 1 —
+ * the stored spelling is not part of what two envelopes are compared on,
+ * so a version-1 and a version-2 envelope holding the same labels are
+ * equal here.
+ */
 export const canonicalizeCfcMetadata = (
   metadata: CfcMetadata,
 ): CfcMetadata => ({
@@ -351,7 +379,7 @@ export const canonicalizeCfcMetadata = (
     version: 1,
     entries: [...metadata.labelMap.entries].map((entry) => ({
       path: canonicalizeLogicalPath(entry.path),
-      label: canonicalizeCfcLabel(entry.label),
+      label: withoutUndefinedLabelMembers(canonicalizeCfcLabel(entry.label)),
       ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
       ...(entry.observes !== undefined ? { observes: entry.observes } : {}),
     })).sort((left, right) => {

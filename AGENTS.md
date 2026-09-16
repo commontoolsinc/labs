@@ -164,7 +164,8 @@ If you are developing runtime code, start with:
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
 - `docs/development/TESTING.md` - Running the test suites and the general unit
-  and integration test structure; hub that links the other testing docs
+  and integration test structure; hub that links the other testing docs; renamed
+  tests must be tracked in the aliases file
 - `docs/development/unit-test-coding-style.md` - How a unit test file is shaped:
   its location and name, the single top-level `describe()`, how an `it()`
   description is worded, `expect()` over `assert*()`, and the matcher traps that

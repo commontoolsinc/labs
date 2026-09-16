@@ -599,7 +599,10 @@ control.
 Vertical and horizontal flexbox stacks. Shared layout props:
 
 - `gap` — space between items (`0`–`24` numeric scale or `xs`–`xl`)
-- `align` / `justify` — flexbox alignment
+- `align` — cross-axis alignment: `start`, `center`, `end`, or `stretch`;
+  `cf-hstack` also accepts `baseline`
+- `justify` — main-axis alignment: `start`, `center`, `end`, `between`, `around`,
+  or `evenly` (for example, `justify="between"` separates two items)
 - `reverse` — reverse the direction (`wrap` is cf-hstack only)
 - `padding` — uniform padding around the stack (same scale as `gap`)
 - `px` / `py` — horizontal / vertical axis padding (same scale)

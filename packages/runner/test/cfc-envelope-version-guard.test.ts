@@ -313,7 +313,7 @@ describe("CFC envelope version guard", () => {
       const seed = runtime.edit();
       seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
         value: { secret: "sealed" },
-        cfc: { version: 2, payload: { labels: [] } },
+        cfc: { version: 3, payload: { labels: [] } },
       });
       expect((await seed.commit()).ok).toBeDefined();
 

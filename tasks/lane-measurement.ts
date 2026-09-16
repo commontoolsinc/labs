@@ -22,6 +22,69 @@ export const LANE_MEASUREMENT_SURFACE = { kind: "gate", scope: "ci" };
 /** What the lane's own measurements are named for. */
 export const LANE_MEASUREMENT_PREFIX = "ci-lane ";
 
+/**
+ * How a batch run with coverage on is named apart from one run without.
+ *
+ * Instrumenting a run costs it time, and how much is a property of the
+ * suite rather than a constant, so a measurement records which kind of
+ * run it came from.
+ */
+export const MEASURED_BATCH_SUFFIX = " with coverage";
+
+/**
+ * What a lane's measurement of one batch is called.
+ *
+ * A lane writes two of these per batch: what it spent, and what it was
+ * packed to spend. The pair is what the calibration is fitted from.
+ */
+export function batchMeasurementName(
+  suite: string,
+  measured: boolean,
+  kind: "spent" | "planned" = "spent",
+): string {
+  const lead = kind === "planned" ? "planned " : "";
+  return `${LANE_MEASUREMENT_PREFIX}${lead}batch ${suite}` +
+    (measured ? MEASURED_BATCH_SUFFIX : "");
+}
+
+/**
+ * The suite one batch measurement names, whether coverage was on for it,
+ * and whether the figure is what the lane was packed to spend or what it
+ * spent. Nothing else for the name: a reader that took it apart itself
+ * would be a second answer to how it is composed, and the two would
+ * part company the first time either moved.
+ *
+ * A suite whose id ended with the suffix would be read as a shorter
+ * suite's measured run, and the two would be fitted as one.
+ * `tasks/test-topology.test.ts` holds the topology to naming no such
+ * suite, which is cheaper than escaping every id for a collision no
+ * identifier in the tree comes near.
+ */
+export function batchMeasurement(
+  name: string,
+): { suite: string; measured: boolean; kind: "spent" | "planned" } | undefined {
+  for (const kind of ["planned", "spent"] as const) {
+    const prefix = `${LANE_MEASUREMENT_PREFIX}` +
+      `${kind === "planned" ? "planned " : ""}batch `;
+    if (!name.startsWith(prefix)) continue;
+    const rest = name.slice(prefix.length);
+    const measured = rest.endsWith(MEASURED_BATCH_SUFFIX);
+    const suite = measured
+      ? rest.slice(0, -MEASURED_BATCH_SUFFIX.length)
+      : rest;
+    return suite.length === 0 ? undefined : { suite, measured, kind };
+  }
+  return undefined;
+}
+
+/** The capability one setup measurement names. */
+export function setupMeasurement(name: string): string | undefined {
+  const prefix = `${LANE_MEASUREMENT_PREFIX}setup `;
+  if (!name.startsWith(prefix)) return undefined;
+  const capability = name.slice(prefix.length);
+  return capability.length === 0 ? undefined : capability;
+}
+
 /** Whether an identity is the lane measuring itself rather than a test. */
 export function isLaneMeasurement(test: TestIdentity): boolean {
   return test.k === LANE_MEASUREMENT_SURFACE.kind &&

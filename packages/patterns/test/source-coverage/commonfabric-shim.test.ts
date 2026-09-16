@@ -460,7 +460,6 @@ export function __cf_data<T>(value: T): T {
 // copy of a list whose whole point is to have one.
 export {
   CFC_CANONICAL_ALIAS_NAMES,
-  FABRIC_INSTANCE_BRAND,
   FABRIC_INSTANCE_PLUS_BRAND,
   FABRIC_PRIMITIVE_BRAND,
   FABRIC_PRIMITIVE_SCHEMA_TYPES,

@@ -154,6 +154,7 @@ import {
   type IStorageSubscription,
   type MemorySpace,
   type Result,
+  toThrowable,
   type Unit,
   type URI,
 } from "./storage/interface.ts";
@@ -2579,6 +2580,58 @@ export class Runner {
   }
 
   /**
+   * Whether setting `pattern` up on `resultCell` would rewrite the result
+   * projection: `pattern` is not the pattern the document was last set up
+   * with, and the projection it binds to the document differs from the one
+   * stored. Setup writes the projection only then, and records the result
+   * schema as a write-policy input only with that write, so this is also
+   * whether the setup commit merges `pattern`'s result schema into the
+   * document's stored CFC envelope. `cf piece setsrc --check` asks it before
+   * it merges that envelope in dry run, so a source update that leaves the
+   * projection as it is — one changing only what the projection does not
+   * carry — is not refused over an envelope the commit never touches. Reads
+   * only.
+   *
+   * A source update never asks setup to reapply a stored setup, so the same
+   * pattern as the last run — by the pointer setup itself compares, a
+   * keyless pattern's session pointer included — is the one case where
+   * setup keeps the stored projection without comparing. For any other
+   * pattern, setup re-points the argument link at `pattern`'s argument
+   * schema before it compares, so the projection is bound here against the
+   * link setup would have staged, not the one stored.
+   */
+  setupRewritesResultProjection(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    resultCell: Cell<unknown>,
+  ): boolean {
+    const previousIdentityRef = getPatternIdentityRef(resultCell.withTx(tx)) ??
+      this.#sessionPatternPointer(resultCell.withTx(tx));
+    const entryRef = this.#entryRefForPattern(pattern);
+    if (
+      previousIdentityRef !== undefined &&
+      entryRef.identity === previousIdentityRef.identity &&
+      entryRef.symbol === previousIdentityRef.symbol
+    ) {
+      return false;
+    }
+    // The link `#applySetupState` stages for a pattern change: the argument
+    // document it finds, or the one it would create, under the pattern's
+    // argument schema.
+    const argumentLink = getMetaLink(resultCell.withTx(tx), "argument");
+    const argumentCell = argumentLink === undefined
+      ? getMetaCell(resultCell, "argument", tx)
+      : this.#runtime.getCellFromLink(argumentLink, undefined, tx);
+    return this.#nextResultProjection(
+      tx,
+      pattern,
+      resultCell,
+      argumentCell.asSchema(pattern.argumentSchema).getAsNormalizedFullLink(),
+      { preserveName: false },
+    ).changed;
+  }
+
+  /**
    * Validate a piece's stored argument against a candidate without staging it.
    *
    * Uses setup's value validation and defaults. Unreadable argument documents
@@ -2878,10 +2931,49 @@ export class Runner {
     resultCell: Cell<R>,
     options: { preserveName: boolean },
   ): void {
+    const { result, fabricResult, changed } = this.#nextResultProjection(
+      tx,
+      pattern,
+      resultCell,
+      getMetaLink(resultCell.withTx(tx), "argument")!,
+      options,
+    );
+    if (changed) {
+      recordSetupProjectionPolicyInputs(
+        tx,
+        this.#runtime,
+        resultCell,
+        pattern.resultSchema,
+        result,
+      );
+      const writableResultCell = pattern.resultSchema === undefined
+        ? resultCell.withTx(tx)
+        : resultCell.withTx(tx).asSchema(pattern.resultSchema);
+      // The result root marks the whole result document as generated: setup
+      // rewrites the complete projection.
+      writableResultCell.setRawUntyped(fabricResult, false, "output");
+    }
+  }
+
+  /**
+   * The projection setting `pattern` up stores on `resultCell`, beside the
+   * one stored now: `result` is the projection as bound to the document,
+   * which the policy-input recorder walks; `fabricResult` is what a write
+   * stores; and `changed` is whether that differs from what is stored, which
+   * is the one condition under which setup writes it. `argumentCellLink` is
+   * the argument link the projection binds to, which setup has staged under
+   * `pattern`'s argument schema by the time it writes. Reads only.
+   */
+  #nextResultProjection<R>(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    resultCell: Cell<R>,
+    argumentCellLink: NormalizedFullLink,
+    options: { preserveName: boolean },
+  ): { result: R; fabricResult: FabricValue; changed: boolean } {
     const writableResultCell = pattern.resultSchema === undefined
       ? resultCell.withTx(tx)
       : resultCell.withTx(tx).asSchema(pattern.resultSchema);
-    const argumentCellLink = getMetaLink(resultCell.withTx(tx), "argument")!;
     // `Pattern` erases its authored result type to `JSONValue`, so validate
     // that actual execution value here, then restore its association with
     // `Cell<R>`.
@@ -2918,18 +3010,11 @@ export class Runner {
     const fabricResult = fabricFromConvertibleJsValue(
       flattenBuilderArtifacts(result),
     );
-    if (!valueEqual(fabricResult, previousResult)) {
-      recordSetupProjectionPolicyInputs(
-        tx,
-        this.#runtime,
-        resultCell,
-        pattern.resultSchema,
-        result,
-      );
-      // The result root marks the whole result document as generated: setup
-      // rewrites the complete projection.
-      writableResultCell.setRawUntyped(fabricResult, false, "output");
-    }
+    return {
+      result,
+      fabricResult,
+      changed: !valueEqual(fabricResult, previousResult),
+    };
   }
 
   /**
@@ -6943,7 +7028,8 @@ export class Runner {
    *   store's own. A flag-ON client speculating installs no destination and
    *   is unaffected; its setup is stamped as bookkeeping, which the overlay
    *   passes through to the real store;
-   * - a commit that storage rejects throws, and never falls through to the
+   * - a commit that storage rejects throws an `Error` carrying the
+   *   rejection's name, message, and fields, and never falls through to the
    *   post-commit work that a receipt-less run tolerates;
    * - the required source transition appends a fresh revision, so the setup
    *   cannot be elided as a wholly redundant transaction before reaching
@@ -7175,8 +7261,15 @@ export class Runner {
         // here would run the post-commit work over a setup storage refused and
         // then report no receipt for it. The identity arm below predates the
         // receipt and covers its own callers; neither subsumes the other.
+        //
+        // A verdict that is a plain `Result` object goes out as an `Error`
+        // carrying its name, message, and fields: thrown as it stands it
+        // fails every `instanceof Error` check on the way up and renders as
+        // `[object Object]`, its message discarded. One that is already an
+        // `Error`, a precondition failure among them, goes out as itself, so
+        // its identity, stack, and `cause` survive.
         if (requireCommit || options?.expectedPatternIdentity) {
-          throw error;
+          throw error instanceof Error ? error : toThrowable(error);
         }
         logger.error("pattern-setup-error", "Error setting up pattern", error);
         setupRes = undefined;

@@ -1796,7 +1796,7 @@ describe("setup/start", () => {
     }
   });
 
-  it("runSynced rethrows retry exhaustion when identity is required", async () => {
+  it("runSynced rethrows retry exhaustion as the same `Error` when identity is required", async () => {
     const pattern: Pattern = {
       argumentSchema: { type: "object", properties: {} },
       resultSchema: {},
@@ -1822,7 +1822,7 @@ describe("setup/start", () => {
             symbol: "default",
           },
         },
-      )).rejects.toThrow("precondition retry exhausted");
+      )).rejects.toBe(failure);
     } finally {
       runtime.editWithRetry = originalEditWithRetry;
     }
@@ -1915,6 +1915,77 @@ describe("setup/start", () => {
       );
     } finally {
       manager.loadPatternByIdentity = originalLoad;
+    }
+  });
+
+  it("start() yields to a pointer that moved again while the swapped-in pattern's dependencies synced", async () => {
+    // The watcher follows the durable pointer to a pattern the runtime does
+    // not hold by loading it and naming what it reads before the swap. A
+    // pointer that moves again during that naming has its own swap on the
+    // way, so the earlier chain swaps nothing: the piece ends up on the
+    // pattern the pointer names, not on the one whose sync finished last.
+
+    const resultCell = runtime.getCell(
+      space,
+      "watcher yields to a later pointer move",
+    );
+    const first = await compileReceiptPattern(runtime, "yield-first");
+    const second = await compileReceiptPattern(runtime, "yield-second");
+    const third = await compileReceiptPattern(runtime, "yield-third");
+    const manager = runtime.patternManager;
+    const secondRef = manager.getArtifactEntryRef(second);
+    const thirdRef = manager.getArtifactEntryRef(third);
+    if (secondRef === undefined || thirdRef === undefined) {
+      throw new Error("a compiled pattern has no entry ref");
+    }
+    await runtime.runSynced(resultCell, first, {});
+    const movePointer = async (ref: { identity: string; symbol: string }) => {
+      const { error } = await runtime.editWithRetry((tx) => {
+        resultCell.withTx(tx).setMetaRaw(
+          "patternIdentity",
+          ref,
+          rawMetaWriteAuthorization,
+        );
+      });
+      if (error !== undefined) throw error;
+    };
+    // The second pattern is compiled here, so the runtime holds it. Hiding
+    // it from the in-memory lookup sends the watcher down the load path,
+    // whose swap names what the loaded pattern reads before it happens.
+    const originalLookup = manager.artifactFromIdentitySync.bind(manager);
+    manager.artifactFromIdentitySync = (identity, symbol) =>
+      identity === secondRef.identity
+        ? undefined
+        : originalLookup(identity, symbol);
+    let movedDuringSync = false;
+    runtime.runner.accessForTestingOnly.dependencySyncer = async (
+      cell,
+      pattern,
+      inputs,
+      sync,
+    ) => {
+      if (
+        !movedDuringSync &&
+        manager.getArtifactEntryRef(pattern)?.identity === secondRef.identity
+      ) {
+        movedDuringSync = true;
+        await movePointer(thirdRef);
+      }
+      return await sync(cell, pattern, inputs);
+    };
+
+    try {
+      await movePointer(secondRef);
+      await runtime.runner.idlePointerMaintenance();
+      await runtime.idle();
+
+      expect(movedDuringSync).toBe(true);
+      expect(getPatternIdentityRef(resultCell)).toEqual(thirdRef);
+      expect((resultCell.getAsQueryResult() as { marker: string }).marker)
+        .toBe("yield-third");
+    } finally {
+      manager.artifactFromIdentitySync = originalLookup;
+      runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
     }
   });
 
@@ -2052,6 +2123,51 @@ describe("setup/start", () => {
       );
     } finally {
       ExtendedStorageTransaction.prototype.committedSeq = committedSeq;
+    }
+  });
+
+  it("runSyncedWithCommit throws a refused setup commit as an `Error` that keeps the refusal's fields", async () => {
+    // Storage reports a refusal as a `Result` error, a plain object rather
+    // than an `Error`. Thrown as it stands it fails `instanceof Error`, has
+    // no stack, and renders as `[object Object]`, so the message, the one
+    // line an operator can act on, never reaches them. The refusal below has
+    // the shape the CFC boundary produces when not every reason is a
+    // verdict.
+
+    const resultCell = runtime.getCell(space, "runSynced refused setup commit");
+    const initialPattern = await compileReceiptPattern(runtime, "v1");
+    const nextPattern = await compileReceiptPattern(runtime, "v2");
+    await runtime.runSynced(resultCell, initialPattern, {});
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
+    const pieceSourceTransition = await receiptSourceTransition(
+      runtime,
+      resultCell,
+    );
+    const refusal = {
+      name: "StorageTransactionAborted" as const,
+      message: "CFC enforcement rejected commit: relevant transaction was " +
+        "not prepared: a policy check refused the write",
+      reason: new Error("cfc-refusal-not-a-verdict"),
+    };
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    runtime.editWithRetry =
+      (() =>
+        Promise.resolve({ error: refusal })) as typeof runtime.editWithRetry;
+
+    try {
+      const thrown = await runtime.runSyncedWithCommit(
+        resultCell,
+        nextPattern,
+        {},
+        { expectedPatternIdentity: previous, pieceSourceTransition },
+      ).then(() => undefined, (error: unknown) => error);
+      expect(thrown).toBeInstanceOf(Error);
+      const error = thrown as Error & { reason?: unknown };
+      expect(error.message).toBe(refusal.message);
+      expect(error.name).toBe("StorageTransactionAborted");
+      expect(error.reason).toBe(refusal.reason);
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
     }
   });
 

@@ -142,7 +142,7 @@ class TestTerminalCodec extends BaseTerminalCodec<string> {
  * Codec satisfying the interface without extending either base class, for the
  * cases pinning that the registry refuses one. Its members are never reached.
  */
-const UNCLASSIFIABLE_CODEC: FabricCodec<string> = {
+const UNCLASSIFIABLE_CODEC: FabricCodec<never, string> = {
   get uniqueHandledClass(): Constructor | undefined {
     return FabricRegExp;
   },

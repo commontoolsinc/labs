@@ -30,6 +30,38 @@ member names end to end: allocation, resolution at the CLI, the shell opening
 being finished.** Five things are outstanding, and each still needs
 execution.
 
+**Decided 2026-09-15: each member stores its own member name.** Built for the
+exemplar in #7532, and only there. `addItem` allocates the name over the board's
+names map and passes it into the member's input in the same transaction that
+creates the member, and the member publishes what it stores. For decision 14 and
+for #7439 (items 1 and 2 below), that is the whole of what changes: a member the
+create named reads its own name from its own input, without the board's derived
+names table. Three things it does not change.
+
+The names map has not left the picture. It is still what a name is allocated
+over — `createNamed` reads its keys — and the derived `namesTable` is still what
+`nameOf` reads to find the board's name for a member by identity, including a
+member whose own `shortName` is absent.
+
+A member filed before this change, or one a backfill names, stores no name and
+shows none. Writing a name onto such a member is not built, because a board
+writes a member's result and never its argument, so no verb of the board can
+reach that input once the member exists.
+
+`packages/patterns/topics` is unchanged. A topic still takes `boardNames` and
+reads its name through `ownName` over that table, so none of this is yet true of
+Topics.
+
+Items 1 and 2, and decisions 13 and 14, are not yet reconciled with this
+decision. Read as an elaboration of it they would give the wrong input contract
+for decision 14 and #7439. Reconciling them is its own stage, and is not done
+here.
+
+[The lenient-naming experiment record](../history/plans/collection-naming-lenient-naming-experiment-2026-09-14.md)
+holds the evidence behind the decision: a member reading its name through the
+board's table, and what it took to bind the board onto members filed before the
+namespace.
+
 1. **Decision 14 — a member takes one input naming its board.** Ruled, and
    measured buildable in
    [the board-demand measurement](../history/plans/collection-naming-board-demand-measurement-2026-09-07.md):

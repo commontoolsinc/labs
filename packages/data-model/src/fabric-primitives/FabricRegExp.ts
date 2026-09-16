@@ -163,7 +163,8 @@ export class FabricRegExp extends BaseFabricPrimitive
   //
 
   static #jsonCodec = Object.freeze(
-    new (class RegExpCodec extends BaseNonterminalCodec<FabricRegExpState> {
+    new (class RegExpCodec
+      extends BaseNonterminalCodec<never, FabricRegExpState> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.RegExp, FabricRegExp);

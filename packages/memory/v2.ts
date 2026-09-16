@@ -679,7 +679,9 @@ export type SessionEffectsDocValue = {
  * intent arrives with (result-as-pattern children converge by
  * cause-derived identity, speculation.md §2; the instance id is that
  * convergence). One event × one navigateTo instance ⇒ one nonce, so a
- * re-run of either side is idempotent by presence check.
+ * re-run of either side is idempotent by presence check, in either
+ * order: the side that enacts second finds the nonce recorded and
+ * stands down.
  */
 export const effectIntentNonce = (
   eventId: string,

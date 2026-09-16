@@ -4,6 +4,7 @@ import * as path from "@std/path";
 import {
   collectReports,
   main,
+  markedSets,
   measuredSetFigures,
   parseReportArgs,
   report,
@@ -16,7 +17,11 @@ import {
   measuredSetCoverageMetric,
 } from "./ci-check-lib.ts";
 import type { CoverageDebtMetric } from "./coverage-metrics.ts";
-import { COVERAGE_REPORT_DIR, COVERAGE_REPORT_FILE } from "./ci-lane.ts";
+import {
+  COVERAGE_FAILURE_MARKER,
+  COVERAGE_REPORT_DIR,
+  COVERAGE_REPORT_FILE,
+} from "./ci-lane.ts";
 import { UNLAUNCHED_MEMBERS_FILE } from "./unlaunched-members.ts";
 import { loadTopology } from "./test-topology.ts";
 import {
@@ -91,6 +96,18 @@ async function reportPathIn(lane: string): Promise<string> {
     COVERAGE_REPORT_DIR,
     measuredSetDirectory(ref),
     COVERAGE_REPORT_FILE,
+  );
+}
+
+/**
+ * Where a lane marks `MEMBER`'s set as measured through a failing test,
+ * under the artifact named. Beside the report rather than inside it, and
+ * named from the topology for the same reason the report path is.
+ */
+async function markerPathIn(lane: string): Promise<string> {
+  return path.join(
+    path.dirname(await reportPathIn(lane)),
+    COVERAGE_FAILURE_MARKER,
   );
 }
 
@@ -300,6 +317,46 @@ describe("coverage-report", () => {
     });
   });
 
+  describe("markedSets()", () => {
+    it("finds a marker the lane wrote no report beside", async () => {
+      // A lane that ran a set's unit and saw it fail may have collected
+      // no profile for it, so the marker is walked for by the set's own
+      // directory. Another lane's report for that set must still not
+      // become the baseline.
+      const root = await directoryOf({
+        [await reportPathIn("lane-1")]: "SF:/a.ts\nend_of_record\n",
+        [await markerPathIn("lane-2")]: `${MEMBER}/one.test.ts\n`,
+        "lane-2/notes.txt": "not under the layout at all",
+      });
+      try {
+        const marked = await markedSets(root);
+        expect(marked.size).toBe(1);
+        expect([...marked][0]).toContain(SUITE);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
+    it("marks nothing where nothing was downloaded", async () => {
+      expect([...await markedSets("/nonexistent-coverage-artifacts")])
+        .toEqual([]);
+    });
+
+    it("refuses a reports directory it cannot walk", async () => {
+      // An absent directory is a run whose lanes uploaded nothing, which
+      // is ordinary. Anything else is a failure worth ending on rather
+      // than reading as a run that marked nothing.
+      const root = await Deno.makeTempDir({ prefix: "coverage-report-" });
+      const at = path.join(root, "not-a-directory");
+      await Deno.writeTextFile(at, "");
+      try {
+        await expect(markedSets(at)).rejects.toThrow();
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+  });
+
   describe("measuredSetFigures()", () => {
     it("returns a figure for the set a lane reported and for no other", async () => {
       // Every other set the topology declares went unreported, and a set
@@ -319,6 +376,36 @@ describe("coverage-report", () => {
       } finally {
         await Deno.remove(root, { recursive: true });
       }
+    });
+
+    it("publishes nothing for a set a lane measured through a failure", async () => {
+      // A run that excused a flaky failure stayed green, and the number
+      // is short by whatever the failing test would have reached, so
+      // publishing it holds every later pull request to a bar this run
+      // did not clear either.
+      //
+      // The same report is scored both ways round, because the absence
+      // on its own would also hold for a set the topology has dropped or
+      // a report naming no line of the member.
+      const source = path.join(REPOSITORY, MEMBER, "src/index.ts");
+      const report = `SF:${source}\nDA:1,1\nDA:2,0\nend_of_record\n`;
+      const named = async (marked: boolean) => {
+        const root = await directoryOf({
+          [await reportPathIn("lane-1")]: report,
+          ...(marked
+            ? { [await markerPathIn("lane-1")]: `${MEMBER}/one.test.ts\n` }
+            : {}),
+        });
+        try {
+          return (await setFiguresFrom(root)).map((figure) => figure.name);
+        } finally {
+          await Deno.remove(root, { recursive: true });
+        }
+      };
+      expect(await named(false)).toEqual([
+        measuredSetCoverageMetric(`${SUITE}/${MEMBER}`),
+      ]);
+      expect(await named(true)).toEqual([]);
     });
 
     it("returns a figure counting every lane that reported the set", async () => {
