@@ -690,6 +690,29 @@ it. Those refusals are discovery instruments; see "Flag-gated tripwires" in
 [EXPERIMENTAL_OPTIONS.md](EXPERIMENTAL_OPTIONS.md), which states the obligation
 each new one carries.
 
+### Validating a value that arrived through a decode
+
+A validator that reads named fields off a value asks first whether the value
+is a record. Which question it asks is settled by what built the value.
+
+`JSON.parse()` builds objects rooted at `Object.prototype` and nothing else,
+so over its output `isObjectNotArray()` and `isPlainObject()` agree on every
+value, and a validator fed only from it may ask either.
+
+A richer codec has a wider range. The fabric JSON codec builds class
+instances, and each of those passes the non-array test while carrying no own
+properties. A validator that admits one and then reads named fields off it
+reads `undefined` from every one. Where the fields it consults are optional,
+nothing is left to reject the value by, and it is accepted without a single
+field having been read off it.
+
+So a validator reading a value that arrived through a codec decode asks
+`isPlainObject()`, or `isFabricPlainObject()` where the declared type is
+already a `FabricValue`. The memory wire parser is the worked example: every
+position where a message names fields asks that question, and the positions
+it covers are listed under "Record positions in an envelope" in
+[the memory protocol chapter](../specs/memory-v2/04-protocol.md).
+
 ### Avoid representing invalid state
 
 Similarly, permissive interfaces (including nullable properties and

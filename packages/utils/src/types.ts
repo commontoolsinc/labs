@@ -81,7 +81,9 @@
  *
  * `@commonfabric/data-model` asks the first of these questions of a value the
  * type system already says is a `FabricValue`, and spells it
- * `isFabricObjectOrArray()` for the same reason.
+ * `isFabricObjectOrArray()` for the same reason. It spells the third
+ * `isFabricPlainObject()`, which narrows to `FabricPlainObject` and so keeps
+ * an indexed value typed as a `FabricValue`.
  *
  * `typeOfIncludingNull()` is the one function here that is not a predicate.
  * It returns a value's `typeof` tag, with `null` given a tag of its own, for
