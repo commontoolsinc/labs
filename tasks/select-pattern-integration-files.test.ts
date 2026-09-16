@@ -1,4 +1,5 @@
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
+import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import {
   assignPatternIntegrationShards,
@@ -182,13 +183,13 @@ Deno.test("pattern integration assignments separate expensive files", async () =
   );
 });
 
-describe("assignPatternIntegrationShards()", () => {
-  it("groups no more files for distinct shards than there are shards", async () => {
-    // `assignWeightedShards` gives the group distinct shards only while the
-    // group fits in them: once it holds more files than there are shards, the
-    // constraint is dropped for every member, and nothing reports that. The
-    // other tests here stay green through it, since the five files they name
-    // would still land on five shards.
+describe("select-pattern-integration-files", () => {
+  it("puts no more files in the distinct-shard group than there are shards", async () => {
+    // `assignWeightedShards` gives a group distinct shards only while the
+    // group fits in them, and falls back to ordinary weighted placement for
+    // every member once it does not. The fallback is silent, and the other
+    // tests here stay green through it, since the five files they name would
+    // still land on five shards.
 
     const files = await listPatternIntegrationTests();
     const expensiveFiles = files.filter((name) =>
@@ -197,18 +198,15 @@ describe("assignPatternIntegrationShards()", () => {
         PATTERN_INTEGRATION_DISTINCT_WEIGHT_MINIMUM
     );
 
-    // `assert()` rather than `expect().toBeLessThanOrEqual()`: both counts are
-    // in the message, and it also names the files over the line and what to do
-    // about them, which `@std/expect` takes no argument for.
-    assert(
-      expensiveFiles.length <= PATTERN_INTEGRATION_SHARD_COUNT,
+    expect(
+      expensiveFiles.length,
       `${expensiveFiles.length} files weigh at least ` +
         `${PATTERN_INTEGRATION_DISTINCT_WEIGHT_MINIMUM}s and so ask for ` +
         `distinct shards, more than the ${PATTERN_INTEGRATION_SHARD_COUNT} ` +
         `shards there are: ${expensiveFiles.join(", ")}. A group this large ` +
         `runs no distinct-shard constraint at all, so raise the minimum until ` +
         `the group fits, or cut what the heaviest files cost.`,
-    );
+    ).toBeLessThanOrEqual(PATTERN_INTEGRATION_SHARD_COUNT);
   });
 });
 

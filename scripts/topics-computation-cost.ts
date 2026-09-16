@@ -455,10 +455,11 @@ async function deriveLimits(v8Flags: readonly string[]): Promise<void> {
 }
 
 /**
- * Runs each case of `ids` once under every regression variant the limits of
- * `limits` assign to it, each in a process of its own started with `v8Flags`,
- * and so shows every limit exceeded by a regression that grows the count it
- * gates.
+ * Runs each case of `ids` once under every regression variant its workload
+ * assigns, each in a process of its own started with `v8Flags`, and checks the
+ * run against the limits `limits` holds for the counts that variant is
+ * assigned, and so shows every limit exceeded by a regression that grows the
+ * count it gates.
  *
  * @throws Error when a case fails or exhausts its heap, and when a variant
  * leaves a limit assigned to it unexceeded, naming the workload, case, phase,
