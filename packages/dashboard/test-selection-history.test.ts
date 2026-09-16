@@ -376,13 +376,46 @@ describe("test-selection-history", () => {
     it("writes no refusal into the cache file", async () => {
       const manifest = measurement("2026-09-01T00:00:00.000Z");
       const store = storeOf([manifest]);
-      store.objects[objectName(manifest.generatedAt)] = JSON.stringify({
+      const name = objectName(manifest.generatedAt);
+      store.objects[name] = JSON.stringify({
         ...manifest,
         schema: MANIFEST_SCHEMA_VERSION + 1,
       });
       await makeTestSelectionSource({ fetchImpl: store.fetchImpl, cacheFile })
         .history();
-      expect(JSON.parse(await Deno.readTextFile(cacheFile)).counts).toEqual({});
+      // The whole file, not one field of it: a refusal recorded anywhere
+      // in it would outlive the build that formed it, wherever it was put.
+      const persisted = await Deno.readTextFile(cacheFile);
+      expect(persisted).not.toContain(name);
+      expect(JSON.parse(persisted).counts).toEqual({});
+    });
+
+    it("keeps refusing an object that becomes newest again", async () => {
+      const older = measurement("2026-09-01T00:00:00.000Z");
+      const newer = measurement("2026-09-02T00:00:00.000Z");
+      const store = storeOf([older, newer]);
+      store.objects[objectName(older.generatedAt)] = JSON.stringify({
+        ...older,
+        schema: MANIFEST_SCHEMA_VERSION + 1,
+      });
+      const source = makeTestSelectionSource({
+        fetchImpl: store.fetchImpl,
+        cacheFile,
+      });
+      const first = await source.history();
+      expect(first.errors).toHaveLength(1);
+
+      // The newest leaves the listing, so an object already refused is the
+      // newest again. Both readers share one answer, so neither asks the
+      // store for it a second time.
+      delete store.objects[objectName(newer.generatedAt)];
+      store.reads.length = 0;
+      time.tick(MANIFEST_SHARE_MS + 1);
+      const again = await source.history();
+      expect(again.samples.map((sample) => sample.counts)).toEqual([null]);
+      // The condition still holds, so the warning is still reported.
+      expect(again.errors).toHaveLength(1);
+      expect(store.reads.filter((n) => !n.startsWith("list:"))).toEqual([]);
     });
 
     it("retries an object the store could not answer for", async () => {

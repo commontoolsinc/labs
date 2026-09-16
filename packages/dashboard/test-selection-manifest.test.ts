@@ -185,6 +185,29 @@ Deno.test("a tile and the page name a schema rather than saying nothing useful",
   assertEquals(body.includes("temporarily unavailable"), false);
 });
 
+Deno.test("a version inherited from the prototype is not a declared one", async () => {
+  // A body declares a version in its own field or not at all. Reading an
+  // inherited one would refuse an object that is no manifest at all, and
+  // refuse it for the life of the process.
+  const name = `${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`;
+  // deno-lint-ignore no-explicit-any
+  (Object.prototype as any).schema = MANIFEST_SCHEMA_VERSION + 1;
+  try {
+    const error = await assertRejects(
+      () =>
+        newestManifest({
+          fetchImpl: storeOf({ [name]: JSON.stringify({ not: "a manifest" }) }),
+        }),
+      Error,
+      "not a manifest",
+    );
+    assertEquals(error instanceof ManifestSchemaError, false);
+  } finally {
+    // deno-lint-ignore no-explicit-any
+    delete (Object.prototype as any).schema;
+  }
+});
+
 Deno.test("newestManifest reports nothing when the store holds none", async () => {
   assertEquals(await newestManifest({ fetchImpl: storeOf({}) }), undefined);
 });

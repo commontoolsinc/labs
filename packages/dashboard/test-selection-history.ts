@@ -110,7 +110,11 @@ export function makeTestSelectionSource(options: {
     | { name: string; error: ManifestSchemaError }
     | undefined;
   let cached: Record<string, SelectionCounts> | undefined;
-  let refused = new Set<string>();
+  // One answer per object name, for every object this reader has read and
+  // refused over the version it declares. The newest-manifest reader and
+  // the historical collection both consult it and both add to it, so the
+  // two cannot come to hold different answers about one object.
+  let refused = new Map<string, ManifestSchemaError>();
   let persisted = "";
 
   const newest = memo(MANIFEST_SHARE_MS, async () => {
@@ -120,14 +124,20 @@ export function makeTestSelectionSource(options: {
       return { name, manifest: undefined };
     }
     if (current?.name !== name) {
-      try {
-        current = { name, manifest: await readManifest(name, options) };
-      } catch (error) {
-        // The schema a body declares cannot change, so it is kept beside
-        // the name and the object is not fetched again. Every other
-        // failure may come back differently on the next read.
-        if (!(error instanceof ManifestSchemaError)) return { name, error };
-        current = { name, error };
+      const known = refused.get(name);
+      if (known !== undefined) {
+        current = { name, error: known };
+      } else {
+        try {
+          current = { name, manifest: await readManifest(name, options) };
+        } catch (error) {
+          // The version a body declares cannot change, so it is kept and
+          // the object is not fetched again. Every other failure may come
+          // back differently on the next read.
+          if (!(error instanceof ManifestSchemaError)) return { name, error };
+          refused.set(name, error);
+          current = { name, error };
+        }
       }
     }
     return current;
@@ -170,7 +180,7 @@ export function makeTestSelectionSource(options: {
       }
 
       const kept: Record<string, SelectionCounts> = {};
-      const keptRefusals = new Set<string>();
+      const keptRefusals = new Map<string, ManifestSchemaError>();
       const samples: SelectionSample[] = [];
       // A full manifest holds the whole corpus. We reduce each response before
       // starting more downloads, bounding the number of inventories in memory.
@@ -180,8 +190,13 @@ export function makeTestSelectionSource(options: {
           names,
           async (name): Promise<SelectionSample> => {
             let counts = cached?.[name];
-            if (counts === undefined && refused.has(name)) {
-              keptRefusals.add(name);
+            const known = refused.get(name);
+            if (counts === undefined && known !== undefined) {
+              // The object is not fetched again, and the refusal is
+              // reported on every pass it still applies to, so the warning
+              // the wall carries lasts as long as the condition does.
+              keptRefusals.set(name, known);
+              errors.push(`${name}: ${known.message}`);
             } else if (counts === undefined) {
               try {
                 if (head.name === name && "error" in head) throw head.error;
@@ -191,10 +206,8 @@ export function makeTestSelectionSource(options: {
                     : await readManifest(name, options),
                 );
               } catch (error) {
-                // The schema a body declares cannot change, so this
-                // process does not fetch the object again.
                 if (error instanceof ManifestSchemaError) {
-                  keptRefusals.add(name);
+                  keptRefusals.set(name, error);
                 }
                 errors.push(
                   `${name}: ${error instanceof Error ? error.message : error}`,

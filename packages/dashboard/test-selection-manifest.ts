@@ -116,10 +116,12 @@ export class ManifestSchemaError extends Error {
  * validator.
  */
 function otherVersion(body: unknown): number | undefined {
-  if (typeof body !== "object" || body === null || !("schema" in body)) {
-    return undefined;
-  }
-  const schema = body.schema;
+  // The version has to be the body's own. A body inheriting one from a
+  // polluted prototype declares nothing, and reading it as a version
+  // would refuse an object that is not a manifest at all, for good.
+  if (typeof body !== "object" || body === null) return undefined;
+  if (!Object.hasOwn(body, "schema")) return undefined;
+  const schema = (body as { schema: unknown }).schema;
   return typeof schema === "number" && schema !== MANIFEST_SCHEMA_VERSION
     ? schema
     : undefined;
