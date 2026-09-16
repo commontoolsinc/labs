@@ -223,6 +223,12 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       // The unsigned caller retires: a comment always carries a structured author now, so the mirror beside it goes.
       "argument.comments[]",
       "result.createdByName",
+      // The mention universe's readable-cell narrowing, the break the entry
+      // below records: these baselines carry it as well, and the argument
+      // role reports it once the widened `kind` domains are accepted (a
+      // closed enum widening to `string` is a type widening the proof
+      // admits).
+      "argument.mentionable",
     ],
     reason:
       "Two accepted breaks on one pattern: the reference-graph rebuild on cell " +
@@ -392,12 +398,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
   },
   {
     // A second entry for this pattern, with baselines disjoint from the other
-    // one's, which is what keeps the bound tight: forgiving this path on the
-    // older baselines too would let the proof's one-issue-per-role limit hide
-    // an unintended break behind pairs this break never produced a finding
-    // against. Those older baselines report `bodyUpdatedBy.kind` or
-    // `boardCrossrefs` for the argument role, so `mentionable` is not the
-    // reported issue there.
+    // one's: the gate keys accepted pairs into a Map, so a baseline named
+    // twice would take the later path set in place of the earlier one. The
+    // older baselines report this same narrowing for the argument role and
+    // name it in their own entry above, beside the breaks only they carry.
     pattern: "topics/topic.tsx",
     baselines: [
       "20260826T221814Z-RZiIzB74VkCoXYty",
