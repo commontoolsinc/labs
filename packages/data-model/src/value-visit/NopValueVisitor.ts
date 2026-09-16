@@ -28,7 +28,7 @@ import {
 export class NopValueVisitor<PlusType = never, ResultType = FabricValue>
   extends BaseValueVisitor<PlusType, ResultType> {
   /** @inheritDoc */
-  isPlusType(_value: FabricValuePlus<PlusType>): _value is PlusType {
+  isPlusType(_value: unknown): _value is PlusType {
     return false;
   }
 

@@ -191,10 +191,11 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
   /**
    * Indicates whether or not the given value is compatible with the `PlusType`
    * type defined by the visitor. This is a type predicate for `PlusType`. The
-   * visitor engine calls it before dispatching to `visitPlusType()`, and will
-   * instead `throw` an error if this method returns anything falsy.
+   * visitor engine calls it before dispatching to `visitPlusType()` in order to
+   * decide whether to dispatch a value or `throw` an error indicating it is
+   * invalid.
    */
-  isPlusType(value: FabricValuePlus<PlusType>): value is PlusType;
+  isPlusType(value: unknown): value is PlusType;
 
   /**
    * Visits a value which is already in the process of being visited. The

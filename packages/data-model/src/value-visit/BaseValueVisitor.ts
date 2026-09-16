@@ -32,7 +32,7 @@ export abstract class BaseValueVisitor<
   //
 
   /** @inheritDoc */
-  abstract isPlusType(value: FabricValuePlus<PlusType>): value is PlusType;
+  abstract isPlusType(value: unknown): value is PlusType;
 
   /** @inheritDoc */
   abstract visitCycle(
