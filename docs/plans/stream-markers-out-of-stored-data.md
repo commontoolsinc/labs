@@ -12,15 +12,17 @@ are keyed on that read failing on documents whose setup never wrote it. The
 schema already knows which positions are streams — the `Stream<T>` brand
 becomes `asCell: ["stream"]` — so the runtime should not need a stored value
 to say the same thing. This plan moves stream-ness out of the value and into
-three places that are already durable: the link schema the builder emits, the
-module's own `wrapper: "handler"` flag, and a `schema` meta on the stream's
-document. Handler dispatch becomes structural, the cold-start repairs trigger
-on a structural mismatch instead of on the missing marker, and out-of-runtime
-consumers (FUSE, the shuttle listing, the state inspector) recognize a stream
-by following at most one schema reference from its document.
+two places that are already durable: the link schema the builder emits and the
+module's own `wrapper: "handler"` flag. Handler dispatch becomes structural,
+the cold-start repairs trigger on a structural mismatch instead of on the
+missing marker, the stream's document keeps only the `result` back-link it
+already carries, and a reader that has nothing but that document (FUSE, the
+state inspector, a bare address) resolves it through the owner's manifest.
 
-The contract change to state up front: **a stream must be declared by schema,
-kind, or meta. A bare document can no longer be a stream.**
+The contract change to state up front: **a stream is declared by the schema
+of the link that names it or by the kind of the handle that holds it. Its
+document says nothing about it; a reader that has only the document resolves
+it through the owner.**
 
 ## What the runtime does today
 
@@ -181,13 +183,14 @@ holds no value.
 A user-authored lift that legitimately wants an input named `$event` stays
 rejected, exactly as today. Rule 3 keeps that restriction on purpose.
 
-### 3. The stream's document stays self-describing through meta
+### 3. The stream's document carries only the back-link
 
-Without the sentinel the derived document holds only the `result` back-link
-meta. It is still listed (the memory server's entity page selects current ids
-with no value condition, `memory/v2/engine.ts:2188`) and still found by event
-auto-start, but a raw-value reader can no longer tell it is a stream without a
-cross-document lookup into the owning piece's manifest:
+Without the sentinel the derived document holds the `result` back-link meta
+and nothing else. It is still listed (the memory server's entity page selects
+current ids with no value condition, `memory/v2/engine.ts:2188`), still the
+record events are appended to, and still found by event auto-start. What it no
+longer does is describe itself: a reader that has only the document cannot
+tell it is a stream.
 
 - The state inspector would classify it as `owned-cell` labeled "(lineage)"
   (`state-inspector/model.ts:383`) and the `stream` entity kind would stop
@@ -205,21 +208,30 @@ cross-document lookup into the owning piece's manifest:
   The gap is nested objects: the tree builder's JSON sibling is built from
   values (`fuse/tree-builder.ts:544`), so an undefined value drops the key.
 
-So setup writes a `schema` meta onto the derived stream document, carrying the
-stamped stream schema, at the same point it writes the `result` back-link. The
-inspector already documents `schema` as a meta path on result cells
-(`state-inspector/model.ts:13`), so there is precedent. Meta is never returned
-by `get()`, never reaches handler dispatch, and never confuses a schema-less
-proxy read. Cost: one extra meta write per stream per setup, in the transaction
-that already writes the back-link.
+The plan does not put a declaration back onto the document. A `schema` meta
+beside the back-link would be the sentinel moved from value to meta: safer
+there, since `get()` never returns it and a stray write cannot clobber it, but
+still a per-document copy of what the owner's manifest link already says, and
+one more thing that has to agree with it. Instead, a reader that has only the
+document resolves it through the owner: follow the `result` back-link to the
+owner's result document, read its `internal` manifest, and take the schema of
+the entry whose link names the document. That is the stamped link decision 1
+emits (`includeSchema: true` at `runner.ts:2979`), so there is one source of
+truth. `followResultCellChain` (`runner/src/ensure-piece-running.ts:45`) is
+the first half of that walk already; the manifest lookup is the second. Cost:
+one extra document per classification for a reader that starts from a bare
+document. The inspector holds the whole space and pays it from memory; the
+shuttle listing and the CLI read guard start from a parent cell and its link
+and never pay it.
 
-In-runtime readers do not consult the meta today, which is why stage 3 gives
-`Cell.isStream` and the proxy a meta read as their last resort in place of the
-value read: a bare address to the stream document, with no stored link hop to
-carry a stamp, otherwise loses its declaration when the value read goes. The
+The runtime pays it in one place. `Cell.isStream` and the proxy decide from
+the handle's kind and the resolved link's schema, and a bare address to the
+stream document, with no stored link hop to carry a stamp, has neither. The
 llm-dialog read and invoke tools dispatch on such an address
 (`runner/src/builtins/llm-dialog.ts:2067`, `:2078`), built from an
-LLM-supplied path with no schema (`:2050`).
+LLM-supplied path with no schema (`:2050`). Stage 3 resolves a bare address
+through the owner before the stream decision, with the same walk; that is what
+replaces the value read there.
 
 ## Stages
 
@@ -238,11 +250,10 @@ than what the list first said, the item says what it does now and why.
       alias schema for stream-kind cells, with no `default`. The stamp goes in
       front of an `asCell` the schema already carries (`["opaque"]` on a
       stream's own schema) rather than replacing it.
-- [x] Setup writes a `schema` meta onto each stream's derived document next to
-      the `result` back-link (`runner.ts:2986`). It is written in the stored
-      spelling, so with content-addressed schemas on it is a `cid:` reference
-      and the declaration lives in the schema document it names; a raw-storage
-      reader follows one reference, not none.
+- [ ] Setup writes nothing onto a stream's derived document but the `result`
+      back-link (`runner.ts:2986`). #7583 writes a `schema` meta beside it
+      through a `declaredStreamSchema` helper; that write and the helper go,
+      per decision 3.
 - [x] Handler dispatch follows decision 2, without rule 1's schema assertion,
       which stage 3 adds. `describeHandlerStreamFailure`,
       `isMissingStreamMarkerFailure` and the `runner.ts:10492` throw are gone,
@@ -288,12 +299,14 @@ than what the list first said, the item says what it does now and why.
 
 ### Stage 2 — Consumers, tests, docs (#7589)
 
-- [x] State inspector: classify a document as `stream` when its `schema` meta
-      declares one; keep the value check until stage 3. Because the meta can
-      be a `cid:` reference, `classifyDocument` takes a document reader and
-      follows it into the schema document; every classification site hands
-      one over, and the detail view shows the referenced schema and names the
-      document it came from.
+- [ ] State inspector: classify a document as `stream` by following its
+      `result` back-link to the owner's `internal` manifest and reading the
+      stamped link there; keep the value check until stage 3. #7589 classifies
+      from a `schema` meta on the document and has `classifyDocument` take a
+      document reader to follow a `cid:` reference. The reader stays, since
+      the manifest walk needs it and a manifest link's schema can itself be a
+      `cid:` reference; the meta check goes, and the detail view names the
+      manifest it read.
 - [x] Shuttle listing: a key is a `callable` off the child's link-derived
       schema, the same signal the CLI read guard refuses on, through a new
       `listCallableKeys` read (`cli/lib/piece.ts`) that runs beside the value
@@ -322,14 +335,16 @@ than what the list first said, the item says what it does now and why.
       runtime now declares it — `runtime.getCell(space, cause, { asCell:
       ["stream"] })` for a handle, `schema: { asCell: ["stream"] }` on a
       hand-built descriptor or alias — and stores nothing; a declared stream
-      argument is passed as `{}`. The served-execution fixtures
-      (`executor-events-down`, `executor-space-server`) write the schema meta
-      the way setup does, since their durable appends land on the stream's
-      document, and their serving-side handles declare the stream too, since
-      a send decides stream-or-write off the handle. The CLI test harness
-      (`test-runner.ts`) likewise. Pure fakes whose `getRaw` returns the
-      sentinel are deferred to stage 3 (see there): they exercise the value
-      fallback that stage removes, and would be rewritten twice otherwise.
+      argument is passed as `{}`. The served-execution fixtures'
+      (`executor-events-down`, `executor-space-server`) serving-side handles
+      declare the stream, since a send decides stream-or-write off the handle.
+      The CLI test harness (`test-runner.ts`) likewise. Pure fakes whose
+      `getRaw` returns the sentinel are deferred to stage 3 (see there): they
+      exercise the value fallback that stage removes, and would be rewritten
+      twice otherwise.
+- [ ] The served-execution fixtures write only the `result` back-link onto the
+      stream's document, the way setup does. #7589 has them write a `schema`
+      meta beside it; that goes with the setup write it mirrored.
 - [x] Docs. The six live documents and the formal spec's encoding table now
       describe the declaration, and the formal spec says the marker is retired
       rather than renamed to `/Stream@1`. The builder README and the lunch-poll
@@ -368,13 +383,14 @@ than what the list first said, the item says what it does now and why.
       value check (`model.ts` and `decode.ts`), the shuttle listing's
       (`kindOf`), FUSE's `isStreamValue` in `callables.ts`, and `isStreamValue`
       in `runner/src/builder/types.ts` (and its re-export).
-- [ ] `Cell.isStream` and the query-result proxy read the stream document's
-      `schema` meta as their last resort, in place of the value: a meta read,
-      not a value read, so it taints nothing. This covers links a handler or
-      lift wrote into data before stage 1, which no setup pass rewrites
-      (`data-updating.ts:1283` stamps only a new write), and bare addresses to
-      the stream document, the llm-dialog dispatch at
-      `builtins/llm-dialog.ts:2067` among them.
+- [ ] A bare address to a stream document resolves through the owner before
+      any stream decision: follow the `result` back-link, read the owner's
+      `internal` manifest, and take the stamped link's schema (decision 3).
+      This is the last resort in `Cell.isStream` and the proxy in place of the
+      value read. It covers links a handler or lift wrote into data before
+      stage 1, which no setup pass rewrites (`data-updating.ts:1283` stamps
+      only a new write), and the llm-dialog dispatch at
+      `builtins/llm-dialog.ts:2067`.
 - [ ] Handler dispatch asserts that the parsed `$event` link's schema declares
       a stream (decision 2, rule 1).
 - [ ] `detectCallableKind` stops reading the value (`cli/lib/callable.ts:1226`),
@@ -405,7 +421,7 @@ Stage 3 has no observable precondition in the data. Setup re-emits only
 manifest links; a running piece reuses its setup without re-emitting them
 (`runner.ts:2838`); the setup marker records pattern identity, not a format
 (`runner.ts:3257`); and links written into data before stage 1 are never
-rewritten. So the meta-read fallback above is what lets the value read go, not
+rewritten. So the owner resolution above is what lets the value read go, not
 a waiting period. Documents that still hold a sentinel are harmless after
 stage 3: the value is ignored, and nothing reads it.
 
@@ -418,22 +434,24 @@ stage 3: the value is ignored, and nothing reads it.
   registers a handler on a stream whose document holds no value.
 - `when` and `unless` over a stream emit a link whose schema declares it, as
   `ifElse` does.
-- A bare address to a meta-only stream document is a stream to `Cell.isStream`
-  and to the proxy, with nothing stored.
+- A bare address to a back-link-only stream document is a stream to
+  `Cell.isStream` and to the proxy, resolved through the owner's manifest with
+  nothing stored.
 - A lift whose inputs carry `$event` fails at instantiation with the
   lift-with-event-input message (the lunch-poll trap, pinned as a unit test).
 - `ensurePieceRunning` still auto-starts a piece from an event sent to a
-  stream document that has only meta.
+  stream document that has only the back-link.
 - The `.map`-into-sub-pattern regression test above.
-- State inspector fixtures: a meta-only stream document classifies as
-  `stream`.
+- State inspector fixtures: a back-link-only stream document classifies as
+  `stream` through its owner's manifest, and one whose owner is absent
+  classifies as `owned-cell`.
 - Shuttle listing: a stream position lists as `callable` with no sentinel
   stored.
 - FUSE: a nested stream two levels down a result appears as
   `{"/handler": key}` in its parent's `.json` sibling. It gets no `.handler`
   script of its own; see the stage 2 FUSE item.
-- Inspector: a stream whose `schema` meta is a `cid:` reference classifies as
-  `stream` and shows the referenced schema.
+- Inspector: a stream whose manifest link schema is a `cid:` reference
+  classifies as `stream` and shows the referenced schema.
 - A stream declared through `$ref` and `allOf`/`anyOf` sends with nothing
   stored (`stream-declaration.test.ts`).
 
@@ -449,7 +467,7 @@ stage 3: the value is ignored, and nothing reads it.
 - **Unstamped stored links.** Pieces whose last setup ran before stage 1 carry
   unstamped manifest links until their next setup pass, and links a handler or
   lift wrote into data before stage 1 are never rewritten. The value fallback
-  covers both until stage 3 and the meta-read fallback after it; a `send()`
+  covers both until stage 3 and the owner resolution after it; a `send()`
   through a link neither covers becomes a value write with no error, which is
   the failure to watch for.
 - **The `.map` sub-pattern case.** The proxy fallback was added for it, and the
@@ -465,6 +483,10 @@ stage 3: the value is ignored, and nothing reads it.
 ## Not in scope
 
 - Unifying streams with value cells, which `2-storage-format.md:95` floats.
+- Removing the stream's document altogether. Events are appended to that
+  record and auto-start finds the owner through its back-link; a stream that
+  is an address with no record needs another target for both, which is the
+  unification above.
 - Changing derived-cell identity or the manifest format.
 - Allowing a lift to take an input named `$event`.
 - The formal spec's wider encoding work; this plan only retires one row of its
