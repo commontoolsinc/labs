@@ -26,6 +26,7 @@ import {
   toWebSocketAddress,
   WebSocketTransport,
 } from "../src/storage/v2-remote-session.ts";
+import { createNativeMemorySocket } from "../src/storage/memory-socket.ts";
 import { SpaceHostValidationError } from "../src/space-host.ts";
 import { StorageManager } from "../src/storage/v2.ts";
 import { TEST_HELLO_SESSION_OPEN } from "./memory-v2-test-utils.ts";
@@ -551,12 +552,25 @@ describe("WebSocketTransport failure signaling", () => {
       transport: WebSocketTransport,
       socket: () => DrivableWebSocket,
     ) => Promise<void>,
+    write?: (frame: EncodedMemoryMessage) => Promise<void>,
   ): Promise<void> {
     const realWebSocket = globalThis.WebSocket;
     DrivableWebSocket.instances.length = 0;
     (globalThis as { WebSocket: unknown }).WebSocket = DrivableWebSocket;
     const transport = new WebSocketTransport(
       new URL("wss://memory.test/api/storage/memory"),
+      true,
+      () => {},
+      (address) => {
+        const connection = createNativeMemorySocket(address);
+        return {
+          socket: connection.socket,
+          send: (frame) => {
+            connection.send(frame);
+            return write?.(frame);
+          },
+        };
+      },
     );
     return body(transport, () => DrivableWebSocket.instances.at(-1)!)
       .finally(() => {
@@ -707,6 +721,101 @@ describe("WebSocketTransport failure signaling", () => {
       await Promise.all([first, second]);
       expect(activeSocket.sent).toEqual(["first", "second"]);
       expect(DrivableWebSocket.instances).toHaveLength(1);
+    });
+  });
+
+  it("waits for local write completion before resolving or sending the next frame", async () => {
+    const write = Promise.withResolvers<void>();
+    await withTransport(async (transport, socket) => {
+      let completed = false;
+      const first = transport.send("first").then(() => completed = true);
+      const second = transport.send("second");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await activeSocket.whenSent(1);
+      await clock.settle();
+      expect(completed).toBe(false);
+      expect(activeSocket.sent).toEqual(["first"]);
+
+      write.resolve();
+      await Promise.all([first, second]);
+      expect(completed).toBe(true);
+      expect(activeSocket.sent).toEqual(["first", "second"]);
+      await transport.close();
+    }, () => write.promise);
+  });
+
+  it("propagates an asynchronous write failure without poisoning the send queue", async () => {
+    const write = Promise.withResolvers<void>();
+    await withTransport(async (transport, socket) => {
+      const first = transport.send("first");
+      const failure = expect(first).rejects.toThrow("TLS write failed");
+      const second = transport.send("second");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await activeSocket.whenSent(1);
+      write.reject(new Error("TLS write failed"));
+      await failure;
+      await second;
+      expect(activeSocket.sent).toEqual(["first", "second"]);
+      await transport.close();
+    }, (frame) => frame === "first" ? write.promise : Promise.resolve());
+  });
+
+  it("rejects queued sends after close without reopening the socket", async () => {
+    const write = Promise.withResolvers<void>();
+    await withTransport(async (transport, socket) => {
+      const first = transport.send("first");
+      const second = transport.send("second");
+      const failure = expect(second).rejects.toThrow("changed before send");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await activeSocket.whenSent(1);
+      await transport.close();
+      write.resolve();
+      await first;
+      await failure;
+      await expect(transport.send("after close")).rejects.toThrow(
+        "Memory transport closed",
+      );
+      expect(activeSocket.sent).toEqual(["first"]);
+      expect(DrivableWebSocket.instances).toHaveLength(1);
+    }, () => write.promise);
+  });
+
+  it("queues compression controls behind outstanding writes", async () => {
+    const write = Promise.withResolvers<void>();
+    await withTransport(async (transport, socket) => {
+      const first = transport.send("first");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await activeSocket.whenSent(1);
+      transport.setMessageCompressionEnabled(true);
+      const control = transport.requestMessageCompression(false);
+      await clock.settle();
+      expect(activeSocket.sent).toEqual(["first"]);
+      write.resolve();
+      await first;
+      await activeSocket.whenSent(2);
+      activeSocket.receive(requireTextFrame(activeSocket.sent[1]));
+      expect(await control).toBe(false);
+      await transport.close();
+    }, () => write.promise);
+  });
+
+  it("preserves errors from a non-DOM socket event", async () => {
+    await withTransport(async (transport, socket) => {
+      const first = transport.send("first");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await first;
+      const closed = Promise.withResolvers<Error | undefined>();
+      transport.setCloseReceiver(closed.resolve);
+      const error = new Error("Node TLS failure");
+      activeSocket.dispatchEvent(Object.assign(new Event("error"), { error }));
+      expect(await closed.promise).toBe(error);
+      activeSocket.close();
+      await transport.close();
     });
   });
 
@@ -1021,6 +1130,7 @@ describe("WebSocketTransport failure signaling", () => {
       const factory = new RemoteSessionFactory(
         () => new URL("wss://memory.test/api/storage/memory"),
         signer,
+        createNativeMemorySocket,
       );
 
       await expect(
@@ -1038,6 +1148,7 @@ describe("WebSocketTransport failure signaling", () => {
       const factory = new RemoteSessionFactory(
         () => new URL("wss://memory.test/api/storage/memory"),
         signer,
+        createNativeMemorySocket,
       );
       await factory.setMessageCompressionEnabled(false);
       const opening = factory.create(signer.did(), signer, {});
@@ -1078,6 +1189,7 @@ describe("WebSocketTransport failure signaling", () => {
       const factory = new RemoteSessionFactory(
         () => new URL("wss://memory.test/api/storage/memory"),
         signer,
+        createNativeMemorySocket,
       );
       const opening = factory.create(signer.did(), signer, {});
       const activeSocket = socket();
@@ -1103,6 +1215,7 @@ describe("WebSocketTransport failure signaling", () => {
       const factory = new RemoteSessionFactory(
         () => new URL("wss://memory.test/api/storage/memory"),
         signer,
+        createNativeMemorySocket,
       );
       const opening = factory.create(
         space,
@@ -1140,6 +1253,7 @@ describe("WebSocketTransport failure signaling", () => {
       const factory = new RemoteSessionFactory(
         () => new URL("wss://memory.test/api/storage/memory"),
         signer,
+        createNativeMemorySocket,
       );
       const opening = factory.create(
         signer.did(),
@@ -1193,6 +1307,7 @@ describe("WebSocketTransport failure signaling", () => {
       const factory = new RemoteSessionFactory(
         () => new URL("wss://memory.test/api/storage/memory"),
         signer,
+        createNativeMemorySocket,
       );
       let opened:
         | Awaited<ReturnType<RemoteSessionFactory["create"]>>
@@ -1268,6 +1383,7 @@ describe("WebSocketTransport failure signaling", () => {
       const factory = new RemoteSessionFactory(
         () => new URL("wss://memory.test/api/storage/memory"),
         signer,
+        createNativeMemorySocket,
       );
       const opening = factory.create(
         signer.did(),
@@ -1305,6 +1421,7 @@ describe("WebSocketTransport failure signaling", () => {
         const factory = new RemoteSessionFactory(
           () => new URL("wss://memory.test/api/storage/memory"),
           signer,
+          createNativeMemorySocket,
         );
         const opening = factory.create(
           signer.did(),
