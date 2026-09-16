@@ -883,6 +883,23 @@ describe("running the check and saying what it found", () => {
     }
   });
 
+  it("exits two on a command line it cannot act on, and says how", async () => {
+    // A usage mistake is not a topology defect, and reporting it as one
+    // sends somebody looking through the tree for a surface nobody
+    // registered. The exit status is what tells the two apart.
+    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+    const said: string[] = [];
+    const err = console.error;
+    console.error = (line: string) => said.push(line);
+    try {
+      expect(await main(["--records", "a.ndjson"], root)).toBe(2);
+    } finally {
+      console.error = err;
+    }
+    expect(said.join("\n")).toContain("--commit");
+    expect(said.join("\n")).toContain("usage:");
+  });
+
   it("accounts for this repository's own tree", async () => {
     // The check the repository runs on itself, run the way it runs it.
     const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");

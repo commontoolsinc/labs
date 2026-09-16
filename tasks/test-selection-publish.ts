@@ -767,10 +767,12 @@ function summarize(
   const unclaimed = unplaced.unclaimed.filter((key) => !gone.has(key));
   if (unclaimed.length > 0) {
     console.log(
-      `test selection: no suite claims ${unclaimed.length} identities ` +
-        `that have run inside the window a state keeps counters for, so ` +
-        `no lane can be asked to run one. What puts an identity here, and ` +
-        `what takes it out again, is in docs/development/test-selection.md.`,
+      `test selection: no suite claims ${unclaimed.length} identities the ` +
+        `aggregate still carries, so no lane can be asked to run one. ` +
+        `Each has run inside the window a state keeps counters for, or a ` +
+        `configuration declares its unit unavailable. What puts an ` +
+        `identity here, and what takes it out again, is in ` +
+        `docs/development/test-selection.md.`,
     );
     console.log(
       `test selection: those ${unclaimed.length} were recorded ` +

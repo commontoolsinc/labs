@@ -1807,12 +1807,15 @@ there and still runs records inside that window whether or not a change
 selects it.
 
 Neither condition is enough alone, and requiring both is what makes this
-safe. An identity whose records never say which file they came from is
-claimed by nobody and is running every day; dropping it would throw away
-the history of a live test and hide the wiring defect that is worth
-acting on. A topology that misreads the tree — a suite whose scope was
-renamed without the alias that bridges it — stops claiming tests that are
-running, and every one of those is held by the second condition.
+safe. A suite whose units are files places a record by the file the
+record names, so an identity whose records never name one is claimed by
+nobody and is running every day; dropping it would throw away the history
+of a live test and hide the wiring defect that is worth acting on. A
+suite whose units are not files reads the recorded name instead and is
+untouched by that. A topology that misreads the tree — a suite whose
+scope was renamed without the alias that bridges it — stops claiming
+tests that are running, whichever kind of suite it is, and every one of
+those is held by the second condition.
 
 An identity more than one suite claims is not a departure at all. The
 tree holds that test twice over, which is a defect in the topology rather
@@ -1829,9 +1832,13 @@ enumerated and running, so its identities are placed by their file and
 never reach this.
 
 A skip is the one outcome a state records nothing for, so a test the tree
-holds that nothing ever runs meets the second condition as well and is
-dropped like a deleted one. What that costs is catches from before the
-window, since every counter inside it is empty either way.
+holds that nothing ever runs meets the second condition as well. Where
+nothing claims it either, it is dropped like a deleted one; what that
+costs is catches from before the window, since every counter inside it is
+empty either way. Most skipped tests are in neither position: a whole
+unit declared unavailable is exempt, a declared leaf leaves its unit
+enumerated and placed, and a test skipped inside a unit some suite claims
+is claimed with it.
 
 The longest window is the longer of `CHURN_WINDOW_DAYS` and
 `FLAKE_WINDOW_DAYS`, sixty days today, so that is how long a deletion

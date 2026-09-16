@@ -226,10 +226,11 @@ export function explainLines(
     return [
       `${key}`,
       "  The manifest has no entry for it, and what that means depends on",
-      "  the tree. A unit no manifest knows is mandatory, so a test just",
-      "  added, one just renamed, and one whose records never say which",
-      "  unit it is in all run until a run on `main` records them. A test",
-      "  the tree no longer holds is in no unit, and nothing runs it.",
+      "  the tree. An available unit no manifest knows is mandatory, so a",
+      "  test just added, one just renamed, and one whose records never",
+      "  say which unit it is in all run until a run on `main` records",
+      "  them. Nothing runs a test the tree no longer holds, and nothing",
+      "  runs one whose unit a configuration declares unavailable.",
     ];
   }
   const lines = [

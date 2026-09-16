@@ -77,6 +77,17 @@ const needsFile = () =>
       record.file === UNIT ? { level: "unit", unit: UNIT } : undefined,
   }]);
 
+/**
+ * A topology whose two suites both claim what the records carry, which
+ * is the defect the drift guard fails on: nothing in a record says which
+ * of them owns it.
+ */
+const twoSuites = () =>
+  Promise.resolve<Suite[]>([
+    TOPOLOGY[0]!,
+    { ...TOPOLOGY[0]!, id: "runner-unit" },
+  ]);
+
 /** Everything a call said on the standard output, as one string. */
 async function saying(call: () => Promise<unknown>): Promise<string> {
   const lines: string[] = [];
@@ -1326,8 +1337,34 @@ describe("publish() over an aggregate holding tests the tree has lost", () => {
     // The seeded runs record no file either, so they are unplaced and
     // running, which is the other half of what the count separates.
     expect(said).toContain(
-      "no suite claims 2 identities that have run inside the window",
+      "no suite claims 2 identities the aggregate still carries",
     );
+  });
+});
+
+describe("publish() over a topology two suites read the same way", () => {
+  const NOW = new Date("2026-08-20T12:00:00.000Z");
+
+  it("names the identities neither suite can be given", async () => {
+    // Placing one either way would put the work in whichever suite came
+    // first, so the publisher holds them out and says how many. The
+    // count is apart from the tests that have left because the tree
+    // holds these twice over rather than not at all.
+    const { store, created } = fakeStore(seed());
+    const said = await saying(() =>
+      publish(
+        ["--bootstrap", "--days", "1"],
+        store,
+        NOW,
+        twoSuites,
+        noBaselines,
+      )
+    );
+    expect(said).toContain("1 identities are claimed by more than one suite");
+    expect(said).toContain("unit:memory 1");
+    // Held out of the manifest rather than placed under one of them.
+    const manifest = await publishedManifest(created);
+    expect(manifest.entries).toEqual([]);
   });
 });
 

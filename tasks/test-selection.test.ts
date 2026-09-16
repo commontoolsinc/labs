@@ -103,15 +103,22 @@ describe("test-selection", () => {
 
     it("says an identity with no records is mandatory", () => {
       const lines = explainLines(manifest(), { ...TEST, n: "never seen" });
-      expect(lines.join("\n")).toContain("no manifest knows is mandatory");
+      expect(lines.join("\n")).toContain(
+        "An available unit no manifest knows is mandatory",
+      );
     });
 
-    it("says a deleted test runs nowhere rather than everywhere", () => {
+    it("says what does not run rather than only what does", () => {
       // The name reaches the same branch a new test's does, and nothing
-      // in an identity tells the two apart, so the answer has to cover
-      // both rather than assert the wrong one.
+      // in an identity tells any of them apart, so the answer has to
+      // cover them all rather than assert one for every case. A unit a
+      // configuration declares unavailable gets no stand-in, so nothing
+      // in it is mandatory either.
       const lines = explainLines(manifest(), { ...TEST, n: "never seen" });
-      expect(lines.join("\n")).toContain("nothing runs it");
+      expect(lines.join("\n")).toContain(
+        "Nothing runs a test the tree no longer holds",
+      );
+      expect(lines.join("\n")).toContain("declares unavailable");
     });
 
     it("does not claim the store or the tree holds nothing for it", () => {

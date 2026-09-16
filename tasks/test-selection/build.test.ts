@@ -824,12 +824,15 @@ describe("build", () => {
 
   describe("departed()", () => {
     /** A suite claiming nothing, holding the skips a case gives it. */
-    function empty(unavailable: Suite["unavailable"] = []): Suite {
+    function empty(
+      unavailable: Suite["unavailable"] = [],
+      units: string[] = [],
+    ): Suite {
       return {
         id: "workspace-unit",
         recordSurfaces: [{ kind: "unit", scope: "memory" }],
         needs: ["deno"],
-        units: [],
+        units,
         unavailable,
         locate: () => undefined,
         command: () => Promise.resolve([]),
@@ -900,15 +903,16 @@ describe("build", () => {
     });
 
     it("passes over a leaf a configuration declares unavailable", () => {
-      // A leaf entry leaves its unit enumerated and running, so the unit
-      // is placed by its file and never reaches here. Reading such an
-      // entry as a whole unit would exempt every other test in the file.
+      // A leaf entry leaves its unit enumerated and running, which is
+      // what the suite here holds, so in the tree the unit is placed by
+      // its file and nothing in it reaches this. Reading such an entry
+      // as a whole unit would exempt every other test in the file.
       expect(departed(
         [empty([{
           unit: UNIT,
           leafName: "space > writes",
           reason: "the surface has not landed",
-        }])],
+        }], [UNIT])],
         { suiteLevel: [], unclaimed: [KEY], contested: [] },
         { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
       )).toEqual([KEY]);

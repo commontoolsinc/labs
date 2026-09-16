@@ -527,14 +527,15 @@ and nothing at all in between, and a count that stays large run after run
 is a suite that has stopped recording rather than a set of tests somebody
 deleted. The surfaces named beside it say which suite.
 
-The third is the identities no suite claims that have run inside that
-window:
+The third is the identities no suite claims that the aggregate still
+carries:
 
 ```
-test selection: no suite claims 3295 identities that have run inside the
-window a state keeps counters for, so no lane can be asked to run one.
-What puts an identity here, and what takes it out again, is in
-docs/development/test-selection.md.
+test selection: no suite claims 3295 identities the aggregate still
+carries, so no lane can be asked to run one. Each has run inside the
+window a state keeps counters for, or a configuration declares its unit
+unavailable. What puts an identity here, and what takes it out again, is
+in docs/development/test-selection.md.
 test selection: those 3295 were recorded by 12 surface(s): unit:utils 742,
 unit:runtime-client 509, unit:ts-transformers 379,
 unit:schema-generator 314, unit:js-compiler 153, and 7 more
@@ -581,12 +582,15 @@ manifest that no lane could run. The next record that says enough puts the
 identity back in.
 
 The count spans every identity the aggregate holds rather than the ones
-this run read, because the surfaces it is taken from do. Two different
+this run read, because the surfaces it is taken from do. Three different
 things are in it. The first is an identity whose records have never said
 which unit it is in, which is the one to act on, and the next record
 that says enough takes it out. The second is a test deleted inside that
 window, which moves to the count above once the window has passed over
-it and is gone from the aggregate for good after that.
+it and is gone from the aggregate for good after that. The third is a
+test in a unit a configuration declares unavailable, which is here for
+as long as the declaration stands and is not something to act on: the
+declaration is why it stopped recording.
 
 The fourth is the identities two suites both claim:
 
