@@ -836,7 +836,7 @@ const defaultGenesisAcl = (owner: string): ACL => ({
  *  a space with `"*": "OWNER"` is owned by everyone, and a document that
  *  did not say so is not what stands (a non-object has none). */
 const ownersOf = (document: unknown): string[] =>
-  typeof document === "object" && document !== null
+  isObjectOrArray(document)
     ? Object.entries(document as Record<string, unknown>)
       .filter(([, capability]) => capability === "OWNER")
       .map(([principal]) => principal)
@@ -2832,9 +2832,7 @@ export class StorageManager implements IStorageManager {
     if (isKeyableObjectOrArray(value)) {
       for (const key of Object.keys(value)) {
         const child = value[key];
-        if (
-          child === null || child === undefined || typeof child !== "object"
-        ) {
+        if (!isObjectOrArray(child)) {
           continue;
         }
         const childSchema = schema

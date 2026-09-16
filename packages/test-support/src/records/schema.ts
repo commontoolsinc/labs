@@ -5,6 +5,8 @@
  * material, is docs/history/plans/test-run-telemetry.md.
  */
 
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 /** Schema version carried by every context line and object path. */
 export const RECORD_SCHEMA_VERSION = 1;
 
@@ -168,11 +170,11 @@ export function parseRecordLine(line: string): TestRecord | undefined {
   } catch {
     return undefined;
   }
-  if (typeof value !== "object" || value === null) return undefined;
+  if (!isObjectOrArray(value)) return undefined;
   const record = value as Record<string, unknown>;
   if (record.line !== "record") return undefined;
   const test = record.test as Record<string, unknown> | undefined;
-  if (typeof test !== "object" || test === null) return undefined;
+  if (!isObjectOrArray(test)) return undefined;
   if (
     !isNonEmptyString(test.k) || !isNonEmptyString(test.s) ||
     !isNonEmptyString(test.n)
@@ -210,7 +212,7 @@ export function parseContextLine(line: string): RunContext | undefined {
   } catch {
     return undefined;
   }
-  if (typeof value !== "object" || value === null) return undefined;
+  if (!isObjectOrArray(value)) return undefined;
   const context = value as Record<string, unknown>;
   if (context.line !== "context") return undefined;
   if (context.schema !== RECORD_SCHEMA_VERSION) return undefined;
@@ -233,7 +235,7 @@ export function parseContextLine(line: string): RunContext | undefined {
   }
   let ci: CiContext | undefined;
   if (context.ci !== undefined) {
-    if (typeof context.ci !== "object" || context.ci === null) {
+    if (!isObjectOrArray(context.ci)) {
       return undefined;
     }
     const raw = context.ci as Record<string, unknown>;

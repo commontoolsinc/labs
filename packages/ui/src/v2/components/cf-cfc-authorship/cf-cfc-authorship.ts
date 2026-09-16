@@ -1,4 +1,5 @@
 import type { CfcLabelView } from "@commonfabric/runner/cfc";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { css, html } from "lit";
 
 import { BaseElement } from "../../core/base-element.ts";
@@ -52,28 +53,28 @@ const AUTHOR_DISPLAY_FIELDS = [
 ] as const;
 
 const hasLabelQuery = (value: unknown): value is CfcLabelQueryableValue =>
-  typeof value === "object" && value !== null &&
+  isObjectOrArray(value) &&
   "getCfcLabel" in value &&
   typeof (value as { getCfcLabel?: unknown }).getCfcLabel === "function";
 
 const hasLabelSubscription = (
   value: unknown,
 ): value is CfcLabelSubscribableValue =>
-  typeof value === "object" && value !== null &&
+  isObjectOrArray(value) &&
   "subscribe" in value &&
   typeof (value as { subscribe?: unknown }).subscribe === "function";
 
 const hasLabelResolution = (
   value: unknown,
 ): value is CfcLabelResolvableValue =>
-  typeof value === "object" && value !== null &&
+  isObjectOrArray(value) &&
   "resolveAsCell" in value &&
   typeof (value as { resolveAsCell?: unknown }).resolveAsCell === "function";
 
 const hasReadableClaim = (
   value: unknown,
 ): value is CfcReadableClaimValue =>
-  typeof value === "object" && value !== null &&
+  isObjectOrArray(value) &&
   (typeof (value as { get?: unknown }).get === "function" ||
     typeof (value as { sync?: unknown }).sync === "function");
 
@@ -87,9 +88,7 @@ const labelHasRootIntegrityKind = (
       if (typeof atom === "string") {
         return atom.startsWith(`${kind}:`);
       }
-      if (
-        typeof atom !== "object" || atom === null || Array.isArray(atom)
-      ) {
+      if (!isObjectNotArray(atom)) {
         return false;
       }
       return (atom as Record<string, unknown>).kind === kind;
@@ -124,7 +123,7 @@ const isConcreteAuthorClaim = (value: unknown): boolean => {
   ) {
     return true;
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isObjectNotArray(value)) {
     return false;
   }
   const record = value as Record<string, unknown>;
@@ -237,7 +236,7 @@ const objectStringFields = (
   value: unknown,
   fields: readonly string[],
 ): string[] => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isObjectNotArray(value)) {
     return [];
   }
 
@@ -274,7 +273,7 @@ const representsPrincipalSubjectForLabel = (
   }
   for (const entry of rootEntries(view)) {
     for (const atom of entry.label.integrity ?? []) {
-      if (typeof atom !== "object" || atom === null || Array.isArray(atom)) {
+      if (!isObjectNotArray(atom)) {
         continue;
       }
       const atomRecord = atom as Record<string, unknown>;
@@ -317,7 +316,7 @@ export const integrityAtomMatchesAuthor = (
     return authorIds.some((authorId) => atom === `${kind}:${authorId}`);
   }
 
-  if (typeof atom !== "object" || atom === null || Array.isArray(atom)) {
+  if (!isObjectNotArray(atom)) {
     return false;
   }
 
@@ -343,8 +342,7 @@ const hasAuthorshipIntegrity = (
     (entry.label.integrity ?? []).some((atom) =>
       typeof atom === "string"
         ? atom.startsWith(`${kind}:`)
-        : typeof atom === "object" && atom !== null &&
-          !Array.isArray(atom) &&
+        : isObjectNotArray(atom) &&
           objectField(atom as Record<string, unknown>, "kind") === kind
     )
   );

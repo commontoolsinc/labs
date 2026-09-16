@@ -19,6 +19,8 @@
  * export imports, and the test file holds a check that it stayed there.
  */
 
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
 export const repoRoot = new URL("..", import.meta.url).pathname;
 
 /** Run `cf` from the repository root and return stdout; throw on failure. */
@@ -188,7 +190,7 @@ export function withoutKeys(
 }
 
 const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
+  isObjectNotArray(v);
 
 /** The authored scalar fields of a topic's argument document. Everything a
  * restore may write and nothing else: `myName` is per-user state and
@@ -332,7 +334,7 @@ export function buildRestoreDocument(
 /** The path below any node where a `$link` marker appears, or null. Used to
  * refuse an export that would silently record a reference as content. */
 export function findLink(node: unknown, path = "$"): string | null {
-  if (node === null || typeof node !== "object") return null;
+  if (!isObjectOrArray(node)) return null;
   if (Object.hasOwn(node, "$link")) return path;
   for (const [key, value] of Object.entries(node)) {
     const hit = findLink(value, `${path}.${key}`);

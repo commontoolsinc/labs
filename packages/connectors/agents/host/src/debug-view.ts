@@ -18,6 +18,7 @@ import {
   type Pattern,
 } from "@commonfabric/runner";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import type { AgentsHostTargetDescription } from "./host.ts";
 import {
@@ -298,9 +299,7 @@ function asDebugRegistration(
   value: FabricValue,
 ): DebugRegistration | undefined {
   if (value === undefined) return undefined;
-  if (
-    typeof value !== "object" || value === null || Array.isArray(value)
-  ) {
+  if (!isObjectNotArray(value)) {
     throw new Error("debug view registration is malformed");
   }
   const candidate = value as unknown as Record<string, unknown>;

@@ -2,6 +2,7 @@ import { resolveScopeKey, type ScopeKey } from "@commonfabric/memory/v2";
 import { getAuthoredDebugSource } from "../harness/authored-debug-source.ts";
 import { startReadStats } from "../read-stats.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { CfcRefusalDetail } from "../cfc/refusal-detail.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
@@ -356,7 +357,7 @@ export function watchReactiveActionCommit(state: {
       // keeps the debounce: that is the spacing between it and the local
       // writer it raced (an interval `#now` tick's own write, for one).
       const emptyReactiveCommit = isStorageTransactionInconsistent(error) &&
-        typeof error === "object" && error !== null &&
+        isObjectOrArray(error) &&
         "emptyReactiveCommit" in error && error.emptyReactiveCommit === true;
       state.markInvalid(state.action, {
         retry: waitedForCatchUp ||

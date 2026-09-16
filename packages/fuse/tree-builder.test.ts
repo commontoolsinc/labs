@@ -1,5 +1,6 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion and symlink parsing
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { FsTree } from "./tree.ts";
 import {
   buildCallableScript,
@@ -413,7 +414,7 @@ function nestedChain(depth: number): Record<string, unknown> {
 function chainDepth(value: unknown): { depth: number; tail: unknown } {
   let depth = 0;
   let cursor = value;
-  while (cursor !== null && typeof cursor === "object") {
+  while (isObjectOrArray(cursor)) {
     const next = (cursor as Record<string, unknown>).next;
     if (next === undefined) break;
     depth++;

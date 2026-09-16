@@ -20,6 +20,7 @@
  */
 
 import { html, LitElement, nothing, type TemplateResult } from "lit";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   type ConsoleChatEventEnvelope,
   type ConsoleRunDetail,
@@ -105,9 +106,7 @@ const elide = (text: string, limit = LINE_LIMIT): string =>
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
 
 const asRecord = (value: unknown): Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  isObjectNotArray(value) ? value as Record<string, unknown> : {};
 
 const parsedRecord = (text: string | undefined): Record<string, unknown> => {
   try {

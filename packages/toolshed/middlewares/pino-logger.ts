@@ -4,6 +4,7 @@ import pretty from "pino-pretty";
 
 import env from "@/env.ts";
 import { backgroundLogFile, backgroundLogStream } from "@/background.ts";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 const SENSITIVE_HEADERS = new Set([
   "authorization",
@@ -21,9 +22,7 @@ export function redactHeaders(headers: unknown): unknown {
       ]),
     );
   }
-  if (
-    headers === null || typeof headers !== "object" || Array.isArray(headers)
-  ) {
+  if (!isObjectNotArray(headers)) {
     return headers;
   }
   return Object.fromEntries(

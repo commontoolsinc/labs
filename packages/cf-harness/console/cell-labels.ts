@@ -33,6 +33,7 @@ import {
   type LabelObservationClass,
   rebaseCfcLabelView,
 } from "@commonfabric/runner/cfc/label-view-core";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { parseConsoleReference } from "./reference.ts";
 
 import type {
@@ -157,7 +158,7 @@ const dedupe = (names: readonly string[]): string[] => [...new Set(names)];
 /** What a provenance atom's identity resolves to, in as few words as carry it. */
 const producerOf = (atom: HarnessCfcAtom | undefined): string | undefined => {
   const identity = atom?.fields?.identity;
-  if (typeof identity !== "object" || identity === null) {
+  if (!isObjectOrArray(identity)) {
     return undefined;
   }
   const fields = identity as Record<string, unknown>;

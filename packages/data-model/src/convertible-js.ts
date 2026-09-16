@@ -627,7 +627,7 @@ export function convertibleJsFromFabricValue(
   // through unchanged.
   if (isFabricSpecialObject(value)) return value;
 
-  if (value === null || value === undefined || typeof value !== "object") {
+  if (!isObjectOrArray(value)) {
     return value;
   }
 

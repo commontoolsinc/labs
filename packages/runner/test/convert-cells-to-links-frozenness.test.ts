@@ -22,6 +22,7 @@ import {
 } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { type CellLinkInput, convertCellsToLinks } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -58,7 +59,7 @@ function reachableObjects(
   value: unknown,
   found: Set<object> = new Set(),
 ): Set<object> {
-  if ((value === null) || (typeof value !== "object")) return found;
+  if (!isObjectOrArray(value)) return found;
   if (found.has(value)) return found;
 
   found.add(value);

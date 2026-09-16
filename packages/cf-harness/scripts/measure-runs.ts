@@ -24,6 +24,7 @@
 
 import { parseArgs } from "@std/cli/parse-args";
 import { basename, join } from "@std/path";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type { HarnessRunReport } from "../src/contracts/run-report.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import type { HarnessResearchRecord } from "../src/research/runner.ts";
@@ -772,9 +773,7 @@ export const measureTranscript = (
   // unreadable run rather than aborting the whole report.
   const messages = transcript.filter((
     message,
-  ): message is typeof transcript[number] =>
-    typeof message === "object" && message !== null
-  );
+  ): message is typeof transcript[number] => isObjectOrArray(message));
   for (const message of messages) {
     if (message.role === "tool") {
       if (typeof message.toolCallId !== "string") continue;
@@ -970,8 +969,7 @@ const readJsonObject = async (
       basename(path),
     );
     if (parsed.kind === "unread") return parsed;
-    return typeof parsed.value === "object" && parsed.value !== null &&
-        !Array.isArray(parsed.value)
+    return isObjectNotArray(parsed.value)
       ? read(parsed.value as Record<string, unknown>)
       : unread(`${basename(path)} is not an object`);
   } catch (error) {

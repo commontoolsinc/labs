@@ -590,7 +590,7 @@ const stripRequiredFields = (schema: JSONSchema): JSONSchema => {
       ]),
     );
   }
-  if (typeof result.items === "object" && result.items !== null) {
+  if (isObjectOrArray(result.items)) {
     result.items = stripRequiredFields(result.items as JSONSchema);
   }
   for (const key of ["anyOf", "oneOf", "allOf"] as const) {
@@ -598,7 +598,7 @@ const stripRequiredFields = (schema: JSONSchema): JSONSchema => {
       result[key] = (result[key] as JSONSchema[]).map(stripRequiredFields);
     }
   }
-  if (typeof result.not === "object" && result.not !== null) {
+  if (isObjectOrArray(result.not)) {
     result.not = stripRequiredFields(result.not as JSONSchema);
   }
 
@@ -1399,7 +1399,7 @@ const markSchemaValueActive = (
     context.activeByRoot.set(root, activity);
   }
   if (
-    (typeof value === "object" && value !== null) ||
+    isObjectOrArray(value) ||
     typeof value === "function"
   ) {
     const objectValue = value as object;
@@ -1432,7 +1432,7 @@ const unmarkSchemaValueActive = (
   const activity = context.activeByRoot.get(root);
   if (!activity) return;
   if (
-    (typeof value === "object" && value !== null) ||
+    isObjectOrArray(value) ||
     typeof value === "function"
   ) {
     activity.activeObjectValues.get(schema)?.delete(value as object);
@@ -1695,7 +1695,7 @@ const validateAgainstSchemaInternal = (
   context: SchemaValidationContext,
 ): SchemaValidationFailure | undefined => {
   let successful: WeakSet<object> | undefined;
-  if (isObjectNotArray(schema) && typeof value === "object" && value !== null) {
+  if (isObjectNotArray(schema) && isObjectOrArray(value)) {
     const schemaRoot = fullSchema;
     const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
     let byRoot = context.successful.get(options);
@@ -1763,7 +1763,7 @@ const validateAgainstSchemaUncached = (
       // branch can still find sibling $defs entries, except when an embedded
       // or external ref changes the owning document, or resolution merged
       // ref-site siblings into a view that is a document of its own.
-      const resolvedRoot = typeof resolved === "object" && resolved !== null
+      const resolvedRoot = isObjectOrArray(resolved)
         ? cfcSchemaResolvedRoot(
           resolved,
           resolveCfcSchemaRefRoot(schema, schemaRoot),

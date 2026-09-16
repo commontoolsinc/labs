@@ -23,6 +23,7 @@ import {
   type SpaceDb,
 } from "@commonfabric/state-inspector";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   HARNESS_CELL_LABELS_TYPE,
   type HarnessCellLabelEntry,
@@ -38,7 +39,7 @@ import {
 const TRANSFORMED_BY = "https://commonfabric.org/cfc/atom/TransformedBy";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+  isObjectNotArray(value);
 
 /**
  * One stored atom, normalized. A string atom is its own type and its own

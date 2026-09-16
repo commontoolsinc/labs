@@ -64,6 +64,7 @@ import {
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
 import { nameSchema } from "@commonfabric/runner/schemas";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { pieceId } from "../piece-id.ts";
 import {
@@ -238,7 +239,7 @@ function replaceMaterializedValueAtPath(
   if (path.length === 0) return value;
 
   const [segment, ...remaining] = path;
-  const prototype = current !== null && typeof current === "object"
+  const prototype = isObjectOrArray(current)
     ? Object.getPrototypeOf(current)
     : undefined;
   const clone: Record<PropertyKey, unknown> | unknown[] = Array.isArray(current)
@@ -248,7 +249,7 @@ function replaceMaterializedValueAtPath(
     : typeof segment === "number"
     ? []
     : {};
-  const child = current !== null && typeof current === "object"
+  const child = isObjectOrArray(current)
     ? (current as Record<PropertyKey, unknown>)[segment]
     : undefined;
   Object.defineProperty(clone, segment, {
@@ -270,7 +271,7 @@ function writePathCrossesLink(
 ): boolean {
   let current = raw;
   for (const segment of path.slice(0, -1)) {
-    current = current !== null && typeof current === "object"
+    current = isObjectOrArray(current)
       ? (current as Record<PropertyKey, unknown>)[segment]
       : undefined;
     if (isLink(current)) return true;
@@ -292,7 +293,7 @@ function replaceMaterializedCellValueAtPath(
   if (path.length === 0) return value;
 
   const [segment, ...remaining] = path;
-  const prototype = current !== null && typeof current === "object"
+  const prototype = isObjectOrArray(current)
     ? Object.getPrototypeOf(current)
     : undefined;
   const clone: Record<PropertyKey, unknown> | unknown[] = Array.isArray(current)
@@ -302,7 +303,7 @@ function replaceMaterializedCellValueAtPath(
     : typeof segment === "number"
     ? []
     : {};
-  const child = current !== null && typeof current === "object"
+  const child = isObjectOrArray(current)
     ? (current as Record<PropertyKey, unknown>)[segment]
     : undefined;
   Object.defineProperty(clone, segment, {
@@ -681,7 +682,7 @@ function resolvePathSchemaContract(
   const schema = contract.schema;
   const schemaRoot = contract.root;
   if (
-    typeof schema !== "object" || schema === null ||
+    !isObjectOrArray(schema) ||
     typeof schema.$ref !== "string"
   ) {
     return { ...contract, schema, root: schemaRoot };
@@ -853,7 +854,7 @@ export function materializedValueAtPath(
   };
   for (const segment of path) {
     followCell();
-    if (current === null || typeof current !== "object") return undefined;
+    if (!isObjectOrArray(current)) return undefined;
     current = (current as Record<PropertyKey, unknown>)[segment];
   }
   followCell();
@@ -937,7 +938,7 @@ export function selectCurrentContainerSchema(
 ): JSONSchema {
   const currentType = Array.isArray(currentValue)
     ? "array"
-    : currentValue !== null && typeof currentValue === "object" &&
+    : isObjectOrArray(currentValue) &&
         !isCell(currentValue) && !isStream(currentValue)
     ? "object"
     : undefined;
@@ -998,7 +999,7 @@ export function currentValuePathContracts(
     return linkPathContracts([contract], [segment]);
   } catch (originalError) {
     const { schema, root } = contract;
-    if (typeof schema !== "object" || schema === null) throw originalError;
+    if (!isObjectOrArray(schema)) throw originalError;
     if (active.has(schema)) {
       throw new Error("recursive correlated write schema cannot be localized");
     }
@@ -1134,7 +1135,7 @@ export function currentValuePathContracts(
 
 function withoutTopLevelScope(schema: JSONSchema): JSONSchema {
   if (
-    typeof schema !== "object" || schema === null || schema.scope === undefined
+    !isObjectOrArray(schema) || schema.scope === undefined
   ) {
     return schema;
   }
@@ -1151,7 +1152,7 @@ export function consumeOuterCellContract(
   schema: JSONSchema,
 ): OuterCellContract {
   const entries = ContextualFlowControl.getAsCellValues(schema);
-  if (entries.length === 0 || typeof schema !== "object" || schema === null) {
+  if (entries.length === 0 || !isObjectOrArray(schema)) {
     return { kind: "cell", payloadSchema: schema };
   }
   const kind = ContextualFlowControl.getAsCellKind(entries[0]);
@@ -1184,7 +1185,7 @@ export function localizeOuterCellContract(
 ): OuterCellLocalization {
   const contract = resolvePathSchemaContract(unresolved);
   const { schema, root } = contract;
-  if (typeof schema !== "object" || schema === null) return { contract };
+  if (!isObjectOrArray(schema)) return { contract };
   if (active.has(schema)) {
     return { contract, issue: "recursive Cell schema cannot be localized" };
   }
@@ -1428,7 +1429,7 @@ export function localizeStreamEventContract(
 ): StreamEventLocalization {
   const contract = resolvePathSchemaContract(unresolved);
   const { schema, root } = contract;
-  if (typeof schema !== "object" || schema === null) {
+  if (!isObjectOrArray(schema)) {
     return { contract, consumedStream: false };
   }
   if (active.has(schema)) {
@@ -1658,7 +1659,7 @@ export function durableSourceContract(
   if (!ownedArgument && Array.isArray(internal)) {
     for (const descriptor of internal) {
       if (
-        descriptor === null || typeof descriptor !== "object" ||
+        !isObjectOrArray(descriptor) ||
         !("link" in descriptor)
       ) continue;
       try {
@@ -1734,7 +1735,7 @@ export function durableSourceContract(
         }
         return;
       }
-      if (value === null || typeof value !== "object" || seen.has(value)) {
+      if (!isObjectOrArray(value) || seen.has(value)) {
         return;
       }
       seen.add(value);
@@ -1773,7 +1774,7 @@ function suppliedLinks(
   seen = new WeakSet<object>(),
 ): SuppliedLink[] {
   if (isLink(value)) return [{ path, value }];
-  if (value === null || typeof value !== "object" || seen.has(value)) return [];
+  if (!isObjectOrArray(value) || seen.has(value)) return [];
 
   const prototype = Object.getPrototypeOf(value);
   // TODO(danfuzz): the prototype gate treats a `FabricInstance` as a leaf,
@@ -2704,7 +2705,7 @@ function rawValueAtPath(
   let value = root;
   for (const segment of path) {
     if (
-      value === null || typeof value !== "object" ||
+      !isObjectOrArray(value) ||
       !Object.hasOwn(value, segment)
     ) {
       return { present: false, value: undefined };
@@ -2739,7 +2740,7 @@ export function rawResolvedValueAtPath(
   }
   const envelope = document.ok?.value;
   if (
-    envelope === null || typeof envelope !== "object" ||
+    !isObjectOrArray(envelope) ||
     !Object.hasOwn(envelope, "value")
   ) {
     return { present: false, value: undefined };
@@ -2855,8 +2856,8 @@ export function omitMissingProjectionAliases(
     }
   }
   if (
-    materialized === null || typeof materialized !== "object" ||
-    raw === null || typeof raw !== "object"
+    !isObjectOrArray(materialized) ||
+    !isObjectOrArray(raw)
   ) return materialized;
 
   // TODO(danfuzz): the `typeof` gate admits a `FabricSpecialObject` on
@@ -2871,7 +2872,7 @@ export function omitMissingProjectionAliases(
       : { ...materialized }) as Record<string, unknown>;
   const materializedRecord = materialized as Record<PropertyKey, unknown>;
   const rawRecord = raw as Record<PropertyKey, unknown>;
-  const viewRecord = schemaView !== null && typeof schemaView === "object"
+  const viewRecord = isObjectOrArray(schemaView)
     ? schemaView as Record<PropertyKey, unknown>
     : undefined;
   for (const key of Object.keys(rawRecord)) {
@@ -3662,8 +3663,7 @@ class PiecePropIo implements PieceCellIo {
               for (const contract of ancestorContracts) {
                 const ancestorSchema = contract.schema;
                 if (
-                  typeof ancestorSchema !== "object" ||
-                  ancestorSchema === null ||
+                  !isObjectOrArray(ancestorSchema) ||
                   (!("maxItems" in ancestorSchema) &&
                     !("minItems" in ancestorSchema))
                 ) {
@@ -5024,7 +5024,7 @@ function sourceRevision(
 }
 
 function isPieceSourceAction(action: unknown): action is PieceSourceAction {
-  if (typeof action !== "object" || action === null || !("kind" in action)) {
+  if (!isObjectOrArray(action) || !("kind" in action)) {
     return false;
   }
   if (action.kind === "detach" || action.kind === "adopt") return true;

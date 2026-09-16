@@ -7,6 +7,7 @@ import {
   type HarnessPatternIndexClientFactory,
   PatternIndexError,
 } from "../src/pattern-index/client.ts";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { DEFAULT_DOCKER_BINARY } from "../src/sandbox/docker-runsc.ts";
 import { readDockerRuntimes } from "../src/sandbox/docker-runtimes.ts";
 import {
@@ -53,10 +54,7 @@ export const consoleSandboxHealthProbe = (
     read: async () => {
       const result = await readRuntimes();
       const checkedAt = new Date().toISOString();
-      if (
-        typeof result.runtimes !== "object" || result.runtimes === null ||
-        Array.isArray(result.runtimes)
-      ) {
+      if (!isObjectNotArray(result.runtimes)) {
         return unavailable(checkedAt).map((row) => ({
           ...row,
           reason: result.unreadable ??
@@ -131,9 +129,7 @@ export const consolePatternIndexHealthProbes = (
         const result =
           await (index === 0 ? client.health() : client.enrollmentStatus());
         const checkedAt = new Date().toISOString();
-        if (
-          typeof result !== "object" || result === null || Array.isArray(result)
-        ) return unavailable(checkedAt);
+        if (!isObjectNotArray(result)) return unavailable(checkedAt);
         const record = result as Record<string, unknown>;
         const field = index === 0 ? "ok" : "enrolled";
         if (

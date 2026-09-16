@@ -25,6 +25,7 @@ import { validateSchemaValue } from "@commonfabric/runner/cfc";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Identity } from "@commonfabric/identity";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   assertSchemaSubset,
   DEFAULT_INERT_SUBSCHEMA_KEYS,
@@ -128,7 +129,7 @@ const DEFAULT_UNDER_INERT_KEYWORD: Record<
 
 /** Whether `value` or anything nested inside it carries a `default`. */
 function carriesDefault(value: unknown): boolean {
-  if (value === null || typeof value !== "object") return false;
+  if (!isObjectOrArray(value)) return false;
   return Object.hasOwn(value, "default") ||
     Object.values(value).some(carriesDefault);
 }

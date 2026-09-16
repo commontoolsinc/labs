@@ -6,6 +6,7 @@
  * drawing the tiles chart their history with.
  */
 
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { Status } from "./types.ts";
 import { PROD_SERVICE } from "./config.ts";
 import {
@@ -143,7 +144,7 @@ function githubErrorBody(body: string): string | undefined {
   try {
     const value: unknown = JSON.parse(body);
     if (
-      value !== null && typeof value === "object" && "message" in value &&
+      isObjectOrArray(value) && "message" in value &&
       typeof value.message === "string"
     ) {
       detail = value.message;

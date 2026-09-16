@@ -6,6 +6,7 @@
  * points without exposing the GitHub request or response.
  */
 
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   defaultHarnessFetch,
   type HarnessFetch,
@@ -111,9 +112,7 @@ const parseHitId = (hit: SkillsShSearchHit): SkillsShAddressSegments => {
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
+  isObjectNotArray(value) ? value as Record<string, unknown> : undefined;
 
 /** Fetches one GitHub API object, parsing the body rather than trusting status. */
 const fetchGithubObject = async (

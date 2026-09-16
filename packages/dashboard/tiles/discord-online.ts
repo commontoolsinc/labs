@@ -12,6 +12,7 @@
  * with 4014.
  */
 
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { Status, Tile, TileView } from "../types.ts";
 import { escapeHtml, multiSparkline, thin } from "../lib.ts";
 import { dashboardCacheFile } from "../history-files.ts";
@@ -41,7 +42,7 @@ type Point = { t: number; team: number; visitors: number };
 const history: Point[] = [];
 
 const isPoint = (p: unknown): p is Point =>
-  typeof p === "object" && p !== null &&
+  isObjectOrArray(p) &&
   typeof (p as Point).t === "number" &&
   typeof (p as Point).team === "number" &&
   typeof (p as Point).visitors === "number";

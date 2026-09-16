@@ -1,6 +1,7 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { JSONSchema } from "@commonfabric/api";
 import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL } from "@commonfabric/llm/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   type HarnessNativeModelToolId,
   type HarnessOpenAIWebSearchResult,
@@ -209,7 +210,7 @@ export const asHarnessSubagentFailureReport = (
   value: unknown,
 ): { code: HarnessSubagentFailureReasonCode } | undefined => {
   if (
-    typeof value !== "object" || value === null || Array.isArray(value) ||
+    !isObjectNotArray(value) ||
     (value as Record<string, unknown>).ok !== false
   ) {
     return undefined;

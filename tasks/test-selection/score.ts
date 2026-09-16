@@ -16,6 +16,7 @@ import type {
   TestIdentity,
 } from "@commonfabric/test-support/records";
 import { testIdentityKey } from "@commonfabric/test-support/records";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   BREADTH_SATURATION,
   CATCH_BREADTH_WINDOW_DAYS,
@@ -336,7 +337,7 @@ export function serializeContext(context: FoldContext): StoredFoldContext {
  */
 export function parseContext(value: unknown): FoldContext {
   const context = emptyContext();
-  if (typeof value !== "object" || value === null) return context;
+  if (!isObjectOrArray(value)) return context;
   const stored = value as Partial<StoredFoldContext>;
   const pairs = (raw: unknown): Array<[string, unknown]> =>
     Array.isArray(raw)
@@ -346,7 +347,7 @@ export function parseContext(value: unknown): FoldContext {
       : [];
 
   for (const [commit, seen] of pairs(stored.outcomesAtCommit)) {
-    if (typeof seen !== "object" || seen === null) continue;
+    if (!isObjectOrArray(seen)) continue;
     const held = seen as { day?: unknown; identities?: unknown };
     if (!isDay(held.day)) continue;
     const identities = new Map<string, Set<string>>();
@@ -369,7 +370,7 @@ export function parseContext(value: unknown): FoldContext {
       .slice(-FLAKE_COMMIT_REACH);
   }
   for (const [at, seen] of pairs(stored.mainAtCommit)) {
-    if (typeof seen !== "object" || seen === null) continue;
+    if (!isObjectOrArray(seen)) continue;
     const held = seen as { day?: unknown; outcome?: unknown };
     if (!isDay(held.day)) continue;
     if (held.outcome !== "pass" && held.outcome !== "fail") continue;
@@ -386,7 +387,7 @@ export function parseContext(value: unknown): FoldContext {
       day: string;
       source: string;
     } =>
-      typeof failure === "object" && failure !== null &&
+      isObjectOrArray(failure) &&
       isDay((failure as { day?: unknown }).day) &&
       typeof (failure as { source?: unknown }).source === "string"
     );
@@ -770,9 +771,7 @@ interface StoredPercentile {
  */
 export function readCostsForward(state: IdentityState): void {
   const held = state.costByDay;
-  const days = typeof held === "object" && held !== null && !Array.isArray(held)
-    ? held
-    : {};
+  const days = isObjectNotArray(held) ? held : {};
   state.costByDay = days;
   // A stored day is one shape or the other, which the state's own
   // declared type cannot say.
@@ -783,7 +782,7 @@ export function readCostsForward(state: IdentityState): void {
     // it, which is what a day this cannot make sense of is worth.
     // Ending the read of the whole state is not, and a state is read
     // back through this before anything has looked at what it holds.
-    if (typeof held !== "object" || held === null) {
+    if (!isObjectOrArray(held)) {
       days[day] = emptySamples();
       continue;
     }

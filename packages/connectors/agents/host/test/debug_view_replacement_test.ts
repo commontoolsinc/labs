@@ -14,6 +14,7 @@ import { createSession } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { assertEquals } from "@std/assert";
 import { fromFileUrl } from "@std/path";
 import {
@@ -60,7 +61,7 @@ Deno.test("debug replacement stops every superseded local runner", async () => {
         agentOwnerSchema(session.as.did()),
       );
       const current = cell.getRawUntyped({ frozen: false });
-      if (typeof current !== "object" || current === null) {
+      if (!isObjectOrArray(current)) {
         throw new Error("debug registration is missing");
       }
       if (

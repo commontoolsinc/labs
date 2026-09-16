@@ -33,6 +33,7 @@
 
 import { parse as parseJsonc } from "@std/jsonc";
 import { dirname, fromFileUrl } from "@std/path";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
@@ -227,7 +228,7 @@ export function resolvesInTree(
 /** Does `key` ("." or "./sub") resolve against a deno.jsonc `exports` value? */
 function resolvesExport(exports: unknown, key: string): boolean {
   if (typeof exports === "string") return key === "."; // string = root export only
-  if (exports !== null && typeof exports === "object") {
+  if (isObjectOrArray(exports)) {
     return key in (exports as Record<string, unknown>);
   }
   return false;

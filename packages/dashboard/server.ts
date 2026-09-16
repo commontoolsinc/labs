@@ -25,6 +25,7 @@
  *                                     organization-users tile
  */
 
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { CI_WORKFLOW, PORT, REPO } from "./config.ts";
 import { TILES } from "./registry.ts";
 import { makeCtx } from "./ctx.ts";
@@ -545,7 +546,7 @@ export async function handle(req: Request): Promise<Response> {
       });
     }
     if (
-      typeof body !== "object" || body === null || Array.isArray(body) ||
+      !isObjectNotArray(body) ||
       typeof (body as { text?: unknown }).text !== "string"
     ) {
       return Response.json({ error: "Message text must be a string." }, {

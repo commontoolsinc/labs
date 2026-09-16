@@ -59,6 +59,7 @@
 import { parse as parseJsonc } from "@std/jsonc";
 import { walk } from "@std/fs/walk";
 import { dirname, fromFileUrl, join, relative } from "@std/path";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
@@ -140,7 +141,7 @@ export function importsAlias(source: string, alias: string): boolean {
 export function parseImportMap(configText: string): Record<string, string> {
   const config = parseJsonc(configText) as { imports?: unknown } | null;
   const imports = config?.imports;
-  if (imports === null || typeof imports !== "object") return {};
+  if (!isObjectOrArray(imports)) return {};
   const result: Record<string, string> = {};
   for (const [alias, specifier] of Object.entries(imports)) {
     if (typeof specifier === "string") result[alias] = specifier;
