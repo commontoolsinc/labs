@@ -12,8 +12,8 @@
  *     across 133 nodes, while bio/findRedir (findAllWriteRedirectCells) = 356ms.
  * So the real cost is `findAllWriteRedirectCells`, which is NOT a pure transform:
  * it follows every write-redirect link via
- * `parseLink -> runtime.getCellFromLink -> linkCell.getRaw() -> recurse`, i.e.
- * recursive cell/storage resolution per node. That part needs a Runtime, so it
+ * `parseLink -> resolveLink -> readMaybeLink -> next hop`, i.e. storage
+ * resolution per node. That part needs a Runtime, so it
  * isn't covered by this pure micro-bench (TODO: add an emulate-runtime bench for
  * findAllWriteRedirectCells to study/optimize the actual hotspot).
  *

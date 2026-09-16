@@ -20,10 +20,11 @@ import {
   linkCfcLabelView,
   setLinkCfcLabelView,
 } from "../src/cfc/link-label-view.ts";
-import { isCell } from "../src/cell.ts";
+import { createCell, isCell } from "../src/cell.ts";
 import {
   areLinksSame,
   areNormalizedLinksSame,
+  createSigilLinkFromParsedLink,
   getDerivedInternalCellLink,
   getMetaCell,
   parseLink,
@@ -1173,6 +1174,82 @@ describe("pattern-binding", () => {
         { id: bId, path: ["mid"] },
         { id: bId, path: ["x"] },
       ]);
+    });
+
+    it("follows a chain whose redirect link carries a schema", () => {
+      // A schema on the binding link leaves the chain the walk yields
+      // unchanged. What the schema decides is which hops resolution may
+      // follow on the way, which the case below measures.
+      const testCell = runtime.getCell<Record<string, unknown>>(
+        space,
+        "schema-bearing chain",
+        undefined,
+        tx,
+      );
+      testCell.set({ x: 3 });
+      testCell.key("mid").set(
+        testCell.key("x").getAsWriteRedirectLink({ base: testCell }),
+      );
+      const binding = createSigilLinkFromParsedLink(
+        {
+          ...testCell.key("mid").getAsNormalizedFullLink(),
+          schema: { type: "number" },
+        },
+        { includeSchema: true, overwrite: "redirect" },
+      );
+      expect(parseLink(binding, testCell).schema).toBeDefined();
+      const links = findAllWriteRedirectCells(binding, testCell);
+      expect(links.map((l) => l.path)).toEqual([["mid"], ["x"]]);
+    });
+
+    it("stops at a hop the redirect link's schema caps out of reach", () => {
+      // Resolution follows the links on the way to the redirect's position
+      // under the schema the link carries, and that schema's scope cap decides
+      // which of them it may follow. The chain runs through a session-scoped
+      // document: a link capped at `space` cannot reach it, so the walk ends at
+      // the redirect, and the same link capped at `any` walks on into it.
+      const sessionCell = createCell<Record<string, unknown>>(
+        runtime,
+        {
+          ...runtime.getCell(
+            space,
+            "capped chain session target",
+            undefined,
+            tx,
+          ).getAsNormalizedFullLink(),
+          scope: "session",
+        },
+        tx,
+      );
+      sessionCell.set({ z: 9 });
+      sessionCell.key("y").set(
+        sessionCell.key("z").getAsWriteRedirectLink({ base: sessionCell }),
+      );
+      const outer = runtime.getCell<Record<string, unknown>>(
+        space,
+        "capped chain outer",
+        undefined,
+        tx,
+      );
+      outer.set({ hop: sessionCell });
+
+      const redirectThroughHop = (scope: "space" | "any") =>
+        findAllWriteRedirectCells(
+          createSigilLinkFromParsedLink(
+            {
+              ...outer.getAsNormalizedFullLink(),
+              path: ["hop", "y"],
+              schema: { type: "number", scope },
+            },
+            { includeSchema: true, overwrite: "redirect" },
+          ),
+          outer,
+        );
+
+      expect(redirectThroughHop("space").map((l) => l.path))
+        .toEqual([["hop", "y"]]);
+      expect(redirectThroughHop("any").map((l) => l.path))
+        .toEqual([["hop", "y"], ["z"]]);
     });
 
     it("should find all write redirect links in an array", () => {
