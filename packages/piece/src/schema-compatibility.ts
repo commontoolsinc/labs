@@ -22,13 +22,9 @@ import {
   UNUSED_RECORD_SUBSCHEMA_KEYS,
   UNUSED_SINGLE_SUBSCHEMA_KEYS,
 } from "@commonfabric/data-model-schema/schema-walk";
-import {
-  internSchema,
-  schemaTypeOfFabricPrimitive,
-} from "@commonfabric/data-model-schema";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   fabricAwareEqual,
-  FabricPrimitive,
   isKeyableObjectOrArray,
 } from "@commonfabric/data-model";
 
@@ -992,15 +988,19 @@ function schemaIsStableUnderDescendantDefaults(schema: JSONSchema): boolean {
   return Object.keys(schema).every((key) => {
     if (DEFAULT_STABLE_SCHEMA_KEYS.has(key)) return true;
     return (key === "anyOf" || key === "oneOf") &&
-      alternativesDeclareDisjointTypes(schema[key]!);
+      alternativesAreStableUnderDescendantDefaults(schema[key]!);
   });
 }
 
 /**
- * Whether composition branches can never change membership after descendant
- * defaults are inserted because their accepted top-level types do not overlap.
+ * Whether composition branches keep their membership after descendant
+ * defaults are inserted. Their accepted top-level types must not overlap, so
+ * no value can move to another branch, and every branch a default can be
+ * inserted into — one admitting objects or arrays — must keep its own
+ * constraints true under the insertion, as any node is asked to. A branch
+ * admitting only scalars receives no default, whatever else it constrains.
  */
-function alternativesDeclareDisjointTypes(
+function alternativesAreStableUnderDescendantDefaults(
   alternatives: readonly JSONSchema[],
 ): boolean {
   const declared = alternatives.map((alternative) => {
@@ -1030,7 +1030,24 @@ function alternativesDeclareDisjointTypes(
       }
     }
   }
-  return true;
+  return alternatives.every((alternative, index) =>
+    declared[index]!.every(isScalarSchemaType) ||
+    schemaIsStableUnderDescendantDefaults(alternative)
+  );
+}
+
+const SCALAR_SCHEMA_TYPES: ReadonlySet<string> = new Set([
+  "boolean",
+  "integer",
+  "null",
+  "number",
+  "string",
+  "undefined",
+]);
+
+/** Whether a `type` name admits no value a default can be inserted into. */
+function isScalarSchemaType(type: string): boolean {
+  return SCALAR_SCHEMA_TYPES.has(type);
 }
 
 function objectSubsetIssue(
@@ -1638,33 +1655,57 @@ function hasComplexSameInstanceConstraints(schema: SchemaObject): boolean {
 
 /**
  * The `type` names a schema admits, or `undefined` when it leaves them
- * unbounded. A schema that states no `type` but lists every value it accepts
- * in `enum` or `const` — the spelling a literal union compiles to — is bounded
- * all the same: it admits exactly the types those values carry, so a
- * `{enum: ["open", "closed"]}` is a `string` schema to every type comparison
- * here. A listed value whose type {@link valueSchemaType} cannot name leaves
- * the schema unbounded, as a missing `type` does.
+ * unbounded. A schema that lists every value it accepts in `enum` or `const`
+ * admits exactly the types those values carry, narrowed by any `type` it
+ * declares beside them: `{enum: ["open", "closed"]}` — the spelling a literal
+ * union compiles to — is a `string` schema to every type comparison here, and
+ * `{type: "number", enum: [1, 2]}` an `integer` one. A listed value whose
+ * type {@link valueSchemaType} cannot name leaves the declared `type` to
+ * bound the schema, or nothing to.
  */
 function schemaTypes(schema: SchemaObject): readonly string[] | undefined {
-  if (schema.type !== undefined) {
-    return typeof schema.type === "string" ? [schema.type] : schema.type;
-  }
+  const declared = schema.type === undefined
+    ? undefined
+    : typeof schema.type === "string"
+    ? [schema.type]
+    : schema.type;
   const values = allowedLiteralValues(schema);
-  if (values === undefined) return undefined;
+  if (values === undefined) return declared;
   const types: string[] = [];
   for (const value of values) {
     const type = valueSchemaType(value);
-    if (type === undefined) return undefined;
+    if (type === undefined) return declared;
+    if (
+      declared !== undefined &&
+      !declared.some((admitted) => schemaTypeAdmits(admitted, type))
+    ) {
+      continue;
+    }
     if (!types.includes(type)) types.push(type);
   }
   return types;
 }
 
 /**
- * The `type` name a literal value satisfies, in the vocabulary the runtime
- * validates against: an integral number is an `integer`, and a
- * `FabricPrimitive` is its own class name, which an `object` schema also
- * accepts. A value outside that vocabulary gets no name.
+ * Whether a schema `type` name admits a value of the given type name: the
+ * same name, `unknown`, an `integer` under `number`, or a `FabricPrimitive`
+ * class under `object` (mirrors `schemaTypeMatchesValueType` in the runner's
+ * traverse).
+ */
+function schemaTypeAdmits(schemaType: string, valueType: string): boolean {
+  return schemaType === valueType || schemaType === "unknown" ||
+    (schemaType === "number" && valueType === "integer") ||
+    (schemaType === "object" && isFabricPrimitiveSchemaType(valueType));
+}
+
+/**
+ * The `type` name a literal value satisfies, in the JSON vocabulary the
+ * runtime validates against, with an integral number an `integer`. A value
+ * outside that vocabulary gets no name. That includes a `FabricPrimitive`,
+ * on purpose: the runtime checks an object schema's `required` keys on one
+ * whenever the schema declares no `type` or admits `object`, so the class
+ * name alone does not say which object keywords reach the value, and a
+ * schema listing one has to stay unbounded for the object proof to run.
  */
 function valueSchemaType(value: unknown): string | undefined {
   if (value === null) return "null";
@@ -1674,9 +1715,6 @@ function valueSchemaType(value: unknown): string | undefined {
   }
   if (typeof value === "boolean") return "boolean";
   if (Array.isArray(value)) return "array";
-  if (value instanceof FabricPrimitive) {
-    return schemaTypeOfFabricPrimitive(value);
-  }
   return isPlainObject(value) ? "object" : undefined;
 }
 

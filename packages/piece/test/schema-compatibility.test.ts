@@ -2960,9 +2960,8 @@ describe("piece schema compatibility", () => {
   });
 
   it("throws for a bare enum listing a value type the candidate does not accept", () => {
-    // Each listed value contributes the type the runtime validates it as:
-    // an integral number is an `integer`, and a `FabricPrimitive` its own
-    // class name, which an `object` schema accepts as well.
+    // Each listed value contributes the type the runtime validates it as,
+    // with an integral number an `integer`.
 
     expect(() => assertSchemaSubset({ enum: ["a", 1] }, { type: "string" }))
       .toThrow(/type integer is not accepted by the candidate schema/);
@@ -2979,15 +2978,101 @@ describe("piece schema compatibility", () => {
       .not.toThrow();
     expect(() => assertSchemaSubset({ enum: [{ a: 1 }] }, { type: "object" }))
       .not.toThrow();
+  });
 
-    const bytes = {
-      enum: [new FabricBytes(new Uint8Array([1]))],
+  it("narrows a declared type to the literal values listed beside it", () => {
+    // `{type: "number", enum: [1, 2]}` and `{enum: [1, 2]}` accept the same
+    // two values and read as the same `integer` schema: the declared type
+    // bounds which listed values count, and those values bound the type.
+
+    expect(() =>
+      assertSchemaSubset({ type: "number", enum: [1, 2] }, { enum: [1, 2] })
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset({ enum: [1, 2] }, { type: "number", enum: [1, 2] })
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        { type: "integer", enum: [1, 2.5] },
+        { type: "integer" },
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        { type: "number", enum: [1, 2.5] },
+        { type: "integer" },
+      )
+    ).toThrow(/type number is not accepted by the candidate schema/);
+  });
+
+  it("leaves a schema listing a `FabricPrimitive` value unbounded on type", () => {
+    // The runtime checks an object schema's `required` keys on a
+    // `FabricPrimitive` whenever the schema declares no `type` or admits
+    // `object`, so the value's class name does not say which object
+    // keywords reach it. Unbounded, the schema keeps the object proof
+    // running against a target that also declares no type, so that link is
+    // refused where the value validator rejects the value, and it is
+    // refused on type against any typed target.
+
+    const value = new FabricBytes(new Uint8Array([1]));
+    const listed = { enum: [value] } as unknown as JSONSchema;
+    const requiring = {
+      enum: [value],
+      required: ["source"],
     } as unknown as JSONSchema;
-    expect(() => assertSchemaSubset(bytes, { type: "FabricBytes" }))
-      .not.toThrow();
-    expect(() => assertSchemaSubset(bytes, { type: "object" })).not.toThrow();
-    expect(() => assertSchemaSubset(bytes, { type: "FabricHash" }))
-      .toThrow(/type FabricBytes is not accepted by the candidate schema/);
+    expect(validateSchemaValue(requiring, value, requiring)).toBe(
+      "missing required property source",
+    );
+    expect(() => assertSchemaSubset(listed, requiring))
+      .toThrow(/value\.source: newly required argument field has no default/);
+    for (
+      const typed of [
+        { type: "object", required: ["source"] },
+        { type: "FabricBytes" },
+      ] satisfies JSONSchema[]
+    ) {
+      expect(() => assertSchemaSubset(listed, typed))
+        .toThrow(/the candidate no longer accepts every previous type/);
+    }
+  });
+
+  it("keeps a composition unstable under defaults while a branch a default reaches lists the whole value", () => {
+    // Disjoint branch types keep a value from moving between branches, but a
+    // default inserted from a sibling `properties` still lands inside an
+    // object the value occupies. A branch listing that object whole, bare or
+    // typed, no longer matches it afterwards, so the default is refused. A
+    // branch admitting only scalars receives no default, and leaves the
+    // composition stable beside an open object branch.
+
+    const withBranch = (
+      combinator: "anyOf" | "oneOf",
+      branch: JSONSchema,
+    ): JSONSchema => ({
+      type: "object",
+      [combinator]: [branch, { type: "string" }],
+      properties: { a: { type: "number", default: 1 } },
+    });
+    for (const combinator of ["anyOf", "oneOf"] as const) {
+      for (
+        const branch of [
+          { enum: [{}] },
+          { type: "object", enum: [{}] },
+        ] satisfies JSONSchema[]
+      ) {
+        const schema = withBranch(combinator, branch);
+        expect(() => assertSchemaSubset(schema, schema))
+          .toThrow(/not stable under default insertion/);
+      }
+    }
+    const scalarBranch: JSONSchema = {
+      type: "object",
+      anyOf: [
+        { type: "object", properties: { b: { type: "number" } } },
+        { enum: ["none"] },
+      ],
+      properties: { a: { type: "number", default: 1 } },
+    };
+    expect(() => assertSchemaSubset(scalarBranch, scalarBranch)).not.toThrow();
   });
 
   it("treats `FabricPrimitive` types as subtypes of object (one-way)", () => {
