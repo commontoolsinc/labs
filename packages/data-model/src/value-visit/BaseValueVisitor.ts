@@ -42,15 +42,14 @@ import {
  *   `DO_VISIT_SUBTYPE`, so that concrete classes get subtype dispatched
  *   visiting by default (which is easy enough to override back to
  *   non-dispatched).
+ *
+ * **Note:** This class is marked `abstract` not because it has `abstract`
+ * members but instead because it's simply not useful if directly instantiated.
  */
 export abstract class BaseValueVisitor<
   PlusType = never,
   ResultType = FabricValue,
 > implements ValueVisitor<PlusType, ResultType> {
-  //
-  // Subclass contract
-  //
-
   /** @inheritDoc */
   isPlusType(_value: unknown): value is PlusType {
     return false;
@@ -149,10 +148,6 @@ export abstract class BaseValueVisitor<
   ): BaselineVisitResult<ResultType> {
     this.throwShouldntCall("visitedFabricPlainObjectEntry");
   }
-
-  //
-  // Instance members
-  //
 
   /**
    * Throws an error indicating that this visitor does not handle cycles.
