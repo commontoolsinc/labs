@@ -420,12 +420,7 @@ const machineryReadMarker: unique symbol = Symbol(
  * derivation still counts a marked read's ordinary label consumption
  * (link-origin pointer labels, concrete structure/derived entries — exactly
  * what it consumed before templates existed); only runtime-minted `*`-path
- * TEMPLATE consumption is excluded (template-population §3.1/§6). The marker
- * narrows what a read consumes; it does not reclassify the read. CFC §4.6.3
- * puts the standalone/machinery boundary on the dereference trace alone, so a
- * link resolution probe carrying this marker and covered by no trace is still
- * a standalone reference-identity read and still consumes the pointer's own
- * link-origin label. The
+ * TEMPLATE consumption is excluded (template-population §3.1/§6). The
  * machinery reading a plumbing container's child paths is the runtime
  * wiring up operations, not an application observing a slot — letting those
  * reads consume membership/slot templates smeared one reconcile's J into

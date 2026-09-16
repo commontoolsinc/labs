@@ -191,14 +191,12 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     // exactly element i's taint. (Asserting on specific internal docs is
     // brittle — content lands in different docs on the inline-first-run vs
     // steady-state paths; what matters is what a reader's derivation
-    // joins.) Four parts of the blind-passing split keep the coordinator's
-    // scaffolding from smearing one element's taint onto the other: a
-    // reference-identity probe issued while following a reference is
-    // resolution machinery and stays out of J (CFC §4.6.3 puts that
-    // boundary on the dereference trace); link-covered writes aren't
-    // stamped, so the per-slot link labels are the pointwise answer;
-    // pure-link-structure writes get exact-path `structure` stamps that
-    // slot reads below them never join; and the `*`-path membership
+    // joins.) Three parts of the blind-passing split keep the coordinator's
+    // scaffolding from smearing one element's taint onto the other:
+    // link-covered writes aren't stamped, so the per-slot link labels the
+    // link write mints from each source's own label are the pointwise
+    // answer; pure-link-structure writes get exact-path `structure` stamps
+    // that slot reads below them never join; and the `*`-path membership
     // templates beside those stamps are not consumed by the coordinator's
     // own scaffolding reads, which carry `machineryRead`. This test also
     // pins that the batch first-run's coarse J landing on the container as

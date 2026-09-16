@@ -2299,16 +2299,6 @@ const forEachFlowObservation = (
         logicalPath,
       );
     let shape: ReadObservationShape;
-    // CFC §4.6.3 makes the dereference trace the whole of the
-    // standalone/machinery boundary: a probe whose slot path a same-tx
-    // trace covers at or above is resolution machinery, because the
-    // follow's taint arrives through the ordinary reads of the target, and
-    // only a read with no covering trace consumes the reference-identity
-    // row. `machineryRead` answers a different question — which entries a
-    // read consumes, narrowed below to exclude the `*`-path templates — so
-    // it does not reach this classification: a marked probe with no
-    // covering trace is a standalone reference-identity read, and consumes
-    // the pointer's link-origin label.
     if (isLinkResolutionProbe(read.meta)) {
       if (coveredByTrace()) {
         continue;
