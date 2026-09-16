@@ -151,7 +151,11 @@ describe("research", () => {
       };
       expect(schema.required).toEqual(["task"]);
       expect(schema.additionalProperties).toBe(false);
-      expect(Object.keys(schema.properties)).toEqual(["task"]);
+      expect(Object.keys(schema.properties)).toEqual([
+        "task",
+        "purpose",
+        "followUpTo",
+      ]);
     });
   });
 
@@ -775,7 +779,7 @@ describe("research", () => {
         argumentSchema: {
           type: "object",
           properties: {},
-          description: "x".repeat(20_000),
+          description: "x".repeat(MAX_RESEARCH_READ_CHARS + 1),
         },
         resultSchema: { type: "object" },
         program: { main: "/main.tsx", files },

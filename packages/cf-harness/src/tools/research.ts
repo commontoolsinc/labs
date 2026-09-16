@@ -13,7 +13,8 @@ import {
 import {
   HARNESS_RESEARCH_RUN_TYPE,
   type HarnessResearchCfcProjection,
-  type HarnessResearchKit,
+  type HarnessResearchPurpose,
+  type HarnessResearchResult,
   type HarnessResearchRunSummary,
 } from "../contracts/research.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
@@ -30,6 +31,12 @@ import type { HarnessToolDefinition } from "./types.ts";
 export interface ResearchToolInput {
   /** Common Fabric task, question, or implementation uncertainty. */
   task: string;
+
+  /** Orient to the user goal or investigate a follow-up question. */
+  purpose?: HarnessResearchPurpose;
+
+  /** Earlier admitted research output to follow up on. */
+  followUpTo?: string;
 }
 
 /** Successful bounded research, including the artifact-only derivation. */
@@ -41,7 +48,7 @@ export interface ResearchToolSuccessOutput {
   status: "ok";
 
   /** Host-admitted implementation kit given to the caller. */
-  kit: HarnessResearchKit;
+  kit: HarnessResearchResult;
 
   /** How the caller must treat the kit's admission status. */
   guidance: string;
@@ -87,7 +94,7 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
   toolId: "research",
   title: "Research Common Fabric",
   description:
-    "Research a whole Common Fabric implementation task or a focused follow-up across the operator-provisioned CF docs and skills, the published pattern index, exact multi-file pattern source and dependencies, and the safe shape of available handles. A bounded cheap-model loop performs iterative search and exact reads on the trusted host, then returns a cited implementation kit with verified pattern ids/imports/contracts, a complete direct-run or composition example when applicable, API rules, verification steps, and explicit missing inputs. This is not web research. Indexed source remains in the research artifact; only the derived kit reaches your context.",
+    "Research Common Fabric documentation, skills, indexed pieces, and available data in service of the user goal. Use orient for an initial approach or answer (default) for a question. Both can inspect source and return useful code or invocations. Build on prior findings with followUpTo; ask for what remains unclear instead of commissioning another whole app. Prefer composition of existing pieces and a small reusable addition where needed. Indexed source and the private transcript remain in artifacts. This tool does not search the web.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -97,7 +104,20 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
         minLength: 3,
         maxLength: 20_000,
         description:
-          "The whole implementation task, or a focused follow-up that names what remains uncertain.",
+          "The user task to orient to, or the question to investigate. Include the relevant constraints; let research find the simplest supported approach.",
+      },
+      purpose: {
+        type: "string",
+        enum: ["orient", "answer"],
+        description:
+          "Initial orientation or follow-up question. Both have the same reading tools; examples are optional.",
+      },
+      followUpTo: {
+        type: "string",
+        minLength: 1,
+        maxLength: 500,
+        description:
+          "Existing researchRunId or outputId to use as starting context. Only unresolved facts need new research.",
       },
     },
     required: ["task"],
@@ -145,13 +165,20 @@ const RESEARCH_FAILURE_MESSAGE =
   "research failed before returning an implementation kit";
 
 /** Caller guidance derived from the host-admitted kit status. */
-export const researchKitGuidance = (kit: HarnessResearchKit): string =>
-  kit.status === "complete"
+export const researchKitGuidance = (kit: HarnessResearchResult): string =>
+  (kit.status === "incomplete"
+    ? "This research is incomplete. Do not present or implement unsupported parts as complete. "
+    : "") +
+  (kit.purpose === "orient"
+    ? "Use this orientation to achieve the user goal with existing data and composable pieces. Patterns were inspected; leads remain unverified. Use supported contracts and examples directly, and ask follow-up questions only where needed. Honor missing items and syntax diagnostics; syntax checks do not establish types or runtime behavior. A candidate's input requirements do not establish requirements for the entire task."
+    : kit.purpose === "answer"
+    ? "Use the supported answer and optional example within the user goal. Honor missing items and syntax diagnostics; syntax checks do not establish types or runtime behavior. Ask another question only when it would resolve something still unclear."
+    : kit.status === "complete"
     ? "This kit passed host admission. Preserve its cited contracts and still run the listed verification."
     : kit.example?.kind === "pattern-source" &&
         kit.example.syntax?.status === "invalid"
     ? "This kit retains its cited evidence and complete source, but the source has the exact TypeScript syntax errors listed under kit.example.syntax.diagnostics. Correct those errors locally without repeating research, then resolve any other item under kit.missing before presenting or implementing the kit as complete. Syntax acceptance alone will not establish its imports, types, compilation, or runtime behavior."
-    : "This kit is incomplete. Do not present or implement it as complete. Correct local recipe errors directly; use focused research for missing evidence and report any unresolved limitation.";
+    : "Correct local recipe errors directly; use focused research for missing evidence and report any unresolved limitation.");
 
 /** Narrows a raw tool result to a successful research response. */
 export const isResearchToolSuccessOutput = (
@@ -190,6 +217,17 @@ export const researchTool: HarnessToolDefinition<
       return errorOutput("research requires the host research runner");
     }
     try {
+      if (
+        input.followUpTo !== undefined &&
+        !(context.researchRuns ?? []).some((run) =>
+          run.researchRunId === input.followUpTo ||
+          run.outputId === input.followUpTo
+        )
+      ) {
+        return errorOutput(
+          "followUpTo must name an admitted research result available to this run",
+        );
+      }
       const corpus = context.getDocsCorpus === undefined
         ? undefined
         : await context.getDocsCorpus();
@@ -198,6 +236,13 @@ export const researchTool: HarnessToolDefinition<
         .map((entry) => entry.token);
       const reply = await context.runResearch({
         task: input.task,
+        ...(context.researchGoal === undefined
+          ? {}
+          : { goal: context.researchGoal }),
+        purpose: input.purpose ?? "answer",
+        ...(input.followUpTo === undefined
+          ? {}
+          : { followUpTo: input.followUpTo }),
         researchRunId: outputId,
         ...(corpus !== undefined ? { corpus } : {}),
         ...(context.getPatternIndexClient !== undefined

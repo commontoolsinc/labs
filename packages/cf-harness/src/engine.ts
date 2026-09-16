@@ -363,6 +363,9 @@ export interface CreateHarnessEngineOptions
    */
   inheritedResearchRuns?: readonly HarnessResearchRunSummary[];
 
+  /** Root user goal preserved when a child receives a narrower delegated task. */
+  researchGoal?: string;
+
   /** Parent model-context labels retained by a newly delegated child. */
   inheritedCfcModelContext?: HarnessCfcModelContext;
 
@@ -1023,6 +1026,7 @@ export class CfHarnessEngine {
         runManifest: this.config.runManifest,
         runManifestPath: this.config.runManifestPath,
         docsCorpus: this.config.docsCorpus,
+        researchGoal: options.researchGoal ?? options.taskText,
         ...(options.inheritedResearchRuns !== undefined
           ? { researchRuns: [...options.inheritedResearchRuns] }
           : {}),
@@ -2550,6 +2554,7 @@ export class CfHarnessEngine {
         ? { runResearch: this.#researchRunner }
         : {}),
       researchRuns: this.#runState.researchRuns ?? [],
+      researchGoal: this.#runState.researchGoal,
       ...(researchTaskCfcLabel !== undefined ? { researchTaskCfcLabel } : {}),
       patternRefs: this.#runState.patternRefs ?? [],
       recordResearchRun: (run: HarnessResearchRunSummary) => {

@@ -1386,17 +1386,12 @@ describe("CfHarnessPromptLoop research handoff", () => {
                   status: "incomplete",
                   summary:
                     "The handle contract did:key:zResearchText is known, but semantics remain.",
-                  recommendation: {
-                    kind: "author",
-                    rationale: "Author against the described input shape.",
-                  },
                   inputs: [{
                     name: "mail",
                     token: minted.token,
                     purpose: "Read message metadata",
                   }],
                   selectedPatternIds: [],
-                  steps: ["Bind the opaque handle without materializing it."],
                   example: {
                     kind: "pattern-source",
                     content: "export default ({ mail }) => mail;",
@@ -1406,7 +1401,6 @@ describe("CfHarnessPromptLoop research handoff", () => {
                     rule: "Describe a handle before binding it.",
                     sourceIds: [sourceId],
                   }],
-                  verification: ["Type-check the authored pattern."],
                   sourceIds: [sourceId],
                   missing: [
                     "The task's filtering semantics remain unresolved.",
@@ -1430,6 +1424,7 @@ describe("CfHarnessPromptLoop research handoff", () => {
                       name: "research",
                       arguments: JSON.stringify({
                         task: `Build a reader around ${minted.token}`,
+                        purpose: "answer",
                       }),
                     },
                   }],
@@ -2184,16 +2179,11 @@ describe("CfHarnessPromptLoop opening research", () => {
                   status: "incomplete",
                   summary:
                     "The task did:key:zOpeningText needs more exact evidence.",
-                  recommendation: {
-                    kind: "focused-api",
-                    rationale:
-                      "Resolve the remaining contract before implementation.",
-                  },
                   inputs: [],
                   selectedPatternIds: [],
-                  steps: [],
+                  leads: [],
+                  questions: ["Which counter contract fits?"],
                   rules: [],
-                  verification: [],
                   sourceIds: [],
                   missing: ["an exact implementation contract"],
                 }),
@@ -2268,16 +2258,31 @@ describe("CfHarnessPromptLoop opening research", () => {
       expect(result.runState.openingResearch?.status).toBe("completed");
       expect(result.runState.openingResearch?.outputId).toBe(openingOutputId);
       expect(result.runState.researchRuns).toHaveLength(1);
+      expect(result.runState.researchRuns?.[0]?.kit.purpose).toBe("orient");
+      expect(result.runState.researchRuns?.[0]?.kit).not.toHaveProperty(
+        "example",
+      );
       const openingCfc = result.runState.researchRuns?.[0]?.cfc;
       expect(openingCfc?.coverage).toBe("complete");
       expect(openingCfc?.missingLabels).toEqual([]);
-      expect(openingCfc?.sourceLabel.integrity).toBeUndefined();
+      expect(openingCfc?.sourceLabel.integrity).toEqual([
+        expect.objectContaining({
+          class: "CommonFabricHarnessOperatorProvisionedReference",
+          subject: expect.stringMatching(/\/docs\/common$/),
+        }),
+        expect.objectContaining({
+          class: "CommonFabricHarnessOperatorProvisionedReference",
+          subject: expect.stringMatching(/\/skills$/),
+        }),
+      ]);
       expect(openingCfc?.sourceLabel.confidentiality).toHaveLength(1);
       expect(
         (openingCfc?.sourceLabel.confidentiality?.[0] as { type?: string })
           ?.type,
       ).toBe(CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE);
-      expect(openingCfc?.outputLabel).toEqual(openingCfc?.sourceLabel);
+      expect(openingCfc?.outputLabel).toEqual({
+        confidentiality: openingCfc?.sourceLabel.confidentiality,
+      });
       expect(result.runState.cfcModelContext?.observations).toEqual([
         expect.objectContaining({
           toolCallId: `opening-research:${runId}`,

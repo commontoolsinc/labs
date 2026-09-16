@@ -16,10 +16,11 @@ import { mergeLabel } from "@commonfabric/runner/cfc/label-view-core";
 import type {
   HarnessResearchCfcProjection,
   HarnessResearchHandleRecord,
-  HarnessResearchKit,
   HarnessResearchMissingLabel,
   HarnessResearchMissingLabelSource,
   HarnessResearchPatternRecord,
+  HarnessResearchPurpose,
+  HarnessResearchResult,
   HarnessResearchRunSummary,
   HarnessResearchSourceRead,
 } from "../contracts/research.ts";
@@ -34,10 +35,11 @@ import type {
   HarnessTranscriptMessage,
 } from "../contracts/transcript.ts";
 import {
+  type HarnessDocsCorpusSection,
   isOperatorProvisionedReferenceAtom,
 } from "../contracts/docs-corpus.ts";
 import type { HarnessDocsCorpus } from "../docs-corpus/corpus.ts";
-import { rankSections } from "../docs-corpus/sections.ts";
+import { findSectionPassage, rankSections } from "../docs-corpus/sections.ts";
 import { errorMessage } from "../error-message.ts";
 import type {
   HarnessModelAttemptDiagnostic,
@@ -58,13 +60,13 @@ import {
 } from "../tools/search-patterns.ts";
 import { parseStructuredResultJson } from "../structured-result.ts";
 import {
-  admitResearchKit,
+  admitResearchResult,
   type RawResearchResult,
-  RESEARCH_RESULT_SCHEMA,
+  researchResultSchema,
   unreadSourceIds,
 } from "./admission.ts";
 import { objectValue, stringValue, unique } from "./model-value.ts";
-import { selectResearchContext } from "./context.ts";
+import { researchStartingContext, selectResearchContext } from "./context.ts";
 
 /** Cheap gateway model used by the bounded research loop. */
 export const RESEARCH_MODEL = "gemini-3.5-flash" as const;
@@ -79,10 +81,24 @@ export const MAX_RESEARCH_MODEL_TURNS = 8;
 export const MAX_RESEARCH_TOOL_CALLS = 24;
 
 /** Largest exact document or source window returned by one private read. */
-export const MAX_RESEARCH_READ_CHARS = 8_000;
+export const MAX_RESEARCH_READ_CHARS = 32_000;
 
 /** Total exact document and source characters one research call may read. */
 export const MAX_RESEARCH_TOTAL_READ_CHARS = 96_000;
+
+/** Work limits selected by the host for each research purpose. */
+export const RESEARCH_BUDGETS = {
+  orient: {
+    modelTurns: MAX_RESEARCH_MODEL_TURNS,
+    toolCalls: MAX_RESEARCH_TOOL_CALLS,
+    readChars: MAX_RESEARCH_TOTAL_READ_CHARS,
+  },
+  answer: {
+    modelTurns: MAX_RESEARCH_MODEL_TURNS,
+    toolCalls: MAX_RESEARCH_TOOL_CALLS,
+    readChars: MAX_RESEARCH_TOTAL_READ_CHARS,
+  },
+} as const;
 
 export { MAX_RESEARCH_EXAMPLE_CHARS } from "./admission.ts";
 
@@ -104,6 +120,15 @@ export interface HarnessResearchPatternIndex {
 export interface HarnessResearchRequest {
   /** Whole implementation task or focused follow-up to investigate. */
   task: string;
+
+  /** Current user goal, supplied by the host independently of the local question. */
+  goal?: string;
+
+  /** Scope chosen by the caller; absent for unscoped host integrations. */
+  purpose?: HarnessResearchPurpose;
+
+  /** Explicit prior result whose unresolved decision this call investigates. */
+  followUpTo?: string;
 
   /** Unique id used for internal model affinity and provenance. */
   researchRunId: string;
@@ -147,6 +172,15 @@ export interface HarnessResearchRecord {
   /** Task supplied to the loop. */
   task: string;
 
+  /** User goal retained alongside the narrower research task. */
+  goal?: string;
+
+  /** Scope and parent result recorded independently of the model synthesis. */
+  purpose?: HarnessResearchPurpose;
+
+  /** Earlier admitted result selected by the caller. */
+  followUpTo?: string;
+
   /** Complete private model/tool transcript, including exact read windows. */
   messages: readonly HarnessTranscriptMessage[];
 
@@ -178,7 +212,7 @@ export interface HarnessResearchRecord {
 /** Admitted kit plus the artifact-only derivation that produced it. */
 export interface HarnessResearchReply {
   /** Structured result safe to give the caller. */
-  kit: HarnessResearchKit;
+  kit: HarnessResearchResult;
 
   /** Full research trace retained only in the tool artifact. */
   record: HarnessResearchRecord;
@@ -211,6 +245,8 @@ export type HarnessResearchRunner = (
 ) => Promise<HarnessResearchReply>;
 
 interface ResearchState {
+  readLimit: number;
+  handleTokens: readonly string[];
   sourceReads: HarnessResearchSourceRead[];
   confirmedPatterns: Map<string, HarnessResearchPatternRecord>;
   searchedPatterns: Map<string, HarnessResearchPatternRecord>;
@@ -226,12 +262,19 @@ const SEARCH_DOCS_TOOL: HarnessModelToolDescriptor = {
   toolId: "search_docs",
   title: "Search CF Docs",
   description:
-    "Search the operator-provisioned Common Fabric docs and skills corpus. Results are exact section ids and metadata only; call open_doc_section to read one. Search sees the complete section, including text after the first 4,000 characters.",
+    "Search the full Common Fabric docs and skills corpus, optionally within a path. Results include exact matching passages, citable sourceIds, heading context, and offsets. Open relevant sections for more context or complete examples.",
   effectClass: "read",
   inputSchema: {
     type: "object",
     properties: {
       query: { type: "string", minLength: 2 },
+      pathPrefix: {
+        type: "string",
+        minLength: 1,
+        maxLength: 1_000,
+        description:
+          "Optional corpus-relative document or directory prefix to keep the search in the relevant guide or skill.",
+      },
       limit: { type: "integer", minimum: 1, maximum: 10 },
     },
     required: ["query"],
@@ -243,12 +286,18 @@ const OPEN_DOC_TOOL: HarnessModelToolDescriptor = {
   toolId: "open_doc_section",
   title: "Open Exact CF Doc Section",
   description:
-    "Read an exact section returned by search_docs. Reads are bounded; when complete is false, call again with nextOffset to continue through the rest of the same section.",
+    "Read one exact section or several selected sections together. Use sectionId for one, or sectionIds for a batch. Reads can include up to 32,000 characters per section; complete=false and nextOffset identify remaining text. Use search_docs offsets to jump to a passage.",
   effectClass: "read",
   inputSchema: {
     type: "object",
     properties: {
       sectionId: { type: "string" },
+      sectionIds: {
+        type: "array",
+        minItems: 1,
+        maxItems: 8,
+        items: { type: "string" },
+      },
       offset: { type: "integer", minimum: 0 },
       maxChars: {
         type: "integer",
@@ -256,7 +305,25 @@ const OPEN_DOC_TOOL: HarnessModelToolDescriptor = {
         maximum: MAX_RESEARCH_READ_CHARS,
       },
     },
-    required: ["sectionId"],
+    oneOf: [{ required: ["sectionId"] }, { required: ["sectionIds"] }],
+    additionalProperties: false,
+  },
+};
+
+const LIST_DOC_SECTIONS_TOOL: HarnessModelToolDescriptor = {
+  toolId: "list_doc_sections",
+  title: "List CF Doc Sections",
+  description:
+    "List a document or directory's section outline with exact ids, heading ancestry, and sizes. Use a pathPrefix from search results or a known guide. Pagination exposes the whole outline without reading all its text.",
+  effectClass: "read",
+  inputSchema: {
+    type: "object",
+    properties: {
+      pathPrefix: { type: "string" },
+      offset: { type: "integer", minimum: 0 },
+      limit: { type: "integer", minimum: 1, maximum: 100 },
+    },
+    required: ["pathPrefix"],
     additionalProperties: false,
   },
 };
@@ -340,6 +407,7 @@ const DESCRIBE_HANDLE_TOOL: HarnessModelToolDescriptor = {
 
 const RESEARCH_TOOLS = [
   SEARCH_DOCS_TOOL,
+  LIST_DOC_SECTIONS_TOOL,
   OPEN_DOC_TOOL,
   SEARCH_PATTERNS_TOOL,
   INSPECT_PATTERN_TOOL,
@@ -435,41 +503,88 @@ const sourceCatalog = (state: ResearchState): string =>
 const researchModel = (providerId: string): string =>
   providerId === "openai-codex" ? RESEARCH_CODEX_MODEL : RESEARCH_MODEL;
 
-const systemPrompt = (): string =>
+const systemPrompt = (purpose?: HarnessResearchPurpose): string =>
   [
     "You are the private Common Fabric research loop inside the harness.",
-    "Investigate the whole task or focused follow-up using only the supplied tools.",
+    purpose === "orient"
+      ? "Orient the parent to achieving the user goal. Inspect the relevant data and indexed pieces, establish how they fit together, and supply the practical contracts or examples needed to proceed. Identify a small reusable piece to author when something is missing. Stop when the parent has a useful approach; a full application is not required."
+      : purpose === "answer"
+      ? "Answer the question in the context of the user goal and prior findings. Read enough to be accurate, then return the explanation, code, or invocation that resolves it. Let the question determine the scope."
+      : "Produce the smallest complete recipe for the requested implementation using only the supplied tools.",
     "This is CF documentation, skills, pattern-index, source, dependency, and handle research; it is not web research.",
-    "Search broadly enough to find the relevant sections and patterns, then open exact evidence. Search results are leads, not evidence.",
+    "Search for the next unresolved fact. Search results are leads, not proof of applicability. Read exact evidence only when it changes the decision; do not keep searching after the question is answered.",
     "A long section or source file is never represented by its first chunk alone. Follow nextOffset with another exact read whenever the needed answer could continue later.",
-    "Inspect every selected pattern. Read the relevant source files and inspect direct dependencies when composition behavior matters.",
+    "Use the pattern index and available data to find a short path to the goal. Prefer composing suitable existing pieces; describe the smallest missing reusable capability when authoring is needed. If the approach becomes large or tangled, reconsider the component boundaries and data contracts before expanding it. One source file per component does not mean one component for the entire goal.",
+    "Only inspected records may be selected as confirmed patterns. Read source and dependencies where applicability or composition depends on them. Uninspected candidates belong under leads, not selectedPatternIds.",
     "A handle binding is supported only after you call describe_handle for that exact token and receive a successful description. Never infer a binding from task prose alone.",
     "Only an exact value returned in a field named sourceId is citable in the final sourceIds arrays. Copy it exactly; never abbreviate, reconstruct, or transpose it.",
     "The outputId returned by describe_handle records binding provenance only. It is not a sourceId and must never be cited.",
     "For documentation, sectionId is the section-N selector accepted by open_doc_section, while sourceId is the documentation:* citation returned by that read. Never use one in place of the other.",
     "The final inputs array is only for existing described external handles. Use [] when the task needs no external data; put types, defaults, literals, and new local state in the recipe.",
     "Never invent a pattern id, import, handle, grant, API rule, source id, or missing input. If the tools do not establish one, return incomplete and name it under missing.",
-    "Prefer direct-run when one verified published pattern solves the task, composition when verified parts fit, and author only when reuse does not. Use focused-api only for a narrow rules/contracts answer that needs no runnable recipe.",
-    "Return a practical complete invocation or complete source example when possible. Never return a clipped code prefix.",
-    "Every API illustrated in an example, including an API mentioned only in a comment, must be supported by an exact opened read cited in example.sourceIds.",
-    "Complete the smallest recipe the task asks for. State routine reversible assumptions in the summary or steps; reserve missing for facts whose absence actually blocks a correct implementation.",
+    ...[
+      "Prefer direct-run when one verified pattern solves the task, composition when verified parts fit, and author only when reuse does not. Implementation direction is separate from the scope of this call.",
+      "A run-pattern-input example has an invocation OBJECT conforming to run_pattern, with a selected patternId and no sourceText; the host serializes it into copyable JSON. A pattern-source example has complete TypeScript/TSX in content. Never put TSX into an invocation or return a clipped code prefix.",
+      "Every API illustrated in an example, including an API mentioned only in a comment, must be supported by an exact opened read cited in example.sourceIds.",
+      "Examples are optional. Include one when it makes the answer usable; it may be a small idiom or a composable piece. Do not expand a factual question into a whole app. State routine assumptions and reserve missing for actual blockers to this answer, not everything left for the author to do.",
+    ],
+    "Distinguish available inputs, the requirements of one candidate, and missing user data. A candidate's SQLite or connector contract is specific to that candidate, not a universal task prerequisite. No current mailbox handle means mailbox data is unavailable; local-only apps need no external handle.",
+    "Check documentTitle and headingPath before applying a snippet. Iframe React guest code and ordinary commonfabric patterns use different execution environments. A React JSX pragma or React import belongs to an iframe guest, never add it to an ordinary compiled CF pattern. Use the relevant canonical guide sections for the execution environment. Search matching passages or list an outline to choose what to read; read larger sections when their context matters.",
     "On your final turn, make no tool calls and return only JSON matching this schema:",
-    JSON.stringify(RESEARCH_RESULT_SCHEMA),
+    JSON.stringify(researchResultSchema(purpose)),
   ].join("\n");
+
+const canonicalGuideSections = (request: HarnessResearchRequest) => {
+  const canonicalPaths = new Set<string>();
+  return (request.corpus?.sections ?? []).flatMap(
+    (section, index) => {
+      if (
+        !section.integrity.some(isOperatorProvisionedReferenceAtom) ||
+        canonicalPaths.has(section.path) ||
+        !(section.path.endsWith("/pattern-dev/SKILL.md") ||
+          section.path.endsWith("/pattern-development-guide.md"))
+      ) return [];
+      canonicalPaths.add(section.path);
+      return [{ section, index }];
+    },
+  );
+};
 
 const userPrompt = (
   request: HarnessResearchRequest,
 ): string => {
-  const prior = selectResearchContext(request.priorResearchRuns ?? []);
+  const retained = request.priorResearchRuns ?? [];
+  const prior = request.followUpTo === undefined
+    ? selectResearchContext(retained)
+    : retained.filter((run) =>
+      run.researchRunId === request.followUpTo ||
+      run.outputId === request.followUpTo
+    );
   const attachedPatterns = request.attachedPatterns ?? [];
+  const canonicalGuides = canonicalGuideSections(request).map((
+    { section },
+  ) => ({
+    path: section.path,
+    documentTitle: section.documentTitle,
+    headingPath: section.headingPath,
+  }));
   return [
-    "Task:",
+    ...(request.goal === undefined
+      ? []
+      : ["Current user goal:", request.goal, ""]),
+    "Research question or orientation task:",
     request.task,
     "",
     "Authoritative general handle inventory for this research call:",
     request.handleTokens.length > 0
       ? request.handleTokens.join("\n")
       : "No general handles are available.",
+    ...(canonicalGuides.length > 0
+      ? [
+        "Canonical authoring references (use list_doc_sections or search_docs to select useful passages):",
+        JSON.stringify(canonicalGuides),
+      ]
+      : []),
     "Keep these opaque cfh tokens unchanged. Call describe_handle for every token you recommend binding; a failed or skipped description cannot support an input binding.",
     ...(attachedPatterns.length > 0
       ? [
@@ -482,12 +597,9 @@ const userPrompt = (
     ...(prior.length > 0
       ? [
         "",
-        "Prior implementation kits retained by this run:",
-        JSON.stringify(prior.map((run) => ({
-          researchRunId: run.researchRunId,
-          kit: run.kit,
-        }))),
-        "Treat these as starting context and research only unresolved items. Their sourceIds are not citations for this fresh research call: reopen every source the current answer relies on, using a section-N value from a documentation source location as open_doc_section.sectionId, and cite only the newly returned sourceId.",
+        "Selected prior findings and reopenable sources:",
+        JSON.stringify(prior.map(researchStartingContext)),
+        "These findings omit old recipes and handle bindings. Only the current inventory above is authoritative. Treat these as starting context and research only unresolved items. Their sourceIds are not citations for this fresh research call: reopen every source the current answer relies on, using a section-N value from a documentation source location as open_doc_section.sectionId, and cite only the newly returned sourceId.",
       ]
       : []),
   ].join("\n");
@@ -529,11 +641,7 @@ const addRead = (
   read: Omit<HarnessResearchSourceRead, "sourceId" | "digest">,
   content: string,
 ): HarnessResearchSourceRead => {
-  if (state.readChars + content.length > MAX_RESEARCH_TOTAL_READ_CHARS) {
-    throw new Error(
-      `research read budget of ${MAX_RESEARCH_TOTAL_READ_CHARS} characters is exhausted`,
-    );
-  }
+  checkReadBudget(state, content.length);
   state.readChars += content.length;
   const digest = digestText(content);
   const admitted: HarnessResearchSourceRead = {
@@ -713,6 +821,67 @@ const inspectPattern = async (
   };
 };
 
+/** Metadata shared by section outlines, passages, and full reads. */
+const docSectionMetadata = (
+  request: HarnessResearchRequest,
+  section: HarnessDocsCorpusSection,
+) => ({
+  sectionId: "section-" + request.corpus!.sections.indexOf(section),
+  path: section.path,
+  heading: section.heading,
+  documentTitle: section.documentTitle,
+  headingPath: section.headingPath,
+  chars: section.text.length,
+});
+
+/** Records and returns the exact section text observed through search or read. */
+const readDocSection = (
+  request: HarnessResearchRequest,
+  state: ResearchState,
+  section: HarnessDocsCorpusSection,
+  range: { offset: number; end: number; content: string },
+) => {
+  const metadata = docSectionMetadata(request, section);
+  const cfcLabel: IFCLabel = {
+    integrity: structuredClone([...section.integrity]),
+  };
+  addSourceLabel(state, cfcLabel);
+  const read = addRead(state, {
+    kind: "documentation",
+    location: section.path + "#" +
+      (section.headingPath?.join(" > ") ?? section.heading) + " (" +
+      metadata.sectionId + ")",
+    offset: range.offset,
+    end: range.end,
+    totalChars: section.text.length,
+    ...(section.documentTitle === undefined
+      ? {}
+      : { documentTitle: section.documentTitle }),
+    ...(section.headingPath === undefined
+      ? {}
+      : { headingPath: section.headingPath }),
+    integrity: section.integrity.map((atom) => atom.class),
+    cfcLabel,
+  }, range.content);
+  return {
+    ...metadata,
+    sourceId: read.sourceId,
+    ...range,
+    totalChars: section.text.length,
+    complete: range.end === section.text.length,
+    ...(range.end < section.text.length ? { nextOffset: range.end } : {}),
+  };
+};
+
+/** Refuses a read batch before any of its windows enter the evidence record. */
+const checkReadBudget = (state: ResearchState, chars: number): void => {
+  if (state.readChars + chars > state.readLimit) {
+    throw new Error(
+      "research read budget of " + state.readLimit + " characters is exhausted",
+    );
+  }
+};
+
 const invokeResearchTool = async (
   request: HarnessResearchRequest,
   state: ResearchState,
@@ -720,77 +889,96 @@ const invokeResearchTool = async (
   input: Record<string, unknown>,
 ): Promise<unknown> => {
   switch (name) {
+    case "list_doc_sections":
     case "search_docs": {
-      const query = stringValue(input.query, 2_000);
-      if (query.length < 2) {
-        throw new Error("query must be at least 2 characters");
-      }
+      const prefix = typeof input.pathPrefix === "string"
+        ? input.pathPrefix
+        : "";
       const eligible = (request.corpus?.sections ?? []).filter((section) =>
-        section.integrity.some(isOperatorProvisionedReferenceAtom)
+        section.integrity.some(isOperatorProvisionedReferenceAtom) &&
+        section.path.startsWith(prefix)
       );
       for (const section of eligible) {
         addSourceLabel(state, {
           integrity: structuredClone([...section.integrity]),
         });
       }
-      const limit = Math.max(1, Math.min(10, integerValue(input.limit, 8)));
+      if (name === "list_doc_sections") {
+        const offset = Math.max(0, integerValue(input.offset, 0));
+        const limit = Math.max(1, Math.min(100, integerValue(input.limit, 40)));
+        return {
+          totalSections: eligible.length,
+          sections: eligible.slice(offset, offset + limit).map((section) =>
+            docSectionMetadata(request, section)
+          ),
+          ...(offset + limit < eligible.length
+            ? { nextOffset: offset + limit }
+            : {}),
+        };
+      }
+      const query = stringValue(input.query, 2_000);
+      if (query.length < 2) {
+        throw new Error("query must be at least 2 characters");
+      }
+      const limit = Math.max(1, Math.min(10, integerValue(input.limit, 5)));
+      const matches = rankSections(eligible, query).slice(0, limit).map((
+        { section, score },
+      ) => ({
+        section,
+        score,
+        range: findSectionPassage(section, query),
+      }));
+      checkReadBudget(
+        state,
+        matches.reduce((size, entry) => size + entry.range.content.length, 0),
+      );
       return {
         corpusSections: eligible.length,
-        results: rankSections(eligible, query).slice(0, limit).map((entry) => {
-          const sectionIndex = request.corpus!.sections.indexOf(entry.section);
-          return {
-            sectionId: `section-${sectionIndex}`,
-            path: entry.section.path,
-            heading: entry.section.heading,
-            chars: entry.section.text.length,
-            score: entry.score,
-          };
-        }),
+        results: matches.map(({ section, score, range }) => ({
+          ...readDocSection(request, state, section, range),
+          score,
+        })),
       };
     }
     case "open_doc_section": {
-      const sectionId = stringValue(input.sectionId, 100);
-      const match = /^section-(\d+)$/.exec(sectionId);
-      const section = match === null
-        ? undefined
-        : request.corpus?.sections[Number(match[1])];
       if (
-        section === undefined ||
-        !section.integrity.some(isOperatorProvisionedReferenceAtom)
+        (input.sectionId === undefined) === (input.sectionIds === undefined)
       ) {
-        throw new Error(`unknown documentation section ${sectionId}`);
+        throw new Error("provide exactly one of sectionId or sectionIds");
       }
-      const range = checkedReadRange(
-        section.text,
-        input.offset,
-        input.maxChars,
+      const ids = input.sectionId !== undefined
+        ? [input.sectionId]
+        : input.sectionIds;
+      if (
+        !Array.isArray(ids) || ids.length === 0 || ids.length > 8 ||
+        ids.some((id) => typeof id !== "string")
+      ) {
+        throw new Error("provide between one and eight section ids");
+      }
+      const reads = ids.map((id) => {
+        const match = /^section-(\d+)$/.exec(id);
+        const section = match === null
+          ? undefined
+          : request.corpus?.sections[Number(match[1])];
+        if (
+          section === undefined ||
+          !section.integrity.some(isOperatorProvisionedReferenceAtom)
+        ) {
+          throw new Error("unknown documentation section " + id);
+        }
+        return {
+          section,
+          range: checkedReadRange(section.text, input.offset, input.maxChars),
+        };
+      });
+      checkReadBudget(
+        state,
+        reads.reduce((size, read) => size + read.range.content.length, 0),
       );
-      const location = `${section.path}#${section.heading} (${sectionId})`;
-      const cfcLabel: IFCLabel = {
-        integrity: structuredClone([...section.integrity]),
-      };
-      addSourceLabel(state, cfcLabel);
-      const read = addRead(state, {
-        kind: "documentation",
-        location,
-        offset: range.offset,
-        end: range.end,
-        totalChars: section.text.length,
-        integrity: section.integrity.map((atom) => atom.class),
-        cfcLabel,
-      }, range.content);
-      return {
-        sourceId: read.sourceId,
-        sectionId,
-        path: section.path,
-        heading: section.heading,
-        offset: range.offset,
-        end: range.end,
-        totalChars: section.text.length,
-        content: range.content,
-        complete: range.end === section.text.length,
-        ...(range.end < section.text.length ? { nextOffset: range.end } : {}),
-      };
+      const sections = reads.map(({ section, range }) =>
+        readDocSection(request, state, section, range)
+      );
+      return input.sectionId !== undefined ? sections[0] : { sections };
     }
     case "search_pattern_index": {
       if (request.getPatternIndex === undefined) {
@@ -804,7 +992,13 @@ const invokeResearchTool = async (
         throw new Error("pattern search requires text, tags, or both");
       }
       const index = await request.getPatternIndex();
-      const limit = Math.max(1, Math.min(10, integerValue(input.limit, 10)));
+      const limit = Math.max(
+        1,
+        Math.min(
+          10,
+          integerValue(input.limit, 10),
+        ),
+      );
       const response = await index.searchPatterns({
         ...(text !== undefined ? { text } : {}),
         ...(tags !== undefined ? { tags } : {}),
@@ -929,14 +1123,22 @@ export const createResearchRunner = (options: {
 }): HarnessResearchRunner =>
 async (request) => {
   const model = researchModel(options.modelClient.providerId);
+  const budget = RESEARCH_BUDGETS[request.purpose ?? "orient"];
+  const tools = RESEARCH_TOOLS;
   const transcript: HarnessTranscriptMessage[] = [
-    { role: "system", content: systemPrompt() },
+    { role: "system", content: systemPrompt(request.purpose) },
     { role: "user", content: userPrompt(request) },
   ];
   const state: ResearchState = {
+    readLimit: budget.readChars,
+    handleTokens: request.handleTokens,
     sourceReads: [],
     confirmedPatterns: new Map(),
-    searchedPatterns: new Map(),
+    searchedPatterns: new Map(
+      (request.attachedPatterns ?? []).map((
+        record,
+      ) => [record.patternId, record]),
+    ),
     programs: new Map(),
     describedHandles: new Map(),
     sourceLabel: {},
@@ -945,6 +1147,11 @@ async (request) => {
     toolCalls: 0,
   };
   addSourceLabel(state, request.taskCfcLabel);
+  for (const { section } of canonicalGuideSections(request)) {
+    addSourceLabel(state, {
+      integrity: structuredClone([...section.integrity]),
+    });
+  }
   for (const prior of request.priorResearchRuns ?? []) {
     if (prior.cfc === undefined) {
       addMissingLabel(
@@ -973,6 +1180,11 @@ async (request) => {
     researchRunId: request.researchRunId,
     model,
     task: request.task,
+    ...(request.goal === undefined ? {} : { goal: request.goal }),
+    ...(request.purpose === undefined ? {} : { purpose: request.purpose }),
+    ...(request.followUpTo === undefined
+      ? {}
+      : { followUpTo: request.followUpTo }),
     messages: transcript,
     sourceReads: state.sourceReads.map((read) => structuredClone(read)),
     confirmedPatterns: [...state.confirmedPatterns.values()].map((record) =>
@@ -991,18 +1203,18 @@ async (request) => {
   let synthesisOnly = false;
   let synthesisPromptAdded = false;
   try {
-    while (modelTurns < MAX_RESEARCH_MODEL_TURNS) {
+    while (modelTurns < budget.modelTurns) {
       if (runWasAborted(request.signal)) {
         throw abortError(request.signal);
       }
-      const reservedFinalTurn = modelTurns === MAX_RESEARCH_MODEL_TURNS - 1;
+      const reservedFinalTurn = modelTurns === budget.modelTurns - 1;
       const withholdTools = synthesisOnly || reservedFinalTurn;
       if (withholdTools && !synthesisPromptAdded) {
         transcript.push({
           role: "user",
           content: [
             "Synthesis turn: private tools are now withheld.",
-            `You used ${modelTurns} of ${MAX_RESEARCH_MODEL_TURNS} model turns, ${state.toolCalls} of ${MAX_RESEARCH_TOOL_CALLS} tool calls, and ${state.readChars} of ${MAX_RESEARCH_TOTAL_READ_CHARS} read characters.`,
+            `You used ${modelTurns} of ${budget.modelTurns} model turns, ${state.toolCalls} of ${budget.toolCalls} tool calls, and ${state.readChars} of ${budget.readChars} read characters.`,
             sourceCatalog(state),
             "Return the final schema now. If evidence is missing, return status incomplete and name it rather than calling another tool.",
           ].join("\n"),
@@ -1012,7 +1224,7 @@ async (request) => {
       const result = await options.modelClient.complete({
         model,
         transcript: [...transcript],
-        tools: withholdTools ? [] : RESEARCH_TOOLS,
+        tools: withholdTools ? [] : tools,
         nativeModelToolIds: [],
         runId: request.researchRunId,
         ...(request.signal !== undefined ? { signal: request.signal } : {}),
@@ -1040,12 +1252,12 @@ async (request) => {
           }
           throw abortError(request.signal);
         }
-        if (withholdTools || state.toolCalls >= MAX_RESEARCH_TOOL_CALLS) {
+        if (withholdTools || state.toolCalls >= budget.toolCalls) {
           synthesisOnly = true;
           transcript.push(toolResultMessage(call.id, call.function.name, {
             error: withholdTools
               ? "private tools are withheld on the synthesis turn"
-              : `research tool-call budget of ${MAX_RESEARCH_TOOL_CALLS} is exhausted`,
+              : `research tool-call budget of ${budget.toolCalls} is exhausted`,
           }));
           continue;
         }
@@ -1084,7 +1296,7 @@ async (request) => {
     }
     if (finalAssistant === undefined) {
       throw new Error(
-        `research exceeded ${MAX_RESEARCH_MODEL_TURNS} model turns without a final kit`,
+        `research exceeded ${budget.modelTurns} model turns without a final kit`,
       );
     }
     const parsed = parseStructuredResultJson(finalAssistant.content, {
@@ -1095,7 +1307,7 @@ async (request) => {
     const invalidSourceIds = unreadSourceIds(raw, state);
     if (
       raw.status === "complete" && invalidSourceIds.length > 0 &&
-      modelTurns < MAX_RESEARCH_MODEL_TURNS
+      modelTurns < budget.modelTurns
     ) {
       if (runWasAborted(request.signal)) {
         throw abortError(request.signal);
@@ -1111,7 +1323,7 @@ async (request) => {
           "Use no other source ids. Remove a claim whose support is absent or return status incomplete; do not invent, approximate, or reuse an id from a prior research call.",
           `This is model turn ${
             modelTurns + 1
-          } of ${MAX_RESEARCH_MODEL_TURNS}; no further repair turn is available.`,
+          } of ${budget.modelTurns}; no further repair turn is available.`,
         ].join("\n"),
       });
       const repaired = await options.modelClient.complete({
@@ -1148,10 +1360,11 @@ async (request) => {
         }
       }
     }
-    const kit = await admitResearchKit(
+    const kit = await admitResearchResult(
       request.task,
       raw,
       state,
+      request.purpose,
     );
     return { kit, record: record() };
   } catch (error) {

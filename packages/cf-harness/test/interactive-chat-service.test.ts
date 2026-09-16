@@ -186,6 +186,7 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
     workspaceHostPath: "/workspace",
     cwd: "/workspace/project",
     model: "gpt-test",
+    taskText: "Hi",
     cacheAffinityKey: "interactive:session-1",
     allowedToolIds: [
       "bash",
@@ -571,6 +572,7 @@ Deno.test("interactive service forces comment-thread turns to read-only prompt-l
     workspaceHostPath: "/workspace",
     cacheAffinityKey: "interactive:session-1",
     allowedToolIds: ["read_file", "view_image", "read_skill_resource"],
+    taskText: "Read only please",
     allowedSubagentProfiles: [],
   });
   assertEquals(service.status("session-1").sessions[0].policy, {
@@ -618,6 +620,7 @@ Deno.test("interactive service passes Browser Access leases to browser-profile t
     workspaceHostPath: "/workspace",
     cacheAffinityKey: "interactive:session-1",
     allowedToolIds: ["delegate_task"],
+    taskText: "Inspect the browser",
     allowedSubagentProfiles: ["browser"],
     browserAccess,
   });

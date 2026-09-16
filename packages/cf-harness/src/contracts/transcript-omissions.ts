@@ -256,6 +256,27 @@ const mergeRuleRecords = (
   });
 };
 
+/** Restores host-only annotations from a checkpoint with exact result identities. */
+export const restoreHarnessTranscriptOmissions = (
+  transcript: readonly HarnessTranscriptMessage[],
+  omissions: HarnessTranscriptOmissions,
+): void => {
+  for (const result of omissions.results) {
+    const message = transcript[result.transcriptIndex];
+    const identity = message === undefined
+      ? undefined
+      : resultProvenanceOf(message);
+    if (
+      identity === undefined || identity.outputId !== result.outputId ||
+      identity.toolId !== result.toolId ||
+      identity.toolCallId !== result.toolCallId
+    ) {
+      throw new Error("Stored transcript omissions do not match their result");
+    }
+    annotateHarnessTranscriptResultOmissions(message, result.rules);
+  }
+};
+
 /**
  * Builds the durable omission join for `transcript`, retaining entries already
  * recorded for messages loaded from a prior process.

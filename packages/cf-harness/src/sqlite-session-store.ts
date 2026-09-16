@@ -10,8 +10,14 @@ import {
   type HarnessChatTurnStatus,
 } from "./contracts/interactive-chat.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
+import {
+  createHarnessTranscriptOmissions,
+  isHarnessTranscriptOmissions,
+  restoreHarnessTranscriptOmissions,
+} from "./contracts/transcript-omissions.ts";
 import type {
   HarnessChatEventListOptions,
+  HarnessChatResearchContext,
   HarnessChatSessionSnapshot,
   HarnessChatSessionStore,
   HarnessChatSessionTurnEventMutation,
@@ -32,6 +38,8 @@ CREATE TABLE IF NOT EXISTS chat_session (
   session_id  TEXT NOT NULL PRIMARY KEY,
   status      TEXT NOT NULL,
   transcript  TEXT NOT NULL,
+  research_context TEXT,
+  transcript_omissions TEXT,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL,
   closed_at   TEXT
@@ -82,6 +90,8 @@ COMMIT;
 type SessionRow = {
   status: string;
   transcript: string;
+  research_context: string | null;
+  transcript_omissions: string | null;
 };
 
 type EventRow = {
@@ -164,6 +174,8 @@ export class SqliteHarnessChatSessionStore implements HarnessChatSessionStore {
         session_id,
         status,
         transcript,
+        research_context,
+        transcript_omissions,
         created_at,
         updated_at,
         closed_at
@@ -172,6 +184,8 @@ export class SqliteHarnessChatSessionStore implements HarnessChatSessionStore {
         :session_id,
         :status,
         :transcript,
+        :research_context,
+        :transcript_omissions,
         :created_at,
         :updated_at,
         :closed_at
@@ -179,12 +193,20 @@ export class SqliteHarnessChatSessionStore implements HarnessChatSessionStore {
       ON CONFLICT(session_id) DO UPDATE SET
         status = :status,
         transcript = :transcript,
+        research_context = :research_context,
+        transcript_omissions = :transcript_omissions,
         updated_at = :updated_at,
         closed_at = :closed_at
     `).run({
       session_id: snapshot.session.sessionId,
       status: JSON.stringify(snapshot.session),
       transcript: JSON.stringify(snapshot.transcript),
+      transcript_omissions: JSON.stringify(
+        createHarnessTranscriptOmissions(snapshot.transcript),
+      ),
+      research_context: snapshot.researchContext === undefined
+        ? null
+        : JSON.stringify(snapshot.researchContext),
       created_at: snapshot.session.createdAt,
       updated_at: snapshot.session.updatedAt,
       closed_at: snapshot.session.closedAt ?? null,
@@ -195,7 +217,7 @@ export class SqliteHarnessChatSessionStore implements HarnessChatSessionStore {
     sessionId: string,
   ): HarnessChatSessionSnapshot | undefined {
     const row = this.database.prepare(`
-      SELECT status, transcript
+      SELECT status, transcript, research_context, transcript_omissions
       FROM chat_session
       WHERE session_id = :session_id
     `).get({ session_id: sessionId }) as SessionRow | undefined;
@@ -204,7 +226,7 @@ export class SqliteHarnessChatSessionStore implements HarnessChatSessionStore {
 
   listSessions(): readonly HarnessChatSessionSnapshot[] {
     return (this.database.prepare(`
-      SELECT status, transcript
+      SELECT status, transcript, research_context, transcript_omissions
       FROM chat_session
       ORDER BY created_at ASC, session_id ASC
     `).all() as SessionRow[]).map(decodeSessionRow);
@@ -447,16 +469,35 @@ export class SqliteHarnessChatSessionStore implements HarnessChatSessionStore {
   }
 }
 
-const decodeSessionRow = (row: SessionRow): HarnessChatSessionSnapshot => ({
-  session: parseJsonColumn<HarnessChatSessionStatus>(
-    row.status,
-    "chat_session.status",
-  ),
-  transcript: parseJsonColumn<HarnessTranscriptMessage[]>(
+const decodeSessionRow = (row: SessionRow): HarnessChatSessionSnapshot => {
+  const transcript = parseJsonColumn<HarnessTranscriptMessage[]>(
     row.transcript,
     "chat_session.transcript",
-  ),
-});
+  );
+  if (row.transcript_omissions != null) {
+    const omissions = parseJsonColumn<unknown>(
+      row.transcript_omissions,
+      "chat_session.transcript_omissions",
+    );
+    if (!isHarnessTranscriptOmissions(omissions)) {
+      throw new Error("Stored transcript omissions have an invalid format");
+    }
+    restoreHarnessTranscriptOmissions(transcript, omissions);
+  }
+  return {
+    ...(row.research_context == null ? {} : {
+      researchContext: parseJsonColumn<HarnessChatResearchContext>(
+        row.research_context,
+        "chat_session.research_context",
+      ),
+    }),
+    session: parseJsonColumn<HarnessChatSessionStatus>(
+      row.status,
+      "chat_session.status",
+    ),
+    transcript,
+  };
+};
 
 const decodeTurnRow = (row: TurnRow): HarnessChatTurnRecord => {
   const context = parseNullableJsonColumn<HarnessChatContext>(
@@ -490,5 +531,16 @@ export const openSqliteHarnessChatSessionStore = async (
   });
   database.exec(PRAGMAS);
   database.exec(INIT);
+  const columns = database.prepare("PRAGMA table_info(chat_session)").all() as {
+    name: string;
+  }[];
+  if (!columns.some((column) => column.name === "research_context")) {
+    database.exec("ALTER TABLE chat_session ADD COLUMN research_context TEXT");
+  }
+  if (!columns.some((column) => column.name === "transcript_omissions")) {
+    database.exec(
+      "ALTER TABLE chat_session ADD COLUMN transcript_omissions TEXT",
+    );
+  }
   return new SqliteHarnessChatSessionStore(database);
 };

@@ -4,6 +4,9 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Research orientation and passage retrieval comparison](packages/cf-harness/research-passages-comparison-2026-09-16.md) — two-use research contract, exact passage search and batch reads, five matched tasks, preserved indexed composition, mixed latency and accuracy, inbox retrieval overlap and token regression, and browser/provenance verification.
+- [Scoped research implementation and matched comparison](packages/cf-harness/targeted-research-comparison-2026-09-16.md) — orient/answer/recipe bundle, ten matched turns, preserved indexed composition, mixed latency and recipe accuracy, a bounded follow-up recheck, six browser acceptance checks, and durable context/omission corrections.
+
 - [Loom investigation review clarifications](development/performance/2026-09-15-loom-person-inbox-review-clarifications.md) — complete 203-document access-shape accounting and raw repetitions explaining independently calculated policy and opening medians.
 
 - [Loom person-inbox policy budget](development/performance/2026-09-15-loom-person-inbox-policy-budget.md) — nine retained-candidate policy preparations below 200 ms, per-node click attribution, full runtime validation, interleaved raw measurements, and rejected preconstruction experiments exposing quadratic label coverage.

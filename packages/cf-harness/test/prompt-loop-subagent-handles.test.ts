@@ -469,12 +469,20 @@ describe("prompt-loop cross-agent address handles", () => {
     expect(childMessages).not.toContain(HASH_A);
   });
 
-  for (const binding of ["declared", "note-only", "superseded"] as const) {
+  for (
+    const binding of [
+      "declared",
+      "note-only",
+      "superseded",
+      "historical",
+    ] as const
+  ) {
     it(`seeds only selected declared research bindings when a token is ${binding}`, async () => {
       const runId = "run-subagent-research-kit";
       const table = await parentTableOf(runId, [URI_A]);
       const token = table.entries[0]!.token;
       const researchRun = {
+        ...(binding === "historical" ? { historical: true as const } : {}),
         type: "cf-harness.research-run",
         researchRunId: `${runId}:research:1`,
         outputId: `${runId}:research:1`,
@@ -548,7 +556,7 @@ describe("prompt-loop cross-agent address handles", () => {
       const childMessages = chatViewOfRequest(requestBodies[1]).messages
         .map((message) => message.content ?? "")
         .join("\n");
-      expect(childMessages).toContain("Common Fabric implementation kits");
+      expect(childMessages).toContain("Common Fabric research findings");
       expect(childMessages).toContain(
         `${runId}:research:${binding === "superseded" ? 2 : 1}`,
       );
@@ -568,6 +576,63 @@ describe("prompt-loop cross-agent address handles", () => {
       }
     });
   }
+
+  it("projects an orientation inventory to the child's bound handles while retaining the parent record", async () => {
+    const runId = "run-subagent-orientation-inventory";
+    const table = await parentTableOf(runId, [URI_A, URI_B]);
+    const [bound, withheld] = table.entries.map((entry) => entry.token);
+    const researchRun: HarnessResearchRunSummary = {
+      type: "cf-harness.research-run",
+      researchRunId: `${runId}:research:1`,
+      outputId: `${runId}:research:1`,
+      completedAt: "2026-09-16T00:00:00.000Z",
+      kit: {
+        purpose: "orient",
+        status: "complete",
+        task: "Identify available resources.",
+        summary: "The mailbox is available.",
+        availableHandleTokens: [bound, withheld],
+        inputs: [{ name: "mail", token: bound, purpose: "Read the mailbox" }],
+        patterns: [],
+        leads: [],
+        questions: [],
+        rules: [],
+        sources: [],
+        missing: [],
+      },
+      confirmedPatterns: [],
+      describedHandles: [],
+    };
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId,
+      model: "gpt-5.4",
+      inheritedResearchRuns: [researchRun],
+    });
+    await engine.recordHandleTable(table);
+    const requestBodies: unknown[] = [];
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine,
+      fetchFn: scriptedFetch([
+        delegateCallTurn("call-delegate", {
+          goal: "Use the available mailbox.",
+        }),
+        finalTurn("Child done."),
+        finalTurn("Parent done."),
+      ], requestBodies),
+    });
+    await loop.runPrompt({
+      prompt: "Delegate the implementation.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
+    const childMessages = chatViewOfRequest(requestBodies[1]).messages
+      .map((message) => message.content ?? "")
+      .join("\n");
+    expect(childMessages).toContain(bound);
+    expect(childMessages).not.toContain(withheld);
+    expect(engine.getRunState().researchRuns).toEqual([researchRun]);
+  });
 
   for (const hasResearch of [true, false]) {
     it(`carries parent CFC context into a child with research ${hasResearch ? "present" : "absent"}`, async () => {
@@ -1075,6 +1140,7 @@ describe("prompt-loop cross-agent address handles", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-pattern-author-inherited",
         model: "gpt-5.4",
+        taskText: "Track attendance with the existing pieces.",
         inheritedResearchRuns: [researchRun],
       }),
       allowedSubagentProfiles: ["pattern-author"],
@@ -1099,15 +1165,18 @@ describe("prompt-loop cross-agent address handles", () => {
     const childSystemPrompt = childRequest.messages[0]?.content ?? "";
     const childUserPrompt = childRequest.messages[1]?.content ?? "";
     expect(childSystemPrompt).toContain(
-      "Start from the Common Fabric implementation kit inherited from the parent.",
+      "Start from the Common Fabric research findings inherited from the parent.",
     );
     expect(childSystemPrompt).toContain(
-      "Call research only for an unresolved item or a focused follow-up",
+      "Ask research a useful follow-up question",
     );
     expect(childSystemPrompt).not.toContain(
       "Use research on the whole task before you author anything",
     );
     expect(childUserPrompt).toContain(researchRun.researchRunId);
+    expect(childUserPrompt).toContain(
+      "Current user goal:\nTrack attendance with the existing pieces.",
+    );
     expect(childUserPrompt).toContain(
       "Confirm the one unresolved event name.",
     );

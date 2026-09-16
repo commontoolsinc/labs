@@ -1,15 +1,15 @@
 /** Projects retained research evidence into an outer model's context. */
 
 import type {
-  HarnessResearchKit,
   HarnessResearchPatternRecord,
+  HarnessResearchResult,
 } from "../contracts/research.ts";
 import { scrubBareFabricIdentifiersWithPointers } from "../fabric-identifier-scrub.ts";
 
 /** One model-facing kit and the artifact positions reduced to produce it. */
 export interface HarnessResearchKitProjection {
   /** Kit whose free text passed through the existing identifier scrub. */
-  kit: HarnessResearchKit;
+  kit: HarnessResearchResult;
 
   /** Text changed by the projection, relative to its artifact position. */
   scrubbedPointers: readonly string[];
@@ -34,18 +34,32 @@ const PATTERN_IDENTITY_FIELDS = [
   "resultType",
 ] as const satisfies readonly (keyof HarnessResearchPatternRecord)[];
 
+/** Host records and their positions within a raw research artifact. */
+const patternPositions = (kit: HarnessResearchResult) => [
+  ...kit.patterns.map((pattern, index) => ({
+    pattern,
+    pointer: `/patterns/${index}`,
+  })),
+  ...(kit.purpose === "orient"
+    ? kit.leads.map((lead, index) => ({
+      pattern: lead.pattern,
+      pointer: `/leads/${index}/pattern`,
+    }))
+    : []),
+];
+
 /**
  * Scrubs free text by default, preserves exact host identities and source/CFC
  * records, and drops unused raw index schemas. The private loop and durable
  * summaries retain the full kit; this projection owns only outer model context.
  */
 export const projectHarnessResearchKitForModel = (
-  kit: HarnessResearchKit,
+  kit: HarnessResearchResult,
   basePointer = "/kit",
 ): HarnessResearchKitProjection => {
   const candidate = structuredClone(kit);
   const artifactOnlyPointers: string[] = [];
-  const identities = candidate.patterns.map((pattern, index) => {
+  const identities = patternPositions(candidate).map(({ pattern, pointer }) => {
     const identity: Partial<HarnessResearchPatternRecord> = {};
     for (const field of PATTERN_IDENTITY_FIELDS) {
       if (Object.hasOwn(pattern, field)) {
@@ -55,7 +69,7 @@ export const projectHarnessResearchKitForModel = (
     }
     for (const field of ["argumentSchema", "resultSchema"] as const) {
       if (pattern[field] !== undefined) {
-        artifactOnlyPointers.push(`${basePointer}/patterns/${index}/${field}`);
+        artifactOnlyPointers.push(`${basePointer}${pointer}/${field}`);
       }
       delete pattern[field];
     }
@@ -67,9 +81,9 @@ export const projectHarnessResearchKitForModel = (
     candidate,
     basePointer,
   );
-  const result = projected.value as HarnessResearchKit;
+  const result = projected.value as HarnessResearchResult;
   result.sources = sources;
-  result.patterns.forEach((pattern, index) =>
+  patternPositions(result).forEach(({ pattern }, index) =>
     Object.assign(pattern, identities[index])
   );
   return {
