@@ -646,11 +646,14 @@ Landed:
   at a frame leaves a watch armed. And a frame is now typed at, so it carries a
   cursor on the command line's row and hides the cursor otherwise.
 
-  `/` searches rather than filters, which is the one place the value view and
-  the list view read the same key differently: a rendering of JSON with lines
-  dropped out of it is no longer the value's rendering
-  ([`views.md`](views.md)). `enter` drill and `backspace` up are not here; they
-  arrive with the list view, below.
+  `/` searches, and the owner ruled that it searches in every view rather than
+  narrowing in one and finding in another: `views.md`'s own "vim-flavored" is
+  what `/` means in every pager a person arrives here knowing, and its "stable"
+  is what a key meaning two things costs. Narrowing is not a view key at all —
+  a view shows what a read returned, and `--filter` is where the grammar asks
+  what a read returns. `enter` drill and `backspace` up are not here either;
+  both need a cursor, which is the row a view stands on, and they arrive with
+  the view that carries one.
 
   Two things a reader will look for and not find. `tab` completes nothing on
   the command line — completion is an errand of its own and the loop runs one
@@ -684,10 +687,11 @@ Still to land:
   raw-document-subscription proving test from issue
   [#6534](https://github.com/commonfabric/labs/issues/6534), falling back to
   the capped deep sink if the seam disappoints. The two drilling keys come with
-  it because both want a row to drill from: a value view has a scroll position
-  and no selection, and its rendering is the one `get` and `wish` write, so a
-  map from a row to a path into the value is a change to a shared renderer
-  rather than a key arm.
+  it because both need a cursor — the row a view stands on — and a view of one
+  value has a scroll position instead. Giving it one is not a key arm: its
+  rendering is the one `get` and `wish` write, so a cursor that meant anything
+  to `enter` would be a map from a drawn row back to a path inside the value,
+  which is a change to a shared renderer.
 - **The structured piece overview** (decision 26): one refreshable frame
   carrying arguments, a result summary, callables and pattern identity.
 

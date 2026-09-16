@@ -60,7 +60,7 @@ drills in place; leaving restores the parent's scroll and selection.
 │▸%3  co-presence rollout   replies  8    +   │
 │ …                              14 of 16     │
 │ : call %3 add-reply --body "shipped"        │
-└ q back · enter drill · / filter · : command ┘
+└ q back · enter drill · / search · : command ┘
 ```
 
 **Piece overview** — the structured piece viewer: arguments, a result
@@ -87,21 +87,41 @@ lives in the event lines, and history stays append-only.
 ## Keys
 
 Small, vim-flavored, and stable: `q` back to prompt; `j`/`k`/arrows
-selection; `g`/`G` ends; `enter` drill, `backspace` up; `/` narrows or
-finds within the view, `n`/`N` next; `e` edit the selection in `$EDITOR`
-(the substrate already suspends and restores the terminal for this); `:`
-opens the command line.
+selection; `g`/`G` ends; `enter` drill, `backspace` up; `/` search within
+the view, `n`/`N` next; `e` edit the selection in `$EDITOR` (the substrate
+already suspends and restores the terminal for this); `:` opens the
+command line.
 
-Three of those keys read the view's rows, so what they do where there are
-none is decided per view rather than once. `/` filters a view of rows,
-dropping the rows that do not match; on a view of one value it searches,
-moving to the next line of the rendering that holds what was typed — a
-rendering with lines dropped out of it is no longer the value's rendering.
-`n` and `N` move to the next match and the previous either way, wrapping,
-and the view says which match of how many it is on. `e` edits the selected
-row where there is one, and the cell the view is open on where there is
-not. `enter` and `backspace` drill, which has no reading at all without a
-row, so they belong to the views that have them.
+`/` searches rather than narrows, and it searches the same way in every
+view. Vim-flavored decides it: `/` finds and `n`/`N` step the matches in
+every pager a person arrives here already knowing, and no such tool
+narrows on it. Stable decides the rest — a key that narrowed a view of
+rows and found in a view of one value would be a key a reader has to know
+which view they are in before they can read, which is what the word is
+there to prevent. So `/` takes what was typed and moves to the next place
+in the view that holds it, `n` and `N` move to the next match and the
+previous, wrapping, and the view says which match of how many it is on.
+
+Narrowing is not a view key, and the reason is where narrowing belongs. A
+view shows what a read returned; what the read returns is the read's own
+question, and `--filter` is where the grammar already asks it — it says
+which elements come back rather than what each holds
+([`grammar.md`](grammar.md)), which is a narrowing shaped to the data
+rather than to the text. It takes arrays today. A view reaches it through
+`:` like any other line.
+
+What a view must not grow instead is a narrowing shaped to the drawing. A
+rendering of a value is a tree written as lines, and keeping only the
+lines that match leaves something that is no longer that value's
+rendering — a narrowing that cannot say what it returned. Should a view
+ever want the key, it is sugar over a read that narrows, and whatever
+shapes are worth narrowing beyond an array is that read's question to
+answer once for every surface rather than a view's to answer for itself.
+
+`e` edits the selected row where there is one, and the cell the view is
+open on where there is not. `enter` and `backspace` drill, which needs a
+cursor — a row the view is standing on, which a view of one value does not
+have — so they belong to the views that carry one.
 
 `:` is the general mechanism instead of a key per verb: any shuttle
 command runs with the view's `%n` handles bound to its rows, and the view
@@ -123,7 +143,7 @@ The value view answers to the motions and the two ways out — `q` and
 `ctrl-c`, `j`/`k` and the arrows, `g` and `G` — and to `/`, `n`/`N`, `e`
 and `:`. `e` there is the cell the view watches, opened through the `edit`
 verb. `enter` and `backspace` arrive with the list view, a value view
-having a scroll position rather than a selection.
+having a scroll position rather than the cursor they drill from.
 
 ## Reuse of the `cf view` substrate
 
