@@ -759,10 +759,10 @@ would take reading it from the collection's `naming` declaration. Nothing reads
 that declaration today (the question above,
 [#6986](https://github.com/commontoolsinc/labs/issues/6986)), and it carries no
 complete grammar predicate to test a key against. Its fields are `name`,
-`policy`, and `compact`, and only the last constrains a member name at all:
-`compact: true` may be declared only by a collection whose member names cannot
-contain a hyphen, which rules one character out rather than saying what a name
-is. That route is open, not planned.
+`policy`, and `compact`, and only the last says anything about a member name at
+all — the eligibility rule in "The compact form" above — which rules one
+character out rather than saying what a name is. That route is open, not
+planned.
 
 **Whether a collection accepting names from people** reuses the space-level
 claim path or needs its own.
