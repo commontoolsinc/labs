@@ -228,8 +228,14 @@ async function observeWorkerInitialization(): Promise<{
     await clients.handleMessage(
       owner,
       new MessageEvent("message", {
-        data: realmFromFabricValue(
-          { msgId: 0, data: { type: RequestType.Initialize, data: SENT } },
+        // Encoded and cloned, as a real transport delivers it. The encoding is
+        // what carries the `FabricKeyPair` this payload holds; the clone is
+        // what makes it a copy, since the loop decodes what arrives and an
+        // encode alone hands back the sender's own tree.
+        data: structuredClone(
+          realmFromFabricValue(
+            { msgId: 0, data: { type: RequestType.Initialize, data: SENT } },
+          ),
         ),
       }),
     );
