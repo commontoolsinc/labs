@@ -537,6 +537,14 @@ is canonicalized and hashed in full. The token belongs to one transaction: a
 fresh transaction prepares independently even when its effective CFC label is
 unchanged.
 
+Compare cache designs over preparation plus recheck as well as individual
+calls: a cold setup cost must be recovered within the requests a transaction
+actually makes. Include repeated executions of the same reactive nodes with
+fresh transaction records. Stable labels can accompany changed write values
+and newly allocated records, so neither label equality nor runtime uptime
+establishes that an identity-keyed cache is warm. For retention comparisons,
+probe live keys and discarded graphs separately across garbage collection.
+
 ## CFC path index queries
 
 `packages/runner/test/cfc-path-index.bench.ts` measures `PathPrefixIndex` and
