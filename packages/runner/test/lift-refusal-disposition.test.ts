@@ -27,14 +27,12 @@ describe("lift refusal disposition", () => {
   });
 
   /**
-   * Runs the pattern in the given posture over two valid rows, then replaces
+   * Runs the pattern over two valid rows, then replaces
    * the second row with one that lacks its required label, then repairs it.
    * Keeps the result demanded throughout and records each settled value and
    * anything that reached the error channel.
    */
-  async function breakSecondRow(
-    lazyMaterialization: boolean,
-  ): Promise<
+  async function breakSecondRow(): Promise<
     {
       before: string | undefined;
       after: string | undefined;
@@ -42,9 +40,7 @@ describe("lift refusal disposition", () => {
       errors: Error[];
     }
   > {
-    env = createSchedulerTestRuntime(import.meta.url, {
-      experimental: { lazyMaterialization },
-    });
+    env = createSchedulerTestRuntime(import.meta.url);
     const { runtime, tx } = env;
     const compiled = await runtime.patternManager.compilePattern({
       main: "/main.tsx",
@@ -94,15 +90,7 @@ describe("lift refusal disposition", () => {
   }
 
   it("writes an undefined result when the body's synchronous read refuses under the view", async () => {
-    const outcome = await breakSecondRow(true);
-    expect(outcome.before).toBe("bb");
-    expect(outcome.errors).toEqual([]);
-    expect(outcome.after).toBeUndefined();
-    expect(outcome.recovered).toBe("recovered");
-  });
-
-  it("writes an undefined result for the same data when the argument is read eagerly", async () => {
-    const outcome = await breakSecondRow(false);
+    const outcome = await breakSecondRow();
     expect(outcome.before).toBe("bb");
     expect(outcome.errors).toEqual([]);
     expect(outcome.after).toBeUndefined();

@@ -10671,9 +10671,7 @@ export class Runner {
         // go lazily: the body materializes the paths it touches and nothing
         // else. Turned off again before the result is written, so diffing and
         // the scheduler's own reads keep eager semantics.
-        if (this.#runtime.experimental.lazyMaterialization) {
-          tx.markLazyMaterialize(true);
-        }
+        tx.markLazyMaterialize(true);
         const { argument, isValidArgument } = (() => {
           try {
             return this.#readJavaScriptArgument(

@@ -32,7 +32,12 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
       API_URL: "http://api.test:9000/",
     },
     storageManager,
-    (name) => name === "EXPERIMENTAL_MODERN_CELL_REP" ? "true" : undefined,
+    (name) =>
+      name === "EXPERIMENTAL_MODERN_CELL_REP"
+        ? "true"
+        : name === "EXPERIMENTAL_LAZY_MATERIALIZATION"
+        ? "false"
+        : undefined,
   );
 
   assertEquals(options.apiUrl.href, "http://memory.test:8000/");
@@ -42,8 +47,12 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
   );
   assertStrictEquals(options.storageManager, storageManager);
   assertEquals(options.experimental?.modernCellRep, true);
+  assertEquals(
+    Object.hasOwn(options.experimental ?? {}, "lazyMaterialization"),
+    false,
+  );
   // Unset flags stay unset (tri-state fidelity), not coerced.
-  assertEquals(options.experimental?.lazyMaterialization, undefined);
+  assertEquals(options.experimental?.readerSchemaPrecedence, undefined);
   // EXCEPT the posture: the deployed-topology preset resolves an unset
   // serverExecution to the first-party default, so this server-side
   // process always runs a declared arm.

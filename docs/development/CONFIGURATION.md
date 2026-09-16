@@ -285,7 +285,6 @@ that is:
 | `contentAddressedSchemas` | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` |
 | `plainResultReceipts` | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` |
 | `computedCellIds` | `EXPERIMENTAL_COMPUTED_CELL_IDS` |
-| `lazyMaterialization` | `EXPERIMENTAL_LAZY_MATERIALIZATION` |
 | `readerSchemaPrecedence` | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` |
 | `serverExecution` | `EXPERIMENTAL_SERVER_EXECUTION` |
 

@@ -92,10 +92,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   owns handler integration, rollout evidence, flag retirement, and renewed
   measurements after the computation-cost arc, with independently checkable
   stages F0–F5.
-- [Lazy cell materialization](lazy-cell-materialization.md) sequences a
-  schema-observing lazy view over a cell, a transaction mode that hands one back
-  from every read, and the runner disposition for a reader that touches data the
-  schema no longer describes.
 - [Pre-syncing from node plans](presync-from-node-plans.md) makes one
   derivation per pattern node serve both instantiation and the pre-sync, so a
   resume and a fresh start name exactly what each lift, handler, builtin, and

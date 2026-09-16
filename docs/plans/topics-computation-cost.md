@@ -221,12 +221,13 @@ any topic was opened ran none of the pivot, backlinks, comment-count, or
 last-activity lifts. Opening a topic ran the pivot, that topic's backlinks, and
 its comment count. Returning to the board afterward ran that topic's
 last-activity lift once. The measurement is one small sample, taken with
-[lazy materialization](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization)
-on. [Server execution](../development/EXPERIMENTAL_OPTIONS.md#serverexecution)
-and lazy materialization off are not yet measured. T0 measures both before the
-baseline report, in runs labeled by mode; the scheduled Benchmarks workflow runs
-client execution only. The headless tier runs the three workloads with the
-demand the browser measured, labeling the all-backlinks workload a scaling probe
+[lazy lift materialization](../features/lazy-cell-materialization.md).
+[Server execution](../development/EXPERIMENTAL_OPTIONS.md#serverexecution)
+needs a separate measurement. T0 measures both server-execution postures before
+the baseline report, in runs labeled by posture; the scheduled Benchmarks
+workflow runs client execution only. Lift materialization is unconditional,
+so it is not a comparison axis. The headless tier runs the three workloads with
+the demand the browser measured, labeling the all-backlinks workload a scaling probe
 rather than normal UI behavior. Measure cold initialization, warm updates, and
 reopen or reconnect separately. Hold runtime, source package, data, demand, and
 feature flags constant between comparison arms; alternate repeated timing runs

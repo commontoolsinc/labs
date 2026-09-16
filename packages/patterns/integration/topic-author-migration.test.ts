@@ -33,7 +33,7 @@ describe("topic-author-migration", () => {
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: EmulatedStorageManager.connectTo(server, { as: signer }),
-      experimental: { lazyMaterialization: true, serverExecution: false },
+      experimental: { serverExecution: false },
       errorHandlers: [(error) => errors.push(String(error))],
     });
 

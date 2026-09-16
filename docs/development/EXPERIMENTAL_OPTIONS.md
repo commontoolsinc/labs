@@ -33,7 +33,6 @@ was last checked against the code.
 | [`commitPreconditions`](#commitpreconditions)                               | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry)                             | on                                                                                   | Bernhard Seefeld (#4090)                              | fold into base scheduler semantics, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`plainResultReceipts`](#plainresultreceipts)                               | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental`                                                                      | on                                                                                   | Mike Salisbury (verb contract WS-C)                   | fold into receipt semantics and delete flag after a bake period                                                                                                                                                                   | implemented, on by default                                                      |
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
-| [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`readerSchemaPrecedence`](#readerschemaprecedence)                         | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` env, or `RuntimeOptions.experimental`                                                                   | on                                                                                   | Robin McCollum (#6338)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`viewScopedReplication` / `webViewScopedReplication`](#viewscopedreplication--webviewscopedreplication) | `EXPERIMENTAL_VIEW_SCOPED_REPLICATION` / `EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION`, or `RuntimeOptions.experimental` | global off; web inherits global | Bernhard Seefeld (2026-09-09) | validate view selection and guarded previews, then graduate per client class | experimental, off by default |
 | [`viewScopedReplicationV1`](#viewscopedreplicationv1) | Memory hello capability | available when server execution is on | Bernhard Seefeld (2026-09-09) | retain as protocol negotiation until older clients and servers retire | optional capability |
@@ -73,7 +72,7 @@ These flags make up the `ExperimentalOptions` interface in
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
 `undefined`, which means "take the built-in default". `commitPreconditions`,
 `contentAddressedSchemas`, `plainResultReceipts`, `computedCellIds`,
-`lazyMaterialization` and `readerSchemaPrecedence` default on;
+`readerSchemaPrecedence` default on;
 `serverExecution` resolves an unset flag to the ONE first-party default
 `SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets (the
 summary table above states its current value and its section carries the
@@ -551,71 +550,6 @@ server](#clients-that-are-not-built-alongside-their-server).
   [the implementation plan](../plans/view-scoped-client-replication.md) for
   follow-up work.
 
-
-### `lazyMaterialization`
-
-**Last checked:** 2026-09-15. **Status:** implemented, on by default.
-
-- **Toggle via.** `EXPERIMENTAL_LAZY_MATERIALIZATION` environment variable, or
-  `new Runtime({ experimental: { lazyMaterialization: false } })` for the eager
-  posture, subject to the validation limits below. The flag is server-authoritative for deployed clients
-  (`EXPERIMENTAL_FLAG_AUTHORITY`), so a server's `false` carries the `cf`
-  clients it serves. The browser shell has no build-time define for this
-  flag, so a shell build runs the runtime default and the override does not
-  reach it: a server rolled back serves browsers running the other arm.
-- **Purpose.** Materialize a lift's argument lazily. The runner marks the
-  action's transaction (`markLazyMaterialize`), and `Cell.get()` on a marked
-  transaction hands back a schema-observing view instead of building everything
-  the schema selects in one pass. The body reads the paths it touches and
-  nothing else; a reader that touches data the schema no longer describes
-  refuses, and the run is disposed of as an argument that did not resolve.
-  Unmarked transactions read exactly as they did before.
-- **Design, measurements and staging.**
-  [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
-
-**Validation and rollback limits.** Off is not qualified as an equivalent
-rollback. Eager reads can hand `undefined` to a body whose schema promises a
-value, producing a TypeError where the lazy read refuses. The focused
-`unresolved-input-lift.test.ts` pins the missing followed-document case; the
-served notebook scenario also exposes an unavailable nullable edit input.
-The corrected notebook reload renders all seven notes in both postures, but
-the eager run fails on those browser errors. Keep these failures visible when
-qualifying a rollback route; rendering alone is not a successful run.
-
-Direct Runtime construction does not read the environment variable. An eager
-comparison must set the runtime option or temporarily change the built-in
-default, including the browser constructor. Selected runner, runtime-client,
-and shell integration results are in the
-[integration evidence](../history/development/performance/2026-09-14-lazy-off-integration.md).
-The [rollout evidence](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md)
-distinguishes eager unit failures from lazy-specific dependency/count
-expectations and assertions of the built-in default. The
-[reload diagnosis](../history/development/performance/2026-09-15-lazy-reload-diagnosis.md)
-and [navigation-policy follow-up](../history/development/performance/2026-09-15-notebook-reload-navigation-policy.md)
-separate nullable-read errors from a test's assumption about the selected page.
-The owner decision and remaining acceptance work belong to the
-[fast-follow plan](../plans/lazy-materialization-fast-follow.md).
-
-One behavior difference is deliberate rather than a defect, and it is the point
-of the mode: a lift that FORWARDS its argument onward without reading through it
-takes no dependency on the values inside, so it does not re-run when they
-change. That is safe because forwarding passes a LINK — whatever the value is
-written into re-reads through it and re-runs — and because a change to the
-REFERENCE still re-triggers the reader, since link resolution registers its own
-probe reads. `Pattern Runner - Lift` pins both halves: the forwarding lift runs
-once instead of twice, while the inner lift still runs and still produces the
-new result.
-
-A view describes the instant its `.get()` fixed, so a reader iterating a list
-while writing into it walks the list as it stood, and a lift that writes into a
-`Writable` input reads back what it wrote by taking the read again. Both
-readings on a marked transaction pin — the schema view and the schema-less
-proxy; unmarked reads are untouched, so the standing handle long-lived consumers
-rely on keeps tracking current state.
-
-Handlers materialize eagerly by decision: the [handler context
-record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)
-holds the measurements and the conditions for revisiting.
 
 ### `readerSchemaPrecedence`
 
@@ -1597,7 +1531,6 @@ The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
 `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS`,
 `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS`,
 `EXPERIMENTAL_COMPUTED_CELL_IDS`,
-`EXPERIMENTAL_LAZY_MATERIALIZATION`,
 `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE`,
 `EXPERIMENTAL_SERVER_EXECUTION`) reach the runtime through the
 deployed processes. The runtime-only flags (`commitPreconditions`, the CFC
@@ -1893,6 +1826,22 @@ server](#clients-that-are-not-built-alongside-their-server).
 
 These are recorded so that references to them elsewhere in the tree do not send
 a future reader hunting for a flag that no longer exists.
+
+### `lazyMaterialization`
+
+**Removed.** Lift argument and body reads use schema-observing lazy views
+unconditionally. `RuntimeOptions.experimental.lazyMaterialization` and
+`EXPERIMENTAL_LAZY_MATERIALIZATION` no longer select a mode. Handlers and
+other unmarked transactions retain eager reads; the internal transaction mark
+still scopes the view to lift execution and is reset before result writing.
+
+The [feature guide](../features/lazy-cell-materialization.md) describes the
+current contract. Rollback requires a reviewed code revert and redeploy.
+Restoring the switch restores its default-on behavior; it does not qualify
+eager mode, whose nullable-read errors are documented in the
+[reload diagnosis](../history/development/performance/2026-09-15-lazy-reload-diagnosis.md).
+The [fast-follow plan](../plans/lazy-materialization-fast-follow.md) tracks
+retirement approval, validation, and remaining measurements.
 
 ### `persistentSchedulerState` / `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` (removed)
 
