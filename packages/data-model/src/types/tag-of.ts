@@ -186,6 +186,11 @@ export function tagOfFabricValueElseNull<PlusType = never>(
  *
  * Note: Instances of `Error` are _only_ detected in this function using
  * `Error.isError()` and _not_ by looking at the prototype chain.
+ *
+ * Note: The other `FabricConvertibleJsObject` classes are recognized by
+ * constructor identity, which is a per-realm question: another realm's `Map`
+ * is a different `Map`, and is not this one. Such a value comes back `null`,
+ * unrecognized rather than misidentified.
  */
 export function tagOfConvertibleJsValueElseNull(
   value: unknown,
@@ -208,6 +213,10 @@ export function tagOfConvertibleJsValueElseNull(
 
   if (result !== null) {
     return result;
+  } else if (typeof value === "function") {
+    // A function is no `FabricConvertibleJsValue`, whatever its prototype
+    // names, so it goes no further.
+    return null;
   }
 
   // The constructor (a/k/a class object) is read from the _prototype_, not from

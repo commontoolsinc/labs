@@ -4002,28 +4002,33 @@ export function fabricFromConvertibleJsValue(
 > it does not recognize. The conversion function then switches on the tag to
 > route to the appropriate wrapping logic. The dispatch asks its questions in
 > a fixed order.
-> An array is tagged first, by `Array.isArray()`, so a subclass instance, a
+> An error is tagged first, by `Error.isError()`, which reads the value's
+> internal slot and so holds across realms, for a subclass nobody here knows,
+> and whatever the value's prototype names: an `Error` re-pointed at
+> `Object.prototype` is still `"JsError"`.
+> An array is tagged next, by `Array.isArray()`, so a subclass instance, a
 > severed-prototype array, and a cross-realm array all reach array handling and
 > are handled by the array rule of Section 1.5, rather than being rejected as
 > some unrecognized class or routed elsewhere by something the array carries.
-> A plain object is decided next, by its prototype being `Object.prototype`,
-> plain objects being the common case. A null-prototype object is tagged
-> `"JsError"` if `Error.isError()` says so and otherwise `"Object"`, which
-> classifies more broadly than the type admits, for the same reason the array
-> tag does: it is what lets the object rule of Section 1.5 reject the value by
-> name rather than as some unrecognized class. Then the tests that hold where
-> no class does: an error by `Error.isError()`, which holds across realms; a
-> `FabricPrimitive` by the tag its instance reports, one of
-> `FABRIC_PRIMITIVE_VALUE_TAGS`; a `FabricInstance` by class. What remains is
-> a JS class instance, decided last by its class, read from its prototype,
-> by a `switch` on constructor identity; a recognized one is a value the
-> conversion has yet to import, the heavier path, so the lookup's cost sits on
-> it alone. That `switch` names only the classes no earlier question decides:
-> an object merely built on the prototype of `Object`, `Array`, or an `Error`
-> class is none of those by the test that decides it, and comes back `null`,
-> unrecognized rather than misidentified. A `FabricPrimitive` subclass that
-> reports no tag of its own is tagged as its parent, which is a defect in that
-> subclass rather than one the dispatch guards against.
+> A plain object is decided next, by its prototype being `Object.prototype` or
+> `null`, plain objects being the common case; that classifies more broadly
+> than the type admits, for the same reason the array tag does: it is what
+> lets the object rule of Section 1.5 reject the value by name rather than as
+> some unrecognized class. Then a `FabricPrimitive`, by the tag its instance
+> reports, one of `FABRIC_PRIMITIVE_VALUE_TAGS`, and a `FabricInstance`, by
+> class. A function goes no further and comes back `null`, whatever its
+> prototype names. What remains is a JS class instance, decided last by its
+> class, read from its prototype, by a `switch` on constructor identity; a
+> recognized one is a value the conversion has yet to import, the heavier
+> path, so the lookup's cost sits on it alone. That `switch` names only the
+> classes no earlier question decides: an object merely built on a plain
+> object, or on the prototype of `Array` or of an `Error` class, is none of
+> those by the test that decides it, and comes back `null`, unrecognized
+> rather than misidentified. Constructor identity is a per-realm question, so
+> a builtin from another realm comes back `null` the same way. A
+> `FabricPrimitive` subclass that reports no tag of its own is tagged as its
+> parent, which is a defect in that subclass rather than one the dispatch
+> guards against.
 
 > **Implementation: centralized shallow-clone utility.** The conversion
 > functions use a centralized `cloneIfNecessary()` utility (in

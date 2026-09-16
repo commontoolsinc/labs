@@ -750,6 +750,22 @@ describe("tags", () => {
       expect(tagOfConvertibleJsValueElseNull(() => {})).toBe(null);
     });
 
+    it("returns `null` for a function whatever its prototype names", () => {
+      // The class switch is never reached by a function, so a prototype
+      // re-pointed at a recognized builtin's does not make one a builtin.
+
+      expect(
+        tagOfConvertibleJsValueElseNull(
+          Object.setPrototypeOf(() => {}, Map.prototype),
+        ),
+      ).toBe(null);
+      expect(
+        tagOfConvertibleJsValueElseNull(
+          Object.setPrototypeOf(() => {}, Date.prototype),
+        ),
+      ).toBe(null);
+    });
+
     it("returns `JsError` tag for standard `Error` subclasses", () => {
       const cases: [string, Error][] = [
         ["Error", new Error("test")],
@@ -776,6 +792,23 @@ describe("tags", () => {
       // Recognized at the value level: `Error.isError()` reads the internal
       // slot, so an `Error` subclass is tagged before any class is read.
       expect(tagOfConvertibleJsValueElseNull(exotic)).toBe(VALUE_TAGS.JsError);
+    });
+
+    it("returns `JsError` tag for an `Error` whatever its prototype names", () => {
+      // `Error.isError()` reads the internal slot and is asked before the
+      // prototype is, so neither a plain object's prototype nor a recognized
+      // builtin's changes the answer.
+
+      expect(
+        tagOfConvertibleJsValueElseNull(
+          Object.setPrototypeOf(new Error("x"), Object.prototype),
+        ),
+      ).toBe(VALUE_TAGS.JsError);
+      expect(
+        tagOfConvertibleJsValueElseNull(
+          Object.setPrototypeOf(new Error("x"), Map.prototype),
+        ),
+      ).toBe(VALUE_TAGS.JsError);
     });
 
     it("returns `JsError` tag for an `Error` whose prototype was severed", () => {
