@@ -11,8 +11,9 @@ SES lockdown, the real-clock exemptions that were retired and what each hang
 turned out to be, why the runtime-client suite keeps the real clock, why
 neither runtime-disposal teardown carries a bound, worked
 examples studied in enough depth to copy — proving a negative in the CSP
-suite, and the FUSE exec suite's design — and the production waits that apply
-the same principle outside tests.
+suite and the FUSE exec suite's design — how a pattern-test assertion comes to
+be read exactly once, and the production waits that apply the same principle
+outside tests.
 
 Nothing here is needed to write an ordinary test. Come here when you need to
 know why a rule is what it is, or before changing the machinery a rule
@@ -595,6 +596,56 @@ NFS client's cached copy until it expires, so a count arrives a beat after the
 write that caused it. That the counts advance is settled by the
 `CellBridge.status` unit tests, which drive the tree directly and need no
 mount and no wait.
+
+## Reading a pattern-test assertion exactly once
+
+[Reading a pattern-test
+assertion](waiting-in-tests.md#reading-a-pattern-test-assertion) says the
+pattern test runner demands an assertion, waits, and reads it once. Two things
+about that are easy to get wrong, and both were once wrong here.
+
+The first is why a single read needs the demand in front of it. A read of a
+lazy value does two jobs at once: it supplies the demand that makes the
+computation run, and it observes the result. For an asynchronous built-in those
+two cannot be the same read, because the work has not started until the demand
+arrives. A runner that just reads therefore observes nothing, and a runner that
+reads, waits, and reads again has separated the jobs by giving the first read
+away — at the cost of a read count that depends on what the first read found,
+which is a retry wearing a bound. Demanding through `cell.sink()` separates
+them without that cost, and holding the demand across the wait is the part
+worth stating: the scheduler runs a computation only while it is reachable from
+a live root, so releasing the demand to wait would let the cascade the built-in
+feeds go dormant before the assertion sees it.
+
+The second is whether anything must drain the scheduler between that wait and
+the read. `Runtime.settled()` in `packages/runner/src/runtime.ts` loops
+`scheduler.idleWithPendingCommits()`, `storageManager.synced()`, and a wait on
+every in-flight async built-in, returning from the round in which nothing is
+left to track — so the last thing it awaits is the storage sync. Applying what
+a sync delivered schedules reactive work, so the graph looks as though it could
+be dirty when `settled()` returns.
+
+It cannot matter, because of what the read itself does. `Cell.pull()`
+subscribes an effect that reads the cell, awaits `scheduler.idle()`, drives the
+link-target loads that read kicked off to convergence, and takes the value
+after all of it. A drain placed before the read observes a subset of what the
+read observes for itself, and observes it earlier.
+
+Two waits elsewhere look like precedent for one here and are narrower than
+their shape. The runner's initial settle drains after its sync because
+`replica.poll()` fires without await during `mount()`, and a pattern mounts
+once. The serving loop in `packages/runner/src/executor/space-server.ts` yields
+a macrotask because it then probes `scheduler.isIdle()`, which is synchronous
+and cannot wait, where `runtime.idle()` waits and `Scheduler.queueExecution`
+marks the scheduler scheduled when it arms its task rather than when the task
+runs.
+
+Measurement agreed before the argument was found. Probing `scheduler.isIdle()`
+on return from `settled()` after every assertion the pattern suite runs
+answered idle every time, including the assertions whose barrier had async
+built-in work to wait for; a macrotask yield placed after every action and
+render settle never found the scheduler other than idle either. Probe the same
+way before adding a wait here.
 
 ## Production case studies
 

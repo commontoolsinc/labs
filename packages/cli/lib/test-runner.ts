@@ -115,6 +115,13 @@ import {
 import { inferProgramRoot } from "./program-root.ts";
 import { buildActionEvent } from "./trusted-test-event.ts";
 
+/**
+ * How many idle-then-sync rounds a step's settle performs before it gives up
+ * on the runtime converging. A round that resolves at once ends the loop, so
+ * the cap is reached only by a graph that keeps scheduling work.
+ */
+const MAX_SETTLE_ROUNDS = 20;
+
 const phaseLogger = getLogger("test-runner-phase", {
   enabled: false,
   level: "debug",
@@ -1568,14 +1575,11 @@ export async function runTestPattern(
     }
 
     let settlementFailed = false;
-    const settleRuntime = async (
-      stepLabel: string,
-      maxSettle = 20,
-    ): Promise<void> => {
+    const settleRuntime = async (stepLabel: string): Promise<void> => {
       await withPhase(
         ["runTestPattern", "step", stepLabel, "settle"],
         async () => {
-          for (let settle = 0; settle < maxSettle; settle++) {
+          for (let settle = 0; settle < MAX_SETTLE_ROUNDS; settle++) {
             const iterStart = performance.now();
             await withPhase(
               [
@@ -1729,7 +1733,7 @@ export async function runTestPattern(
                 () =>
                   materializeTestVDOM(
                     stepCell.key("render") as Cell<unknown>,
-                    () => settleRuntime(renderName, 20),
+                    () => settleRuntime(renderName),
                   ),
               );
               if (options.verbose) console.log(`  ◇ ${renderName}`);
@@ -1828,7 +1832,7 @@ export async function runTestPattern(
           // resolve quickly (< 1ms), indicating quiescence. Max iterations
           // as a safety net against infinite loops.
           try {
-            await settleRuntime(actionName, 20);
+            await settleRuntime(actionName);
           } catch (err) {
             results.push({
               name: actionName,
@@ -1986,13 +1990,13 @@ export async function runTestPattern(
           let passed = false;
           let error: string | undefined;
 
+          const assertionCell = () =>
+            stepCell.key("assertion") as Cell<unknown>;
           const evaluateAssertion = async (): Promise<
             { passed: boolean; error?: string }
           > => {
-            // Get the assertion cell via .key()
             try {
-              const assertCell = stepCell.key("assertion") as Cell<unknown>;
-              const value = await assertCell.pull();
+              const value = await assertionCell().pull();
               // An `assert(...)` assertion carries the operands recorded while
               // the condition ran, so a failure names them and their values.
               return assertionOutcome(value);
@@ -2006,54 +2010,30 @@ export async function runTestPattern(
             }
           };
 
-          ({ passed, error } = await withPhase(
-            ["runTestPattern", "step", assertionName, "evaluate"],
-            () => evaluateAssertion(),
-          ));
-
           // An asynchronous built-in — a fetch, a model call, a query — is a
-          // computation that runs when something reads its result, and the
-          // assertion is that reader: its first read of the result is what
-          // starts the request, so that read sees no result yet. Wait for the
-          // work the read started, as any reader of the result would, and read
-          // again. With nothing in flight the wait returns at once, so an
-          // assertion that fails on its own terms fails just as fast.
-          if (!passed) {
-            try {
-              await withPhase(
-                ["runTestPattern", "step", assertionName, "asyncWork"],
-                () => runtime.settled(),
-              );
-              ({ passed, error } = await withPhase(
-                ["runTestPattern", "step", assertionName, "reread", "evaluate"],
-                () => evaluateAssertion(),
-              ));
-            } catch (err) {
-              passed = false;
-              error = err instanceof Error ? err.message : String(err);
-            }
-          }
-
-          if (!passed && lastActionIndex !== null) {
-            try {
-              for (let retry = 0; retry < 3 && !passed; retry++) {
-                await new Promise((resolve) => setTimeout(resolve, 0));
-                await settleRuntime(assertionName, 6);
-                ({ passed, error } = await withPhase(
-                  [
-                    "runTestPattern",
-                    "step",
-                    assertionName,
-                    `retry-${retry + 1}`,
-                    "evaluate",
-                  ],
-                  () => evaluateAssertion(),
-                ));
-              }
-            } catch (err) {
-              passed = false;
-              error = err instanceof Error ? err.message : String(err);
-            }
+          // computation that runs only while something demands its result, so
+          // demanding the assertion is what starts one. Hold that demand while
+          // waiting for the work it set going, which is what keeps the
+          // built-in's cascade alive long enough to reach the assertion, and
+          // read once. With nothing in flight the wait returns at once. The
+          // read is the only one, so a value arriving after it is reported as
+          // a failure rather than waited out.
+          let releaseDemand: (() => void) | undefined;
+          try {
+            releaseDemand = assertionCell().sink(() => {});
+            await withPhase(
+              ["runTestPattern", "step", assertionName, "asyncWork"],
+              () => runtime.settled(),
+            );
+            ({ passed, error } = await withPhase(
+              ["runTestPattern", "step", assertionName, "evaluate"],
+              () => evaluateAssertion(),
+            ));
+          } catch (err) {
+            passed = false;
+            error = err instanceof Error ? err.message : String(err);
+          } finally {
+            releaseDemand?.();
           }
 
           results.push({
