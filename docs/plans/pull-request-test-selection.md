@@ -1,11 +1,14 @@
 # Choosing which tests a pull request runs
 
-Status: in progress. Part one is built. Part two is built apart from its
-continuous-integration configuration, the coverage work and the full run's
-treatment of flaky tests; part three has the reporter and nothing else.
-[The work](#the-work) carries the detail. The record store this plan
-consumes is live and holds the data the design needs, apart from what
-[What the store is missing](#what-the-store-is-missing) names.
+Status: in progress. Part one is built. Parts two and three are built
+apart from the continuous-integration configuration that puts the lanes
+in `deno.yml`, and what only a run of those lanes can settle: the
+publisher's summary and the exclusion list both read costs that have none
+until lanes have run, and two pre-merge proofs need a run to prove
+anything about. [The work](#the-work) carries the detail. The record
+store this plan consumes is live and holds the data the design needs,
+apart from what [What the store is
+missing](#what-the-store-is-missing) names.
 
 Continuous integration for a pull request currently runs 67 jobs and every
 test in the repository. This plan replaces that with five jobs that run a
@@ -29,10 +32,12 @@ never a change to the continuous-integration configuration. That property
 is the point of the whole exercise: a selection system that has to be
 rewired every time somebody adds a test surface costs more than it saves.
 
-It should land in one pull request, with no flags and nothing to flip: it
-is live the moment it merges. [The work](#the-work) sets out the three
-parts it is built in, and why none of them needs a pull request of its
-own.
+It has landed a piece at a time, each piece inert until the lanes exist:
+the topology, the scoring, the packer, the lane runner, the publisher's
+cost model and the coverage gate are all on the default branch, doing
+nothing, because nothing calls them. The switch is the workflow change
+that replaces the 67 jobs with the lanes, and that is what is left. [The
+work](#the-work) sets out the three parts it is built in.
 
 ## Status convention
 
@@ -4050,40 +4055,80 @@ of it is in the five minutes a lane has.
 
 The packer charges each of those already — `setupCost` the first time a
 lane opens a capability, a suite's `overhead` the first time a lane holds
-that suite, and `correction` against every identity's own cost — and what
-it charges them from is `tasks/test-selection/calibrate.ts`, fitted from
+that suite, its `unitOverhead` the first time a lane opens one of its
+units, and `correction` against every identity's own cost — and what it
+charges them from is `tasks/test-selection/calibrate.ts`, fitted from
 what lanes have spent.
 
 The inputs are the lane's own measurements, which reach the store as
-ordinary records. A lane writes one per capability it opened and two per
-batch: what it spent, and what the packer charged it. The second is what
-makes a fit possible at all, since the packer's figure cannot be
-recovered from the records a batch produced — those say what the tests
-took, not what the packer thought they would.
+ordinary records. A lane writes one per capability it opened and three
+per batch: what it spent, what it was packed to spend, and how many units
+it opened. The last two are what make a fit possible at all, since
+neither can be recovered from the records the batch produced — those say
+what the tests took rather than what the packer thought they would, and a
+unit whose tests all recorded nothing leaves no trace of having been
+opened.
 
 Every figure errs high, for the reason every cost estimate here does. A
-`setupCost` is the ninetieth percentile of what that capability was seen
-to take. A suite's slope comes from observations that disagree about how
-long the same planned work took, and is never below one; with fewer than
-two such observations there is nothing to say about how the cost grows,
-and the intercept carries the whole difference. The intercept is then
-raised until no observation is under-predicted, because a least-squares
-line sits in the middle of its observations by construction, and for this
-quantity the middle means half the lanes running past their budget.
+`setupCost` is the worst opening of that capability anybody has seen. The
+two slopes are fitted together from `MIN_CORRECTION_SAMPLES` observations
+and believed where each comes out positive; where only one of them has
+evidence it is fitted again on its own, because what a slope comes to
+beside the other is not what it comes to without it. The intercept is
+then raised until no observation is under-predicted, because a
+least-squares plane sits in the middle of its observations by
+construction, and for this quantity the middle means half the lanes
+running past their budget.
 
-`unitOverhead` stays empty. A lane times its batches and not the units
-inside them, so nothing measures what one more file costs a batch that
-already runs others; a suite's intercept carries it, which charges a
-batch of one file what a batch of many was seen to cost.
+The two are asked for different evidence, because their readings without
+it differ. A `correction` of one says a second of test time costs a
+second, which is a claim about the machine; a `unitOverhead` of zero says
+opening a unit is free, which is a claim about nothing. So the correction
+needs only that the suite's charges span `MIN_CORRECTION_SPAN_SECONDS`,
+while the unit count is believed only where it spans `MIN_UNIT_SPAN_UNITS`
+in the part of it the charges do not already account for. Demanding that
+independence of the correction as well would refuse the pair wherever the
+two move together — which for a unit suite is the ordinary case, since
+more units usually means more tests — and leave the suite charged as
+though opening a unit were free.
+
+A slope below one is ordinary rather than a sign the fit went wrong: a
+batch runs its files in parallel, so its wall time is routinely a
+fraction of the sum of its tests' own durations, and the pattern unit
+suite takes about a third. Nothing bounds a slope above, either. The
+intercept absorbs whatever a bound would have moved, and the intercept is
+charged once for holding the suite where the slope is charged in
+proportion, so bounding the slope makes a suite dearer to reach rather
+than cheaper — which prices it out of every lane, quietly, since a suite
+nothing can afford simply stops being chosen.
+
+A suite's instrumented and uninstrumented batches are fitted together,
+because a calibration is keyed by suite alone and that is how the packer
+looks one up. The intercept is then the larger residual of the two, so an
+uninstrumented batch is charged what an instrumented one cost.
+
+What one more unit costs a batch that already runs others is the term
+that decides whether a unit suite can be packed at all. Fitted without
+it, the workspace unit suite reads as six minutes flat whatever it holds,
+which against a 230-second budget does not price the suite but removes
+it — quietly, since a suite nothing can afford stops being chosen and
+says nothing about it.
 
 The order a lane takes its batches in decides which suites the model can
-ever learn. A lane that runs out of time is killed with its later batches
-unrun, so they record nothing — and a suite the model cannot price is one
-that makes lanes run out of time. Two keys answer that. A suite nothing
-has measured goes ahead of one something has, because it is the one worth
-measuring; and within each group the largest share of the lane goes
-first, because a lane that runs out of time should have spent it on the
-batch most worth knowing about and dropped the cheap ones.
+ever learn. A lane killed part way through is killed with its later
+batches unrun, so they record nothing — and a suite the model cannot
+price is one that makes lanes over-run. Two keys answer that. A suite
+nothing has measured goes ahead of one something has, because it is the
+one worth measuring; and within each group the largest share of the lane
+goes first, because a lane that is going to be cut short should have
+spent its time on the batch most worth knowing about and dropped the
+cheap ones.
+
+The backstop above is what makes this a tail case rather than the norm.
+A lane over-packed against a 230-second budget still has thirty minutes
+before GitHub stops it, so the ordering decides what a lane measures
+first and only decides what it measures at all when the packing was
+wrong by more than sevenfold.
 
 Ordering by the suite identifier put the three largest suites last by the
 alphabet, and four runs of the lanes left `workspace-unit`, `runner-unit`
@@ -4252,12 +4297,14 @@ exercised on the branch on its own.
       now fit the run's budget, and the measured sets past
       `LOCAL_COVERAGE_MAX_SECONDS`. Both read the fitted costs of the
       lanes, which have none until the lanes run.
-- [ ] A measured batch records its duration under a surface of its own, so
-      that what a unit costs with coverage on is fitted separately from
-      what it costs without. Until then the packer charges a measured
-      unit what an unmeasured run of it costs, which is an underestimate
-      of unknown size; there is nothing to fit until the lanes have run
-      something with coverage on.
+- [x] A measured batch records its duration under a name of its own, so
+      that the two halves of an instrumented batch's pair find each other
+      rather than the uninstrumented batch's. The fit then puts both
+      kinds together, because a calibration is keyed by suite alone and
+      that is how the packer looks one up; the intercept becomes the
+      larger residual of the two, so an uninstrumented batch is charged
+      what an instrumented one cost. That is an overestimate rather than
+      the underestimate a shared name would have given.
 - [ ] Before merging: `plan --verify` against the last `main` run, proving
       the manifest accounts for every item the topology enumerates under
       its exact variant, apart from explicitly unavailable skip entries.
@@ -4269,11 +4316,41 @@ exercised on the branch on its own.
       variant apart from explicit unavailable entries. This is what
       running on `main` was going to prove, done where a mistake costs one
       branch.
-- [ ] Before merging: `plan --dry-run` over the reference records, after
+- [x] Before merging: `plan --dry-run` over the reference records, after
       classifying every identity and mapping every item-level identity to
       its runnable item. Record selected item count, measured test time,
       capability setup, repeats, and unschedulable items. All five lanes
       retain their 30-second safety margin.
+
+      Against the manifest of 2026-09-11T20:26Z, built from 157 runs at
+      `475aa549c`, the tree holds 22,141 identities and the manifest
+      withholds one. The five lanes take 17,127 of them, and each is
+      packed to within a tenth of a second of the 230-second budget:
+      4,568, 2,529, 4,140, 5,668 and 222 identities respectively. The
+      spread in identity counts against a flat time is the skew the
+      problem statement describes — a lane carrying the cheap tail holds
+      twenty times as many tests as one carrying pattern integration.
+
+      The 30-second safety margin is retained by construction rather than
+      by luck: the budget the packer fills is the 300-second bound less a
+      40-second prologue and that margin, so a lane filled to its budget
+      is 70 seconds short of the bound it is packed against.
+
+      Every lane opens `browser`, `compile-cache`, `deno`, `fuse` and both
+      baked Toolshed servers; `cf`, `git-history`, `github-api`,
+      `local-dev-servers` and `toolshed` each reach three or fewer. The
+      packer charges each of those to the lane that opens it, which is
+      what the budget is filled against.
+
+      Nothing repeats. Every identity the manifest carries has a flake
+      rate of zero, so `executionsFor` gives each of them one run.
+
+      Twenty identities are unschedulable, all of them pattern
+      integration tests measured at 300 to 307 seconds: past the
+      300-second bound a lane runs under, so no lane can hold one. They
+      are reported rather than scheduled, and the sixty-second rule is
+      where such a test gets split. The full run takes 55 lanes and runs
+      them.
 
 ### Part three — the pull-request path
 
