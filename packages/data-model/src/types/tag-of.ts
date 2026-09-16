@@ -232,8 +232,11 @@ export function tagOfConvertibleJsValueElseNull(
       // here due to how `tagOfUnknownElseNull()` works. This is more of a
       // defense-in-depth or separation of concerns.
       if (value === null) {
+        // deno-coverage-ignore-start -- `tagOfUnknownElseNull()` tags `null`
+        // before this is reached, so this arm is defense in depth only
         return null;
       }
+      // deno-coverage-ignore-stop
 
       // Otherwise handled below.
       break;
@@ -241,8 +244,11 @@ export function tagOfConvertibleJsValueElseNull(
 
     default: {
       // See the comment on `object` above.
+      // deno-coverage-ignore-start -- `tagOfUnknownElseNull()` tags every
+      // primitive before this is reached, so this arm is defense in depth only
       return null;
     }
+      // deno-coverage-ignore-stop
   }
 
   const constructor = constructorOfObject(value);
