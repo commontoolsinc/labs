@@ -806,6 +806,9 @@ Deno.test("CfHarnessEngine mints operator input cells once and replays the recor
               spaceReads += 1;
               return cellSpace;
             },
+            // This double names no space: the cells here are plain
+            // references, which resolve without one.
+            getSpaceName: () => undefined,
           },
           // deno-lint-ignore no-explicit-any
         } as any,
@@ -859,6 +862,7 @@ Deno.test("CfHarnessEngine refuses an operator input cell into another space, re
           pieces: {
             getSpace: () =>
               "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+            getSpaceName: () => undefined,
           },
           // deno-lint-ignore no-explicit-any
         } as any,

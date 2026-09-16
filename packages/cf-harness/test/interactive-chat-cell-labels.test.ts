@@ -180,7 +180,10 @@ describe("interactive chat cell labels", () => {
           fabricSessionFactory: () =>
             Promise.resolve(
               {
-                pieces: { getSpace: () => SPACE_DB_DID },
+                pieces: {
+                  getSpace: () => SPACE_DB_DID,
+                  getSpaceName: () => undefined,
+                },
                 // deno-lint-ignore no-explicit-any
               } as any,
             ),
