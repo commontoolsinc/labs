@@ -27,7 +27,57 @@ describe("prepared digest transaction binding", () => {
   });
   afterEach(async () => {
     await runtime.dispose();
-    await storage.close();
+  });
+
+  it("does not report a write when the storage operation rejects it", () => {
+    const operations = [
+      (tx: ExtendedStorageTransaction) =>
+        tx.write(address("rejected"), 1).error,
+      (tx: ExtendedStorageTransaction) =>
+        tx.writeValueOrThrow(address("rejected"), 1),
+      (tx: ExtendedStorageTransaction) =>
+        tx.writeValuesOrThrow([{ address: address("rejected"), value: 1 }]),
+      (tx: ExtendedStorageTransaction) =>
+        tx.recordSqliteWrite(signer.did(), {
+          op: "sqlite",
+          db: { id: "of:test", tables: {} },
+          sql: "CREATE TABLE notes (body TEXT)",
+          params: [],
+        }),
+      (tx: ExtendedStorageTransaction) =>
+        tx.recordMergeableOp(address("rejected"), { op: "increment", by: 1 }),
+    ];
+    for (const operation of operations) {
+      const outcomes: string[] = [];
+      const underlying = runtime.edit() as ExtendedStorageTransaction;
+      const tx = new ExtendedStorageTransaction(underlying.tx, {
+        onPreparedDigest: (outcome) => outcomes.push(outcome),
+      });
+      tx.abort();
+      tx.accessForTestingOnly.preparedDigest();
+      let error: unknown;
+      try {
+        error = operation(tx);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeDefined();
+      expect(tx.hasWrites()).toBe(false);
+      tx.accessForTestingOnly.preparedDigest();
+      expect(outcomes).toEqual(["computed", "computed"]);
+    }
+  });
+
+  it("reports successful writes but leaves an empty batch read-only", () => {
+    const tx = runtime.edit() as ExtendedStorageTransaction;
+    try {
+      tx.writeValuesOrThrow([]);
+      expect(tx.hasWrites()).toBe(false);
+      tx.writeValuesOrThrow([{ address: address("output"), value: 1 }]);
+      expect(tx.hasWrites()).toBe(true);
+    } finally {
+      tx.abort();
+    }
   });
 
   it("reuses the prepared digest at commit with no intervening activity", async () => {

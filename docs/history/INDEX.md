@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Prepared digest unit ladder: paired summary](development/performance/2026-09-15-prepared-digest-paired-summary.md) — median timings and same-round speedups supplementing the original minimum-based summary.
+
 - [Prepared CFC digest measurements](development/performance/2026-09-15-prepared-digest.md) — alternating unit and labeled SQLite arm-B ladders, frozen-record cache counts, native-hasher profiles, and the cold-composition tradeoff.
 
 - [Loom investigation review clarifications](development/performance/2026-09-15-loom-person-inbox-review-clarifications.md) — complete 203-document access-shape accounting and raw repetitions explaining independently calculated policy and opening medians.

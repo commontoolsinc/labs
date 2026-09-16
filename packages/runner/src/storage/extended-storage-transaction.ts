@@ -1690,17 +1690,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #hasWrites = false;
 
   /**
-   * Record that this transaction has written.
+   * Record that a storage write succeeded.
    *
-   * Called from every write path rather than inferred from one of their side
+   * Called after each successful write rather than inferred from one of its side
    * effects: a mergeable op and a folded SQLite write are both writes, and
    * neither drops the read-result cache — the value write a mergeable op
    * annotates has already done that, and a SQLite op changes no cell value
    * locally. Deriving "has written" from cache invalidation would miss both.
+   * Activity is recorded separately because a failed attempt can enter the
+   * journal without changing a value.
    */
   #noteWrite(): void {
     this.#hasWrites = true;
-    this.#noteCfcActivity();
   }
 
   #invalidateReadResultCache(): void {
@@ -2877,9 +2878,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // later reshape or mixed-op leave a stale tail op in the commit — silent
     // corruption. When poison is unavailable the intent is simply not recorded,
     // so the commit falls back to the plain whole-array diff already written.
-    if (this.tx.poisonMergeableOp) {
+    if (this.tx.poisonMergeableOp && this.tx.recordMergeableOp) {
+      this.#noteCfcActivity();
+      this.tx.recordMergeableOp(address, delta);
       this.#noteWrite();
-      this.tx.recordMergeableOp?.(address, delta);
     }
   }
 
@@ -2897,8 +2899,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         "storage transaction does not support recordSqliteWrite()",
       );
     }
-    this.#noteWrite();
+    this.#noteCfcActivity();
     this.tx.recordSqliteWrite(space, op);
+    this.#noteWrite();
   }
 
   getReadActivities(): Iterable<IReadActivity> {
@@ -3004,7 +3007,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
     this.#assertWritable("write()");
-    this.#noteWrite();
+    this.#noteCfcActivity();
     this.#noteSystemWrite(address, value, options);
     this.#noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -3016,6 +3019,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
     const result = this.tx.write(address, value, options);
     if (result.ok) {
+      this.#noteWrite();
       this.#stageSchemaDocsForValue(address.space, address, value);
     }
     return result;
@@ -3027,7 +3031,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): void {
     this.#assertWritable("writeOrThrow()");
-    this.#noteWrite();
+    this.#noteCfcActivity();
     this.#noteSystemWrite(address, value, options);
     this.#noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -3108,6 +3112,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     } else if (writeResult.error) {
       throw toThrowable(writeResult.error);
     }
+    this.#noteWrite();
     // The staged value may carry link schemas — or be, or carry, a
     // `schema` metadata member — with external refs; stage their closure
     // with it (the write-side delivery guarantee, and what makes a
@@ -3166,7 +3171,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // batch authored nothing, so it must not record a write for the
       // transaction's write-identity summary.
       const noteWriteIdentity = () => {
-        this.#noteWrite();
+        this.#noteCfcActivity();
         this.#noteWriteIdentity();
       };
       const refuseMalformedSchemaMeta = (
@@ -3213,6 +3218,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       if (result.error) {
         throw toThrowable(result.error);
       }
+      if (cachesInvalidated) this.#noteWrite();
       for (const write of staged) {
         this.#stageSchemaDocsForValue(
           write.address.space,
