@@ -1,11 +1,3 @@
-import { assertEquals } from "@std/assert";
-import type {
-  HandlerFactory,
-  HandlerFunction,
-  Stream,
-} from "@commonfabric/api";
-import type { MustBeTrue, Same } from "@commonfabric/utils/types";
-
 /**
  * `HandlerFunction` is the `handler` a PATTERN sees — the same hand-maintained
  * mirror situation as `ActionFunction` (see `action-function-surface.test.ts`):
@@ -15,6 +7,14 @@ import type { MustBeTrue, Same } from "@commonfabric/utils/types";
  * `packages/runner/test/handler-overload-types.test.ts` covers the builder
  * half. Both must hold.
  */
+
+import { assertEquals } from "@std/assert";
+import type {
+  HandlerFactory,
+  HandlerFunction,
+  Stream,
+} from "@commonfabric/api";
+import type { MustBeTrue, Same } from "@commonfabric/utils/types";
 
 interface AddTopic {
   title: string;
