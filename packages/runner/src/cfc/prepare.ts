@@ -80,6 +80,7 @@ import {
   isLinkResolutionProbe,
   isMachineryRead,
   isSchedulerDependencyRead,
+  isWriteDestinationRead,
   stableInternalVerifierRead,
 } from "../storage/reactivity-log.ts";
 import { getTransactionWriteAttempts } from "../storage/transaction-inspection.ts";
@@ -2220,6 +2221,11 @@ const forEachFlowObservation = (
       // machinery-read boundary that lets the generic pure-link mint route
       // ship (SC-8 remainder; template-population §6).
       machinery: boolean;
+      // True when the read carries `writeDestinationRead`. `deriveFlowJoin`
+      // drops these (§18.6.2); every other consumer of this walk keeps
+      // them, which is what leaves `flowLabelWorkExists` — and with it
+      // whether the flow stage runs at all — exactly as it was.
+      writeDestination: boolean;
     },
   ) => boolean,
 ): boolean => {
@@ -2330,6 +2336,7 @@ const forEachFlowObservation = (
             return coveredByTrace();
           },
           machinery: isMachineryRead(read.meta),
+          writeDestination: isWriteDestinationRead(read.meta),
         },
       )
     ) {
@@ -2374,6 +2381,7 @@ const forEachFlowObservation = (
           nonRecursive: false,
           coveredByTrace: false,
           machinery: false,
+          writeDestination: false,
         },
       )
     ) {
@@ -2495,6 +2503,16 @@ const deriveFlowJoinImpl = (
   forEachFlowObservation(
     tx,
     (space, id, scope, type, logicalPath, observation) => {
+      // The write path reading its own destination to decide which
+      // sub-paths differ (§18.6.2,
+      // `docs/specs/cfc-write-destination-reads.md`). No program asked for
+      // it, and what it returns decides which writes are emitted, never a
+      // written value. Where what is stored there sends the write
+      // elsewhere, the diff reads the slot again without the marker, so
+      // that read arrives here and joins.
+      if (observation.writeDestination) {
+        return false;
+      }
       const key = targetKey({ space, id, scope });
       let document = metadataByDoc.get(key);
       if (document === undefined) {

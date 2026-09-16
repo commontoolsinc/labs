@@ -1246,3 +1246,70 @@ the link-carried one. Name the observation-class axis in the same breath: the
 cover has to hold under each read class that consumes the entry, since a
 class-scoped declared entry can shadow a covering one for some classes and
 not others.
+
+## From the write-path self-read exclusion (2026-09-15)
+
+**SC-41 [normative] A write path's read of its own destination is a
+runtime-internal read — §18.6.2.** §18.6.2 derives the consumed set and the
+conservative flow-path confidentiality from the attempt's journal minus
+runtime-internal reads, and enumerates four kinds: verifier-internal reads,
+label-metadata reads at the envelope's own metadata paths, program and source
+text loaded to run the handler, and content-addressed schema documents. The
+list does not contemplate a write path that reads its own destination, and the
+omission has a cost a deployment meets as soon as both `cfcFlowLabels` is
+`persist` and `cfcEnforcementMode` is `enforce-strict`: a whole-object
+`Cell.set()` into a document whose fields carry different confidentiality is
+refused by the §8.12.4 writer-fit rule on every write after the first that
+changes any field's value. The runtime's diff reads the destination
+recursively to decide which sub-paths differ, so the transaction's join
+carries every field's label, and the write to each field is then measured
+against that field's own declared ceiling. The stream-marker probe `set()`
+makes before choosing between an event send and a stored write has the same
+effect over a document whose label sits at its root, and reaches further: a
+transaction that rewrites such a document carries its label onto every other
+write it makes, which is how the runner's sqlite commit-evaluation
+integration case fails. What the refusal blocks is a
+whole-object write whose value the program did not read out of the
+destination — an event payload, a form's contents, a computed record. A
+read-modify-write spelled `cell.set({ ...cell.get(), secret: x })` is refused
+before and after this entry alike, and correctly so: the program did read the
+sibling, so §8.9.2's conservative join covers it. Narrowing that case is the
+per-write question SC-23 left transaction-global and SC-24 profiles, not this
+one.
+
+Proposed edit: add a fifth kind to §18.6.2's excluded set — a read the
+runtime's own write machinery makes of the region it is about to write, whose
+result decides how and whether to write rather than what is written. The
+runner has two: the stream-marker probe that chooses between an event send
+and a stored write, and the diff's read of each destination path. Two conditions belong in the text with it, because they are
+what keep the exclusion from being the flow-precision claim §8.9.2 forbids by
+default, gating it exactly as §8.9.1 gates a schema-level claim. The excluded
+read's result MUST reach no written value: where the stored content steers the
+write rather than merely gating it, the runtime takes a separate,
+non-excluded read of the same address. And the marking MUST be runtime
+recording rather than anything executed code can assert, the same discipline
+§8.10.1 already puts on marking verifier-internal reads. The class is scoped
+to the write path rather than to the probe: the runner's `isStream()` takes
+its read metadata from its caller, so the same probe made to decide whether
+to add a listener joins like any other observation.
+
+The residual this admits is the write-elision channel: whether a path was
+written is visible, so dropping a write tells an observer of the write set
+that the writer's value equalled the stored one, and repeated attempts with
+chosen values make that an equality oracle on that path's prior value.
+Elision opens the channel and predates the exclusion; what the exclusion
+changes is that the influence is no longer labeled at all, where before it
+was labeled at the wrong paths. Recording a channel a profile does not close
+is the discipline §18.6.4's conformance checklist asks for, and §4.6.3's
+existence channel (SC-4) is the neighbouring disclosure.
+
+The runner applies the exclusion to the flow join alone. The consumed set the
+egress and sink ceilings read, and the per-write read-prefix gate of SC-23,
+both still count these reads, which over-gates and never under-gates; §18.6.2
+governs both sets, so a runtime that claims the amended list owes either the
+wider application or this boundary stated, as SC-23 stated its own. The design and the runner's
+implementation are in
+[`cfc-write-destination-reads.md`](./cfc-write-destination-reads.md); the
+runtime marks the class with `writeDestinationRead` rather than by address, so
+§18.6.4's "excluded address patterns" obligation is discharged for this class
+by naming the marker. `open`.

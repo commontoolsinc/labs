@@ -51,6 +51,10 @@ const mergeableOpReadMarker: unique symbol = Symbol(
   "mergeableOpReadMarker",
 );
 
+const writeDestinationReadMarker: unique symbol = Symbol(
+  "writeDestinationReadMarker",
+);
+
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
 };
@@ -115,6 +119,22 @@ export const linkResolutionProbe: Metadata = {
  */
 export const mergeableOpRead: Metadata = {
   [mergeableOpReadMarker]: true,
+};
+
+/**
+ * Marks the reads the write machinery makes of the region it is about to
+ * write: the stream-marker probe that chooses between an event send and a
+ * stored write, and the diff's read of each destination path. Each answer
+ * decides how and whether to write, never what is written, and where a
+ * stored link sends the write somewhere else the walk reads that slot again
+ * without this marker. CFC flow-label derivation excludes these from the
+ * transaction's join (spec §18.6.2,
+ * `docs/specs/cfc-write-destination-reads.md`). Scheduling, conflict
+ * detection and the attempted-write record are unaffected, and the same
+ * stream-marker probe made outside the write path carries no marker.
+ */
+export const writeDestinationRead: Metadata = {
+  [writeDestinationReadMarker]: true,
 };
 
 export function isReadIgnoredForScheduling(meta?: Metadata): boolean {
@@ -370,6 +390,10 @@ export function isReadMarkedAsAttemptedWrite(meta?: Metadata): boolean {
 
 export function isMergeableOpRead(meta?: Metadata): boolean {
   return meta?.[mergeableOpReadMarker] === true;
+}
+
+export function isWriteDestinationRead(meta?: Metadata): boolean {
+  return meta?.[writeDestinationReadMarker] === true;
 }
 
 export function isMutableTransactionReadAllowed(meta?: Metadata): boolean {
