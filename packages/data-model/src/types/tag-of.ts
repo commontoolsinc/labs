@@ -18,8 +18,6 @@ import {
 import {
   FabricInstance,
   FabricPrimitive,
-  type FabricValue,
-  type FabricValuePlus,
   type FabricValueLayer,
   type FabricValuePlusLayer,
 } from "@/interface.ts";
