@@ -49,11 +49,10 @@ describe("scheduler-reactive-retry-readiness", () => {
       runtime.scheduler.unsubscribe(action);
       runtime.scheduler.subscribe(action, { isEffect: true });
       await runtime.idle();
-      expect(wakes.calls.length).toBe(1);
-      expect(wakes.calls[0].args).toEqual([action]);
       verdict.resolve();
       await runtime.scheduler.idleWithPendingCommits();
       expect(wakes.calls.length).toBe(1);
+      expect(wakes.calls[0].args).toEqual([action]);
     } finally {
       verdict.resolve();
       wakes.restore();

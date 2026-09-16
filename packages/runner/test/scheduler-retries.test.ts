@@ -111,6 +111,7 @@ describe("reactive retries", () => {
       canRetry?: () => boolean;
       initialOffBudgetRetries?: number;
       awaitRetryReadiness?: (error: unknown) => Promise<void>;
+      handleUnavailable?: () => boolean;
       rejectPromise?: boolean;
       restoreInvalidCauses?: () => void;
       shared?: {
@@ -148,6 +149,7 @@ describe("reactive retries", () => {
       canRetry: options.canRetry ?? (() => true),
       awaitRetryReadiness: options.awaitRetryReadiness ??
         (() => Promise.resolve()),
+      handleUnavailable: options.handleUnavailable,
       action,
       tx: {
         abandonStagedWork: (error: unknown) => abandoned.push(error),
@@ -378,6 +380,38 @@ describe("reactive retries", () => {
     });
     expect(r.queued).toBe(1);
     expect(r.retries.has(r.action)).toBe(false);
+  });
+
+  it("handles unavailability during recovery before abandoning a retired run", async () => {
+    const recovering = Promise.withResolvers<void>();
+    const repaired = Promise.withResolvers<void>();
+    let retired = false;
+    const availabilityChecks: boolean[] = [];
+    const watched = runWatcher("ConflictError", 3, {
+      canRetry: () => !retired,
+      awaitRetryReadiness: () => {
+        recovering.resolve();
+        return repaired.promise;
+      },
+      handleUnavailable: () => {
+        availabilityChecks.push(retired);
+        return retired;
+      },
+    });
+    try {
+      await recovering.promise;
+      retired = true;
+      repaired.resolve();
+      const r = await watched;
+      expect(availabilityChecks).toEqual([false, true]);
+      expect(r.resubscribed).toBe(1);
+      expect(r.queued).toBe(0);
+      expect(r.abandoned).toEqual([]);
+      expect(r.retries.get(r.action)).toBe(3);
+    } finally {
+      repaired.resolve();
+      await watched;
+    }
   });
 
   it("repairs a conflict even when it carries no catch-up callback", async () => {
