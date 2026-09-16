@@ -1326,13 +1326,18 @@ earliest matching position. A penalized final generation removes that chain from
 the answer; a branch or cycle fails the affected search instead of choosing a
 generation arbitrarily.
 
-Replacement metadata, schemas, quality, and signals belong to the successor.
-Query-term counts are omitted on a replacement because the index measured them
-against the predecessor. The catalog is refreshed for every nonempty search;
-create-only metadata is cached by identity within the client, and failed reads
-are not cached. This requires one metadata read per catalog entry on the first
-search and for each newly discovered identity thereafter. No source is
-requested. An unavailable catalog or metadata read fails discovery explicitly.
+Replacement metadata, schemas, quality, and signals describe the successor.
+Where the index supports generation evidence, its combined signal summary
+includes an attributed `inherited` portion: predecessor ID, publication cutoff,
+event counts, and score. The harness preserves that attribution; a proven tier
+can come entirely from predecessor evidence before the successor has run. Older
+deployments supply only that generation's own event counts and score. Query-term
+counts are omitted on a replacement because the index measured them against the
+predecessor. The catalog is refreshed for every nonempty search; create-only
+metadata is cached by identity within the client, and failed reads are not
+cached. This requires one metadata read per catalog entry on the first search
+and for each newly discovered identity thereafter. No source is requested. An
+unavailable catalog or metadata read fails discovery explicitly.
 
 `getPattern`, attached pattern references, and `cf:pattern:` imports continue to
 resolve the exact requested identity. Search resolution changes recommendations,

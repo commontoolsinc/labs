@@ -38,6 +38,30 @@ const row = (patternId: string): PatternIndexListedPattern => ({
 });
 
 describe("resolvePatternIndexSuccessors()", () => {
+  it("preserves the index's combined signals and attributed predecessor evidence", () => {
+    const signals = {
+      uses: 11,
+      score: 6.5,
+      inherited: {
+        priorPatternId: "old",
+        asOf: "2026-09-17T00:00:00Z",
+        events: { instantiated: 5, run_succeeded: 4 },
+        score: 6.5,
+      },
+    };
+    const result = resolvePatternIndexSuccessors(
+      { results: [hit("old")] },
+      [row("old"), {
+        ...row("fresh"),
+        events: { created: 2 },
+        score: 6.5,
+        signals,
+      }],
+      [pattern("old"), pattern("fresh", "old")],
+    );
+    expect(result.results[0].signals).toEqual(signals);
+  });
+
   it("replaces an old hit with a successor outside the ranked results", () => {
     const replacement = {
       ...pattern("fresh", "old"),

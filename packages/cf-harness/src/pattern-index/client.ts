@@ -24,10 +24,18 @@ import {
 } from "../contracts/http-fetch.ts";
 import { resolvePatternIndexSuccessors } from "./successors.ts";
 
-/** Usage counters the index keeps for a pattern, when it has any. */
+/** Own and publication-bounded inherited evidence computed by the index. */
 export interface PatternIndexSignals {
   uses: number;
   score: number;
+
+  /** The inherited portion, distinct from events on this exact generation. */
+  inherited?: {
+    priorPatternId: string;
+    asOf: string;
+    events: Readonly<Record<string, number>>;
+    score: number;
+  };
 }
 
 /** Whether a published argument schema classifies a hit as reusable or whole. */
@@ -109,7 +117,7 @@ export interface PatternIndexGetRequest {
 
 /**
  * One row of `listPatterns`: a pattern's public metadata, the events recorded
- * against it counted by type, and the weighted total those counts produce.
+ * against it counted by type, and its own plus inherited ranking evidence.
  * Carries no source and none of the private query fields a publication
  * supplied.
  */
@@ -127,6 +135,9 @@ export interface PatternIndexListedPattern {
   events: Readonly<Record<string, number>>;
 
   score: number;
+
+  /** Combined evidence, absent on index deployments without inheritance. */
+  signals?: PatternIndexSignals;
 
   /** Evidence tier computed by the index, absent on older deployments. */
   quality?: PatternIndexQuality;

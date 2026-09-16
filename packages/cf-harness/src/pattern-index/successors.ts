@@ -67,7 +67,7 @@ export const resolvePatternIndexSuccessors = (
       ownerDid: pattern.ownerDid,
       createdAt: pattern.createdAt,
       dependencies: pattern.dependencies,
-      signals: {
+      signals: row.signals ?? {
         uses: Object.values(row.events).reduce((sum, count) => sum + count, 0),
         score: row.score,
       },

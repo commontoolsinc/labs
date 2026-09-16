@@ -9,7 +9,23 @@ export const TRUSTED_PATTERN_PROPERTIES = {
   hashtags: { type: "array", items: { type: "string" } },
   signals: {
     type: "object",
-    properties: { uses: { type: "number" }, score: { type: "number" } },
+    properties: {
+      uses: { type: "number" },
+      score: { type: "number" },
+      inherited: {
+        type: "object",
+        properties: {
+          priorPatternId: { type: "string" },
+          asOf: { type: "string" },
+          events: { type: "object", additionalProperties: { type: "number" } },
+          score: { type: "number" },
+        },
+        required: ["priorPatternId", "asOf", "events", "score"],
+        additionalProperties: false,
+        description:
+          "Predecessor evidence included through publication; it does not describe runs of this exact generation.",
+      },
+    },
     required: ["uses", "score"],
     additionalProperties: false,
   },
@@ -23,7 +39,7 @@ export const TRUSTED_PATTERN_PROPERTIES = {
     type: "string",
     enum: ["penalized", "unproven", "proven"],
     description:
-      "Evidence tier from recorded outcomes: penalized is net-negative, unproven has no recorded success, and proven has at least one recorded success or positive rating without a net-negative score.",
+      "Evidence tier from own and eligible inherited outcomes: penalized is net-negative, unproven has no recorded success, and proven has at least one recorded success or positive rating without a net-negative score. Proven can come entirely from predecessor evidence.",
   },
   matchedTerms: { type: "number" },
   queryTerms: { type: "number" },

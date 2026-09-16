@@ -162,6 +162,28 @@ const createEngine = (index?: IndexStub): CfHarnessEngine =>
   });
 
 describe("search-patterns", () => {
+  it("keeps inherited evidence attributed in the model's search result", async () => {
+    const signals = {
+      uses: 10,
+      score: 4,
+      inherited: {
+        priorPatternId: "pat-older",
+        asOf: "2026-09-17T00:00:00Z",
+        events: { run_succeeded: 4 },
+        score: 4,
+      },
+    };
+    const index = stubIndex([{ ...SEARCH_HIT, signals }], {
+      "pat-expenses": PATTERN_RECORD,
+    });
+    const result = await createEngine(index).invokeBuiltinTool(
+      "search_patterns",
+      { text: "expenses" },
+    );
+    const output = result.output as SearchPatternsToolSuccessOutput;
+    expect(output.results[0].signals).toEqual(signals);
+  });
+
   it("offers only the successor's identity, import, and declared shapes", async () => {
     const successor = {
       ...PATTERN_RECORD,
