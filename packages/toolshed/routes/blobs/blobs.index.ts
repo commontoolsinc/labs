@@ -1,6 +1,6 @@
 import { hashOf } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { isDID } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { Context } from "@hono/hono";

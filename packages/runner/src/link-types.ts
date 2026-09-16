@@ -1,4 +1,5 @@
 import { toCompactDebugString } from "@commonfabric/data-model";
+import { isDID } from "@commonfabric/identity/did";
 import {
   isLinkRef,
   linkRefFrom,
@@ -415,9 +416,6 @@ export const matchLLMFriendlyLink = new RegExp(
   "^/(?:/[^/]+/|@[^/]+/)?[a-zA-Z0-9]+:",
 );
 
-// Matches the space DID a link's leading `@` segment names, the `@` removed.
-const matchSpaceDid = new RegExp("^did:[^:]+:[^/]+$");
-
 /**
  * The shortest an id segment may be and still be a piece handle.
  *
@@ -480,12 +478,12 @@ export function parseLLMFriendlyLink(
   // are: a space name and a slug each need a session to look up, and there is
   // none here.
   if (parsed.space !== undefined) {
-    if (!matchSpaceDid.test(parsed.space)) {
+    if (!isDID(parsed.space)) {
       throw new Error(
         `Link spaces must be DIDs (e.g., "/@did:key:z6Mk.../of:fid1:abc123"), not names (e.g., "${parsed.space}").`,
       );
     }
-    space = parsed.space as MemorySpace;
+    space = parsed.space;
   }
   if (!isPieceHandle(parsed.id)) {
     throw new Error(

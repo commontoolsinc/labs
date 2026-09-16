@@ -4,6 +4,19 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Pattern-test CFC posture measurement](development/performance/2026-09-15-cfc-pattern-test-posture.md) — 2026-09-15; five alternating headless mapped-render and labeled-copy samples at N=11/50/150, with resolved postures and preparation spans.
+- [Prepared digest cache selection](development/performance/2026-09-15-prepared-digest-cache-selection/) ([report](development/performance/2026-09-15-prepared-digest-cache-selection/README.md)) — four-arm comparison, repeated reactive executions, GC retention, paired timings, profiles, and replay patches selecting epoch-only memoization.
+
+- [Prepared digest unit ladder: paired summary](development/performance/2026-09-15-prepared-digest-paired-summary.md) — median timings and same-round speedups supplementing the original minimum-based summary.
+
+- [Prepared CFC digest measurements](development/performance/2026-09-15-prepared-digest.md) — alternating unit and labeled SQLite arm-B ladders, frozen-record cache counts, native-hasher profiles, and the cold-composition tradeoff.
+- [Research orientation and passage retrieval comparison](packages/cf-harness/research-passages-comparison-2026-09-16.md) — two-use research contract, exact passage search and batch reads, five matched tasks, preserved indexed composition, mixed latency and accuracy, inbox retrieval overlap and token regression, and browser/provenance verification.
+- [Scoped research implementation and matched comparison](packages/cf-harness/targeted-research-comparison-2026-09-16.md) — orient/answer/recipe bundle, ten matched turns, preserved indexed composition, mixed latency and recipe accuracy, a bounded follow-up recheck, six browser acceptance checks, and durable context/omission corrections.
+- [Indexed flow-read labels](development/performance/2026-09-15-cfc-flow-read-index.md) — generated transaction equivalence, the paired R by E grid, and shared arm-B attribution separating the improved flow lookup from the dominant authoritativeCoverFor scan.
+
+- [Authoritative link-label coverage](development/performance/2026-09-15-cfc-authoritative-cover.md) — 2026-09-15; prefix-only candidate selection, corpus equivalence, and paired mapped-render measurements.
+- [Wildcard-source path indexes](development/performance/2026-09-15-cfc-wildcard-source-index.md) — generated-corpus equivalence, paired source-wildcard query measurements, and shared arm-B profiles locating the remaining authoritative-cover scan.
+
 - [Loom investigation review clarifications](development/performance/2026-09-15-loom-person-inbox-review-clarifications.md) — complete 203-document access-shape accounting and raw repetitions explaining independently calculated policy and opening medians.
 
 - [Loom person-inbox policy budget](development/performance/2026-09-15-loom-person-inbox-policy-budget.md) — nine retained-candidate policy preparations below 200 ms, per-node click attribution, full runtime validation, interleaved raw measurements, and rejected preconstruction experiments exposing quadratic label coverage.
@@ -210,6 +223,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [Where the pattern type check spends its time](development/2026-09-15-cfcheck-cost-decomposition.md) — measured cost decomposition of `deno task cfcheck` over 414 patterns: a fixed cost under four seconds against 94% variable, four disjoint slices costing what one whole run costs, transform and emit at 77% of the batch against 22% for the type check, output-identical per-file emit, one program per file in the union, per-pattern costs spanning 1 ms to 2.4 s, and what a filtered run costs at seven sizes.
+- [Where a unit suite's batch spends its time](development/2026-09-15-unit-suite-cost-decomposition.md) — measured cost decomposition of the `workspace-unit` and `runner-unit` test-selection batches from five lane artifacts and a workstation: serial invocations inside a batch, a `runner-unit` residual of 0.51 to 0.55 seconds a unit across a 68-fold range of batch sizes, a load-only curve of 0.216 seconds a unit through a near-zero intercept, the two-term model pricing `workspace-unit` at 1054.7 seconds against a 230-second budget, what a third per-unit term gives instead, coverage instrumentation costing 1.5 to 2.9 times, and the manifest under-costing that made the `workspace-unit` observations unusable.
 - [Lazy materialization reload diagnosis](development/performance/2026-09-15-lazy-reload-diagnosis.md) — Current-main eager nullable-read failures, durable-state comparison, and a wrong-page reload observation.
 - [Notebook reload navigation policy](development/performance/2026-09-15-notebook-reload-navigation-policy.md) — Default-on wrong-selection reproduction and reload-test correction under the existing speculative-navigation contract.
 
@@ -339,6 +354,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [2026-08-inline-document-memo-key.md](development/performance/2026-08-inline-document-memo-key.md) — why a pattern test overran its 180-second action budget: an inline document carries its content in its own id, and the schema memo built one key out of that whole id for every one of the 8,453 nodes it visited, August 2026.
 - [2026-09-11-person-inbox-click-cost.md](development/performance/2026-09-11-person-inbox-click-cost.md) — where cf-person-inbox's thread-open seconds go: worker CPU in the commit-time flow-relevance scan, growing per consecutive click and tracking rows returned rather than rows rendered, plus two write refusals that block a host from setting `people` at all, September 2026.
 - [2026-09-13-link-probe-memo.md](development/performance/2026-09-13-link-probe-memo.md) — what feeds the per-read work under a wide reactive read at the code that shipped with the dereference-trace index: link resolution's repeated sigil probes, which a probe-level memo removes at the source, with the alternated A/B behind it and the sink-wrapper memo left out as unmeasured, September 2026.
+- [2026-09-15-writer-fit-refusal-details.md](development/performance/2026-09-15-writer-fit-refusal-details.md) — deferred structured writer-fit attribution, successful and strict-refusal counters, and paired shared-fixture timings and profiles, September 2026.
 - [2026-08-fabric-value-validation-cost.md](development/performance/2026-08-fabric-value-validation-cost.md) — where the write path's validation time went in the benchmarks from 2026-07-29, August 2026.
 - [noattrcache-mount-option-evaluation.md](packages/fuse/noattrcache-mount-option-evaluation.md) — the two-stage evaluation and live-stack measurements behind defaulting FUSE-T mounts to a one-second attribute-cache timeout, July 2026.
 - [stable-inode-mtime-verification.md](packages/fuse/stable-inode-mtime-verification.md) — the on-hardware FUSE-T check of stable inodes and a moving mtime, including the measurement showing same-size staleness is bounded rather than unbounded, July 2026.

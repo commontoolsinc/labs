@@ -39,9 +39,30 @@ Before AST transforms, `transformCfDirective()`:
    import of the internal helper binding, not a namespace import), and appends
    after the source a forwarding `h(...)` helper delegating to
    `__cfHelpers.h` — so authors need not import the JSX factory manually, and
-   the helper module is not tree-shaken before binding. §16.5 depends on that
-   split: exactly one line is prepended.
-3. Rejects sources that contain identifier `__cfHelpers` anywhere in the AST.
+   the helper module is not tree-shaken before binding. When the module
+   scope already declares a value binding named `h` (a top-level function,
+   class, enum, or namespace declaration, a top-level variable declaration
+   including destructuring, any import binding — type-only imports
+   included, since they still occupy the name — or a `var` hoisted out of a
+   nested block or loop), the shim would be a duplicate identifier, so the
+   same forwarding function is appended under the reserved name
+   `__cfHelpersShim` instead. It stays a direct function declaration because
+   that is the shape the runner's module-body verifier admits at module
+   scope; a bare expression statement such as `void __cfHelpers;` is
+   rejected there as top-level executable code
+   (`packages/runner/test/engine-compile-evaluate.test.ts`). An import
+   binding named `h` counts whatever its `type` modifier: whether it
+   conflicts (TS2440) depends on the imported target's meaning, which the
+   string-level scan cannot resolve. `interface h` / `type h` declarations,
+   block-scoped `h` bindings in nested statements, and `h` bindings inside
+   function or class bodies keep the `h` shim (`declaresTopLevelBinding`,
+   `src/core/cf-helpers.ts`; pinned by `test/core/cf-helpers-coverage.test.ts`
+   and the `ast-transform/top-level-h-binding` fixture). The scan and the
+   guard below parse with the script kind the file name implies, so a `.ts`
+   module's angle-bracket assertions do not read as JSX. Either trailer is
+   two lines. §16.5 depends on that split: exactly one line is prepended.
+3. Rejects sources that contain identifier `__cfHelpers` (or the reserved
+   fallback shim name `__cfHelpersShim`) anywhere in the AST.
 
 These string-level steps run in `transformCfDirective()`
 (`src/core/cf-helpers.ts`) before any AST transformer, because symbol binding
@@ -51,9 +72,10 @@ TypeScript's subsequent JSX emit uses `__cfHelpers.h` for elements and
 `__cfHelpers.h.fragment` for fragment tags
 (`packages/js-compiler/typescript/options.ts`). Both resolve through the
 reserved helper binding, so authored locals and parameters named `h` retain
-their ordinary meaning inside JSX-producing scopes. The forwarding `h()`
-function remains available for explicit calls and keeps the helper import
-live during binding.
+their ordinary meaning inside JSX-producing scopes, and a top-level `h` does
+too (the renamed shim above). The forwarding `h()` function remains
+available for explicit calls when the module does not bind `h` itself, and
+either trailer keeps the helper import live during binding.
 
 Legacy stored-envelope compatibility is deliberately separate from
 `transformCfDirective()` (#4574, CT-1838):
@@ -2918,7 +2940,8 @@ The transformer computes span lines against the file it sees — which, for
 every transformed module, is the helper-injected source of §2.1, not the
 authored bytes. `injectCfHelpers` (`src/core/cf-helpers.ts`) builds
 `[HELPERS_STMT, source, usedStmt].join("\n")`: exactly **one** line (the
-`__cfHelpers` import) is prepended, and the forwarding `h(...)` helper is
+`__cfHelpers` import) is prepended, and the trailer (the forwarding `h(...)`
+helper, named `__cfHelpersShim` for modules binding `h` — §2.1) is
 appended after the source. The runner compensates in its `mapSpan`
 (`patternCoverageOptionsForCompile`, `packages/runner/src/harness/engine.ts`):
 
@@ -3182,11 +3205,13 @@ statement of the file, including imports**, and only when at least one use
 was emitted (`transform`, the `updateSourceFile` construction). In practice
 the hardening helper appears in essentially every transformed module, because
 the default-on pre-transform (§2.1) injects a forwarding
-`function h(…) { return __cfHelpers.h.apply(null, args); }` declaration,
-which shape 1 then hardens: as of this writing the trailing `__cfHardenFn(h);`
-closes 358 of the 360 `*.expected.*` fixture files (the two exceptions are a
-`.skip` file and the orphaned, input-less
-`closures/map-type-assertion.expected.jsx`, which predates this stage).
+`function h(…) { return __cfHelpers.h.apply(null, args); }` declaration
+(named `__cfHelpersShim` when the module binds `h` itself, §2.1), which
+shape 1 then hardens: as of this writing the trailing `__cfHardenFn(h);`
+closes 381 of the 383 `*.expected.*` fixture files. The two exceptions are
+the orphaned, input-less `closures/map-type-assertion.expected.jsx`, which
+predates this stage, and `ast-transform/top-level-h-binding.expected.jsx`,
+which closes with `__cfHardenFn(__cfHelpersShim);` instead.
 Helper names are `createUniqueName`-minted, so they print as bare
 `__cfHardenFn`/`__cfBindVerifiedBinding` unless the printer must
 disambiguate — and a suffixed name would no longer verify (§17.6).

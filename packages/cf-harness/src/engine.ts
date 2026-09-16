@@ -222,6 +222,12 @@ import type {
   RecordFeedbackToolOutput,
 } from "./tools/record-feedback.ts";
 import { getBuiltinTool } from "./tools/registry.ts";
+import type {
+  ReadPieceSourceToolInput,
+  ReadPieceSourceToolOutput,
+  RevisePieceToolInput,
+  RevisePieceToolOutput,
+} from "./tools/piece-source.ts";
 import {
   type RunPatternToolInput,
   type RunPatternToolOutput,
@@ -271,6 +277,8 @@ export interface BuiltinToolInputMap {
   write_file: WriteFileToolInput;
   delegate_task: DelegateTaskToolInput;
   run_pattern: RunPatternToolInput;
+  read_piece_source: ReadPieceSourceToolInput;
+  revise_piece: RevisePieceToolInput;
   assign_slug: AssignSlugToolInput;
   describe_handle: DescribeHandleToolInput;
   search_patterns: SearchPatternsToolInput;
@@ -295,6 +303,8 @@ export interface BuiltinToolOutputMap {
   write_file: WriteFileToolOutput;
   delegate_task: DelegateTaskToolOutput;
   run_pattern: RunPatternToolOutput;
+  read_piece_source: ReadPieceSourceToolOutput;
+  revise_piece: RevisePieceToolOutput;
   assign_slug: AssignSlugToolOutput;
   describe_handle: DescribeHandleToolOutput;
   search_patterns: SearchPatternsToolOutput;
@@ -362,6 +372,9 @@ export interface CreateHarnessEngineOptions
    * admitted kits and host-confirmed records, not the private read transcript.
    */
   inheritedResearchRuns?: readonly HarnessResearchRunSummary[];
+
+  /** Root user goal retained across follow-up questions and delegated tasks. */
+  researchGoal?: string;
 
   /** Parent model-context labels retained by a newly delegated child. */
   inheritedCfcModelContext?: HarnessCfcModelContext;
@@ -1023,6 +1036,7 @@ export class CfHarnessEngine {
         runManifest: this.config.runManifest,
         runManifestPath: this.config.runManifestPath,
         docsCorpus: this.config.docsCorpus,
+        researchGoal: options.researchGoal ?? options.taskText,
         ...(options.inheritedResearchRuns !== undefined
           ? { researchRuns: [...options.inheritedResearchRuns] }
           : {}),
@@ -2516,6 +2530,7 @@ export class CfHarnessEngine {
       ...(signal !== undefined ? { signal } : {}),
       skillRegistry: this.#runState.skillRegistry,
       skillActivations: this.#runState.skillActivations,
+      allowSkillScripts: this.config.allowSkillScripts,
       allowedSkillScripts: this.config.allowedSkillScripts,
       skillScriptExecutionTarget: this.config.skillScriptExecutionTarget,
       browserAccess: this.config.browserAccess,
@@ -2550,6 +2565,7 @@ export class CfHarnessEngine {
         ? { runResearch: this.#researchRunner }
         : {}),
       researchRuns: this.#runState.researchRuns ?? [],
+      researchGoal: this.#runState.researchGoal,
       ...(researchTaskCfcLabel !== undefined ? { researchTaskCfcLabel } : {}),
       patternRefs: this.#runState.patternRefs ?? [],
       recordResearchRun: (run: HarnessResearchRunSummary) => {

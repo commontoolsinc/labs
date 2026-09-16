@@ -14,6 +14,13 @@ a record: archive it to `docs/history/plans/` following the procedure in
   publishing existing database and companion-cell references once per Loom
   environment, with a staged person-inbox migration and compiled integration
   acceptance gates.
+- [Revising a piece's source from an agent session](piece-revision-from-a-session.md)
+  covers the two `pattern-author` tools that revise a piece someone already
+  has — a handle-addressed read of its current source, and a direct edit
+  through the runtime's own compatibility check and setup transaction — what
+  they lean on rather than rebuild, and the two questions left open: whether
+  revising is really `run_pattern` with a target, and what to do about an
+  agent retyping a whole pattern for a one-character mistake.
 - [View-scoped client replication](view-scoped-client-replication.md) tracks
   rollout, recovery, and adversarial verification of active-view delivery and
   guarded speculative computation. It separates execution demand from delivery

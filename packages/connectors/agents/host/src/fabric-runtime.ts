@@ -1,4 +1,5 @@
-import { createSession, Identity, isDID } from "@commonfabric/identity";
+import { createSession, Identity } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
   experimentalOptionsForDeployedClient,

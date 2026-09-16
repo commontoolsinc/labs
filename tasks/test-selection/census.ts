@@ -110,6 +110,33 @@ export function standIn(
   };
 }
 
+/**
+ * The unit an entry belongs to in this tree.
+ *
+ * A manifest's `unit` is what its suite said at publication, and a suite
+ * that re-grains its units leaves every entry it published naming a unit
+ * the tree no longer has. Those entries would be read as covering
+ * nothing, and every unit that replaced them as never recorded, so a
+ * corpus whose whole history is present would be charged as new until
+ * the next publication.
+ *
+ * So an entry whose stored unit the tree still holds keeps it, and only
+ * one whose unit has gone is put back through the suite that owns it.
+ * Where the suite cannot place it — its record carries no file, or it
+ * belongs to the suite rather than to any unit — the stored unit stands
+ * and the entry drops out as before, which is what makes this unable to
+ * lose anything that reading the stored value would have kept.
+ */
+function unitNow(
+  suites: ReadonlyMap<string, Suite>,
+  held: ReadonlyMap<string, ReadonlySet<Unit>>,
+  entry: ManifestEntry,
+): Unit {
+  if (held.get(entry.suite)?.has(entry.unit) === true) return entry.unit;
+  const located = suites.get(entry.suite)?.locate({ test: entry.test });
+  return located?.level === "unit" ? located.unit : entry.unit;
+}
+
 /** What this working tree holds, and what has to run whatever it is worth. */
 export interface Census {
   /**
@@ -178,9 +205,17 @@ export function census(
   // repository — so charging it what one test costs would charge a new
   // file a fraction of what running it takes.
   const unitTotal = new Map<string, number>();
+  const held = new Map<string, Set<Unit>>(
+    suites.map((suite) => [suite.id, new Set(suite.units)]),
+  );
+  const suiteById = new Map(suites.map((suite) => [suite.id, suite]));
   for (const entry of manifest?.entries ?? []) {
-    const key = `${entry.suite}\t${entry.unit}`;
-    inUnit.set(key, [...inUnit.get(key) ?? [], entry]);
+    // The entry carries the unit it was placed under, since everything
+    // downstream reads that field rather than the key it was found by.
+    const unit = unitNow(suiteById, held, entry);
+    const key = `${entry.suite}\t${unit}`;
+    const placed = unit === entry.unit ? entry : { ...entry, unit };
+    inUnit.set(key, [...inUnit.get(key) ?? [], placed]);
     unitTotal.set(key, (unitTotal.get(key) ?? 0) + entry.cost);
   }
   const costs = new Map<string, number[]>();

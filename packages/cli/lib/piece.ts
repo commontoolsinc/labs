@@ -12,12 +12,8 @@ import {
   codecOf,
   NULL_LIVE_ENVIRONMENT,
 } from "@commonfabric/data-model/codec-common";
-import {
-  createSession,
-  type Identity,
-  isDID,
-  Session,
-} from "@commonfabric/identity";
+import { createSession, type Identity, Session } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import { collectDataFileNames } from "@commonfabric/js-compiler";
 import { TARGET } from "@commonfabric/js-compiler/typescript";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";

@@ -7,6 +7,7 @@ import {
 import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import { sameAcl } from "@commonfabric/memory/acl";
 import {
   acquireServerExecutionEnabler,
@@ -830,6 +831,13 @@ export interface CfcRuntimeStats {
   dereferenceTracesRecorded: number;
 
   dereferenceTracesMax: number;
+
+  /** Structured refusal details recorded across transaction prepares. */
+  refusalDetailsRecorded: number;
+
+  /** Full consumed-label collections, including sink and host release checks. */
+  consumedLabelWalks: number;
+
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
   cfcDigestInvalidations: number;
@@ -875,6 +883,8 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   flowLabelProbeMemoHits: 0,
   dereferenceTracesRecorded: 0,
   dereferenceTracesMax: 0,
+  refusalDetailsRecorded: 0,
+  consumedLabelWalks: 0,
   cfcPreparedTx: 0,
   cfcPrepareRejects: 0,
   cfcDigestInvalidations: 0,
@@ -950,10 +960,6 @@ type RuntimeSetupOptions = {
   reapplyStoredSetup?: boolean;
   prepareForResume?: boolean;
 };
-
-function isMemorySpaceDID(value: string): boolean {
-  return /^did:[^:]+:.+/.test(value);
-}
 
 /**
  * Helper for `Runtime.getImmutableCell()`, which tells the storage preflight
@@ -2312,6 +2318,12 @@ export class Runtime {
       onPreparedTx: () => {
         this.#cfcStats.cfcPreparedTx += 1;
       },
+      onRefusalDetail: () => {
+        this.#cfcStats.refusalDetailsRecorded += 1;
+      },
+      onConsumedLabelWalk: () => {
+        this.#cfcStats.consumedLabelWalks += 1;
+      },
       onPrepareReject: (refusal) => {
         this.#cfcStats.cfcPrepareRejects += 1;
         // Every refusal is reported here, terminal or not. The scheduler's
@@ -3616,7 +3628,7 @@ export class Runtime {
    * re-running the handler/action (see RetryImmediately).
    */
   resolveSpaceNameSync(name: string): MemorySpace | undefined {
-    if (isMemorySpaceDID(name)) return name as MemorySpace;
+    if (isDID(name)) return name;
     return this.#spaceNameToDid.get(name);
   }
 
@@ -3696,7 +3708,7 @@ export class Runtime {
     if (options?.genesisAcl !== undefined) {
       // A document the resolution cannot honor is refused, never dropped:
       // the caller asked for a space born closed.
-      if (isMemorySpaceDID(name)) {
+      if (isDID(name)) {
         throw new Error(
           `space-name resolution for the DID ${name} cannot register a ` +
             "genesisAcl: the runtime derives no space key for a bare DID, " +

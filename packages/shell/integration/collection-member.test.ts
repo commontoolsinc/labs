@@ -11,9 +11,17 @@ import { expect } from "@std/expect";
 import { join, resolve } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
-import { env, waitForCondition } from "@commonfabric/integration";
+import { toCompactDebugString } from "@commonfabric/data-model";
+import type { Identity } from "@commonfabric/identity";
+import {
+  env,
+  type ProbeApi,
+  waitForCondition,
+} from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { writeTempIdentity } from "@commonfabric/integration/temp-identity";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import { PiecesController } from "@commonfabric/piece/ops";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 
 import "../src/globals.ts";
@@ -89,18 +97,86 @@ async function fileBoard(identityPath: string): Promise<string> {
  * what tells a resolver it names a collection.
  */
 async function fileBoardWithMembers(
+  identity: Identity,
   identityPath: string,
   slug: string,
   titles: readonly string[],
 ): Promise<string> {
+  if (titles.length === 0) {
+    throw new Error("A collection fixture needs at least one member.");
+  }
   const boardId = await fileBoard(identityPath);
-  for (const title of titles) {
+  for (const [index, title] of titles.entries()) {
+    // Under server execution the detached call acknowledges the event append,
+    // not the served handler's result. Observe each publication before
+    // allocating the next name so the sequence cannot race the previous one.
     await cf(
       identityPath,
-      ["piece", "call", "--cell", `/of:${boardId}`],
+      ["piece", "call", "--cell", `/of:${boardId}`, "--no-wait"],
       ["addItem", JSON.stringify({ title, agentName: "shell integration" })],
     );
+
+    const pieces = await PiecesController.initialize({
+      apiUrl: new URL(API_URL),
+      identity,
+      space: SPACE_NAME,
+    });
+    try {
+      const board = await pieces.get(boardId, true);
+      const memberName = String(index + 1);
+      const memberSlot = (await board.result.getCell())
+        .key("names")
+        .key(memberName);
+      // The namespace deliberately keeps an unread link. Wait for that stored
+      // slot first, then open its piece to derive the member's own result.
+      await memberSlot.pull();
+      await waitForCellValue(
+        pieces.runtime,
+        memberSlot,
+        () => memberSlot.getRaw({ lastNode: "value" }) !== undefined,
+        { stuckLabel: "collection member link publication" },
+      );
+      // Server execution derives only fields a subscription's schema reaches,
+      // so this readiness read demands the two fields it checks.
+      const member = await pieces.getPieceCell(memberSlot, true, {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          shortName: { type: "string" },
+        },
+        required: ["title", "shortName"],
+      });
+      await member.pull();
+      let observed: unknown;
+      try {
+        await waitForCellValue<{ title?: string; shortName?: string }>(
+          pieces.runtime,
+          member,
+          (value) => {
+            observed = value === undefined
+              ? undefined
+              : { title: value.title, shortName: value.shortName };
+            return value?.title === title && value?.shortName === memberName;
+          },
+          { stuckLabel: "collection member result publication" },
+        );
+      } catch (cause) {
+        throw new Error(
+          `Collection member publication failed: ${
+            toCompactDebugString({
+              expected: { title, shortName: memberName },
+              observed,
+              member: member.getAsNormalizedFullLink(),
+            })
+          }`,
+          { cause },
+        );
+      }
+    } finally {
+      await pieces.dispose();
+    }
   }
+
   await cf(identityPath, [
     "piece",
     "set-slug",
@@ -108,6 +184,16 @@ async function fileBoardWithMembers(
     `/of:${boardId}/names`,
   ]);
   return boardId;
+}
+
+/** Whether the rendered view shows one member with the expected name. */
+function memberNameIs(
+  probe: ProbeApi,
+  expected: string,
+): boolean {
+  const badges = probe.collect("[data-member-name]");
+  return badges.length === 1 &&
+    probe.deepText(badges[0]).trim() === expected;
 }
 
 describe("shell collection members", () => {
@@ -125,7 +211,7 @@ describe("shell collection members", () => {
       });
       const { identity, path: identityPath } = tempIdentity;
       const slug = `members-${crypto.randomUUID()}`;
-      await fileBoardWithMembers(identityPath, slug, [
+      await fileBoardWithMembers(identity, identityPath, slug, [
         "Glaze recipes",
         "Oven schedule",
       ]);
@@ -138,10 +224,13 @@ describe("shell collection members", () => {
 
       // One badge, reading the board's name for this member. The board
       // renders one per item, so a page carrying exactly one is the member's.
-      await waitForCondition(shell.page(), (probe) => {
-        const badges = probe.collect("[data-member-name]");
-        return badges.length === 1 && probe.deepText(badges[0]).trim() === "2";
+      await waitForCondition(shell.page(), memberNameIs, {
+        args: ["2"],
       });
+      const pathname = await shell.page().evaluate(() =>
+        globalThis.location.pathname
+      );
+      expect(pathname).toBe(`/${SPACE_NAME}/${slug}/2`);
       // The tab names the piece the shell opened. Member 2 is the second item
       // filed, and the board would name itself for its item count instead.
       await waitForCondition(
@@ -156,7 +245,7 @@ describe("shell collection members", () => {
       });
       const { identity, path: identityPath } = tempIdentity;
       const slug = `portable-${crypto.randomUUID()}`;
-      await fileBoardWithMembers(identityPath, slug, [
+      await fileBoardWithMembers(identity, identityPath, slug, [
         "Glaze recipes",
         "Oven schedule",
       ]);
@@ -172,9 +261,8 @@ describe("shell collection members", () => {
         identity,
       });
 
-      await waitForCondition(shell.page(), (probe) => {
-        const badges = probe.collect("[data-member-name]");
-        return badges.length === 1 && probe.deepText(badges[0]).trim() === "2";
+      await waitForCondition(shell.page(), memberNameIs, {
+        args: ["2"],
       });
       // The mark says which segment is the space and is no part of it, so the
       // page the shell settles on is the one it would have written itself.
@@ -197,7 +285,9 @@ describe("shell collection members", () => {
       });
       const { identity, path: identityPath } = tempIdentity;
       const slug = `missing-${crypto.randomUUID()}`;
-      await fileBoardWithMembers(identityPath, slug, ["Glaze recipes"]);
+      await fileBoardWithMembers(identity, identityPath, slug, [
+        "Glaze recipes",
+      ]);
 
       await shell.goto({
         frontendUrl: FRONTEND_URL,
@@ -223,7 +313,9 @@ describe("shell collection members", () => {
       });
       const { identity, path: identityPath } = tempIdentity;
       const slug = `nested-${crypto.randomUUID()}`;
-      await fileBoardWithMembers(identityPath, slug, ["Glaze recipes"]);
+      await fileBoardWithMembers(identity, identityPath, slug, [
+        "Glaze recipes",
+      ]);
 
       // Member 1 is held, so what refuses this page is its address rather
       // than the collection. The page is served at the longer address, and

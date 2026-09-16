@@ -509,6 +509,95 @@ The [metadata-width measurement](../history/development/performance/2026-09-14-c
 uses the same fixture to compare per-document validation and indexed path
 lookup. Index construction remains inside the collector timer.
 
+## Prepared CFC digests
+
+`packages/runner/test/cfc-prepared-digest.bench.ts` records 5, 50, or 200
+write policy inputs with 1 or 10 KiB payloads, plus 300 read activities and
+dereference traces. Each sample uses a fresh emulated-storage transaction.
+Construction, initial hashing for warm cases, validation, and abort are outside
+the timed interval. Policy names are distinct, so sorting does not repeatedly
+hash large records to break name ties.
+
+The five series measure the first digest, an unchanged second digest, a
+second digest after one additional write, direct hashing over warmed records
+in a fresh input wrapper, and preparation plus its unchanged recheck in one
+interval. The direct-hashing series bypasses the transaction epoch memo; the
+combined series measures the normal two-request shape. Diagnostics on stderr
+report the immutable-object hash-cache hits during the measured interval; an
+epoch-memo hit performs no hashing. Stdout remains the benchmark JSON report.
+
+```sh
+deno bench --no-lock -A --json packages/runner/test/cfc-prepared-digest.bench.ts
+```
+
+Prepared digests are process-local equality tokens over canonical activity.
+The transaction reuses the complete token until its activity epoch changes;
+decision-input recorders and write paths advance that epoch. A changed snapshot
+is canonicalized and hashed in full. The token belongs to one transaction: a
+fresh transaction prepares independently even when its effective CFC label is
+unchanged.
+
+Compare cache designs over preparation plus recheck as well as individual
+calls: a cold setup cost must be recovered within the requests a transaction
+actually makes. Include repeated executions of the same reactive nodes with
+fresh transaction records. Stable labels can accompany changed write values
+and newly allocated records, so neither label equality nor runtime uptime
+establishes that an identity-keyed cache is warm. For retention comparisons,
+probe live keys and discarded graphs separately across garbage collection.
+
+## CFC path index queries
+
+`packages/runner/test/cfc-path-index.bench.ts` measures `PathPrefixIndex` and
+`ConsumedLabelIndex` over 50, 250, and 1,000 sources with wildcard fractions
+of 0, 0.05, and 0.3 (rounded down to a whole source count). Templates end in
+`"*"` at segment depths 2–5. Concrete queries have 2–7 segments and mix hits,
+misses, and ancestor reads. The same corpus checks both indexes against
+`isPrefix` in unit tests, including label-map encounter order.
+
+Each timed sample performs 8,192 queries after explicit warmup. Divide the
+reported nanoseconds by 8,192 for per-query cost. Index construction and
+scan-equivalence checks stay outside timing. The fixture spreads templates
+across distinct container prefixes; wildcard tails sharing one prefix still
+require a scan of that bucket, and overlap queries returning many entries
+still pay for collecting and ordering them. The wildcard-query scan fallback
+and index construction are measured separately in
+`packages/runner/test/cfc-dereference-coverage.bench.ts`.
+
+## CFC flow-join lookup
+
+`packages/runner/test/cfc-flow-join.bench.ts` measures one `deriveFlowJoin`
+pass at every combination of 100, 300, and 1,000 label entries and 50, 200,
+and 800 read activities. Concrete paths have three to six segments. Each
+map also carries the three value, shape, and followRef wildcard templates
+minted for a collection container. The reads overlap concrete entries and
+those templates; the benchmark asserts both confidentiality contributions.
+
+Runtime construction, seeding, journaling, assertions, and aborts stay outside
+timing. Each sample uses a fresh transaction and includes the pass's metadata
+resolution and index construction. Entry count and read count vary independently
+so the grid separates per-document preparation from per-read lookup. This
+synthetic pass benchmark does not measure mapped rendering or a browser.
+
+The index returns matching entries in label-map order. Concrete queries cost
+path traversal plus wildcard candidates under matching container prefixes and
+the entries returned. Recursive root reads and wildcard queries can still
+consume the whole map; the grid measures narrow concrete reads.
+
+## CFC authoritative label coverage
+
+`packages/runner/test/cfc-authoritative-cover.bench.ts` compares a plain scan
+with the prefix-only `ConsumedLabelIndex` lookup used to protect carried link
+labels from longest-prefix shadowing. It uses the path-index source grid and
+8,192 concrete queries per sample. Each query selects all deepest matching
+entries; wildcard queries are covered by unit tests and use the scan fallback.
+
+The timer includes index construction and candidate selection. Divide the
+reported nanoseconds by 8,192 for amortized per-query cost. Label merging,
+fixture creation, and scan-equivalence assertions are outside this benchmark;
+persistence tests verify the final labels. Construction is paid once per link
+write that has a usable carried entry, so the amortized result depends on the
+number of queries per write.
+
 ## Scoped snapshot memo reuse
 
 `packages/runner/test/snapshot-memo.bench.ts` measures repeated CFC label-view
@@ -785,3 +874,58 @@ Existing persisted and wire key formats keep their protocol-defined encoding.
 The collector and scheduler effects are tracked by
 `packages/runner/test/cfc-consumed-source-dedup.bench.ts` and
 `packages/runner/test/scheduler-invalid-causes.bench.ts` respectively.
+
+## Labeled pattern-test mapped render
+
+`packages/cli/test/fixtures/cfc-flow-labels/mapped-render.test.tsx` is the shared
+headless regression fixture for CFC preparation over mapped SQLite rows. It
+seeds 150 rows with a confidential title column, queries 11, 50, and 150 rows,
+and demands each full mapped VDOM through the worker reconciler. It needs no
+connector, browser, or external store. After each render, a labeled-copy action
+reads every title and writes plain row values into an ordinary writable store,
+exercising writer-fit preparation separately from generated view outputs.
+The file stays identical between arms;
+only the runtime flags change:
+
+```sh
+# Arm A: enforcement disabled, flow labels off.
+deno task cf test packages/cli/test/fixtures/cfc-flow-labels/mapped-render.test.tsx --cfc-enforcement-mode disabled --cfc-flow-labels off --verbose --stats-threshold 0 --no-idempotency-check
+
+# Arm B: shell enforcement and flow-label posture.
+deno task cf test packages/cli/test/fixtures/cfc-flow-labels/mapped-render.test.tsx --cfc-shell-posture --verbose --stats-threshold 0 --no-idempotency-check
+```
+
+The output names the resolved posture and each N. `render_1`, `render_2`, and
+`render_3` correspond to N=11, 50, and 150. Their intervals exclude compilation,
+seeding, and the preceding query assertion's row materialization. They include
+mounting and removing the worker reconciler's demand and settling its synchronous
+mapped work. There is no DOM or browser paint. The assertions verify row counts;
+the CLI's regression test verifies both postures and nonzero arm-B flow/digest
+spans, without gating elapsed time. `action_3`, `action_5`, and `action_7` are
+the corresponding labeled copies. Their following assertions verify the copied
+row counts. A separate storage test reads the stored source and destination
+labels with enforcement fixed to `enforce-explicit`, checking that column labels
+survive the query with flow labels off and that only `persist` propagates them
+to the copy. Zero counts remain visible for operations a
+phase does not call.
+
+For comparisons, alternate A/B for at least five rounds on the same machine and
+revision, preserve complete output, and report the size, posture, machine,
+Deno version, and idempotency setting with each number. Compare matching render
+steps across arms and revisions, recording distributions as well as minima.
+Ordinary mapping and reconciliation scale with rows in arm A too; the control
+is the absence of flow-derivation work, not a promise of constant render time.
+No elapsed-time threshold belongs in the functional test.
+
+Add `--timing-measures-out /tmp/mapped-B.json` (a distinct path per run) for
+unrounded spans and `cf:runTestPattern/step/render_N/materialize#...` boundaries.
+Use the aggregation and attribution tools in
+[profiling](debugging/profiling.md) to locate the CFC work inside each interval.
+Nested timing totals overlap: `prepareCfc` includes its derivation and initial
+digest, while a commit recheck can hash again outside preparation. The spans
+measure elapsed time, not CPU attribution.
+
+This `cf test` probe runs on demand, outside the scheduled `deno bench` suite.
+Keep its source and step order stable across the optimizations it measures.
+The [CLI guide](../../packages/cli/README.md#pattern-test-cfc-posture-and-labeled-fixtures)
+documents the dials, labeled table declaration, and reporting boundaries.

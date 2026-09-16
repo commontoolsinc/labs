@@ -31,6 +31,7 @@
  * and routes are in [`README.md`](README.md); the operator procedure is in
  * [`../docs/WEAVER.md`](../docs/WEAVER.md).
  */
+import { isDID } from "@commonfabric/identity/did";
 import { parseArgs } from "@std/cli/parse-args";
 import { join } from "@std/path";
 
@@ -96,6 +97,7 @@ export const LAUNCHER_OWNED_VARIABLES = [
   "CF_HARNESS_CONNECTOR_GRANTS",
   "CF_HARNESS_PATTERN_INDEX_URL",
   "CF_HARNESS_SKILLS_REGISTRY_URL",
+  "CF_HARNESS_ALLOW_SKILL_SCRIPTS",
   "CF_HARNESS_SPACE_DB",
   "MEMORY_DIR",
 ] as const;
@@ -183,6 +185,8 @@ export interface ConsoleLaunchOptions {
   skillsRegistryUrl?: string;
   noPatternIndex?: boolean;
   noSkillsRegistry?: boolean;
+  allowSkillScripts?: boolean;
+  inheritedAllowSkillScripts?: boolean;
   cfcResultDir?: string;
   cfcInvocationContextDir?: string;
   posture?: string;
@@ -356,7 +360,7 @@ export const resolveConsoleLaunchPlan = (
     "--fabric-api-url",
     "CF_HARNESS_FABRIC_API_URL",
   );
-  if (space.value.startsWith("did:")) {
+  if (isDID(space.value)) {
     throw new Error(
       `the space must be a name rather than a DID: \`assign_slug\` composes ` +
         `a piece's URL from the name, and offers none for ${space.value}`,
@@ -477,6 +481,17 @@ export const resolveConsoleLaunchPlan = (
   const registrationSourceName =
     `\`${RUNSC_CFC_RUNTIME}\` as \`docker info\` reports it`;
 
+  // The operator's one decision about skill scripts. Nothing about the fabric
+  // implies it, so it is off unless someone says otherwise, and the printout
+  // says which of the two ways they said it.
+  const allowSkillScripts = options.allowSkillScripts === true ||
+    options.inheritedAllowSkillScripts === true;
+  const allowSkillScriptsSource = options.allowSkillScripts === true
+    ? NAMED
+    : options.inheritedAllowSkillScripts === true
+    ? "`CF_HARNESS_ALLOW_SKILL_SCRIPTS`, inherited"
+    : LAUNCHER_DEFAULT;
+
   const resolved: ResolvedValue[] = [
     ...(instance === undefined ? [] : [{
       name: "instance",
@@ -548,6 +563,11 @@ export const resolveConsoleLaunchPlan = (
         ? NAMED
         : deploymentDefault,
     },
+    {
+      name: "skill scripts",
+      value: allowSkillScripts ? "run in the sandbox" : "not run",
+      source: allowSkillScriptsSource,
+    },
     ...connectorResolved,
     {
       name: "proxy",
@@ -577,6 +597,7 @@ export const resolveConsoleLaunchPlan = (
     ...(skillsRegistryUrl !== undefined
       ? { CF_HARNESS_SKILLS_REGISTRY_URL: skillsRegistryUrl }
       : {}),
+    ...(allowSkillScripts ? { CF_HARNESS_ALLOW_SKILL_SCRIPTS: "1" } : {}),
   };
 
   return { environment, resolved };
@@ -758,7 +779,11 @@ export const prepareConsoleLaunch = async (
       "fabric-cfc-flow-labels",
       "fabric-cfc-enforcement-mode",
     ],
-    boolean: ["no-pattern-index", "no-skills-registry"],
+    boolean: [
+      "no-pattern-index",
+      "no-skills-registry",
+      "allow-skill-scripts",
+    ],
     "--": true,
   });
   // A flag present but empty is a value someone typed that did not survive
@@ -883,6 +908,9 @@ export const prepareConsoleLaunch = async (
       : {}),
     noPatternIndex: parsed["no-pattern-index"] === true,
     noSkillsRegistry: parsed["no-skills-registry"] === true,
+    allowSkillScripts: parsed["allow-skill-scripts"] === true,
+    inheritedAllowSkillScripts:
+      nonEmpty(env.CF_HARNESS_ALLOW_SKILL_SCRIPTS) === "1",
     ...(flag("cfc-result-dir") !== undefined
       ? { cfcResultDir: flag("cfc-result-dir")! }
       : {}),
@@ -900,7 +928,27 @@ export const prepareConsoleLaunch = async (
       : {}),
   });
 
-  return { plan, consoleArgs: (parsed["--"] ?? []).map(String) };
+  // The launch prints what it resolved, and this is one of the values it
+  // resolves, so a console argument setting it again would leave that report
+  // describing a console that does something else. Every other server flag
+  // still passes through.
+  const consoleArgs = (parsed["--"] ?? []).map(String);
+  // Both spellings: a boolean flag still parses `--flag=true` and `--flag=1`,
+  // so an exact-token check leaves the enabling form through and the printed
+  // report then describes a console that does something else.
+  const passedThrough = consoleArgs.find((argument) =>
+    argument === "--allow-skill-scripts" ||
+    argument.startsWith("--allow-skill-scripts=")
+  );
+  if (passedThrough !== undefined) {
+    throw new Error(
+      `\`${passedThrough}\` cannot be passed through to the console: ` +
+        `\`--allow-skill-scripts\` is one of the values this launch ` +
+        `resolves and prints, so name it before \`--\` instead`,
+    );
+  }
+
+  return { plan, consoleArgs };
 };
 
 /**

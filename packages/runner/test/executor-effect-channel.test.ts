@@ -586,9 +586,11 @@ describe("Phase 4 client-effect channel", () => {
     // was ever recorded this life — the optimistic record and the
     // authoritative intent shared it (a divergent pair records two).
     // UNCONDITIONAL (independent review NOTE-e): the count witnesses
-    // convergence even when the poll never sampled the transient
+    // nonce AGREEMENT even when the poll never sampled the transient
     // intent; the sampled equality below is the opportunistic
-    // stronger half.
+    // stronger half. It does not witness a single enactment — the
+    // record is a set, so two enactments of one nonce leave the count
+    // at one. The navigation count below is what holds that.
     expect(clientRuntime.effectsChannel?.enactedNonceCount).toBe(1);
     if (sampledNonce !== undefined) {
       expect(clientRuntime.effectsChannel?.hasEnacted(sampledNonce)).toBe(

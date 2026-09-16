@@ -18,15 +18,17 @@ import {
 import {
   FabricInstance,
   FabricPrimitive,
-  type FabricValue,
   type FabricValueLayer,
+  type FabricValuePlusLayer,
 } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
+import { type PlusTypePredicate } from "./interface.ts";
 import {
   type ConvertibleJsValueTag,
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
+  type FabricValuePlusTag,
   type FabricValueTag,
   VALUE_TAGS,
 } from "./tags.ts";
@@ -70,14 +72,23 @@ export function tagOfFabricPrimitiveElseNull(
 }
 
 /**
- * Maps a presumed valid `FabricValue` or `FabricValueLayer` to its tag, based
- * on a shallow evaluation of its type. This `throw`s if it determines that the
- * given value cannot possibly be valid.
+ * Maps a presumed valid `FabricValue`, `FabricValueLayer`, or corresponding
+ * `*Plus` value to its tag, based on a shallow evaluation of its type. This
+ * `throw`s if it determines that the given value cannot possibly be valid. For
+ * `*Plus` values, a corresponding type predicate must be passed as the second
+ * argument, and that function is used to make a determination if the value
+ * would otherwise be considered invalid.
  */
 export function tagOfFabricValue(value: FabricValueLayer): FabricValueTag;
-export function tagOfFabricValue(value: FabricValue): FabricValueTag;
-export function tagOfFabricValue(value: FabricValueLayer): FabricValueTag {
-  const result = tagOfFabricValueElseNull(value);
+export function tagOfFabricValue<PlusType = never>(
+  value: NoInfer<FabricValuePlusLayer<PlusType>>,
+  isPlusType: PlusTypePredicate<PlusType>,
+): FabricValuePlusTag;
+export function tagOfFabricValue<PlusType = never>(
+  value: FabricValuePlusLayer<PlusType>,
+  isPlusType?: PlusTypePredicate<PlusType> | undefined,
+): FabricValuePlusTag {
+  const result = tagOfFabricValueElseNull(value, isPlusType);
 
   if (result !== null) {
     return result;
@@ -88,23 +99,28 @@ export function tagOfFabricValue(value: FabricValueLayer): FabricValueTag {
 }
 
 /**
- * Maps a presumed valid `FabricValue` or `FabricValueLayer` to its tag, based
- * on a shallow evaluation of its type. This returns `null` if it determines
- * that the given value cannot possibly be valid. To be clear, this function
- * does not go out of its way to make a validity determination.
+ * Maps a presumed valid `FabricValue`, `FabricValueLayer`, or corresponding
+ * `*Plus` value to its tag, based on a shallow evaluation of its type. This
+ * returns `null` if it determines that the given value cannot possibly be
+ * valid. For `*Plus` values, a corresponding type predicate must be passed as
+ * the second argument, and that function is used to make a determination if the
+ * value would otherwise be considered invalid.
  */
 export function tagOfFabricValueElseNull(
   value: FabricValueLayer,
-): FabricValueTag;
-export function tagOfFabricValueElseNull(value: FabricValue): FabricValueTag;
-export function tagOfFabricValueElseNull(
-  value: FabricValue | FabricValueLayer,
-): FabricValueTag | null {
+): FabricValueTag | null;
+export function tagOfFabricValueElseNull<PlusType = never>(
+  value: NoInfer<FabricValuePlusLayer<PlusType>>,
+  isPlusType: PlusTypePredicate<PlusType> | undefined,
+): FabricValuePlusTag | null;
+export function tagOfFabricValueElseNull<PlusType = never>(
+  value: FabricValuePlusLayer<PlusType>,
+  isPlusType?: PlusTypePredicate<PlusType> | undefined,
+): FabricValuePlusTag | null {
   const jsType = typeOfIncludingNull(value);
 
   if (jsType === VALUE_TAGS.function) {
-    // A function is no `FabricValue`, so its tag is not one this returns.
-    return null;
+    return isPlusType?.(value) ? VALUE_TAGS.PlusType : null;
   } else if (jsType !== "object") {
     return jsType;
   }
@@ -114,9 +130,19 @@ export function tagOfFabricValueElseNull(
   } else if (isPlainObject(value)) {
     return VALUE_TAGS.Object;
   } else if (value instanceof FabricPrimitive) {
+    // Note: If `value` turns out to be an invalid `FabricPrimitive`, this will
+    // return `null` instead of falling through to an `isPlusType()` check. The
+    // reasoning here is that the full class hierarchy under `FabricPrimitive`
+    // is meant to be controlled by the `data-model`, and so any invalid
+    // `FabricPrimitive` is de facto a bug in the `data-model`, and that makes
+    // it _more correct_ to return `null` here compared to blithely calling
+    // through to an `isPlusType()` predicate which should never have been
+    // called with such a value.
     return tagOfFabricPrimitiveElseNull(value);
   } else if (value instanceof FabricInstance) {
     return VALUE_TAGS.FabricInstance;
+  } else if (isPlusType?.(value)) {
+    return VALUE_TAGS.PlusType;
   } else {
     return null;
   }

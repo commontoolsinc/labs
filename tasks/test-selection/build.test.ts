@@ -25,7 +25,11 @@ import {
   recordSurface,
   reportFromText,
 } from "./build.ts";
-import { parseManifest, serializeManifest } from "./manifest.ts";
+import {
+  MANIFEST_SCHEMA_VERSION,
+  parseManifest,
+  serializeManifest,
+} from "./manifest.ts";
 import type { Suite } from "../test-topology/suite.ts";
 import {
   costSeconds,
@@ -93,6 +97,8 @@ function stored(
 }
 
 const KEY = testIdentityKey({ k: "unit", s: "memory", n: "space > writes" });
+/** The file a record of that identity names. */
+const UNIT = "packages/memory/test/space.test.ts";
 const CI_NAME = "labs/test-records/submissions/ci/v1/2026/08/20/run-1-a.ndjson";
 const LOCAL_NAME =
   "labs/test-records/submissions/local/ianh/v1/2026/08/20/01K3-branch.ndjson";
@@ -318,6 +324,69 @@ describe("build", () => {
       expect([...read.surfaces.keys()]).toEqual([KEY]);
       expect([...read.durations.keys()]).toEqual([KEY]);
     });
+
+    it("keeps a lane's measurements of itself for the cost model", () => {
+      // Left out of everything scored, and not discarded either: what
+      // the packer charges a lane beyond its tests is fitted from them.
+      // One group is one lane's artifact, so a batch's three
+      // measurements are here together.
+      const read = readReport(
+        stored(CI_NAME, context(), [
+          record(),
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+            durationMs: 14_800,
+          }),
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+            durationMs: 92_000,
+          }),
+          record({
+            test: {
+              k: "gate",
+              s: "ci",
+              n: "ci-lane planned batch workspace-unit",
+            },
+            durationMs: 40_000,
+          }),
+          record({
+            test: {
+              k: "gate",
+              s: "ci",
+              n: "ci-lane units batch workspace-unit",
+            },
+            durationMs: 17,
+          }),
+        ]),
+        NO_ALIASES,
+      );
+      expect(read.lanes).toEqual([
+        { day: "2026-08-20", capability: "fuse", seconds: 14.8 },
+        {
+          day: "2026-08-20",
+          suite: "workspace-unit",
+          planned: 40,
+          spent: 92,
+          units: 17,
+        },
+      ]);
+    });
+
+    it("keeps no lane measurement from a group nothing may read", () => {
+      const forked = context();
+      forked.ci!.fork = true;
+      expect(
+        readReport(
+          stored(CI_NAME, forked, [
+            record({
+              test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+              durationMs: 14_800,
+            }),
+          ]),
+          NO_ALIASES,
+        ).lanes,
+      ).toEqual([]);
+    });
   });
 
   describe("the fold", () => {
@@ -354,6 +423,87 @@ describe("build", () => {
       );
       for (const report of reports) streamed.add([report]);
       expect(streamed.finish().states).toEqual(whole.states);
+    });
+
+    it("gives every identity the aggregate scores a surface", () => {
+      // The publisher keeps the identities it can place, and it places
+      // from these. A fold that gathered them from its own reads alone
+      // would hand it the identities that ran inside its window and
+      // nothing else, so every identity that did not run inside it would
+      // leave the manifest while its scores stayed in the aggregate.
+      const carried = emptyAggregate("2026-08-20");
+      carried.states[KEY] = emptyState();
+      carried.files[KEY] = UNIT;
+      const surfaces = new Fold(carried, NO_ALIASES, "2026-08-20")
+        .finish().surfaces;
+      expect(surfaces.get(KEY)).toEqual({
+        suite: "unit:memory",
+        unit: UNIT,
+        fromFile: true,
+      });
+    });
+
+    it("reads an identity with no recorded file as its own unit", () => {
+      // A suite whose units are not files places an identity by its
+      // recorded name, and an identity whose records never named a file
+      // has nothing else to be placed by either.
+      const carried = emptyAggregate("2026-08-20");
+      carried.states[KEY] = emptyState();
+      const surfaces = new Fold(carried, NO_ALIASES, "2026-08-20")
+        .finish().surfaces;
+      expect(surfaces.get(KEY)).toEqual({
+        suite: "unit:memory",
+        unit: "space > writes",
+        fromFile: false,
+      });
+    });
+
+    it("writes the file a record named into the aggregate", () => {
+      const folded = foldReports(
+        emptyAggregate("2026-08-20"),
+        [stored(CI_NAME, context(), [record({ file: UNIT })])],
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      expect(folded.aggregate.files).toEqual({ [KEY]: UNIT });
+    });
+
+    it("gives no surface to a state key that names no identity", () => {
+      // The aggregate is stored input like every other object in the
+      // store, so a key that cannot be read back into a test is passed
+      // over rather than thrown on. The state stays where it is and
+      // nothing downstream is built from it: the manifest is built from
+      // the identities the surfaces place.
+      const carried = emptyAggregate("2026-08-20");
+      carried.states["not an identity key"] = emptyState();
+      carried.states[KEY] = emptyState();
+      const folded = new Fold(carried, NO_ALIASES, "2026-08-20").finish();
+      expect(folded.states.has("not an identity key")).toBe(true);
+      expect(folded.surfaces.has("not an identity key")).toBe(false);
+      expect(folded.surfaces.has(KEY)).toBe(true);
+    });
+
+    it("drops a carried file for an identity it holds no state for", () => {
+      // The files are seeded from the states and written back from the
+      // surfaces those seeded, so the map cannot name an identity the
+      // aggregate does not score. Without that it would only ever grow:
+      // nothing else removes an entry from it.
+      const carried = emptyAggregate("2026-08-20");
+      carried.files[KEY] = UNIT;
+      const folded = new Fold(carried, NO_ALIASES, "2026-08-20").finish();
+      expect(folded.surfaces.has(KEY)).toBe(false);
+      expect(folded.aggregate.files).toEqual({});
+    });
+
+    it("keeps a carried file a later record does not name", () => {
+      // A record with no file says what an unmapped record can say, and
+      // the file an earlier one named is the better answer.
+      const carried = emptyAggregate("2026-08-20");
+      carried.states[KEY] = emptyState();
+      carried.files[KEY] = UNIT;
+      const fold = new Fold(carried, NO_ALIASES, "2026-08-20");
+      fold.add([stored(CI_NAME, context(), [record()])]);
+      expect(fold.finish().aggregate.files).toEqual({ [KEY]: UNIT });
     });
 
     it("does not fold a day it took from a rollup", () => {
@@ -485,10 +635,14 @@ describe("build", () => {
       });
       aggregate.states[measurement] = emptyState();
       aggregate.states[KEY] = emptyState();
+      aggregate.files[measurement] = "tasks/ci-lane.ts";
 
-      const states = new Fold(aggregate, NO_ALIASES, "2026-08-20")
-        .finish().states;
+      const folded = new Fold(aggregate, NO_ALIASES, "2026-08-20").finish();
+      const states = folded.states;
       expect(states.has(measurement)).toBe(false);
+      // The file goes with the state, so the aggregate does not carry
+      // one for an identity nothing scores.
+      expect(folded.aggregate.files).toEqual({});
       // The test beside it survives, so this drains the measurements
       // rather than the aggregate.
       expect(states.has(KEY)).toBe(true);
@@ -510,14 +664,25 @@ describe("build", () => {
       expect(parseAggregate(JSON.stringify(aggregate))).toEqual(aggregate);
     });
 
-    it("carries what could not be placed into the next run", () => {
-      // A run compares what it cannot place against what the previous one
-      // could not, which is what tells an identity waiting for a record
-      // that places it from a surface whose records never carry one.
+    it("carries the file each identity's records named", () => {
+      // Which identities a manifest holds is decided from these, so a
+      // run that lost them would publish only what ran inside its own
+      // window.
       const aggregate = emptyAggregate("2026-08-20");
-      aggregate.unclaimed = [KEY];
-      expect(parseAggregate(JSON.stringify(aggregate))?.unclaimed)
-        .toEqual([KEY]);
+      aggregate.files[KEY] = UNIT;
+      expect(parseAggregate(JSON.stringify(aggregate))?.files)
+        .toEqual({ [KEY]: UNIT });
+    });
+
+    it("reads an aggregate written before the files as holding none", () => {
+      // Every identity in it is then read as its own invocation unit
+      // until one of its records names a file again.
+      const older = { ...emptyAggregate("2026-08-20") } as Record<
+        string,
+        unknown
+      >;
+      delete older.files;
+      expect(parseAggregate(JSON.stringify(older))?.files).toEqual({});
     });
 
     it("gives back the cost a day carrying a percentile was giving", () => {
@@ -533,27 +698,92 @@ describe("build", () => {
       expect(costSeconds(parsed.states[KEY]!, "2026-08-20")).toBe(4);
     });
 
-    it("reads a malformed unplaced list as nothing to compare against", () => {
-      // Nothing in the fold reads this list, so an aggregate carrying
-      // something else in its place is read as holding no list rather
-      // than refused outright.
+    it("carries what lanes measured into the next run", () => {
+      // The fit reads a week of them, and a publisher run folds a few
+      // hours of objects, so they survive the aggregate rather than
+      // being read again each time.
+      const aggregate = emptyAggregate("2026-08-20");
+      aggregate.lanes = [
+        { day: "2026-08-20", capability: "fuse", seconds: 14.8 },
+        {
+          day: "2026-08-20",
+          suite: "runner-unit",
+          planned: 10,
+          spent: 30,
+          units: 4,
+        },
+      ];
+      expect(parseAggregate(JSON.stringify(aggregate))?.lanes)
+        .toEqual(aggregate.lanes);
+    });
+
+    it("drops a stored lane measurement it cannot read", () => {
+      // Each one stands alone, so one that will not read is dropped by
+      // itself rather than taking a week of measurements with it. The
+      // fit reads all three of a batch's figures as numbers, so one
+      // short of them says nothing it can use, and a stored `Infinity`
+      // or `NaN` arrives here as `null`.
       const older = { ...emptyAggregate("2026-08-20") } as Record<
         string,
         unknown
       >;
-      older.unclaimed = [7];
-      expect(parseAggregate(JSON.stringify(older))?.unclaimed).toBeUndefined();
+      older.lanes = [
+        { day: "2026-08-20", capability: "fuse", seconds: "a while" },
+        { day: "2026-08-20", suite: "runner-unit", planned: 10, units: 4 },
+        {
+          day: "2026-08-20",
+          suite: "runner-unit",
+          planned: NaN,
+          spent: 30,
+          units: 4,
+        },
+        { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
+        { day: 7, capability: "fuse", seconds: 1 },
+        "fuse took a while",
+        null,
+        { day: "2026-08-20", capability: "fuse", seconds: 2.1 },
+      ];
+      expect(parseAggregate(JSON.stringify(older))?.lanes).toEqual([
+        { day: "2026-08-20", capability: "fuse", seconds: 2.1 },
+      ]);
+    });
+
+    it("reads an aggregate written before lanes measured themselves", () => {
+      expect(
+        parseAggregate(JSON.stringify(emptyAggregate("2026-08-20")))?.lanes,
+      )
+        .toBeUndefined();
+    });
+
+    it("refuses an aggregate whose files it cannot read", () => {
+      // These decide which identities the manifest holds, so reading a
+      // shape this does not understand as an empty map would drop every
+      // identity that did not run inside the window.
+      const older = { ...emptyAggregate("2026-08-20") } as Record<
+        string,
+        unknown
+      >;
+      older.files = { [KEY]: 7 };
+      expect(parseAggregate(JSON.stringify(older))).toBeUndefined();
+      older.files = [UNIT];
+      expect(parseAggregate(JSON.stringify(older))).toBeUndefined();
+      older.files = null;
+      expect(parseAggregate(JSON.stringify(older))).toBeUndefined();
     });
 
     it("returns undefined for anything that is not one", () => {
       expect(parseAggregate("{not json")).toBeUndefined();
       expect(parseAggregate('{"schema":99}')).toBeUndefined();
-      expect(parseAggregate('{"schema":1,"day":"x"}')).toBeUndefined();
+      expect(
+        parseAggregate(
+          JSON.stringify({ schema: MANIFEST_SCHEMA_VERSION, day: "x" }),
+        ),
+      ).toBeUndefined();
     });
 
     it("refuses a shape it would otherwise have to guess at", () => {
       const whole = {
-        schema: 1,
+        schema: MANIFEST_SCHEMA_VERSION,
         day: "2026-08-20",
         folded: [],
         states: {},
@@ -582,7 +812,7 @@ describe("build", () => {
       // No compacted list at all is the truthful reading that nothing
       // was compacted, which is different from a list it cannot read.
       const before = {
-        schema: 1,
+        schema: MANIFEST_SCHEMA_VERSION,
         day: "2026-08-20",
         folded: [],
         states: {},
@@ -959,6 +1189,113 @@ describe("a report holding a whole day", () => {
     );
     fold.add([stored(CI_NAME, context(), many)]);
     expect(fold.observations).toBe(many.length);
+  });
+});
+
+describe("the days a fold keeps a lane's measurements over", () => {
+  /** One lane's artifact: what a batch took, beside what it was charged. */
+  function laneRanOn(day: string, spentSeconds: number) {
+    return stored(
+      `labs/test-records/submissions/ci/v1/${
+        day.replaceAll("-", "/")
+      }/lane.ndjson`,
+      context({ startedAt: `${day}T00:00:00.000Z`, commit: `c-${day}` }),
+      [
+        record({
+          test: { k: "gate", s: "ci", n: "ci-lane batch runner-unit" },
+          durationMs: spentSeconds * 1000,
+        }),
+        record({
+          test: { k: "gate", s: "ci", n: "ci-lane planned batch runner-unit" },
+          durationMs: 10_000,
+        }),
+        record({
+          test: { k: "gate", s: "ci", n: "ci-lane units batch runner-unit" },
+          durationMs: 4,
+        }),
+      ],
+    );
+  }
+
+  function keptAfterFolding(days: readonly string[]) {
+    const fold = new Fold(
+      emptyAggregate("2026-08-20"),
+      NO_ALIASES,
+      "2026-08-20",
+    );
+    for (const day of days) fold.add([laneRanOn(day, 30)]);
+    return fold.finish().aggregate.lanes;
+  }
+
+  it("keeps what a lane measured on a day inside the window", () => {
+    expect(keptAfterFolding(["2026-08-20"])).toEqual([
+      {
+        day: "2026-08-20",
+        suite: "runner-unit",
+        planned: 10,
+        spent: 30,
+        units: 4,
+      },
+    ]);
+  });
+
+  it("keeps nothing a lane measured on a day the window cannot reach", () => {
+    // Reading one buys nothing, since the same `finish` that would keep
+    // it drops it again, and a bootstrap would hold sixty days of them
+    // at once.
+    const old = "2026-06-01";
+    expect(daysBetween(old, "2026-08-20")).toBeGreaterThan(COST_WINDOW_DAYS);
+    expect(keptAfterFolding([old])).toEqual([]);
+    expect(keptAfterFolding([old, "2026-08-20"])).toEqual(
+      keptAfterFolding(["2026-08-20"]),
+    );
+  });
+
+  it("keeps nothing whose day will not parse as one", () => {
+    // Both ends of the fold ask the same question, so a day that answers
+    // neither yes nor no is dropped at both rather than accepted at one.
+    const aggregate = emptyAggregate("2026-08-20");
+    aggregate.lanes = [
+      { day: "whenever", capability: "fuse", seconds: 14.8 },
+      { day: "2026-08-20", capability: "fuse", seconds: 2.1 },
+    ];
+    expect(
+      new Fold(aggregate, NO_ALIASES, "2026-08-20").finish().aggregate.lanes,
+    ).toEqual([{ day: "2026-08-20", capability: "fuse", seconds: 2.1 }]);
+  });
+
+  it("drops one it was already keeping once the window has passed it", () => {
+    // The two sides age separately. One already in the aggregate was
+    // inside the window when it arrived, and the window moved under it.
+    const aggregate = emptyAggregate("2026-08-20");
+    aggregate.lanes = [
+      { day: "2026-06-01", capability: "fuse", seconds: 14.8 },
+      { day: "2026-08-20", capability: "fuse", seconds: 2.1 },
+    ];
+    expect(
+      new Fold(aggregate, NO_ALIASES, "2026-08-20").finish().aggregate.lanes,
+    ).toEqual([{ day: "2026-08-20", capability: "fuse", seconds: 2.1 }]);
+  });
+
+  it("carries what lanes measured across a saved aggregate", () => {
+    const first = new Fold(
+      emptyAggregate("2026-08-20"),
+      NO_ALIASES,
+      "2026-08-20",
+    );
+    first.add([laneRanOn("2026-08-20", 30)]);
+    const saved = parseAggregate(JSON.stringify(first.finish().aggregate));
+    expect(saved).toBeDefined();
+    const second = new Fold(saved!, NO_ALIASES, "2026-08-20");
+    expect(second.finish().aggregate.lanes).toEqual([
+      {
+        day: "2026-08-20",
+        suite: "runner-unit",
+        planned: 10,
+        spent: 30,
+        units: 4,
+      },
+    ]);
   });
 });
 

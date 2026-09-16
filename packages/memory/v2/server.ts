@@ -176,6 +176,15 @@ import {
 
 export { SessionRegistry } from "./session-registry.ts";
 
+/**
+ * A space DID pinned tightly enough to name a store. `isDID`
+ * (`@commonfabric/identity/did`) answers only whether a string is a DID, so it
+ * admits a method-specific identifier of any shape, and this string goes on to
+ * name a file on disk. The narrower question is the one
+ * `foreignWriteAuthorityFor` has to ask.
+ */
+const WELL_FORMED_SPACE_DID = /^did:[^:]+:[^:]+$/;
+
 // Global OTel API tracer. Interface-only and inert when no provider is
 // registered, so this is a no-op unless the host process (toolshed) has an
 // OTLP SDK installed. Spans created here are purely additive observability and
@@ -1548,6 +1557,12 @@ export class Server {
    * host per process.
    */
   #serverExecutionObserver: ServerExecutionObserver | undefined;
+
+  /**
+   * Additive watchers of the same admission hook, independent of the host's
+   * observer above: any number attach, and each sees every notice.
+   */
+  #admittedCommitWatchers = new Set<(notice: AdmittedCommitNotice) => void>();
 
   /**
    * Per-frame delivery record: the wire strips instance keys (frames carry
@@ -6807,18 +6822,51 @@ export class Server {
     this.#serverExecutionObserver = observer;
   }
 
+  /**
+   * Watch every commit this server admits: a session transact, a
+   * delegated append, the server's own direct write, and the serving
+   * loop's wave commits, each reported after the engine has applied it.
+   * Any number of watchers attach — the host's own observer above is
+   * separate and unaffected — and the returned function detaches one.
+   *
+   * This is the store's "something landed" edge, and it reports the
+   * commits a client's own subscription does not: a doc outside every
+   * replica's watch set, and the serving loop's own bookkeeping.
+   * `docs/development/waiting-in-tests.md` covers what a test does
+   * with it.
+   */
+  watchAdmittedCommits(
+    watcher: (notice: AdmittedCommitNotice) => void,
+  ): () => void {
+    this.#admittedCommitWatchers.add(watcher);
+    return () => {
+      this.#admittedCommitWatchers.delete(watcher);
+    };
+  }
+
   #notifyCommitAdmitted(notice: AdmittedCommitNotice): void {
     const observer = this.#serverExecutionObserver;
-    if (observer?.commitAdmitted === undefined) return;
-    try {
-      observer.commitAdmitted(notice);
-    } catch (error) {
-      // Admission never fails because the observer threw; the host's
-      // catch-up scan (selectCommitsSince) covers a dropped notice.
-      console.warn(
-        "memory v2: server-execution observer threw on commitAdmitted",
-        error,
-      );
+    if (observer?.commitAdmitted !== undefined) {
+      try {
+        observer.commitAdmitted(notice);
+      } catch (error) {
+        // Admission never fails because the observer threw; the host's
+        // catch-up scan (selectCommitsSince) covers a dropped notice.
+        console.warn(
+          "memory v2: server-execution observer threw on commitAdmitted",
+          error,
+        );
+      }
+    }
+    for (const watcher of this.#admittedCommitWatchers) {
+      try {
+        watcher(notice);
+      } catch (error) {
+        console.warn(
+          "memory v2: admitted-commit watcher threw",
+          error,
+        );
+      }
     }
   }
 
@@ -7623,7 +7671,7 @@ export class Server {
     | { granted: true; via: "owner" | "creation" | "acl" }
     | { granted: false; reason: string }
   > {
-    if (!/^did:[^:]+:[^:]+$/.test(space)) {
+    if (!WELL_FORMED_SPACE_DID.test(space)) {
       return {
         granted: false,
         reason: `"${space}" is not a space DID — refusing to resolve (or ` +

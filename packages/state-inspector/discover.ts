@@ -7,6 +7,7 @@
 // walk a bounded depth under each cache base rather than assume a fixed path.
 
 import { Identity } from "@commonfabric/identity";
+import { assertNotDID, isDID } from "@commonfabric/identity/did";
 
 import { openSpace } from "./db.ts";
 import { rootCacheDir } from "./remote.ts";
@@ -22,6 +23,7 @@ let spaceRoot: Promise<Identity> | undefined;
 
 /** Derive the DID of a NAMED space, the same way the runtime does. */
 export async function deriveSpaceDid(name: string): Promise<string> {
+  assertNotDID(name, "A space name");
   spaceRoot ??= Identity.fromPassphrase(SPACE_ROOT_PASSPHRASE);
   const space = await (await spaceRoot).derive(name);
   return space.did();
@@ -180,7 +182,7 @@ export async function resolveSpace(
     return resolveSpacePath(token, spaces);
   } catch (err) {
     const looksLikeName = !token.includes("/") &&
-      !token.endsWith(".sqlite") && !token.startsWith("did:");
+      !token.endsWith(".sqlite") && !isDID(token);
     if (!looksLikeName) throw err;
     const did = await deriveSpaceDid(token);
     const match = spaces.find((s) => s.did === did);

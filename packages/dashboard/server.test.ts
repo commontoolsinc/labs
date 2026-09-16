@@ -14,6 +14,8 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+import { FakeTime } from "@std/testing/time";
 import {
   broadcast,
   clients,
@@ -128,6 +130,21 @@ function faviconRedSinceInPage(): string {
   const match = page().match(/let faviconServerRedSince = ([^;]+);/);
   assert(match, "the page includes the server red timestamp");
   return match[1];
+}
+
+// Resolve on a published state, independently of any other pending collection.
+function observeUpdate(matches: () => boolean) {
+  const observed = deferred<void>();
+  const client = {
+    enqueue() {
+      if (matches()) observed.resolve();
+    },
+  } as unknown as ReadableStreamDefaultController<Uint8Array>;
+  clients.add(client);
+  return {
+    promise: observed.promise,
+    [Symbol.dispose]: () => clients.delete(client),
+  };
 }
 
 Deno.test("healthz: not ok until the board has collected something", async () => {
@@ -1609,4 +1626,135 @@ Deno.test("start: the work it schedules on its clock both heartbeats and collect
   assertEquals(collections, 2);
 
   await reader.cancel();
+});
+
+describe("workflow activity", () => {
+  it("preserves the last badge while measurements keep refreshing", async () => {
+    using time = new FakeTime(Date.now() + 86_400_000);
+    let value = "50%";
+    let reads = 0;
+    let activity = Promise.resolve<boolean | undefined>(true);
+    const tiles: Tile[] = ["test-selection", "test-flakes"].map((id) => ({
+      id,
+      intervalMs: 30_000,
+      collectActivity: () => activity,
+      collect: () => {
+        reads++;
+        return Promise.resolve({
+          label: id,
+          status: "good",
+          value,
+          extra: "<span>chart</span>",
+        });
+      },
+    }));
+    await tick(tiles);
+    for (const tile of tiles) {
+      expect(tileHtml(tile.id)).toContain('class="running"');
+    }
+    const pending = deferred<boolean | undefined>();
+    activity = pending.promise;
+    time.tick(30_001);
+    value = "75%";
+    using published = observeUpdate(() =>
+      tiles.every((tile) => tileHtml(tile.id).includes("75%"))
+    );
+    const collecting = tick(tiles);
+    try {
+      await published.promise;
+      time.tick(60_001);
+      value = "100%";
+      await tick(tiles);
+      expect(reads).toBe(6);
+      for (const tile of tiles) {
+        const html = tileHtml(tile.id);
+        assert(html.startsWith('good"'));
+        expect(html).toContain("100%");
+        expect(html).toContain("chart");
+        expect(html).toContain('class="running"');
+        assert(!html.includes("refresh still pending"));
+      }
+    } finally {
+      pending.resolve(false);
+      await collecting;
+    }
+    for (const tile of tiles) {
+      assert(!tileHtml(tile.id).includes('class="running"'));
+    }
+  });
+
+  it("publishes activity changes while measurements remain pending", async () => {
+    using _time = new FakeTime(Date.now() + 2 * 86_400_000);
+    const oldView: TileView = {
+      label: "independent activity",
+      status: "good",
+      value: "50%",
+    };
+    let measurement = Promise.resolve(oldView);
+    let running = false;
+    const tile: Tile = {
+      id: "test-selection",
+      intervalMs: 0,
+      collectActivity: () => Promise.resolve(running),
+      collect: () => measurement,
+    };
+    await tick([tile]);
+    const pending = deferred<TileView>();
+    measurement = pending.promise;
+    running = true;
+    using published = observeUpdate(() =>
+      tileHtml(oldView.label).includes('class="running"')
+    );
+    const collecting = tick([tile]);
+    try {
+      await published.promise;
+      expect(tileHtml(oldView.label)).toContain("50%");
+      running = false;
+      await tick([tile]);
+      assert(!tileHtml(oldView.label).includes('class="running"'));
+      expect(tileHtml(oldView.label)).toContain("50%");
+    } finally {
+      pending.resolve({ ...oldView, value: "75%" });
+      await collecting;
+    }
+    expect(tileHtml(oldView.label)).toContain("75%");
+  });
+
+  it("preserves measurements and other header facets when activity reads fail", async () => {
+    using _time = new FakeTime(Date.now() + 3 * 86_400_000);
+    const view: TileView = {
+      label: "activity failure",
+      status: "warn",
+      value: "2 flaky tests",
+      aside:
+        '<span class="hfacet" title="24h old">24h old</span><span>history warning</span>',
+      extra: "<span>chart</span>",
+    };
+    const tile: Tile = {
+      id: "test-flakes",
+      intervalMs: 0,
+      collect: () => Promise.resolve(view),
+      collectActivity: () => Promise.reject(new Error('bad "<script>"')),
+    };
+    await tick([tile]);
+    const html = tileHtml(view.label);
+    assert(html.startsWith('warn"'));
+    for (
+      const content of [
+        "2 flaky tests",
+        "chart",
+        "24h old",
+        "history warning",
+        "activity unknown",
+        "temporarily unavailable",
+      ]
+    ) {
+      expect(html).toContain(content);
+    }
+    assert(!html.includes('bad "<script>"'));
+    tile.collectActivity = () => Promise.resolve(undefined);
+    await tick([tile]);
+    assert(!tileHtml(view.label).includes("activity unknown"));
+    expect(tileHtml(view.label)).toContain("history warning");
+  });
 });

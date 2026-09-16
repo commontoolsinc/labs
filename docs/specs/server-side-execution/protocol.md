@@ -808,14 +808,20 @@ Session-scoped, server-computed, client-enacted effects (README §3.7).
   bounded by per-wave retirement, and the session-lifetime GC
   (below) covers abandoned instances.
 - Exactly-once enactment per nonce is the CLIENT's duty (it may enact
-  optimistically from speculation, then reconcile by nonce — navigation
-  is reversible). Nonce reconciliation covers only the intent-ARRIVES
-  case: when the authoritative run computes no intent for an
-  optimistically enacted navigation (branch divergence on a speculative
-  read), the enactment STANDS un-reconciled — ruled PUNT (owner,
-  2026-08-27; register OW45) — and consumers must be robust to it.
-  Reload between intent and ack: on resubscribe the
-  client sees unacked intents and enacts them; nonces make re-enactment
+  optimistically from speculation, then reconcile by nonce —
+  navigation is reversible). Reconciliation holds in either order. An
+  intent that arrives, and begins enacting, before the client's own
+  speculative run seals records the nonce, and that run's optimistic
+  enactment converges on the record rather than enacting a second
+  time. An enactment still in flight is awaited rather than assumed,
+  since its failure retracts the record and the caller that found it
+  must then enact. Nonce reconciliation covers only the
+  intent-ARRIVES case: when the authoritative run computes no intent
+  for an optimistically enacted navigation (branch divergence on a
+  speculative read), the enactment STANDS un-reconciled — ruled PUNT
+  (owner, 2026-08-27; register OW45) — and consumers must be robust
+  to it. Reload between intent and ack: on resubscribe the client
+  sees unacked intents and enacts them; nonces make re-enactment
   detectable. The reload × optimistic-enactment window MAY re-enact
   a nonce — the enacted-nonce record lives in the reload-wiped
   overlay — and that is ACCEPTED for reversible effects, which

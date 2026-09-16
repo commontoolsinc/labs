@@ -419,142 +419,163 @@ const runAttachedDelegation = async (): Promise<
 };
 
 describe("prompt-loop pattern references", () => {
-  it("delegates a pattern inspected by the opening research pass", async () => {
-    await ensureCompilerStack();
-    const files = [{ name: "/main.tsx", contents: "export default 1;\n" }];
-    const patternId = computeEntryIdentity("/main.tsx", files);
-    const runId = "run-opening-pattern-delegation";
-    const task = "Inspect the indexed pattern and delegate its use.";
-    const indexCalls: string[] = [];
-    const requests: HarnessModelTurnRequest[] = [];
-    let researchTurns = 0;
-    let parentTurns = 0;
-    const loop = new CfHarnessPromptLoop({
-      engine: new CfHarnessEngine({
-        sandboxRuntime: new FakeSandboxRuntime(),
-        runId,
-        model: "gpt-test",
-        patternIndexClientFactory: () =>
-          Promise.resolve(
-            new PatternIndexClient({
-              baseUrl: "https://index.test",
-              signer,
-              fetchFn: (input) => {
-                indexCalls.push(String(input).split("/").pop() ?? "");
-                return Promise.resolve(
-                  new Response(
-                    JSON.stringify({
-                      ...PATTERN_RECORD,
-                      patternId,
-                      program: { main: "/main.tsx", files },
-                    }),
-                    { status: 200 },
-                  ),
-                );
-              },
-            }),
-          ),
-      }),
-      allowedToolIds: ["research", "delegate_task"],
-      allowedSubagentProfiles: ["default"],
-      modelClient: {
-        providerId: "test-provider",
-        complete: (request) => {
-          requests.push({
-            ...request,
-            transcript: structuredClone(request.transcript),
-          });
-          if (request.runId.includes(":research:")) {
-            researchTurns += 1;
-            return Promise.resolve(
-              researchTurns === 1
-                ? {
-                  assistant: {
-                    role: "assistant",
-                    content: "",
-                    toolCalls: [{
-                      id: "inspect-pattern",
-                      type: "function",
-                      function: {
-                        name: "inspect_pattern",
-                        arguments: JSON.stringify({ patternId }),
-                      },
-                    }],
-                  },
-                }
-                : {
-                  assistant: {
-                    role: "assistant",
-                    content: JSON.stringify({
-                      status: "incomplete",
-                      summary:
-                        "The indexed source is confirmed; inspect the caller's requirements next.",
-                      recommendation: {
-                        kind: "focused-api",
-                        rationale: "Confirm how to use this component.",
-                      },
-                      inputs: [],
-                      selectedPatternIds: [patternId],
-                      steps: [],
-                      rules: [],
-                      verification: [],
-                      sourceIds: [],
-                      missing: ["caller requirements"],
-                    }),
-                  },
+  for (const inspected of [true, false]) {
+    const name = inspected
+      ? "delegates a pattern inspected by the opening research pass"
+      : "delegates an orientation lead without claiming source inspection";
+    it(name, async () => {
+      await ensureCompilerStack();
+      const files = [{ name: "/main.tsx", contents: "export default 1;\n" }];
+      const patternId = computeEntryIdentity("/main.tsx", files);
+      const runId = "run-opening-pattern-delegation";
+      const task = "Inspect the indexed pattern and delegate its use.";
+      const indexCalls: string[] = [];
+      const requests: HarnessModelTurnRequest[] = [];
+      let researchTurns = 0;
+      let parentTurns = 0;
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId,
+          model: "gpt-test",
+          patternIndexClientFactory: () =>
+            Promise.resolve(
+              new PatternIndexClient({
+                baseUrl: "https://index.test",
+                signer,
+                fetchFn: (input) => {
+                  indexCalls.push(String(input).split("/").pop() ?? "");
+                  return Promise.resolve(
+                    new Response(
+                      JSON.stringify(
+                        inspected
+                          ? {
+                            ...PATTERN_RECORD,
+                            patternId,
+                            program: { main: "/main.tsx", files },
+                          }
+                          : { results: [{ ...SEARCH_HIT, patternId }] },
+                      ),
+                      { status: 200 },
+                    ),
+                  );
                 },
-            );
-          }
-          if (request.runId === runId && parentTurns++ === 0) {
-            return Promise.resolve({
-              assistant: {
-                role: "assistant",
-                content: "",
-                toolCalls: [{
-                  id: "delegate-pattern",
-                  type: "function",
-                  function: {
-                    name: "delegate_task",
-                    arguments: JSON.stringify({
-                      goal: "Read the inherited component contract.",
-                      patternRefs: [{ patternId }],
-                    }),
-                  },
-                }],
-              },
+              }),
+            ),
+        }),
+        allowedToolIds: ["research", "delegate_task"],
+        allowedSubagentProfiles: ["default"],
+        modelClient: {
+          providerId: "test-provider",
+          complete: (request) => {
+            requests.push({
+              ...request,
+              transcript: structuredClone(request.transcript),
             });
-          }
-          return Promise.resolve({
-            assistant: { role: "assistant", content: "Contract received." },
-          });
+            if (request.runId.includes(":research:")) {
+              researchTurns += 1;
+              return Promise.resolve(
+                researchTurns === 1
+                  ? {
+                    assistant: {
+                      role: "assistant",
+                      content: "",
+                      toolCalls: [{
+                        id: "research-pattern",
+                        type: "function",
+                        function: {
+                          name: inspected
+                            ? "inspect_pattern"
+                            : "search_pattern_index",
+                          arguments: JSON.stringify(
+                            inspected ? { patternId } : { text: "expense" },
+                          ),
+                        },
+                      }],
+                    },
+                  }
+                  : {
+                    assistant: {
+                      role: "assistant",
+                      content: JSON.stringify({
+                        status: "incomplete",
+                        summary: inspected
+                          ? "The indexed source is confirmed; inspect the caller's requirements next."
+                          : "The index returned a candidate whose applicability needs inspection.",
+                        inputs: [],
+                        selectedPatternIds: inspected ? [patternId] : [],
+                        leads: inspected ? [] : [{
+                          patternId,
+                          question: "Does the input contract fit?",
+                        }],
+                        questions: ["Which input should be used?"],
+                        rules: [],
+                        sourceIds: [],
+                        missing: ["caller requirements"],
+                      }),
+                    },
+                  },
+              );
+            }
+            if (request.runId === runId && parentTurns++ === 0) {
+              return Promise.resolve({
+                assistant: {
+                  role: "assistant",
+                  content: "",
+                  toolCalls: [{
+                    id: "delegate-pattern",
+                    type: "function",
+                    function: {
+                      name: "delegate_task",
+                      arguments: JSON.stringify({
+                        goal: "Read the inherited component contract.",
+                        patternRefs: [{ patternId }],
+                      }),
+                    },
+                  }],
+                },
+              });
+            }
+            return Promise.resolve({
+              assistant: { role: "assistant", content: "Contract received." },
+            });
+          },
         },
-      },
+      });
+      const result = await loop.runPrompt({
+        prompt: task,
+        openingResearchTask: task,
+        promptSlotBinding: directPromptSlotBinding,
+      });
+      const child = requests.find((request) =>
+        request.runId.includes(".subagent.")
+      );
+      expect(child?.transcript.at(-1)?.content).toContain(patternId);
+      expect(child?.transcript.at(-1)?.content).toContain(
+        SEARCH_HIT.description,
+      );
+      const delegated = result.transcript.find((message) =>
+        message.role === "tool" && message.toolName === "delegate_task"
+      );
+      expect(JSON.parse(delegated?.content ?? "null")).toMatchObject({
+        subagent: { status: "completed" },
+      });
+      expect(delegated?.content).not.toContain("patternRefRefusals");
+      const patterns = inspected
+        ? [expect.objectContaining({ patternId, sourceIdentityVerified: true })]
+        : [];
+      expect(result.runState.researchRuns?.[0].confirmedPatterns).toEqual(
+        patterns,
+      );
+      expect(result.runState.researchRuns?.[0].kit.patterns).toEqual(patterns);
+      expect(result.runState.researchRuns?.[0].kit).toMatchObject({
+        purpose: "orient",
+        leads: inspected ? [] : [{ pattern: { patternId } }],
+      });
+      expect(indexCalls).toEqual([inspected ? "getPattern" : "searchPatterns"]);
+      expect(researchTurns).toBe(2);
     });
-    const result = await loop.runPrompt({
-      prompt: task,
-      openingResearchTask: task,
-      promptSlotBinding: directPromptSlotBinding,
-    });
-    const child = requests.find((request) =>
-      request.runId.includes(".subagent.")
-    );
-    expect(child?.transcript.at(-1)?.content).toContain(patternId);
-    expect(child?.transcript.at(-1)?.content).toContain(
-      PATTERN_RECORD.description,
-    );
-    const delegated = result.transcript.find((message) =>
-      message.role === "tool" && message.toolName === "delegate_task"
-    );
-    expect(JSON.parse(delegated?.content ?? "null")).toMatchObject({
-      subagent: { status: "completed" },
-    });
-    expect(delegated?.content).not.toContain("patternRefRefusals");
-    expect(result.runState.researchRuns?.[0].confirmedPatterns).toEqual([
-      expect.objectContaining({ patternId, sourceIdentityVerified: true }),
-    ]);
-    expect(indexCalls).toEqual(["getPattern"]);
-    expect(researchTurns).toBe(2);
-  });
+  }
 
   it("rehydrates a selected hit into neutral child context", async () => {
     const result = await runDelegation([{

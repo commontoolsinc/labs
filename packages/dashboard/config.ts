@@ -10,6 +10,7 @@ export { TRUST_RUNS_MAX } from "./ci-trust-layout.ts";
 export const PORT = Number(Deno.env.get("DASHBOARD_PORT") ?? "8731");
 export const REPO = Deno.env.get("DASHBOARD_REPO") ?? "commontoolsinc/labs";
 export const CI_WORKFLOW = "deno.yml";
+export const TEST_SELECTION_WORKFLOW = "test-selection.yml";
 
 // The service.name production reports under in SigNoz. The tiles that read traces
 // scope to it by name: the same SigNoz also holds staging and one-off perf runs,

@@ -105,6 +105,7 @@ import {
 import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
 import { writeResultSchemaMeta } from "./result-schema-meta.ts";
 import {
+  canResolveScopeKey,
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
@@ -147,6 +148,7 @@ import { isSchemaMismatchError } from "./schema-view.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
+import { getTransactionReadActivities } from "./storage/transaction-inspection.ts";
 import {
   type CommitError,
   type DID,
@@ -154,10 +156,12 @@ import {
   type IStorageSubscription,
   type MemorySpace,
   type Result,
+  toThrowable,
   type Unit,
   type URI,
 } from "./storage/interface.ts";
 import {
+  isDurableReadTx,
   machineryRead,
   markDurableReadTx,
   schedulerDependencyRead,
@@ -1350,7 +1354,6 @@ type DeferredStartResult<R> = {
 type BoundNodeIO = {
   inputs: FabricExecValue;
   outputs: FabricExecValue;
-  reads: NormalizedFullLink[];
   writes: NormalizedFullLink[];
   /**
    * The bound inputs as an immutable document: what a node reads its
@@ -1361,12 +1364,10 @@ type BoundNodeIO = {
 
 /**
  * A raw node's bound inputs and outputs as `#instantiateRawNode()` hands
- * them to the builtin. `inputCells` is `reads` less the opaque forwarded
- * references the builtin never value-reads.
+ * them to the builtin.
  */
 type RawNodeInputs = BoundNodeIO & {
   argumentCellLink: NormalizedFullLink;
-  inputCells: NormalizedFullLink[];
   resolvedOutputSpot: NormalizedFullLink | undefined;
   outputBinding: NormalizedFullLink | undefined;
 };
@@ -1378,7 +1379,7 @@ type RawNodeInputs = BoundNodeIO & {
  * child's link is written through the outputs, or the outputs already name
  * the child's result cell.
  */
-type PatternNodeBinding = BoundNodeIO & {
+type PatternNodeBinding = Omit<BoundNodeIO, "inputsCell"> & {
   child: Pattern;
   childResultCell: Cell<any> | undefined;
   sendToBindings: boolean;
@@ -1387,8 +1388,8 @@ type PatternNodeBinding = BoundNodeIO & {
 /**
  * What one node's bindings resolve to on a result cell: the module the node
  * runs, its inputs and outputs bound to the piece's argument and result
- * documents, the write-redirect links those bindings read and write
- * through, and what the node's kind adds. Instantiation and the pre-sync
+ * documents, the write-redirect links those bindings write through,
+ * and what the node's kind adds. Instantiation and the pre-sync
  * derive it the same way, so what the pre-sync names is what the
  * instantiated node reads.
  */
@@ -1408,6 +1409,7 @@ type ResolvedJavaScriptModule = {
 };
 
 type JavaScriptNodeContext = BoundNodeIO & {
+  reads: NormalizedFullLink[];
   tx: IExtendedStorageTransaction;
   module: Module;
   resultCell: Cell<any>;
@@ -2579,6 +2581,58 @@ export class Runner {
   }
 
   /**
+   * Whether setting `pattern` up on `resultCell` would rewrite the result
+   * projection: `pattern` is not the pattern the document was last set up
+   * with, and the projection it binds to the document differs from the one
+   * stored. Setup writes the projection only then, and records the result
+   * schema as a write-policy input only with that write, so this is also
+   * whether the setup commit merges `pattern`'s result schema into the
+   * document's stored CFC envelope. `cf piece setsrc --check` asks it before
+   * it merges that envelope in dry run, so a source update that leaves the
+   * projection as it is — one changing only what the projection does not
+   * carry — is not refused over an envelope the commit never touches. Reads
+   * only.
+   *
+   * A source update never asks setup to reapply a stored setup, so the same
+   * pattern as the last run — by the pointer setup itself compares, a
+   * keyless pattern's session pointer included — is the one case where
+   * setup keeps the stored projection without comparing. For any other
+   * pattern, setup re-points the argument link at `pattern`'s argument
+   * schema before it compares, so the projection is bound here against the
+   * link setup would have staged, not the one stored.
+   */
+  setupRewritesResultProjection(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    resultCell: Cell<unknown>,
+  ): boolean {
+    const previousIdentityRef = getPatternIdentityRef(resultCell.withTx(tx)) ??
+      this.#sessionPatternPointer(resultCell.withTx(tx));
+    const entryRef = this.#entryRefForPattern(pattern);
+    if (
+      previousIdentityRef !== undefined &&
+      entryRef.identity === previousIdentityRef.identity &&
+      entryRef.symbol === previousIdentityRef.symbol
+    ) {
+      return false;
+    }
+    // The link `#applySetupState` stages for a pattern change: the argument
+    // document it finds, or the one it would create, under the pattern's
+    // argument schema.
+    const argumentLink = getMetaLink(resultCell.withTx(tx), "argument");
+    const argumentCell = argumentLink === undefined
+      ? getMetaCell(resultCell, "argument", tx)
+      : this.#runtime.getCellFromLink(argumentLink, undefined, tx);
+    return this.#nextResultProjection(
+      tx,
+      pattern,
+      resultCell,
+      argumentCell.asSchema(pattern.argumentSchema).getAsNormalizedFullLink(),
+      { preserveName: false },
+    ).changed;
+  }
+
+  /**
    * Validate a piece's stored argument against a candidate without staging it.
    *
    * Uses setup's value validation and defaults. Unreadable argument documents
@@ -2878,10 +2932,49 @@ export class Runner {
     resultCell: Cell<R>,
     options: { preserveName: boolean },
   ): void {
+    const { result, fabricResult, changed } = this.#nextResultProjection(
+      tx,
+      pattern,
+      resultCell,
+      getMetaLink(resultCell.withTx(tx), "argument")!,
+      options,
+    );
+    if (changed) {
+      recordSetupProjectionPolicyInputs(
+        tx,
+        this.#runtime,
+        resultCell,
+        pattern.resultSchema,
+        result,
+      );
+      const writableResultCell = pattern.resultSchema === undefined
+        ? resultCell.withTx(tx)
+        : resultCell.withTx(tx).asSchema(pattern.resultSchema);
+      // The result root marks the whole result document as generated: setup
+      // rewrites the complete projection.
+      writableResultCell.setRawUntyped(fabricResult, false, "output");
+    }
+  }
+
+  /**
+   * The projection setting `pattern` up stores on `resultCell`, beside the
+   * one stored now: `result` is the projection as bound to the document,
+   * which the policy-input recorder walks; `fabricResult` is what a write
+   * stores; and `changed` is whether that differs from what is stored, which
+   * is the one condition under which setup writes it. `argumentCellLink` is
+   * the argument link the projection binds to, which setup has staged under
+   * `pattern`'s argument schema by the time it writes. Reads only.
+   */
+  #nextResultProjection<R>(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    resultCell: Cell<R>,
+    argumentCellLink: NormalizedFullLink,
+    options: { preserveName: boolean },
+  ): { result: R; fabricResult: FabricValue; changed: boolean } {
     const writableResultCell = pattern.resultSchema === undefined
       ? resultCell.withTx(tx)
       : resultCell.withTx(tx).asSchema(pattern.resultSchema);
-    const argumentCellLink = getMetaLink(resultCell.withTx(tx), "argument")!;
     // `Pattern` erases its authored result type to `JSONValue`, so validate
     // that actual execution value here, then restore its association with
     // `Cell<R>`.
@@ -2918,18 +3011,11 @@ export class Runner {
     const fabricResult = fabricFromConvertibleJsValue(
       flattenBuilderArtifacts(result),
     );
-    if (!valueEqual(fabricResult, previousResult)) {
-      recordSetupProjectionPolicyInputs(
-        tx,
-        this.#runtime,
-        resultCell,
-        pattern.resultSchema,
-        result,
-      );
-      // The result root marks the whole result document as generated: setup
-      // rewrites the complete projection.
-      writableResultCell.setRawUntyped(fabricResult, false, "output");
-    }
+    return {
+      result,
+      fabricResult,
+      changed: !valueEqual(fabricResult, previousResult),
+    };
   }
 
   /**
@@ -6181,8 +6267,10 @@ export class Runner {
     const actionId = `piece-run/${resultLink.id}`;
     const startLifecycleEpoch = this.#lifecycleEpoch;
     const ownership = this.#createDeferredStartOwnership(resultCell);
+    const speculationContext = speculationRunContextOf(tx);
+    const durableReads = isDurableReadTx(tx);
     const navigateContext = navigateEventContextFromRunInfo(
-      waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+      waveRunContextOf(tx) ?? speculationContext,
     );
     const work = (async () => {
       let toName = named;
@@ -6190,13 +6278,14 @@ export class Runner {
         await this.#nameFamilyBeforeRun(resultCell, toName, argument);
         if (ownership.isCancelled()) return;
         const startTx = this.#runtime.edit();
+        if (durableReads) markDurableReadTx(startTx);
         if (identity !== undefined) startTx.tx.scopeKeyIdentity = identity;
-        // Minted outside any scheduler run; the run's setup and node wiring
-        // are piece machinery, stamped bookkeeping per serving-loop.md §3d.
-        this.#runtime.stampServerRun(startTx, {
-          actionId,
-          kind: "bookkeeping",
-        });
+        // A speculative child's continuation keeps its origin across the
+        // data load. Authored and served starts use piece bookkeeping.
+        this.#runtime.stampServerRun(
+          startTx,
+          speculationContext ?? { actionId, kind: "bookkeeping" },
+        );
         if (navigateContext !== undefined) {
           setNavigateEventContext(startTx, navigateContext);
         }
@@ -6943,7 +7032,8 @@ export class Runner {
    *   store's own. A flag-ON client speculating installs no destination and
    *   is unaffected; its setup is stamped as bookkeeping, which the overlay
    *   passes through to the real store;
-   * - a commit that storage rejects throws, and never falls through to the
+   * - a commit that storage rejects throws an `Error` carrying the
+   *   rejection's name, message, and fields, and never falls through to the
    *   post-commit work that a receipt-less run tolerates;
    * - the required source transition appends a fresh revision, so the setup
    *   cannot be elided as a wholly redundant transaction before reaching
@@ -7175,8 +7265,15 @@ export class Runner {
         // here would run the post-commit work over a setup storage refused and
         // then report no receipt for it. The identity arm below predates the
         // receipt and covers its own callers; neither subsumes the other.
+        //
+        // A verdict that is a plain `Result` object goes out as an `Error`
+        // carrying its name, message, and fields: thrown as it stands it
+        // fails every `instanceof Error` check on the way up and renders as
+        // `[object Object]`, its message discarded. One that is already an
+        // `Error`, a precondition failure among them, goes out as itself, so
+        // its identity, stack, and `cause` survive.
         if (requireCommit || options?.expectedPatternIdentity) {
-          throw error;
+          throw error instanceof Error ? error : toThrowable(error);
         }
         logger.error("pattern-setup-error", "Error setting up pattern", error);
         setupRes = undefined;
@@ -7813,11 +7910,11 @@ export class Runner {
    * walk delivers what a plan's selector reaches within its space and stops
    * at a link into another, so after the plan syncs land this reads each
    * plan's inputs under its read schema through a read transaction: a read
-   * that dead-ends on such a link kicks that document's load, and the loads
-   * pending after the reads are awaited before the next read, which reaches
-   * one space further. Each round awaits only loads no earlier round
-   * awaited, by document, so a link whose target never arrives, kicked
-   * again by every read, ends the pass rather than extending it, and a round
+   * that dead-ends on such a link kicks that document's load. Pending loads
+   * for documents the transaction read are awaited before the next read,
+   * which reaches one space further. Each round awaits only loads no
+   * earlier round awaited, by document, so a link whose target never arrives,
+   * kicked again by every read, ends the pass rather than extending it, and a round
    * whose reads leave no new load pending ends it. The manager's settled
    * pool is not what is awaited: on a client it holds the runtime's other
    * work, sinks' first loads and coordinators' republishes among it, which
@@ -7833,6 +7930,7 @@ export class Runner {
     for (;;) {
       const readTx = this.#familyReadTx(identity);
       for (const plan of plans) {
+        if (plan.kind === "pattern") continue;
         const schema = this.#planReadSchema(plan);
         if (schema === undefined) continue;
         try {
@@ -7846,9 +7944,21 @@ export class Runner {
           ]);
         }
       }
-      const keys = manager.pendingLoadAddresses()
+      const pending = manager.pendingLoadAddresses();
+      if (pending.length === 0) return;
+      const readIdentity = identity ?? this.#runtime.scopeKeyIdentity;
+      const readKeys = new Set<string>();
+      for (const read of getTransactionReadActivities(readTx)) {
+        if (
+          read.scopeKey !== undefined ||
+          canResolveScopeKey(read.scope, readIdentity)
+        ) {
+          readKeys.add(entityKey(read, readIdentity));
+        }
+      }
+      const keys = pending
         .map((address) => entityKey(address, this.#runtime.scopeKeyIdentity))
-        .filter((key) => !awaited.has(key));
+        .filter((key) => readKeys.has(key) && !awaited.has(key));
       if (keys.length === 0) return;
       for (const key of keys) awaited.add(key);
       const settleStart = performance.now();
@@ -8823,9 +8933,6 @@ export class Runner {
     return {
       inputs,
       outputs,
-      reads: findAllWriteRedirectCells(inputs, resultCell, {
-        followRedirectChains: !usesLocalReads(resultCell.tx),
-      }),
       writes: findAllWriteRedirectCells(outputs, resultCell, {
         followRedirectChains: !usesLocalReads(resultCell.tx),
       }),
@@ -10867,7 +10974,17 @@ export class Runner {
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ) {
-    const { module, inputs, outputs, reads, writes } = plan;
+    const { module, inputs, outputs, writes } = plan;
+    // Pre-sync reads the inputs document under the module's schema. Only
+    // instantiation needs the scheduler's static read links, so resolve them
+    // here, under the same machinery-read boundary as the bound plan.
+    const reads = tx.runWithAmbientReadMeta(
+      machineryRead,
+      () =>
+        findAllWriteRedirectCells(inputs, resultCell, {
+          followRedirectChains: !usesLocalReads(resultCell.tx),
+        }),
+    );
     const { fn, name } = this.#resolveJavaScriptFunction(module);
     const context: JavaScriptNodeContext = {
       tx,
@@ -11126,20 +11243,6 @@ export class Runner {
       mappedInputBindings,
     );
 
-    // Opaque forwarded references (argument keys the module's schema marks
-    // `asCell: ["opaque"]`, e.g. ifElse's `ifTrue`/`ifFalse` branches) are
-    // never value-read by the builtin, so they must not become declared reads
-    // that pull their (possibly unselected) writer. Drop those top-level keys
-    // when building inputCells only; outputCells and other callers keep the
-    // full surface.
-    const opaqueInputKeys = opaqueArgumentKeys(module.argumentSchema);
-    const inputCells = findAllWriteRedirectCells(
-      mappedInputBindings,
-      resultCell,
-      opaqueInputKeys.size > 0
-        ? { skipTopLevelKeys: opaqueInputKeys }
-        : undefined,
-    );
     // outputCells tracks the static write surface for dependency ordering and
     // event preflight.
     const outputCells = findAllWriteRedirectCells(
@@ -11201,14 +11304,8 @@ export class Runner {
     return {
       inputs: mappedInputBindings,
       outputs: mappedOutputBindings,
-      // The full read surface, opaque keys included: what the pre-sync
-      // names. The builtin's declared reads are `inputCells`.
-      reads: opaqueInputKeys.size > 0
-        ? findAllWriteRedirectCells(mappedInputBindings, resultCell)
-        : inputCells,
       writes: outputCells,
       argumentCellLink,
-      inputCells,
       inputsCell,
       resolvedOutputSpot,
       outputBinding,
@@ -11228,12 +11325,27 @@ export class Runner {
       moduleRefName,
       argumentCellLink,
       outputs: mappedOutputBindings,
-      inputCells,
       writes: outputCells,
       inputsCell,
       resolvedOutputSpot,
       outputBinding,
     } = plan;
+    // Opaque forwarded references (e.g. ifElse's unselected branch) are
+    // never value-read by the builtin. Exclude them from its declared reads
+    // so the scheduler does not pull their writers. Resume pre-sync uses
+    // inputsCell directly and does not need this scheduler read list.
+    const opaqueInputKeys = opaqueArgumentKeys(module.argumentSchema);
+    const inputCells = tx.runWithAmbientReadMeta(
+      machineryRead,
+      () =>
+        findAllWriteRedirectCells(
+          plan.inputs,
+          resultCell,
+          opaqueInputKeys.size > 0
+            ? { skipTopLevelKeys: opaqueInputKeys }
+            : undefined,
+        ),
+    );
     if (typeof module.implementation !== "function") {
       throw new Error(
         `Raw module is not a function, got: ${module.implementation}`,
@@ -11574,16 +11686,7 @@ export class Runner {
       child,
       inputs,
       outputs,
-      reads: argumentCellLink === undefined
-        ? []
-        : findAllWriteRedirectCells(inputs, resultCell),
       writes: findAllWriteRedirectCells(outputs, resultCell),
-      inputsCell: this.#runtime.getImmutableCell(
-        resultCell.space,
-        inputs,
-        undefined,
-        tx,
-      ),
     };
 
     // If output bindings is a link to a non-redirect cell,

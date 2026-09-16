@@ -15,9 +15,9 @@ import {
   generatedAtOf,
   LANE_BUDGET_FALLBACK_SECONDS,
   laneBudgetOf,
-  type ManifestReader,
   newestManifest,
 } from "./test-selection-manifest.ts";
+import type { TestSelectionSource } from "./test-selection-history.ts";
 import { makeTestFlakes } from "./tiles/test-flakes.ts";
 import { makeTestSelection } from "./tiles/test-selection.ts";
 import { TEST_SELECTION_PATH } from "./test-selection-page.ts";
@@ -155,20 +155,26 @@ const CTX: Ctx = {
 /** A reader over a store holding one manifest under a fixed name. */
 function reading(
   manifest: Parameters<typeof serializeManifest>[0],
-): ManifestReader {
+): TestSelectionSource {
   const fetchImpl = storeOf({
     [`${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`]:
       serializeManifest(manifest),
   });
-  return () => newestManifest({ fetchImpl });
+  return {
+    latest: () => newestManifest({ fetchImpl }),
+    history: () => Promise.resolve({ samples: [], errors: [] }),
+  };
 }
 
 Deno.test("both test tiles are unknown when there is no manifest", async () => {
-  const empty: ManifestReader = () => Promise.resolve(undefined);
+  const empty: TestSelectionSource = {
+    latest: () => Promise.resolve(undefined),
+    history: () => Promise.resolve({ samples: [], errors: [] }),
+  };
   for (
     const tile of [
-      makeTestFlakes({ read: empty }),
-      makeTestSelection({ read: empty }),
+      makeTestFlakes({ source: empty }),
+      makeTestSelection({ source: empty }),
     ]
   ) {
     const view = await tile.collect(CTX);
@@ -179,7 +185,7 @@ Deno.test("both test tiles are unknown when there is no manifest", async () => {
 
 Deno.test("the flake tile is green when nothing is withheld as flaky", async () => {
   const tile = makeTestFlakes({
-    read: reading(sampleManifest()),
+    source: reading(sampleManifest()),
     now: () => Date.parse("2026-08-20T00:30:00.000Z"),
   });
   const view = await tile.collect(CTX);
@@ -200,13 +206,13 @@ Deno.test("the flake tile counts what selection held back, and points at them", 
     withheld: [{ test: noisy.test, suite: noisy.suite, reason: "flaky" }],
   });
   const view = await makeTestFlakes({
-    read: reading(manifest),
+    source: reading(manifest),
     now: () => Date.parse("2026-08-20T04:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "warn");
   assertEquals(view.value, "1 flaky test");
   assertEquals(view.sub, `${FLAKE_WINDOW_FALLBACK_DAYS} days of runs · 4h old`);
-  // The count is the whole tile: no name reaches it to be cut in half.
+  // A source with no history adds no chart or test names to the tile.
   assertEquals(view.extra, undefined);
   assertEquals(view.href, "/test-selection#flaky");
   assertEquals(view.hint, "flakes ↗");
@@ -227,7 +233,7 @@ Deno.test("the selection tile says what share of the corpus would run", async ()
     }],
   });
   const view = await makeTestSelection({
-    read: reading(manifest),
+    source: reading(manifest),
     now: () => Date.parse("2026-08-20T05:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "good");
@@ -239,7 +245,7 @@ Deno.test("the selection tile says what share of the corpus would run", async ()
 
 Deno.test("the selection tile goes amber once the manifest has gone stale", async () => {
   const view = await makeTestSelection({
-    read: reading(sampleManifest()),
+    source: reading(sampleManifest()),
     now: () => Date.parse("2026-08-21T04:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "warn");
@@ -270,7 +276,7 @@ Deno.test("the selection tile goes red when a lane is past its budget", async ()
     }],
   });
   const view = await makeTestSelection({
-    read: reading(manifest),
+    source: reading(manifest),
     now: () => Date.parse("2026-08-20T05:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "bad");
@@ -294,7 +300,7 @@ Deno.test("the selection tile goes amber while a test is too long for any lane",
     }],
   });
   const view = await makeTestSelection({
-    read: reading(manifest),
+    source: reading(manifest),
     now: () => Date.parse("2026-08-20T05:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "warn");
@@ -317,7 +323,7 @@ Deno.test("the selection tile counts every test no lane can hold", async () => {
     ],
   });
   const view = await makeTestSelection({
-    read: reading(manifest),
+    source: reading(manifest),
     now: () => Date.parse("2026-08-20T05:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "warn");
@@ -337,7 +343,7 @@ Deno.test("a lane past its budget outranks the tests no lane can hold", async ()
     }],
   });
   const view = await makeTestSelection({
-    read: reading(manifest),
+    source: reading(manifest),
     now: () => Date.parse("2026-08-20T05:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "bad");
@@ -345,7 +351,7 @@ Deno.test("a lane past its budget outranks the tests no lane can hold", async ()
 });
 
 Deno.test("the selection tile serves the page both tiles link to", async () => {
-  const tile = makeTestSelection({ read: reading(sampleManifest()) });
+  const tile = makeTestSelection({ source: reading(sampleManifest()) });
   const route = tile.routes?.find((r) => r.path === TEST_SELECTION_PATH);
   assertExists(route);
   const url = new URL(`http://wall${TEST_SELECTION_PATH}`);
@@ -358,9 +364,9 @@ Deno.test("the selection tile serves the page both tiles link to", async () => {
 });
 
 Deno.test("both tiles link into the page the route serves", async () => {
-  const read = reading(sampleManifest());
-  const flakes = await makeTestFlakes({ read }).collect(CTX);
-  const selection = await makeTestSelection({ read }).collect(CTX);
+  const source = reading(sampleManifest());
+  const flakes = await makeTestFlakes({ source }).collect(CTX);
+  const selection = await makeTestSelection({ source }).collect(CTX);
   assertEquals(selection.href, TEST_SELECTION_PATH);
   assertEquals(flakes.href?.split("#")[0], TEST_SELECTION_PATH);
 });
@@ -368,11 +374,14 @@ Deno.test("both tiles link into the page the route serves", async () => {
 Deno.test("a tile lets a store failure through, for the wall to gray it", async () => {
   // The wall turns a collection that throws into a gray tile carrying the
   // reason, which is what separates an unreadable store from an empty one.
-  const failing: ManifestReader = () => Promise.reject(new Error("no network"));
+  const failing: TestSelectionSource = {
+    latest: () => Promise.reject(new Error("no network")),
+    history: () => Promise.reject(new Error("no network")),
+  };
   for (
     const tile of [
-      makeTestFlakes({ read: failing }),
-      makeTestSelection({ read: failing }),
+      makeTestFlakes({ source: failing }),
+      makeTestSelection({ source: failing }),
     ]
   ) {
     await assertRejects(() => tile.collect(CTX), Error, "no network");
@@ -381,7 +390,10 @@ Deno.test("a tile lets a store failure through, for the wall to gray it", async 
 
 Deno.test("the page says a store could not be read, rather than that it is empty", async () => {
   const tile = makeTestSelection({
-    read: () => Promise.reject(new Error("no network")),
+    source: {
+      latest: () => Promise.reject(new Error("no network")),
+      history: () => Promise.reject(new Error("no network")),
+    },
   });
   const route = tile.routes?.find((r) => r.path === TEST_SELECTION_PATH);
   assertExists(route);

@@ -1821,7 +1821,9 @@ Tasks:
       sessions refuse loudly, and the deterministic nonce
       (`effectIntentNonce(eventId, instance)`) is what the flag-ON
       client's OPTIMISTIC enactment records so the authoritative
-      intent converges without re-enacting; the client half
+      intent converges without re-enacting — and what stands that
+      optimistic enactment down when the intent got there first, so
+      the journey navigates once in either order; the client half
       (`speculation/effects-channel.ts`) subscribes per space, enacts
       unacked intents, re-reads on resubscribe (the LT8 reload
       journey), and acks by nonce.

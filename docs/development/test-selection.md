@@ -206,13 +206,13 @@ three look identical in a source file, and somebody who tunes a measured
 value is arguing with a tape measure while somebody who tries to tune a
 derived one is editing a line that is not there.
 
-Three more numbers are measured, and they are not in the table because
+Four more numbers are measured, and they are not in the table because
 they are not in `policy.ts`: `setupCost` for each capability, and
-`suiteOverhead` and `correction` for each suite. They are fitted from the
-lanes' own timing records and published in the manifest, one set per
-publisher run, which is where to read them. Nothing hand-edits them, and a
-manifest carrying a strange one is a measurement to look at rather than a
-setting to fix.
+`suiteOverhead`, `correction` and `unitOverhead` for each suite. They are
+fitted from the lanes' own timing records and published in the manifest,
+one set per publisher run, which is where to read them. Nothing hand-edits
+them, and a manifest carrying a strange one is a measurement to look at
+rather than a setting to fix.
 
 | Dial | Default | Units | Set by | Why you would move it, and which way |
 | --- | --- | --- | --- | --- |
@@ -245,6 +245,9 @@ setting to fix.
 | `FILL_VALUE_SHARE` | 0.6 | share of the run's budget | chosen | Up when expensive high-value tests are crowded out by cheap ones; down when a lane spends its budget on a few slow tests and runs little else. The three shares sum to one. |
 | `FILL_DENSITY_SHARE` | 0.25 | share of the run's budget | chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
 | `FILL_EXPLORATION_SHARE` | 0.15 | share of the run's budget | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
+| `MIN_CORRECTION_SPAN_SECONDS` | 23 | seconds | derived | A tenth of a lane's budget, measured as the widest gap between two batches' charges. Down when a suite's real slope is going unbelieved for too long; up when a slope fitted inside a narrow range is being read far outside it. |
+| `MIN_CORRECTION_SAMPLES` | 3 | batches | chosen | Up when a slope is being fitted from too little and swinging about; down when a suite's real slope takes too long to be believed. |
+| `MIN_UNIT_SPAN_UNITS` | 50 | units | chosen | The widest gap between two batches' sizes a suite needs before what one more unit costs it is believed. Down when a suite's real per-unit cost is going unbelieved for too long; up when a slope fitted across a few units is being read across hundreds. |
 | `FLAKE_EXCLUSION_RATE` | 0.005 | share of runs | chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |
 | `FLAKE_MIN_EXECUTIONS` | 2 | runs of one item | chosen | What an item that has ever disagreed runs. Down to one when the cheapest evidence of intermittency is not worth a second execution; nowhere useful above two, since the line through the anchor covers everything flakier. |
 | `FLAKE_ANCHOR_RATE` | 0.01 | share of runs | chosen | With `FLAKE_ANCHOR_EXECUTIONS`, the point the count's line passes through. Down to make the count climb faster with the rate; up to make it climb slower. |
@@ -278,6 +281,19 @@ are not already folded into it, folds them, ages the counters, scores
 everything, and creates one manifest object and one aggregate object. It
 reads and folds two hundred objects at a time, so what it holds is bounded
 by the number of tests rather than by the number of runs.
+
+A manifest holds every identity in the aggregate that the topology can
+place, rather than the identities that ran inside the window the run
+read. Placing an identity needs the file its records named, where its
+suite's units are files, so the aggregate carries that file beside the
+identity's scores. Without that, a manifest would hold what ran lately:
+an identity would leave it on the first run that read none of its
+records, and come back the next time it ran, while its scores sat in the
+aggregate throughout. The exploration draw picks from the manifest's
+entries, so the tests that had gone longest without running would be the
+ones it could no longer reach. An aggregate written before those files
+were carried holds none, and each identity rejoins the manifest as its
+records name a file again.
 
 **Nothing gates on it.** When the publisher fails, the previous manifest is
 still the newest one and consumers keep using it. A manifest going stale
@@ -450,9 +466,8 @@ read them, and creates nothing in the store.
 ## What a run leaves out
 
 A run's log names two kinds of identity that did not reach the manifest.
-The first is the design working. The second is either a set of identities
-whose next record will say enough, or a surface whose records never say
-enough, and the run says which.
+The first is the design working. The second is a surface whose records do
+not say which unit they belong to.
 
 The first is the identities that measure a whole invocation:
 
@@ -473,8 +488,8 @@ The second is the identities the topology has no unit for:
 
 ```
 test selection: the topology has no unit for 3295 identities, so no lane
-can be asked to run one. An identity is left out until one of its records
-says enough to work out which unit it is in.
+can be asked to run one. What puts an identity here, and what takes it
+out again, is in docs/development/test-selection.md.
 test selection: those 3295 were recorded by 12 surface(s): unit:utils 742,
 unit:runtime-client 509, unit:ts-transformers 379,
 unit:schema-generator 314, unit:js-compiler 153, and 7 more
@@ -503,39 +518,46 @@ batches. Those records travel the same path as a test's, but nothing
 enumerates them and no lane can be asked to run one, so no suite has a
 unit for them and none should. `isLaneMeasurement` is what says so, and
 everything that reads a recorded identity asks it: the drift guard, the
-publisher, and the list the publisher keeps from one run to the next.
+publisher, and the fold that carries the surfaces from one run to the
+next.
+
+Left out of everything scored, they are not discarded. The publisher
+keeps them in its rolling aggregate over `COST_WINDOW_DAYS`, the same
+window it measures a test's cost over, and fits `setupCost`,
+`suiteOverhead`, `correction` and `unitOverhead` from them for the next
+manifest. A lane writes one record per capability it opens and three per
+batch — what it spent, what it was packed to spend, and how many units it
+opened — and it is the second and third that make a fit possible. Neither
+can be recovered from the records the batch produced: those say what the
+tests took rather than what the packer expected them to take, and a unit
+whose tests all recorded nothing leaves no trace of having been opened.
 
 The publisher leaves all of those out rather than putting an entry in the
 manifest that no lane could run. The next record that says enough puts the
 identity back in.
 
-A count on its own says nothing about which of the two it holds, so the
-aggregate keeps the identities that have no unit and removes each one when
-the topology has a unit for it, or when it names something the count no
-longer holds. A run compares its own list against that one:
+The count spans every identity the aggregate holds rather than the ones
+this run read, because the surfaces it is taken from do. Three different
+things are in it. The first is an identity whose records have never said
+which unit it is in, which is the one to act on, and the next record
+that says enough takes it out. The second is an identity nothing records
+any more: a deleted or renamed test keeps its state in the aggregate,
+and the file its records named may be one no suite has a unit for now.
+The third is an identity two suites both claim, which no record can
+settle, and which the drift guard fails on separately. Nothing in the
+count separates the three, and the surfaces named beside it are the only
+handle on which is which.
 
-```
-test selection: 2900 of them were in this count at the last publish too,
-so more of their records have been read since and those records still do
-not say which unit. A surface whose records never say which unit is worth
-fixing. See docs/development/test-selection.md.
-test selection: those 2900 were recorded by 9 surface(s): unit:utils 742,
-unit:runtime-client 509, unit:ts-transformers 379,
-unit:schema-generator 314, unit:js-compiler 153, and 4 more
-```
-
-The second line is the one to act on. It is the same breakdown, over the
-part of the count that two runs both left without a unit.
-
-A run reads each identity's records only from the objects it folded for
-the first time, so every identity in its count was recorded in an object
-no earlier publish had read. One that was already on the list has
-therefore been recorded twice over and had no unit either time. That is a
-surface whose records never say which unit, rather than an identity whose
-next record will say. The list is kept across runs rather than replaced by
-each one, because a surface recording less often than the publisher runs
-is absent from most runs, and a list replaced each time would treat such a
-surface as new every time it did record.
+The first runs after a change to what the aggregate carries report the
+whole corpus here. An aggregate written before the files were carried
+holds none, so every identity in it is read as its own invocation unit
+until one of its records names a file again, and a suite whose units are
+files can place none of them. Those runs publish the manifest they would
+have published before, and the count falls as the records arrive. A
+bootstrap would fill the files in one run, and it is the wrong tool for
+it: a bootstrap replaces the score history with what its window holds,
+so it would pay for a count that falls on its own with every catch
+counted before that window.
 
 What to check is that surface's wiring, which
 [the record guide](test-records.md#covering-a-new-test-surface) covers: a
@@ -544,16 +566,6 @@ JUnit path on the job's ship step, the `--preload` naming
 `deno test`, and the working directory that relative class names are
 joined onto. Where the records do have a file, the file is one no suite
 has a unit for, and the answer is in the topology rather than in the job.
-
-Where none of them were on the list, the run says so instead:
-
-```
-test selection: none of them were in this count at the last publish, so
-nothing has been recorded twice with no unit.
-```
-
-A run folding into an empty aggregate has nothing to compare against, and
-says neither.
 
 ## What the run on the default branch does with a flaky test
 
@@ -594,10 +606,24 @@ an invocation that accounted for every identity it was asked to run.
 ## What the wall shows
 
 Two tiles read the newest manifest. The flake tile reports how many tests
-are too noisy to judge a change by, naming the worst few. The selection
-tile reports what share of the corpus five lanes would run and how close
-the fullest lane is to its budget; it goes amber when the manifest has
-gone stale and red when a lane's projected work is past its bound.
+are too noisy to judge a change by. The selection tile reports what share
+of the corpus five lanes would run and how close the fullest lane is to
+its budget; it goes amber when the manifest has gone stale and red when a
+lane's projected work is past its bound. Both tiles link to the full
+manifest detail page.
+
+Each tile charts its measurement from every available manifest, positioned
+by generation time. The selected percentage uses each manifest's own corpus
+size. Empty corpora and unreadable manifests leave gaps; measured zeros
+remain visible. The chart's span follows the available objects. The dashboard
+caches compact counts across restarts and removes them when their source
+objects leave the listing. A latest manifest with no tests makes both
+headlines unknown.
+
+Both tiles show a running indicator while the publisher workflow is queued or
+running on main. Activity and new manifests are checked every 30 seconds.
+Activity requires the dashboard's GitHub token; the public measurements remain
+available when that lookup fails.
 
 Both follow [the wall's rules](../../packages/dashboard/README.md#philosophy-and-values):
 they report on the system, they name tests, and nothing about either is

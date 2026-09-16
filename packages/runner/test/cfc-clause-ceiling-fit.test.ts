@@ -188,11 +188,10 @@ describe("CFC clause-aware ceiling fit", () => {
       }])).toBe(false);
       // §15.2 types the field as a DID; a string that is not one is a
       // malformed atom and gets no reading, so two degenerate atoms do not
-      // meet each other through it.
-      // `isDID` and not a `did:` prefix: a truncated or method-only string
-      // is not a DID, and a method-specific id carrying a third colon is
-      // refused too — over-refusal, the safe way for this gate to be wrong.
-      for (const owner of ["", "alice", "did:", "did:key", "did:web:h:p"]) {
+      // meet each other through it. A truncated or method-only string names
+      // no principal to restate, so it gets no reading either — over-refusal,
+      // the safe way for this gate to be wrong.
+      for (const owner of ["", "alice", "did:", "did:key"]) {
         expect(cfcObservationFitsCeiling([{
           type: "https://commonfabric.org/cfc/atom/PersonalSpace",
           owner,
@@ -201,6 +200,15 @@ describe("CFC clause-aware ceiling fit", () => {
           subject: owner,
         }])).toBe(false);
       }
+      // A method-specific identifier may hold colons of its own, as a
+      // `did:web` with a port does, so such an owner is read.
+      expect(cfcObservationFitsCeiling([{
+        type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+        owner: "did:web:example.com:8080",
+      }], [{
+        type: "https://commonfabric.org/cfc/atom/User",
+        subject: "did:web:example.com:8080",
+      }])).toBe(true);
     });
 
     it("reaches into an OR-clause on the label side", () => {

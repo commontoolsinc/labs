@@ -442,14 +442,23 @@ export async function runInvocation(
 }
 
 /**
- * A record measuring the lane machinery rather than a test. The publisher
- * fits `setupCost`, `suiteOverhead` and `correction` from these, so they
+ * One figure a lane measured about itself, as a record measuring the lane
+ * machinery rather than a test. The publisher fits `setupCost`,
+ * `suiteOverhead`, `correction` and `unitOverhead` from these, so they
  * travel as ordinary records through the machinery that already exists
  * and need no pipeline of their own. They stay unmarked whatever variant
  * the batch they measure carried: they measure the lane, not an alternate
  * execution of one test.
+ *
+ * The record format carries one number and calls it a duration, so which
+ * of the lane's figures this is and what it counts are decided by the
+ * name.
  */
-function timingRecord(name: string, seconds: number, ok: boolean): TestRecord {
+function measurementRecord(
+  name: string,
+  figure: number,
+  ok: boolean,
+): TestRecord {
   return {
     line: "record",
     test: {
@@ -458,8 +467,13 @@ function timingRecord(name: string, seconds: number, ok: boolean): TestRecord {
       n: name,
     },
     outcome: ok ? "pass" : "fail",
-    durationMs: Math.round(seconds * 1000),
+    durationMs: Math.round(figure),
   };
+}
+
+/** One span of time a lane measured about itself, in seconds. */
+function timingRecord(name: string, seconds: number, ok: boolean): TestRecord {
+  return measurementRecord(name, seconds * 1000, ok);
 }
 
 /** Appends records to the lane's own spool. */
@@ -614,6 +628,7 @@ export async function runBatch(
   spool: string | undefined,
   env: Record<string, string>,
   coverage?: BatchCoverage,
+  plannedSeconds = 0,
 ): Promise<{
   ok: boolean;
   records: TestRecord[];
@@ -710,9 +725,34 @@ export async function runBatch(
   if (spool !== undefined) {
     spoolRecords(spool, [
       ...records,
+      // What the batch spent, what it was packed to spend, and how many
+      // units it opened. All three are known only here: what the packer
+      // expected the tests to take cannot be recovered from the records
+      // the batch produced, because those say what the tests took, and a
+      // unit that recorded nothing at all leaves no trace of having been
+      // opened. The publisher fits a suite's cost beyond its tests from
+      // the three together.
       timingRecord(
         batchMeasurementName(batch.suite.id, coverage !== undefined),
         seconds,
+        ok,
+      ),
+      timingRecord(
+        batchMeasurementName(
+          batch.suite.id,
+          coverage !== undefined,
+          "planned",
+        ),
+        plannedSeconds,
+        ok,
+      ),
+      measurementRecord(
+        batchMeasurementName(
+          batch.suite.id,
+          coverage !== undefined,
+          "units",
+        ),
+        batch.units.length,
         ok,
       ),
     ]);
@@ -1268,6 +1308,7 @@ export async function runLane(
         // lane.
         opened.envFor(batch.suite.needs),
         batchCoverage(options, batch.suite.id, seen.coverage),
+        chosenFor(batch.suite.id, mine.selections).seconds,
       );
       conflicts.push(...result.conflicts);
       // The records decide, rather than the command's exit status: a
