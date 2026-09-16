@@ -161,9 +161,16 @@ export type StreamValue = {
   $stream: true;
 };
 
+/**
+ * The key a stream value carries, holding `true`. A reader that only needs
+ * to know whether a value is a stream reads this one path rather than the
+ * whole value.
+ */
+export const STREAM_MARKER_KEY = "$stream";
+
 export function isStreamValue(value: unknown): value is StreamValue {
-  return isObjectNotArray(value) && "$stream" in value &&
-    value.$stream === true;
+  return isObjectNotArray(value) && STREAM_MARKER_KEY in value &&
+    value[STREAM_MARKER_KEY] === true;
 }
 
 declare module "@commonfabric/api" {

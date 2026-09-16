@@ -507,6 +507,15 @@ The strict-only delta is:
   direction is over-taint, so reads stay protected; giving the envelope seam
   a path space of its own is what removes the collision.
 
+  What the check measures is bounded on the read side as well, and not only
+  at this rung: the write machinery's own reads of the region it is writing
+  leave the per-transaction join wherever the flow dial derives one, which is
+  what lets a document whose fields carry different confidentiality be
+  rewritten whole.
+  [`cfc-write-destination-reads.md`](./cfc-write-destination-reads.md)
+  carries that class, the §8.11.3 objection to it, and the channel it leaves
+  open.
+
 - **Runtime-owned-store declaration (§8.12.5 route 2) — implemented.** The
   runtime materializes a set of documents to hold a piece's machinery rather
   than data an author named. There are four kinds: a piece's argument
