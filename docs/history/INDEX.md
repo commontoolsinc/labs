@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Research orientation and passage retrieval comparison](packages/cf-harness/research-passages-comparison-2026-09-16.md) — two-use research contract, exact passage search and batch reads, five matched tasks, preserved indexed composition, mixed latency and accuracy, inbox retrieval overlap and token regression, and browser/provenance verification.
+- [Scoped research implementation and matched comparison](packages/cf-harness/targeted-research-comparison-2026-09-16.md) — orient/answer/recipe bundle, ten matched turns, preserved indexed composition, mixed latency and recipe accuracy, a bounded follow-up recheck, six browser acceptance checks, and durable context/omission corrections.
 - [Indexed flow-read labels](development/performance/2026-09-15-cfc-flow-read-index.md) — generated transaction equivalence, the paired R by E grid, and shared arm-B attribution separating the improved flow lookup from the dominant authoritativeCoverFor scan.
 
 - [Authoritative link-label coverage](development/performance/2026-09-15-cfc-authoritative-cover.md) — 2026-09-15; prefix-only candidate selection, corpus equivalence, and paired mapped-render measurements.

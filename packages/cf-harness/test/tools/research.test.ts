@@ -18,6 +18,32 @@ describe("research", () => {
   });
 
   describe("researchTool", () => {
+    it("refuses an unknown follow-up before invoking research and retains task influence", async () => {
+      let invoked = false;
+      const context: Partial<HarnessToolContext> = {
+        nextOutputId: () => createToolOutputId("follow-up", "research", 1),
+        researchTaskCfcLabel: { confidentiality: ["task-influence"] },
+        researchRuns: [],
+        runResearch: () => {
+          invoked = true;
+          return Promise.reject(new Error("unexpected research invocation"));
+        },
+      };
+      const output = await researchTool.invoke(context as HarnessToolContext, {
+        task: "Clarify the input contract",
+        purpose: "answer",
+        followUpTo: "unknown-result",
+      });
+      expect(invoked).toBe(false);
+      expect(output).toMatchObject({
+        status: "error",
+        message:
+          "followUpTo must name an admitted research result available to this run",
+        cfc: { outputLabel: { confidentiality: ["task-influence"] } },
+      });
+      expect(output).not.toHaveProperty("researchRecord");
+    });
+
     it("retains an artifact-only fallback for an unconvertible provider cause", async () => {
       const context: Partial<HarnessToolContext> = {
         nextOutputId: () => createToolOutputId("unconvertible", "research", 1),
