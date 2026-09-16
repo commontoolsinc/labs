@@ -438,6 +438,11 @@ tests. It sleeps on the sink and applies its predicate to the cell only after
 iteration cap over it. Its predicate takes `T | undefined`, since a cell holds
 no value until its piece writes one.
 
+When that wait fails, its error includes the cell address, predicate, and last
+read value, with the original failure as its cause. The value is rendered only
+at failure, with bounded depth and length; a live value reflects its state at
+that point. This keeps healthy waits from traversing data just for diagnostics.
+
 The runner's llm tests wait on that shape often enough to have a name for it.
 `waitForLlmSettled`, in `packages/runner/test/support/llm-result.ts`, resolves
 once `llm`, `generateText` or `generateObject` has finished a request. It is a
