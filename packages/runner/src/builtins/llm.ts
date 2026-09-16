@@ -1217,6 +1217,12 @@ export function llm(
         lifecycle?.owns,
       );
 
+    // The ending for a request refused before it started.
+    const settleRefused = (error: Error) => {
+      cleanupPartial();
+      return settleAbandoned(error);
+    };
+
     // Build tool catalog if tools are present, then start execution after the
     // transaction commits.
     enqueuePostCommitLLMWork(
@@ -1307,10 +1313,7 @@ export function llm(
 
         return resultPromise.catch(settleWithError);
       },
-      (error) => {
-        cleanupPartial();
-        return settleAbandoned(error);
-      },
+      settleRefused,
       lifecycle,
     );
   };
@@ -1694,6 +1697,12 @@ export function generateText(
         lifecycle?.owns,
       );
 
+    // The ending for a request refused before it started.
+    const settleRefused = (error: Error) => {
+      cleanupPartial();
+      return settleAbandoned(error);
+    };
+
     enqueuePostCommitLLMWork(
       tx,
       runtime,
@@ -1775,10 +1784,7 @@ export function generateText(
 
         return resultPromise.catch(settleWithError);
       },
-      (error) => {
-        cleanupPartial();
-        return settleAbandoned(error);
-      },
+      settleRefused,
       lifecycle,
     );
   };
@@ -2227,6 +2233,12 @@ export function generateObject<T extends Record<string, unknown>>(
           lifecycle?.owns,
         );
 
+      // The ending for a request refused before it started.
+      const settleRefused = (error: Error) => {
+        cleanupPartial();
+        return settleAbandoned(error);
+      };
+
       logGenerateObject("enqueue", toolsRequestSummary);
 
       enqueuePostCommitLLMWork(
@@ -2462,10 +2474,7 @@ export function generateObject<T extends Record<string, unknown>>(
 
           return resultPromise.catch(settleWithError);
         },
-        (error) => {
-          cleanupPartial();
-          return settleAbandoned(error);
-        },
+        settleRefused,
         lifecycle,
       );
     } else {
@@ -2776,9 +2785,7 @@ export function generateObject<T extends Record<string, unknown>>(
             })
             .catch(settleWithError);
         },
-        (error) => {
-          return settleAbandoned(error);
-        },
+        settleAbandoned,
         lifecycle,
       );
     }

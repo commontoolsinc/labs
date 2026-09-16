@@ -157,19 +157,18 @@ export class StandaloneMemoryServer {
       let helloReceived = false;
       let sawFirstMessage = false;
       let closed = false;
-      const channel = new MemoryMessageCompressionChannel(
-        (frame) => {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(frame);
-          }
-        },
-        () => {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.close(1011, "memory websocket message failure");
-          }
-          closeConnection();
-        },
-      );
+      const failChannel = () => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.close(1011, "memory websocket message failure");
+        }
+        closeConnection();
+      };
+
+      const channel = new MemoryMessageCompressionChannel((frame) => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(frame);
+        }
+      }, failChannel);
       channels.add(channel);
       const connection = memory.connect((message) => {
         channel.send(encodeMemoryBoundary(message));

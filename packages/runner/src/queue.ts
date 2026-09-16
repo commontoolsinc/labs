@@ -93,20 +93,19 @@ export class AsyncSemaphoreQueue {
         continue;
       }
 
-      promise.then(
-        (result) => {
-          this.#active--;
-          this.#completed++;
-          resolvers.resolve(result);
-          this.#drain();
-        },
-        (error) => {
-          this.#active--;
-          this.#failed++;
-          resolvers.reject(error);
-          this.#drain();
-        },
-      );
+      const settleFailure = (error: unknown) => {
+        this.#active--;
+        this.#failed++;
+        resolvers.reject(error);
+        this.#drain();
+      };
+
+      promise.then((result) => {
+        this.#active--;
+        this.#completed++;
+        resolvers.resolve(result);
+        this.#drain();
+      }, settleFailure);
     }
   }
 }
