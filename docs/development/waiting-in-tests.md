@@ -539,13 +539,15 @@ enough to reach the assertion. Then the assertion is read, once, and reported.
 With nothing in flight the wait returns at once, so an assertion that is false
 on its own terms is reported as fast as one that never waited.
 
-`Cell.pull()` is what makes a single read enough. It subscribes an effect that
-reads the cell, awaits `scheduler.idle()`, drives the link-target loads that
-read kicked off to convergence, and takes the value after all of it. That
-convergence carries a bound of a hundred rounds, and a pull that exhausts it
-resolves anyway, with loads still pending and a warning naming the cell — so
-short of that bound the read is not taken against a graph with work
-outstanding, and at it the value can be held state.
+`Cell.pull()` is what makes a single read enough, over a scope worth stating.
+It subscribes an effect that reads the cell, awaits `scheduler.idle()`, drives
+the link-target loads that read kicked off to convergence, and takes the value
+after all of it, so the read waits for the computations it depends on and for
+the links it followed. It waits for neither the storage sync nor an async
+built-in's own work: those are what `runtime.settled()` before it covers, which
+is why the demand and the wait are not redundant with the read. Its convergence
+also carries a bound of a hundred rounds, and a pull that exhausts it resolves
+anyway, with loads still pending and a warning naming the cell.
 
 `packages/cli/test/test-runner-assertion-reads.test.ts` states the count, for
 an assertion that holds, one that does not, and one whose value an async

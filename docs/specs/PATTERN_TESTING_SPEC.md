@@ -279,9 +279,11 @@ expense-tracker.test.tsx
 
 The runner itself is `packages/cli/lib/test-runner.ts`. The sketch below is a
 reading aid for the shape of the loop, not a second copy of it: it leaves out
-settling and the multi-user paths. Behavior that matters belongs in the code and in the
-prose above — change one of those and this sketch needs the same edit, so keep
-it short enough to be worth having.
+the convergence loop an action and a render step settle through, the read
+accounting and error handling around each step, and the multi-user paths.
+Behavior that matters belongs in the code and in the prose above — change one
+of those and this sketch needs the same edit, so keep it short enough to be
+worth having.
 
 ```typescript
 // Shown for illustration only.
@@ -376,9 +378,13 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
       // Demanding the assertion starts a lazy async builtin; the demand is
       // held across the wait so the work it starts stays reachable.
       const releaseDemand = assertCell.sink(() => {});
-      await runtime.settled();
-      const value = await assertCell.pull();
-      releaseDemand();
+      let value: unknown;
+      try {
+        await runtime.settled();
+        value = await assertCell.pull();
+      } finally {
+        releaseDemand();
+      }
       const record = asAssertRecord(value);
       const passed = record ? record.ok : value === true;
 
