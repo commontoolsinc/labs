@@ -136,7 +136,9 @@ What works today:
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
     reports each one's kind, evidence quality, declared shapes, and import
-    specifier, never its source)
+    specifier, never its source; discovery follows published successors as
+    described in
+    [Pattern generations in search](#pattern-generations-in-search))
   - `record_feedback` (under the same pattern-index gate; votes a pattern up or
     down so the index learns which ones were worth offering)
   - `search_skills` (present only on the parent surface when the run configures
@@ -1312,6 +1314,29 @@ channels of one conceptual kind: an id names hashed information stored
 somewhere, attached metadata accompanies it, and trusted-side code resolves it.
 They deliberately remain separate until experience supplies a concrete reason to
 unify them.
+
+### Pattern generations in search
+
+The shared index client resolves discovery for `search_patterns`, private
+research, and the console's Index search. It reads the discoverable catalog and
+follows each entry's `priorPatternId` to find replacements, including a
+successor outside the original query's result limit. Only same-owner links
+participate. An unambiguous chain contributes its final generation once, at the
+earliest matching position. A penalized final generation removes that chain from
+the answer; a branch or cycle fails the affected search instead of choosing a
+generation arbitrarily.
+
+Replacement metadata, schemas, quality, and signals belong to the successor.
+Query-term counts are omitted on a replacement because the index measured them
+against the predecessor. The catalog is refreshed for every nonempty search;
+create-only metadata is cached by identity within the client, and failed reads
+are not cached. This requires one metadata read per catalog entry on the first
+search and for each newly discovered identity thereafter. No source is
+requested. An unavailable catalog or metadata read fails discovery explicitly.
+
+`getPattern`, attached pattern references, and `cf:pattern:` imports continue to
+resolve the exact requested identity. Search resolution changes recommendations,
+not existing compositions or the index's stored event history.
 
 ### Researching Common Fabric
 
