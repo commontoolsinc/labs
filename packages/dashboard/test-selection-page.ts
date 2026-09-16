@@ -24,6 +24,7 @@ import {
   groupDigits,
 } from "./lib.ts";
 import { STATUS_EDGE, STATUS_WASH } from "./palette.ts";
+import { sharedTestSelection } from "./test-selection-history.ts";
 import {
   FLAKE_EXCLUSION_FALLBACK,
   FLAKE_WINDOW_FALLBACK_DAYS,
@@ -33,7 +34,6 @@ import {
   type ManifestReader,
   numberDial,
   selectedCount,
-  sharedManifest,
 } from "./test-selection-manifest.ts";
 import {
   DASHBOARD_THEME_CLIENT,
@@ -308,7 +308,7 @@ export function testSelectionUnavailable(reason: string): string {
 
 /** Serves the page against the manifest the tiles are already reading. */
 export async function testSelectionResponse(
-  read: ManifestReader = sharedManifest,
+  read: ManifestReader = sharedTestSelection.latest,
   clock?: () => number,
 ): Promise<Response> {
   const html = (body: string, status: number) =>

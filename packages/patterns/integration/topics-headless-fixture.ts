@@ -589,11 +589,11 @@ export type TopicsDemand =
    */
   | { readonly workload: "all-backlinks" }
   /**
-   * Every topic's comment count and last activity, and nothing else: the two
-   * lifts that read a topic's comments and links. A browser ran them one topic
-   * at a time, the comment count on opening a topic and its last activity on
-   * returning to the board, so every topic's at once is not what a board in
-   * use demands.
+   * Every topic's comment count and last activity, and nothing else: the lifts
+   * that read a topic's comments, and of those the last activity reads its
+   * links as well. A browser ran them only for the topic it opened, the
+   * comment count on opening that topic and its last activity on returning to
+   * the board, so every topic's at once is not what a board in use demands.
    */
   | { readonly workload: "aggregates" };
 
@@ -614,6 +614,46 @@ export interface TopicsOutputs {
   /** Each demanded topic's last activity, by topic index. */
   readonly lastActivity: ReadonlyMap<number, Cell<number>>;
 }
+
+/**
+ * What a regression variant starts its actions from: the transaction that
+ * starts the demanded lifts, and the fixture they run over.
+ */
+export interface TopicsVariantStart {
+  /** The transaction starting the demanded lifts, which the actions join. */
+  readonly tx: IExtendedStorageTransaction;
+
+  /** The fixture as written to storage. */
+  readonly seeded: SeededTopicsFixture;
+
+  /**
+   * Returns the cell for the variant's output called `name`, apart from every
+   * output the demanded lifts write.
+   */
+  output<T>(name: string): Cell<T>;
+
+  /**
+   * Starts another instance of each demanded lift over the same inputs, each
+   * writing an output named with `name` apart from the first instance's, and
+   * returns those outputs.
+   */
+  startDemandedLifts(name: string): readonly Cell<unknown>[];
+}
+
+/**
+ * Extra work a measurement starts beside the lifts its demand names, which a
+ * read-budget test uses as a regression variant. It is called once for each
+ * runtime a measurement opens, after the Topics sources are compiled and
+ * before reads are recorded, so work it does then, such as compiling a module
+ * of its own, is not measured. The function it resolves to starts the
+ * variant's actions in the transaction that starts the demanded lifts and
+ * returns their outputs, which the measurement holds demanded as it holds the
+ * lifts' own. Those outputs are not among the measurement's `outputs`.
+ */
+export type TopicsVariant = (
+  runtime: Runtime,
+  derivations: TopicsDerivations,
+) => Promise<(start: TopicsVariantStart) => readonly Cell<unknown>[]>;
 
 /** An operation on a measurement, recorded through settlement. */
 export interface TopicsOperation {
@@ -700,7 +740,8 @@ export interface TopicsMeasurement extends AsyncDisposable {
 /**
  * Runs the reached Topics lifts `demand` names over `fixture` in a fresh
  * runtime, holding their outputs demanded, and returns once the runtime has
- * settled.
+ * settled. Given `variant`, every runtime the measurement opens starts the
+ * variant's actions beside the lifts, in the same transaction.
  *
  * Reads are recorded from the transaction that starts the lifts, which is
  * accounted as initialization, through settlement; compiling the sources and
@@ -714,6 +755,7 @@ export async function measureTopicsFixture(
   fixture: TopicsFixture,
   passphrase: string,
   demand: TopicsDemand = { workload: "all-backlinks" },
+  variant?: TopicsVariant,
 ): Promise<TopicsMeasurement> {
   const demanded = demandedLiftsOf(demand, fixture.topics.length);
   await using stack = new AsyncDisposableStack();
@@ -727,7 +769,7 @@ export async function measureTopicsFixture(
       storage,
       space,
       errors,
-      { topicCount: fixture.topics.length, demanded, seed },
+      { topicCount: fixture.topics.length, demanded, seed, variant },
     );
 
   // Unset only while `reopen()` is between disposing one session and opening
@@ -825,17 +867,19 @@ interface TopicsSession extends AsyncDisposable {
  * Helper for {@link measureTopicsFixture}, which opens a runtime over `storage`,
  * reaches the Topics lifts, writes `seed` into `space` or, absent one,
  * addresses the fixture already written there, and starts the lifts `demanded`
- * names, recording reads from that start through settlement. Disposing the
- * session disposes its runtime and leaves `storage` open.
+ * names, with `variant`'s actions when given, recording reads from that start
+ * through settlement. Disposing the session disposes its runtime and leaves
+ * `storage` open.
  */
 async function openTopicsSession(
   storage: EmulatedStorageManager,
   space: MemorySpace,
   errors: string[],
-  { topicCount, demanded, seed }: {
+  { topicCount, demanded, seed, variant }: {
     readonly topicCount: number;
     readonly demanded: DemandedLifts;
     readonly seed?: TopicsFixture;
+    readonly variant?: TopicsVariant;
   },
 ): Promise<TopicsSession> {
   await using stack = new AsyncDisposableStack();
@@ -851,6 +895,7 @@ async function openTopicsSession(
     runtime,
     await resolveTopicsProgram(runtime),
   );
+  const startVariant = await variant?.(runtime, derivations);
   const seeded = seed === undefined
     ? storedTopicsFixture(runtime, space, topicCount)
     : await seedTopicsFixture(runtime, space, seed);
@@ -859,21 +904,17 @@ async function openTopicsSession(
   let elapsedMs: number;
   try {
     const started = performance.now();
-    outputs = await startTopicsLifts(
+    const lifts = await startTopicsLifts(
       runtime,
       space,
       derivations,
       seeded,
       demanded,
+      startVariant,
     );
-    const { table, backlinks, commentCounts, lastActivity } = outputs;
+    outputs = lifts.outputs;
     for (
-      const cell of [
-        ...(table === undefined ? [] : [table]),
-        ...backlinks.values(),
-        ...commentCounts.values(),
-        ...lastActivity.values(),
-      ]
+      const cell of [...outputCellsOf(outputs), ...lifts.variantOutputs]
     ) {
       stack.defer(cell.sink(() => {}));
     }
@@ -1004,8 +1045,9 @@ async function seedTopicsFixture(
 
 /**
  * Helper for {@link openTopicsSession}, which starts the lifts `demanded`
- * names over the seeded fixture, in one transaction begun as an initialization
- * attempt.
+ * names over the seeded fixture, and `startVariant`'s actions when given, in
+ * one transaction begun as an initialization attempt, and returns the lifts'
+ * outputs apart from the variant's.
  */
 async function startTopicsLifts(
   runtime: Runtime,
@@ -1013,64 +1055,83 @@ async function startTopicsLifts(
   { lifts }: TopicsDerivations,
   seeded: SeededTopicsFixture,
   demanded: DemandedLifts,
-): Promise<TopicsOutputs> {
+  startVariant?: (start: TopicsVariantStart) => readonly Cell<unknown>[],
+): Promise<{
+  readonly outputs: TopicsOutputs;
+  readonly variantOutputs: readonly Cell<unknown>[];
+}> {
   const tx = runtime.edit();
   runtime.scheduler.beginReadAttempt(tx, "initialization");
   const output = <T>(cause: string) =>
     runtime.getCell<T>(space, cause, undefined, tx);
-  const table = demanded.pivot === undefined ? undefined : runtime.run(
-    tx,
-    lifts.crossrefTable,
-    { sources: seeded.board },
-    output<PivotRow[]>("topics-fixture-crossrefs"),
-  );
   const withBacklinks = new Set(demanded.pivot?.backlinks);
   const withCommentCount = new Set(demanded.commentCounts);
   const withLastActivity = new Set(demanded.lastActivity);
-  const backlinks = new Map<number, Cell<unknown[]>>();
-  const commentCounts = new Map<number, Cell<number>>();
-  const lastActivity = new Map<number, Cell<number>>();
-  seeded.topics.forEach((topic, index) => {
-    if (table !== undefined && withBacklinks.has(index)) {
-      backlinks.set(
-        index,
-        runtime.run(
-          tx,
-          lifts.backlinksOf,
-          { table, self: topic },
-          output<unknown[]>(`topics-fixture-backlinks-${index}`),
-        ),
-      );
-    }
-    if (withCommentCount.has(index)) {
-      commentCounts.set(
-        index,
-        runtime.run(
-          tx,
-          lifts.presentCommentCountOf,
-          { comments: topic.key("comments") },
-          output<number>(`topics-fixture-comment-count-${index}`),
-        ),
-      );
-    }
-    if (withLastActivity.has(index)) {
-      lastActivity.set(
-        index,
-        runtime.run(
-          tx,
-          lifts.lastActivityOf,
-          {
-            comments: topic.key("comments"),
-            links: topic.key("links"),
-            createdAt: topic.key("createdAt"),
-            bodyUpdatedAt: topic.key("bodyUpdatedAt"),
-            titleUpdatedAt: topic.key("titleUpdatedAt"),
-          },
-          output<number>(`topics-fixture-last-activity-${index}`),
-        ),
-      );
-    }
-  });
+  // Starts one instance of each demanded lift, with `prefix` opening the cause
+  // of every output it writes.
+  const start = (prefix: string): TopicsOutputs => {
+    const table = demanded.pivot === undefined ? undefined : runtime.run(
+      tx,
+      lifts.crossrefTable,
+      { sources: seeded.board },
+      output<PivotRow[]>(`${prefix}crossrefs`),
+    );
+    const backlinks = new Map<number, Cell<unknown[]>>();
+    const commentCounts = new Map<number, Cell<number>>();
+    const lastActivity = new Map<number, Cell<number>>();
+    seeded.topics.forEach((topic, index) => {
+      if (table !== undefined && withBacklinks.has(index)) {
+        backlinks.set(
+          index,
+          runtime.run(
+            tx,
+            lifts.backlinksOf,
+            { table, self: topic },
+            output<unknown[]>(`${prefix}backlinks-${index}`),
+          ),
+        );
+      }
+      if (withCommentCount.has(index)) {
+        commentCounts.set(
+          index,
+          runtime.run(
+            tx,
+            lifts.presentCommentCountOf,
+            { comments: topic.key("comments") },
+            output<number>(`${prefix}comment-count-${index}`),
+          ),
+        );
+      }
+      if (withLastActivity.has(index)) {
+        lastActivity.set(
+          index,
+          runtime.run(
+            tx,
+            lifts.lastActivityOf,
+            {
+              comments: topic.key("comments"),
+              links: topic.key("links"),
+              createdAt: topic.key("createdAt"),
+              bodyUpdatedAt: topic.key("bodyUpdatedAt"),
+              titleUpdatedAt: topic.key("titleUpdatedAt"),
+            },
+            output<number>(`${prefix}last-activity-${index}`),
+          ),
+        );
+      }
+    });
+    return table === undefined
+      ? { backlinks, commentCounts, lastActivity }
+      : { table, backlinks, commentCounts, lastActivity };
+  };
+  const outputs = start("topics-fixture-");
+  const variantOutputs = startVariant?.({
+    tx,
+    seeded,
+    output: <T>(name: string) => output<T>(`topics-fixture-variant-${name}`),
+    startDemandedLifts: (name) =>
+      outputCellsOf(start(`topics-fixture-variant-${name}-`)),
+  }) ?? [];
   runtime.prepareTxForCommit(tx);
   const { error } = await tx.commit();
   if (error !== undefined) {
@@ -1078,9 +1139,18 @@ async function startTopicsLifts(
       cause: error,
     });
   }
-  return table === undefined
-    ? { backlinks, commentCounts, lastActivity }
-    : { table, backlinks, commentCounts, lastActivity };
+  return { outputs, variantOutputs };
+}
+
+/** Returns every output cell `outputs` holds, the pivot's first when held. */
+function outputCellsOf(outputs: TopicsOutputs): Cell<unknown>[] {
+  const { table, backlinks, commentCounts, lastActivity } = outputs;
+  return [
+    ...(table === undefined ? [] : [table]),
+    ...backlinks.values(),
+    ...commentCounts.values(),
+    ...lastActivity.values(),
+  ];
 }
 
 /**

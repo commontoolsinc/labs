@@ -49,7 +49,7 @@ import {
   type LaneObservation,
   laneObservationsOf,
 } from "./calibrate.ts";
-import type { Suite } from "../test-topology/suite.ts";
+import { type Suite, unavailableUnits } from "../test-topology/suite.ts";
 import {
   type Calibration,
   dialSnapshot,
@@ -431,19 +431,26 @@ export interface Unplaced {
   suiteLevel: string[];
 
   /**
-   * Identities the topology has no unit for. What decides an identity's
-   * unit is its own records: the file, for a suite whose units are files,
-   * and the recorded name for one whose units are not. An identity whose
-   * records say neither is given a unit the first time it records one the
-   * tree holds. An identity that matches two suites is here as well, which
-   * is a topology defect the drift guard fails on rather than a record
-   * that says too little. The lane's measurements of itself are not here:
-   * they are not test surfaces, and `isLaneMeasurement` is what says so.
+   * Identities no suite claims. What decides an identity's unit is its
+   * own records: the file, for a suite whose units are files, and the
+   * recorded name for one whose units are not. An identity whose records
+   * say neither is given a unit the first time it records one the tree
+   * holds. The lane's measurements of itself are not here: they are not
+   * test surfaces, and `isLaneMeasurement` is what says so.
    *
    * These span the aggregate's whole history rather than one run's
    * reads, because the surfaces they are read from do.
    */
   unclaimed: string[];
+
+  /**
+   * Identities more than one suite claims, which is a topology defect
+   * the drift guard fails on rather than a record that says too little.
+   * Apart here because the tree holds the test twice over rather than
+   * not at all, and what is done about an identity the tree has lost
+   * must not be done about one it holds.
+   */
+  contested: string[];
 }
 
 /**
@@ -467,7 +474,7 @@ export function locateSurfaces(
   surfaces: ReadonlyMap<string, Surface>,
 ): { placed: Map<string, Surface>; unplaced: Unplaced } {
   const placed = new Map<string, Surface>();
-  const unplaced: Unplaced = { suiteLevel: [], unclaimed: [] };
+  const unplaced: Unplaced = { suiteLevel: [], unclaimed: [], contested: [] };
   for (const [key, surface] of surfaces) {
     const test = testIdentityOfKey(key);
     if (test === undefined) continue;
@@ -486,19 +493,82 @@ export function locateSurfaces(
     // an ambiguity to settle here, and the drift guard is what fails on
     // it. Placing it either way would put the work in whichever suite
     // came first.
-    const unit = claims.length === 1 ? claims[0]!.unit : undefined;
-    if (unit !== undefined) {
-      placed.set(key, {
-        suite: claims[0]!.suite.id,
-        unit,
-        fromFile: surface.fromFile,
-      });
+    if (claims.length === 1) {
+      const unit = claims[0]!.unit;
+      if (unit === undefined) unplaced.suiteLevel.push(key);
+      else {
+        placed.set(key, {
+          suite: claims[0]!.suite.id,
+          unit,
+          fromFile: surface.fromFile,
+        });
+      }
       continue;
     }
-    if (claims.length === 1) unplaced.suiteLevel.push(key);
-    else unplaced.unclaimed.push(key);
+    if (claims.length === 0) unplaced.unclaimed.push(key);
+    else unplaced.contested.push(key);
   }
   return { placed, unplaced };
+}
+
+/**
+ * The identities the aggregate carries for tests the tree has lost.
+ *
+ * A test deleted from the repository leaves its records in the store,
+ * and the store is what the fold reads, so the aggregate carries its
+ * state for good. Nothing can select it, because the topology has no
+ * unit for it and the manifest holds only what the topology placed. What
+ * it costs is a state read, scored and written back on every publisher
+ * run, and a place in the count of identities the topology has no unit
+ * for, which is the count that says a surface is recording without
+ * saying where it runs.
+ *
+ * Two things have to hold before one is dropped, and neither is enough
+ * alone. No suite claims the identity at all: an identity two suites
+ * both claim is a topology defect over a test the tree holds twice, and
+ * is not here. And no run of it has
+ * been recorded inside the longest window a state keeps counters for,
+ * which is what `lastRun` having no answer says: the default branch runs
+ * every test the tree holds, so a test that is still there and still
+ * runs records inside that window whether or not a change selects it.
+ *
+ * The second is what holds this against a topology that reads the tree
+ * wrongly. A suite that enumerates nothing leaves every identity it
+ * would have claimed with no unit, and every one of those is running, so
+ * none of them is dropped.
+ *
+ * A skip is not a run, so a test the tree holds that nothing ever runs
+ * is dropped like a deleted one. What that costs is catches from before
+ * the window: every counter inside it is empty either way, since a skip
+ * is the one outcome a state records nothing for.
+ *
+ * A unit a configuration declares unavailable is kept, under the variant
+ * that declared it. The declaration is the tree saying the test is there
+ * and does not run in this configuration, which is how the drift guard
+ * and `verify` each read one as well.
+ */
+export function departed(
+  suites: readonly Suite[],
+  unplaced: Unplaced,
+  folded: Pick<FoldResult, "states" | "surfaces">,
+): string[] {
+  // A skip registry belongs to one configuration, and the file it names
+  // is a unit of every configuration of that suite. Keyed by the variant
+  // as well, so a file skipped in one of them says nothing about the
+  // same file's identities in another.
+  const declared = new Set<string>();
+  for (const suite of suites) {
+    for (const unit of unavailableUnits(suite)) {
+      declared.add(`${suite.variant ?? ""}\t${unit}`);
+    }
+  }
+  return unplaced.unclaimed.filter((key) => {
+    const state = folded.states.get(key);
+    if (state === undefined || lastRun(state) !== undefined) return false;
+    const unit = folded.surfaces.get(key)?.unit;
+    const test = testIdentityOfKey(key);
+    return !declared.has(`${test?.v ?? ""}\t${unit}`);
+  });
 }
 
 /**
@@ -605,7 +675,6 @@ export function buildManifest(input: BuildInput): Manifest {
     calibration: {
       setupCost: input.calibration?.setupCost ?? {},
       suites: input.calibration?.suites ?? {},
-      unitOverhead: input.calibration?.unitOverhead ?? {},
       prologue: input.calibration?.prologue ?? LANE_PROLOGUE_SECONDS,
     },
     entries,

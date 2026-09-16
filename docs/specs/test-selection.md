@@ -163,6 +163,21 @@ the bound a lane is killed at are the same order of magnitude, so a test
 that hits one is otherwise reported as fitting no lane and held out of
 every pull request that does not touch it.
 
+A day records which set of these rules sealed it, and a day carrying no
+such record was sealed before any set was recorded, which reads as
+another set. These rules change, and a day sealed under earlier ones did
+not measure what these measure, so such a day answers only until these
+rules have sealed a day for that test, and is dropped the moment they
+do. Carried instead, it would
+decide what runs for the whole of the window, and a safety net's bound
+is the figure that outcome is worst for.
+
+Two things follow that are worth stating. The window refills over its
+own length after a change, charging fewer days' figures while it does.
+And a test that keeps hitting a safety net seals no day at all, so it
+keeps the earlier set's figure until that figure ages out; what answers
+that case is the rule above it, that a failure is not measured.
+
 A test with no passing execution inside the window has no measured cost
 and is charged nothing. Such a test has either barely run or is failing
 everywhere, and one failing everywhere holds up the default branch, which
@@ -592,6 +607,46 @@ rename is never inferred: a wrong bridge silently credits one test with
 another's record, and since the whole score rests on catch attribution
 there is no downstream check that would notice. Suggesting a line is help;
 writing one unasked is not.
+
+## Removals
+
+A test deleted from the repository keeps its records, because the store
+is append-only and a record is a fact about a run that happened. So every
+consumer has to be able to hold an identity nothing will ever run again,
+and a consumer that keeps a rolling aggregate has to be able to let one
+go.
+
+Nothing selects such an identity. What decides where a test runs is the
+working tree, and an identity the topology has no unit for is left out of
+the manifest rather than carried under a name nothing can run. A manifest
+published before the deletion still names it, and a consumer reconciles
+the manifest against the tree before packing, so the entry drops out
+there too.
+
+A deletion is never bridged. The alias file joins a test's history to the
+name it now has, and a deleted test has no such name; an alias to one
+would credit another test with its record. Nothing declares a removal
+either. What says a test is gone is the tree not holding it, which is the
+same thing that says where every other test runs.
+
+A consumer that keeps a rolling aggregate drops an identity on two
+conditions together. No suite claims it, and no run of it has been
+recorded inside the longest window the aggregate keeps counters for.
+Either alone is not enough: an identity whose records never say which
+unit they came from is claimed by nobody and is running, and a topology
+that reads the tree wrongly stops claiming tests that are running. An
+identity more than one suite claims is a defect over a test the tree
+holds twice and is not a departure at all. A unit a configuration
+declares unavailable, under the variant that declares it, is accounted
+for rather than lost, and every identity in it is kept. Until the window
+has passed over it a deleted identity is one nobody claims and which has
+run, which is what it is.
+
+A guard that compares a tree against a set of records compares it against
+the records that tree produced. A tree read against an earlier run's
+records disagrees with them over every test deleted in between, and over
+every test renamed on the same day, since an alias reaches records from
+earlier days only. Both are the repository working as intended.
 
 ## What a run on the default branch owes the change behind it
 

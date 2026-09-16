@@ -12,6 +12,7 @@ import {
   buildManifest,
   CI_SOURCE,
   dayOf,
+  departed,
   emptyAggregate,
   executionsFor,
   Fold,
@@ -25,9 +26,14 @@ import {
   recordSurface,
   reportFromText,
 } from "./build.ts";
-import { parseManifest, serializeManifest } from "./manifest.ts";
+import {
+  MANIFEST_SCHEMA_VERSION,
+  parseManifest,
+  serializeManifest,
+} from "./manifest.ts";
 import type { Suite } from "../test-topology/suite.ts";
 import {
+  COST_RULE,
   costSeconds,
   daysBetween,
   emptyState,
@@ -324,8 +330,8 @@ describe("build", () => {
     it("keeps a lane's measurements of itself for the cost model", () => {
       // Left out of everything scored, and not discarded either: what
       // the packer charges a lane beyond its tests is fitted from them.
-      // One group is one lane's artifact, so a batch's two halves are
-      // here together.
+      // One group is one lane's artifact, so a batch's three
+      // measurements are here together.
       const read = readReport(
         stored(CI_NAME, context(), [
           record(),
@@ -345,12 +351,26 @@ describe("build", () => {
             },
             durationMs: 40_000,
           }),
+          record({
+            test: {
+              k: "gate",
+              s: "ci",
+              n: "ci-lane units batch workspace-unit",
+            },
+            durationMs: 17,
+          }),
         ]),
         NO_ALIASES,
       );
       expect(read.lanes).toEqual([
         { day: "2026-08-20", capability: "fuse", seconds: 14.8 },
-        { day: "2026-08-20", suite: "workspace-unit", planned: 40, spent: 92 },
+        {
+          day: "2026-08-20",
+          suite: "workspace-unit",
+          planned: 40,
+          spent: 92,
+          units: 17,
+        },
       ]);
     });
 
@@ -680,6 +700,27 @@ describe("build", () => {
       expect(costSeconds(parsed.states[KEY]!, "2026-08-20")).toBe(4);
     });
 
+    it("reads a day a stored state holds under the stamp it carries", () => {
+      // The days in a stored state were sealed by whatever rules were in
+      // force then, and a state written before the stamps carries none,
+      // so what a reader gets back has to say which.
+      const aggregate = emptyAggregate("2026-08-20");
+      const held = emptyState();
+      held.costByDay["2026-08-20"] = samplesOf([300_000, 300_000]);
+      aggregate.states[KEY] = held;
+      const parsed = parseAggregate(JSON.stringify(aggregate))!;
+      expect(parsed.states[KEY]!.costByDay["2026-08-20"]!.rule)
+        .toBeUndefined();
+      const sealed = emptyAggregate("2026-08-20");
+      const measured = emptyState();
+      sealDay(measured, "2026-08-20", samplesOf([300_000, 300_000]));
+      sealed.states[KEY] = measured;
+      expect(
+        parseAggregate(JSON.stringify(sealed))!
+          .states[KEY]!.costByDay["2026-08-20"]!.rule,
+      ).toBe(COST_RULE);
+    });
+
     it("carries what lanes measured into the next run", () => {
       // The fit reads a week of them, and a publisher run folds a few
       // hours of objects, so they survive the aggregate rather than
@@ -687,7 +728,13 @@ describe("build", () => {
       const aggregate = emptyAggregate("2026-08-20");
       aggregate.lanes = [
         { day: "2026-08-20", capability: "fuse", seconds: 14.8 },
-        { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
+        {
+          day: "2026-08-20",
+          suite: "runner-unit",
+          planned: 10,
+          spent: 30,
+          units: 4,
+        },
       ];
       expect(parseAggregate(JSON.stringify(aggregate))?.lanes)
         .toEqual(aggregate.lanes);
@@ -696,16 +743,24 @@ describe("build", () => {
     it("drops a stored lane measurement it cannot read", () => {
       // Each one stands alone, so one that will not read is dropped by
       // itself rather than taking a week of measurements with it. The
-      // fit reads every figure in one as a number, and a stored
-      // `Infinity` or `NaN` arrives here as `null`.
+      // fit reads all three of a batch's figures as numbers, so one
+      // short of them says nothing it can use, and a stored `Infinity`
+      // or `NaN` arrives here as `null`.
       const older = { ...emptyAggregate("2026-08-20") } as Record<
         string,
         unknown
       >;
       older.lanes = [
         { day: "2026-08-20", capability: "fuse", seconds: "a while" },
-        { day: "2026-08-20", suite: "runner-unit", planned: 10 },
-        { day: "2026-08-20", suite: "runner-unit", planned: NaN, spent: 30 },
+        { day: "2026-08-20", suite: "runner-unit", planned: 10, units: 4 },
+        {
+          day: "2026-08-20",
+          suite: "runner-unit",
+          planned: NaN,
+          spent: 30,
+          units: 4,
+        },
+        { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
         { day: 7, capability: "fuse", seconds: 1 },
         "fuse took a while",
         null,
@@ -742,12 +797,16 @@ describe("build", () => {
     it("returns undefined for anything that is not one", () => {
       expect(parseAggregate("{not json")).toBeUndefined();
       expect(parseAggregate('{"schema":99}')).toBeUndefined();
-      expect(parseAggregate('{"schema":1,"day":"x"}')).toBeUndefined();
+      expect(
+        parseAggregate(
+          JSON.stringify({ schema: MANIFEST_SCHEMA_VERSION, day: "x" }),
+        ),
+      ).toBeUndefined();
     });
 
     it("refuses a shape it would otherwise have to guess at", () => {
       const whole = {
-        schema: 1,
+        schema: MANIFEST_SCHEMA_VERSION,
         day: "2026-08-20",
         folded: [],
         states: {},
@@ -776,12 +835,151 @@ describe("build", () => {
       // No compacted list at all is the truthful reading that nothing
       // was compacted, which is different from a list it cannot read.
       const before = {
-        schema: 1,
+        schema: MANIFEST_SCHEMA_VERSION,
         day: "2026-08-20",
         folded: [],
         states: {},
       };
       expect(parseAggregate(JSON.stringify(before))?.compacted).toEqual([]);
+    });
+  });
+
+  describe("departed()", () => {
+    /** A suite claiming nothing, holding the skips a case gives it. */
+    function empty(
+      unavailable: Suite["unavailable"] = [],
+      units: string[] = [],
+    ): Suite {
+      return {
+        id: "workspace-unit",
+        recordSurfaces: [{ kind: "unit", scope: "memory" }],
+        needs: ["deno"],
+        units,
+        unavailable,
+        locate: () => undefined,
+        command: () => Promise.resolve([]),
+      };
+    }
+
+    /** A state whose last run was on a day inside the counters' window. */
+    function ranOn(day: string): IdentityState {
+      return { ...emptyState(), runsByDay: { [day]: 4 } };
+    }
+
+    const onFile = new Map([[KEY, {
+      suite: "unit:memory",
+      unit: UNIT,
+      fromFile: true,
+    }]]);
+
+    it("drops an identity the topology lost that nothing records", () => {
+      // A deleted test keeps its records in the store, so the fold keeps
+      // reading it back. Nothing can run it, and carrying it costs a
+      // state rescored and rewritten on every publisher run.
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([KEY]);
+    });
+
+    it("keeps an identity the topology lost that is still recording", () => {
+      // A surface whose records never say which file they came from has
+      // no unit either, and it is a wiring defect rather than a test that
+      // left. The runs are what tell the two apart.
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        {
+          states: new Map([[KEY, ranOn("2026-08-19")]]),
+          surfaces: onFile,
+        },
+      )).toEqual([]);
+    });
+
+    it("keeps an identity a configuration declares unavailable", () => {
+      // The declaration is the tree saying the test is there and does not
+      // run in this configuration, so it has stopped recording on
+      // purpose and its history is waiting for the skip to be lifted.
+      expect(departed(
+        [empty([{ unit: UNIT, reason: "the surface has not landed" }])],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([]);
+    });
+
+    it("reads a skip registry against the variant that declared it", () => {
+      // The registry belongs to one configuration and names a file every
+      // configuration of the suite holds. Read across all of them, a file
+      // skipped under one variant would pin the default history of the
+      // same file for good.
+      const variant: Suite = {
+        ...empty([{ unit: UNIT, reason: "the surface has not landed" }]),
+        variant: "server-execution",
+      };
+      expect(departed(
+        [variant],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([KEY]);
+    });
+
+    it("passes over a leaf a configuration declares unavailable", () => {
+      // A leaf entry leaves its unit enumerated and running, which is
+      // what the suite here holds, so in the tree the unit is placed by
+      // its file and nothing in it reaches this. Reading such an entry
+      // as a whole unit would exempt every other test in the file.
+      expect(departed(
+        [empty([{
+          unit: UNIT,
+          leafName: "space > writes",
+          reason: "the surface has not landed",
+        }], [UNIT])],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([KEY]);
+    });
+
+    it("drops an identity whose history is older than the window", () => {
+      // The counters are aged before this reads them, so a state with
+      // catches and no days is a test that stopped running long enough
+      // ago for every window to have passed over it.
+      const old = { ...emptyState(), mainCatches: 4, lastCatch: "2026-01-02" };
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, old]]), surfaces: onFile },
+      )).toEqual([KEY]);
+    });
+
+    it("keeps an identity more than one suite claims", () => {
+      // Two suites claiming it is a topology defect over a test the tree
+      // holds twice, and the drift guard is what fails on it. Dropping
+      // its history would answer a defect by discarding the evidence.
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [], contested: [KEY] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([]);
+    });
+
+    it("keeps an identity the topology placed", () => {
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([]);
+    });
+
+    it("keeps an identity that measures a whole invocation", () => {
+      // Those are left out of the manifest because no lane can be asked
+      // to run one, not because the tree has lost them, and the lane
+      // cost fit reads what they measured.
+      expect(departed(
+        [empty()],
+        { suiteLevel: [KEY], unclaimed: [], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([]);
     });
   });
 
@@ -865,7 +1063,8 @@ describe("build", () => {
         }]]),
       );
       expect(placed.size).toBe(0);
-      expect(unplaced).toEqual({ suiteLevel: [], unclaimed: [] });
+      expect(unplaced)
+        .toEqual({ suiteLevel: [], unclaimed: [], contested: [] });
     });
 
     it("passes over a key that names no identity", () => {
@@ -881,7 +1080,8 @@ describe("build", () => {
         }]]),
       );
       expect(placed.size).toBe(0);
-      expect(unplaced).toEqual({ suiteLevel: [], unclaimed: [] });
+      expect(unplaced)
+        .toEqual({ suiteLevel: [], unclaimed: [], contested: [] });
     });
 
     it("passes on an identity two suites claim", () => {
@@ -898,7 +1098,11 @@ describe("build", () => {
         }]]),
       );
       expect(placed.size).toBe(0);
-      expect(unplaced.unclaimed).toEqual([KEY]);
+      // Apart from an identity no suite claims: the tree holds this test
+      // twice over rather than not at all, and what is done about a test
+      // the tree has lost must not be done about one it holds.
+      expect(unplaced.unclaimed).toEqual([]);
+      expect(unplaced.contested).toEqual([KEY]);
     });
   });
 
@@ -1173,6 +1377,10 @@ describe("the days a fold keeps a lane's measurements over", () => {
           test: { k: "gate", s: "ci", n: "ci-lane planned batch runner-unit" },
           durationMs: 10_000,
         }),
+        record({
+          test: { k: "gate", s: "ci", n: "ci-lane units batch runner-unit" },
+          durationMs: 4,
+        }),
       ],
     );
   }
@@ -1189,7 +1397,13 @@ describe("the days a fold keeps a lane's measurements over", () => {
 
   it("keeps what a lane measured on a day inside the window", () => {
     expect(keptAfterFolding(["2026-08-20"])).toEqual([
-      { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
+      {
+        day: "2026-08-20",
+        suite: "runner-unit",
+        planned: 10,
+        spent: 30,
+        units: 4,
+      },
     ]);
   });
 
@@ -1242,8 +1456,53 @@ describe("the days a fold keeps a lane's measurements over", () => {
     expect(saved).toBeDefined();
     const second = new Fold(saved!, NO_ALIASES, "2026-08-20");
     expect(second.finish().aggregate.lanes).toEqual([
-      { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
+      {
+        day: "2026-08-20",
+        suite: "runner-unit",
+        planned: 10,
+        spent: 30,
+        units: 4,
+      },
     ]);
+  });
+});
+
+describe("a fold reading cost days another set of rules sealed", () => {
+  /** A stored aggregate holding one five-minute day under no stamp. */
+  function aggregateSealedBefore(): string {
+    const aggregate = emptyAggregate("2026-08-20");
+    const held = emptyState();
+    held.costByDay["2026-08-20"] = samplesOf([300_000, 300_000]);
+    aggregate.states[KEY] = held;
+    return JSON.stringify(aggregate);
+  }
+
+  function folded(reports: readonly ReturnType<typeof stored>[]) {
+    const fold = new Fold(
+      parseAggregate(aggregateSealedBefore())!,
+      NO_ALIASES,
+      "2026-08-20",
+    );
+    if (reports.length > 0) fold.add(reports);
+    return fold.finish();
+  }
+
+  it("charges the day it sealed once it has one", () => {
+    const run = folded([
+      stored(CI_NAME, context(), [record({ durationMs: 1000 })]),
+    ]);
+    expect(costSeconds(run.states.get(KEY)!, "2026-08-20")).toBe(1);
+    // And the aggregate it writes says so, so the next run reads it as a
+    // day these rules sealed rather than dropping it again.
+    const next = parseAggregate(JSON.stringify(run.aggregate))!;
+    expect(next.states[KEY]!.costByDay["2026-08-20"]!.rule).toBe(COST_RULE);
+  });
+
+  it("charges the day that set sealed while it has none", () => {
+    // A test that has not passed since the rules changed has nothing
+    // else to be charged, and charging it nothing is the direction that
+    // overruns a lane.
+    expect(costSeconds(folded([]).states.get(KEY)!, "2026-08-20")).toBe(300);
   });
 });
 

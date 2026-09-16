@@ -11,10 +11,13 @@ import {
   stateObjectName,
   statePrefix,
 } from "./store.ts";
-import { serializeManifest } from "./manifest.ts";
+import { MANIFEST_SCHEMA_VERSION, serializeManifest } from "./manifest.ts";
 import { sampleManifest } from "./testing.ts";
 
 const NO_ENV = () => undefined;
+
+/** The area a manifest of the version this reader understands is in. */
+const AREA = `labs/test-selection/v${MANIFEST_SCHEMA_VERSION}`;
 
 /**
  * A fetch that answers a listing and one object, and nothing else.
@@ -62,8 +65,8 @@ describe("store", () => {
   describe("object names", () => {
     it("puts the manifest area beside the records area", () => {
       expect(selectionPrefix(NO_ENV)).toBe("labs/test-selection");
-      expect(manifestPrefix(NO_ENV)).toBe("labs/test-selection/v1");
-      expect(statePrefix(NO_ENV)).toBe("labs/test-selection/v1/state");
+      expect(manifestPrefix(NO_ENV)).toBe(AREA);
+      expect(statePrefix(NO_ENV)).toBe(`${AREA}/state`);
     });
 
     it("adds the version to the area the environment names", () => {
@@ -84,19 +87,19 @@ describe("store", () => {
         NO_ENV,
       );
       expect(name).toBe(
-        "labs/test-selection/v1/manifest-2026-08-20T04:00:00.000Z-01K3.json.gz",
+        `${AREA}/manifest-2026-08-20T04:00:00.000Z-01K3.json.gz`,
       );
       expect(generatedAtOf(name)).toBe("2026-08-20T04:00:00.000Z");
     });
 
     it("leads a state object's name with its day", () => {
       expect(stateObjectName("2026-08-20", "01K3", NO_ENV)).toBe(
-        "labs/test-selection/v1/state/2026-08-20-01K3.json.gz",
+        `${AREA}/state/2026-08-20-01K3.json.gz`,
       );
     });
 
     it("reads no generation time out of a name that is not one", () => {
-      expect(generatedAtOf("labs/test-selection/v1/state/x.json.gz"))
+      expect(generatedAtOf(`${AREA}/state/x.json.gz`))
         .toBeUndefined();
       expect(generatedAtOf("something-else")).toBeUndefined();
     });
@@ -153,8 +156,7 @@ describe("store", () => {
 
   describe("fetchManifest()", () => {
     const at = "2026-08-20T05:00:00.000Z";
-    const name =
-      "labs/test-selection/v1/manifest-2026-08-20T04:00:00.000Z-b.json.gz";
+    const name = `${AREA}/manifest-2026-08-20T04:00:00.000Z-b.json.gz`;
 
     it("returns the newest manifest at or before the moment", async () => {
       const manifest = sampleManifest();
@@ -191,8 +193,7 @@ describe("store", () => {
       // The whole listing is visible to a lane that lists late enough;
       // what keeps every lane and every attempt on one manifest is that a
       // manifest created after the commit is never eligible.
-      const building =
-        "labs/test-selection/v1/manifest-2026-08-20T04:30:00.000Z-c.json.gz";
+      const building = `${AREA}/manifest-2026-08-20T04:30:00.000Z-c.json.gz`;
       const manifest = sampleManifest();
       const found = await fetchManifest({
         at,

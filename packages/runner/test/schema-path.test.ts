@@ -113,7 +113,6 @@ describe("schemaPathSelection", () => {
       }
     } finally {
       await runtime.dispose();
-      await storageManager.close();
     }
   });
 

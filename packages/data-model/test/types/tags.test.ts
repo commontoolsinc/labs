@@ -30,7 +30,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import type { JsTypeTagIncludingNull } from "@commonfabric/utils/types";
+import type { JsTypeTagIncludingNull, Same } from "@commonfabric/utils/types";
 
 import {
   BaseFabricPrimitive,
@@ -280,9 +280,6 @@ describe("tags", () => {
     });
 
     it("is the `typeOfIncludingNull()` vocabulary, less `object`", () => {
-      type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
-        : false;
-
       const _same: Same<JsTypeValueTag | "object", JsTypeTagIncludingNull> =
         true;
     });
@@ -300,9 +297,6 @@ describe("tags", () => {
     });
 
     it("is the `FabricValue` vocabulary plus `PlusType`, in the type system, and `PlusType` is no convertible-JS tag", () => {
-      type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
-        : false;
-
       const _plus: Same<FabricValuePlusTag, FabricValueTag | "PlusType"> = true;
       const _convertible: Same<
         Extract<ConvertibleJsValueTag, "PlusType">,
@@ -560,9 +554,6 @@ describe("tags", () => {
           value: FabricValuePlus<PlusProbe>,
           plain: FabricValue,
         ): void {
-          type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
-            : false;
-
           // @ts-expect-error a plus value matches no overload without its predicate
           tagOfFabricValue(value);
           // @ts-expect-error the predicate must be for the value's own `PlusType`
@@ -683,9 +674,6 @@ describe("tags", () => {
           value: FabricValuePlus<PlusProbe>,
           plain: FabricValue,
         ): void {
-          type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
-            : false;
-
           // @ts-expect-error a plus value matches no overload without its predicate
           tagOfFabricValueElseNull(value);
           // @ts-expect-error the predicate must be for the value's own `PlusType`

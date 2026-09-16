@@ -1,6 +1,9 @@
-import { defer } from "@commonfabric/utils/defer";
-import { stuckNet } from "@commonfabric/test-support/stuck-net";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import type { Cell, Runtime } from "@commonfabric/runner";
+import { stuckNet } from "@commonfabric/test-support/stuck-net";
+import { defer } from "@commonfabric/utils/defer";
+
+import { describeThrown } from "./describe-thrown.ts";
 
 /**
  * Resolve with `cell`'s value once `predicate` accepts it at a quiescent
@@ -24,6 +27,11 @@ import type { Cell, Runtime } from "@commonfabric/runner";
  * process holding a live connection open does, since nothing there goes quiet
  * and the wait would otherwise run to the ambient job limit with nothing said
  * about what it was waiting for.
+ *
+ * A failed wait reports the cell address, predicate, and last read value.
+ * Rendering happens only at failure, with bounded depth and length, so a live
+ * value reflects its state then. An Error's name is retained on the wrapper;
+ * the original failure remains its cause.
  */
 export async function waitForCellValue<T>(
   runtime: Runtime,
@@ -40,6 +48,7 @@ export async function waitForCellValue<T>(
   const stuck = options?.stuckLabel === undefined
     ? undefined
     : stuckNet(options.stuckLabel);
+  let lastRead: { value: T | undefined } | undefined;
   try {
     while (true) {
       await runtime.idle();
@@ -47,9 +56,28 @@ export async function waitForCellValue<T>(
       // next attempt instead of being missed.
       const next = changed.promise;
       const value = cell.get() as T;
+      lastRead = { value };
       if (predicate(value)) return value;
       await (stuck === undefined ? next : Promise.race([next, stuck.rejects]));
     }
+  } catch (cause) {
+    const { space, id, path, scope } = cell.getAsNormalizedFullLink();
+    const error = new Error(
+      `${describeThrown(cause)}\n` +
+        `Cell: ${
+          toCompactDebugString({ space, id, path, scope }, { maxLength: 4096 })
+        }\n` +
+        `Predicate: ${predicate.toString().slice(0, 4096)}\n` +
+        `Last read value (rendered at failure): ${
+          lastRead === undefined ? "<not read>" : toCompactDebugString(
+            lastRead.value,
+            { maxDepth: 2, maxLength: 4096 },
+          )
+        }`,
+      { cause },
+    );
+    if (cause instanceof Error) error.name = cause.name;
+    throw error;
   } finally {
     stuck?.clear();
     // Cancelling while the action that reported a value is still finalizing

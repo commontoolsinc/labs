@@ -25,6 +25,7 @@ import {
   parseLinkOrThrow,
   parseLLMFriendlyLink,
   parseReferenceParts,
+  sanitizeAndInternSchemaForLinks,
   sanitizeSchemaForLinks,
   schemaForSpaceCrossing,
 } from "../src/link-utils.ts";
@@ -785,6 +786,42 @@ describe("link-utils", () => {
   });
 
   describe("sanitizeSchemaForLinks through references", () => {
+    for (const position of ["root", "nested"]) {
+      it(`revisits canonical bindings when a ${position} schema arrives`, () => {
+        setContentAddressedSchemasConfig(true);
+        const document: JSONSchema = { type: "string", asCell: ["cell"] };
+        const hash = internSchemaAsTaggedHashString(document);
+        const schema: JSONSchema = deepFreeze(
+          position === "root" ? { $ref: `cid:${hash}` } : {
+            type: "object",
+            properties: { name: { $ref: `cid:${hash}` } },
+          },
+        );
+        const before = sanitizeAndInternSchemaForLinks(schema);
+        expect(before).toEqual(schema);
+        // Exercise the next link-emission pass on the canonical result while
+        // the declaration is still missing too.
+        const missing = createSigilLinkFromParsedLink({
+          id: "of:late-schema",
+          path: [],
+          schema: before,
+        }, { includeSchema: true });
+        expect(missing).toBeDefined();
+        registerSchemaDocument(hash, document);
+        const after = sanitizeAndInternSchemaForLinks(schema);
+        expect(after).not.toBe(before);
+        const emitted = createSigilLinkFromParsedLink({
+          id: "of:late-schema",
+          path: [],
+          schema: before,
+        }, { includeSchema: true });
+        const emittedSchema = linkRefPayload(emitted).schema;
+        expect(JSON.stringify(resolvedSchema(emittedSchema as JSONSchema)))
+          .not.toContain("asCell");
+        expect(JSON.stringify(resolvedSchema(after!))).not.toContain("asCell");
+      });
+    }
+
     it("re-externalizes a nested document the strip changed", () => {
       // Document B carries the marker; document A reaches it only by
       // reference. A sanitize that stops at the reference looks clean and
@@ -845,6 +882,44 @@ describe("link-utils", () => {
   });
 
   describe("stripAsCellAndStreamFromSchema", () => {
+    it("shares canonical sanitized schemas without sharing mutable roots", () => {
+      const schema: JSONSchema = deepFreeze({
+        type: "object",
+        properties: { name: { type: "string", asCell: ["cell"] } },
+      });
+      for (const mode of Object.values(KeepAsCell)) {
+        const first = sanitizeAndInternSchemaForLinks(schema, mode);
+        const second = sanitizeAndInternSchemaForLinks(schema, mode);
+        expect(first).toEqual(sanitizeSchemaForLinks(schema, mode));
+        expect(second).toBe(first);
+        expect(Object.isFrozen(first)).toBe(true);
+        const mutable = sanitizeSchemaForLinks(schema, mode);
+        expect(mutable).not.toBe(first);
+        expect(Object.isFrozen(mutable)).toBe(false);
+      }
+    });
+
+    it("interns a mutable input without freezing it or caching later edits", () => {
+      const schema = {
+        type: "object",
+        properties: { name: { type: "string", title: "before" } },
+      } satisfies JSONSchema;
+      const first = sanitizeAndInternSchemaForLinks(schema);
+      expect(Object.isFrozen(schema)).toBe(false);
+      expect(Object.isFrozen(schema.properties.name)).toBe(false);
+      schema.properties.name.title = "after";
+      const second = sanitizeAndInternSchemaForLinks(schema);
+      expect(second).not.toBe(first);
+      expect(first).toEqual({
+        type: "object",
+        properties: { name: { type: "string", title: "before" } },
+      });
+      expect(second).toEqual(schema);
+      for (const primitive of [undefined, true, false]) {
+        expect(sanitizeAndInternSchemaForLinks(primitive)).toBe(primitive);
+      }
+    });
+
     it("memoizes a frozen input per keepAsCell mode, handing out a fresh top that shares the cached sub-tree", () => {
       // The memo only engages for deep-frozen inputs (a mutable input's identity
       // could go stale), so it no-ops for the non-frozen literals other tests

@@ -11,281 +11,50 @@
  * the limit, skips the larger sizes of that case's series, and carries on. Any
  * other failure ends the run. Output is JSON lines on stdout; progress, and
  * everything a child prints, goes to stderr.
+ *
+ * Given `--derive-limits`, it instead runs the read-budget cases five times
+ * each, writes the read-budget limits module to stdout, and runs each case
+ * again under every regression variant its limits are assigned to, as the
+ * "Topics read budget" section of `docs/development/BENCHMARKS.md` describes.
  */
 
 import { parseArgs } from "@std/cli/parse-args";
-import { expect } from "@std/expect";
 import { fromFileUrl } from "@std/path";
 // The heap limit a process runs under is exposed only through `node:v8`.
 // deno-lint-ignore no-external-import
 import { getHeapStatistics } from "node:v8";
 
-import type {
-  Cell,
-  IExtendedStorageTransaction,
-  SchedulerGraphSnapshot,
-} from "@commonfabric/runner";
-
 import {
-  type AttemptReads,
-  type BodyReads,
+  BOARD_NOT_MEASURED,
+  caseNamed,
+  caseRecord,
+  measureCasePhases,
+  type PhaseRecord,
+  type ProbeCase,
+  probeCases,
+} from "../packages/patterns/integration/topics-cost-cases.ts";
+import {
   buildTopicsFixture,
-  DEFAULT_COMMENTS_PER_TOPIC,
-  DEFAULT_LINKS_PER_TOPIC,
-  type FixtureComment,
-  type FixtureLink,
-  type FixtureTopic,
-  latestStamp,
-  MAX_SINGLE_BUCKET_MENTIONS_PER_SOURCE,
-  measureTopicsFixture,
-  mentionersOf,
-  type MentionGraph,
-  pivotEntriesOf,
-  presentCommentCount,
-  topicIndicesOf,
   TOPICS_FIXTURE_EXPERIMENTAL_OPTIONS,
-  TOPICS_LIFT_NAMES,
-  type TopicsDemand,
-  type TopicsFixture,
-  type TopicsFixtureOptions,
-  type TopicsLiftName,
-  type TopicsMeasurement,
-  type TopicsOperation,
-  type TopicsReads,
 } from "../packages/patterns/integration/topics-headless-fixture.ts";
+import {
+  assignedLimitsNotExceeded,
+  GATED_MEASURES,
+  type GatedMeasure,
+  gatedMeasuresOf,
+  limitFor,
+  limitsModuleSource,
+  type ReadBudgetLimits,
+  TOPICS_READ_BUDGET_GROUPS,
+  variantsAssignedTo,
+} from "../packages/patterns/integration/topics-read-budget.ts";
+import {
+  READ_BUDGET_VARIANTS,
+  type ReadBudgetVariantName,
+} from "../packages/patterns/integration/topics-read-budget-variants.ts";
 
 /** The repository root, where a child process finds the workspace config. */
 const REPOSITORY_ROOT = fromFileUrl(new URL("..", import.meta.url));
-
-//
-// The case matrix
-//
-
-/** Topic counts the pivot cases scale over. */
-const PIVOT_TOPIC_COUNTS = [32, 128, 512];
-
-/** Topic count of the small pivot cases. */
-const SMALL_TOPIC_COUNT = 4;
-
-/** The mention graphs whose spread the pivot cases compare. */
-const SPREADS = ["low-degree", "high-degree", "single-bucket"] as const;
-
-/**
- * Mentions per source as the pivot cases scale over topic count, or as many
- * as a spread allows at the small topic count.
- */
-const SCALING_MENTIONS_PER_SOURCE = 4;
-
-/** Topic count at which the pivot cases vary mentions per source. */
-const MENTION_SWEEP_TOPIC_COUNT = 128;
-
-/**
- * Mentions per source the mention sweep covers. Zero is the `none` graph, in
- * which no spread differs from another.
- */
-const MENTION_SWEEP = [0, 1, 4, 16];
-
-/** Comment and link counts the thread cases scale over, one at a time. */
-const THREAD_LENGTHS = [10, 100, 1_000];
-
-/** Comments and links on each topic of the small thread case. */
-const SMALL_THREAD_LENGTH = 1;
-
-/** Topics in every thread case. */
-const THREAD_TOPIC_COUNT = 4;
-
-/** The mention graph of every thread case. */
-const THREAD_MENTIONS: MentionGraph = { shape: "low-degree", perSource: 1 };
-
-/** The demand workloads each pivot case is recorded under. */
-const PIVOT_WORKLOADS = ["board", "topic-open", "all-backlinks"] as const;
-
-/** The demand workloads each thread case is measured under. */
-const THREAD_WORKLOADS = ["aggregates"] as const;
-
-/**
- * Why no `board` case is measured, which each `board` sample says in place of
- * a measurement.
- */
-const BOARD_NOT_MEASURED =
-  "A board loaded before any topic is opened reads its stored card values, " +
-  "and in a browser with client execution loading it ran none of the reached " +
-  "lifts, so there is no work of theirs to measure headlessly. Returning to " +
-  "the board after opening a topic ran that topic's last activity once; that " +
-  "state is not one of the probe's workloads.";
-
-/**
- * The topic a `topic-open` case opens. The mention phases change which topics
- * mention it, and the comment and link phases edit it; the unrelated sibling
- * edit changes a different topic, the last one. How many other topics mention
- * it depends on the mention graph, and each sample records the count.
- */
-const FOCUS_TOPIC = 0;
-
-/** A demand workload, by name. */
-type Workload =
-  | typeof PIVOT_WORKLOADS[number]
-  | typeof THREAD_WORKLOADS[number];
-
-/** One case of the matrix. */
-interface ProbeCase {
-  /** Names the case in output, to `--filter`, and to the child that runs it. */
-  readonly id: string;
-
-  /** The part of the matrix the case belongs to. */
-  readonly family: "pivot" | "thread";
-
-  /** Whether `--small` selects the case. */
-  readonly small: boolean;
-
-  /**
-   * Names the cases that differ from this one only in `size`, as this case's
-   * `id` with the scaled quantity written as `*`. A size that cannot be built
-   * ends its series: no larger size in it runs.
-   */
-  readonly series: string;
-
-  /** The quantity the series scales: topics, comments, or links. */
-  readonly size: number;
-
-  /** The demand the case is recorded under. */
-  readonly workload: Workload;
-
-  /** What the case's fixture is built from. */
-  readonly options: TopicsFixtureOptions;
-}
-
-/** Returns every case of the matrix, each series in ascending size. */
-function probeCases(): ProbeCase[] {
-  const cases: ProbeCase[] = [];
-  // `segments` name the case between its family and its workload, and the one
-  // at `scaled` holds the count its series scales, which is `size`.
-  const add = (
-    family: ProbeCase["family"],
-    workloads: readonly Workload[],
-    small: boolean,
-    segments: readonly string[],
-    scaled: number,
-    size: number,
-    options: TopicsFixtureOptions,
-  ) => {
-    for (const workload of workloads) {
-      const written = (value: string) =>
-        [family, ...segments.with(scaled, value), workload].join("/");
-      const id = written(segments[scaled]);
-      if (cases.some((existing) => existing.id === id)) continue;
-      cases.push({
-        id,
-        family,
-        small,
-        series: written(segments[scaled].replace(/\d+$/, "*")),
-        size,
-        workload,
-        options,
-      });
-    }
-  };
-  const pivot = (mentions: MentionGraph, topicCount: number) => {
-    const perSource = mentions.shape === "none" ? 0 : mentions.perSource;
-    add(
-      "pivot",
-      PIVOT_WORKLOADS,
-      topicCount === SMALL_TOPIC_COUNT,
-      [mentions.shape, `mentions-${perSource}`, `topics-${topicCount}`],
-      2,
-      topicCount,
-      { topicCount, mentions },
-    );
-  };
-  const thread = (commentsPerTopic: number, linksPerTopic: number) => {
-    const byLinks = linksPerTopic !== DEFAULT_LINKS_PER_TOPIC;
-    add(
-      "thread",
-      THREAD_WORKLOADS,
-      commentsPerTopic === SMALL_THREAD_LENGTH &&
-        linksPerTopic === SMALL_THREAD_LENGTH,
-      [`comments-${commentsPerTopic}`, `links-${linksPerTopic}`],
-      byLinks ? 1 : 0,
-      byLinks ? linksPerTopic : commentsPerTopic,
-      {
-        topicCount: THREAD_TOPIC_COUNT,
-        mentions: THREAD_MENTIONS,
-        commentsPerTopic,
-        linksPerTopic,
-      },
-    );
-  };
-
-  for (const shape of SPREADS) {
-    for (const topicCount of [SMALL_TOPIC_COUNT, ...PIVOT_TOPIC_COUNTS]) {
-      const most = shape === "single-bucket"
-        ? MAX_SINGLE_BUCKET_MENTIONS_PER_SOURCE
-        : topicCount - 1;
-      pivot(
-        { shape, perSource: Math.min(SCALING_MENTIONS_PER_SOURCE, most) },
-        topicCount,
-      );
-    }
-  }
-  for (const perSource of MENTION_SWEEP) {
-    if (perSource === 0) {
-      pivot({ shape: "none" }, MENTION_SWEEP_TOPIC_COUNT);
-      continue;
-    }
-    for (const shape of SPREADS) {
-      pivot({ shape, perSource }, MENTION_SWEEP_TOPIC_COUNT);
-    }
-  }
-  thread(SMALL_THREAD_LENGTH, SMALL_THREAD_LENGTH);
-  for (const length of THREAD_LENGTHS) {
-    thread(length, DEFAULT_LINKS_PER_TOPIC);
-  }
-  for (const length of THREAD_LENGTHS) {
-    thread(DEFAULT_COMMENTS_PER_TOPIC, length);
-  }
-  return cases;
-}
-
-/** Returns the case of the matrix named `id`. */
-function caseNamed(id: string): ProbeCase {
-  const found = probeCases().find((probeCase) => probeCase.id === id);
-  if (found === undefined) throw new Error(`No case is named \`${id}\`.`);
-  return found;
-}
-
-/**
- * Returns what every sample of `probeCase` records about the case itself, with
- * `fixture` the data its options build.
- */
-function caseRecord(
-  probeCase: ProbeCase,
-  fixture: TopicsFixture,
-): Record<string, unknown> {
-  const { id, family, series, size, workload, options } = probeCase;
-  return {
-    case: id,
-    family,
-    series,
-    size,
-    workload,
-    fixture: {
-      topicCount: options.topicCount,
-      mentions: options.mentions,
-      commentsPerTopic: options.commentsPerTopic ?? DEFAULT_COMMENTS_PER_TOPIC,
-      linksPerTopic: options.linksPerTopic ?? DEFAULT_LINKS_PER_TOPIC,
-      mentionEntries: fixture.topics.reduce(
-        (sum, topic) => sum + topic.mentions.length,
-        0,
-      ),
-      focusTopic: FOCUS_TOPIC,
-      focusMentioners: mentionersOf(fixture, FOCUS_TOPIC).length,
-    },
-    demandedActions: demandedActionsOf(
-      demandOf(workload),
-      options.topicCount,
-    ),
-  };
-}
 
 //
 // The run
@@ -347,12 +116,7 @@ async function runProbe(options: RunOptions): Promise<void> {
     (options.filter?.test(probeCase.id) ?? true)
   );
   if (cases.length === 0) throw new Error("No case matches the arguments.");
-  const v8Flags = [
-    "--expose-gc",
-    ...(options.maxOldSpaceSize === undefined
-      ? []
-      : [`--max-old-space-size=${options.maxOldSpaceSize}`]),
-  ];
+  const v8Flags = childV8Flags(options.maxOldSpaceSize);
   emit({
     kind: "environment",
     ...await gitState(),
@@ -423,6 +187,19 @@ async function runProbe(options: RunOptions): Promise<void> {
   emit({ kind: "complete", samples, limitedSeries: [...limits.keys()] });
 }
 
+/**
+ * Returns the V8 flags a child process starts with, with its heap set to
+ * `maxOldSpaceSize` megabytes when that is given.
+ */
+function childV8Flags(maxOldSpaceSize?: number): string[] {
+  return [
+    "--expose-gc",
+    ...(maxOldSpaceSize === undefined
+      ? []
+      : [`--max-old-space-size=${maxOldSpaceSize}`]),
+  ];
+}
+
 /** Writes `record` to stdout as one JSON line. */
 function emit(record: Record<string, unknown>): void {
   console.log(JSON.stringify(record));
@@ -452,9 +229,10 @@ async function gitState(): Promise<{ revision: string; dirty: boolean }> {
 }
 
 /**
- * Runs `probeCase` in a child process started with `v8Flags`, forwarding
- * everything the child prints to stderr, and returns its sample, or the limit
- * its process reached by exhausting its heap.
+ * Runs `probeCase` in a child process started with `v8Flags`, under the
+ * regression variant `variant` when one is named, forwarding everything the
+ * child prints to stderr, and returns its sample, or the limit its process
+ * reached by exhausting its heap.
  *
  * @throws Error when the child fails other than by exhausting its heap, or
  * exits successfully without writing its sample.
@@ -462,6 +240,7 @@ async function gitState(): Promise<{ revision: string; dirty: boolean }> {
 async function runCase(
   probeCase: ProbeCase,
   v8Flags: readonly string[],
+  variant?: ReadBudgetVariantName,
 ): Promise<CaseOutcome> {
   const sampleFile = await Deno.makeTempFile({
     prefix: "topics-computation-cost-",
@@ -478,6 +257,7 @@ async function runCase(
         fromFileUrl(import.meta.url),
         `--case=${probeCase.id}`,
         `--sample-file=${sampleFile}`,
+        ...(variant === undefined ? [] : [`--variant=${variant}`]),
       ],
       cwd: REPOSITORY_ROOT,
       stdin: "null",
@@ -546,72 +326,29 @@ async function forwardToStderr(
 // One case, in a child process
 //
 
-/** The seeded shape of a topic document, as a warm update writes to it. */
-interface StoredTopic {
-  /** The topic's title. */
-  title: string;
-
-  /** Links to the topics this one mentions. */
-  mentions: unknown[];
-
-  /** The topic's comments. */
-  comments: FixtureComment[];
-
-  /** The topic's links. */
-  links: FixtureLink[];
-}
-
-/** What a warm update's edit touched, by topic and entry index. */
-type EditRecord = Readonly<Record<string, number | boolean>>;
-
-/** What a phase recorded, or why it was not measured. */
-type PhaseRecord =
-  | Readonly<Record<string, unknown> & { phase: string; measured: true }>
-  | {
-    readonly phase: string;
-    readonly measured: false;
-    readonly reason: string;
-  };
-
 /**
- * Measures `probeCase` and writes its sample to `sampleFile`: the case, the
- * heap limit the process ran under, and a record for each phase.
+ * Measures `probeCase`, under the regression variant `variant` when one is
+ * named, and writes its sample to `sampleFile`: the case, the heap limit the
+ * process ran under, and a record for each phase.
  *
- * @throws Error for a `board` case, which is not measured, or when an output
- * differs from what the fixture data says it should be after any phase, a lift
- * outside the demand ran in one, or the runtime reports an error.
+ * @throws Error as {@link measureCasePhases} does.
  */
 async function measureCase(
   probeCase: ProbeCase,
   sampleFile: string,
+  variant?: ReadBudgetVariantName,
 ): Promise<void> {
-  const { id, options, workload } = probeCase;
-  if (workload === "board") {
-    throw new Error(`Case \`${id}\` is not measured: ${BOARD_NOT_MEASURED}`);
-  }
   const heapSizeLimitBytes = getHeapStatistics().heap_size_limit;
   // Written before anything is measured, so that a limit record can name the
   // heap this process had even when the case never finishes. The sample
   // replaces it.
   await Deno.writeTextFile(sampleFile, JSON.stringify({ heapSizeLimitBytes }));
-  const fixture = buildTopicsFixture(options);
-  console.error(`${id}: initialization`);
-  await using measurement = await measureTopicsFixture(
-    fixture,
-    `topics-computation-cost ${id}`,
-    demandOf(workload),
-  );
-  const phases: PhaseRecord[] = [phaseRecord("initialization", measurement)];
-  verifyOutputs(measurement, fixture);
-  verifyIdleLifts(measurement, measurement);
-  const updated = await measureWarmUpdates(id, measurement, fixture, phases);
-  console.error(`${id}: reopen`);
-  const reopened = await measurement.reopen();
-  phases.push(phaseRecord("reopen", reopened));
-  verifyOutputs(measurement, updated);
-  verifyIdleLifts(measurement, reopened);
-  verifyReopen(measurement, reopened);
-
+  const { fixture, phases } = await measureCasePhases(probeCase, {
+    progress: (line) => console.error(line),
+    variant: variant === undefined
+      ? undefined
+      : READ_BUDGET_VARIANTS[variant](probeCase),
+  });
   await Deno.writeTextFile(
     sampleFile,
     JSON.stringify({
@@ -624,489 +361,175 @@ async function measureCase(
   );
 }
 
-/** Returns the demand `workload` names, opening the focus topic. */
-function demandOf(workload: Workload): TopicsDemand {
-  switch (workload) {
-    case "board":
-      return { workload };
-    case "topic-open":
-      return { workload, topic: FOCUS_TOPIC };
-    case "all-backlinks":
-      return { workload };
-    case "aggregates":
-      return { workload };
-  }
-}
+//
+// Deriving the read-budget limits
+//
+
+/** How many rounds `--derive-limits` runs every read-budget case. */
+const DERIVATION_ROUNDS = 5;
 
 /**
- * Helper for {@link measureCase}, which measures each warm update in turn on
- * the one evolving fixture, appending a record for each to `phases` and
- * checking every output and every undemanded lift after each, and returns the
- * fixture data as the updates left it.
+ * Runs every case the read-budget groups name in {@link DERIVATION_ROUNDS}
+ * rounds, each case in a process of its own started with `v8Flags`, writes the
+ * read-budget limits module to stdout, and then, when every gated count
+ * repeated across the rounds, runs {@link deriveControls} on the limits it
+ * wrote. Each gated count of each measured phase gets
+ * {@link limitFor} the largest value the rounds observed, or, where the rounds
+ * observed different values, is written as ungated with those values.
+ *
+ * @throws Error when a case fails or exhausts its heap, and, once the module is
+ * written, when any gated count differed between rounds or a variant left a
+ * limit assigned to it unexceeded.
  */
-async function measureWarmUpdates(
-  id: string,
-  measurement: TopicsMeasurement,
-  fixture: TopicsFixture,
-  phases: PhaseRecord[],
-): Promise<TopicsFixture> {
-  const { seeded } = measurement;
-  let model = fixture;
-  const others = model.topics.map((_, index) => index)
-    .filter((index) => index !== FOCUS_TOPIC);
-  const stored = (index: number, tx: IExtendedStorageTransaction) =>
-    seeded.topics[index].withTx(tx) as Cell<StoredTopic>;
-  const focus = () => model.topics[FOCUS_TOPIC];
-  const measure = async (
-    phase: string,
-    edit: EditRecord,
-    next: TopicsFixture,
-    write: (tx: IExtendedStorageTransaction) => void,
-  ) => {
-    console.error(`${id}: ${phase}`);
-    const update = await measurement.update(write);
-    phases.push(phaseRecord(phase, update, edit));
-    model = next;
-    verifyOutputs(measurement, model);
-    verifyIdleLifts(measurement, update);
-  };
-
-  // Removal drops every entry naming the focus topic from a topic that
-  // mentions it, and insertion appends one again, so each moves that topic
-  // out of or into the focus topic's mentioners. Where nothing mentions the
-  // focus topic, removal is not measured and insertion starts from the first
-  // other topic.
-  const mentioner = others.find((index) =>
-    model.topics[index].mentions.includes(FOCUS_TOPIC)
+async function deriveLimits(v8Flags: readonly string[]): Promise<void> {
+  const ids = Object.values(TOPICS_READ_BUDGET_GROUPS).flat();
+  // By case, then by phase, each gated count every round observed.
+  const observed = new Map<string, Map<string, Record<GatedMeasure, number[]>>>(
+    ids.map((id) => [id, new Map()]),
   );
-  const source = mentioner ?? others[0];
-  if (mentioner === undefined) {
-    phases.push({
-      phase: "mention removal",
-      measured: false,
-      reason: "No topic mentions the focus topic.",
-    });
-  } else {
-    const before = model.topics[source].mentions;
-    const kept = before.filter((index) => index !== FOCUS_TOPIC);
-    await measure(
-      "mention removal",
-      {
-        source,
-        target: FOCUS_TOPIC,
-        removedEntries: before.length - kept.length,
-      },
-      withTopic(model, source, (topic) => ({ ...topic, mentions: kept })),
-      (tx) =>
-        stored(source, tx).key("mentions").set(
-          kept.map((index) => seeded.topics[index]),
-        ),
-    );
+  for (let round = 1; round <= DERIVATION_ROUNDS; round++) {
+    for (const id of ids) {
+      console.error(`derivation round ${round}: ${id}`);
+      const outcome = await runCase(caseNamed(id), v8Flags);
+      if (outcome.kind === "limit") {
+        throw new Error(
+          `Case \`${id}\` exhausted its heap: ${outcome.message}`,
+        );
+      }
+      const phases = observed.get(id)!;
+      for (const record of outcome.sample.phases as PhaseRecord[]) {
+        if (!record.measured) continue;
+        const counts = gatedMeasuresOf(record);
+        for (const measure of GATED_MEASURES) {
+          if (!Number.isSafeInteger(counts[measure])) {
+            throw new Error(
+              `Case \`${id}\` recorded no \`${measure}\` count in its ` +
+                `\`${record.phase}\` phase.`,
+            );
+          }
+        }
+        const values = phases.get(record.phase) ??
+          Object.fromEntries(
+            GATED_MEASURES.map((measure) => [measure, [] as number[]]),
+          ) as Record<GatedMeasure, number[]>;
+        for (const measure of GATED_MEASURES) {
+          values[measure].push(counts[measure]);
+        }
+        phases.set(record.phase, values);
+      }
+    }
   }
-  await measure(
-    "mention insertion",
-    { source, target: FOCUS_TOPIC },
-    withTopic(model, source, (topic) => ({
-      ...topic,
-      mentions: [...topic.mentions, FOCUS_TOPIC],
-    })),
-    (tx) => stored(source, tx).key("mentions").push(seeded.topics[FOCUS_TOPIC]),
-  );
 
-  // The same topic, which now names the focus topic in exactly one entry,
-  // points that entry at a topic it does not yet mention, leaving the focus
-  // topic's mentioners and joining that topic's. Where it already mentions
-  // every other topic, it points the entry at one it mentions, and
-  // `targetGainsSource` records that the target's mentioners did not change.
-  const mentions = model.topics[source].mentions;
-  const position = mentions.indexOf(FOCUS_TOPIC);
-  const candidates = others.filter((index) => index !== source);
-  const unmentioned = candidates.filter((index) => !mentions.includes(index));
-  const target = unmentioned[0] ?? candidates[0];
-  await measure(
-    "same-count retarget",
-    {
-      source,
-      position,
-      from: FOCUS_TOPIC,
-      to: target,
-      targetGainsSource: unmentioned.length > 0,
-    },
-    withTopic(model, source, (topic) => ({
-      ...topic,
-      mentions: mentions.with(position, target),
-    })),
-    (tx) =>
-      stored(source, tx).key("mentions").key(position).set(
-        seeded.topics[target],
-      ),
-  );
-
-  // The focus topic's thread gains a comment, and its first present comment
-  // is edited and then retracted. Each stamp is later than any the topic
-  // holds, as a live edit's would be.
-  const sentAt = latestStamp(focus()) + 1;
-  await measure(
-    "comment append",
-    { topic: FOCUS_TOPIC, comment: focus().comments.length },
-    withTopic(model, FOCUS_TOPIC, (topic) => ({
-      ...topic,
-      comments: [...topic.comments, { sentAt }],
-    })),
-    (tx) => stored(FOCUS_TOPIC, tx).key("comments").push({ sentAt }),
-  );
-  const comment = focus().comments.findIndex((record) =>
-    record.removedAt === undefined
-  );
-  for (
-    const [phase, stamp] of [
-      ["comment edit", "editedAt"],
-      ["comment retraction", "removedAt"],
-    ] as const
-  ) {
-    const at = latestStamp(focus()) + 1;
-    await measure(
-      phase,
-      { topic: FOCUS_TOPIC, comment },
-      withTopic(model, FOCUS_TOPIC, (topic) => ({
-        ...topic,
-        comments: topic.comments.with(comment, {
-          ...topic.comments[comment],
-          [stamp]: at,
+  const limits: Record<
+    string,
+    Record<string, ReadBudgetLimits[string][string]>
+  > = {};
+  const differing: string[] = [];
+  for (const [id, phases] of observed) {
+    limits[id] = {};
+    for (const [phase, values] of phases) {
+      limits[id][phase] = Object.fromEntries(
+        GATED_MEASURES.map((measure) => {
+          const counts = values[measure];
+          const repeated = counts.length === DERIVATION_ROUNDS &&
+            counts.every((count) => count === counts[0]);
+          if (!repeated) {
+            differing.push(`${id}, ${phase}, ${measure}: ${counts.join(", ")}`);
+          }
+          return [
+            measure,
+            repeated ? limitFor(Math.max(...counts)) : { ungated: counts },
+          ];
         }),
-      })),
-      (tx) =>
-        stored(FOCUS_TOPIC, tx).key("comments").key(comment).key(stamp).set(
-          at,
-        ),
+      ) as ReadBudgetLimits[string][string];
+    }
+  }
+  console.log(limitsModuleSource(limits));
+  if (differing.length > 0) {
+    throw new Error(
+      `These gated counts differed between rounds, and are written as ` +
+        `ungated:\n${differing.join("\n")}`,
     );
   }
+  await deriveControls(ids, limits, v8Flags);
+}
 
-  // The focus topic's first present link is retracted.
-  const link = focus().links.findIndex((record) =>
-    record.removedAt === undefined
-  );
-  if (link === -1) {
-    phases.push({
-      phase: "link removal",
-      measured: false,
-      reason: "The focus topic has no present link.",
-    });
-  } else {
-    const removedAt = latestStamp(focus()) + 1;
-    await measure(
-      "link removal",
-      { topic: FOCUS_TOPIC, link },
-      withTopic(model, FOCUS_TOPIC, (topic) => ({
-        ...topic,
-        links: topic.links.with(link, { ...topic.links[link], removedAt }),
-      })),
-      (tx) =>
-        stored(FOCUS_TOPIC, tx).key("links").key(link).key("removedAt").set(
-          removedAt,
-        ),
+/**
+ * Runs each case of `ids` once under every regression variant its workload
+ * assigns, each in a process of its own started with `v8Flags`, and checks the
+ * run against the limits `limits` holds for the counts that variant is
+ * assigned, and so shows every limit exceeded by a regression that grows the
+ * count it gates.
+ *
+ * @throws Error when a case fails or exhausts its heap, and when a variant
+ * leaves a limit assigned to it unexceeded, naming the workload, case, phase,
+ * count, variant, observed value, and limit of each.
+ */
+async function deriveControls(
+  ids: readonly string[],
+  limits: ReadBudgetLimits,
+  v8Flags: readonly string[],
+): Promise<void> {
+  const unexceeded: string[] = [];
+  for (const id of ids) {
+    const probeCase = caseNamed(id);
+    for (const variant of variantsAssignedTo(probeCase)) {
+      console.error(`control: ${id} under \`${variant}\``);
+      const outcome = await runCase(probeCase, v8Flags, variant);
+      if (outcome.kind === "limit") {
+        throw new Error(
+          `Case \`${id}\` exhausted its heap under the \`${variant}\` ` +
+            `variant: ${outcome.message}`,
+        );
+      }
+      const phases = outcome.sample.phases as PhaseRecord[];
+      for (
+        const check of assignedLimitsNotExceeded(
+          probeCase,
+          variant,
+          phases,
+          limits,
+        )
+      ) {
+        unexceeded.push(
+          `${check.workload}, ${check.case}, ${check.phase}, ` +
+            `${check.measure}: the \`${variant}\` variant observed ` +
+            `${check.observed ?? "no count"}, which does not exceed its ` +
+            `limit of ${check.limit}.`,
+        );
+      }
+    }
+  }
+  if (unexceeded.length > 0) {
+    throw new Error(
+      `These limits are not exceeded by the variant they are assigned to, ` +
+        `so they gate a count no regression grows:\n${unexceeded.join("\n")}`,
     );
   }
-
-  // Another topic's title, and nothing else on it, is written. None of the
-  // reached lifts reads a title, which a rename's `titleUpdatedAt` stamp would
-  // change, so this is not a rename.
-  const sibling = others[others.length - 1];
-  const title = `${model.topics[sibling].title}, renamed`;
-  await measure(
-    "unrelated sibling edit",
-    { topic: sibling },
-    withTopic(model, sibling, (topic) => ({ ...topic, title })),
-    (tx) => stored(sibling, tx).key("title").set(title),
-  );
-  return model;
-}
-
-/**
- * Returns `model` with the topic at `index` replaced by what `change` returns
- * for it.
- */
-function withTopic(
-  model: TopicsFixture,
-  index: number,
-  change: (topic: FixtureTopic) => FixtureTopic,
-): TopicsFixture {
-  return {
-    ...model,
-    topics: model.topics.with(index, change(model.topics[index])),
-  };
-}
-
-/** What a measurement under a demand holds, by topic index. */
-interface DemandedOutputs {
-  /** Whether it holds the pivot. */
-  readonly pivot: boolean;
-
-  /** The topics whose backlinks it holds, in topic order. */
-  readonly backlinks: readonly number[];
-
-  /** The topics whose present comment count it holds, in topic order. */
-  readonly commentCounts: readonly number[];
-
-  /** The topics whose last activity it holds, in topic order. */
-  readonly lastActivity: readonly number[];
-}
-
-/**
- * Returns what a measurement under `demand` over `topicCount` topics holds. It
- * is worked out from `demand` alone, apart from the fixture, so the outputs a
- * measurement holds are checked against it rather than against themselves.
- */
-function demandedOutputsOf(
-  demand: TopicsDemand,
-  topicCount: number,
-): DemandedOutputs {
-  const every = Array.from({ length: topicCount }, (_, index) => index);
-  switch (demand.workload) {
-    case "board":
-      return {
-        pivot: false,
-        backlinks: [],
-        commentCounts: [],
-        lastActivity: [],
-      };
-    case "topic-open":
-      return {
-        pivot: true,
-        backlinks: [demand.topic],
-        commentCounts: [demand.topic],
-        lastActivity: [],
-      };
-    case "all-backlinks":
-      return {
-        pivot: true,
-        backlinks: every,
-        commentCounts: [],
-        lastActivity: [],
-      };
-    case "aggregates":
-      return {
-        pivot: false,
-        backlinks: [],
-        commentCounts: every,
-        lastActivity: every,
-      };
-  }
-}
-
-/**
- * Returns how many actions of each reached lift a measurement under `demand`
- * over `topicCount` topics starts.
- */
-function demandedActionsOf(
-  demand: TopicsDemand,
-  topicCount: number,
-): Record<TopicsLiftName, number> {
-  const { pivot, backlinks, commentCounts, lastActivity } = demandedOutputsOf(
-    demand,
-    topicCount,
-  );
-  return {
-    crossrefTable: pivot ? 1 : 0,
-    backlinksOf: backlinks.length,
-    presentCommentCountOf: commentCounts.length,
-    lastActivityOf: lastActivity.length,
-  };
-}
-
-/**
- * Checks that `measurement` holds exactly the outputs its demand names, and
- * checks each of them, the pivot when demanded included, against what `model`
- * says it should be. The pivot holds one entry per distinct topic on the
- * board, in the order of each topic's first entry.
- *
- * @throws Error when one differs, or when the runtime has reported an error.
- */
-function verifyOutputs(
-  measurement: TopicsMeasurement,
-  model: TopicsFixture,
-): void {
-  const { seeded, outputs, errors, demand } = measurement;
-  expect(errors).toEqual([]);
-  expect({
-    pivot: outputs.table !== undefined,
-    backlinks: [...outputs.backlinks.keys()],
-    commentCounts: [...outputs.commentCounts.keys()],
-    lastActivity: [...outputs.lastActivity.keys()],
-  }).toEqual(demandedOutputsOf(demand, model.topics.length));
-  if (outputs.table !== undefined) {
-    expect(
-      pivotEntriesOf(seeded, outputs.table).map(({ topic, mentionedBy }) => ({
-        topic,
-        mentionedBy,
-      })),
-    ).toEqual([...new Set(model.board)].map((topic) => ({
-      topic,
-      mentionedBy: mentionersOf(model, topic),
-    })));
-  }
-  for (const [topic, backlinks] of outputs.backlinks) {
-    expect({ topic, backlinks: topicIndicesOf(seeded, backlinks) }).toEqual({
-      topic,
-      backlinks: mentionersOf(model, topic),
-    });
-  }
-  for (const [topic, commentCount] of outputs.commentCounts) {
-    expect({ topic, commentCount: commentCount.get() }).toEqual({
-      topic,
-      commentCount: presentCommentCount(model.topics[topic]),
-    });
-  }
-  for (const [topic, lastActivity] of outputs.lastActivity) {
-    expect({ topic, lastActivity: lastActivity.get() }).toEqual({
-      topic,
-      lastActivity: latestStamp(model.topics[topic]),
-    });
-  }
-}
-
-/**
- * Checks that no lift `measurement.demand` starts none of completed an action
- * during `operation`, so that a lift running without being demanded, whether or
- * not it holds an output, fails the case.
- *
- * @throws Error when such a lift completed an action.
- */
-function verifyIdleLifts(
-  measurement: TopicsMeasurement,
-  operation: { readonly reads: TopicsReads },
-): void {
-  const { demand, seeded } = measurement;
-  const started = demandedActionsOf(demand, seeded.topics.length);
-  const idle = TOPICS_LIFT_NAMES.filter((lift) => started[lift] === 0);
-  expect(
-    idle.map((lift) => ({
-      lift,
-      actions: operation.reads.bodies[lift].actions.size,
-    })),
-  ).toEqual(idle.map((lift) => ({ lift, actions: 0 })));
-}
-
-/**
- * Checks that reopening completed at least one action of every lift
- * `measurement.demand` starts.
- *
- * @throws Error when a demanded lift completed no action.
- */
-function verifyReopen(
-  measurement: TopicsMeasurement,
-  reopened: TopicsOperation,
-): void {
-  const { demand, seeded } = measurement;
-  const started = demandedActionsOf(demand, seeded.topics.length);
-  const demanded = TOPICS_LIFT_NAMES.filter((lift) => started[lift] > 0);
-  expect(
-    demanded.map((lift) => ({
-      lift,
-      completed: reopened.reads.bodies[lift].actions.size > 0,
-    })),
-  ).toEqual(demanded.map((lift) => ({ lift, completed: true })));
-}
-
-/**
- * Returns the record of a measured phase: its elapsed time, its body and
- * attempt reads by role, the graph once settled, and the memory in use after a
- * collection.
- */
-function phaseRecord(
-  phase: string,
-  measured: {
-    readonly reads: TopicsReads;
-    readonly graph: SchedulerGraphSnapshot;
-    readonly elapsedMs: number;
-  },
-  edit?: EditRecord,
-): PhaseRecord {
-  const { reads, graph, elapsedMs } = measured;
-  const { bodies, attempts } = reads;
-  return {
-    phase,
-    measured: true,
-    ...(edit === undefined ? {} : { edit }),
-    elapsedMs,
-    bodies: {
-      producer: { crossrefTable: bodyRecord(bodies.crossrefTable) },
-      consumer: { backlinksOf: bodyRecord(bodies.backlinksOf) },
-      aggregate: {
-        presentCommentCountOf: bodyRecord(bodies.presentCommentCountOf),
-        lastActivityOf: bodyRecord(bodies.lastActivityOf),
-      },
-      other: bodyRecord(bodies.other),
-      total: bodyTotalOf(Object.values(bodies)),
-    },
-    attempts: {
-      producer: { crossrefTable: { ...attempts.crossrefTable } },
-      consumer: { backlinksOf: { ...attempts.backlinksOf } },
-      aggregate: {
-        presentCommentCountOf: { ...attempts.presentCommentCountOf },
-        lastActivityOf: { ...attempts.lastActivityOf },
-      },
-      other: { ...attempts.other },
-      unattributed: { ...attempts.unattributed },
-      total: attemptTotalOf(Object.values(attempts)),
-    },
-    graph: { nodes: graph.nodes.length, edges: graph.edges.length },
-    memory: memoryRecord(),
-  };
-}
-
-/** Returns `body` with its actions counted rather than listed. */
-function bodyRecord(body: BodyReads): Record<string, number> {
-  return { ...body, actions: body.actions.size };
-}
-
-/** Returns `bodies` summed, with the largest single run's proxy accesses. */
-function bodyTotalOf(bodies: readonly BodyReads[]): Record<string, number> {
-  const sum = (count: (body: BodyReads) => number) =>
-    bodies.reduce((total, body) => total + count(body), 0);
-  return {
-    runs: sum((body) => body.runs),
-    actions: sum((body) => body.actions.size),
-    proxyAccesses: sum((body) => body.proxyAccesses),
-    linkResolutions: sum((body) => body.linkResolutions),
-    distinctDocuments: sum((body) => body.distinctDocuments),
-    registeredDependencies: sum((body) => body.registeredDependencies),
-    maxRunProxyAccesses: Math.max(
-      0,
-      ...bodies.map((body) => body.maxRunProxyAccesses),
-    ),
-  };
-}
-
-/** Returns `buckets` summed. */
-function attemptTotalOf(buckets: readonly AttemptReads[]): AttemptReads {
-  return buckets.reduce((total, bucket) => ({
-    attempts: total.attempts + bucket.attempts,
-    proxyAccesses: total.proxyAccesses + bucket.proxyAccesses,
-    linkResolutions: total.linkResolutions + bucket.linkResolutions,
-  }), { attempts: 0, proxyAccesses: 0, linkResolutions: 0 });
-}
-
-/**
- * Returns the process's memory use, after a full collection when the process
- * was started with `--expose-gc`, which says whether it was.
- */
-function memoryRecord(): Record<string, number | boolean> {
-  const collect: unknown = Reflect.get(globalThis, "gc");
-  if (typeof collect === "function") collect();
-  const { rss, heapTotal, heapUsed, external } = Deno.memoryUsage();
-  return {
-    collected: typeof collect === "function",
-    heapUsedBytes: heapUsed,
-    heapTotalBytes: heapTotal,
-    rssBytes: rss,
-    externalBytes: external,
-  };
 }
 
 //
 // Entry point
 //
+
+/**
+ * Helper for {@link main}, which returns `value` as the name of a regression
+ * variant, and `undefined` when it is `undefined`.
+ *
+ * @throws Error when `value` names no variant.
+ */
+function variantNamed(value?: string): ReadBudgetVariantName | undefined {
+  if (value === undefined) return undefined;
+  if (!Object.hasOwn(READ_BUDGET_VARIANTS, value)) {
+    const names = Object.keys(READ_BUDGET_VARIANTS)
+      .map((name) => `\`${name}\``)
+      .join(", ");
+    throw new Error(
+      `No variant is named \`${value}\`. The variants are ${names}.`,
+    );
+  }
+  return value as ReadBudgetVariantName;
+}
 
 /**
  * Helper for {@link main}, which returns `value` as a positive integer.
@@ -1123,24 +546,63 @@ function positiveInteger(name: string, value: string): number {
 
 /**
  * Runs the probe, or, given `--case`, measures that one case as a child of a
- * run.
+ * run, under the variant `--variant` names when it is given, or, given
+ * `--derive-limits`, derives the read-budget limits.
  *
  * @throws Error for an argument the probe does not take.
  */
 async function main(): Promise<void> {
+  const booleanOptions = ["derive-limits", "small"] as const;
+  const stringOptions = [
+    "case",
+    "filter",
+    "max-old-space-size",
+    "repeat",
+    "sample-file",
+    "variant",
+  ] as const;
   const args = parseArgs(Deno.args, {
-    boolean: ["small"],
-    string: ["case", "filter", "max-old-space-size", "repeat", "sample-file"],
+    boolean: booleanOptions,
+    string: stringOptions,
     unknown: (arg) => {
       throw new Error(`Unknown argument: \`${arg}\``);
     },
   });
+  const maxOldSpaceSize = args["max-old-space-size"] === undefined
+    ? undefined
+    : positiveInteger("max-old-space-size", args["max-old-space-size"]);
+  if (args["derive-limits"]) {
+    // Every option the probe takes, other than these two, selects or runs cases
+    // some other way.
+    const conflicting = [
+      ...booleanOptions.filter((name) => args[name]),
+      ...stringOptions.filter((name) => args[name] !== undefined),
+    ].filter((name) =>
+      name !== "derive-limits" && name !== "max-old-space-size"
+    );
+    if (conflicting.length > 0) {
+      throw new Error(
+        "`--derive-limits` takes no other option but " +
+          "`--max-old-space-size`, and was given " +
+          `${conflicting.map((name) => `\`--${name}\``).join(", ")}.`,
+      );
+    }
+    await deriveLimits(childV8Flags(maxOldSpaceSize));
+    return;
+  }
   if (args.case !== undefined) {
     if (args["sample-file"] === undefined) {
       throw new Error("`--case` needs `--sample-file`.");
     }
-    await measureCase(caseNamed(args.case), args["sample-file"]);
+    await measureCase(
+      caseNamed(args.case),
+      args["sample-file"],
+      variantNamed(args.variant),
+    );
     return;
+  }
+  if (args.variant !== undefined) {
+    throw new Error("`--variant` needs `--case`.");
   }
   await runProbe({
     repeat: args.repeat === undefined
@@ -1148,9 +610,7 @@ async function main(): Promise<void> {
       : positiveInteger("repeat", args.repeat),
     small: args.small,
     filter: args.filter === undefined ? undefined : new RegExp(args.filter),
-    maxOldSpaceSize: args["max-old-space-size"] === undefined
-      ? undefined
-      : positiveInteger("max-old-space-size", args["max-old-space-size"]),
+    maxOldSpaceSize,
   });
 }
 

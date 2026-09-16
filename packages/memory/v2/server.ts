@@ -2,10 +2,13 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 
 import type { FabricValue } from "@commonfabric/api";
-import { cloneIfNecessary, valueEqual } from "@commonfabric/data-model";
+import {
+  cloneIfNecessary,
+  isFabricPlainObject,
+  valueEqual,
+} from "@commonfabric/data-model";
 import { getLogger } from "@commonfabric/utils/logger";
 import { StagedMap } from "@commonfabric/utils/staged-map";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { metrics, SpanStatusCode, trace } from "@opentelemetry/api";
 
 import {
@@ -910,7 +913,7 @@ class Connection {
 
   sessionOpenAuthContext(message: SessionOpenRequest): SessionOpenAuthContext {
     const audience = this.#server.sessionOpenAudience();
-    const invocation = isObjectNotArray(message.invocation)
+    const invocation = isFabricPlainObject(message.invocation)
       ? message.invocation
       : null;
     if (invocation === null || typeof invocation.aud !== "string") {
@@ -7847,14 +7850,14 @@ export class Server {
  * declares holdings it cannot spell is not silently delivered in full.
  */
 const parseHoldings = (
-  value: unknown,
+  value: FabricValue,
 ): SessionHolding[] | undefined | null => {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) return null;
   const holdings: SessionHolding[] = [];
   for (const entry of value) {
     if (
-      !isObjectNotArray(entry) ||
+      !isFabricPlainObject(entry) ||
       typeof entry.id !== "string" ||
       !isNonNegativeInteger(entry.seq) ||
       (entry.scope !== undefined && !isCellScope(entry.scope)) ||
@@ -7889,14 +7892,14 @@ function isSqliteNamedParamEntries(
 export const parseClientMessage = (
   payload: string,
 ): ClientMessage | null => {
-  let parsed: unknown;
+  let parsed: FabricValue;
   try {
     parsed = decodeMemoryBoundary(payload);
   } catch {
     return null;
   }
 
-  if (!isObjectNotArray(parsed)) {
+  if (!isFabricPlainObject(parsed)) {
     return null;
   }
 
@@ -7918,7 +7921,7 @@ export const parseClientMessage = (
     parsed.type === "session.open" &&
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
-    isObjectNotArray(parsed.session)
+    isFabricPlainObject(parsed.session)
   ) {
     const holdings = parseHoldings(parsed.holdings);
     if (holdings === null) return null;
@@ -7946,7 +7949,7 @@ export const parseClientMessage = (
           ? (parsed.session.actingAs as "space-owner")
           : undefined,
       },
-      invocation: isObjectNotArray(parsed.invocation)
+      invocation: isFabricPlainObject(parsed.invocation)
         ? parsed.invocation
         : undefined,
       authorization: parsed
@@ -7959,7 +7962,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isObjectNotArray(parsed.commit)
+    isFabricPlainObject(parsed.commit)
   ) {
     return {
       type: "transact",
@@ -7975,7 +7978,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isObjectNotArray(parsed.query) &&
+    isFabricPlainObject(parsed.query) &&
     Array.isArray(parsed.query.roots)
   ) {
     return {
@@ -7992,7 +7995,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isObjectNotArray(parsed.query) &&
+    isFabricPlainObject(parsed.query) &&
     typeof parsed.query.id === "string" &&
     Array.isArray(parsed.query.path)
   ) {
@@ -8050,7 +8053,7 @@ export const parseClientMessage = (
   if (
     parsed.type === "sqlite.query" &&
     (parsed.reader === undefined ||
-      (isObjectNotArray(parsed.reader) &&
+      (isFabricPlainObject(parsed.reader) &&
         typeof parsed.reader.principal === "string" &&
         parsed.reader.principal.length > 0 &&
         (parsed.reader.sessionId === undefined ||
@@ -8061,11 +8064,11 @@ export const parseClientMessage = (
     typeof parsed.sessionId === "string" &&
     typeof parsed.sql === "string" &&
     parsed.sql.length <= 100_000 &&
-    isObjectNotArray(parsed.db) &&
+    isFabricPlainObject(parsed.db) &&
     typeof parsed.db.id === "string" &&
     parsed.db.id.length > 0 && parsed.db.id.length <= 256 &&
     (parsed.db.tables === undefined ||
-      (isObjectNotArray(parsed.db.tables) &&
+      (isFabricPlainObject(parsed.db.tables) &&
         Object.keys(parsed.db.tables).length <= 256)) &&
     (parsed.db.scope === undefined || parsed.db.scope === "space" ||
       parsed.db.scope === "user" || parsed.db.scope === "session") &&
@@ -8075,12 +8078,14 @@ export const parseClientMessage = (
   ) {
     const db = {
       id: parsed.db.id,
-      tables: isObjectNotArray(parsed.db.tables) ? parsed.db.tables : undefined,
+      tables: isFabricPlainObject(parsed.db.tables)
+        ? parsed.db.tables
+        : undefined,
       scope: parsed.db.scope as CellScope | undefined,
     };
     const params = isSqliteNamedParamEntries(parsed.namedParams)
       ? Object.fromEntries(parsed.namedParams)
-      : isObjectOrArray(parsed.params)
+      : Array.isArray(parsed.params) || isFabricPlainObject(parsed.params)
       ? parsed.params as SqliteParamsWire
       : undefined;
     return {
