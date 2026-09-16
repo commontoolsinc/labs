@@ -111,17 +111,19 @@ export interface AggregateState {
   states: Record<string, IdentityState>;
 
   /**
-   * Every identity no run has worked out a unit for, kept from one
-   * publish to the next. A run reads surfaces only from the objects it
-   * folds for the first time, so a surface recording less often than the
-   * publisher runs is absent from most runs; keeping the list across them
-   * is what lets a run tell an identity recorded once and not yet given a
-   * unit from one whose records keep arriving and keep saying too little.
-   * An entry is removed when the topology has a unit for its identity, or
-   * when it names something the count no longer holds, so the list is
-   * what the tree still says nothing about.
+   * The file each identity's records named, by identity key, for the
+   * identities whose records named one at all. Everything else about an
+   * identity's surface follows from the identity, and an identity absent
+   * here is its own invocation unit.
+   *
+   * Carried so that a manifest holds every identity the aggregate scores
+   * rather than the ones that ran lately. A run reads records only from
+   * the objects it folds for the first time, so surfaces gathered from
+   * those alone name the identities that ran inside that run's window;
+   * the publisher keeps the identities it can place, and an identity it
+   * has no surface for is not one of them.
    */
-  unclaimed?: string[];
+  files: Record<string, string>;
 
   /**
    * What lanes have measured about themselves, against the day each ran.
@@ -142,6 +144,7 @@ export function emptyAggregate(day: string): AggregateState {
     context: serializeContext(emptyContext()),
     compacted: [],
     states: {},
+    files: {},
   };
 }
 
@@ -216,13 +219,6 @@ export function parseAggregate(text: string): AggregateState | undefined {
   const compacted = state.compacted === undefined
     ? (written as string[]).map((day) => sourceDateKey(CI_SOURCE, day))
     : written as string[];
-  // What was unplaced last time is compared against rather than folded,
-  // so an aggregate written without it, or with something that is not a
-  // list of identities, is read as having nothing to compare against.
-  const unclaimed = Array.isArray(state.unclaimed) &&
-      state.unclaimed.every((key) => typeof key === "string")
-    ? state.unclaimed as string[]
-    : undefined;
   // Each lane observation stands alone, so one that will not read is
   // dropped by itself rather than taking the rest with it. What the list
   // holds is a week of measurements, and the fit reads every figure in
@@ -230,6 +226,19 @@ export function parseAggregate(text: string): AggregateState | undefined {
   const lanes = Array.isArray(state.lanes)
     ? state.lanes.filter(isLaneObservation)
     : undefined;
+  // An aggregate written before the files were carried holds none, and
+  // an empty map is the truthful reading of it: each identity is then
+  // read as its own invocation unit until one of its records names a
+  // file again. Anything else in that place is a state this cannot read,
+  // and reading it wrongly would decide which identities the manifest
+  // holds, so the aggregate is refused instead.
+  const files = state.files === undefined ? {} : state.files;
+  if (typeof files !== "object" || files === null || Array.isArray(files)) {
+    return undefined;
+  }
+  for (const file of Object.values(files as Record<string, unknown>)) {
+    if (typeof file !== "string") return undefined;
+  }
   const states = state.states as Record<string, IdentityState>;
   for (const identity of Object.values(states)) readCostsForward(identity);
   return {
@@ -239,7 +248,7 @@ export function parseAggregate(text: string): AggregateState | undefined {
     context: serializeContext(parseContext(state.context)),
     compacted,
     states,
-    ...(unclaimed === undefined ? {} : { unclaimed }),
+    files: files as Record<string, string>,
     ...(lanes === undefined ? {} : { lanes }),
   };
 }
@@ -431,12 +440,8 @@ export interface Unplaced {
    * that says too little. The lane's measurements of itself are not here:
    * they are not test surfaces, and `isLaneMeasurement` is what says so.
    *
-   * A count of these alone says nothing about which of those it holds. A
-   * run reads surfaces only from the objects it folds for the first time,
-   * so an identity here that `AggregateState.unclaimed` already held has
-   * recorded more since and still has no unit. That is a surface whose
-   * records never say which unit, rather than one whose next record
-   * will.
+   * These span the aggregate's whole history rather than one run's
+   * reads, because the surfaces they are read from do.
    */
   unclaimed: string[];
 }
@@ -654,6 +659,17 @@ export class Fold {
         })
         .map(([key, state]) => [key, { ...emptyState(), ...state }]),
     );
+    // A record produces a state and a surface together, so an identity
+    // the aggregate holds a state for has a surface, and the file its
+    // records named is the only part of that surface the identity does
+    // not already say. Seeding these is what makes the manifest hold
+    // every identity the aggregate scores rather than the ones whose
+    // records this run happened to read.
+    for (const key of this.#states.keys()) {
+      const test = testIdentityOfKey(key);
+      if (test === undefined) continue;
+      this.#surfaces.set(key, recordSurface(test, aggregate.files[key]));
+    }
     this.#context = parseContext(aggregate.context);
     this.#lanes = [...aggregate.lanes ?? []];
     this.#folded = [...aggregate.folded];
@@ -815,6 +831,11 @@ export class Fold {
         compacted: this.#compacted,
         states: Object.fromEntries(this.#states),
         lanes,
+        files: Object.fromEntries(
+          [...this.#surfaces]
+            .filter(([, surface]) => surface.fromFile)
+            .map(([key, surface]) => [key, surface.unit]),
+        ),
       },
       states: this.#states,
       surfaces: this.#surfaces,

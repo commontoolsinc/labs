@@ -281,6 +281,19 @@ everything, and creates one manifest object and one aggregate object. It
 reads and folds two hundred objects at a time, so what it holds is bounded
 by the number of tests rather than by the number of runs.
 
+A manifest holds every identity in the aggregate that the topology can
+place, rather than the identities that ran inside the window the run
+read. Placing an identity needs the file its records named, where its
+suite's units are files, so the aggregate carries that file beside the
+identity's scores. Without that, a manifest would hold what ran lately:
+an identity would leave it on the first run that read none of its
+records, and come back the next time it ran, while its scores sat in the
+aggregate throughout. The exploration draw picks from the manifest's
+entries, so the tests that had gone longest without running would be the
+ones it could no longer reach. An aggregate written before those files
+were carried holds none, and each identity rejoins the manifest as its
+records name a file again.
+
 **Nothing gates on it.** When the publisher fails, the previous manifest is
 still the newest one and consumers keep using it. A manifest going stale
 degrades selection quality slowly rather than failing anything, which is
@@ -452,9 +465,8 @@ read them, and creates nothing in the store.
 ## What a run leaves out
 
 A run's log names two kinds of identity that did not reach the manifest.
-The first is the design working. The second is either a set of identities
-whose next record will say enough, or a surface whose records never say
-enough, and the run says which.
+The first is the design working. The second is a surface whose records do
+not say which unit they belong to.
 
 The first is the identities that measure a whole invocation:
 
@@ -475,8 +487,8 @@ The second is the identities the topology has no unit for:
 
 ```
 test selection: the topology has no unit for 3295 identities, so no lane
-can be asked to run one. An identity is left out until one of its records
-says enough to work out which unit it is in.
+can be asked to run one. What puts an identity here, and what takes it
+out again, is in docs/development/test-selection.md.
 test selection: those 3295 were recorded by 12 surface(s): unit:utils 742,
 unit:runtime-client 509, unit:ts-transformers 379,
 unit:schema-generator 314, unit:js-compiler 153, and 7 more
@@ -505,7 +517,8 @@ batches. Those records travel the same path as a test's, but nothing
 enumerates them and no lane can be asked to run one, so no suite has a
 unit for them and none should. `isLaneMeasurement` is what says so, and
 everything that reads a recorded identity asks it: the drift guard, the
-publisher, and the list the publisher keeps from one run to the next.
+publisher, and the fold that carries the surfaces from one run to the
+next.
 
 Left out of everything scored, they are not discarded. The publisher
 keeps them in its rolling aggregate over `COST_WINDOW_DAYS`, the same
@@ -520,33 +533,28 @@ The publisher leaves all of those out rather than putting an entry in the
 manifest that no lane could run. The next record that says enough puts the
 identity back in.
 
-A count on its own says nothing about which of the two it holds, so the
-aggregate keeps the identities that have no unit and removes each one when
-the topology has a unit for it, or when it names something the count no
-longer holds. A run compares its own list against that one:
+The count spans every identity the aggregate holds rather than the ones
+this run read, because the surfaces it is taken from do. Three different
+things are in it. The first is an identity whose records have never said
+which unit it is in, which is the one to act on, and the next record
+that says enough takes it out. The second is an identity nothing records
+any more: a deleted or renamed test keeps its state in the aggregate,
+and the file its records named may be one no suite has a unit for now.
+The third is an identity two suites both claim, which no record can
+settle, and which the drift guard fails on separately. Nothing in the
+count separates the three, and the surfaces named beside it are the only
+handle on which is which.
 
-```
-test selection: 2900 of them were in this count at the last publish too,
-so more of their records have been read since and those records still do
-not say which unit. A surface whose records never say which unit is worth
-fixing. See docs/development/test-selection.md.
-test selection: those 2900 were recorded by 9 surface(s): unit:utils 742,
-unit:runtime-client 509, unit:ts-transformers 379,
-unit:schema-generator 314, unit:js-compiler 153, and 4 more
-```
-
-The second line is the one to act on. It is the same breakdown, over the
-part of the count that two runs both left without a unit.
-
-A run reads each identity's records only from the objects it folded for
-the first time, so every identity in its count was recorded in an object
-no earlier publish had read. One that was already on the list has
-therefore been recorded twice over and had no unit either time. That is a
-surface whose records never say which unit, rather than an identity whose
-next record will say. The list is kept across runs rather than replaced by
-each one, because a surface recording less often than the publisher runs
-is absent from most runs, and a list replaced each time would treat such a
-surface as new every time it did record.
+The first runs after a change to what the aggregate carries report the
+whole corpus here. An aggregate written before the files were carried
+holds none, so every identity in it is read as its own invocation unit
+until one of its records names a file again, and a suite whose units are
+files can place none of them. Those runs publish the manifest they would
+have published before, and the count falls as the records arrive. A
+bootstrap would fill the files in one run, and it is the wrong tool for
+it: a bootstrap replaces the score history with what its window holds,
+so it would pay for a count that falls on its own with every catch
+counted before that window.
 
 What to check is that surface's wiring, which
 [the record guide](test-records.md#covering-a-new-test-surface) covers: a
@@ -555,16 +563,6 @@ JUnit path on the job's ship step, the `--preload` naming
 `deno test`, and the working directory that relative class names are
 joined onto. Where the records do have a file, the file is one no suite
 has a unit for, and the answer is in the topology rather than in the job.
-
-Where none of them were on the list, the run says so instead:
-
-```
-test selection: none of them were in this count at the last publish, so
-nothing has been recorded twice with no unit.
-```
-
-A run folding into an empty aggregate has nothing to compare against, and
-says neither.
 
 ## What the run on the default branch does with a flaky test
 
