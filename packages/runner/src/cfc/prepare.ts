@@ -7221,12 +7221,20 @@ export const prepareBoundaryCommit = (
           label: entry.label,
         })),
       ];
+      let authoritativeIndex: ConsumedLabelIndex | undefined;
       const authoritativeCoverFor = (
         entryPath: readonly string[],
       ): IFCLabel | undefined => {
+        authoritativeIndex ??= new ConsumedLabelIndex(authoritativeEntries, {
+          canonicalPaths: true,
+        });
         let best: { path: readonly string[]; label: IFCLabel } | undefined;
-        for (const auth of authoritativeEntries) {
-          if (!isPrefix(auth.path, entryPath)) continue;
+        for (
+          const { entry: auth } of authoritativeIndex.overlapping(
+            entryPath,
+            false,
+          )
+        ) {
           if (best === undefined || auth.path.length > best.path.length) {
             best = auth;
           } else if (auth.path.length === best.path.length) {

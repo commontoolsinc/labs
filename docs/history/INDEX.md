@@ -6,6 +6,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 - [Indexed flow-read labels](development/performance/2026-09-15-cfc-flow-read-index.md) — generated transaction equivalence, the paired R by E grid, and shared arm-B attribution separating the improved flow lookup from the dominant authoritativeCoverFor scan.
 
+- [Authoritative link-label coverage](development/performance/2026-09-15-cfc-authoritative-cover.md) — 2026-09-15; prefix-only candidate selection, corpus equivalence, and paired mapped-render measurements.
 - [Wildcard-source path indexes](development/performance/2026-09-15-cfc-wildcard-source-index.md) — generated-corpus equivalence, paired source-wildcard query measurements, and shared arm-B profiles locating the remaining authoritative-cover scan.
 
 - [Loom investigation review clarifications](development/performance/2026-09-15-loom-person-inbox-review-clarifications.md) — complete 203-document access-shape accounting and raw repetitions explaining independently calculated policy and opening medians.
