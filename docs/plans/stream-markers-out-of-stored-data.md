@@ -197,75 +197,150 @@ that already writes the back-link.
 ## Stages
 
 Three PRs. The first keeps the value fallback so nothing that still holds a
-sentinel breaks; the last removes it.
+sentinel breaks; the last removes it. Stage 1 landed as #7583 and stage 2 as
+#7589, stacked on it; where either stage did something other than what the
+list below first said, the item says what happened and why.
 
-### Stage 1 — Runner: stop writing, stop needing
+### Stage 1 — Runner: stop writing, stop needing (#7583)
 
-- [ ] `Cell.export()` reports `kind` and stops reporting a value for streams.
+- [x] `Cell.export()` reports `kind` and stops reporting a value for streams.
       The two build-time checks at `builder/pattern.ts:390` and `:1053` switch
       to the exported kind.
-- [ ] Builder stamps `asCell: ["stream"]` on the descriptor schema and on the
-      alias schema for stream-kind cells, with no `default`.
-- [ ] Setup writes a `schema` meta onto each stream's derived document next to
-      the `result` back-link (`runner.ts:2986`).
-- [ ] Handler dispatch follows decision 2. Delete
-      `describeHandlerStreamFailure`, `isMissingStreamMarkerFailure`, the
-      throw at `runner.ts:10492`, and the marker-keyed trigger in the
-      cold-start repair (`runner.ts:4942`). Keep the setup passes themselves;
-      they still materialize the manifest and argument defaults. Rewrite the
-      `runner.ts:10492` guard message and the comments at `:4470` and `:4558`.
-- [ ] Remove the four hand-written sentinels in llm-dialog and confirm its
+- [x] Builder stamps `asCell: ["stream"]` on the descriptor schema and on the
+      alias schema for stream-kind cells, with no `default`. The stamp goes in
+      front of an `asCell` the schema already carries (`["opaque"]` on a
+      stream's own schema) rather than replacing it.
+- [x] Setup writes a `schema` meta onto each stream's derived document next to
+      the `result` back-link (`runner.ts:2986`). It is written in the stored
+      spelling, so with content-addressed schemas on it is a `cid:` reference
+      and the declaration lives in the schema document it names; a raw-storage
+      reader follows one reference, not none.
+- [x] Handler dispatch follows decision 2. `describeHandlerStreamFailure`,
+      `isMissingStreamMarkerFailure` and the `runner.ts:10492` throw are gone,
+      and a lift binding `$event` is refused by name. The cold-start repairs
+      stay, on structural triggers rather than the marker: a nested piece
+      repairs when its setup marker names another version and its manifest
+      lacks one of the pattern's internal cells, and the controller refuses a
+      stopped root whose marker names another version and hands it to the
+      existing repair (`Runner.isRunning()` keeps a running root out of it).
+      Deleting the repairs outright regressed nested pieces, which came up
+      with no result aliases. `nested-piece-setup-repair.test.ts` therefore
+      stays, rewritten for the structural trigger.
+- [x] Remove the four hand-written sentinels in llm-dialog and confirm its
       result schema marks those fields as streams.
-- [ ] `processDefaultValue` mints a stream-kind cell instead of a sentinel
+- [x] `processDefaultValue` mints a stream-kind cell instead of a sentinel
       cell (`schema.ts:574`). The guard at `data-updating.ts:1193` becomes
       dead; remove it.
-- [ ] `Cell.isStream` goes through `getAsCellKind` so object `asCell` entries
+- [x] `Cell.isStream` goes through `getAsCellKind` so object `asCell` entries
       are recognized. Keep its value fallback for now.
-- [ ] The query-result proxy tests the resolved link's schema before the value
+- [x] The query-result proxy tests the resolved link's schema before the value
       (`query-result-proxy.ts:349`). Keep its value fallback for now.
-- [ ] Regression test: forward a stream into a sub-pattern through `.map`, the
+- [x] Regression test: forward a stream into a sub-pattern through `.map`, the
       case that added the proxy fallback and that `sidebar.tsx:84` still works
       around. Under this design it works only because the stored alias link
       carries the stamp.
+- [x] Not foreseen: every read path treats a declared stream position as a
+      handle whether or not the data names it — the eager traversal, the
+      schema view, the defaults path — with `required` checks exempting such
+      positions, since a required stream field with nothing stored otherwise
+      collapsed the read. A stream handle written into data carries the
+      declaration on its link, decided by the handle's kind with nothing read
+      (a value read there taints the write, which the CFC tests caught). Link
+      resolution keeps a stored schema that is only an `asCell` stamp instead
+      of discarding it as unconstraining, and the family-presence probes read
+      the document record rather than its value.
 
-### Stage 2 — Consumers, tests, docs
+### Stage 2 — Consumers, tests, docs (#7589)
 
-- [ ] State inspector: classify a document as `stream` when its `schema` meta
-      declares one; keep the value check until stage 3.
-- [ ] Shuttle listing: `kindOf` takes the schema alongside the value, from
-      the same link-derived cell the CLI read guard already uses, so the two
-      keep agreeing once the sentinel is gone.
-- [ ] FUSE: read the `schema` meta in the entity projection; thread the
-      schema-aware `classifyCallableEntry` into the tree builder's nested walk
-      (`tree-builder.ts:554`) so nested streams stop vanishing;
-      `callables.ts:50` gains a schema branch.
-- [ ] CLI read guard: already schema-only; update the comment at
+- [x] State inspector: classify a document as `stream` when its `schema` meta
+      declares one; keep the value check until stage 3. Because the meta can
+      be a `cid:` reference, `classifyDocument` takes a document reader and
+      follows it into the schema document; every classification site hands
+      one over, and the detail view shows the referenced schema and names the
+      document it came from.
+- [x] Shuttle listing: a key is a `callable` off the child's link-derived
+      schema, the same signal the CLI read guard refuses on, through a new
+      `listCallableKeys` read (`cli/lib/piece.ts`) that runs beside the value
+      read and fails open the way the guard does. The listing skips it for a
+      keyless cell. A position still reading as the sentinel counts as a
+      callable until stage 3.
+- [x] FUSE, in part. `classifyCallableEntry` takes a schema that declares a
+      stream as a handler whatever stands at the position; the bridge's
+      callable discovery asks the child cell itself as a last resort, the way
+      the CLI's `detectCallableKind` already did; and a nested `.json` sibling
+      shows a stream handle as `{ "/handler": key }` instead of the handle's
+      own JSON, at every depth. Not done, and not blocking stage 3: nested
+      `.handler` scripts (the bridge's callable discovery is root-only, and a
+      nested script needs a path-addressed `cf exec`), and the `entities/`
+      projection of a bare stream document, which `#materializeTreeValue`
+      already leaves empty rather than failing. Both are follow-ups if anyone
+      wants them.
+- [x] CLI read guard: already schema-only; update the comment at
       `cli/lib/piece.ts:4694`.
-- [ ] Piece menu: already schema-first with a parent-schema fallback
+- [x] Piece menu: already schema-first with a parent-schema fallback
       (`cf-piece-menu.ts:1851`); remove `isRawStreamMarker`.
-- [ ] Test fixtures: the 48 files that build streams with `setRaw` switch to
-      `runtime.getCell(space, cause, { asCell: ["stream"] })` or an explicit
-      kind. The CLI test harness (`test-runner.ts:1369`) likewise.
-      `nested-piece-setup-repair.test.ts` and the failure-message tests go
-      away with the machinery.
-- [ ] Docs. Six live documents describe the sentinel:
-      `docs/specs/space-model/1-data-model.md` (`:138`, `:296`, `:719`,
-      `:904`), `2-storage-format.md` (`:30`, `:70`, `:95`), `4-cells.md`
-      (`:71`, `:154`), `7-schemas.md` (`:56`),
-      `docs/specs/pattern-construction/rollout-plan.md` (`:138`),
-      `docs/plans/pattern-verb-contract.md` (`:412`). The formal spec proposes
-      keeping the sentinel under a `{ "/Stream@1": null }` encoding
-      (`space-model-formal-spec/1-fabric-values.md:3794`, and the two blocks
-      at `1-data-model.md:737` and `:774`); those need to say the encoding is
-      retired, not renamed.
+- [x] Test fixtures, in part. Every fixture that built a stream through a real
+      runtime now declares it — `runtime.getCell(space, cause, { asCell:
+      ["stream"] })` for a handle, `schema: { asCell: ["stream"] }` on a
+      hand-built descriptor or alias — and stores nothing; a declared stream
+      argument is passed as `{}`. The served-execution fixtures
+      (`executor-events-down`, `executor-space-server`) write the schema meta
+      the way setup does, since their durable appends land on the stream's
+      document, and their serving-side handles declare the stream too, since
+      a send decides stream-or-write off the handle. The CLI test harness
+      (`test-runner.ts`) likewise. Pure fakes that answer the sentinel from
+      `getRaw` are deferred to stage 3 (see there): they exercise the value
+      fallback that stage removes, and would be rewritten twice otherwise.
+- [x] Docs. The six live documents and the formal spec's encoding table now
+      describe the declaration, and the formal spec says the marker is retired
+      rather than renamed to `/Stream@1`. The builder README and the lunch-poll
+      deploy guide follow. Comments in pattern sources (`sidebar.tsx`,
+      `gideon-tests`, `gmail-agentic-search.tsx`) still mention the marker:
+      editing a pattern's source changes its identity, so they are left alone.
+- [x] Not foreseen: a stream declared through a `$ref` into the schema's own
+      `$defs`, or through a composition whose branches agree (`allOf` with
+      plain constraints beside it, a uniform `anyOf`/`oneOf`), was not a
+      declared stream to `Cell.isStream`, which read only a root `asCell`; the
+      stored sentinel had been carrying those sends. The piece controller
+      already localized such declarations for validation.
+      `ContextualFlowControl.declaredHandleKind` reads the kind through a
+      local `$ref` and through agreeing branches — `allOf` declares what any
+      branch declares, `anyOf`/`oneOf` what every branch declares — and
+      `declaresStream`, `Cell.isStream` and the proxy decide from it. The
+      local lookup is quiet on a miss, because the CLI test harness counts a
+      logged warning as a failure. `Cell.key()` still derives a handle's kind
+      from the root `asCell` alone.
+- [x] Not foreseen: stage 1 had changed what a verb's link-derived schema
+      reads as — `asCell: ["stream"]` in front of the event schema, and
+      `{ asCell: ["stream"] }` rather than nothing for a verb declaring no
+      event type — and two CLI tests pinning the old shape
+      (`verb-undeclared-field.test.ts`) had not been run. Their expectations
+      are updated in stage 2.
 
 ### Stage 3 — Remove the fallback
 
-- [ ] Delete the value branch in `Cell.isStream`, the proxy's value check, the
-      inspector's value check, and `isStreamValue` in
-      `runner/src/builder/types.ts` (and its re-export, which the shuttle
-      listing imports).
-- [ ] Confirm no `$stream` remains outside `docs/history/`.
+- [ ] Delete the value branch in `Cell.isStream`, the proxy's value check
+      (and the `$stream` read it registers, which
+      `query-result-proxy-shape-reactivity.test.ts` pins), the inspector's
+      value check (`model.ts` and `decode.ts`), the shuttle listing's
+      (`kindOf`), FUSE's `isStreamValue` in `callables.ts`, and `isStreamValue`
+      in `runner/src/builder/types.ts` (and its re-export).
+- [ ] Rewrite the pure fakes deferred from stage 2, whose `getRaw` answers the
+      sentinel: the CLI's `piece-call`, `piece-connection`, `exec`,
+      `exec-read-options`, `read-options-four-ways` and
+      `verb-undeclared-field` doubles, and the inline-verb case in
+      `piece.test.ts` that exists to pin the sentinel path. Each should carry
+      `schema: { asCell: ["stream"] }` or `isStream: () => true` and answer
+      `undefined` from `getRaw`.
+- [ ] Decide the raw-document fixtures that model older data:
+      `scripts/topics-export.test.ts`, `storage-subscription-filter.bench.ts`
+      and the codec round-trip case in `data-model/test/codecs.test.ts`. The
+      first two seed a sentinel where nothing reads it, so they can stay as
+      history or switch to a stamped link; the codec case is about `$`-keyed
+      records in general and should keep the key under another name.
+- [ ] Confirm no `$stream` remains outside `docs/history/`, the plan docs, and
+      pattern sources whose comments cannot change without changing the
+      pattern's identity.
 
 Stage 3 can ship once every space that matters has had a setup pass under
 stage 1, which re-emits manifest links with stamped schemas. Documents that
@@ -288,7 +363,12 @@ nothing reads it.
 - Shuttle listing: a stream position lists as `callable` with no sentinel
   stored.
 - FUSE: a nested stream two levels down a result appears as
-  `{"/handler": key}` and gets a `.handlers` script.
+  `{"/handler": key}` in its parent's `.json` sibling. It gets no `.handler`
+  script of its own; see the stage 2 FUSE item.
+- Inspector: a stream whose `schema` meta is a `cid:` reference classifies as
+  `stream` and shows the referenced schema.
+- A stream declared through `$ref` and `allOf`/`anyOf` sends with nothing
+  stored (`stream-declaration.test.ts`).
 
 ## Risks
 
