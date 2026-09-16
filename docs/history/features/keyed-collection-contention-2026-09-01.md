@@ -1,7 +1,7 @@
 ---
 status: historical
-created: 2026-09-01
-archived: 2026-09-01
+created: 2026-09-15
+archived: 2026-09-15
 reason: "Measurement snapshot; the mechanisms it found are described live in docs/features/keyed-collection-writes.md."
 ---
 

@@ -76,6 +76,7 @@ import {
   applyPatchToDocument,
   PatchApplyError,
 } from "../../../memory/v2/patch.ts";
+import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
@@ -382,7 +383,7 @@ const readAddress = (
 ): string => {
   const scope = normalizeCellScope(read.scope);
   const instance = scope === "space" ? read.id : `${read.id}@${scope}`;
-  return read.path.length > 0 ? `${instance}/${read.path.join("/")}` : instance;
+  return `${instance}${encodePointer(read.path)}`;
 };
 
 /**

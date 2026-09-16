@@ -68,6 +68,10 @@ await harness.settle();
 const msgLink = await alice.link(["messages"]);
 console.log(`[driver] messages link:`, msgLink);
 
+// Open the refusal window here, so the summary covers the storm rather than
+// the commits that started the harness and opened the piece.
+await Promise.all(harness.sessions.map((session) => session.clearRejections()));
+
 const writers = WRITERS === 1 ? [alice] : [alice, bob];
 await Promise.all(writers.map((w, i) => storm(w, i === 0 ? "alice" : "bob")));
 console.log(`[driver] storm done (${writers.length}×${K})`);
@@ -184,7 +188,7 @@ for (const [label, path] of probePaths) {
 // document is a root conflict, while a "pending dependency ..." is a commit
 // dropped because one it stacked on was dropped.
 const staleOver = (message: string): string | undefined =>
-  message.match(/stale [a-z]+ read: (\S+) /)?.[1];
+  message.match(/^stale [a-z]+ read: (\S+) /)?.[1];
 const classifyWrite = (id: string): string =>
   id === msgLink.id ? "list" : id.startsWith("computed:") ? "computed" : "doc";
 for (
@@ -202,11 +206,12 @@ for (
     kinds[stale === undefined ? "cascade" : "root"] =
       (kinds[stale === undefined ? "cascade" : "root"] ?? 0) + 1;
     if (stale !== undefined) {
-      // A commit refused over a document it wrote itself is contending with
-      // its own output rather than with another session's writes.
-      const self = refusal.writes.includes(stale) ? "self-" : "";
-      over[`${self}${classifyWrite(stale)}:${stale.slice(-8)}`] =
-        (over[`${self}${classifyWrite(stale)}:${stale.slice(-8)}`] ?? 0) + 1;
+      // Whether the document that went stale is one this commit also writes,
+      // which separates contending over an input from contending over an
+      // output.
+      const alsoWrote = refusal.writes.includes(stale) ? "alsoWrote-" : "";
+      const key = `${alsoWrote}${classifyWrite(stale)}:${stale.slice(-8)}`;
+      over[key] = (over[key] ?? 0) + 1;
     }
     for (const id of new Set(refusal.writes.map(classifyWrite))) {
       wrote[id] = (wrote[id] ?? 0) + 1;

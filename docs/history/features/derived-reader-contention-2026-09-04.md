@@ -1,7 +1,7 @@
 ---
 status: historical
-created: 2026-09-04
-archived: 2026-09-04
+created: 2026-09-15
+archived: 2026-09-15
 reason: "Measurement snapshot; the durable statement is in docs/features/mergeable-collection-writes.md."
 ---
 
@@ -101,6 +101,6 @@ three sessions, one derivation. Nothing here measures a keyed collection, a
 larger session count, or a derivation whose output is expensive to recompute
 rather than merely contended.
 
-`packages/patterns/integration/convergence-storm.test.ts` drives this fixture
-and asserts convergence. Nothing in it observes the refusals above, so the cost
-is invisible to continuous integration.
+`packages/patterns/integration/convergence-storm.test.ts` drives this fixture.
+When these measurements were taken it asserted convergence and nothing else,
+so nothing in continuous integration observed the refusals above.

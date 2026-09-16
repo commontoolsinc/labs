@@ -199,7 +199,7 @@ case and the boundary either mechanism crosses. Its burst recasts only, holds
 the collection's membership still through every round, and requires that no
 commit refused while it ran wrote the collection — the question a count of
 rolled-back writes cannot answer, since that count is every write a session
-threw away whatever refused it.
+threw away, whatever refused it.
 `docs/history/features/keyed-collection-contention-2026-09-01.md` records what
 bursts that do change membership cost, which mechanism each one exercised, and
 what none of them measured.
@@ -207,12 +207,13 @@ what none of them measured.
 A reader of the collection is not part of this, and is measured separately in
 `mergeable-collection-writes.md`, where it turns out to be the whole cost of a
 collection whose writes already merge. Deriving a value from the whole
-collection puts the collection in a conflict set, but in the commit that writes
-the derived result: the runner opens one transaction per event dispatch and
-another per reactive run. That a keyed write and a derivation never share a
-commit follows from those two sites and has not been established directly; what
-has been measured is that no refused commit in those runs wrote a derived
-document. The derived commit is a compare-and-set over the whole collection and
+collection does put the collection in a conflict set. The conflict set it lands
+in belongs to the commit that writes the derived result, not to the commits
+that write the collection it derives from. The runner opens one transaction per
+event dispatch and another per reactive run, which is the reason, though it
+has not been established directly that a keyed write and a derivation never
+share a commit. What has been measured is that no refused commit in those runs
+wrote a derived document. The derived commit is a compare-and-set over the whole collection and
 contends with every element write, a cost belonging to the reader.
 
 ## Clear-and-reseed commits as a plain overwrite
