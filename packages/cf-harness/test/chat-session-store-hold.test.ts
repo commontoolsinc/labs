@@ -18,10 +18,7 @@ import {
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
 } from "../src/interactive-chat-service.ts";
-import type {
-  HarnessPromptLoopResult,
-  RunHarnessTranscriptOptions,
-} from "../src/prompt-loop.ts";
+import type { RunHarnessTranscriptOptions } from "../src/prompt-loop.ts";
 import {
   HarnessChatStoreAliasedError,
   HarnessChatStoreHeldError,
@@ -32,28 +29,7 @@ import {
   type SqliteHarnessChatSessionStore,
   sqliteHarnessChatSessionStoreHolderPath,
 } from "../src/sqlite-session-store.ts";
-
-const makeResult = (
-  options: RunHarnessTranscriptOptions,
-  finalAssistantText: string,
-): HarnessPromptLoopResult => ({
-  model: options.model ?? "gpt-test",
-  finalAssistantText,
-  transcript: [
-    ...options.transcript,
-    { role: "assistant", content: finalAssistantText },
-  ],
-  modelTurns: 1,
-  runState: {} as HarnessPromptLoopResult["runState"],
-});
-
-const nextIsoNow = () => {
-  let counter = 0;
-  return () => {
-    counter += 1;
-    return `2026-09-15T00:00:${String(counter).padStart(2, "0")}.000Z`;
-  };
-};
+import { makeResult, nextIsoNow } from "./support/session-store-fixtures.ts";
 
 const completingPromptLoop: HarnessInteractivePromptLoopFactory = () => ({
   runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),

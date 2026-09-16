@@ -31,28 +31,7 @@ import {
   faultingToolLoop,
   toolCall,
 } from "./support/chat-fault-fixture.ts";
-
-const nextIsoNow = () => {
-  let counter = 0;
-  return () => {
-    counter += 1;
-    return `2026-05-27T00:00:${String(counter).padStart(2, "0")}.000Z`;
-  };
-};
-
-const makeResult = (
-  options: RunHarnessTranscriptOptions,
-  finalAssistantText: string,
-): HarnessPromptLoopResult => ({
-  model: options.model ?? "gpt-test",
-  finalAssistantText,
-  transcript: [
-    ...options.transcript,
-    { role: "assistant", content: finalAssistantText },
-  ],
-  modelTurns: 1,
-  runState: {} as HarnessPromptLoopResult["runState"],
-});
+import { makeResult, nextIsoNow } from "./support/session-store-fixtures.ts";
 
 /** Asserts a synthesized result states an unknown outcome without `ok`. */
 const assertUnknownToolOutcome = (
