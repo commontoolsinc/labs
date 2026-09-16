@@ -71,4 +71,52 @@ describe("CFC write-policy identity borrowing", () => {
       await storageManager.close();
     }
   });
+  for (const firstAttributed of [false, true]) {
+    it(`uses the first deepest input when its identity is ${firstAttributed ? "attributed" : "absent"}`, async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      try {
+        const tx = runtime.edit();
+        const trusted = {
+          kind: "builtin",
+          builtinId: "trustedIncrement",
+        } as const;
+        const field = {
+          type: "number",
+          ifc: { writeAuthorizedBy: ["trustedIncrement"] },
+        } as const;
+        const schema = {
+          type: "object",
+          properties: { counter: field },
+        } as const;
+        const cell = runtime.getCell(
+          signer.did(),
+          "deepest-identity",
+          schema,
+          tx,
+        );
+        tx.setCfcImplementationIdentity(trusted);
+        cell.set({ counter: 1 });
+        tx.setCfcImplementationIdentity(firstAttributed ? trusted : undefined);
+        const target = { ...cell.getAsNormalizedFullLink(), path: ["counter"] };
+        tx.recordCfcWritePolicyInput({ kind: "schema", target, schema: field });
+        tx.setCfcImplementationIdentity(
+          firstAttributed
+            ? { kind: "builtin", builtinId: "untrusted" }
+            : trusted,
+        );
+        tx.recordCfcWritePolicyInput({ kind: "schema", target, schema: field });
+        tx.prepareCfc();
+        const result = await tx.commit();
+        expect(isCfcEnforcementRejection(result.error)).toBe(!firstAttributed);
+        if (firstAttributed) expect(result.error).toBeUndefined();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+  }
 });

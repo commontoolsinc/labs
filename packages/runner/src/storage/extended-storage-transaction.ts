@@ -93,6 +93,7 @@ import {
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+  type CfcPreparationWork,
   POST_COMMIT_RELEASE_REJECTED,
   runtimeWritePolicyAuthorized,
 } from "../cfc/types.ts";
@@ -219,6 +220,9 @@ type CfcInstrumentationHooks = {
 
   /** One full consumed-label collection was started. Measurement only. */
   onConsumedLabelWalk?(): void;
+
+  /** Work performed by preparation, including label lookup and stamping. */
+  onPreparationWork?(kind: CfcPreparationWork, count: number): void;
 
   /** One dereference trace was recorded, and how many the transaction holds
    * after it. `probeBelongsToDereference` scans this set once per read
@@ -2034,6 +2038,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   /** @inheritDoc */
   noteCfcConsumedLabelWalk(): void {
     this.#cfcInstrumentation.onConsumedLabelWalk?.();
+  }
+
+  /** @inheritDoc */
+  noteCfcPreparationWork(kind: CfcPreparationWork, count = 1): void {
+    this.#cfcInstrumentation.onPreparationWork?.(kind, count);
   }
 
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
@@ -4018,6 +4027,11 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   /** @inheritDoc */
   noteCfcConsumedLabelWalk(): void {
     this.#wrapped.noteCfcConsumedLabelWalk();
+  }
+
+  /** @inheritDoc */
+  noteCfcPreparationWork(kind: CfcPreparationWork, count = 1): void {
+    this.#wrapped.noteCfcPreparationWork(kind, count);
   }
 
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {

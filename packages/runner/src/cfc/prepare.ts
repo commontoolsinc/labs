@@ -34,7 +34,7 @@ import {
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { STREAM_ENTRIES_DOC_PREFIX } from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { deepEqual, deepEqualKey } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
@@ -164,6 +164,7 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcAddress,
   cfcEnforcementStrictness,
+  type CfcLabelView,
   type CfcMetadata,
   type IFCLabel,
   type ImplementationIdentity,
@@ -227,7 +228,7 @@ const labelForEntriesAtPath = (
   // single-map resolution for pre-component metadata.
   const matches = new Map<
     string,
-    { path: readonly string[]; label: IFCLabel }
+    { depth: number; labels: IFCLabel[] }
   >();
   for (const entry of entries) {
     if (!isPrefix(entry.path, path)) {
@@ -262,24 +263,25 @@ const labelForEntriesAtPath = (
       ? `${component}\u0000shape-template`
       : component;
     const match = matches.get(bucket);
-    if (match === undefined || match.path.length < entry.path.length) {
-      matches.set(bucket, entry);
-    } else if (match.path.length === entry.path.length) {
+    if (match === undefined || match.depth < entry.path.length) {
+      matches.set(bucket, { depth: entry.path.length, labels: [entry.label] });
+    } else if (match.depth === entry.path.length) {
       // Two equally specific prefixes of one queried path are the same
       // path — or, with wildcard segments, a concrete entry and a `*`
       // template covering the same slot; duplicate (path, origin) entries
       // shouldn't survive coalescing, but join defensively (fail-toward-
       // taint) rather than drop one.
-      matches.set(bucket, {
-        path: match.path,
-        label: mergeLabels(match.label, entry.label),
-      });
+      match.labels.push(entry.label);
     }
   }
   if (matches.size === 0) {
     return undefined;
   }
-  const labels = Array.from(matches.values(), (match) => match.label);
+  const labels = Array.from(
+    matches.values(),
+    (match) =>
+      match.labels.length === 1 ? match.labels[0] : joinLabels(match.labels),
+  );
   return labels.length === 1 ? labels[0] : joinLabels(labels);
 };
 
@@ -629,8 +631,10 @@ const joinLabelValues = (
   // Every source is collected before the dedup runs, so a join over any number
   // of sources deduplicates once.
   const atoms: unknown[] = [];
+  const seen = new Set<readonly unknown[]>();
   for (const source of sources) {
-    if (source !== undefined) {
+    if (source !== undefined && !seen.has(source)) {
+      seen.add(source);
       for (const atom of source) {
         atoms.push(atom);
       }
@@ -763,33 +767,23 @@ const literalDidSubjectsForPrincipalClaim = (
   return subjects;
 };
 
-const metadataAppliesToPath = (
-  metadata: CfcMetadata,
-  path: readonly string[],
-): boolean => {
-  const logicalPath = canonicalizeLogicalPath(path);
-  // A labelMap entry is persisted whenever the source schema had label values
-  // OR a policy claim (writeAuthorizedBy / uiContract / exactCopyOf /
-  // projection — see the entry-construction site). The mere presence of the
-  // entry signals "policy
-  // applies on this path"; do NOT filter on `hasLabelValues` here, or
-  // claim-only entries get silently bypassed.
-  //
-  // Derived/structure (flow-label) entries are the exception: they record
-  // taint, not authored policy. A plain value write replacing a
-  // flow-labeled path is an ordinary overwrite (the flow components are
-  // replaced/cleared by the flow stage), so it must not demand a schema
-  // write-policy input.
-  return metadata.labelMap.entries.some((entry) =>
-    entry.origin !== "derived" && entry.origin !== "structure" &&
-    (isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path))
-  );
-};
-
 const metadataAppliesToAnyPath = (
   metadata: CfcMetadata,
   paths: readonly (readonly string[])[],
-): boolean => paths.some((path) => metadataAppliesToPath(metadata, path));
+): boolean => {
+  const logicalPaths = paths.map(canonicalizeLogicalPath);
+  const written = new PathPrefixIndex();
+  for (const path of logicalPaths) written.add(path);
+  const policies = new PathPrefixIndex();
+  for (const entry of metadata.labelMap.entries) {
+    // Claim-only entries are authored policy even without label values.
+    // Derived and structure entries record flow taint instead.
+    if (entry.origin === "derived" || entry.origin === "structure") continue;
+    if (written.hasPrefixOf(entry.path)) return true;
+    policies.add(entry.path);
+  }
+  return logicalPaths.some((path) => policies.hasPrefixOf(path));
+};
 
 const hasPersistedPolicyClaim = (schema: JSONSchema): boolean => {
   if (!isObjectOrArray(schema) || !isObjectOrArray(schema.ifc)) {
@@ -1193,8 +1187,23 @@ const storedMetadataFor = (
  */
 class VerifierMetadataResolver {
   #tx: IExtendedStorageTransaction;
-  #envelopes = new Map<string, Map<MediaType, CfcMetadata | undefined>>();
+  #envelopes = new Map<
+    MemorySpace,
+    Map<
+      ReturnType<typeof normalizeCellScope>,
+      Map<URI, Map<MediaType, CfcMetadata | undefined>>
+    >
+  >();
   #seenWrites = 0;
+  #viewIndexes = new WeakMap<CfcMetadata, ConsumedLabelIndex>();
+  #views = new WeakMap<CfcMetadata, Map<string, CfcLabelView | undefined>>();
+  #labelIndexes = new WeakMap<CfcMetadata, ConsumedLabelIndex>();
+  #labels = new WeakMap<CfcMetadata, Map<string, IFCLabel | undefined>>();
+  #coverIndexes = new WeakMap<CfcLabelView, ConsumedLabelIndex>();
+  #covers = new WeakMap<
+    CfcLabelView,
+    Map<string, { depth: number; label: IFCLabel } | undefined>
+  >();
 
   /** Binds metadata reads and write inspection to the same transaction. */
   constructor(tx: IExtendedStorageTransaction) {
@@ -1208,16 +1217,143 @@ class VerifierMetadataResolver {
     scope: ReturnType<typeof normalizeCellScope>,
     type: MediaType,
   ): CfcMetadata | undefined {
-    const key = stringTupleKey([space, scope, id]);
-    let types = this.#envelopes.get(key);
+    let scopes = this.#envelopes.get(space);
+    if (scopes === undefined) {
+      scopes = new Map();
+      this.#envelopes.set(space, scopes);
+    }
+    let documents = scopes.get(scope);
+    if (documents === undefined) {
+      documents = new Map();
+      scopes.set(scope, documents);
+    }
+    let types = documents.get(id);
     if (types === undefined) {
       types = new Map();
-      this.#envelopes.set(key, types);
+      documents.set(id, types);
     }
     if (!types.has(type)) {
       types.set(type, storedMetadataFor(this.#tx, space, id, scope, type));
     }
     return types.get(type);
+  }
+
+  /** Resolves a source label using the validated envelope's path index. */
+  label(metadata: CfcMetadata, path: readonly string[]): IFCLabel | undefined {
+    let labels = this.#labels.get(metadata);
+    if (labels === undefined) {
+      labels = new Map();
+      this.#labels.set(metadata, labels);
+    }
+    const key = encodePointer(path);
+    if (labels.has(key)) return labels.get(key);
+    let index = this.#labelIndexes.get(metadata);
+    if (index === undefined) {
+      index = new ConsumedLabelIndex(metadata.labelMap.entries, {
+        canonicalPaths: true,
+        onQuery: (wildcard) =>
+          this.#tx.noteCfcPreparationWork?.(
+            wildcard ? "overlapWildcardQueries" : "overlapConcreteQueries",
+          ),
+      });
+      this.#labelIndexes.set(metadata, index);
+    }
+    const label = labelForEntriesAtPath(
+      index.overlapping(path, false).map(({ entry }) => entry),
+      path,
+    );
+    labels.set(key, label);
+    return label;
+  }
+
+  /** Reuses rebased views while their validated source envelope is unchanged. */
+  view(
+    metadata: CfcMetadata | undefined,
+    path: readonly string[],
+  ): CfcLabelView | undefined {
+    if (metadata === undefined) return undefined;
+    let views = this.#views.get(metadata);
+    if (views === undefined) {
+      views = new Map();
+      this.#views.set(metadata, views);
+    }
+    const key = pathKey(path);
+    if (!views.has(key)) {
+      let index = this.#viewIndexes.get(metadata);
+      if (index === undefined) {
+        index = new ConsumedLabelIndex(metadata.labelMap.entries, {
+          onQuery: (wildcard) =>
+            this.#tx.noteCfcPreparationWork?.(
+              wildcard ? "overlapWildcardQueries" : "overlapConcreteQueries",
+            ),
+        });
+        this.#viewIndexes.set(metadata, index);
+      }
+      const entries = index.overlapping(canonicalizeLogicalPath(path))
+        .map(({ entry }) => entry);
+      views.set(
+        key,
+        cfcLabelViewFromMetadata({
+          ...metadata,
+          labelMap: { ...metadata.labelMap, entries },
+        }, path),
+      );
+    }
+    return views.get(key);
+  }
+
+  /** Resolves the view's longest cover, then layers the link-specific root. */
+  cover(
+    view: CfcLabelView | undefined,
+    path: readonly string[],
+    root: IFCLabel | undefined,
+  ): IFCLabel | undefined {
+    if (view === undefined) return root;
+    let covers = this.#covers.get(view);
+    if (covers === undefined) {
+      covers = new Map();
+      this.#covers.set(view, covers);
+    }
+    const key = encodePointer(path);
+    if (!covers.has(key)) {
+      let index = this.#coverIndexes.get(view);
+      if (index === undefined) {
+        index = new ConsumedLabelIndex(
+          view.entries.map((entry) => ({
+            path: canonicalizeLogicalPath(entry.path),
+            label: entry.label,
+          })),
+          {
+            canonicalPaths: true,
+            onQuery: (wildcard) =>
+              this.#tx.noteCfcPreparationWork?.(
+                wildcard ? "overlapWildcardQueries" : "overlapConcreteQueries",
+              ),
+          },
+        );
+        this.#coverIndexes.set(view, index);
+      }
+      let depth = -1;
+      let labels: IFCLabel[] = [];
+      for (const { entry } of index.overlapping(path, false)) {
+        if (entry.path.length > depth) {
+          depth = entry.path.length;
+          labels = [entry.label];
+        } else if (entry.path.length === depth) labels.push(entry.label);
+      }
+      covers.set(
+        key,
+        labels.length === 0 ? undefined : {
+          depth,
+          label: labels.length === 1 ? labels[0] : joinLabels(labels),
+        },
+      );
+    }
+    const covered = covers.get(key);
+    if (covered === undefined) return root;
+    return covered.depth === 0 && root !== undefined
+      ? mergeLabels(root, covered.label)
+      : covered.label;
   }
 
   /**
@@ -1231,18 +1367,34 @@ class VerifierMetadataResolver {
     const writes = getTransactionWriteAttempts(this.#tx.tx);
     if (writes === undefined) {
       this.#envelopes.clear();
+      this.#viewIndexes = new WeakMap();
+      this.#views = new WeakMap();
+      this.#labelIndexes = new WeakMap();
+      this.#labels = new WeakMap();
+      this.#coverIndexes = new WeakMap();
+      this.#covers = new WeakMap();
       this.#seenWrites = 0;
       return;
     }
     for (let index = this.#seenWrites; index < writes.length; index++) {
       const write = writes[index];
-      this.#envelopes.delete(
-        stringTupleKey([
-          write.space,
-          normalizeCellScope(write.scope),
-          write.id,
-        ]),
+      const documents = this.#envelopes.get(write.space)?.get(
+        normalizeCellScope(write.scope),
       );
+      const types = documents?.get(write.id);
+      for (const metadata of types?.values() ?? []) {
+        if (metadata === undefined) continue;
+        for (const view of this.#views.get(metadata)?.values() ?? []) {
+          if (view === undefined) continue;
+          this.#coverIndexes.delete(view);
+          this.#covers.delete(view);
+        }
+        this.#views.delete(metadata);
+        this.#viewIndexes.delete(metadata);
+        this.#labelIndexes.delete(metadata);
+        this.#labels.delete(metadata);
+      }
+      documents?.delete(write.id);
     }
     this.#seenWrites = writes.length;
   }
@@ -1276,13 +1428,12 @@ const documentRootIsReadable = (
     meta: INTERNAL_VERIFIER_META,
   }).ok !== undefined;
 
-/**
- * This returns a map whose values are always interned schemas.
- */
+/** Collects each target's distinct generated paths in input order. */
 const generatedOutputPathsByTarget = (
   inputs: readonly WritePolicyInput[],
 ): Map<string, readonly (readonly string[])[]> => {
-  const result = new Map<string, readonly (readonly string[])[]>();
+  const result = new Map<string, (readonly string[])[]>();
+  const seenByTarget = new Map<string, Set<string>>();
   for (const input of inputs) {
     if (
       input.kind !== "schema" || input.schema === undefined ||
@@ -1292,9 +1443,16 @@ const generatedOutputPathsByTarget = (
     }
     const key = targetKey(input.target);
     const path = canonicalizeLogicalPath(input.target.path);
-    const existing = result.get(key) ?? [];
-    if (!existing.some((candidate) => arraysEqual(candidate, path))) {
-      result.set(key, [...existing, path]);
+    let seen = seenByTarget.get(key);
+    if (seen === undefined) {
+      seen = new Set();
+      seenByTarget.set(key, seen);
+      result.set(key, []);
+    }
+    const encoded = encodePointer(path);
+    if (!seen.has(encoded)) {
+      seen.add(encoded);
+      result.get(key)!.push(path);
     }
   }
   return result;
@@ -1340,7 +1498,7 @@ const candidateSchemasByTarget = (
 };
 
 /**
- * Maps each write target cell to the list of its write-authority-bearing inputs
+ * Maps each write target cell to its first write-authority-bearing input per path
  * (path + the implementation identity that authored each, captured when the
  * input was recorded). `writeAuthorizedBy` is verified per field, so we keep
  * each input's identity separately rather than collapsing a cell to a single
@@ -1357,29 +1515,20 @@ const writePolicyIdentitiesByTarget = (
   identityForInput: (input: WritePolicyInput) =>
     | ImplementationIdentity
     | undefined,
-): Map<
-  string,
-  Array<
-    { path: readonly string[]; identity: ImplementationIdentity | undefined }
-  >
-> => {
+): Map<string, Map<string, ImplementationIdentity | undefined>> => {
   const result = new Map<
     string,
-    Array<
-      { path: readonly string[]; identity: ImplementationIdentity | undefined }
-    >
+    Map<string, ImplementationIdentity | undefined>
   >();
   for (const input of inputs) {
     if (input.kind !== "schema" && input.kind !== "link-write") {
       continue;
     }
     const key = targetKey(input.target);
-    const list = result.get(key) ?? [];
-    list.push({
-      path: canonicalizeLogicalPath(input.target.path),
-      identity: identityForInput(input),
-    });
-    result.set(key, list);
+    let paths = result.get(key);
+    if (paths === undefined) result.set(key, paths = new Map());
+    const path = encodePointer(canonicalizeLogicalPath(input.target.path));
+    if (!paths.has(path)) paths.set(path, identityForInput(input));
   }
   return result;
 };
@@ -1391,27 +1540,16 @@ const writePolicyIdentitiesByTarget = (
  * is the one `writeAuthorizedBy` must be verified against.
  */
 const identityForSchemaPath = (
-  entries:
-    | Array<
-      { path: readonly string[]; identity: ImplementationIdentity | undefined }
-    >
-    | undefined,
+  entries: Map<string, ImplementationIdentity | undefined> | undefined,
   path: readonly string[],
 ): ImplementationIdentity | undefined => {
-  if (entries === undefined) {
-    return undefined;
+  if (entries === undefined) return undefined;
+  for (let depth = path.length; depth >= 0; depth--) {
+    const key = encodePointer(path.slice(0, depth));
+    // A deeper unattributed input shadows any attributed ancestor.
+    if (entries.has(key)) return entries.get(key);
   }
-  let bestLength = -1;
-  let bestIdentity: ImplementationIdentity | undefined;
-  for (const entry of entries) {
-    if (
-      concretePathHasPrefix(path, entry.path) && entry.path.length > bestLength
-    ) {
-      bestLength = entry.path.length;
-      bestIdentity = entry.identity;
-    }
-  }
-  return bestIdentity;
+  return undefined;
 };
 
 const targetKey = (target: {
@@ -1908,7 +2046,17 @@ const valueWriteTargets = (
     }
   >();
   const log = tx.getReactivityLog?.();
-  const forgedSystemWrites = tx.getCfcState().unprivilegedSystemWrites ?? [];
+  const forgedSystemDocuments = new Set<string>();
+  for (const recorded of tx.getCfcState().unprivilegedSystemWrites ?? []) {
+    // Document ids can contain slashes; each separator is a possible boundary.
+    for (
+      let offset = recorded.indexOf("/");
+      offset !== -1;
+      offset = recorded.indexOf("/", offset + 1)
+    ) {
+      forgedSystemDocuments.add(recorded.slice(0, offset));
+    }
+  }
   const seenWriteSpaces = new Set<MemorySpace>(
     [...(log?.writes ?? []), ...(log?.attemptedWrites ?? [])].map((write) =>
       write.space
@@ -1932,9 +2080,7 @@ const valueWriteTargets = (
         write.address.id.startsWith("cid:") ||
         (
           isReservedCfcDocumentId(write.address.id) &&
-          !forgedSystemWrites.some((recorded) =>
-            recorded.startsWith(`${write.address.id}/`)
-          )
+          !forgedSystemDocuments.has(write.address.id)
         ) ||
         rawPath[0] === "cfc" ||
         rawPath[0] === "source" ||
@@ -2497,6 +2643,7 @@ const deriveFlowJoinImpl = (
   const metadataByDoc = new Map<string, {
     metadata: CfcMetadata | undefined;
     indexes: Map<ReadObservationShape, ConsumedLabelIndex>;
+    labels: Map<string, IFCLabel | undefined>;
   }>();
   // §8.12.8 readback exclusion: see `ownRestampContainerPaths`.
   const ownRestamps = ownRestampContainerPaths(tx);
@@ -2519,6 +2666,7 @@ const deriveFlowJoinImpl = (
         document = {
           metadata: storedMetadataFor(tx, space, id, scope, type),
           indexes: new Map(),
+          labels: new Map(),
         };
         metadataByDoc.set(key, document);
       }
@@ -2528,7 +2676,13 @@ const deriveFlowJoinImpl = (
           document.metadata.labelMap.entries.filter((entry) =>
             readConsumesEntry(observation.shape, entry)
           ),
-          { canonicalPaths: true },
+          {
+            canonicalPaths: true,
+            onQuery: (wildcard) =>
+              tx.noteCfcPreparationWork?.(
+                wildcard ? "overlapWildcardQueries" : "overlapConcreteQueries",
+              ),
+          },
         );
         document.indexes.set(observation.shape, index);
       }
@@ -2557,27 +2711,37 @@ const deriveFlowJoinImpl = (
       const excludesTemplates = observation.coveredByTrace ||
         observation.machinery ||
         ownedContainers !== undefined;
-      const label = effectiveReadLabel(
-        document.metadata,
-        logicalPath,
-        {
-          nonRecursive: observation.nonRecursive,
-          consumes: observation.shape,
-          ...(excludesTemplates
-            ? {
-              excludeEntry: (entry: LabelMapEntry) =>
-                ((observation.coveredByTrace || observation.machinery) &&
-                  isRuntimeMintedTemplate({
-                    origin: entry.origin,
-                    path: canonicalizeLogicalPath(entry.path),
-                  })) ||
-                (ownedContainers !== undefined &&
-                  isReplacedMembershipEntry(entry, ownedContainers)),
-            }
-            : {}),
-        },
-        index,
-      );
+      const labelKey = stringTupleKey([
+        observation.shape,
+        String(observation.nonRecursive === true),
+        String(observation.coveredByTrace || observation.machinery),
+        encodePointer(logicalPath),
+      ]);
+      let label = document.labels.get(labelKey);
+      if (!document.labels.has(labelKey)) {
+        label = effectiveReadLabel(
+          document.metadata,
+          logicalPath,
+          {
+            nonRecursive: observation.nonRecursive,
+            consumes: observation.shape,
+            ...(excludesTemplates
+              ? {
+                excludeEntry: (entry: LabelMapEntry) =>
+                  ((observation.coveredByTrace || observation.machinery) &&
+                    isRuntimeMintedTemplate({
+                      origin: entry.origin,
+                      path: canonicalizeLogicalPath(entry.path),
+                    })) ||
+                  (ownedContainers !== undefined &&
+                    isReplacedMembershipEntry(entry, ownedContainers)),
+              }
+              : {}),
+          },
+          index,
+        );
+        document.labels.set(labelKey, label);
+      }
       // Any observation with label CONTENT marks its space as a label
       // contributor. Deliberately over-approximate for integrity (an
       // observation whose hereditary atoms all meet away still marks its
@@ -2697,24 +2861,28 @@ export const flowLabelWorkExists = (
   }
   const entriesByDoc = new Map<
     string,
-    { any: boolean; entries: readonly LabelMapEntry[] }
+    {
+      any: boolean;
+      entries: readonly LabelMapEntry[];
+      consumed: Map<ReadObservationShape, boolean>;
+    }
   >();
   const docEntries = (
     space: MemorySpace,
     id: URI,
     scope: ReturnType<typeof normalizeCellScope>,
     type: MediaType,
-  ): { any: boolean; entries: readonly LabelMapEntry[] } => {
+  ) => {
     const key = targetKey({ space, id, scope });
     let known = entriesByDoc.get(key);
     if (known === undefined) {
       if (selfMintedDocs.has(key)) {
-        known = { any: false, entries: [] };
+        known = { any: false, entries: [], consumed: new Map() };
       } else {
         const entries =
           storedMetadataFor(tx, space, id, scope, type)?.labelMap.entries ??
             [];
-        known = { any: entries.length > 0, entries };
+        known = { any: entries.length > 0, entries, consumed: new Map() };
       }
       entriesByDoc.set(key, known);
     }
@@ -2728,10 +2896,17 @@ export const flowLabelWorkExists = (
   if (
     forEachFlowObservation(
       tx,
-      (space, id, scope, type, _logicalPath, observation) =>
-        docEntries(space, id, scope, type).entries.some((entry) =>
-          readConsumesEntry(observation.shape, entry)
-        ),
+      (space, id, scope, type, _logicalPath, observation) => {
+        const document = docEntries(space, id, scope, type);
+        let consumed = document.consumed.get(observation.shape);
+        if (consumed === undefined) {
+          consumed = document.entries.some((entry) =>
+            readConsumesEntry(observation.shape, entry)
+          );
+          document.consumed.set(observation.shape, consumed);
+        }
+        return consumed;
+      },
     )
   ) {
     return true;
@@ -2803,13 +2978,12 @@ const storedSchemaClaimsForLinkWrites = (
   inputs: readonly LinkWritePolicyInput[],
 ): JSONSchema => {
   let result: JSONSchema | undefined;
-  const targetPaths = inputs.map((input) =>
-    canonicalizeLogicalPath(input.target.path)
-  );
+  const targetPaths = new PathPrefixIndex();
+  for (const input of inputs) {
+    targetPaths.add(canonicalizeLogicalPath(input.target.path));
+  }
   for (const entry of cfcSchemaEntries(schema)) {
-    if (
-      !targetPaths.some((targetPath) => pathsOverlap(targetPath, entry.path))
-    ) {
+    if (!targetPaths.overlaps(entry.path)) {
       continue;
     }
     const policySchema = linkWritePolicyOnlySchema(entry.schema, entry.path);
@@ -4162,16 +4336,24 @@ const verifyInputRequirements = (
   // while producing the current view. Refresh after that inspection so every
   // envelope resolution observes those writes.
   metadataResolver.refresh();
-  const readSources = currentReads.map((read) => ({
-    ...read,
-    path: canonicalizeLogicalPath(read.path),
-    metadata: metadataResolver.read(
+  const schemaEntries = cfcSchemaEntries(schema);
+  const needsReadLabels = provenance !== undefined ||
+    schemaEntries.some(({ schema: entrySchema }) => {
+      const ifc = isObjectOrArray(entrySchema) ? entrySchema.ifc : undefined;
+      return (ifc?.requiredIntegrity?.length ?? 0) > 0 ||
+        ifc?.maxConfidentiality !== undefined;
+    });
+  const sourceMetadata = currentReads.map((read) => {
+    // Gate paths are captured before resolving an envelope: backend reads may
+    // mutate a caller-owned path array. Ungated targets only need the address.
+    if (needsReadLabels) read.path = canonicalizeLogicalPath(read.path);
+    return metadataResolver.read(
       read.space,
       read.id,
       normalizeCellScope(read.scope),
       read.type ?? "application/json",
-    ),
-  }));
+    );
+  });
   if (provenance !== undefined) {
     provenance.clockLessReads = clockLessReads;
   }
@@ -4182,10 +4364,10 @@ const verifyInputRequirements = (
   // declaring `requiredIntegrity` or `maxConfidentiality` reads the result,
   // so the set is assembled on first ask and kept for the rest of the call.
   const buildGatedReads = () => {
-    const gatedReads = readSources.map(({ metadata, ...read }) => ({
+    const gatedReads = currentReads.map((read, index) => ({
       ...read,
       label: effectiveReadLabel(
-        metadata,
+        sourceMetadata[index],
         read.path,
         { nonRecursive: read.nonRecursive, consumes: "all" },
       ),
@@ -4231,7 +4413,7 @@ const verifyInputRequirements = (
     .filter((read) => !isProvenanceOnlyConsumedLabel(read.label!))
     .length;
 
-  for (const entry of cfcSchemaEntries(schema)) {
+  for (const entry of schemaEntries) {
     if (
       !ifcEntryAppliesToAttemptedWrite(
         tx,
@@ -5082,14 +5264,23 @@ const derivePersistedLinkLabel = (
   input: LinkWritePolicyInput,
   candidateSchemas: ReadonlyMap<string, JSONSchema>,
   authoringIdentity: ImplementationIdentity | undefined,
+  metadataResolver?: VerifierMetadataResolver,
 ): { label?: IFCLabel; reason?: string; sourceMetadata?: CfcMetadata } => {
-  const sourceMetadata = storedMetadataFor(
-    tx,
-    input.source.space,
-    input.source.id as URI,
-    input.source.scope,
-    "application/json",
-  );
+  metadataResolver?.refresh();
+  const sourceMetadata = metadataResolver === undefined
+    ? storedMetadataFor(
+      tx,
+      input.source.space,
+      input.source.id as URI,
+      input.source.scope,
+      "application/json",
+    )
+    : metadataResolver.read(
+      input.source.space,
+      input.source.id as URI,
+      input.source.scope,
+      "application/json",
+    );
   let pendingSourceSchema = candidateSchemas.get(targetKey(input.source)) ??
     setupResultSchemaFor(tx, input.source);
   let pendingSourceLabel = pendingSourceSchema !== undefined
@@ -5180,10 +5371,17 @@ const derivePersistedLinkLabel = (
   }
   const withMetadata = sourceMetadata === undefined ? {} : { sourceMetadata };
   const sourceLabel = mergeLabels(
-    sourceMetadata === undefined ? undefined : labelAtPath(
-      sourceMetadata,
-      canonicalizeLogicalPath(input.source.path),
-    ) ?? {},
+    sourceMetadata === undefined
+      ? undefined
+      : (metadataResolver === undefined
+        ? labelAtPath(
+          sourceMetadata,
+          canonicalizeLogicalPath(input.source.path),
+        )
+        : metadataResolver.label(
+          sourceMetadata,
+          canonicalizeLogicalPath(input.source.path),
+        )) ?? {},
     pendingSourceLabel,
   );
   // The source/link-schema integrity is author-influenceable (a link value can
@@ -5230,21 +5428,25 @@ const coalesceLabelEntries = (
   // so each keeps its own consumers — merging a `value` and a `shape` entry
   // into one covering entry would both widen consumption and destroy the
   // SC-4 grow-vs-replace split (C2).
-  const byKey = new Map<string, LabelMapEntry>();
+  const byKey = new Map<string, { entry: LabelMapEntry; labels: IFCLabel[] }>();
   for (const entry of entries) {
-    const path = [...entry.path];
     const key = `${entry.origin ?? ""}\u0000${entry.observes ?? ""}\u0000${
-      pathKey(path)
+      pathKey(entry.path)
     }`;
     const existing = byKey.get(key);
-    byKey.set(key, {
-      path,
-      label: mergeLabels(existing?.label, cloneLabel(entry.label)),
-      ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
-      ...(entry.observes !== undefined ? { observes: entry.observes } : {}),
-    });
+    if (existing === undefined) {
+      byKey.set(key, { entry, labels: [entry.label] });
+    } else {
+      existing.entry = entry;
+      existing.labels.push(entry.label);
+    }
   }
-  return [...byKey.values()].sort((left, right) => {
+  return [...byKey.values()].map(({ entry, labels }) => ({
+    path: [...entry.path],
+    label: joinLabels(labels),
+    ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
+    ...(entry.observes !== undefined ? { observes: entry.observes } : {}),
+  })).sort((left, right) => {
     const leftKey = pathKey(left.path);
     const rightKey = pathKey(right.path);
     if (leftKey !== rightKey) {
@@ -5619,6 +5821,7 @@ const collectConsumedLabelImpl = (
       read.scope,
       pathKey(read.path),
       pathKey(labelPath),
+      deepEqualKey(atom),
     ]);
     const bucket = sourceBuckets.get(key);
     if (bucket?.some((seen) => deepEqual(seen.atom, atom))) {
@@ -5654,7 +5857,12 @@ const collectConsumedLabelImpl = (
         metadataKey,
         metadata === undefined
           ? undefined
-          : new ConsumedLabelIndex(metadata.labelMap.entries),
+          : new ConsumedLabelIndex(metadata.labelMap.entries, {
+            onQuery: (wildcard) =>
+              tx.noteCfcPreparationWork?.(
+                wildcard ? "overlapWildcardQueries" : "overlapConcreteQueries",
+              ),
+          }),
       );
     }
     const labels = labelIndexes.get(metadataKey);
@@ -6510,11 +6718,13 @@ export const prepareBoundaryCommit = (
         target.type,
       );
       const existingEntries = existingMeta?.labelMap.entries ?? [];
+      const writtenPrefixes = new PathPrefixIndex();
+      for (const written of target.paths) writtenPrefixes.add(written);
       if (
         existingEntries.some((entry) =>
           (entry.origin === "derived" || entry.origin === "link" ||
             entry.origin === "structure") &&
-          target.paths.some((written) => isPrefix(written, entry.path))
+          writtenPrefixes.hasPrefixOf(entry.path)
         ) ||
         // Stage B healing, the template-ONLY arm (cubic P2 on the Stage B
         // PR): an envelope whose entries are ALL label-metadata templates
@@ -6740,6 +6950,8 @@ export const prepareBoundaryCommit = (
     );
     const flowTarget = flowPersist ? flowTargets?.get(key) : undefined;
     const flowWrittenPaths = flowTarget?.paths ?? [];
+    const flowWrittenPrefixes = new PathPrefixIndex();
+    for (const path of flowWrittenPaths) flowWrittenPrefixes.add(path);
     const flowWrittenValues = flowTarget?.valuesByPath;
     // Pre-transaction snapshots (and slot presence at each recorded path)
     // per written path, for the §8.12.8 re-mint-on-recreation probe below.
@@ -7107,7 +7319,7 @@ export const prepareBoundaryCommit = (
         flowPersist &&
         (entry.origin === "derived" || entry.origin === "link" ||
           entry.origin === "structure") &&
-        flowWrittenPaths.some((written) => isPrefix(written, clearProbePath))
+        flowWrittenPrefixes.hasPrefixOf(clearProbePath)
       ) {
         flowCleared = true;
         if (
@@ -7150,6 +7362,7 @@ export const prepareBoundaryCommit = (
         input,
         candidates,
         linkIdentity,
+        metadataResolver,
       );
       if (result.reason !== undefined) {
         reasons.push(result.reason);
@@ -7201,7 +7414,7 @@ export const prepareBoundaryCommit = (
           origin: "link",
         }));
       };
-      const rederivedView = cfcLabelViewFromMetadata(
+      const rederivedView = metadataResolver.view(
         result.sourceMetadata,
         input.source.path,
       );
@@ -7226,44 +7439,17 @@ export const prepareBoundaryCommit = (
       // join: confidentiality is the leak the shadow would open; integrity
       // at the covered path (e.g. the LinkReference provenance) would
       // otherwise silently drop out of sub-path reads.
-      const authoritativeEntries: Array<{
-        path: readonly string[];
-        label: IFCLabel;
-      }> = [
-        ...(result.label !== undefined && hasLabelValues(result.label)
-          ? [{ path: [] as readonly string[], label: result.label }]
-          : []),
-        ...(rederivedView?.entries ?? []).map((entry) => ({
-          path: canonicalizeLogicalPath(entry.path),
-          label: entry.label,
-        })),
-      ];
-      let authoritativeIndex: ConsumedLabelIndex | undefined;
       const authoritativeCoverFor = (
         entryPath: readonly string[],
       ): IFCLabel | undefined => {
-        authoritativeIndex ??= new ConsumedLabelIndex(authoritativeEntries, {
-          canonicalPaths: true,
-        });
-        let best: { path: readonly string[]; label: IFCLabel } | undefined;
-        for (
-          const { entry: auth } of authoritativeIndex.overlapping(
-            entryPath,
-            false,
-          )
-        ) {
-          if (best === undefined || auth.path.length > best.path.length) {
-            best = auth;
-          } else if (auth.path.length === best.path.length) {
-            // Source-path label and a re-derived root entry share path [];
-            // join defensively rather than pick one.
-            best = {
-              path: best.path,
-              label: mergeLabels(best.label, auth.label),
-            };
-          }
-        }
-        return best?.label;
+        tx.noteCfcPreparationWork?.("authoritativeCoverCalls");
+        return metadataResolver.cover(
+          rederivedView,
+          entryPath,
+          result.label !== undefined && hasLabelValues(result.label)
+            ? result.label
+            : undefined,
+        );
       };
       for (const entry of input.cfcLabelView?.entries ?? []) {
         const gated = gateRuntimeMintedIntegrity(
@@ -7484,17 +7670,19 @@ export const prepareBoundaryCommit = (
           ...structureContainerPath,
           "*",
         ]);
-        for (let i = persistedLabelEntries.length - 1; i >= 0; i--) {
-          const candidateEntry = persistedLabelEntries[i];
+        let kept = 0;
+        for (const candidateEntry of persistedLabelEntries) {
           if (
             candidateEntry.origin === "structure" &&
             ((candidateEntry.observes === "enumerate" &&
               pathKey(candidateEntry.path) === containerPathKey) ||
               pathKey(candidateEntry.path) === containerTemplateKey)
           ) {
-            persistedLabelEntries.splice(i, 1);
+            continue;
           }
+          persistedLabelEntries[kept++] = candidateEntry;
         }
+        persistedLabelEntries.length = kept;
         if (
           !structureStampPaths.some((p) => pathKey(p) === containerPathKey)
         ) {
@@ -7538,15 +7726,15 @@ export const prepareBoundaryCommit = (
             path,
           )
         );
+        const measuredPrefixes = new PathPrefixIndex();
+        for (const path of measuredPaths) measuredPrefixes.add(path);
         for (const path of measuredPaths) {
           // Deeper paths are covered by the write at a measured ancestor;
           // collapse against measured paths only, so an exempt meta path
           // never shadows a value write below it (a payload field named
           // `schema` shares the meta root's logical path).
           if (
-            measuredPaths.some((other) =>
-              other.length < path.length && isPrefix(other, path)
-            )
+            path.length > 0 && measuredPrefixes.hasPrefixOf(path.slice(0, -1))
           ) {
             continue;
           }
@@ -7693,13 +7881,19 @@ export const prepareBoundaryCommit = (
           }
         }
       }
+      const derivedPrefixes = new PathPrefixIndex();
+      for (const path of derivedStampPaths) derivedPrefixes.add(path);
+      const frozenShapePaths = new Set(
+        persistedLabelEntries.filter((entry) =>
+          (entry.origin === "derived" || entry.origin === "structure") &&
+          entry.observes === "shape"
+        ).map((entry) => pathKey(entry.path)),
+      );
       for (const path of derivedStampPaths) {
         // Deeper stamped paths are redundant with a stamped ancestor; only
         // collapse against paths that actually receive a covering entry.
         if (
-          derivedStampPaths.some((other) =>
-            other.length < path.length && isPrefix(other, path)
-          )
+          path.length > 0 && derivedPrefixes.hasPrefixOf(path.slice(0, -1))
         ) {
           continue;
         }
@@ -7739,13 +7933,11 @@ export const prepareBoundaryCommit = (
         // DECLARED observes:"shape" entry is store policy for the shape
         // channel, not a record that creation happened — both coexist as
         // separate components (review on this PR).
-        const hasShapeEntry = persistedLabelEntries.some((entry) =>
-          (entry.origin === "derived" || entry.origin === "structure") &&
-          entry.observes === "shape" && pathKey(entry.path) === pathKey(path)
-        );
+        const hasShapeEntry = frozenShapePaths.has(pathKey(path));
         if (!hasShapeEntry) {
           const shapeConfidentiality = frozenConfidentialityFor(path);
           if (shapeConfidentiality.length > 0) {
+            frozenShapePaths.add(pathKey(path));
             persistedLabelEntries.push(markFlowStampEntry({
               path,
               label: { confidentiality: shapeConfidentiality },
@@ -7760,9 +7952,7 @@ export const prepareBoundaryCommit = (
         // structure stamps don't cover each other (exact-path semantics),
         // so they only collapse against derived ancestors-or-equal.
         if (
-          derivedStampPaths.some((other) =>
-            other.length <= path.length && isPrefix(other, path)
-          )
+          derivedPrefixes.hasPrefixOf(path)
         ) {
           continue;
         }
@@ -7824,6 +8014,9 @@ export const prepareBoundaryCommit = (
         if (
           flowHasLabels && flowConfidentiality.length > 0
         ) {
+          frozenShapePaths.add(pathKey([...path, "*"]));
+          tx.noteCfcPreparationWork?.("flowTemplateContainers");
+          tx.noteCfcPreparationWork?.("flowTemplateEntriesMinted", 3);
           for (const observes of ["shape", "value", "followRef"] as const) {
             persistedLabelEntries.push(markFlowStampEntry({
               path: [...path, "*"],
@@ -7842,13 +8035,11 @@ export const prepareBoundaryCommit = (
         // re-creation after deletion (a fresh creation event — the carry
         // refuses the stale entry and the replacement above re-mints at
         // this attempt's join); a carried entry above wins.
-        const hasFrozenExistence = persistedLabelEntries.some((entry) =>
-          (entry.origin === "derived" || entry.origin === "structure") &&
-          entry.observes === "shape" && pathKey(entry.path) === pathKey(path)
-        );
+        const hasFrozenExistence = frozenShapePaths.has(pathKey(path));
         if (!hasFrozenExistence) {
           const frozen = frozenConfidentialityFor(path);
           if (frozen.length > 0) {
+            frozenShapePaths.add(pathKey(path));
             persistedLabelEntries.push(markFlowStampEntry({
               path,
               label: { confidentiality: frozen },

@@ -57,6 +57,7 @@ export type {
   CfcLabelMetadataProtectionMode,
   CfcMetadata,
   CfcPolicyEvaluationMode,
+  CfcPreparationWork,
   CfcPrepareState,
   CfcSandboxDiagnostic,
   CfcSandboxExitCodeObservation,
