@@ -48,7 +48,9 @@ export type FabricValueLayer = FabricValuePlusLayer<never>;
 export type MutableFabricArrayLayer = MutableFabricArrayPlusLayer<never>;
 
 /** A mutable record root whose values remain `FabricValue`s. */
-export type MutableFabricPlainObjectLayer = MutableFabricPlainObjectPlusLayer<never>;
+export type MutableFabricPlainObjectLayer = MutableFabricPlainObjectPlusLayer<
+  never
+>;
 
 /**
  * A `FabricContainerValue` with a mutable root. Nested containers remain
@@ -57,7 +59,8 @@ export type MutableFabricPlainObjectLayer = MutableFabricPlainObjectPlusLayer<ne
  * unchanged: an instance's mutability is its own frozen state to report, not
  * something a type can layer over it.
  */
-export type MutableFabricContainerValueLayer = MutableFabricContainerValuePlusLayer<never>;
+export type MutableFabricContainerValueLayer =
+  MutableFabricContainerValuePlusLayer<never>;
 
 /**
  * A `FabricValue` with a mutable root container. Nested containers remain
@@ -76,7 +79,10 @@ export type FabricValuePlusLayer<PlusType> = FabricValuePlus<
 export type MutableFabricArrayPlusLayer<PlusType> = FabricValuePlus<PlusType>[];
 
 /** `PlusType` equivalent of `MutableFabricPlainObjectLayer`. */
-export type MutableFabricPlainObjectPlusLayer<PlusType> = Record<string, FabricValuePlus<PlusType>>;
+export type MutableFabricPlainObjectPlusLayer<PlusType> = Record<
+  string,
+  FabricValuePlus<PlusType>
+>;
 
 /** `PlusType` equivalent of `MutableFabricContainerValueLayer`. */
 export type MutableFabricContainerValuePlusLayer<PlusType> =
@@ -86,7 +92,10 @@ export type MutableFabricContainerValuePlusLayer<PlusType> =
 
 /** `PlusType` equivalent of `MutableFabricValueLayer`. */
 export type MutableFabricValuePlusLayer<PlusType> =
-  | Exclude<FabricValuePlus<PlusType>, FabricArrayPlus<PlusType> | FabricPlainObjectPlus<PlusType>>
+  | Exclude<
+    FabricValuePlus<PlusType>,
+    FabricArrayPlus<PlusType> | FabricPlainObjectPlus<PlusType>
+  >
   | MutableFabricArrayPlusLayer<PlusType>
   | MutableFabricPlainObjectPlusLayer<PlusType>;
 

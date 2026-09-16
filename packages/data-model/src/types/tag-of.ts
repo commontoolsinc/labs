@@ -120,9 +120,7 @@ export function tagOfFabricValueElseNull<PlusType = never>(
   const jsType = typeOfIncludingNull(value);
 
   if (jsType === VALUE_TAGS.function) {
-    return isPlusType?.(value)
-      ? VALUE_TAGS.PlusType
-      : null;
+    return isPlusType?.(value) ? VALUE_TAGS.PlusType : null;
   } else if (jsType !== "object") {
     return jsType;
   }

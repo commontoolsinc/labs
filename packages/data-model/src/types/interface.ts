@@ -5,5 +5,6 @@ import type { FabricValuePlusLayer } from "@/interface.ts";
  * `FabricValuePlus` or `FabricValuePlusLayer` of a given `PlusType` is in fact
  * considered to be the `PlusType`.
  */
-export type PlusTypePredicate<PlusType> =
-  (value: FabricValuePlusLayer<PlusType>) => value is PlusType;
+export type PlusTypePredicate<PlusType> = (
+  value: FabricValuePlusLayer<PlusType>,
+) => value is PlusType;
