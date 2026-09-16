@@ -99,7 +99,8 @@ a record: archive it to `docs/history/plans/` following the procedure in
 - [Stream markers out of stored data](stream-markers-out-of-stored-data.md)
   moves stream-ness out of the stored `{ "$stream": true }` value and into the
   link schema and the module wrapper, and triggers the cold-start repairs on a
-  structural mismatch instead of the missing marker.
+  structural mismatch instead of the missing marker. It names putting the
+  owner into a stream's address as the follow-up it is written toward.
 - [Pre-syncing from node plans](presync-from-node-plans.md) makes one
   derivation per pattern node serve both instantiation and the pre-sync, so a
   resume and a fresh start name exactly what each lift, handler, builtin, and

@@ -116,7 +116,8 @@ The descriptor's `kind` field is minted into the entity URI scheme
 (`runner.ts:2971`); changing it re-materializes the cell under a new id.
 `EntityKind` is only `"computed"` today. So the stamp goes into the schema,
 which is not part of the id: derived-cell ids hash the cause, so existing
-spaces keep their identities and need no migration.
+spaces keep their identities and need no migration. The follow-up at the end
+of this plan takes that migration on for streams; this plan does not.
 
 Two schemas need the stamp, not one. When a partial-cause alias is bound to a
 link, `scopedLinkForPath` prefers the alias's own schema over the descriptor's
@@ -223,7 +224,9 @@ the first half of that walk already; the manifest lookup is the second. Cost:
 one extra document per classification for a reader that starts from a bare
 document. The inspector holds the whole space and pays it from memory; the
 shuttle listing and the CLI read guard start from a parent cell and its link
-and never pay it.
+and never pay it. The walk is interim: the follow-up puts the owner into the
+stream's address and deletes it, so stage 3 keeps it to one function that the
+inspector and the runtime share.
 
 The runtime pays it in one place. `Cell.isStream` and the proxy decide from
 the handle's kind and the resolved link's schema, and a bare address to the
@@ -391,7 +394,8 @@ than what the list first said, the item says what it does now and why.
       value read. It covers links a handler or lift wrote into data before
       stage 1, which no setup pass rewrites (`data-updating.ts:1283` stamps
       only a new write), and the llm-dialog dispatch at
-      `builtins/llm-dialog.ts:2067`.
+      `builtins/llm-dialog.ts:2067`. One function, shared with the inspector's
+      classification; the follow-up deletes it.
 - [ ] Handler dispatch asserts that the parsed `$event` link's schema declares
       a stream (decision 2, rule 1).
 - [ ] `detectCallableKind` stops reading the value (`cli/lib/callable.ts:1226`),
@@ -481,14 +485,51 @@ stage 3: the value is ignored, and nothing reads it.
   withdrawal path still keeps the old graph running, which is what makes the
   state coherent, rather than relying on the instantiation failure.
 
+## Follow-up: the owner in the address
+
+This plan leaves a stream's document in place as a back-link-only record
+because a bare stream id says nothing about who owns it: the owner's result id
+is hashed into the id (`createRef({}, { parent, type: "internal", cause })`
+at `link-utils.ts:856`) but cannot be read back out. The follow-up makes the
+owner recoverable from the address itself, so any party holding a stream's id
+can name the owner's result document with no lookup and no record. It is the
+next plan after this one, and this plan is written on the assumption that it
+happens. What it changes:
+
+- **Identity.** A stream's id carries its owner's result id and its cause in
+  a form a reader can take apart, either as a stream entity kind minted into
+  the URI scheme (`link-utils.ts:845`; `EntityKind` is only `"computed"`
+  today) or as a structured id. It is minted from owner and cause, as derived
+  ids are today, and never content-addressed: a `cid:` id is a function of
+  the value, every stream's value is the same nothing, and what tells two
+  streams apart is the owner and cause that live in meta. Every existing
+  stream re-materializes under a new id. That is the migration decision 1
+  declines here, and the follow-up's first section states it and the cutover
+  for it.
+- **Sidecars.** A stream's event sidecar hashes the stream link
+  (`memory/v2.ts:407`), so it moves with the id; entries in flight at the
+  cutover drain first or are rewritten.
+- **Readers.** The inspector, FUSE, the shuttle listing and the runtime's
+  bare-address case classify a stream from its id alone. The owner walk stage
+  3 adds is deleted; the link-schema stamp and the handle kind stay, since
+  dispatch and `send()` decide from them and neither depends on the id.
+- **Auto-start.** `ensurePieceRunning` reads a stream's owner from the address
+  and skips the back-link chain for it.
+- **The document.** Nothing writes to it and nothing reads it. Whether the
+  record exists at all becomes the storage question the unification in
+  `2-storage-format.md:95` answers, and can be settled there.
+
+What this plan does in anticipation: stream-ness decisions key on the link
+schema and the handle kind, both of which survive an id change; the owner
+walk is one shared function, so the follow-up deletes one thing; and nothing
+new is written onto the stream document that a migration would have to carry.
+
 ## Not in scope
 
-- Unifying streams with value cells, which `2-storage-format.md:95` floats.
-- Removing the stream's document altogether. Auto-start finds the owner
-  through the back-link on that record, and a served event's sidecar entry
-  names its id; a stream that is an address with no record needs another way
-  to reach the owner, which is the unification above.
-- Changing derived-cell identity or the manifest format.
+- Unifying streams with value cells, which `2-storage-format.md:95` floats;
+  the follow-up above is the step toward it this plan commits to.
+- Changing derived-cell identity or the manifest format; the follow-up takes
+  the identity change for streams.
 - Allowing a lift to take an input named `$event`.
 - The formal spec's wider encoding work; this plan only retires one row of its
   table.
