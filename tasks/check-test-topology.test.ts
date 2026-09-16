@@ -10,6 +10,7 @@ import {
   parseCheckArgs,
   readRecords,
   report,
+  UsageError,
   workflowRecords,
 } from "./check-test-topology.ts";
 import type { Suite } from "./test-topology/suite.ts";
@@ -105,6 +106,9 @@ describe("the tree half of the drift guard", () => {
 });
 
 describe("the store half of the drift guard", () => {
+  /** The commit the tree under test is checked out at. */
+  const HERE = "0f1e2d3c";
+
   const bakery = suite({
     id: "workspace-unit",
     units: ["packages/bakery/test/glaze.test.ts"],
@@ -118,7 +122,8 @@ describe("the store half of the drift guard", () => {
     const findings = checkStore([bakery], [{
       test: { k: "unit", s: "bakery", n: "glaze > sets" },
       file: "packages/bakery/test/glaze.test.ts",
-    }]);
+      commit: HERE,
+    }], HERE);
     expect(findings.filter((finding) => finding.fails)).toEqual([]);
   });
 
@@ -126,7 +131,8 @@ describe("the store half of the drift guard", () => {
     const findings = checkStore([bakery], [{
       test: { k: "unit", s: "bakery", n: "icing > sets" },
       file: "packages/bakery/icing.test.ts",
-    }]);
+      commit: HERE,
+    }], HERE);
     expect(
       findings.some((finding) =>
         finding.fails && finding.message.includes("no suite claims")
@@ -139,7 +145,8 @@ describe("the store half of the drift guard", () => {
     const findings = checkStore([bakery, twin], [{
       test: { k: "unit", s: "bakery", n: "glaze > sets" },
       file: "packages/bakery/test/glaze.test.ts",
-    }]);
+      commit: HERE,
+    }], HERE);
     expect(
       findings.some((finding) =>
         finding.fails && finding.message.includes("both claim")
@@ -153,20 +160,30 @@ describe("the store half of the drift guard", () => {
     // can be asked to run one. Failing on them would fail every `main`
     // run the moment lanes exist.
     const findings = checkStore([bakery], [
-      { test: { k: "gate", s: "ci", n: "ci-lane setup toolshed-baked-on" } },
-      { test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" } },
+      {
+        test: { k: "gate", s: "ci", n: "ci-lane setup toolshed-baked-on" },
+        commit: HERE,
+      },
+      {
+        test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+        commit: HERE,
+      },
       {
         test: { k: "unit", s: "bakery", n: "glaze > sets" },
         file: "packages/bakery/test/glaze.test.ts",
+        commit: HERE,
       },
-    ]);
+    ], HERE);
     expect(findings.filter((finding) => finding.fails)).toEqual([]);
   });
 
   it("still fails a gate-kind record that is not the lane's own", () => {
     const findings = checkStore([bakery], [
-      { test: { k: "gate", s: "ci", n: "something nobody declared" } },
-    ]);
+      {
+        test: { k: "gate", s: "ci", n: "something nobody declared" },
+        commit: HERE,
+      },
+    ], HERE);
     expect(
       findings.some((finding) =>
         finding.fails && finding.message.includes("no suite claims")
@@ -175,9 +192,47 @@ describe("the store half of the drift guard", () => {
   });
 
   it("reports a unit the run never recorded rather than failing", () => {
-    const findings = checkStore([bakery], []);
+    const findings = checkStore([bakery], [], HERE);
     expect(findings.map((finding) => finding.fails)).toEqual([false]);
     expect(findings[0]!.message).toContain("never recorded");
+  });
+
+  it("refuses records from another commit rather than judging them", () => {
+    // The change between the two commits deleted the test, so this tree
+    // has no unit for an identity that run recorded. Reading the two as
+    // a disagreement would fail the default branch for deleting a test.
+    const findings = checkStore([bakery], [{
+      test: { k: "unit", s: "bakery", n: "icing > sets" },
+      file: "packages/bakery/icing.test.ts",
+      commit: "9a8b7c6d",
+    }], HERE);
+    expect(findings.map((finding) => finding.fails)).toEqual([true]);
+    expect(findings[0]!.message).toContain("9a8b7c6d");
+    expect(findings[0]!.message).not.toContain("no suite claims");
+  });
+
+  it("refuses a record that names no commit at all", () => {
+    // A group with no context is a group nothing can hold to this tree,
+    // so the guard cannot say whether it agrees with it.
+    const findings = checkStore([bakery], [{
+      test: { k: "unit", s: "bakery", n: "icing > sets" },
+      file: "packages/bakery/icing.test.ts",
+    }], HERE);
+    expect(findings.map((finding) => finding.fails)).toEqual([true]);
+    expect(findings[0]!.message).toContain("no commit");
+  });
+
+  it("judges records from this commit", () => {
+    const findings = checkStore([bakery], [{
+      test: { k: "unit", s: "bakery", n: "icing > sets" },
+      file: "packages/bakery/icing.test.ts",
+      commit: HERE,
+    }], HERE);
+    expect(
+      findings.some((finding) =>
+        finding.fails && finding.message.includes("no suite claims")
+      ),
+    ).toBe(true);
   });
 
   it("says nothing about a unit a configuration declares unavailable", () => {
@@ -188,7 +243,7 @@ describe("the store half of the drift guard", () => {
         reason: "the surface it exercises has not landed",
       }],
     });
-    expect(checkStore([withSkip], [])).toEqual([]);
+    expect(checkStore([withSkip], [], HERE)).toEqual([]);
   });
 });
 
@@ -638,16 +693,115 @@ describe("what the guard declines to fail on", () => {
     const record = {
       test: { k: "unit", s: "bakery", n: "glaze > sets" },
       file: "packages/bakery/test/glaze.test.ts",
+      commit: "c1",
     };
-    expect(checkStore([bakery], [record, record, record])).toEqual([]);
+    expect(checkStore([bakery], [record, record, record], "c1"))
+      .toEqual([]);
   });
 });
+
+/** One run's records: a context naming the commit, and one record. */
+function recordsAt(commit: string): string {
+  return [
+    JSON.stringify({
+      line: "context",
+      schema: 1,
+      reportId: "01K3",
+      repo: "commontoolsinc/labs",
+      commit,
+      dirty: false,
+      branch: "main",
+      env: "ci",
+      ci: {
+        workflowRunId: "1",
+        runAttempt: 1,
+        workflow: "deno.yml",
+        job: "Lane 1",
+        event: "push",
+      },
+      os: "linux",
+      arch: "x86_64",
+      denoVersion: "2.9.4",
+      startedAt: "2026-08-20T01:00:00.000Z",
+    }),
+    JSON.stringify({
+      line: "record",
+      test: { k: "gate", s: "repo", n: "a gate nobody declares" },
+      outcome: "pass",
+      durationMs: 1,
+    }),
+  ].join("\n") + "\n";
+}
 
 describe("running the check and saying what it found", () => {
   it("runs the store half only when a run's records are named", () => {
     expect(parseCheckArgs([], "/repo")).toEqual({ root: "/repo" });
-    expect(parseCheckArgs(["--records", "a.ndjson", "b.ndjson"], "/repo"))
-      .toEqual({ root: "/repo", records: ["a.ndjson", "b.ndjson"] });
+    expect(() => parseCheckArgs(["--records", "a.ndjson", "b.ndjson"], "/repo"))
+      .toThrow(UsageError);
+  });
+
+  it("reads the commit the named records were produced at", () => {
+    expect(
+      parseCheckArgs(
+        ["--commit", "0f1e2d3c", "--records", "a.ndjson"],
+        "/repo",
+      ),
+    ).toEqual({
+      root: "/repo",
+      store: { records: ["a.ndjson"], commit: "0f1e2d3c" },
+    });
+  });
+
+  it("refuses records named without the commit they were produced at", () => {
+    // Without it nothing says whether the records describe this tree, and
+    // a tree read against an earlier run's records disagrees with them
+    // over every test deleted since.
+    expect(() => parseCheckArgs(["--records", "a.ndjson"], "/repo"))
+      .toThrow(UsageError);
+    expect(() => parseCheckArgs(["--commit", "c1"], "/repo"))
+      .toThrow(UsageError);
+  });
+
+  it("refuses an argument it does not understand", () => {
+    // A record file passed over leaves the store half judging part of a
+    // run and reporting that the topology accounts for everything.
+    expect(() => parseCheckArgs(["a.ndjson"], "/repo")).toThrow(UsageError);
+    expect(() => parseCheckArgs(["--commit"], "/repo")).toThrow(UsageError);
+    expect(() => parseCheckArgs(["--commit", "--records", "a"], "/repo"))
+      .toThrow(UsageError);
+  });
+
+  it("refuses a flag given twice or with nothing after it", () => {
+    // Taking the last of two commits, or reading `--records` with no
+    // file as no store half at all, is the same silence in a different
+    // place: the command line asked for something it did not get.
+    expect(() => parseCheckArgs(["--records"], "/repo")).toThrow(UsageError);
+    expect(() =>
+      parseCheckArgs(
+        ["--commit", "c1", "--commit", "c2", "--records", "a"],
+        "/repo",
+      )
+    ).toThrow(UsageError);
+    expect(() =>
+      parseCheckArgs(
+        ["--records", "a", "--records", "b", "--commit", "c1"],
+        "/repo",
+      )
+    ).toThrow(UsageError);
+  });
+
+  it("keeps reading record files after the commit is named", () => {
+    // The two flags may be written in either order, and a file after the
+    // commit is a file the store half has to read.
+    expect(
+      parseCheckArgs(
+        ["--records", "a.ndjson", "--commit", "c1", "b.ndjson"],
+        "/repo",
+      ),
+    ).toEqual({
+      root: "/repo",
+      store: { records: ["a.ndjson", "b.ndjson"], commit: "c1" },
+    });
   });
 
   it("says a tree it accounts for is accounted for", () => {
@@ -686,15 +840,13 @@ describe("running the check and saying what it found", () => {
     const at = await Deno.makeTempFile({ suffix: ".ndjson" });
     await Deno.writeTextFile(
       at,
-      JSON.stringify({
-        line: "record",
-        test: { k: "gate", s: "repo", n: "a gate nobody declares" },
-        outcome: "pass",
-        durationMs: 1,
-      }) + "\n",
+      recordsAt("c1"),
     );
     try {
-      const { findings } = await check({ root, records: [at] });
+      const { findings } = await check({
+        root,
+        store: { records: [at], commit: "c1" },
+      });
       expect(
         findings.some((finding) =>
           finding.fails && finding.message.includes("no suite claims")
@@ -718,15 +870,10 @@ describe("running the check and saying what it found", () => {
       const at = await Deno.makeTempFile({ suffix: ".ndjson" });
       await Deno.writeTextFile(
         at,
-        JSON.stringify({
-          line: "record",
-          test: { k: "gate", s: "repo", n: "a gate nobody declares" },
-          outcome: "pass",
-          durationMs: 1,
-        }) + "\n",
+        recordsAt("c1"),
       );
       try {
-        expect(await main(["--records", at], root)).toBe(1);
+        expect(await main(["--commit", "c1", "--records", at], root)).toBe(1);
       } finally {
         await Deno.remove(at);
       }
@@ -734,6 +881,23 @@ describe("running the check and saying what it found", () => {
       console.log = log;
       console.error = err;
     }
+  });
+
+  it("exits two on a command line it cannot act on, and says how", async () => {
+    // A usage mistake is not a topology defect, and reporting it as one
+    // sends somebody looking through the tree for a surface nobody
+    // registered. The exit status is what tells the two apart.
+    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+    const said: string[] = [];
+    const err = console.error;
+    console.error = (line: string) => said.push(line);
+    try {
+      expect(await main(["--records", "a.ndjson"], root)).toBe(2);
+    } finally {
+      console.error = err;
+    }
+    expect(said.join("\n")).toContain("--commit");
+    expect(said.join("\n")).toContain("usage:");
   });
 
   it("accounts for this repository's own tree", async () => {

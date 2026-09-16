@@ -28,6 +28,9 @@ import {
   parseAggregate,
   reportFromText,
 } from "./test-selection/build.ts";
+import { emptyState } from "./test-selection/score.ts";
+import { stateObjectName } from "./test-selection/store.ts";
+import { MANIFEST_SCHEMA_VERSION } from "./test-selection/manifest.ts";
 import type { Suite } from "./test-topology/suite.ts";
 import { join } from "@std/path";
 
@@ -73,6 +76,17 @@ const needsFile = () =>
     locate: (record) =>
       record.file === UNIT ? { level: "unit", unit: UNIT } : undefined,
   }]);
+
+/**
+ * A topology whose two suites both claim what the records carry, which
+ * is the defect the drift guard fails on: nothing in a record says which
+ * of them owns it.
+ */
+const twoSuites = () =>
+  Promise.resolve<Suite[]>([
+    TOPOLOGY[0]!,
+    { ...TOPOLOGY[0]!, id: "runner-unit" },
+  ]);
 
 /** Everything a call said on the standard output, as one string. */
 async function saying(call: () => Promise<unknown>): Promise<string> {
@@ -583,7 +597,7 @@ describe("publish()", () => {
     );
     expect(manifest!.entries).toEqual([]);
     expect(lines.join("\n")).toContain(
-      "the topology has no unit for 1 identities",
+      "no suite claims 1 identities",
     );
   });
 
@@ -691,7 +705,7 @@ describe("publish()", () => {
       publish(["--days", "1"], store, LATER, lostUnit, noBaselines)
     );
     expect(await newestManifest(created)).toEqual([]);
-    expect(lines).toContain("the topology has no unit for 1 identities");
+    expect(lines).toContain("no suite claims 1 identities");
   });
 
   it("keeps an identity placed by name through a window it did not run in", async () => {
@@ -1264,6 +1278,93 @@ describe("publish() over a day that has been compacted", () => {
       .toBe(0);
     expect(read).toEqual(shards);
     expect(peak).toBeLessThanOrEqual(SHARD_CHUNK);
+  });
+});
+
+describe("publish() over an aggregate holding tests the tree has lost", () => {
+  const NOW = new Date("2026-08-20T12:00:00.000Z");
+  // Named through the store rather than written out: the schema version
+  // is a segment of the path, so a spelled-out one would stop being the
+  // place the publisher looks the next time the version moves.
+  const STATE = stateObjectName("2026-08-19", "0");
+  const DELETED = JSON.stringify(["unit", "memory", "space > erases"]);
+  const SILENT = JSON.stringify(["unit", "memory", "space > unreported"]);
+
+  /** An aggregate carrying two identities this topology cannot place. */
+  function carrying(): string {
+    return JSON.stringify({
+      schema: MANIFEST_SCHEMA_VERSION,
+      day: "2026-08-19",
+      folded: [],
+      compacted: [],
+      states: {
+        // A test deleted long enough ago for every window to have passed
+        // over it: no unit, and no run inside what a state still holds.
+        [DELETED]: { ...emptyState(), mainCatches: 2 },
+        // A test that runs and whose records never say which file it is
+        // in: no unit either, and running all the same.
+        [SILENT]: { ...emptyState(), runsByDay: { "2026-08-20": 3 } },
+      },
+      files: {
+        [DELETED]: "packages/memory/test/erase.test.ts",
+        [SILENT]: "packages/memory/test/unreported.test.ts",
+      },
+    });
+  }
+
+  it("stops carrying the deleted test and keeps the silent one", async () => {
+    const { store, created } = fakeStore({ ...seed(), [STATE]: carrying() });
+    expect(
+      await publish(["--days", "1"], store, NOW, needsFile, noBaselines),
+    ).toBe(0);
+    const written = [...created.keys()].find((name) =>
+      name.includes("/state/")
+    )!;
+    const after = parseAggregate(await gunzipToText(created.get(written)!))!;
+    expect(Object.keys(after.states)).not.toContain(DELETED);
+    expect(Object.keys(after.files)).not.toContain(DELETED);
+    // Nothing places this one either, and dropping it would throw away
+    // the history of a test that is running right now.
+    expect(Object.keys(after.states)).toContain(SILENT);
+  });
+
+  it("says which identities left the tree and which are still recording", async () => {
+    const { store } = fakeStore({ ...seed(), [STATE]: carrying() });
+    const said = await saying(() =>
+      publish(["--days", "1"], store, NOW, needsFile, noBaselines)
+    );
+    expect(said).toContain("1 identities have left the tree");
+    // The seeded runs record no file either, so they are unplaced and
+    // running, which is the other half of what the count separates.
+    expect(said).toContain(
+      "no suite claims 2 identities the aggregate still carries",
+    );
+  });
+});
+
+describe("publish() over a topology two suites read the same way", () => {
+  const NOW = new Date("2026-08-20T12:00:00.000Z");
+
+  it("names the identities neither suite can be given", async () => {
+    // Placing one either way would put the work in whichever suite came
+    // first, so the publisher holds them out and says how many. The
+    // count is apart from the tests that have left because the tree
+    // holds these twice over rather than not at all.
+    const { store, created } = fakeStore(seed());
+    const said = await saying(() =>
+      publish(
+        ["--bootstrap", "--days", "1"],
+        store,
+        NOW,
+        twoSuites,
+        noBaselines,
+      )
+    );
+    expect(said).toContain("1 identities are claimed by more than one suite");
+    expect(said).toContain("unit:memory 1");
+    // Held out of the manifest rather than placed under one of them.
+    const manifest = await publishedManifest(created);
+    expect(manifest.entries).toEqual([]);
   });
 });
 

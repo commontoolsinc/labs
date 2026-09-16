@@ -593,6 +593,46 @@ another's record, and since the whole score rests on catch attribution
 there is no downstream check that would notice. Suggesting a line is help;
 writing one unasked is not.
 
+## Removals
+
+A test deleted from the repository keeps its records, because the store
+is append-only and a record is a fact about a run that happened. So every
+consumer has to be able to hold an identity nothing will ever run again,
+and a consumer that keeps a rolling aggregate has to be able to let one
+go.
+
+Nothing selects such an identity. What decides where a test runs is the
+working tree, and an identity the topology has no unit for is left out of
+the manifest rather than carried under a name nothing can run. A manifest
+published before the deletion still names it, and a consumer reconciles
+the manifest against the tree before packing, so the entry drops out
+there too.
+
+A deletion is never bridged. The alias file joins a test's history to the
+name it now has, and a deleted test has no such name; an alias to one
+would credit another test with its record. Nothing declares a removal
+either. What says a test is gone is the tree not holding it, which is the
+same thing that says where every other test runs.
+
+A consumer that keeps a rolling aggregate drops an identity on two
+conditions together. No suite claims it, and no run of it has been
+recorded inside the longest window the aggregate keeps counters for.
+Either alone is not enough: an identity whose records never say which
+unit they came from is claimed by nobody and is running, and a topology
+that reads the tree wrongly stops claiming tests that are running. An
+identity more than one suite claims is a defect over a test the tree
+holds twice and is not a departure at all. A unit a configuration
+declares unavailable, under the variant that declares it, is accounted
+for rather than lost, and every identity in it is kept. Until the window
+has passed over it a deleted identity is one nobody claims and which has
+run, which is what it is.
+
+A guard that compares a tree against a set of records compares it against
+the records that tree produced. A tree read against an earlier run's
+records disagrees with them over every test deleted in between, and over
+every test renamed on the same day, since an alias reaches records from
+earlier days only. Both are the repository working as intended.
+
 ## What a run on the default branch owes the change behind it
 
 Selection trades away the guarantee that a pull request runs every test
