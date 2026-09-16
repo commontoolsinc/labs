@@ -377,6 +377,17 @@ available manifest at its generation time. The listing determines the chart's
 span; the dashboard imposes no date window. A successful refresh removes cached
 counts for objects that are no longer listed.
 
+An object whose body names a manifest schema version other than the one this
+dashboard reads is read once and then left alone for as long as the process runs, so
+a refresh does not fetch it again; the tiles and the detail page say which
+version was found rather than the phrase they give a source that went quiet.
+A body naming this dashboard's own version and failing validation anyway is an
+ordinary failed read.
+That is held in memory rather than in the cache file, because what a reader
+can validate belongs to the build holding it and a later build may accept what
+this one refused. Every other failed read is tried again on the next
+refresh.
+
 An empty corpus or an unreadable manifest leaves a gap. Connected stretches
 share one vertical scale, and an isolated measurement appears as a dot. A
 measured zero remains a measurement. An unreadable historical object adds a

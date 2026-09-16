@@ -5,6 +5,7 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import {
+  MANIFEST_SCHEMA_VERSION,
   sampleEntry,
   sampleManifest,
   serializeManifest,
@@ -15,6 +16,7 @@ import {
   generatedAtOf,
   LANE_BUDGET_FALLBACK_SECONDS,
   laneBudgetOf,
+  ManifestSchemaError,
   newestManifest,
   TEST_SELECTION_PREFIX,
 } from "./test-selection-manifest.ts";
@@ -91,6 +93,96 @@ Deno.test("the reader looks where the publisher writes", () => {
   // moved, and what that produces is a reader listing objects that are
   // all refused: a fault where a figure should be.
   assertEquals(`${manifestPrefix(() => undefined)}/`, TEST_SELECTION_PREFIX);
+});
+
+Deno.test("a version ahead is named even where its shape dropped a field", async () => {
+  // A later shape may drop a field this reader requires, as the
+  // calibration has already lost one. Deciding from the body's declared
+  // version holds there; offering the body under this reader's own
+  // version does not, because the validator then refuses it over the
+  // missing field and the version goes unreported.
+  const name = `${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`;
+  const ahead = MANIFEST_SCHEMA_VERSION + 1;
+  const error = await assertRejects(
+    () =>
+      newestManifest({
+        fetchImpl: storeOf({
+          [name]: JSON.stringify({
+            ...sampleManifest({}),
+            schema: ahead,
+            calibration: { setupCost: {}, suites: {} },
+          }),
+        }),
+      }),
+    ManifestSchemaError,
+  );
+  assertStringIncludes(error.reason, `schema ${ahead}`);
+});
+
+Deno.test("a broken body of this reader's own version is a plain fault", async () => {
+  const name = `${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`;
+  const error = await assertRejects(
+    () =>
+      newestManifest({
+        fetchImpl: storeOf({
+          [name]: JSON.stringify({
+            ...sampleManifest({}),
+            entries: "not a list of entries",
+          }),
+        }),
+      }),
+    Error,
+    "not a manifest",
+  );
+  assertEquals(error instanceof ManifestSchemaError, false);
+});
+
+Deno.test("newestManifest names a version it cannot read", async () => {
+  const name = `${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`;
+  const later = MANIFEST_SCHEMA_VERSION + 1;
+  const error = await assertRejects(
+    () =>
+      newestManifest({
+        fetchImpl: storeOf({
+          [name]: JSON.stringify({
+            ...sampleManifest({}),
+            schema: later,
+          }),
+        }),
+      }),
+    ManifestSchemaError,
+  );
+  assertStringIncludes(error.message, name);
+  assertEquals(
+    error.reason,
+    `store holds schema ${later}, this wall reads ${MANIFEST_SCHEMA_VERSION}`,
+  );
+});
+
+Deno.test("a tile and the page name a schema rather than saying nothing useful", async () => {
+  const error = new ManifestSchemaError("a.json.gz", 1);
+  const source: TestSelectionSource = {
+    latest: () => Promise.reject(error),
+    history: () => Promise.resolve({ samples: [], errors: [] }),
+  };
+  for (
+    const tile of [
+      makeTestFlakes({ source }),
+      makeTestSelection({ source }),
+    ]
+  ) {
+    const view = await tile.collect(CTX);
+    assertEquals(view.value, "—");
+    assertEquals(view.sub, error.reason);
+  }
+  const route = makeTestSelection({ source }).routes?.find((r) =>
+    r.path === TEST_SELECTION_PATH
+  );
+  assertExists(route);
+  const url = new URL(`http://wall${TEST_SELECTION_PATH}`);
+  const body = await (await route.handler(new Request(url), url)).text();
+  assertStringIncludes(body, error.reason);
+  assertEquals(body.includes("temporarily unavailable"), false);
 });
 
 Deno.test("newestManifest reports nothing when the store holds none", async () => {

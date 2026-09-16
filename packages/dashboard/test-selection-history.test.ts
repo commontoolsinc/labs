@@ -5,6 +5,7 @@ import { FakeTime } from "@std/testing/time";
 
 import {
   type Manifest,
+  MANIFEST_SCHEMA_VERSION,
   sampleEntry,
   sampleManifest,
   serializeManifest,
@@ -288,6 +289,126 @@ describe("test-selection-history", () => {
       expect(await source.latest()).toBeUndefined();
       expect(await source.history()).toEqual({ samples: [], errors: [] });
       expect(JSON.parse(await Deno.readTextFile(cacheFile)).counts).toEqual({});
+    });
+
+    it("downloads a refused object once and does not fetch it again", async () => {
+      const manifests = [
+        measurement("2026-09-01T00:00:00.000Z"),
+        measurement("2026-09-02T00:00:00.000Z"),
+        measurement("2026-09-03T00:00:00.000Z"),
+      ];
+      const store = storeOf(manifests);
+      // A body of a schema this reader does not enforce, which is what the
+      // store holds for every manifest an earlier format wrote.
+      for (const manifest of manifests) {
+        store.objects[objectName(manifest.generatedAt)] = JSON.stringify({
+          ...manifest,
+          schema: MANIFEST_SCHEMA_VERSION + 1,
+        });
+      }
+      const source = makeTestSelectionSource({
+        fetchImpl: store.fetchImpl,
+        cacheFile,
+      });
+      const downloads = () =>
+        store.reads.filter((name) => !name.startsWith("list:"));
+
+      const first = await source.history();
+      expect(first.samples.map((sample) => sample.counts)).toEqual([
+        null,
+        null,
+        null,
+      ]);
+      expect(downloads().length).toBe(3);
+      expect(first.errors.length).toBe(3);
+      expect(first.errors[0]).toContain(
+        `store holds schema ${MANIFEST_SCHEMA_VERSION + 1}`,
+      );
+
+      store.reads.length = 0;
+      time.tick(MANIFEST_SHARE_MS + 1);
+      const again = await source.history();
+      expect(again.samples.map((sample) => sample.counts)).toEqual([
+        null,
+        null,
+        null,
+      ]);
+      expect(downloads()).toEqual([]);
+    });
+
+    it("re-reads a refused object in a process that may accept it", async () => {
+      const manifests = [
+        measurement("2026-09-01T00:00:00.000Z"),
+        measurement("2026-09-02T00:00:00.000Z"),
+      ];
+      const store = storeOf(manifests);
+      for (const manifest of manifests) {
+        store.objects[objectName(manifest.generatedAt)] = JSON.stringify({
+          ...manifest,
+          schema: MANIFEST_SCHEMA_VERSION + 1,
+        });
+      }
+      await makeTestSelectionSource({ fetchImpl: store.fetchImpl, cacheFile })
+        .history();
+      store.reads.length = 0;
+
+      // What a reader can validate belongs to the build holding it, so no
+      // refusal survives into a process that may answer differently. Here
+      // the objects become readable and the measurements appear.
+      for (const manifest of manifests) {
+        store.objects[objectName(manifest.generatedAt)] = serializeManifest(
+          manifest,
+        );
+      }
+      const restarted = makeTestSelectionSource({
+        fetchImpl: store.fetchImpl,
+        cacheFile,
+      });
+      const history = await restarted.history();
+      expect(history.samples.map((sample) => sample.counts?.known)).toEqual([
+        4,
+        4,
+      ]);
+      expect(store.reads.filter((name) => !name.startsWith("list:")).sort())
+        .toEqual(manifests.map((m) => objectName(m.generatedAt)).sort());
+    });
+
+    it("writes no refusal into the cache file", async () => {
+      const manifest = measurement("2026-09-01T00:00:00.000Z");
+      const store = storeOf([manifest]);
+      store.objects[objectName(manifest.generatedAt)] = JSON.stringify({
+        ...manifest,
+        schema: MANIFEST_SCHEMA_VERSION + 1,
+      });
+      await makeTestSelectionSource({ fetchImpl: store.fetchImpl, cacheFile })
+        .history();
+      expect(JSON.parse(await Deno.readTextFile(cacheFile)).counts).toEqual({});
+    });
+
+    it("retries an object the store could not answer for", async () => {
+      // A store that did not answer may answer the next read, so nothing
+      // about that is kept.
+      const manifest = measurement("2026-09-01T00:00:00.000Z");
+      const store = storeOf([manifest]);
+      store.objects[objectName(manifest.generatedAt)] = 503;
+      const source = makeTestSelectionSource({
+        fetchImpl: store.fetchImpl,
+        cacheFile,
+      });
+      expect((await source.history()).samples[0].counts).toBe(null);
+
+      store.objects[objectName(manifest.generatedAt)] = serializeManifest(
+        manifest,
+      );
+      store.reads.length = 0;
+      time.tick(MANIFEST_SHARE_MS + 1);
+      expect((await source.history()).samples[0].counts).toEqual({
+        known: 4,
+        selected: 2,
+        flaky: 1,
+      });
+      expect(store.reads.filter((name) => !name.startsWith("list:")))
+        .toEqual([objectName(manifest.generatedAt)]);
     });
 
     it("keeps gaps for empty and unreadable manifests and fills recovered reads on refresh", async () => {

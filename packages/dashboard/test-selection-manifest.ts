@@ -11,6 +11,23 @@
  * store that holds no manifest, which is the one case where "none has been
  * published" is true.
  *
+ * One refusal is singled out from the rest, because it behaves
+ * differently. A body that arrives whole and is refused over the version
+ * it declares, and over nothing else, is settled: the store creates
+ * objects and never overwrites one, so that body is what the name holds
+ * and a later read gets the same answer. It carries its own type, so a
+ * reader can record it and stop fetching the object, and so the wall can
+ * say which version it found rather than the phrase it gives a source
+ * that went quiet. Every other refusal stays a plain fault and is read
+ * again.
+ *
+ * What separates the two is the version a body declares against the one
+ * this reader is built for. That is decidable from the body alone. Asking
+ * the validator instead, by offering it the body under this reader's own
+ * version, is not: a shape that drops a field an earlier one required is
+ * refused over the missing field rather than over the version, and the
+ * calibration has already lost a field that way once.
+ *
  * Following the dashboard's values (README.md): what this feeds reports on
  * the system. It names tests, never people.
  */
@@ -19,6 +36,7 @@ import {
   type LanePlan,
   listObjects,
   type Manifest,
+  MANIFEST_SCHEMA_VERSION,
   objectUrl,
   parseManifest,
   SELECTION_AREA,
@@ -66,6 +84,47 @@ export async function manifestNames(options: {
   }).sort();
 }
 
+/**
+ * A manifest body declaring a version this reader is not built for. The
+ * object holding it is immutable, so a later read of that name returns the
+ * same body and the same answer.
+ */
+export class ManifestSchemaError extends Error {
+  #reason: string;
+
+  constructor(name: string, schema: number) {
+    const reason = `store holds schema ${schema}, ` +
+      `this wall reads ${MANIFEST_SCHEMA_VERSION}`;
+    super(`manifest ${name}: ${reason}`);
+    this.#reason = reason;
+  }
+
+  /** The refusal alone, for a line too narrow to carry the object name. */
+  get reason(): string {
+    return this.#reason;
+  }
+}
+
+/**
+ * The version a refused body declares, when it is not the version this
+ * reader is built for. This reader reads one version, so a body naming
+ * another is one it has no way to read, whichever side of its own that
+ * version falls.
+ *
+ * It takes the parsed body rather than the text, because a manifest holds
+ * the whole corpus and the reader has already parsed it to ask the
+ * validator.
+ */
+function otherVersion(body: unknown): number | undefined {
+  if (typeof body !== "object" || body === null || !("schema" in body)) {
+    return undefined;
+  }
+  const schema = body.schema;
+  return typeof schema === "number" && schema !== MANIFEST_SCHEMA_VERSION
+    ? schema
+    : undefined;
+}
+
 /** Fetches and validates a manifest, throwing when the object is unreadable. */
 export async function readManifest(name: string, options: {
   bucket?: string;
@@ -79,11 +138,21 @@ export async function readManifest(name: string, options: {
   }
   // The store serves these with transcoding, so a plain fetch has
   // already decoded the gzip the object is stored under.
-  const manifest = parseManifest(await response.text());
-  if (manifest === undefined) {
+  const text = await response.text();
+  // A manifest holds every identity the store knows, so the body is
+  // parsed once here and the one value answers both questions asked of
+  // it.
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
     throw new Error(`manifest ${name}: not a manifest`);
   }
-  return manifest;
+  const manifest = parseManifest(body);
+  if (manifest !== undefined) return manifest;
+  const schema = otherVersion(body);
+  if (schema !== undefined) throw new ManifestSchemaError(name, schema);
+  throw new Error(`manifest ${name}: not a manifest`);
 }
 
 /**
