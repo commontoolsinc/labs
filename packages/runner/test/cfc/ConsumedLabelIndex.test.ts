@@ -127,4 +127,49 @@ describe("ConsumedLabelIndex", () => {
       );
     }
   });
+  describe("constructor()", () => {
+    it("preserves payload coordinates when entries are already canonical", () => {
+      const entries = [["value", "field"], ["field"], []].map(entry);
+      const index = new ConsumedLabelIndex(entries, { canonicalPaths: true });
+      expect(index.overlapping(["value", "field"]).map((item) => item.entry))
+        .toEqual([entries[0], entries[2]]);
+      expect(index.overlapping(["field"]).map((item) => item.entry))
+        .toEqual([entries[1], entries[2]]);
+    });
+
+    it("retains a supplied path when its caller reuses the input array", () => {
+      const path = ["value", "*"];
+      const original = entry(path, 0);
+      const index = new ConsumedLabelIndex([original], {
+        canonicalPaths: true,
+      });
+      path[0] = "other";
+      expect(index.overlapping(["value", "field"]).map((item) => item.entry))
+        .toEqual([original]);
+      expect(index.overlapping(["other", "field"])).toEqual([]);
+    });
+  });
+
+  describe("instance members", () => {
+    describe("overlapping()", () => {
+      it("returns only prefix entries when descendants are excluded", () => {
+        const paths = [
+          [],
+          ["a"],
+          ["a", "*"],
+          ["a", "*", "c"],
+          ["a", "b"],
+          ["a", "b", "c"],
+          ["a", "b", "*"],
+          ["other"],
+        ];
+        const entries = paths.map(entry);
+        const index = new ConsumedLabelIndex(entries);
+        for (const path of [...paths, ["missing"], ["*"], ["a", "*", "*"]]) {
+          expect(index.overlapping(path, false).map((item) => item.entry))
+            .toEqual(entries.filter((item) => isPrefix(item.path, path)));
+        }
+      });
+    });
+  });
 });

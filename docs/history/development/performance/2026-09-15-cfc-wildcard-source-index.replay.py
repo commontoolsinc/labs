@@ -70,7 +70,7 @@ with tempfile.TemporaryDirectory(prefix="cfc-wildcard-replay-") as directory:
     for name in ["path-prefix-index.ts", "consumed-label-index.ts"]:
         source = subprocess.check_output(
             ["git", "show", f"{BASE}:packages/runner/src/cfc/{name}"],
-            cwd=checkout, text=True,
+            cwd=checkout, text=True, encoding="utf-8",
         )
         if name == "consumed-label-index.ts":
             for dependency in ["canonical.ts", "types.ts"]:
@@ -83,9 +83,9 @@ with tempfile.TemporaryDirectory(prefix="cfc-wildcard-replay-") as directory:
             target = "legacy-consumed.ts"
         else:
             target = "before-path-prefix-index.ts"
-        (scratch / target).write_text(source)
+        (scratch / target).write_text(source, encoding="utf-8")
     script = TS_SOURCE.replace("CHECKOUT", checkout.as_uri())
-    (scratch / "paired-grid.ts").write_text(script)
+    (scratch / "paired-grid.ts").write_text(script, encoding="utf-8")
     subprocess.run(
         ["deno", "run", "--no-lock", "-A", "--config",
          str(checkout / "deno.jsonc"), str(scratch / "paired-grid.ts")],

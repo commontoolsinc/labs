@@ -555,6 +555,26 @@ still pay for collecting and ordering them. The wildcard-query scan fallback
 and index construction are measured separately in
 `packages/runner/test/cfc-dereference-coverage.bench.ts`.
 
+## CFC flow-join lookup
+
+`packages/runner/test/cfc-flow-join.bench.ts` measures one `deriveFlowJoin`
+pass at every combination of 100, 300, and 1,000 label entries and 50, 200,
+and 800 read activities. Concrete paths have three to six segments. Each
+map also carries the three value, shape, and followRef wildcard templates
+minted for a collection container. The reads overlap concrete entries and
+those templates; the benchmark asserts both confidentiality contributions.
+
+Runtime construction, seeding, journaling, assertions, and aborts stay outside
+timing. Each sample uses a fresh transaction and includes the pass's metadata
+resolution and index construction. Entry count and read count vary independently
+so the grid separates per-document preparation from per-read lookup. This
+synthetic pass benchmark does not measure mapped rendering or a browser.
+
+The index returns matching entries in label-map order. Concrete queries cost
+path traversal plus wildcard candidates under matching container prefixes and
+the entries returned. Recursive root reads and wildcard queries can still
+consume the whole map; the grid measures narrow concrete reads.
+
 ## Scoped snapshot memo reuse
 
 `packages/runner/test/snapshot-memo.bench.ts` measures repeated CFC label-view

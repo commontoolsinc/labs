@@ -214,6 +214,12 @@ type CfcInstrumentationHooks = {
   /** Whether the prepared digest was computed or reused at the activity epoch. */
   onPreparedDigest?(outcome: "computed" | "memo"): void;
 
+  /** One structured refusal detail was recorded. Measurement only. */
+  onRefusalDetail?(): void;
+
+  /** One full consumed-label collection was started. Measurement only. */
+  onConsumedLabelWalk?(): void;
+
   /** One dereference trace was recorded, and how many the transaction holds
    * after it. `probeBelongsToDereference` scans this set once per read
    * activity at commit preparation, so its size is a per-read multiplier.
@@ -2022,6 +2028,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // this transaction already made; letting it move the enforcement state
     // would make the description part of the decision.
     this.#cfcState.refusalDetails.push(deepFreeze(detail));
+    this.#cfcInstrumentation.onRefusalDetail?.();
+  }
+
+  /** @inheritDoc */
+  noteCfcConsumedLabelWalk(): void {
+    this.#cfcInstrumentation.onConsumedLabelWalk?.();
   }
 
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
@@ -3990,6 +4002,11 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   recordCfcRefusalDetail(detail: CfcRefusalDetail): void {
     this.#wrapped.recordCfcRefusalDetail(detail);
+  }
+
+  /** @inheritDoc */
+  noteCfcConsumedLabelWalk(): void {
+    this.#wrapped.noteCfcConsumedLabelWalk();
   }
 
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {

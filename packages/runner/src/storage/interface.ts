@@ -2234,6 +2234,9 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    */
   recordCfcRefusalDetail(detail: CfcRefusalDetail): void;
 
+  /** Counts a full consumed-label collection without changing CFC state. */
+  noteCfcConsumedLabelWalk(): void;
+
   /**
    * The trusted policy-writer path for CFC grant documents (§8.12.7 route
    * 2a; cfc/grants.ts module doc). Requires the transaction's CURRENT

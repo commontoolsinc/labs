@@ -23,6 +23,11 @@ const owner = await Identity.fromPassphrase("terminal structure owner");
 const service = await Identity.fromPassphrase("terminal structure service");
 const space = owner.did();
 const rootId = "of:terminal-structure-root";
+// The flush deadline the stepped-clock phases run the serving loop under, and
+// the size of the step their clock takes. A wave here settles in a fraction of
+// this, so the deadline timer stays out of the settle race and the step alone
+// decides where the wave is cut.
+const steppedFlushDeadlineMs = 1000;
 
 async function settle<T>(work: Promise<T>): Promise<T> {
   await clock.settle();
@@ -65,6 +70,8 @@ describe("SpaceServer", () => {
           "during confirmation",
           "across a deadline",
           "at the post-input deadline",
+          "at the re-armed retry deadline",
+          "with work left at the deadline",
           "through a changed owning backlink",
           "behind a sealed root",
           "behind an unrelated sealed write",
@@ -72,6 +79,10 @@ describe("SpaceServer", () => {
       ) {
         const crossDeadline = phase === "across a deadline";
         const postInputDeadline = phase === "at the post-input deadline";
+        const rearmedDeadline = phase === "at the re-armed retry deadline";
+        const workLeftDeadline = phase === "with work left at the deadline";
+        const steppedDeadline = rearmedDeadline || workLeftDeadline;
+        const cutDeadline = postInputDeadline || steppedDeadline;
         const shadow = phase === "behind a sealed root";
         it(`settles a piece created ${phase} before covering its input`, async () => {
           const engine = await server.engineForSpace(space);
@@ -188,6 +199,9 @@ describe("SpaceServer", () => {
             ensureSpaceRoots: false,
             localSeqRef: { value: 0 },
             stats,
+            policy: steppedDeadline
+              ? { flushDeadlineMs: steppedFlushDeadlineMs }
+              : undefined,
             createRuntime: () =>
               Promise.resolve({
                 runtime,
@@ -252,6 +266,7 @@ describe("SpaceServer", () => {
           let restoreTime: (() => void) | undefined;
           let cancelLeftover: (() => void) | undefined;
           let deadlineSampled = false;
+          let deadlineStepped = false;
           let leftoverRuns = 0;
           const deadlinePurges: { count: number; watermark: number }[] = [];
           const verdict = Promise.withResolvers<SealedCommitVerdict>();
@@ -313,6 +328,8 @@ describe("SpaceServer", () => {
                 }
                 return floor;
               };
+            }
+            if (cutDeadline) {
               const purge = runtime.scheduler.purgeQueuedEvents.bind(
                 runtime.scheduler,
               );
@@ -324,6 +341,79 @@ describe("SpaceServer", () => {
                 });
                 return count;
               };
+            }
+            if (steppedDeadline) {
+              const originalDate = Date;
+              const now = Date.now;
+              let step = 0;
+              // SES freezes Date.now, so the step rides the global constructor
+              // binding, which retains ordinary date construction and every
+              // other read. The step stays on, and every later wave reads its
+              // own deadline from the stepped clock, so the wave stepped over
+              // is the only one that runs past its deadline.
+              class SteppedDate extends originalDate {
+                static override now() {
+                  return now() + step;
+                }
+              }
+              expect(Reflect.set(globalThis, "Date", SteppedDate)).toBe(true);
+              restoreTime = () => {
+                expect(Reflect.set(globalThis, "Date", originalDate)).toBe(
+                  true,
+                );
+              };
+              const stepPastDeadline = () => {
+                step = steppedFlushDeadlineMs;
+                deadlineStepped = true;
+              };
+              // A demanded root joins the re-armed set either when its
+              // confirmation is invalidated (counted `structureLoadDeferred`)
+              // or when a commit re-arms a terminal decision (counted
+              // `structureLoadRearmed`).
+              const rearmQueued = () =>
+                stats.structureLoadDeferred + stats.structureLoadRearmed > 0;
+              if (rearmedDeadline) {
+                const inputSynced = manager.inputSynced.bind(manager);
+                manager.inputSynced = async () => {
+                  await inputSynced();
+                  // The load pass this settle awaited put the demanded root in
+                  // the re-armed set, which the settle loop reads right after
+                  // this barrier. A whole flush deadline stepped here puts the
+                  // wave past its deadline at the re-armed retry.
+                  if (!deadlineStepped && rearmQueued()) {
+                    stepPastDeadline();
+                  }
+                };
+              } else {
+                const leftover = runtime.getCell(space, "work-left-lt1-copy")
+                  .getAsNormalizedFullLink();
+                cancelLeftover = runtime.scheduler.addEventHandler(() => {
+                  leftoverRuns++;
+                }, leftover);
+                const isIdle = runtime.scheduler.isIdle.bind(runtime.scheduler);
+                runtime.scheduler.isIdle = () => {
+                  // The settle loop reaches this probe with the re-armed retry
+                  // already spent. The copy lands and the clock steps in the
+                  // same synchronous stretch as the deadline decision the probe
+                  // guards, so the wave is cut with the copy still queued.
+                  if (!deadlineStepped && rearmQueued()) {
+                    runtime.scheduler.queueEvent(
+                      leftover,
+                      {},
+                      false,
+                      undefined,
+                      true,
+                      {
+                        eventId: "work-left-lt1-copy",
+                        time: now(),
+                        served: { firedAt: { user: owner.did() } },
+                      },
+                    );
+                    stepPastDeadline();
+                  }
+                  return isIdle();
+                };
+              }
             }
             expect(await settle(serving.activate())).toBe(true);
             expect(held).toBe(1);
@@ -389,6 +479,23 @@ describe("SpaceServer", () => {
             expect(coveringCommits.length).toBeGreaterThan(0);
             if (postInputDeadline) {
               expect(deadlineSampled).toBe(true);
+              expect(stats.wavesBudgetExhausted).toBe(1);
+              expect(deadlinePurges).toHaveLength(1);
+              expect(deadlinePurges[0].count).toBe(1);
+              expect(deadlinePurges[0].watermark).toBeLessThan(creationSeq!);
+              expect(stats.events.lt1LeftoversPurged).toBe(1);
+              expect(leftoverRuns).toBe(0);
+            }
+            if (rearmedDeadline) {
+              expect(deadlineStepped).toBe(true);
+              expect(stats.wavesBudgetExhausted).toBe(1);
+              expect(deadlinePurges).toHaveLength(1);
+              expect(deadlinePurges[0].count).toBe(0);
+              expect(deadlinePurges[0].watermark).toBeLessThan(creationSeq!);
+              expect(stats.events.lt1LeftoversPurged).toBe(0);
+            }
+            if (workLeftDeadline) {
+              expect(deadlineStepped).toBe(true);
               expect(stats.wavesBudgetExhausted).toBe(1);
               expect(deadlinePurges).toHaveLength(1);
               expect(deadlinePurges[0].count).toBe(1);
