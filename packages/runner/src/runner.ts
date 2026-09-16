@@ -6266,8 +6266,9 @@ export class Runner {
     const actionId = `piece-run/${resultLink.id}`;
     const startLifecycleEpoch = this.#lifecycleEpoch;
     const ownership = this.#createDeferredStartOwnership(resultCell);
+    const speculationContext = speculationRunContextOf(tx);
     const navigateContext = navigateEventContextFromRunInfo(
-      waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+      waveRunContextOf(tx) ?? speculationContext,
     );
     const work = (async () => {
       let toName = named;
@@ -6276,12 +6277,12 @@ export class Runner {
         if (ownership.isCancelled()) return;
         const startTx = this.#runtime.edit();
         if (identity !== undefined) startTx.tx.scopeKeyIdentity = identity;
-        // Minted outside any scheduler run; the run's setup and node wiring
-        // are piece machinery, stamped bookkeeping per serving-loop.md §3d.
-        this.#runtime.stampServerRun(startTx, {
-          actionId,
-          kind: "bookkeeping",
-        });
+        // A speculative child's continuation keeps its origin across the
+        // data load. Authored and served starts use piece bookkeeping.
+        this.#runtime.stampServerRun(
+          startTx,
+          speculationContext ?? { actionId, kind: "bookkeeping" },
+        );
         if (navigateContext !== undefined) {
           setNavigateEventContext(startTx, navigateContext);
         }
