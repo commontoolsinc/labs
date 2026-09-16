@@ -1,4 +1,8 @@
-import { hashStringOf } from "@commonfabric/data-model";
+import {
+  deepFreeze,
+  hashStringOf,
+  isDeepFrozen,
+} from "@commonfabric/data-model";
 import type { CfcConfClause } from "./clause.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type {
@@ -236,43 +240,42 @@ const compareWritePolicyInput = (
   return leftHash < rightHash ? -1 : leftHash > rightHash ? 1 : 0;
 };
 
-// Note: these `canonicalize*` helpers don't freeze their output. Records
-// destined for CFC state are frozen at their entry chokepoints
-// (`buildPreparedDigestInput`, `recordCfcDereferenceTrace`,
-// `recordCfcWritePolicyInput`); `canonicalize*` is also called during
-// `canonicalizePreparedDigestInput` re-canonicalization, where freezing
-// every fresh wrapper would add measurable cost without a correctness
-// benefit. The path-array invariant — every canonical path is frozen and
-// safe to use as a cache key — is held by `canonicalizeLogicalPath`
-// itself.
+// These helpers accept mutable records. Digest projections of immutable
+// records are frozen and memoized by `memoizeCanonicalRecord`; canonical
+// paths are always frozen by `canonicalizeLogicalPath`.
 export const canonicalizeConsumedRead = (
   read: ConsumedRead,
-): ConsumedRead => ({
-  ...read,
-  path: canonicalizeLogicalPath(read.path),
-});
+): ConsumedRead => {
+  const path = canonicalizeLogicalPath(read.path);
+  return path === read.path ? read : { ...read, path };
+};
 
 export const canonicalizeAttemptedWrite = (
   write: AttemptedWrite,
-): AttemptedWrite => ({
-  ...write,
-  path: canonicalizeLogicalPath(write.path),
-});
+): AttemptedWrite => {
+  const path = canonicalizeLogicalPath(write.path);
+  return path === write.path ? write : { ...write, path };
+};
 
 export const canonicalizeDereferenceTrace = (
   trace: CfcDereferenceTrace,
-): CfcDereferenceTrace => ({
-  ...trace,
-  source: canonicalizeAttemptedWrite(trace.source),
-  target: canonicalizeAttemptedWrite(trace.target),
-});
+): CfcDereferenceTrace => {
+  const source = canonicalizeAttemptedWrite(trace.source);
+  const target = canonicalizeAttemptedWrite(trace.target);
+  return source === trace.source && target === trace.target
+    ? trace
+    : { ...trace, source, target };
+};
 
 export const canonicalizeWritePolicyInput = (
   input: WritePolicyInput,
 ): WritePolicyInput => {
   switch (input.kind) {
     case "schema":
-      return { ...input, target: canonicalizeAttemptedWrite(input.target) };
+    case "trusted-event": {
+      const target = canonicalizeAttemptedWrite(input.target);
+      return target === input.target ? input : { ...input, target };
+    }
     case "structural-provenance":
       return {
         ...input,
@@ -281,8 +284,6 @@ export const canonicalizeWritePolicyInput = (
           compareAddress,
         ),
       };
-    case "trusted-event":
-      return { ...input, target: canonicalizeAttemptedWrite(input.target) };
     // Clause-canonicalization coverage note: the digest hashes label-bearing
     // material in two places beyond the labelMap. Carried `link-write` label
     // views are RUNTIME-DERIVED (view merges can order alternatives
@@ -308,10 +309,11 @@ export const canonicalizeWritePolicyInput = (
         ...(cfcLabelView !== undefined && { cfcLabelView }),
       };
     }
-    case "custom":
-      return input.target === undefined
-        ? input
-        : { ...input, target: canonicalizeAttemptedWrite(input.target) };
+    case "custom": {
+      if (input.target === undefined) return input;
+      const target = canonicalizeAttemptedWrite(input.target);
+      return target === input.target ? input : { ...input, target };
+    }
     case "sink-request":
       return input;
   }
@@ -407,15 +409,46 @@ export const canonicalizeCfcMetadata = (
   },
 });
 
+/**
+ * Keeps the canonical projection of an immutable record stable so its hash
+ * can use the data-model cache. Mutable inputs are projected on every call.
+ */
+const memoizeCanonicalRecord = <T extends object>(
+  canonicalize: (input: T) => T,
+): (input: T) => T => {
+  const cache = new WeakMap<T, T>();
+  return (input) => {
+    const cached = cache.get(input);
+    if (cached !== undefined) return cached;
+    const canonical = canonicalize(input);
+    if (isDeepFrozen(input)) {
+      deepFreeze(canonical);
+      cache.set(input, canonical);
+    }
+    return canonical;
+  };
+};
+
+const canonicalConsumedRead = memoizeCanonicalRecord(canonicalizeConsumedRead);
+const canonicalAttemptedWrite = memoizeCanonicalRecord(
+  canonicalizeAttemptedWrite,
+);
+const canonicalDereferenceTrace = memoizeCanonicalRecord(
+  canonicalizeDereferenceTrace,
+);
+const canonicalWritePolicyInput = memoizeCanonicalRecord(
+  canonicalizeWritePolicyInput,
+);
+
 export const canonicalizePreparedDigestInput = (
   input: PreparedDigestInput,
 ): PreparedDigestInput => ({
-  consumedReads: [...input.consumedReads].map(canonicalizeConsumedRead).sort(
+  consumedReads: [...input.consumedReads].map(canonicalConsumedRead).sort(
     compareAddress,
   ),
-  attemptedWrites: [...input.attemptedWrites].map(canonicalizeAttemptedWrite)
+  attemptedWrites: [...input.attemptedWrites].map(canonicalAttemptedWrite)
     .sort(compareAddress),
-  writes: [...input.writes].map(canonicalizeAttemptedWrite).sort(
+  writes: [...input.writes].map(canonicalAttemptedWrite).sort(
     compareAddress,
   ),
   // ORDER-PRESERVING on purpose (sorted by journalIndex, which is unique
@@ -428,7 +461,7 @@ export const canonicalizePreparedDigestInput = (
     (left: OrderedWriteAttempt, right: OrderedWriteAttempt) =>
       left.journalIndex - right.journalIndex,
   ),
-  triggerReads: [...(input.triggerReads ?? [])].map(canonicalizeAttemptedWrite)
+  triggerReads: [...(input.triggerReads ?? [])].map(canonicalAttemptedWrite)
     .sort(compareAddress),
   // A SET, not a multiset: the digest binds WHICH dereferences the
   // transaction performed, never how many times a link was read. Reading one
@@ -453,13 +486,13 @@ export const canonicalizePreparedDigestInput = (
   // the sort follows canonicalization: two traces differing only in a leading
   // `"value"` path element are the same record, but only once canonicalized.
   dereferenceTraces: dedupeSorted(
-    [...input.dereferenceTraces].map(canonicalizeDereferenceTrace).sort(
+    [...input.dereferenceTraces].map(canonicalDereferenceTrace).sort(
       compareDereferenceTrace,
     ),
     compareDereferenceTrace,
   ),
   writePolicyInputs: [...input.writePolicyInputs].map(
-    canonicalizeWritePolicyInput,
+    canonicalWritePolicyInput,
   ).sort(compareWritePolicyInput),
   implementationIdentity: input.implementationIdentity,
   trustSnapshot: input.trustSnapshot,
@@ -524,5 +557,17 @@ export const canonicalizePreparedDigestInput = (
     : {}),
 });
 
-export const preparedDigestFor = (input: PreparedDigestInput): string =>
-  hashStringOf(canonicalizePreparedDigestInput(input));
+/**
+ * Returns a process-local equality token over canonical activity. Each record
+ * is hashed at its own cache boundary; the outer hash binds field names,
+ * record order, multiplicity, and optional-field presence.
+ */
+export const preparedDigestFor = (input: PreparedDigestInput): string => {
+  const canonical = canonicalizePreparedDigestInput(input);
+  return hashStringOf(Object.fromEntries(
+    Object.entries(canonical).map(([key, value]) => [
+      key,
+      Array.isArray(value) ? value.map(hashStringOf) : hashStringOf(value),
+    ]),
+  ));
+};

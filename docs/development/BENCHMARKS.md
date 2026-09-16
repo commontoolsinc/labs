@@ -509,6 +509,33 @@ The [metadata-width measurement](../history/development/performance/2026-09-14-c
 uses the same fixture to compare per-document validation and indexed path
 lookup. Index construction remains inside the collector timer.
 
+## Prepared CFC digests
+
+`packages/runner/test/cfc-prepared-digest.bench.ts` records 5, 50, or 200
+write policy inputs with 1 or 10 KiB payloads, plus 300 read activities and
+dereference traces. Each sample uses a fresh emulated-storage transaction.
+Construction, initial hashing for warm cases, validation, and abort are outside
+the timed interval. Policy names are distinct, so sorting does not repeatedly
+hash large records to break name ties.
+
+The four series measure the first digest, an unchanged second digest, a
+second digest after one additional write, and direct composition over warmed
+records in a fresh input wrapper. The last series bypasses the transaction
+epoch memo to isolate per-record hash reuse. Diagnostics on stderr report the
+immutable-object hash-cache hits during the measured interval; an epoch-memo
+hit performs no hashing. Stdout remains the benchmark JSON report.
+
+```sh
+deno bench --no-lock -A --json packages/runner/test/cfc-prepared-digest.bench.ts
+```
+
+Prepared digests are process-local equality tokens. Composition preserves the
+canonicalizer's ordering, multiplicity, trace deduplication, and optional-field
+rules, while each immutable record has its own hash-cache boundary. Canonical
+projections are memoized only for deeply frozen inputs. The transaction reuses
+the complete token until its activity epoch changes; decision-input recorders
+and write paths advance that epoch.
+
 ## Scoped snapshot memo reuse
 
 `packages/runner/test/snapshot-memo.bench.ts` measures repeated CFC label-view
