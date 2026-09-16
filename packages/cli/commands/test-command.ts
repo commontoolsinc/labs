@@ -1,7 +1,9 @@
 import { expandGlob } from "@std/fs";
 import { resolve } from "@std/path";
 
-import { Command } from "@cliffy/command";
+import { Command, EnumType } from "@cliffy/command";
+
+import { CFC_ENFORCEMENT_MODES } from "@commonfabric/runner/cfc";
 
 import { cliText } from "../lib/cli-name.ts";
 import {
@@ -19,6 +21,8 @@ export function createTestCommand(
 ) {
   return new Command()
     .name("test")
+    .type("cfc-enforcement", new EnumType(CFC_ENFORCEMENT_MODES))
+    .type("cfc-flow", new EnumType(["off", "derive", "observe", "persist"]))
     .description("Run pattern tests (.test.tsx files).")
     .example(
       cliText("cf test ./counter.test.tsx"),
@@ -37,6 +41,19 @@ export function createTestCommand(
         "cf test ./battleship/pass-and-play/main.test.tsx --root ./battleship",
       ),
       "Run with custom root for resolving imports from sibling directories.",
+    )
+    .option(
+      "--cfc-enforcement-mode <mode:cfc-enforcement>",
+      "Override the test runtime CFC enforcement mode.",
+    )
+    .option(
+      "--cfc-flow-labels <mode:cfc-flow>",
+      "Flow labels: off, derive (runtime observe), or persist.",
+    )
+    .option(
+      "--cfc-shell-posture",
+      "Use enforce-explicit enforcement and persist flow labels.",
+      { conflicts: ["cfc-enforcement-mode", "cfc-flow-labels"] },
     )
     .option(
       "--verbose",
@@ -179,6 +196,14 @@ export function createTestCommand(
       // Run tests
       const { failed } = await runTests(uniqueTestFiles, {
         verbose: options.verbose,
+        cfcEnforcementMode: options.cfcShellPosture
+          ? "enforce-explicit"
+          : options.cfcEnforcementMode,
+        cfcFlowLabels: options.cfcShellPosture
+          ? "persist"
+          : options.cfcFlowLabels === "derive"
+          ? "observe"
+          : options.cfcFlowLabels,
         noIdempotencyCheck: options.idempotencyCheck === false,
         root,
         dataFilePaths: options.datafile?.map((path: string) =>

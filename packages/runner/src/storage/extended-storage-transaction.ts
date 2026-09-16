@@ -2602,7 +2602,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  /** Evaluates CFC gates and records the complete preparation interval. */
   prepareCfc(): string {
+    const started = performance.now();
+    try {
+      return this.#prepareCfc();
+    } finally {
+      logger.time(started, "prepareCfc");
+    }
+  }
+
+  /** Evaluates gates and seals preparation inputs for this transaction. */
+  #prepareCfc(): string {
     // Verification always runs. There is deliberately no caller-supplied input
     // override: the commit-time digest recheck only confirms the prepared input
     // matches real activity, so accepting an external input here would let a

@@ -348,3 +348,5 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 ## The retired tutorial site
 
 - [tutorials/](tutorials/) — the complete MyST source of the retired docs.commontools.dev site: nine chapters, example code and images, and the build scaffolding, entered at [index.md](tutorials/index.md). Its state chapters and LLM tour teach the retired `cell()` API.
+
+- [Pattern-test CFC posture measurement](development/performance/2026-09-15-cfc-pattern-test-posture.md) — 2026-09-15; five alternating headless mapped-render and labeled-copy samples at N=11/50/150, with resolved postures and preparation spans.

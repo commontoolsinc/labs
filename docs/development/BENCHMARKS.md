@@ -785,3 +785,58 @@ Existing persisted and wire key formats keep their protocol-defined encoding.
 The collector and scheduler effects are tracked by
 `packages/runner/test/cfc-consumed-source-dedup.bench.ts` and
 `packages/runner/test/scheduler-invalid-causes.bench.ts` respectively.
+
+## Labeled pattern-test mapped render
+
+`packages/cli/test/fixtures/cfc-flow-labels/mapped-render.test.tsx` is the shared
+headless regression fixture for CFC preparation over mapped SQLite rows. It
+seeds 150 rows with a confidential title column, queries 11, 50, and 150 rows,
+and demands each full mapped VDOM through the worker reconciler. It needs no
+connector, browser, or external store. After each render, a labeled-copy action
+reads every title and writes plain row values into an ordinary writable store,
+exercising writer-fit preparation separately from generated view outputs.
+The file stays identical between arms;
+only the runtime flags change:
+
+```sh
+# Arm A: enforcement disabled, flow labels off.
+deno task cf test packages/cli/test/fixtures/cfc-flow-labels/mapped-render.test.tsx --cfc-enforcement-mode disabled --cfc-flow-labels off --verbose --stats-threshold 0 --no-idempotency-check
+
+# Arm B: shell enforcement and flow-label posture.
+deno task cf test packages/cli/test/fixtures/cfc-flow-labels/mapped-render.test.tsx --cfc-shell-posture --verbose --stats-threshold 0 --no-idempotency-check
+```
+
+The output names the resolved posture and each N. `render_1`, `render_2`, and
+`render_3` correspond to N=11, 50, and 150. Their intervals exclude compilation,
+seeding, and the preceding query assertion's row materialization. They include
+mounting and removing the worker reconciler's demand and settling its synchronous
+mapped work. There is no DOM or browser paint. The assertions verify row counts;
+the CLI's regression test verifies both postures and nonzero arm-B flow/digest
+spans, without gating elapsed time. `action_3`, `action_5`, and `action_7` are
+the corresponding labeled copies. Their following assertions verify the copied
+row counts. A separate storage test reads the stored source and destination
+labels with enforcement fixed to `enforce-explicit`, checking that column labels
+survive the query with flow labels off and that only `persist` propagates them
+to the copy. Zero counts remain visible for operations a
+phase does not call.
+
+For comparisons, alternate A/B for at least five rounds on the same machine and
+revision, preserve complete output, and report the size, posture, machine,
+Deno version, and idempotency setting with each number. Compare matching render
+steps across arms and revisions, recording distributions as well as minima.
+Ordinary mapping and reconciliation scale with rows in arm A too; the control
+is the absence of flow-derivation work, not a promise of constant render time.
+No elapsed-time threshold belongs in the functional test.
+
+Add `--timing-measures-out /tmp/mapped-B.json` (a distinct path per run) for
+unrounded spans and `cf:runTestPattern/step/render_N/materialize#...` boundaries.
+Use the aggregation and attribution tools in
+[profiling](debugging/profiling.md) to locate the CFC work inside each interval.
+Nested timing totals overlap: `prepareCfc` includes its derivation and initial
+digest, while a commit recheck can hash again outside preparation. The spans
+measure elapsed time, not CPU attribution.
+
+This `cf test` probe runs on demand, outside the scheduled `deno bench` suite.
+Keep its source and step order stable across the optimizations it measures.
+The [CLI guide](../../packages/cli/README.md#pattern-test-cfc-posture-and-labeled-fixtures)
+documents the dials, labeled table declaration, and reporting boundaries.

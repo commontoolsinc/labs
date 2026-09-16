@@ -306,6 +306,7 @@ describe("runtimePresets conformance", () => {
         navigateCallback,
         moduleByteCache,
         cfcEnforcementMode: "observe",
+        cfcFlowLabels: "persist",
         patternCoverage,
         onPatternInstantiated,
       })).toEqual({
@@ -315,6 +316,7 @@ describe("runtimePresets conformance", () => {
         navigateCallback,
         moduleByteCache,
         cfcEnforcementMode: "observe",
+        cfcFlowLabels: "persist",
         patternCoverage,
         onPatternInstantiated,
       });

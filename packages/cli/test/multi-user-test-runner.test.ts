@@ -258,7 +258,11 @@ describe(
 
       const { failed, results } = await runTests(
         fixture("marker-barrier.test.tsx"),
-        { root: FIXTURES, cfcEnforcementMode: "observe" },
+        {
+          root: FIXTURES,
+          cfcEnforcementMode: "observe",
+          cfcFlowLabels: "persist",
+        },
       );
       expect(results[0].error).toBeUndefined();
       expect(failed).toBe(0);
@@ -302,6 +306,32 @@ describe(
           .toBe("enforce-explicit");
       } finally {
         await server.close().catch(() => {});
+      }
+    });
+
+    it("builds every requested flow-label mode into the participant runtime", async () => {
+      const server = StandaloneMemoryServer.start();
+      try {
+        for (const mode of ["off", "observe", "persist"] as const) {
+          expect(
+            (await initParticipant(server, { cfcFlowLabels: mode }))
+              .cfcFlowLabels,
+          )
+            .toBe(mode);
+        }
+        expect((await initParticipant(server, {})).cfcFlowLabels).toBe("off");
+      } finally {
+        await server.close();
+      }
+    });
+
+    it("rejects an invalid flow-label mode before initializing a participant", async () => {
+      const client = new ParticipantWorkerClient("alice");
+      try {
+        await expect(client.call("init", { cfcFlowLabels: "typo" }))
+          .rejects.toThrow("cfcFlowLabels is typo");
+      } finally {
+        await client.close();
       }
     });
 
