@@ -123,6 +123,31 @@ function seed(path: string) {
     JSON.stringify({ value: { $stream: true }, result: link("of:piece") }),
     5,
   );
+  // a stream holding no value, whose `schema` meta references the schema
+  // document that declares it
+  commit.run(10, 10);
+  rev.run(
+    "cid:streamschema",
+    10,
+    JSON.stringify({
+      value: {
+        asCell: ["stream"],
+        type: "object",
+        properties: { tag: { type: "string" } },
+      },
+    }),
+    10,
+  );
+  commit.run(11, 11);
+  rev.run(
+    "of:stream-ref",
+    11,
+    JSON.stringify({
+      result: link("of:piece"),
+      schema: { $ref: "cid:streamschema" },
+    }),
+    11,
+  );
   // an import cell: { link, specifier }
   commit.run(6, 6);
   rev.run(
@@ -211,6 +236,17 @@ Deno.test("html explorer: rich bundle + self-contained render", async (t) => {
           "payload shape present",
         );
         assertStringIncludes(stream.schemaSource ?? "", "addNote");
+        // A stream whose document holds no value is a stream by its `schema`
+        // meta, and the schema shown is the schema document's.
+        const declared = byId("of:stream-ref");
+        assertEquals(declared.kind, "stream");
+        assertEquals(declared.label, "⊙ stream");
+        assert(declared.streamPayload, "stream payload schema resolved");
+        assert(declared.schemaKeys?.includes("properties"));
+        assertStringIncludes(
+          declared.schemaSource ?? "",
+          "schema document · cid:streamschema",
+        );
         // A `{ link, specifier }` cell is a module import.
         const imp = byId("of:imp");
         assertEquals(imp.label, "import ./dep.tsx");

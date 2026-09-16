@@ -618,3 +618,79 @@ describe("stream declaration", () => {
     }
   }
 });
+
+describe("a stream declared through a reference or a composition", () => {
+  const NUMBER_STREAM = { type: "number", asCell: ["stream"] } as const;
+  const WITH_DEFS = (event: JSONSchema): JSONSchema => ({
+    type: "object",
+    properties: { event: { $ref: "#/$defs/Event" } },
+    $defs: { Event: event, NumberStream: NUMBER_STREAM },
+  });
+  const declaredAt = (schema: JSONSchema) =>
+    ContextualFlowControl.declaredHandleKind(
+      ContextualFlowControl.getSchemaAtPath(schema, ["event"]),
+    );
+
+  it("reads the declaration through a local reference", () => {
+    expect(declaredAt(WITH_DEFS({ $ref: "#/$defs/NumberStream" }))).toBe(
+      "stream",
+    );
+  });
+
+  it("reads what any allOf branch declares, beside plain constraints", () => {
+    expect(declaredAt(WITH_DEFS({
+      allOf: [{ $ref: "#/$defs/NumberStream" }, { minimum: 0 }],
+    }))).toBe("stream");
+  });
+
+  it("reads what every anyOf branch declares, and nothing when one does not", () => {
+    expect(declaredAt(WITH_DEFS({
+      anyOf: [
+        { $ref: "#/$defs/NumberStream" },
+        { type: "undefined", asCell: ["stream"] },
+      ],
+    }))).toBe("stream");
+    expect(declaredAt(WITH_DEFS({
+      anyOf: [{ $ref: "#/$defs/NumberStream" }, { type: "null" }],
+    }))).toBeUndefined();
+    expect(declaredAt(WITH_DEFS({
+      anyOf: [{ $ref: "#/$defs/NumberStream" }, { asCell: ["cell"] }],
+    }))).toBeUndefined();
+  });
+
+  it("declares nothing where nothing is declared", () => {
+    expect(declaredAt(WITH_DEFS({ type: "number" }))).toBeUndefined();
+    expect(ContextualFlowControl.declaredHandleKind(undefined)).toBeUndefined();
+    expect(ContextualFlowControl.declaredHandleKind(true)).toBeUndefined();
+  });
+
+  it("makes a handle at such a position a stream with nothing stored", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      const holder = rt.getCell(
+        space,
+        "composed-stream-holder",
+        WITH_DEFS({
+          allOf: [{ $ref: "#/$defs/NumberStream" }, { minimum: 0 }],
+        }),
+      );
+      const event = holder.key("event");
+      expect(isStream(event)).toBe(true);
+      const received: unknown[] = [];
+      rt.scheduler.addEventHandler((_tx, payload) => {
+        received.push(payload);
+      }, event.getAsNormalizedFullLink());
+      event.send(5 as never);
+      await rt.idle();
+      expect(received).toEqual([5]);
+      expect(holder.getRaw()).toBeUndefined();
+    } finally {
+      await rt.dispose();
+      await storageManager.close();
+    }
+  });
+});

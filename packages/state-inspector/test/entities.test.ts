@@ -1,7 +1,9 @@
 /**
  * Hermetic test for the unified entity model + encoded commit decoding. Seeds a
  * modern piece (patternIdentity → module, argument, internal manifest), an
- * owned cell, a stream, and a free cell, then checks classification + lineage.
+ * owned cell, three streams, and a free cell, then checks classification +
+ * lineage. Two of the streams hold no value and are known by their `schema`
+ * meta alone, one inline and one by reference to a schema document.
  *
  * It also seeds one entity for each way an entity ends up carrying no document
  * — a tombstone, a payload that does not decode, and a `set` that stored no
@@ -177,6 +179,46 @@ function seed(path: string) {
     12,
   );
 
+  // Two streams whose documents hold no value: what says they are streams is
+  // the `schema` meta, held inline on one and, on the other, by a reference
+  // to the schema document that holds it.
+  commit.run(19, session, 19, "{}");
+  op.run(
+    "cid:streamschema",
+    19,
+    "set",
+    JSON.stringify({
+      value: {
+        asCell: ["stream"],
+        type: "object",
+        properties: { text: { type: "string" } },
+      },
+    }),
+    19,
+  );
+  commit.run(20, session, 20, "{}");
+  op.run(
+    "of:stream-inline",
+    20,
+    "set",
+    JSON.stringify({
+      result: link("of:piece"),
+      schema: { asCell: ["stream"], type: "object" },
+    }),
+    20,
+  );
+  commit.run(21, session, 21, "{}");
+  op.run(
+    "of:stream-ref",
+    21,
+    "set",
+    JSON.stringify({
+      result: link("of:piece"),
+      schema: { $ref: "cid:streamschema" },
+    }),
+    21,
+  );
+
   db.close();
 }
 
@@ -216,6 +258,17 @@ Deno.test("unified entity model + encoded commit decode", async (t) => {
 
         // A stream beats ownership; an owned cell carries a back-link.
         assertEquals(byId["of:stream"].kind, "stream");
+        // A stream document holds no value: its `schema` meta is what says
+        // it is one, whether the schema is inline or in a schema document.
+        assertEquals(byId["of:stream-inline"].kind, "stream");
+        assertEquals(byId["of:stream-inline"].valueShape, "absent");
+        assertEquals(byId["of:stream-ref"].kind, "stream");
+        assertEquals(byId["of:stream-ref"].owned, true);
+        assertEquals(
+          listEntityModels(space, { kind: "stream" }).entities.map((e) => e.id)
+            .sort(),
+          ["of:stream", "of:stream-inline", "of:stream-ref"],
+        );
         assertEquals(byId["of:owned"].kind, "owned-cell");
         assertEquals(byId["of:owned"].owned, true);
         assertEquals(byId["of:owned"].lineage.owner, "of:piece");

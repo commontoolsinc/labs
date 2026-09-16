@@ -4008,7 +4008,9 @@ in the layers above it. The two get there by different routes, and the
 difference matters to anyone tracing a value through the wire format.
 
 - **`$stream` is an ordinary key.** The JSON layer attaches no meaning to it: a
-  record carrying it round-trips as the record it is.
+  record carrying it round-trips as the record it is. Nothing writes it any
+  more — a stream position is declared by its schema and stores no value — so
+  what remains of it is the documents written before that.
 - **The link-ref envelope is not.** `/` is reserved — the prefix is wholly owned
   by the encoding system in the wire format (Section 9 of `3-json-encoding.md`),
   so a `/`-keyed record reaching the wire is a tagged value, a built-in escape,
@@ -4027,12 +4029,14 @@ from the very rule that gives `/` its meaning.
 | Convention | Where Produced and Recognized | Example | Unified Form |
 |------------|-------------------------------|---------|--------------|
 | Link-ref envelope | Links (`runner/src/sigil-types.ts`, chokepointed on `data-model/cell-rep`) | `{ "/": { "link@1": { id, path, space } } }` | `{ "/Link@1": { id, path, space } }` |
-| `$stream` marker | Streams (`runner/src/builder/types.ts`) | `{ "$stream": true }` | `{ "/Stream@1": null }` |
+| `$stream` marker | Retired; read from older documents only (`runner/src/builder/types.ts`) | `{ "$stream": true }` | none — the schema declares the stream |
 
-> **Note on `$stream`:** `$stream` is a stateless marker — it signals that a
-> cell path is a stream endpoint rather than carrying decodable state. Under the
-> unified encoding it becomes `{ "/Stream@1": null }` (a stateless tagged type
-> per Section 5 of `3-json-encoding.md`), preserving its marker semantics.
+> **Note on `$stream`:** the marker is retired rather than renamed. A stream
+> position is declared by `asCell: ["stream"]` on its schema — carried by the
+> links that reach it and by the stream document's `schema` metadata — and
+> stores nothing, so no `/Stream@1` tagged type replaces it. What the wire
+> still meets is the sentinel in documents written before the declaration was
+> stored, and readers recognize that until none remain.
 
 > **The link-ref envelope has a named owner.** `sigil-types.ts` states that the
 > envelope and its tag belong to `data-model/cell-rep`, the chokepoint that

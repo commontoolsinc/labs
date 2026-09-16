@@ -53,7 +53,7 @@ Marks a property as a stream endpoint:
 ```
 
 This causes:
-- Storage of `{ $stream: true }` marker
+- No stored value: the declaration alone marks the position
 - Different runtime behavior (send vs set)
 - Different change detection (every send triggers)
 

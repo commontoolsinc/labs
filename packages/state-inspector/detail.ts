@@ -36,6 +36,8 @@ import {
   type ModuleEntry,
   type ScanExtent,
   scanLimit,
+  spaceDocumentReader,
+  storedSchemaOf,
   visibleEntityRows,
 } from "./model.ts";
 
@@ -356,7 +358,7 @@ function detailFromDoc(
   ctx: DetailContext,
   versions: VersionRow[],
 ): EntityDetail {
-  const c = classifyDocument(doc);
+  const c = classifyDocument(doc, ctx.readDocument);
   const value = doc.value;
   const spec = importSpecifier(value);
   const named = ctx.nameOf.get(id);
@@ -446,14 +448,23 @@ function detailFromDoc(
   let code: string | undefined;
   if (isModuleValue(value)) code = value.code;
 
-  // schema / ifc / cfc
-  let schema = doc.schema !== undefined ? annotate(doc.schema) : undefined;
-  let schemaKeys = isObjectNotArray(doc.schema)
-    ? Object.keys(doc.schema)
+  // schema / ifc / cfc. A `schema` meta is the schema itself or a reference
+  // to the schema document holding it; the detail shows the schema either
+  // way and says which.
+  const own = storedSchemaOf(doc, ctx.readDocument);
+  let schema = own === undefined ? undefined : annotate(own.schema);
+  let schemaKeys = own !== undefined && isObjectNotArray(own.schema)
+    ? Object.keys(own.schema)
     : undefined;
-  let schemaSource: string | undefined;
-  let streamPayload: boolean | undefined;
-  // A stream / named owned cell has no own schema — resolve the DECLARED one
+  let schemaSource: string | undefined = own?.via === "document"
+    ? `schema document · ${String((doc.schema as { $ref: string }).$ref)}`
+    : undefined;
+  let streamPayload: boolean | undefined = own !== undefined &&
+      c.kind === "stream"
+    ? true
+    : undefined;
+  // A named owned cell without a schema of its own — a value cell, or a
+  // stream set up before its document carried one — takes the DECLARED one
   // from the owner piece that names it.
   if (schema === undefined && named) {
     const decl = declaredSchemaFor(ctx.docs.get(named.owner), named.key);
@@ -578,11 +589,17 @@ export function buildAllDetails(
     }
   }
 
+  // Content-addressed documents live at space scope only, so a label or
+  // schema document is read there whatever scope the pass describes.
+  const readSpaceDocument = spaceDocumentReader(space, branch);
+  const readDocument = (id: string): EntityDocument | undefined =>
+    docs.get(id) ?? readSpaceDocument(id);
+
   // Pass 2: context names (key in a piece's value that points at a child) +
   // base labels (refined by import specifier / context name).
   const nameOf = new Map<string, { owner: string; key: string }>();
   for (const [id, doc] of docs) {
-    const c = classifyDocument(doc);
+    const c = classifyDocument(doc, readDocument);
     // Only MODERN piece result values carry semantic names as keys (createProfile,
     // profiles, …). A legacy PROCESS cell's top-level keys are control-plane
     // ($TYPE/resultRef/internal/argument) — naming children by those is noise.
@@ -596,7 +613,7 @@ export function buildAllDetails(
     }
   }
   for (const [id, doc] of docs) {
-    const c = classifyDocument(doc);
+    const c = classifyDocument(doc, readDocument);
     const spec = importSpecifier(doc.value);
     const named = nameOf.get(id);
     let label = c.label;
@@ -608,14 +625,6 @@ export function buildAllDetails(
     labelOf.set(id, { kind: c.kind, label });
   }
 
-  // Content-addressed documents live at space scope only, so a label
-  // document is read there whatever scope the pass describes.
-  const readDocument = (id: string): EntityDocument | undefined => {
-    const scanned = docs.get(id);
-    if (scanned !== undefined) return scanned;
-    const outcome = reconstructOutcome(space, { id, branch, scope: "space" });
-    return outcome.status === "present" ? outcome.document : undefined;
-  };
   const ctx: DetailContext = {
     ownDid,
     labelOf,

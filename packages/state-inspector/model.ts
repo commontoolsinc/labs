@@ -78,7 +78,7 @@ import type {
 export type EntityKind =
   | "piece" // a running pattern instance (result cell + lineage meta)
   | "module" // pattern source/compiled module (value carries code + identity)
-  | "stream" // write-only event channel (value.$stream === true)
+  | "stream" // write-only event channel, declared by its `schema` meta
   | "schema" // a JSONSchema stored as a cell value
   | "owned-cell" // a cell owned by a piece (carries a `result` back-link)
   | "free-cell" // a standalone cell, owned by no piece
@@ -213,8 +213,77 @@ function isSchemaValue(v: unknown): boolean {
   return !("$UI" in v) && !("$NAME" in v);
 }
 
+/**
+ * The stored sentinel a stream document held before its `schema` meta said
+ * what it was. Documents written since carry no value; this reads the ones
+ * written before.
+ */
 function isStreamValue(v: unknown): boolean {
   return isObjectNotArray(v) && v.$stream === true;
+}
+
+/**
+ * Reads one document out of the space by id, for a classification that has to
+ * follow a document's `schema` meta into the schema document it references.
+ */
+export type DocumentReader = (id: string) => EntityDocument | undefined;
+
+/**
+ * A reader over `space` at `branch`. Content-addressed documents live at
+ * space scope only, so that is where it reads whatever scope the caller is
+ * describing.
+ */
+export function spaceDocumentReader(
+  space: SpaceDb,
+  branch = "",
+): DocumentReader {
+  return (id) => {
+    const outcome = reconstructOutcome(space, { id, branch, scope: "space" });
+    return outcome.status === "present" ? outcome.document : undefined;
+  };
+}
+
+/** The `asCell` kind a schema declares at its root, if it declares one. */
+function asCellKindOf(schema: unknown): string | undefined {
+  if (!isObjectNotArray(schema) || !Array.isArray(schema.asCell)) return;
+  const front: unknown = schema.asCell[0];
+  if (typeof front === "string") return front;
+  return isObjectNotArray(front) && typeof front.kind === "string"
+    ? front.kind
+    : undefined;
+}
+
+/**
+ * The schema a document's `schema` meta holds: the member itself when it is
+ * the schema, else the value of the schema document a single-member
+ * `{ "$ref": "cid:…" }` names, read through `readDocument`. `undefined` for a
+ * document without the member, and for a reference no reader was given for
+ * or that the space cannot supply.
+ */
+export function storedSchemaOf(
+  doc: EntityDocument,
+  readDocument?: DocumentReader,
+): { schema: unknown; via: "own" | "document" } | undefined {
+  const meta = doc.schema;
+  if (meta === undefined) return undefined;
+  if (!isObjectNotArray(meta)) return { schema: meta, via: "own" };
+  const ref = meta.$ref;
+  if (
+    typeof ref !== "string" || !ref.startsWith("cid:") ||
+    Object.keys(meta).length !== 1
+  ) {
+    return { schema: meta, via: "own" };
+  }
+  const named = readDocument?.(ref)?.value;
+  return named === undefined ? undefined : { schema: named, via: "document" };
+}
+
+/** Whether a document's `schema` meta declares the document a stream. */
+function schemaDeclaresStream(
+  doc: EntityDocument,
+  readDocument?: DocumentReader,
+): boolean {
+  return asCellKindOf(storedSchemaOf(doc, readDocument)?.schema) === "stream";
 }
 
 /** A piece result value: carries render/name markers. */
@@ -270,11 +339,16 @@ export interface Classification {
 
 /**
  * Classify a reconstructed entity document by its top-level path-set and value
- * shape. Pure: resolves lineage to link-target ids but does not follow them or
+ * shape. Resolves lineage to link-target ids but does not follow them or
  * resolve `patternIdentity` to a module (that needs the space-wide module index;
- * see {@link modelEntity}).
+ * see {@link modelEntity}). The one document it reads besides `doc` is the
+ * schema document a `schema` meta references, through `readDocument`: a
+ * stream's document holds no value, so its meta is what says it is one.
  */
-export function classifyDocument(doc: EntityDocument): Classification {
+export function classifyDocument(
+  doc: EntityDocument,
+  readDocument?: DocumentReader,
+): Classification {
   const paths = Object.keys(doc).sort();
   const value = doc.value;
   const owned = "result" in doc;
@@ -352,7 +426,7 @@ export function classifyDocument(doc: EntityDocument): Classification {
       lineage,
     };
   }
-  if (isStreamValue(value)) {
+  if (isStreamValue(value) || schemaDeclaresStream(doc, readDocument)) {
     return {
       kind: "stream",
       regime: "n/a",
@@ -463,15 +537,21 @@ export function modelEntity(
     id: address.id,
     scope: address.scope ?? "space",
     moduleIndex,
+    readDocument: spaceDocumentReader(space, address.branch),
   });
 }
 
 /** Build an EntityModel from an already-reconstructed document. */
 export function modelFromDocument(
   doc: EntityDocument,
-  ctx: { id: string; scope?: string; moduleIndex?: Map<string, ModuleEntry> },
+  ctx: {
+    id: string;
+    scope?: string;
+    moduleIndex?: Map<string, ModuleEntry>;
+    readDocument?: DocumentReader;
+  },
 ): EntityModel {
-  const c = classifyDocument(doc);
+  const c = classifyDocument(doc, ctx.readDocument);
   if (c.lineage.pattern && ctx.moduleIndex) {
     c.lineage.pattern.moduleId = ctx.moduleIndex.get(c.lineage.pattern.identity)
       ?.id;
@@ -700,9 +780,12 @@ export function countEntities(
  * by WHY it carries none, so a tombstone answers `deleted` and only a genuinely
  * unreadable one answers `unknown`.
  */
-function kindOf(outcome: ReconstructOutcome): EntityKind {
+function kindOf(
+  outcome: ReconstructOutcome,
+  readDocument: DocumentReader,
+): EntityKind {
   return outcome.status === "present"
-    ? classifyDocument(outcome.document).kind
+    ? classifyDocument(outcome.document, readDocument).kind
     : absentEntity(outcome.status).kind;
 }
 
@@ -799,6 +882,7 @@ export function listEntityModels(
     reconstructOutcome(space, { id, branch, scope });
   const documentOf = (o: ReconstructOutcome): EntityDocument | undefined =>
     o.status === "present" ? o.document : undefined;
+  const readDocument = spaceDocumentReader(space, branch);
   // An entity that is HERE and cannot be read. A tombstone is not one: it says
   // what happened to it.
   const isUnreadable = (o: ReconstructOutcome): boolean =>
@@ -828,7 +912,7 @@ export function listEntityModels(
     const outcome = read(r.id);
     const doc = documentOf(outcome);
     indexModule(r.id, doc);
-    if (kind !== undefined && kindOf(outcome) !== kind) {
+    if (kind !== undefined && kindOf(outcome, readDocument) !== kind) {
       if (concealable && isUnreadable(outcome)) unreadable++;
       continue;
     }
@@ -903,6 +987,7 @@ export function listEntityModels(
       id: r.id,
       scope,
       moduleIndex,
+      readDocument,
     });
     m.revisions = r.revisions;
     m.links = linksWithPaths(outcome.document.value, LISTING_LINK_WALK)
@@ -992,7 +1077,8 @@ export function describePiece(
     return { error: `entity ${absentEntity(outcome.status).label}` };
   }
   const doc = outcome.document;
-  const c = classifyDocument(doc);
+  const readDocument = spaceDocumentReader(space, branch);
+  const c = classifyDocument(doc, readDocument);
   if (c.kind !== "piece") return { error: `not a piece (kind=${c.kind})` };
 
   const value = doc.value;
@@ -1048,12 +1134,14 @@ export function describePiece(
         return { id: cid, kind, label, summary: label };
       }
       const cdoc = child.document;
-      const cc = classifyDocument(cdoc);
+      const cc = classifyDocument(cdoc, readDocument);
       return {
         id: cid,
         kind: cc.kind,
         label: cc.label,
-        summary: cc.valueShape === "absent"
+        summary: cc.kind === "stream"
+          ? cc.label
+          : cc.valueShape === "absent"
           ? "(no value)"
           : summarize(cdoc.value),
       };

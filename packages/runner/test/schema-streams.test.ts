@@ -36,19 +36,14 @@ describe("Schema - Streams and Promises", () => {
 
   describe("Stream Support", () => {
     it("should create a stream for properties marked with asCell stream", () => {
-      const c = runtime.getCell<{
-        name: string;
-        events: { $stream: boolean };
-      }>(
+      // Nothing is stored where the stream stands; the schema declares it.
+      const c = runtime.getCell<{ name: string }>(
         space,
         "should create a stream for properties marked with asStream 1",
         undefined,
         tx,
       );
-      c.set({
-        name: "Test Doc",
-        events: { $stream: true },
-      });
+      c.set({ name: "Test Doc" });
 
       const schema = {
         type: "object",
@@ -69,27 +64,13 @@ describe("Schema - Streams and Promises", () => {
     });
 
     it("should handle nested streams in objects", () => {
-      const c = runtime.getCell<{
-        user: {
-          profile: {
-            name: string;
-            notifications: { $stream: boolean };
-          };
-        };
-      }>(
+      const c = runtime.getCell<{ user: { profile: { name: string } } }>(
         space,
         "should handle nested streams in objects 1",
         undefined,
         tx,
       );
-      c.set({
-        user: {
-          profile: {
-            name: "John",
-            notifications: { $stream: true },
-          },
-        },
-      });
+      c.set({ user: { profile: { name: "John" } } });
 
       const schema = {
         type: "object",
@@ -153,19 +134,13 @@ describe("Schema - Streams and Promises", () => {
     });
 
     it("should behave correctly when both asCell cell and asCell stream are in the schema", () => {
-      const c = runtime.getCell<{
-        cellData: { value: number };
-        streamData: { $stream: boolean };
-      }>(
+      const c = runtime.getCell<{ cellData: { value: number } }>(
         space,
         "should behave correctly when both asCell and asCell stream are in the schema 1",
         undefined,
         tx,
       );
-      c.set({
-        cellData: { value: 42 },
-        streamData: { $stream: true },
-      });
+      c.set({ cellData: { value: 42 } });
 
       const schema = {
         type: "object",

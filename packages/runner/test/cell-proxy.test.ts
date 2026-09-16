@@ -373,13 +373,16 @@ describe("Proxy", () => {
   });
 
   it("should return a Sendable for stream aliases", async () => {
-    const c = runtime.getCell<{ stream: { $stream: true } }>(
+    const c = runtime.getCell(
       space,
       "should return a Sendable for stream aliases",
-      undefined,
+      {
+        type: "object",
+        properties: { stream: { asCell: ["stream"] } },
+      } as const satisfies JSONSchema,
       tx,
     );
-    c.setRaw({ stream: { $stream: true } });
+    c.set({});
     tx.commit();
 
     tx = runtime.edit();
@@ -399,22 +402,26 @@ describe("Proxy", () => {
       streamCell.getAsNormalizedFullLink(),
     );
 
-    streamCell.send({ $stream: true });
+    streamCell.send({ clicked: true });
     await runtime.idle();
 
-    // The stream property returns a Cell (stream kind) rather than raw { $stream: true }
-    // because createQueryResultProxy detects stream markers and returns stream cells
+    // The stream property is a Cell of stream kind, minted from the schema's
+    // declaration: nothing is stored at the position.
     expect(c.get().stream).toHaveProperty("send");
     expect(eventCount).toBe(1);
-    expect(lastEventSeen).toEqual({ $stream: true });
+    expect(lastEventSeen).toEqual({ clicked: true });
   });
 
   it("should convert cells and proxies to links when sending events", async () => {
     const c = runtime.getCell<any>(
       space,
       "should convert cells and proxies to links when sending events",
+      {
+        type: "object",
+        properties: { stream: { asCell: ["stream"] } },
+      } as const satisfies JSONSchema,
     );
-    c.withTx(tx).setRaw({ stream: { $stream: true } });
+    c.withTx(tx).set({});
     tx.commit();
     tx = runtime.edit();
 

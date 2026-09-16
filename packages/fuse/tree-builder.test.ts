@@ -849,6 +849,41 @@ Deno.test("buildJsonTree - .json sibling replaces streams with handler sigils", 
   assertEquals(parsed.addItem, { "/handler": "addItem" });
 });
 
+Deno.test("buildJsonTree - a nested .json sibling shows a stream handle as a handler sigil", () => {
+  // A stream holds no value; what stands at a nested stream position in a
+  // read value is the handle minted for it, which is not data to spell out.
+  const tree = new FsTree();
+  const bump = { isStream: () => true, toJSON: () => ({ "/": "a link" }) };
+  const data = { nested: { count: 1, bump } };
+
+  buildJsonTree(tree, tree.rootIno, "result", data);
+
+  const resultIno = tree.lookup(tree.rootIno, "result");
+  if (resultIno === undefined) throw new Error("result dir not found");
+  assertEquals(
+    JSON.parse(getFileContent(tree, resultIno, "nested.json")),
+    { count: 1, bump: { "/handler": "bump" } },
+  );
+  // The handle is not projected as an entry of its own either.
+  const nestedIno = tree.lookup(resultIno, "nested");
+  if (nestedIno === undefined) throw new Error("nested dir not found");
+  assertEquals(tree.lookup(nestedIno, "bump"), undefined);
+});
+
+Deno.test("classifyCallableEntry - a schema declaring a stream is a handler whatever stands at it", () => {
+  assertEquals(
+    classifyCallableEntry(undefined, { asCell: ["stream"], type: "object" }),
+    "handler",
+  );
+  assertEquals(classifyCallableEntry({}, { asCell: ["stream"] }), "handler");
+  assertEquals(
+    classifyCallableEntry(undefined, { asCell: [{ kind: "stream" }] }),
+    "handler",
+  );
+  assertEquals(classifyCallableEntry(undefined, { asCell: ["cell"] }), null);
+  assertEquals(classifyCallableEntry({}, { type: "object" }), null);
+});
+
 Deno.test("classifyCallableEntry does not treat ordinary data as a tool when linked schema disagrees", () => {
   const value = {
     pattern: "just-data",

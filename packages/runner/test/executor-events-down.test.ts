@@ -31,7 +31,10 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
-import { resultSchemaMetaSpelling } from "../src/result-schema-meta.ts";
+import {
+  resultSchemaMetaSpelling,
+  writeResultSchemaMeta,
+} from "../src/result-schema-meta.ts";
 import {
   decodeMemoryBoundary,
   eventAttentionEntryKey,
@@ -3173,11 +3176,15 @@ describe("Phase 3 events-down (serving side)", () => {
       clientSigner,
     ));
     const engine = await server.engineForSpace(space);
+    // A stream document holds no value; what setup leaves on it is the
+    // schema meta declaring the stream, and the served appends land on it.
     const mkStream = async (name: string) => {
-      const cell = clientRuntime.getCell<unknown>(space, name, undefined);
+      const cell = clientRuntime.getCell<unknown>(space, name, {
+        asCell: ["stream"],
+      });
       await cell.sync();
       const tx = clientRuntime.edit();
-      cell.withTx(tx).setRaw({ $stream: true });
+      writeResultSchemaMeta(cell.withTx(tx), { asCell: ["stream"] });
       expect((await tx.commit()).error).toBeUndefined();
       return cell;
     };
@@ -3229,16 +3236,14 @@ describe("Phase 3 events-down (serving side)", () => {
       await awaitAdmitted(server, () => readWatermarkSeq(engine) >= pokeSeq);
     }
     const serving = servingRuntime!;
-    const servingS1 = serving.getCell<unknown>(
-      space,
-      `${prefix}-s1`,
-      undefined,
-    );
-    const servingS2 = serving.getCell<unknown>(
-      space,
-      `${prefix}-s2`,
-      undefined,
-    );
+    // The serving side's handles declare the streams too: a send decides
+    // stream-or-write off the handle, and the document holds no value.
+    const servingS1 = serving.getCell<unknown>(space, `${prefix}-s1`, {
+      asCell: ["stream"],
+    });
+    const servingS2 = serving.getCell<unknown>(space, `${prefix}-s2`, {
+      asCell: ["stream"],
+    });
     const servingP = serving.getCell<{ n?: number }>(
       space,
       `${prefix}-counter-p`,

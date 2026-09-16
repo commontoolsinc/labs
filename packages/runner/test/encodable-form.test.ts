@@ -744,7 +744,13 @@ describe("encodable-form", () => {
         undefined,
         tx,
       );
-      cell.set({ handler: { $stream: true }, other: 1 });
+      const handler = runtime.getCell<unknown>(
+        space,
+        "encodable-form-stream",
+        { asCell: ["stream"] },
+        tx,
+      );
+      cell.set({ handler, other: 1 });
       const view = cell.get() as unknown as {
         handler: { toSigilLinkOrNull(): unknown };
       };

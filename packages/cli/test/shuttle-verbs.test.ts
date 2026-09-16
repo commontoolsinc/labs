@@ -147,6 +147,9 @@ const READS_NOTHING: VerbDeps = {
     getCellValue: () => {
       throw new Error("The cell was listed.");
     },
+    listCallableKeys: () => {
+      throw new Error("The cell's callables were listed.");
+    },
   },
   setCellValue: () => {
     throw new Error("A cell was written.");
@@ -383,6 +386,7 @@ function walking(value: unknown): VerbDeps {
     listing: {
       ...READS_NOTHING.listing,
       getCellValue: (_config, path) => at(path),
+      listCallableKeys: () => Promise.resolve(new Set<string>()),
     },
   };
 }
@@ -391,9 +395,6 @@ function walking(value: unknown): VerbDeps {
 function cellKeys(keys: string[]): VerbDeps {
   return listedCell(Object.fromEntries(keys.map((key) => [key, "a value"])));
 }
-
-/** Helper for the cases below, which is the sentinel a stream reads as. */
-const STREAM = { $stream: true };
 
 /**
  * Helper for the cases below, which reports a terminal `rows` rows tall and
@@ -407,13 +408,20 @@ function screen(rows: number, deps: VerbDeps, columns = 200): VerbDeps {
   return { ...deps, rows: () => rows, columns: () => columns };
 }
 
-/** Helper for the cases below, which stands `value` in for a listed cell. */
-function listedCell(value: unknown): VerbDeps {
+/**
+ * Helper for the cases below, which stands `value` in for a listed cell and
+ * `callables` in for the keys whose stored links declare a stream.
+ */
+function listedCell(
+  value: unknown,
+  callables: readonly string[] = [],
+): VerbDeps {
   return {
     ...READS_NOTHING,
     listing: {
       ...READS_NOTHING.listing,
       getCellValue: () => Promise.resolve(value),
+      listCallableKeys: () => Promise.resolve(new Set(callables)),
     },
   };
 }
@@ -2252,7 +2260,11 @@ describe("verbs", () => {
       // than off a second read taken later.
 
       const shuttle = atPiece();
-      await runLine("ls", shuttle, listedCell({ "add-reply": STREAM }));
+      await runLine(
+        "ls",
+        shuttle,
+        listedCell({ "add-reply": {} }, ["add-reply"]),
+      );
       expect(shuttle.session.handles?.rows).toEqual([{
         name: "add-reply",
         kind: "callable",
@@ -6310,7 +6322,11 @@ describe("verbs", () => {
       const gate = inFlight<Record<string, string>>();
       const first = runLine("ls", shuttle, {
         ...READS_NOTHING,
-        listing: { ...READS_NOTHING.listing, getCellValue: gate.read },
+        listing: {
+          ...READS_NOTHING.listing,
+          getCellValue: gate.read,
+          listCallableKeys: () => Promise.resolve(new Set<string>()),
+        },
         signal: stopper.signal,
       });
       await gate.started;

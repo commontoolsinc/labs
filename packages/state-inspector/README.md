@@ -23,7 +23,7 @@ exist** and resolves lineage from them:
 | ------------ | ------------------------------------------------------------------------ |
 | `piece`      | `patternIdentity` (modern) or a legacy `$TYPE`/`resultRef` process value |
 | `module`     | value carries `{ code, identity }` (pattern source/compiled)             |
-| `stream`     | `value.$stream === true`                                                 |
+| `stream`     | `schema` meta declares `asCell: ["stream"]` (or a legacy `value.$stream`) |
 | `schema`     | value is a JSONSchema (`{ type, properties\|$defs }`)                    |
 | `owned-cell` | carries a `result` ownership back-link                                   |
 | `free-cell`  | a bare `value`, owned by no piece                                        |
