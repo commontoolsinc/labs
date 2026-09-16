@@ -163,6 +163,19 @@ the bound a lane is killed at are the same order of magnitude, so a test
 that hits one is otherwise reported as fitting no lane and held out of
 every pull request that does not touch it.
 
+A day records which set of these rules sealed it. These rules change,
+and a day sealed under earlier ones did not measure what these measure,
+so such a day answers only until these rules have sealed a day for that
+test, and is dropped the moment they do. Carried instead, it would
+decide what runs for the whole of the window, and a safety net's bound
+is the figure that outcome is worst for.
+
+Two things follow that are worth stating. The window refills over its
+own length after a change, charging fewer days' figures while it does.
+And a test that keeps hitting a safety net seals no day at all, so it
+keeps the earlier set's figure until that figure ages out; what answers
+that case is the rule above it, that a failure is not measured.
+
 A test with no passing execution inside the window has no measured cost
 and is charged nothing. Such a test has either barely run or is failing
 everywhere, and one failing everywhere holds up the default branch, which
