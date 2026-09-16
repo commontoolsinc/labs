@@ -124,20 +124,21 @@ async function fileBoardWithMembers(
     space: SPACE_NAME,
   });
   try {
-    const board = await pieces.get(boardId, false);
+    const board = await pieces.get(boardId, true);
     const memberName = String(titles.length);
     const memberSlot = (await board.result.getCell())
       .key("names")
       .key(memberName);
     // The namespace deliberately keeps an unread link. Wait for that stored
-    // slot first, then follow it to prove the member's own result is ready.
+    // slot first, then open its piece to derive the member's own result.
     await memberSlot.pull();
     await waitForCellValue(
       pieces.runtime,
       memberSlot,
       () => memberSlot.getRaw({ lastNode: "value" }) !== undefined,
+      { stuckLabel: "collection member link publication" },
     );
-    const member = memberSlot.resolveAsCell()
+    const member = (await pieces.getPieceCell(memberSlot, true))
       .asSchema<{ title?: string; shortName?: string }>();
     await member.pull();
     await waitForCellValue<{ title?: string; shortName?: string }>(
@@ -145,6 +146,7 @@ async function fileBoardWithMembers(
       member,
       (value) =>
         value?.title === expectedTitle && value?.shortName === memberName,
+      { stuckLabel: "collection member result publication" },
     );
   } finally {
     await pieces.dispose();
