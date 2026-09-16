@@ -117,7 +117,7 @@ export abstract class BaseValueVisitor<
 
   /** @inheritDoc */
   visitedFabricArrayElement(
-   _array: FabricArrayPlus<PlusType>,
+    _array: FabricArrayPlus<PlusType>,
     _index: number,
     _value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType> {
