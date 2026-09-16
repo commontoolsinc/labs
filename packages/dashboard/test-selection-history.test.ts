@@ -418,6 +418,30 @@ describe("test-selection-history", () => {
       expect(store.reads.filter((n) => !n.startsWith("list:"))).toEqual([]);
     });
 
+    it("keeps a measurement the build that took it could still read", async () => {
+      // A refusal is this build's reading of a body and dies with the
+      // process. A measurement is a count taken off a body the store will
+      // never change, so it outlives the build that took it, and a reader
+      // that could no longer take it again still shows it.
+      const manifest = measurement("2026-09-01T00:00:00.000Z");
+      const name = objectName(manifest.generatedAt);
+      const store = storeOf([manifest]);
+      await makeTestSelectionSource({ fetchImpl: store.fetchImpl, cacheFile })
+        .history();
+
+      store.objects[name] = JSON.stringify({
+        ...manifest,
+        schema: MANIFEST_SCHEMA_VERSION + 1,
+      });
+      store.reads.length = 0;
+      const later = await makeTestSelectionSource({
+        fetchImpl: store.fetchImpl,
+        cacheFile,
+      }).history();
+      expect(later.samples.map((sample) => sample.counts?.known)).toEqual([4]);
+      expect(store.reads.filter((n) => !n.startsWith("list:"))).toEqual([name]);
+    });
+
     it("retries an object the store could not answer for", async () => {
       // A store that did not answer may answer the next read, so nothing
       // about that is kept.
