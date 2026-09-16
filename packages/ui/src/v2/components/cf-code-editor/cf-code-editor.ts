@@ -60,6 +60,7 @@ import { parseFabricUrl } from "@commonfabric/runner/fabric-url";
 import { stringSchema } from "@commonfabric/runner/schemas";
 import {
   type CellHandle,
+  cellRefToIdentityKey,
   isCellHandle,
   NAME,
   type RuntimeClient,
@@ -179,26 +180,6 @@ function sameShortNames(
   const keys = Object.keys(a);
   return keys.length === Object.keys(b).length &&
     keys.every((key) => a[key] === b[key]);
-}
-
-/**
- * A string distinguishing the cell a handle names from every other cell.
- *
- * A document id alone does not: one id in two spaces is two documents, and
- * two paths into one document are two cells. The fields here are the ones
- * `CellHandle.equals()` weighs, less `cfcLabelView` — a main-thread display
- * copy that drifts while CFC settles, so two handles on a single cell can
- * carry different views, and weighing it would leave a destination
- * unrecognized for as long as the drift lasted. Schema is out for the
- * converse reason: `asSchema()` answers with another handle on the same
- * cell, and a lens over a cell is not a different cell.
- *
- * JSON rather than joined text, so a path segment holding the separator
- * cannot spell another cell's key.
- */
-function cellIdentityKey<T>(cell: CellHandle<T>): string {
-  const ref = cell.ref();
-  return JSON.stringify([ref.id, ref.space, ref.scope ?? "space", ref.path]);
 }
 
 function escapeMarkdownImageAltText(text: string): string {
@@ -3657,10 +3638,13 @@ export class CFCodeEditor extends BaseElement {
    * destination.
    *
    * The row is found by identity, comparing the cell the reference map names
-   * with the one the resolution pass recorded for each row over the whole of
-   * what tells two cells apart, a document id alone holding in every space
-   * that stores the document. The name is the row's, never one the
-   * destination publishes. A destination publishes the name its creating
+   * with the one the resolution pass recorded for each row through
+   * `cellRefToIdentityKey()`, whose doc comment carries what a cell's identity
+   * is and why it is not `CellHandle.equals()`. What matters to a pill is that
+   * a handle redelivered mid-settle names the same cell as the one it
+   * replaced, so a pill keeps its name across a redelivery rather than
+   * blinking out. The name is the row's, never one the destination
+   * publishes. A destination publishes the name its creating
    * collection gave it, which means something only where that collection is
    * read through (`docs/specs/collection-naming.md`, "The name a member
    * publishes"). The row's is what this universe calls the member, and the
@@ -3685,7 +3669,7 @@ export class CFCodeEditor extends BaseElement {
       if (pieceCell === undefined || pieceCell.id() === "" || name === "") {
         continue;
       }
-      const identity = cellIdentityKey(pieceCell);
+      const identity = cellRefToIdentityKey(pieceCell.ref());
       if (namesByPiece.has(identity)) continue;
       namesByPiece.set(identity, name);
     }
@@ -3695,7 +3679,7 @@ export class CFCodeEditor extends BaseElement {
     for (const ref of this._documentRefs()) {
       const destination = refMap[ref.key]?.destination;
       if (!isCellHandle(destination)) continue;
-      const name = namesByPiece.get(cellIdentityKey(destination));
+      const name = namesByPiece.get(cellRefToIdentityKey(destination.ref()));
       if (name !== undefined) names[ref.key] = name;
     }
     return names;
