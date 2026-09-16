@@ -30,7 +30,8 @@ import { describeThrown } from "./describe-thrown.ts";
  *
  * A failed wait reports the cell address, predicate, and last read value.
  * Rendering happens only at failure, with bounded depth and length, so a live
- * value reflects its state then. The original failure remains the error's cause.
+ * value reflects its state then. An Error's name is retained on the wrapper;
+ * the original failure remains its cause.
  */
 export async function waitForCellValue<T>(
   runtime: Runtime,
@@ -61,7 +62,7 @@ export async function waitForCellValue<T>(
     }
   } catch (cause) {
     const { space, id, path, scope } = cell.getAsNormalizedFullLink();
-    throw new Error(
+    const error = new Error(
       `${describeThrown(cause)}\n` +
         `Cell: ${
           toCompactDebugString({ space, id, path, scope }, { maxLength: 4096 })
@@ -75,6 +76,8 @@ export async function waitForCellValue<T>(
         }`,
       { cause },
     );
+    if (cause instanceof Error) error.name = cause.name;
+    throw error;
   } finally {
     stuck?.clear();
     // Cancelling while the action that reported a value is still finalizing

@@ -108,6 +108,7 @@ describe("waitForCellValue()", () => {
 
     expect(error).toBeInstanceOf(Error);
     if (!(error instanceof Error)) throw new Error("Expected a failed wait.");
+    expect(error.name).toBe("TypeError");
     expect(error.cause).toBe(cause);
     expect(error.message).toContain("Cannot inspect the member.");
     expect(error.message).toContain(
@@ -118,7 +119,7 @@ describe("waitForCellValue()", () => {
 
   it("distinguishes a failed first read from an undefined value", async () => {
     const f = fixture(undefined);
-    const cause = new Error("Cannot read the cell.");
+    const cause = new DOMException("Cannot read the cell.", "AbortError");
     using _get = stub(f.cell, "get", () => {
       throw cause;
     });
@@ -128,11 +129,27 @@ describe("waitForCellValue()", () => {
 
     expect(error).toBeInstanceOf(Error);
     if (!(error instanceof Error)) throw new Error("Expected a failed wait.");
+    expect(error.name).toBe("AbortError");
     expect(error.cause).toBe(cause);
     expect(error.message).toContain("Cannot read the cell.");
     expect(error.message).toContain(
       "Last read value (rendered at failure): <not read>",
     );
+    expect(f.listeners.size).toBe(0);
+  });
+
+  it("uses the default error name for a thrown value that is not an Error", async () => {
+    const f = fixture(undefined);
+    const cause = "Cannot inspect the member.";
+    const error = await waitForCellValue(f.runtime, f.cell, () => {
+      throw cause;
+    }).catch((error: unknown) => error);
+
+    expect(error).toBeInstanceOf(Error);
+    if (!(error instanceof Error)) throw new Error("Expected a failed wait.");
+    expect(error.name).toBe("Error");
+    expect(error.cause).toBe(cause);
+    expect(error.message).toContain(cause);
     expect(f.listeners.size).toBe(0);
   });
 
