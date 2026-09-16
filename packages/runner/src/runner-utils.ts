@@ -664,6 +664,13 @@ function mergeSchemaDefaultsUncached(
     // schemaless read that produced the view, and the merge owes the same:
     // defaults fill absent slots and never replace a present value, and the
     // instance's own verdict belongs to the validator, which judges it whole.
+    //
+    // TODO(danfuzz): schemas will come to describe an instance's contents -- a
+    // `FabricMap` with keys of one type and values of another, say -- and a
+    // default can then sit inside one. This return, and the special-object
+    // rule below it, is what stops the merge at the instance's surface; when
+    // that lands, the merge descends an instance by its codec contents
+    // instead, and both stops come out.
     if (valuePresent && isFabricInstanceOrView(value)) return value;
 
     if (

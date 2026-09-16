@@ -411,6 +411,9 @@ describe("fabric special objects through the runner's walks", () => {
       expect(isFabricInstanceOrView({ a: 1 })).toBe(false);
       expect(isFabricInstanceOrView([1])).toBe(false);
       expect(isFabricInstanceOrView(null)).toBe(false);
+      // An own `constructor` is data sharing the name, not the class, and
+      // cannot answer for an instance.
+      expect(isFabricInstanceOrView({ constructor: FabricError })).toBe(false);
     });
 
     for (const kind of FABRIC_INSTANCES) {

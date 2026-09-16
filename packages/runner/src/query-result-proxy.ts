@@ -834,6 +834,16 @@ export function isCellResult(value: any): value is CellResult<any> {
  * descriptor query meets the instance's non-configurable freeze shield, which
  * the stub target lacks, and the proxy invariant throws.
  *
+ * The read is off the view itself rather than through `constructorOfObject()`
+ * from `@commonfabric/utils/objects`, which reads the constructor from the
+ * prototype on purpose: here the prototype is the one fact the view has
+ * erased, and the `get` trap is the only channel the class still comes
+ * through. The shadow that helper guards against -- an own `constructor`
+ * property answering for the class -- has no purchase on a view. The trap
+ * serves an own key as data, a child view or a primitive and never a
+ * function, so the callable test below refuses it; and a stored record cannot
+ * carry that key at all, `unsafeObjectKeyIn()` refusing it at conversion.
+ *
  * TODO(danfuzz): once a view over a `FabricInstance` is perceived as one (the
  * marker above the proxy construction), this collapses to `instanceof`.
  */
