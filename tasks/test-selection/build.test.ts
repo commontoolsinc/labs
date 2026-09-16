@@ -12,6 +12,7 @@ import {
   buildManifest,
   CI_SOURCE,
   dayOf,
+  departed,
   emptyAggregate,
   executionsFor,
   Fold,
@@ -821,6 +822,141 @@ describe("build", () => {
     });
   });
 
+  describe("departed()", () => {
+    /** A suite claiming nothing, holding the skips a case gives it. */
+    function empty(unavailable: Suite["unavailable"] = []): Suite {
+      return {
+        id: "workspace-unit",
+        recordSurfaces: [{ kind: "unit", scope: "memory" }],
+        needs: ["deno"],
+        units: [],
+        unavailable,
+        locate: () => undefined,
+        command: () => Promise.resolve([]),
+      };
+    }
+
+    /** A state whose last run was on a day inside the counters' window. */
+    function ranOn(day: string): IdentityState {
+      return { ...emptyState(), runsByDay: { [day]: 4 } };
+    }
+
+    const onFile = new Map([[KEY, {
+      suite: "unit:memory",
+      unit: UNIT,
+      fromFile: true,
+    }]]);
+
+    it("drops an identity the topology lost that nothing records", () => {
+      // A deleted test keeps its records in the store, so the fold keeps
+      // reading it back. Nothing can run it, and carrying it costs a
+      // state rescored and rewritten on every publisher run.
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([KEY]);
+    });
+
+    it("keeps an identity the topology lost that is still recording", () => {
+      // A surface whose records never say which file they came from has
+      // no unit either, and it is a wiring defect rather than a test that
+      // left. The runs are what tell the two apart.
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        {
+          states: new Map([[KEY, ranOn("2026-08-19")]]),
+          surfaces: onFile,
+        },
+      )).toEqual([]);
+    });
+
+    it("keeps an identity a configuration declares unavailable", () => {
+      // The declaration is the tree saying the test is there and does not
+      // run in this configuration, so it has stopped recording on
+      // purpose and its history is waiting for the skip to be lifted.
+      expect(departed(
+        [empty([{ unit: UNIT, reason: "the surface has not landed" }])],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([]);
+    });
+
+    it("reads a skip registry against the variant that declared it", () => {
+      // The registry belongs to one configuration and names a file every
+      // configuration of the suite holds. Read across all of them, a file
+      // skipped under one variant would pin the default history of the
+      // same file for good.
+      const variant: Suite = {
+        ...empty([{ unit: UNIT, reason: "the surface has not landed" }]),
+        variant: "server-execution",
+      };
+      expect(departed(
+        [variant],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([KEY]);
+    });
+
+    it("passes over a leaf a configuration declares unavailable", () => {
+      // A leaf entry leaves its unit enumerated and running, so the unit
+      // is placed by its file and never reaches here. Reading such an
+      // entry as a whole unit would exempt every other test in the file.
+      expect(departed(
+        [empty([{
+          unit: UNIT,
+          leafName: "space > writes",
+          reason: "the surface has not landed",
+        }])],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([KEY]);
+    });
+
+    it("drops an identity whose history is older than the window", () => {
+      // The counters are aged before this reads them, so a state with
+      // catches and no days is a test that stopped running long enough
+      // ago for every window to have passed over it.
+      const old = { ...emptyState(), mainCatches: 4, lastCatch: "2026-01-02" };
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, old]]), surfaces: onFile },
+      )).toEqual([KEY]);
+    });
+
+    it("keeps an identity more than one suite claims", () => {
+      // Two suites claiming it is a topology defect over a test the tree
+      // holds twice, and the drift guard is what fails on it. Dropping
+      // its history would answer a defect by discarding the evidence.
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [], contested: [KEY] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([]);
+    });
+
+    it("keeps an identity the topology placed", () => {
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([]);
+    });
+
+    it("keeps an identity that measures a whole invocation", () => {
+      // Those are left out of the manifest because no lane can be asked
+      // to run one, not because the tree has lost them, and the lane
+      // cost fit reads what they measured.
+      expect(departed(
+        [empty()],
+        { suiteLevel: [KEY], unclaimed: [], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([]);
+    });
+  });
+
   describe("locateSurfaces()", () => {
     /** A suite claiming what a case tells it to. */
     function claiming(id: string, locate: Suite["locate"]): Suite {
@@ -901,7 +1037,8 @@ describe("build", () => {
         }]]),
       );
       expect(placed.size).toBe(0);
-      expect(unplaced).toEqual({ suiteLevel: [], unclaimed: [] });
+      expect(unplaced)
+        .toEqual({ suiteLevel: [], unclaimed: [], contested: [] });
     });
 
     it("passes over a key that names no identity", () => {
@@ -917,7 +1054,8 @@ describe("build", () => {
         }]]),
       );
       expect(placed.size).toBe(0);
-      expect(unplaced).toEqual({ suiteLevel: [], unclaimed: [] });
+      expect(unplaced)
+        .toEqual({ suiteLevel: [], unclaimed: [], contested: [] });
     });
 
     it("passes on an identity two suites claim", () => {
@@ -934,7 +1072,11 @@ describe("build", () => {
         }]]),
       );
       expect(placed.size).toBe(0);
-      expect(unplaced.unclaimed).toEqual([KEY]);
+      // Apart from an identity no suite claims: the tree holds this test
+      // twice over rather than not at all, and what is done about a test
+      // the tree has lost must not be done about one it holds.
+      expect(unplaced.unclaimed).toEqual([]);
+      expect(unplaced.contested).toEqual([KEY]);
     });
   });
 

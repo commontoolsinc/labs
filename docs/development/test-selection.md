@@ -465,9 +465,10 @@ read them, and creates nothing in the store.
 
 ## What a run leaves out
 
-A run's log names two kinds of identity that did not reach the manifest.
-The first is the design working. The second is a surface whose records do
-not say which unit they belong to.
+A run's log names four kinds of identity that did not reach the manifest.
+The first is the design working. The second is a test the tree no longer
+holds. The third is a surface whose records do not say which unit they
+belong to. The fourth is a topology defect.
 
 The first is the identities that measure a whole invocation:
 
@@ -484,12 +485,56 @@ the time of the steps inside it would count that work twice. The count is
 that separation working. It changes when a suite gains or loses such a
 record, and there is nothing to do about it either way.
 
-The second is the identities the topology has no unit for:
+The second is the identities that have left the tree:
 
 ```
-test selection: the topology has no unit for 3295 identities, so no lane
-can be asked to run one. What puts an identity here, and what takes it
-out again, is in docs/development/test-selection.md.
+test selection: 6 identities have left the tree: no suite claims them and
+no run of them has been recorded inside the window a state keeps counters
+for. Their states are dropped from the aggregate.
+test selection: those 6 were recorded by 2 surface(s): unit:utils 4,
+unit:memory 2
+```
+
+A test deleted from the repository keeps its records in the store, and
+the store is what the publisher reads, so without this the aggregate
+would carry its state for as long as the store lives. Two things have to
+hold before one is dropped. No suite claims it, so nothing in the tree
+can be asked to run it. And no run of it has been recorded inside the
+window a state keeps counters for, which is the longer of
+`CHURN_WINDOW_DAYS` and `FLAKE_WINDOW_DAYS` and so is sixty days today.
+
+The second condition is what the first cannot say on its own. A suite
+whose records name a scope the topology no longer holds claims none of
+its identities, and every one of those is still running on the default
+branch, so the runs hold them where the claim does not. What the second
+condition does not reach is a test the tree holds that nothing runs at
+all: a skip is the one outcome a state records nothing for, so such a
+test meets both conditions and is dropped like a deleted one. What that
+costs is catches from before the window, because every counter inside it
+is empty either way.
+
+A unit a configuration declares unavailable is the exception, and is kept
+under the variant that declared it: the declaration is the tree saying the
+test is there and does not run in this configuration. The exemption is
+read a unit at a time, so a declaration naming one leaf inside a unit does
+not reach it — such a unit is still enumerated and still running, and its
+identities are placed by their file rather than reaching this at all.
+
+That window is how long a deletion takes to settle. Until then the
+deleted test is in the count below rather than this one, because it did
+run inside the window. So this count is a one-off when a change deletes tests
+and nothing at all in between, and a count that stays large run after run
+is a suite that has stopped recording rather than a set of tests somebody
+deleted. The surfaces named beside it say which suite.
+
+The third is the identities no suite claims that have run inside that
+window:
+
+```
+test selection: no suite claims 3295 identities that have run inside the
+window a state keeps counters for, so no lane can be asked to run one.
+What puts an identity here, and what takes it out again, is in
+docs/development/test-selection.md.
 test selection: those 3295 were recorded by 12 surface(s): unit:utils 742,
 unit:runtime-client 509, unit:ts-transformers 379,
 unit:schema-generator 314, unit:js-compiler 153, and 7 more
@@ -511,8 +556,7 @@ supplies neither has no file on any of its records, and neither does a
 name that two files in one report both report. Where a suite's units are
 not files — a dispatch arm, a pattern key — the answer is the recorded
 name instead, and a name no suite recognizes leaves the identity without a
-unit the same way. An identity that matches two suites is left out as
-well, which is a topology defect the drift guard fails on separately. What
+unit the same way. What
 is not in the count is the lane measuring its own setup and its own
 batches. Those records travel the same path as a test's, but nothing
 enumerates them and no lane can be asked to run one, so no suite has a
@@ -537,16 +581,26 @@ manifest that no lane could run. The next record that says enough puts the
 identity back in.
 
 The count spans every identity the aggregate holds rather than the ones
-this run read, because the surfaces it is taken from do. Three different
+this run read, because the surfaces it is taken from do. Two different
 things are in it. The first is an identity whose records have never said
 which unit it is in, which is the one to act on, and the next record
-that says enough takes it out. The second is an identity nothing records
-any more: a deleted or renamed test keeps its state in the aggregate,
-and the file its records named may be one no suite has a unit for now.
-The third is an identity two suites both claim, which no record can
-settle, and which the drift guard fails on separately. Nothing in the
-count separates the three, and the surfaces named beside it are the only
-handle on which is which.
+that says enough takes it out. The second is a test deleted inside that
+window, which moves to the count above once the window has passed over
+it and is gone from the aggregate for good after that.
+
+The fourth is the identities two suites both claim:
+
+```
+test selection: 2 identities are claimed by more than one suite, which is
+a topology defect the drift guard fails on. They are left out rather than
+placed in whichever suite came first.
+```
+
+No record can settle which suite owns one, so placing it either way would
+put the work wherever the topology happened to be read in. The tree holds
+the test twice over rather than not at all, which is why this is counted
+apart from the tests that have left: an identity here keeps its history
+until the topology is fixed.
 
 The first runs after a change to what the aggregate carries report the
 whole corpus here. An aggregate written before the files were carried

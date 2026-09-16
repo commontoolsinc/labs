@@ -103,7 +103,23 @@ describe("test-selection", () => {
 
     it("says an identity with no records is mandatory", () => {
       const lines = explainLines(manifest(), { ...TEST, n: "never seen" });
-      expect(lines.join("\n")).toContain("no record of it");
+      expect(lines.join("\n")).toContain("no manifest knows is mandatory");
+    });
+
+    it("says a deleted test runs nowhere rather than everywhere", () => {
+      // The name reaches the same branch a new test's does, and nothing
+      // in an identity tells the two apart, so the answer has to cover
+      // both rather than assert the wrong one.
+      const lines = explainLines(manifest(), { ...TEST, n: "never seen" });
+      expect(lines.join("\n")).toContain("nothing runs it");
+    });
+
+    it("does not claim the store or the tree holds nothing for it", () => {
+      // The store holds every record it ever took, and the tree holds
+      // every identity whose records do not say which unit they are in.
+      // What has no entry is the manifest.
+      const lines = explainLines(manifest(), { ...TEST, n: "never seen" });
+      expect(lines.join("\n")).toContain("The manifest has no entry for it");
     });
 
     it("prints the catches behind a score", () => {

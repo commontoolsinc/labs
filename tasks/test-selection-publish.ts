@@ -48,6 +48,7 @@ import {
   buildManifest,
   CI_SOURCE,
   dayOf,
+  departed,
   emptyAggregate,
   Fold,
   locateSurfaces,
@@ -597,6 +598,16 @@ export async function publish(
   // built without it names surfaces nothing in the tree answers to.
   const suites = await topology();
   const { placed, unplaced } = locateSurfaces(suites, folded.surfaces);
+  // A test the tree no longer holds leaves the aggregate here rather
+  // than being carried and rescored for the rest of the store's life.
+  // The state written below is the one the next run reads, so dropping
+  // the entries from it is the whole of what forgetting an identity is.
+  const left = departed(suites, unplaced, folded);
+  for (const key of left) {
+    delete folded.aggregate.states[key];
+    delete folded.aggregate.files[key];
+    folded.states.delete(key);
+  }
   const states = new Map(
     [...folded.states].filter(([key]) => placed.has(key)),
   );
@@ -652,7 +663,7 @@ export async function publish(
       })),
   }));
 
-  summarize(manifest, reference, folded.observations, unplaced);
+  summarize(manifest, reference, folded.observations, unplaced, left);
 
   if (options.out !== undefined) {
     await Deno.mkdir(options.out, { recursive: true });
@@ -726,6 +737,7 @@ function summarize(
   reference: ReturnType<typeof plan>,
   observations: number,
   unplaced: Unplaced,
+  left: readonly string[],
 ): void {
   console.log(
     `test selection: folded ${observations} execution(s); the manifest ` +
@@ -739,16 +751,42 @@ function summarize(
         `is missing and there is nothing to act on.`,
     );
   }
-  if (unplaced.unclaimed.length > 0) {
+  if (left.length > 0) {
     console.log(
-      `test selection: the topology has no unit for ` +
-        `${unplaced.unclaimed.length} identities, so no lane can be asked ` +
-        `to run one. What puts an identity here, and what takes it out ` +
-        `again, is in docs/development/test-selection.md.`,
+      `test selection: ${left.length} identities have left the tree: no ` +
+        `suite claims them and no run of them has been recorded inside ` +
+        `the window a state keeps counters for. Their states are dropped ` +
+        `from the aggregate.`,
     );
     console.log(
-      `test selection: those ${unplaced.unclaimed.length} were recorded ` +
-        `by ${namingSurfaces(unplaced.unclaimed)}`,
+      `test selection: those ${left.length} were recorded by ` +
+        `${namingSurfaces(left)}`,
+    );
+  }
+  const gone = new Set(left);
+  const unclaimed = unplaced.unclaimed.filter((key) => !gone.has(key));
+  if (unclaimed.length > 0) {
+    console.log(
+      `test selection: no suite claims ${unclaimed.length} identities ` +
+        `that have run inside the window a state keeps counters for, so ` +
+        `no lane can be asked to run one. What puts an identity here, and ` +
+        `what takes it out again, is in docs/development/test-selection.md.`,
+    );
+    console.log(
+      `test selection: those ${unclaimed.length} were recorded ` +
+        `by ${namingSurfaces(unclaimed)}`,
+    );
+  }
+  if (unplaced.contested.length > 0) {
+    console.log(
+      `test selection: ${unplaced.contested.length} identities are ` +
+        `claimed by more than one suite, which is a topology defect the ` +
+        `drift guard fails on. They are left out rather than placed in ` +
+        `whichever suite came first.`,
+    );
+    console.log(
+      `test selection: those ${unplaced.contested.length} were recorded ` +
+        `by ${namingSurfaces(unplaced.contested)}`,
     );
   }
   const held = new Map<string, number>();
