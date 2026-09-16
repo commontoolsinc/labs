@@ -2,7 +2,20 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
 import { validateSchemaValue } from "@commonfabric/runner/cfc";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  type FabricPrimitiveSchemaType,
+} from "@commonfabric/api";
+import type { FabricPrimitive } from "@commonfabric/data-model";
+import {
+  FabricBytes,
+  FabricEpochDay,
+  FabricEpochNsec,
+  FabricHash,
+  FabricKeyPair,
+  FabricRegExp,
+} from "@commonfabric/data-model/fabric-primitives";
+import { FABRIC_SPECIAL_OBJECT_BRAND } from "@commonfabric/runner/fabric-special-object-brand";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
@@ -3233,6 +3246,147 @@ describe("piece schema compatibility", () => {
     expect(() =>
       assertSchemaSubset({ type: "FabricBytes" }, { type: "FabricHash" })
     ).toThrow(/type FabricBytes is not accepted/);
+  });
+
+  describe("`required` against a `FabricPrimitive`-typed source", () => {
+    // The runtime checks a target's `required` keys on a `FabricPrimitive`
+    // with `in` when the target declares no `type` or its type list includes
+    // `object`, excusing the brand key, and leaves them unchecked under a
+    // target typed some other way. Each case reads the validator's verdict on
+    // a value of the source's class beside the proof's, so the two agree on
+    // the spelling in front of them.
+
+    const bytesSource: JSONSchema = { type: "FabricBytes" };
+    const bytes = new FabricBytes(new Uint8Array([1]));
+
+    it("refuses an `object` target requiring a key `FabricBytes` does not carry", () => {
+      const target: JSONSchema = { type: "object", required: ["source"] };
+      expect(validateSchemaValue(target, bytes, target)).toBe(
+        "missing required property source",
+      );
+      expect(() => assertSchemaSubset(bytesSource, target)).toThrow(
+        /value\.source: required field is not a member of `FabricBytes`/,
+      );
+    });
+
+    it("accepts an `object` target requiring a member every `FabricBytes` carries", () => {
+      const target: JSONSchema = { type: "object", required: ["length"] };
+      expect(validateSchemaValue(target, bytes, target)).toBeUndefined();
+      expect(() => assertSchemaSubset(bytesSource, target)).not.toThrow();
+    });
+
+    it("accepts a `FabricBytes` target requiring a key `FabricBytes` does not carry", () => {
+      const target: JSONSchema = { type: "FabricBytes", required: ["source"] };
+      expect(validateSchemaValue(target, bytes, target)).toBeUndefined();
+      expect(() => assertSchemaSubset(bytesSource, target)).not.toThrow();
+    });
+
+    it("refuses the missing key under an untyped target, a type list including `object`, and a required `anyOf` base", () => {
+      // A type list is proved branch by branch, and an `anyOf` as its base
+      // beside each branch, so these reach the proof by other routes than a
+      // node typed `object` does.
+
+      const cases: [JSONSchema, RegExp][] = [
+        [
+          { required: ["source"] },
+          /value\.source: required field is not a member of `FabricBytes`/,
+        ],
+        [
+          { type: ["FabricBytes", "object"], required: ["source"] },
+          /a schema alternative accepted previously is not accepted/,
+        ],
+        [
+          { type: ["unknown", "object"], required: ["source"] },
+          /a schema alternative accepted previously is not accepted/,
+        ],
+        [
+          { anyOf: [{ type: "FabricBytes" }], required: ["source"] },
+          /a schema alternative accepted previously is not accepted/,
+        ],
+      ];
+      for (const [target, issue] of cases) {
+        expect(validateSchemaValue(target, bytes, target)).toBe(
+          "missing required property source",
+        );
+        expect(() => assertSchemaSubset(bytesSource, target)).toThrow(issue);
+      }
+    });
+
+    it("accepts the missing key under a target typed `unknown` or by a type list without `object`", () => {
+      for (
+        const target of [
+          { type: "unknown", required: ["source"] },
+          { type: ["FabricBytes", "string"], required: ["source"] },
+        ] satisfies JSONSchema[]
+      ) {
+        expect(validateSchemaValue(target, bytes, target)).toBeUndefined();
+        expect(() => assertSchemaSubset(bytesSource, target)).not.toThrow();
+      }
+    });
+
+    it("refuses exactly the member names the validator finds missing, for every class in the vocabulary", () => {
+      // The `satisfies` closes the classes over the vocabulary's names. The
+      // member names are every string-keyed member on any of their prototype
+      // chains below `Object.prototype`, a name none of them has, and the
+      // brand key.
+
+      const values = {
+        FabricBytes: new FabricBytes(new Uint8Array([1])),
+        FabricEpochDay: new FabricEpochDay(0n),
+        FabricEpochNsec: new FabricEpochNsec(0n),
+        FabricHash: new FabricHash(new Uint8Array(32), "fid1"),
+        FabricKeyPair: new FabricKeyPair(
+          "ExampleAlgorithm",
+          new Uint8Array([1]),
+          new Uint8Array([2]),
+        ),
+        FabricRegExp: new FabricRegExp(/a/),
+      } satisfies Record<FabricPrimitiveSchemaType, FabricPrimitive>;
+      const names = new Set([
+        "absentFromEveryClass",
+        FABRIC_SPECIAL_OBJECT_BRAND,
+      ]);
+      for (const value of Object.values(values)) {
+        for (
+          let prototype = Object.getPrototypeOf(value);
+          prototype !== Object.prototype;
+          prototype = Object.getPrototypeOf(prototype)
+        ) {
+          for (const name of Object.getOwnPropertyNames(prototype)) {
+            names.add(name);
+          }
+        }
+      }
+
+      const verdicts: { type: string; name: string; accepted: boolean }[] = [];
+      const disagreements: typeof verdicts = [];
+      for (const type of FABRIC_PRIMITIVE_SCHEMA_TYPES) {
+        for (const name of names) {
+          const target: JSONSchema = { type: "object", required: [name] };
+          const accepted =
+            validateSchemaValue(target, values[type], target) === undefined;
+          let proved = true;
+          try {
+            assertSchemaSubset({ type }, target);
+          } catch {
+            proved = false;
+          }
+          verdicts.push({ type, name, accepted });
+          if (proved !== accepted) disagreements.push({ type, name, accepted });
+        }
+      }
+      expect(disagreements).toEqual([]);
+      expect(verdicts).toContainEqual({
+        type: "FabricHash",
+        name: "tag",
+        accepted: true,
+      });
+      expect(verdicts).toContainEqual({
+        type: "FabricBytes",
+        name: "tag",
+        accepted: false,
+      });
+    });
   });
 
   it("compares Fabric enum and const values canonically", () => {

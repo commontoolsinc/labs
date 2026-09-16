@@ -12,7 +12,11 @@ import {
   validateSchemaDefinition,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
-import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
+import {
+  type FabricPrimitiveSchemaType,
+  isFabricPrimitiveSchemaType,
+} from "@commonfabric/api";
+import { FABRIC_SPECIAL_OBJECT_BRAND } from "@commonfabric/runner/fabric-special-object-brand";
 import { isPlainObject } from "@commonfabric/utils/types";
 import {
   ARRAY_SUBSCHEMA_KEYS,
@@ -25,8 +29,17 @@ import {
 import { internSchema } from "@commonfabric/data-model-schema";
 import {
   fabricAwareEqual,
+  type FabricPrimitive,
   isKeyableObjectOrArray,
 } from "@commonfabric/data-model";
+import {
+  FabricBytes,
+  FabricEpochDay,
+  FabricEpochNsec,
+  FabricHash,
+  FabricKeyPair,
+  FabricRegExp,
+} from "@commonfabric/data-model/fabric-primitives";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
@@ -926,6 +939,9 @@ function schemaSubsetIssue(
       }
     }
 
+    const primitiveIssue = fabricPrimitiveRequiredIssue(source, target, path);
+    if (primitiveIssue) return primitiveIssue;
+
     if (
       schemaMayProduceType(source, ["object"]) &&
       (declaresObjectShape(source) || declaresObjectShape(target))
@@ -1307,6 +1323,66 @@ function objectSubsetIssue(
   return additionalPropertiesSubsetIssue(source, target, path, context);
 }
 
+/**
+ * The class each `FabricPrimitive` type name matches, by the same `instanceof`
+ * mapping `schemaTypeOfFabricPrimitive()` applies to a value. Keyed over the
+ * whole vocabulary, so a name added to it stops this compiling until its class
+ * is named here. Nothing checks that a name is paired with the right class.
+ */
+const FABRIC_PRIMITIVE_CLASSES: {
+  readonly [Type in FabricPrimitiveSchemaType]: {
+    readonly prototype: FabricPrimitive;
+  };
+} = {
+  FabricBytes,
+  FabricEpochDay,
+  FabricEpochNsec,
+  FabricHash,
+  FabricKeyPair,
+  FabricRegExp,
+};
+
+/**
+ * Helper for {@link schemaSubsetIssue}, which proves that a value of each
+ * `FabricPrimitive` class the source names by `type` carries every key the
+ * target's `required` checks on it. The runtime checks those keys on a
+ * `FabricPrimitive` with `in` whenever the target declares no `type` or its
+ * type list includes `object`, and excuses `FABRIC_SPECIAL_OBJECT_BRAND`. A
+ * target typed only by `FabricPrimitive` names is not checked, and the object
+ * keywords besides `required` never reach a primitive.
+ * {@link objectSubsetIssue} does not run for a source typed this way, so this
+ * is the whole object proof for such a source.
+ *
+ * Membership is read off the class's prototype. `BaseFabricPrimitive` freezes
+ * each instance at construction, which leaves a subclass no own field to add,
+ * so every key `in` finds on a value is on that prototype chain; a key found
+ * only on an instance would be reported missing here. A target default does not
+ * supply a missing key, since nothing can be written onto a frozen value.
+ */
+function fabricPrimitiveRequiredIssue(
+  source: SchemaObject,
+  target: SchemaObject,
+  path: string,
+): string | undefined {
+  const targetTypes = typeof target.type === "string"
+    ? [target.type]
+    : target.type;
+  if (
+    target.required === undefined || targetTypes?.includes("object") === false
+  ) {
+    return undefined;
+  }
+  for (const type of schemaTypes(source) ?? []) {
+    if (!isFabricPrimitiveSchemaType(type)) continue;
+    const { prototype } = FABRIC_PRIMITIVE_CLASSES[type];
+    for (const key of target.required) {
+      if (key === FABRIC_SPECIAL_OBJECT_BRAND || key in prototype) continue;
+      return `${path}.${key}: required field is not a member of \`${type}\``;
+    }
+  }
+  return undefined;
+}
+
 function matchingPatternPropertySchemas(
   patternProperties: Record<string, JSONSchema> | undefined,
   property: string,
@@ -1596,7 +1672,18 @@ function schemaAlternatives(
     return anyOf.map((alternative) => [base, alternative]);
   }
   if (Array.isArray(fragment.type)) {
-    return fragment.type.map((type) => [{ ...fragment, type }]);
+    const { type: types, ...untyped } = fragment;
+    if (!types.includes("object")) {
+      return types.map((type) => [{ ...fragment, type }]);
+    }
+    // The runtime checks `required` on a `FabricPrimitive` when the type list
+    // includes `object`, and would not check it under a branch typed by a
+    // `FabricPrimitive` name or by `unknown` alone. `object` admits every
+    // `FabricPrimitive` already, so those names add no branch of their own,
+    // and `unknown` becomes the untyped branch, which admits every value and
+    // is checked.
+    return types.filter((type) => !isFabricPrimitiveSchemaType(type))
+      .map((type) => [type === "unknown" ? untyped : { ...untyped, type }]);
   }
   // With no `type` list, `schemaTypes` names more than one type only when it
   // can name every listed value, and a `const` lists a single value. So each
