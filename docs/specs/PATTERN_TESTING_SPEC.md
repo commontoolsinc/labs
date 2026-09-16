@@ -211,7 +211,7 @@ The `cf test` runner processes the `[TESTS]` array **in order**:
 ┌──────────────────────────────────────────────────────────────┐
 │  1. "action" in step? → step.action.send()                   │
 │  2. await runtime.idle()                                     │
-│  3. "assertion" in step? → step.assertion.get() ok?          │
+│  3. "assertion" in step? → demand, settle, one await pull()  │
 │     ✓ PASS / ✗ FAIL                                          │
 │  ... repeat for each step                                    │
 └──────────────────────────────────────────────────────────────┘
@@ -279,8 +279,7 @@ expense-tracker.test.tsx
 
 The runner itself is `packages/cli/lib/test-runner.ts`. The sketch below is a
 reading aid for the shape of the loop, not a second copy of it: it leaves out
-settling, the demand an assertion is held under and the wait for the async work
-that demand starts, and the multi-user paths. Behavior that matters belongs in the code and in the
+settling and the multi-user paths. Behavior that matters belongs in the code and in the
 prose above — change one of those and this sketch needs the same edit, so keep
 it short enough to be worth having.
 
@@ -374,7 +373,12 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
       // bare boolean.
       assertionCount++;
       const assertCell = testsCell.key(i).key("assertion") as Cell<unknown>;
-      const value = assertCell.get();
+      // Demanding the assertion starts a lazy async builtin; the demand is
+      // held across the wait so the work it starts stays reachable.
+      const releaseDemand = assertCell.sink(() => {});
+      await runtime.settled();
+      const value = await assertCell.pull();
+      releaseDemand();
       const record = asAssertRecord(value);
       const passed = record ? record.ok : value === true;
 
