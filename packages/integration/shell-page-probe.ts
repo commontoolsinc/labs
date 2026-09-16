@@ -11,14 +11,15 @@ const TEXT_LIMIT = 500;
 const CONSOLE_TAIL_LIMIT = 40;
 
 /**
- * What a page held at the moment a shell navigation or state wait failed.
+ * What a page held at the moment a wait or a navigation against it failed.
  *
  * Read with {@link readShellPageProbe} and rendered with
  * {@link describeShellPage}. Every field answers a question an investigator
- * asks of a failed shell test: is this the shell at all, did the server answer
- * with the document that was asked for, had the shell booted far enough to
- * publish itself, what was it showing, and what was it waiting on the runtime
- * worker for.
+ * asks of a failed browser test: is this the shell at all, did the server
+ * answer with the document that was asked for, had the shell booted far enough
+ * to publish itself, what was it showing, and what was it waiting on the
+ * runtime worker for. A page that is not the shell answers the first of those
+ * and is described by its own text.
  */
 export interface ShellPageProbe {
   /** The document's own URL, which a redirect can make differ from the one requested. */
@@ -222,20 +223,43 @@ export function describeShellPage(probe: ShellPageProbe): string {
   return lines.join("\n");
 }
 
+// How long a failure report waits for the page to answer its probe. The probe
+// runs in the page, so a wedged main thread never answers it, and a wedged main
+// thread is one of the states a report is written for. This bounds the report
+// and nothing a test is waiting to succeed at.
+const PROBE_READ_LIMIT_MS = 10_000;
+
 /**
  * Read `page` and render it as the detail block of a failure message,
- * reporting the reason instead when the page cannot be read at all.
+ * reporting the reason instead when the page cannot be read.
  *
  * This is the whole of what a failure report needs from the page. A page that
- * has closed, or a browser that has gone away, must not replace the failure
- * being reported with a second one, so the read is guarded here rather than at
- * each call site.
+ * has closed, a browser that has gone away, and a main thread that never gets
+ * around to the probe must none of them replace the failure being reported
+ * with a second one, or hold it back, so the read is guarded here rather than
+ * at each call site.
  */
 export async function readAndDescribeShellPage(page: Page): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return describeShellPage(await readShellPageProbe(page));
+    const unanswered = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `the page did not answer within ${PROBE_READ_LIMIT_MS}ms`,
+            ),
+          ),
+        PROBE_READ_LIMIT_MS,
+      );
+    });
+    return describeShellPage(
+      await Promise.race([readShellPageProbe(page), unanswered]),
+    );
   } catch (error) {
     return `  the page could not be probed: ${describeThrown(error)}`;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

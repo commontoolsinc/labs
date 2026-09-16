@@ -97,6 +97,14 @@ export interface OpenCapability {
   /** Environment the suites that asked for it run with. */
   env: Record<string, string>;
 
+  /**
+   * Files it writes that say what it did, for a lane that failed to
+   * report. A capability outside the test process is the half of a
+   * failure the test process cannot describe, and its work directory
+   * goes when the lane ends, so a log nobody names here is gone.
+   */
+  logs?: readonly string[];
+
   /** Shuts it down. Called once, in the reverse of the opening order. */
   close(): Promise<void>;
 }
@@ -496,6 +504,7 @@ async function startToolshed(
   }
   return {
     env,
+    logs: [logFile],
     close: () => {
       stop();
       return Promise.resolve();
@@ -759,6 +768,9 @@ export interface OpenedCapabilities {
   /** Seconds each capability's setup took, in the order they opened. */
   timings: Array<{ capability: CapabilityId; seconds: number }>;
 
+  /** Every log the opened capabilities named, in the order they opened. */
+  logs: Array<{ capability: CapabilityId; path: string }>;
+
   /** Closes them all, in the reverse of the order they opened. */
   close(): Promise<void>;
 }
@@ -776,6 +788,7 @@ export async function openCapabilities(
 ): Promise<OpenedCapabilities> {
   const exported = new Map<CapabilityId, Record<string, string>>();
   const timings: Array<{ capability: CapabilityId; seconds: number }> = [];
+  const logs: Array<{ capability: CapabilityId; path: string }> = [];
   const opened: OpenCapability[] = [];
   const close = async (): Promise<void> => {
     for (const capability of opened.reverse()) {
@@ -798,6 +811,9 @@ export async function openCapabilities(
         capability: id,
         seconds: (performance.now() - startedAt) / 1000,
       });
+      for (const log of open.logs ?? []) {
+        logs.push({ capability: id, path: log });
+      }
     }
   } catch (error) {
     await close();
@@ -814,6 +830,7 @@ export async function openCapabilities(
       return env;
     },
     timings,
+    logs,
     close,
   };
 }

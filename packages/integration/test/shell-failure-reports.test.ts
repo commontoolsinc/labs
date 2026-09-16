@@ -15,12 +15,12 @@ import {
   type ShellPageProbe,
 } from "../shell-page-probe.ts";
 import {
-  describeShellReadyFailure,
   describeStateWaitFailure,
   disposePageRuntime,
   login,
   waitForShellReady,
 } from "../shell-utils.ts";
+import { describeConditionWaitFailure, waitForCondition } from "../utils.ts";
 
 // What the toolshed answers with when its fetch to the shell dev server fails.
 const PROXY_FAILURE_TEXT =
@@ -189,6 +189,22 @@ async function rejectionMessage(work: Promise<unknown>): Promise<string> {
   throw new Error("Expected the call to throw, and it returned instead.");
 }
 
+// The stuck-condition safety net is five minutes, which no test can sit
+// through. This drives it through the environment variable the wait reads for
+// exactly that, and returns the message it gave up with. Everything past the
+// first line of that message is what the wait assembles, which nothing else
+// exercises.
+async function shortNetRejectionMessage(
+  work: () => Promise<unknown>,
+): Promise<string> {
+  Deno.env.set("CF_WAIT_FOR_CONDITION_TIMEOUT_MS", "1500");
+  try {
+    return await rejectionMessage(work());
+  } finally {
+    Deno.env.delete("CF_WAIT_FOR_CONDITION_TIMEOUT_MS");
+  }
+}
+
 describe("shell-failure-reports", () => {
   let server: Deno.HttpServer;
   let origin: string;
@@ -347,6 +363,17 @@ describe("shell-failure-reports", () => {
       await waitForShellReady(page);
     });
 
+    it("names the shell whose bootstrap never published the handle", async () => {
+      await load("/shell");
+
+      const message = await shortNetRejectionMessage(() =>
+        waitForShellReady(page)
+      );
+      expect(message).toBe(
+        "The shell never published itself on globalThis.app.",
+      );
+    });
+
     it("waits for publication announced after an earlier readiness event", async () => {
       await load("/shell");
       await page.evaluate(() => {
@@ -426,16 +453,104 @@ describe("shell-failure-reports", () => {
     });
   });
 
-  describe("describeShellReadyFailure()", () => {
-    it("returns a block naming the shell document that published nothing", async () => {
+  describe("describeConditionWaitFailure()", () => {
+    it("returns a block naming the predicate, its arguments, and the page", async () => {
+      await load("/booted-shell");
+
+      const described = await describeConditionWaitFailure(
+        page,
+        "(probe, slug) => probe.collect(slug).length === 1",
+        ["members-7"],
+      );
+      expect(described).toContain(
+        "awaited condition: (probe, slug) => probe.collect(slug).length === 1",
+      );
+      expect(described).toContain('    [0] "members-7"');
+      expect(described).toContain("x-root-view: present");
+      expect(described).toContain("did:key:zBootedShellFixture");
+    });
+
+    it("gives each argument its own line, so shared predicates differ", async () => {
       await load("/shell");
 
-      const described = await describeShellReadyFailure(page);
-      expect(described).toContain(
-        "The shell never published itself on globalThis.app.",
+      const described = await describeConditionWaitFailure(
+        page,
+        "(probe, ...rest) => rest",
+        ["members-7", { member: "2" }],
       );
-      expect(described).toContain("x-root-view: present");
-      expect(described).toContain("globalThis.app: absent");
+      expect(described).toContain("  condition arguments:\n");
+      expect(described).toContain('    [0] "members-7"');
+      expect(described).toContain('    [1] {"member":"2"}');
+    });
+
+    it("collapses a predicate written over several lines onto one", async () => {
+      await load("/shell");
+
+      const described = await describeConditionWaitFailure(
+        page,
+        "(probe) => {\n  return probe;\n}",
+      );
+      expect(described).toContain(
+        "awaited condition: (probe) => { return probe; }",
+      );
+      expect(described).not.toContain("condition arguments:");
+    });
+
+    it("cuts a predicate at the length the report carries", async () => {
+      await load("/shell");
+
+      const described = await describeConditionWaitFailure(
+        page,
+        `() => ${"x".repeat(600)}`,
+      );
+      // Six characters of `() => ` precede the run, so the cut lands inside it.
+      expect(described).toContain(`() => ${"x".repeat(394)}…\n`);
+      expect(described).not.toContain("x".repeat(395));
+    });
+
+    it("cuts an argument at the same length", async () => {
+      await load("/shell");
+
+      const described = await describeConditionWaitFailure(
+        page,
+        "() => false",
+        ["y".repeat(600)],
+      );
+      // A quote opens the rendered string, so 399 of the run reach the line.
+      expect(described).toContain(`    [0] "${"y".repeat(399)}…`);
+      expect(described).not.toContain("y".repeat(400));
+    });
+  });
+
+  describe("waitForCondition()", () => {
+    it("reports the predicate, its arguments, and the page it ran out against", async () => {
+      await load("/booted-shell");
+
+      const message = await shortNetRejectionMessage(() =>
+        waitForCondition(page, (_probe, slug: string) => slug === "never", {
+          args: ["members-7"],
+        })
+      );
+      expect(message).toContain(
+        "waitForCondition did not resolve within 1500ms.",
+      );
+      expect(message).toContain("awaited condition:");
+      expect(message).toContain('    [0] "members-7"');
+      expect(message).toContain("did:key:zBootedShellFixture");
+      expect(message).not.toContain("predicate threw:");
+    });
+
+    it("names the throw a predicate made, which the page cannot show", async () => {
+      await load("/booted-shell");
+
+      const message = await shortNetRejectionMessage(() =>
+        waitForCondition(page, () => {
+          throw new Error("the predicate itself is broken");
+        })
+      );
+      expect(message).toContain(
+        "predicate threw: Error: the predicate itself is broken",
+      );
     });
   });
 
@@ -569,6 +684,26 @@ describe("shell-failure-reports", () => {
       expect(await readAndDescribeShellPage(page)).toBe(
         describeShellPage(await readShellPageProbe(page)),
       );
+    });
+
+    it("returns a reason rather than waiting out a page that never answers", async () => {
+      // Its own browser, because the wedge below is permanent: the probe runs
+      // in the page, and a page whose main thread never yields never answers
+      // one. A report written for that state must still arrive, or the
+      // failure it was describing never reaches the test runner at all.
+      const wedged = await Browser.launch();
+      try {
+        const wedgedPage = await wedged.newPage(`${origin}/shell`);
+        wedgedPage.evaluate(() => {
+          while (true) { /* hold the main thread */ }
+        }).catch(() => {});
+
+        const described = await readAndDescribeShellPage(wedgedPage);
+        expect(described).toContain("the page could not be probed:");
+        expect(described).toContain("did not answer within");
+      } finally {
+        await wedged.close();
+      }
     });
 
     it("returns the reason when the page cannot be read", async () => {

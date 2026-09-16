@@ -564,8 +564,8 @@ test after `testTimeout` — 40 seconds by default, set per suite in
 `deno-web-test.config.ts` — and fails that test with a message naming it and
 saying how long it waited, leaving the rest of the run to report as usual.
 
-This is the distinction `waitForCondition`'s `timeout` draws, one level up: a
-stuck-condition safety net rather than a bound at the call site. It is why a
+This is the distinction `waitForCondition`'s safety net draws, one level up: a
+stuck-condition bound rather than a bound at the call site. It is why a
 wait inside one of these tests still takes no timeout of its own — adding one
 per call site would cap what each wait can observe, which is the thing being
 avoided, while the harness bound only decides when to stop believing a test will
@@ -1288,13 +1288,28 @@ instance the toolshed's `Failed to proxy to ...` page, served with a 502 when
 its own fetch to the shell dev server fails. Without the check, every test in
 the run waits out the full minute and reports nothing that names the cause.
 
-`login()` reports the same block, for the same reason. It waits on
-`waitForCondition` for the shell to publish `globalThis.app`, and a document
-that is not the shell never publishes it, so that wait reaches the
-stuck-condition net five minutes later saying only that it did. The runtime
-handshake after it names which of its two stages ran out and nothing about the
-page it ran against. Both are wrapped, so any login failure names the identity
-being logged in as and what the page held. `readAndDescribeShellPage` is the
+`waitForCondition` carries the same block, and carries it for every wait rather
+than for a wrapped few. A wait that reaches the stuck-condition net renders the
+source the page ran, the arguments it was handed one to a line, the last throw
+the predicate itself made where it made one, and the page it ran out against;
+`describeConditionWaitFailure` in `packages/integration/utils.ts` assembles
+that. The source is usually what names the wait, waits carrying no names of
+their own, and where several sites share one predicate the arguments are what
+tell them apart. The predicate's own throw is the part nothing else can supply:
+a predicate that throws on every evaluation leaves a page identical to one a
+predicate merely reads as false.
+
+The net is five minutes and no test can sit through one, so its length for a
+single wait is read from `CF_WAIT_FOR_CONDITION_TIMEOUT_MS`. That exists for
+the tests that drive this report and for nothing else: shortening the net in a
+run caps what a wait may observe, which is what the net is written to avoid.
+
+`login()` reports the same block, and adds what the wait cannot know. It waits
+on `waitForCondition` for the shell to publish `globalThis.app`, which a
+document that is not the shell never publishes, and the runtime handshake after
+it names which of its two stages ran out and nothing about the page it ran
+against. Both are wrapped, so any login failure names the identity being logged
+in as and what the page held. `readAndDescribeShellPage` is the
 whole of what a report needs from a page — it reads the probe, renders it, and
 reports a page it could not read at all rather than replacing the failure being
 reported with a second one. Reach for it, rather than pairing the read and the

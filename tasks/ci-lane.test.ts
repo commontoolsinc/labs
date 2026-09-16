@@ -13,6 +13,7 @@ import {
   batchCoverage,
   batchesOf,
   batchRepeats,
+  CAPABILITY_LOG_TAIL_LINES,
   changedFiles,
   convertCoverage,
   COVERAGE_FAILURE_MARKER,
@@ -20,6 +21,7 @@ import {
   COVERAGE_REPORT_DIR,
   COVERAGE_REPORT_FILE,
   describeAccounting,
+  describeCapabilityLogs,
   describeConflicts,
   describeCoverage,
   describePlan,
@@ -1076,6 +1078,51 @@ describe("running a lane's work", () => {
     // runs in spite of being withheld.
     expect(printed).toContain("yes, the change reaches it");
     expect(printed).toContain("| no |");
+  });
+
+  it("prints the end of a capability's log, saying what it dropped", async () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    const written = Array.from(
+      { length: CAPABILITY_LOG_TAIL_LINES + 30 },
+      (_unused, index) => `line ${index}`,
+    );
+    try {
+      await describeCapabilityLogs(
+        [{ capability: "toolshed", path: "/tmp/toolshed-1.log" }],
+        () => Promise.resolve(`${written.join("\n")}\n`),
+      );
+    } finally {
+      console.log = log;
+    }
+    const printed = lines.join("\n");
+    expect(printed).toContain(
+      `toolshed log, last ${CAPABILITY_LOG_TAIL_LINES} of ${written.length} ` +
+        "line(s); 30 earlier dropped",
+    );
+    // The end is what a run that went wrong wrote last, so it is the end
+    // that is kept.
+    expect(printed).toContain(`line ${written.length - 1}`);
+    expect(printed).not.toContain("line 29\n");
+  });
+
+  it("reports a log it could not read rather than throwing", async () => {
+    // The lane is already failing when this runs, and a report that threw
+    // would replace the failure it was printed beside.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      await describeCapabilityLogs(
+        [{ capability: "toolshed", path: "/tmp/never-written.log" }],
+        () => Promise.reject(new Error("no such file")),
+      );
+    } finally {
+      console.log = log;
+    }
+    expect(lines.join("\n")).toContain("toolshed log (unreadable:");
+    expect(lines.join("\n")).toContain("no such file");
   });
 
   it("names the records no suite describes", () => {

@@ -891,6 +891,54 @@ export function describeAccounting(
   if (lines.length > 0) say(lines);
 }
 
+/**
+ * How much of a capability's log a failing lane prints. A server's log is
+ * mostly one line per request, so a whole one would bury the report it is
+ * printed beside; the end of it is where a run that went wrong says so.
+ */
+export const CAPABILITY_LOG_TAIL_LINES = 200;
+
+/**
+ * Prints the end of every log the opened capabilities named.
+ *
+ * A capability runs outside the test process, so a failure on its side is
+ * the half no test record describes, and the directory it wrote to goes
+ * when the lane ends. The lane's own output is what survives that — a
+ * continuous-integration job keeps it, and a person running a lane is
+ * reading it already — so the evidence goes there rather than into an
+ * artifact the lane would have to invent a way to upload.
+ *
+ * Not through `say`: the job summary is rendered prose with a size of its
+ * own to keep, and this is a log.
+ */
+export async function describeCapabilityLogs(
+  logs: readonly { capability: string; path: string }[],
+  read: (path: string) => Promise<string> = Deno.readTextFile,
+): Promise<void> {
+  for (const { capability, path: at } of logs) {
+    let contents: string;
+    try {
+      contents = await read(at);
+    } catch (error) {
+      // A capability that wrote nothing is one of the answers, and a
+      // report must not replace the failure it is printed beside.
+      console.log(`\n--- ${capability} log (unreadable: ${error}) ---`);
+      continue;
+    }
+    const lines = contents.split("\n");
+    // A trailing newline ends the last line rather than starting another.
+    if (lines.at(-1) === "") lines.pop();
+    const tail = lines.slice(-CAPABILITY_LOG_TAIL_LINES);
+    const dropped = lines.length - tail.length;
+    console.log(
+      `\n--- ${capability} log, last ${tail.length} of ${lines.length} ` +
+        `line(s)${dropped > 0 ? `; ${dropped} earlier dropped` : ""} ---`,
+    );
+    for (const line of tail) console.log(line);
+    console.log(`--- end of ${capability} log ---`);
+  }
+}
+
 /** Says something both on the lane's output and in the job summary. */
 function say(lines: readonly string[]): void {
   const text = `${lines.join("\n")}\n`;
@@ -1343,6 +1391,10 @@ export async function runLane(
     }
   } finally {
     await opened.close();
+    // What a capability wrote is read before the directory goes, and only
+    // for a lane that failed: a green run has nothing to explain, and the
+    // logs are large.
+    if (!ok) await describeCapabilityLogs(opened.logs);
     // The lane owns this directory and nothing outside the lane reads
     // it, so it goes whether the batches passed, failed, or never ran.
     await Deno.remove(workDir, { recursive: true }).catch(() => {});

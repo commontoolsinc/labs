@@ -53,20 +53,15 @@ export async function waitForShellReady(page: Page): Promise<void> {
       events: ["cf-shell-ready"],
     });
   } catch (cause) {
-    throw new Error(await describeShellReadyFailure(page), { cause });
+    // The wait renders the page it ran out against, and the cause carries that
+    // whole report. What is left to say is the one thing the wait cannot: that
+    // the document is the shell's own, and the bootstrap that publishes the
+    // handle did not run to the end. The console tail in the wait's block is
+    // where a bootstrap that threw says so.
+    throw new Error("The shell never published itself on globalThis.app.", {
+      cause,
+    });
   }
-}
-
-/**
- * Render what `page` held when the shell it carries never published itself on
- * `globalThis.app`: the shell's own document loaded, and its bootstrap did not
- * run to the end. The console tail in the block is where a bootstrap that
- * threw says so.
- */
-export async function describeShellReadyFailure(page: Page): Promise<string> {
-  return `The shell never published itself on globalThis.app.\n${await readAndDescribeShellPage(
-    page,
-  )}`;
 }
 
 /**

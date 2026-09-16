@@ -475,6 +475,29 @@ describe("opening a capability on a machine that answers", () => {
     }
   }
 
+  it("names the log its server writes, so a failed lane can print it", async () => {
+    const m = machine({ toolshed: "listening (pid 999999). Logs: x\n" });
+    const root = await Deno.makeTempDir({ prefix: "capability-" });
+    try {
+      const opened = await openCapabilities(["toolshed"], {
+        root,
+        dryRun: false,
+        workDir: root,
+        exec: m.exec,
+        fetch: serving("default"),
+      }, CAPABILITIES);
+      await opened.close();
+
+      // The one the launch was told to write, and the one the lane would
+      // have nothing of once its work directory goes.
+      const told = m.asked.find((line) => line.includes("--log-file="))!;
+      const wanted = /--log-file=(\S+)/.exec(told)![1];
+      expect(opened.logs).toEqual([{ capability: "toolshed", path: wanted }]);
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+  });
+
   it("installs the FUSE packages only where one is missing", async () => {
     // Every probe answering means the packages are already there, and
     // an install that runs anyway costs the lane fifteen seconds it did

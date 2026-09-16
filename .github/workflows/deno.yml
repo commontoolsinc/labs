@@ -917,6 +917,15 @@ jobs:
           INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml ${SX_ON_IGNORE}" \
           deno task integration
 
+      - name: 📋 Upload toolshed log on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: toolshed-log-package-integration-${{ matrix.junit_name }}
+          path: ${{ runner.temp }}/toolshed.log
+          retention-days: 14
+          if-no-files-found: ignore
+
       - name: 🧾 Write coverage report
         if: always()
         run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/package-${{ matrix.suite_name }} coverage/lcov/package-${{ matrix.suite_name }}.lcov
@@ -1048,6 +1057,15 @@ jobs:
           API_URL="http://localhost:${TOOLSHED_PORT}/" \
           INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml ${SX_ON_IGNORE}" \
           deno task integration
+
+      - name: 📋 Upload toolshed log on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: toolshed-log-package-integration-${{ matrix.junit_name }}
+          path: ${{ runner.temp }}/toolshed.log
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: 📤 Upload test timing data
         if: always()
