@@ -234,11 +234,11 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
             entry.path.join("/") === `field/rows/${segment}/child`
           );
         expect(persisted).toBeDefined();
-        expect(persisted!.label.confidentiality?.toSorted()).toEqual([
-          "carried",
-          "duplicate",
-          "exact",
+        expect(persisted!.label.confidentiality).toEqual([
           "template",
+          "exact",
+          "duplicate",
+          "carried",
         ]);
       } finally {
         await runtime.dispose();

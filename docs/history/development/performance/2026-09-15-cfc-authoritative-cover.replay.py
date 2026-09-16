@@ -50,7 +50,8 @@ with tempfile.TemporaryDirectory(prefix="cfc-authoritative-cover-") as directory
                 label = f"ladder-{pair}-{arm}"
                 env = dict(os.environ)
                 if pair == 5:
-                    env.update(CF_PROF_OUT=str(out / label), CF_PROF_CPU="1")
+                    env.update(CF_PROF_OUT=str(out / label), CF_PROF_CPU="1",
+                               CF_PROF_INTERVAL_US="500")
                     command = ["deno", "run", "--no-lock", "-A",
                                "skills/perf-investigation/scripts/profile-cf.ts", *flags]
                 else:
