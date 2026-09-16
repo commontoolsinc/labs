@@ -2,7 +2,7 @@
  * Top-level `export`ed visitor functions.
  */
 
-import type { FabricValue, FabricValuePlus } from "@/interface.ts";
+import type { FabricValuePlus } from "@/interface.ts";
 
 import type { BaselineVisitResult, ValueVisitor } from "./interface.ts";
 import { VisitInProgress } from "./VisitInProgress.ts";
@@ -25,6 +25,5 @@ export function visitValue<PlusType, ResultType>(
 export function makeVisitValueFunction<PlusType, ResultType>(
   visitor: ValueVisitor<PlusType, ResultType>,
 ): (value: FabricValuePlus<PlusType>) => BaselineVisitResult<ResultType> {
-  return (value: FabricValuePlus<PlusType>) =>
-    visitValue(value, visitor);
+  return (value: FabricValuePlus<PlusType>) => visitValue(value, visitor);
 }
