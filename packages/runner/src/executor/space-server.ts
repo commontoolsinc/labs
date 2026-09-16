@@ -1433,10 +1433,6 @@ export class SpaceServer implements TransactionSealDestination {
           entry.eventId,
           entry.deliveryDeferral,
         );
-        this.#scheduleDeliveryFailureWake(
-          entry.eventId,
-          entry.deliveryDeferral,
-        );
       }
     }
     if (pendingEventDocs.length > 0) {
@@ -1507,6 +1503,11 @@ export class SpaceServer implements TransactionSealDestination {
 
     this.#active = true;
     this.#options.stats.activeSpaces += 1;
+    // The wakes for the checkpoints §6 step 4 replayed above: a wake is the
+    // active tenure's to hold.
+    for (const [eventId, checkpoint] of this.#deliveryCheckpoints) {
+      this.#scheduleDeliveryFailureWake(eventId, checkpoint);
+    }
     void this.#loop();
     return true;
   }
@@ -3144,6 +3145,12 @@ export class SpaceServer implements TransactionSealDestination {
     eventId: string,
     checkpoint: DeliveryDeferral,
   ): void {
+    // A wake belongs to the active tenure. #parkResources clears every one
+    // of these timers in the same synchronous run that clears #active, and
+    // the next activation arms afresh from the checkpoints it replays. A
+    // drain pass or a delivery callback that resumes during the park's
+    // awaits reaches this site with its own checks behind it.
+    if (!this.#active) return;
     this.#cancelDeliveryFailureWake(eventId);
     if (checkpoint.state !== "failed") return;
     const remaining = Math.max(
@@ -3157,9 +3164,10 @@ export class SpaceServer implements TransactionSealDestination {
     // This is the ratified timeout-policy exception: one wake at the
     // cumulative failed-state boundary. It neither cancels storage work nor
     // creates a retry cadence.
+    this.#options.stats.events.deliveryFailureWakesArmed += 1;
     const timer = setTimeout(() => {
       this.#deliveryFailureWakeTimers.delete(eventId);
-      if (!this.#active) return;
+      this.#options.stats.events.deliveryFailureWakesFired += 1;
       this.#eventScanOwed = true;
       this.#feedArrived?.resolve();
     }, remaining);
