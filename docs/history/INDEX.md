@@ -10,6 +10,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [CFC commit preparation: wildcard covers and carried labels](development/performance/2026-09-16-cfc-commit-preparation-round2/README.md) — loop audit, exact read/write grid, paired browser scaling, complete label equivalence, and an explicitly labeled SQL aggregate fixture.
 - [2026-09-16 CFC preparation cache follow-up](development/performance/2026-09-16-cfc-prepare-cache-followup/README.md) — Identity-cache measurements, preserved label/refusal checks, and additional indexed candidate scans for PR 7604.
 
+- [Lift-switch retirement matched read counts](development/performance/2026-09-16-lazy-retirement-counts.md) — identical handler and collection read counts across pinned parent/candidate revisions; raw paired results and remaining measurement limits.
 - [Pattern-test CFC posture measurement](development/performance/2026-09-15-cfc-pattern-test-posture.md) — 2026-09-15; five alternating headless mapped-render and labeled-copy samples at N=11/50/150, with resolved postures and preparation spans.
 - [Prepared digest cache selection](development/performance/2026-09-15-prepared-digest-cache-selection/) ([report](development/performance/2026-09-15-prepared-digest-cache-selection/README.md)) — four-arm comparison, repeated reactive executions, GC retention, paired timings, profiles, and replay patches selecting epoch-only memoization.
 
