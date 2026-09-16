@@ -93,9 +93,8 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
   //
 
   /**
-   * Visits the indicated value as a top-level operation, checking every
-   * encountered value to determine whether or not it is a `FabricValue`.
-   * See `visitValue()` for details on the `deepTypeCheck` argument.
+   * Visits the indicated value as a top-level operation. See the top-level
+   * `visitValue()` for the extent to which encountered values are inspected.
    */
   visit(value: FabricValuePlus<PlusType>): BaselineVisitResult<ResultType> {
     if (this.#inProgress) {
@@ -253,7 +252,8 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
         }
 
         case null: {
-          // `null` means that `value` was not recognized as a `FabricValue`.
+          // `null` means that `value` has no fabric shape and `isPlusType()`
+          // did not claim it.
           const desc = toCompactDebugString(value);
           throw new Error(
             `Encountered a value outside of the visitor's domain: ${desc}`,
@@ -557,9 +557,8 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
   }
 
   /**
-   * Gets the tag for the given value, in a manner which honors the
-   * type-checking style indicated by the top-level `visit*()` call on this
-   * instance.
+   * Gets the tag for the given value, consulting the visitor's `isPlusType()`
+   * only where the value's shape is not a fabric one.
    */
   #tagOfValueElseNull(
     value: FabricValuePlus<PlusType>,

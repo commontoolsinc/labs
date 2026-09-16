@@ -1,10 +1,10 @@
 import { type Primitive } from "@commonfabric/utils/types";
 
 import {
-  type FabricArray,
-  type FabricContainerValue,
-  FabricInstance,
-  type FabricPlainObject,
+  type FabricArrayPlus,
+  type FabricContainerValuePlus,
+  type FabricInstancePlus,
+  type FabricPlainObjectPlus,
   FabricPrimitive,
   type FabricValue,
   type FabricValuePlus,
@@ -43,22 +43,22 @@ export abstract class BaseValueVisitor<
 
   /** @inheritDoc */
   abstract visitFabricArray(
-    value: FabricArray,
+    value: FabricArrayPlus<PlusType>,
   ): LeafVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
   abstract visitFabricInstance(
-    value: FabricInstance,
+    value: FabricInstancePlus<PlusType>,
   ): LeafVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
   abstract visitFabricPlainObject(
-    value: FabricPlainObject,
+    value: FabricPlainObjectPlus<PlusType>,
   ): LeafVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
   abstract visitFabricContainer(
-    value: FabricContainerValue,
+    value: FabricContainerValuePlus<PlusType>,
   ): DispatchingVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
@@ -79,27 +79,27 @@ export abstract class BaseValueVisitor<
 
   /** @inheritDoc */
   abstract visitedFabricArrayElement(
-    array: FabricArray,
+    array: FabricArrayPlus<PlusType>,
     index: number,
     value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
   abstract visitedFabricArrayGap(
-    array: FabricArray,
+    array: FabricArrayPlus<PlusType>,
     start: number,
     count: number,
   ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
   abstract visitedFabricInstance(
-    instance: FabricInstance,
-    state: FabricValue,
+    instance: FabricInstancePlus<PlusType>,
+    state: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
   abstract visitedFabricPlainObjectEntry(
-    container: FabricPlainObject,
+    container: FabricPlainObjectPlus<PlusType>,
     key: FabricValuePlus<PlusType>,
     value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType>;

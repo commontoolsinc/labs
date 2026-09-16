@@ -36,7 +36,7 @@ describe("NopValueVisitor", () => {
 
     const vis = new Counting();
 
-    expect(new VisitInProgress(vis).visit({ a: [1, 2] }, false))
+    expect(new VisitInProgress(vis).visit({ a: [1, 2] }))
       .toBeUndefined();
     expect(vis.calls).toBe(1);
   });

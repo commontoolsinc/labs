@@ -176,9 +176,10 @@ export type DispatchingVisitorResult<
 /**
  * Interface for visit receivers.
  *
- * Each `visit*()` method accepts a `value` of the (parametric) `Domain` type,
- * in some cases along with other arguments, and returns a structured result or
- * `undefined`, which indicates what the visitor engine should do next.
+ * Each `visit*()` method accepts a `value` in the (parametric)
+ * `FabricValuePlus<PlusType>` family, in some cases along with other arguments,
+ * and returns a structured result or `undefined`, which indicates what the
+ * visitor engine should do next.
  * Different methods are allowed to return different subsets of the full
  * complement of possible results (see their declarations for more detail). Each
  * structured result type is documented as to its meaning.
@@ -191,9 +192,12 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
   /**
    * Indicates whether or not the given value is compatible with the `PlusType`
    * type defined by the visitor. This is a type predicate for `PlusType`. The
-   * visitor engine calls it before dispatching to `visitPlusType()` in order to
-   * decide whether to dispatch a value or `throw` an error indicating it is
-   * invalid.
+   * visitor engine consults it only for a value whose shape is not a fabric
+   * one -- a function, or an object which is neither an array, a plain object,
+   * nor a `FabricSpecialObject` -- and its answer decides whether such a value
+   * goes to `visitPlusType()` or is `throw`n as being outside the visitor's
+   * domain. A value with a fabric shape is never put to it, so a predicate
+   * which would accept, say, a plain object never sees one.
    */
   isPlusType(value: unknown): value is PlusType;
 

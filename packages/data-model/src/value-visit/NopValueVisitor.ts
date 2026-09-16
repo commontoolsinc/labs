@@ -1,10 +1,10 @@
 import { type Primitive } from "@commonfabric/utils/types";
 
 import {
-  type FabricArray,
-  type FabricContainerValue,
-  FabricInstance,
-  type FabricPlainObject,
+  type FabricArrayPlus,
+  type FabricContainerValuePlus,
+  type FabricInstancePlus,
+  type FabricPlainObjectPlus,
   FabricPrimitive,
   type FabricValue,
   type FabricValuePlus,
@@ -43,28 +43,28 @@ export class NopValueVisitor<PlusType = never, ResultType = FabricValue>
 
   /** @inheritDoc */
   visitFabricArray(
-    _value: FabricArray,
+    _value: FabricArrayPlus<PlusType>,
   ): LeafVisitorResult<PlusType, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricInstance(
-    _value: FabricInstance,
+    _value: FabricInstancePlus<PlusType>,
   ): LeafVisitorResult<PlusType, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricPlainObject(
-    _value: FabricPlainObject,
+    _value: FabricPlainObjectPlus<PlusType>,
   ): LeafVisitorResult<PlusType, ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitFabricContainer(
-    _value: FabricContainerValue,
+    _value: FabricContainerValuePlus<PlusType>,
   ): DispatchingVisitorResult<PlusType, ResultType> {
     return undefined;
   }
@@ -93,7 +93,7 @@ export class NopValueVisitor<PlusType = never, ResultType = FabricValue>
 
   /** @inheritDoc */
   visitedFabricArrayElement(
-    _array: FabricArray,
+    _array: FabricArrayPlus<PlusType>,
     _index: number,
     _value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType> {
@@ -102,7 +102,7 @@ export class NopValueVisitor<PlusType = never, ResultType = FabricValue>
 
   /** @inheritDoc */
   visitedFabricArrayGap(
-    _array: FabricArray,
+    _array: FabricArrayPlus<PlusType>,
     _start: number,
     _count: number,
   ): BaselineVisitResult<ResultType> {
@@ -111,15 +111,15 @@ export class NopValueVisitor<PlusType = never, ResultType = FabricValue>
 
   /** @inheritDoc */
   visitedFabricInstance(
-    _instance: FabricInstance,
-    _state: FabricValue,
+    _instance: FabricInstancePlus<PlusType>,
+    _state: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
   visitedFabricPlainObjectEntry(
-    _container: FabricPlainObject,
+    _container: FabricPlainObjectPlus<PlusType>,
     _key: FabricValuePlus<PlusType>,
     _value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType> {

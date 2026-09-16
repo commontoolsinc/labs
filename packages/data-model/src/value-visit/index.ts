@@ -1,6 +1,6 @@
 /**
- * Types and classes for visiting (a/k/a, iterating or walking over)
- * `FabricValue`s.
+ * Types and classes for visiting (a/k/a, iterating or walking over) values in
+ * the `FabricValuePlus` family.
  *
  * As with the `data-model` in general, the visitor engine uses `Object.is()`
  * comparisons (or equivalent) to determine value-sameness. This means that `0`

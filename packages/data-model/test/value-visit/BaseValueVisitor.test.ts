@@ -18,7 +18,7 @@ describe("BaseValueVisitor", () => {
         const value: Record<string, unknown> = {};
         value.self = value;
 
-        expect(() => new VisitInProgress(new NoCycles()).visit(value, false))
+        expect(() => new VisitInProgress(new NoCycles()).visit(value))
           .toThrow(/Cannot visit cyclic value: /);
       });
     });
@@ -31,7 +31,7 @@ describe("BaseValueVisitor", () => {
           }
         }
 
-        expect(() => new VisitInProgress(new Refusing()).visit(1, false))
+        expect(() => new VisitInProgress(new Refusing()).visit(1))
           .toThrow(
             /Shouldn't happen: `visitPrimitive\(\)` called on `.*Refusing/,
           );

@@ -11,10 +11,10 @@
 import type { Primitive } from "@commonfabric/utils/types";
 
 import {
-  type FabricArray,
-  type FabricContainerValue,
-  type FabricInstance,
-  type FabricPlainObject,
+  type FabricArrayPlus,
+  type FabricContainerValuePlus,
+  type FabricInstancePlus,
+  type FabricPlainObjectPlus,
   type FabricPrimitive,
 } from "@/interface.ts";
 import { type PrimitiveValueTag } from "@/types";
@@ -42,32 +42,36 @@ export class Recorder extends RecursiveValueVisitor<unknown, unknown> {
    * The values handed to `isPlusType()`, in order. Kept apart from `events` so
    * that the recorded dispatch sequence is the visit alone.
    */
-  readonly domainChecks: unknown[] = [];
+  readonly plusTypeChecks: unknown[] = [];
 
-  onIsDomainExtra?: (value: unknown) => boolean;
+  onIsPlusType?: (value: unknown) => boolean;
   onValue?: (value: unknown) => DispatchingVisitorResult<unknown, unknown>;
   onCycle?: (
     value: unknown,
     originalDepth: number,
     thisDepth: number,
   ) => LeafVisitorResult<unknown, unknown>;
-  onArray?: (value: FabricArray) => LeafVisitorResult<unknown, unknown>;
-  onPlainObject?: (
-    value: FabricPlainObject,
+  onArray?: (
+    value: FabricArrayPlus<unknown>,
   ) => LeafVisitorResult<unknown, unknown>;
-  onInstance?: (value: FabricInstance) => LeafVisitorResult<unknown, unknown>;
+  onPlainObject?: (
+    value: FabricPlainObjectPlus<unknown>,
+  ) => LeafVisitorResult<unknown, unknown>;
+  onInstance?: (
+    value: FabricInstancePlus<unknown>,
+  ) => LeafVisitorResult<unknown, unknown>;
   onPrimitive?: (
     value: unknown,
     tag: PrimitiveValueTag,
   ) => LeafVisitorResult<unknown, unknown>;
-  onNonFabric?: (value: unknown) => LeafVisitorResult<unknown, unknown>;
+  onPlusType?: (value: unknown) => LeafVisitorResult<unknown, unknown>;
   onVisitedElement?: (
     index: number,
     value: unknown,
   ) => BaselineVisitResult<unknown>;
   onVisitedGap?: (start: number, count: number) => BaselineVisitResult<unknown>;
   onVisitedInstance?: (
-    instance: FabricInstance,
+    instance: FabricInstancePlus<unknown>,
     state: unknown,
   ) => BaselineVisitResult<unknown>;
   onVisitedMapping?: (
@@ -82,8 +86,8 @@ export class Recorder extends RecursiveValueVisitor<unknown, unknown> {
 
   override isPlusType(value: unknown): value is unknown {
     // The domain is `unknown`, so everything outside `FabricValue` is in it.
-    this.domainChecks.push(value);
-    return this.onIsDomainExtra ? this.onIsDomainExtra(value) : true;
+    this.plusTypeChecks.push(value);
+    return this.onIsPlusType ? this.onIsPlusType(value) : true;
   }
 
   override visitValue(
@@ -105,21 +109,21 @@ export class Recorder extends RecursiveValueVisitor<unknown, unknown> {
   }
 
   override visitFabricContainer(
-    value: FabricContainerValue,
+    value: FabricContainerValuePlus<unknown>,
   ): DispatchingVisitorResult<unknown, unknown> {
     this.events.push(["container", value]);
     return DO_VISIT_SUBTYPE;
   }
 
   override visitFabricArray(
-    value: FabricArray,
+    value: FabricArrayPlus<unknown>,
   ): LeafVisitorResult<unknown, unknown> {
     this.events.push(["array", value]);
     return this.onArray ? this.onArray(value) : super.visitFabricArray(value);
   }
 
   override visitFabricPlainObject(
-    value: FabricPlainObject,
+    value: FabricPlainObjectPlus<unknown>,
   ): LeafVisitorResult<unknown, unknown> {
     this.events.push(["object", value]);
     return this.onPlainObject
@@ -128,7 +132,7 @@ export class Recorder extends RecursiveValueVisitor<unknown, unknown> {
   }
 
   override visitFabricInstance(
-    value: FabricInstance,
+    value: FabricInstancePlus<unknown>,
   ): LeafVisitorResult<unknown, unknown> {
     this.events.push(["instance", value]);
     return this.onInstance
@@ -147,12 +151,12 @@ export class Recorder extends RecursiveValueVisitor<unknown, unknown> {
   override visitPlusType(
     value: unknown,
   ): LeafVisitorResult<unknown, unknown> {
-    this.events.push(["nonFabric", value]);
-    return this.onNonFabric ? this.onNonFabric(value) : undefined;
+    this.events.push(["plusType", value]);
+    return this.onPlusType ? this.onPlusType(value) : undefined;
   }
 
   override visitedFabricArrayElement(
-    array: FabricArray,
+    array: FabricArrayPlus<unknown>,
     index: number,
     value: unknown,
   ): BaselineVisitResult<unknown> {
@@ -163,7 +167,7 @@ export class Recorder extends RecursiveValueVisitor<unknown, unknown> {
   }
 
   override visitedFabricArrayGap(
-    array: FabricArray,
+    array: FabricArrayPlus<unknown>,
     start: number,
     count: number,
   ): BaselineVisitResult<unknown> {
@@ -172,7 +176,7 @@ export class Recorder extends RecursiveValueVisitor<unknown, unknown> {
   }
 
   override visitedFabricInstance(
-    instance: FabricInstance,
+    instance: FabricInstancePlus<unknown>,
     state: unknown,
   ): BaselineVisitResult<unknown> {
     this.events.push(["visitedInstance", instance, state]);
@@ -182,7 +186,7 @@ export class Recorder extends RecursiveValueVisitor<unknown, unknown> {
   }
 
   override visitedFabricPlainObjectEntry(
-    container: FabricPlainObject | FabricInstance,
+    container: FabricPlainObjectPlus<unknown>,
     key: unknown,
     value: unknown,
   ): BaselineVisitResult<unknown> {
@@ -201,13 +205,4 @@ export function mainResult<T>(value: T): { type: "mainResult"; value: T } {
 /** Returns a `replace` form carrying the given value. */
 export function replace<T>(value: T): { type: "replace"; value: T } {
   return { type: "replace", value };
-}
-
-/** Returns a plain-object chain of the given depth ending in `leaf`. */
-export function chain(depth: number, leaf: unknown): unknown {
-  let result = leaf;
-  for (let i = 0; i < depth; i++) {
-    result = { child: result };
-  }
-  return result;
 }
