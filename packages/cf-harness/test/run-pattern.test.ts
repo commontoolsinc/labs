@@ -18,6 +18,7 @@ import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFabricSession } from "../src/fabric-session.ts";
 import {
   createFabricInstantiationRecorder,
+  type FabricInstantiationRecord,
   type FabricInstantiationRecorder,
   type FabricPatternInstantiations,
 } from "../src/fabric-instantiations.ts";
@@ -661,13 +662,20 @@ class FakeSandboxRuntime implements SandboxRuntime {
   }
 }
 
-const STRANDED_RECORDS = [{
+const STRANDED_ENTITY =
+  "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc" as const;
+
+const STRANDED_RECORDS: readonly FabricInstantiationRecord[] = [{
   sequence: 1,
   identity: "keyless:zStranded",
   symbol: "default",
-  cell: comparableEntityHash(
-    "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc",
-  )!,
+  cell: comparableEntityHash(STRANDED_ENTITY)!,
+  link: {
+    id: STRANDED_ENTITY,
+    space: signer.did(),
+    scope: "space",
+    path: [],
+  },
 }];
 
 describe("run-pattern", () => {

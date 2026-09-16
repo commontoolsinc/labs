@@ -45,6 +45,11 @@ import {
 } from "../fabric-observations.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
+  dedupedOutputConcerns,
+  outputConcernsIn,
+  type RunPatternOutputConcern,
+} from "../run-pattern-output-concerns.ts";
+import {
   addressSealedPositions,
   isSealedOpaqueLinkObject,
   parseStructuredResultSchema,
@@ -190,6 +195,16 @@ export interface RunPatternToolSuccessOutput {
    * than needing to be kept.
    */
   rawCauseMessage?: string;
+
+  /**
+   * What the outputs of the patterns this run materialized say about the
+   * reads behind them: a failure an output reports, and an output that holds
+   * no rows. Present only when there is something to say, and a DISCLOSURE
+   * rather than a refusal — the run succeeded, and this is the reason to
+   * look. `run-pattern-output-concerns.ts` carries why no text travels with
+   * one.
+   */
+  outputConcerns?: readonly RunPatternOutputConcern[];
 }
 
 /**
@@ -322,7 +337,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_pattern",
   title: "Run Pattern",
   description:
-    `Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. Give it either your own sourceText or the patternId of a pattern search_patterns found. Source you write imports the runtime from "${RUNTIME_MODULE_SPECIFIER}" and from no other module — every pattern opens with a line of the form ${RUNTIME_MODULE_IMPORT_LINE} — and no package named after the product resolves. When the run's session reads under a confidentiality ceiling, every db.query result must be declared per session (PerSession<> on the result type, or the query's { scope: "session" } option); a query left space-scoped is refused under a ceiling rather than read. Bound every query's rows with a LIMIT — a few hundred is a sensible ceiling for a view — because every result row is materialized as its own document in the space, so an unbounded query over a large store writes a document per row it returns, and a re-run writes again only the rows that changed, except that a labeled result keys its rows on position and so also rewrites the rows a change displaced, and re-keys every row when the query's projection or the handle's tables change; an aggregate returning one row per group — count(*), sum(), a GROUP BY — is bounded by its own shape and needs no LIMIT. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.`,
+    `Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. Give it either your own sourceText or the patternId of a pattern search_patterns found. Source you write imports the runtime from "${RUNTIME_MODULE_SPECIFIER}" and from no other module — every pattern opens with a line of the form ${RUNTIME_MODULE_IMPORT_LINE} — and no package named after the product resolves. When the run's session reads under a confidentiality ceiling, every db.query result must be declared per session (PerSession<> on the result type, or the query's { scope: "session" } option); a query left space-scoped is refused under a ceiling rather than read. Bound every query's rows with a LIMIT — a few hundred is a sensible ceiling for a view — because every result row is materialized as its own document in the space, so an unbounded query over a large store writes a document per row it returns, and a re-run writes again only the rows that changed, except that a labeled result keys its rows on position and so also rewrites the rows a change displaced, and re-keys every row when the query's projection or the handle's tables change; an aggregate returning one row per group — count(*), sum(), a GROUP BY — is bounded by its own shape and needs no LIMIT. A pattern composing another passes on what the composed one reports: expose its error branch and its row count under your own result and render them, or the run answers over figures derived from a read that failed, and the result carries an outputConcerns entry naming the output you did not read. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.`,
   effectClass: "side-effect",
   inputSchema: RUN_PATTERN_INPUT_SCHEMA,
   outputSchema: {
@@ -370,6 +385,23 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           additionalProperties: false,
         },
         rawCauseMessage: { type: "string" },
+        outputConcerns: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              concern: {
+                type: "string",
+                enum: ["error-branch", "no-rows"],
+              },
+              key: { type: "string" },
+              patternId: { type: "string" },
+              message: { type: "string" },
+            },
+            required: ["concern", "key", "message"],
+            additionalProperties: false,
+          },
+        },
       },
       required: [
         "outputId",
@@ -1625,6 +1657,44 @@ export const runPatternTool: HarnessToolDefinition<
         valueError = errorMessage(error);
       }
     }
+    // What every pattern this run materialized says about its own reads,
+    // read off each one's result rather than off the single value this call
+    // answers with. A composed reader exposes its failure and its emptiness
+    // as outputs, and a pattern composing it need pass neither on — which is
+    // how a run answers `ok` over a result of zeros. The reads are
+    // host-side and nothing they find travels as text, so they are not part
+    // of the release measurement above and are taken on a transaction of
+    // their own, abandoned like every other measurement here.
+    //
+    // Every instantiation in the window is read, the run's own root
+    // included, so a failure the caller's own query reported is disclosed on
+    // the same terms as a composed one. The recorder's buffer is what bounds
+    // the work: a pattern materialized once per row of a list reports the
+    // same output many times, and `dedupedOutputConcerns` states each once.
+    const ownCellHash = comparableEntityHash(piece.id);
+    const concernsTx = pieces.runtime.edit();
+    let outputConcerns: readonly RunPatternOutputConcern[] = [];
+    try {
+      const found: RunPatternOutputConcern[] = [];
+      for (
+        const record of session.instantiations?.since(instantiationStart) ?? []
+      ) {
+        const materialized = pieces.runtime.getCellFromLink(record.link)
+          .withTx(concernsTx);
+        await materialized.pull();
+        found.push(...outputConcernsIn(
+          asSerializableValue(materialized.get()),
+          record.cell === ownCellHash ? undefined : record.identity,
+        ));
+      }
+      outputConcerns = dedupedOutputConcerns(found);
+    } catch {
+      // A materialized result that will not read back says nothing about the
+      // run, and this report is a disclosure: an absent one costs the model
+      // the reason to look, and a thrown one would cost it the answer.
+    } finally {
+      concernsTx.abort("run_pattern output-concern read");
+    }
     // A result that settled to nothing is not a success to report. When the
     // sanitized value failed its schema, or the raw result holds no fields of
     // its own beyond the framework keys, the runtime's observation window
@@ -1987,6 +2057,7 @@ export const runPatternTool: HarnessToolDefinition<
       ...(releaseObservation !== undefined ? { releaseObservation } : {}),
       ...(releaseDecision !== undefined ? { releaseDecision } : {}),
       ...(publication !== undefined ? { patternPublication: publication } : {}),
+      ...(outputConcerns.length > 0 ? { outputConcerns } : {}),
       ...(retainedCauses.length > 0
         ? { rawCauseMessage: retainedCauses.join("\n\n") }
         : {}),

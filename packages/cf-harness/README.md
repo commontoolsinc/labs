@@ -1759,6 +1759,28 @@ carries no handle code. The persisted tool-output artifact keeps the raw
 reference, the raw result value, and the `pieceId` — a bare fabric identifier
 the handle boundary never swaps, so it stays out of the model-facing rendering.
 
+`outputConcerns` is what the run's own outputs say about the reads behind them,
+and it is a DISCLOSURE rather than a refusal: the run succeeded, the piece
+stands, and this is the reason to look at it. A composed reader exposes its
+failure and its emptiness as outputs — an `errorMessage` beside its `rows` — and
+a pattern composing it is free to pass neither on, which is how a run answers
+`ok` over a result whose every figure is zero. So every pattern the run
+materialized is read where it stands, the run's own root included, and each
+output reporting a failure (a non-empty `error` or `errorMessage`, or any string
+carrying the `sqlite:` prefix the runtime writes its own SQLite failures under)
+or holding no rows (an empty list) is named: the output's key, the identity of
+the pattern that produced it — which for a composed one is the id its own
+`cf:pattern:` import addresses — and fixed text saying what to do about it.
+Absent when there is nothing to say, and one entry per pattern, output and kind
+however many times a pattern was materialized.
+
+The failure's own TEXT never travels. A concern names what the model already
+holds: it wrote the composition, and a composed instance's outputs went through
+no release measurement, so the text is treated as every other thrown message
+this tool withholds is. What a model does with a named output is expose it under
+its own result schema and render it, where the release boundary measures it like
+any other value.
+
 What the answer's values may carry is measured against the ceiling a model's
 context has, which admits nothing: a model's context is outside every space, so
 no confidentiality clause names an audience it belongs to. The reference is not
