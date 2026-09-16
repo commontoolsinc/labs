@@ -19,11 +19,9 @@ import {
   type LanePlan,
   listObjects,
   type Manifest,
-  MANIFESTS_LOOKED_BACK,
   objectUrl,
   parseManifest,
   SELECTION_AREA,
-  writtenAhead,
 } from "@commonfabric/test-support/records";
 
 export const TEST_SELECTION_BUCKET = "cf-ci-metadata";
@@ -40,33 +38,15 @@ export function generatedAtOf(objectName: string): string | undefined {
   )?.[1];
 }
 
-/**
- * Fetches the newest manifest this reader knows a shape for, or
- * `undefined` when the store holds none it does.
- *
- * A manifest from further ahead than this reader is passed over and the
- * one before it answers instead. What that costs is a figure some hours
- * old. Raising it would leave the reader with none, and a consumer with
- * no manifest runs the whole corpus.
- */
+/** Fetches the newest manifest, or `undefined` when the store holds none. */
 export async function newestManifest(options: {
   bucket?: string;
   prefix?: string;
   fetchImpl?: typeof fetch;
 } = {}): Promise<Manifest | undefined> {
-  const names = await manifestNames(options);
-  if (names.length === 0) return undefined;
-  for (const name of names.slice(-MANIFESTS_LOOKED_BACK).reverse()) {
-    const manifest = await manifestIfKnown(name, options);
-    if (manifest !== undefined) return manifest;
-  }
-  // Reporting nothing here would say the store holds no manifest, which
-  // is the one thing a reader this far behind its publisher must not
-  // say: the store holds several and this reader can read none of them.
-  throw new Error(
-    `every manifest under ${options.prefix ?? TEST_SELECTION_PREFIX} this ` +
-      `reader looked at was written in a newer shape than it reads`,
-  );
+  const newest = (await manifestNames(options)).at(-1);
+  if (newest === undefined) return undefined;
+  return readManifest(newest, options);
 }
 
 /** Lists the available manifests in generation order. */
@@ -86,16 +66,11 @@ export async function manifestNames(options: {
   }).sort();
 }
 
-/**
- * Fetches one manifest, giving back `undefined` for one written in a
- * shape from further ahead than this reader. A body that is not a
- * manifest at all is a fault and is raised, so that a corrupt object is
- * told apart from one this reader is merely behind.
- */
-async function manifestIfKnown(name: string, options: {
+/** Fetches and validates a manifest, throwing when the object is unreadable. */
+export async function readManifest(name: string, options: {
   bucket?: string;
   fetchImpl?: typeof fetch;
-} = {}): Promise<Manifest | undefined> {
+} = {}): Promise<Manifest> {
   const response = await (options.fetchImpl ?? fetch)(
     objectUrl(options.bucket ?? TEST_SELECTION_BUCKET, name),
   );
@@ -104,28 +79,9 @@ async function manifestIfKnown(name: string, options: {
   }
   // The store serves these with transcoding, so a plain fetch has
   // already decoded the gzip the object is stored under.
-  // One parse for both questions, because a manifest is the whole corpus
-  // and the walk asks them of every candidate.
-  let body: unknown;
-  try {
-    body = JSON.parse(await response.text());
-  } catch {
-    body = undefined;
-  }
-  const manifest = parseManifest(body);
-  if (manifest !== undefined) return manifest;
-  if (writtenAhead(body)) return undefined;
-  throw new Error(`manifest ${name}: not a manifest`);
-}
-
-/** Fetches and validates a manifest, throwing when the object is unreadable. */
-export async function readManifest(name: string, options: {
-  bucket?: string;
-  fetchImpl?: typeof fetch;
-} = {}): Promise<Manifest> {
-  const manifest = await manifestIfKnown(name, options);
+  const manifest = parseManifest(await response.text());
   if (manifest === undefined) {
-    throw new Error(`manifest ${name}: written in a newer shape than this`);
+    throw new Error(`manifest ${name}: not a manifest`);
   }
   return manifest;
 }

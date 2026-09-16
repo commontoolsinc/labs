@@ -5,8 +5,6 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import {
-  MANIFEST_SCHEMA_VERSION,
-  MANIFESTS_LOOKED_BACK,
   sampleEntry,
   sampleManifest,
   serializeManifest,
@@ -88,73 +86,11 @@ Deno.test("newestManifest reports a body that is not a manifest", async () => {
   );
 });
 
-Deno.test("newestManifest takes the newest one written in a shape it knows", async () => {
-  // A manifest published after a change to what one holds is ahead of a
-  // reader that has not been deployed since. Refusing it and stopping
-  // would leave the reader with nothing, and a consumer with no manifest
-  // runs the whole corpus, so the one before it answers instead.
-  const older = sampleManifest({ generatedAt: "2026-08-20T00:00:00.000Z" });
-  const ahead = JSON.parse(
-    serializeManifest(sampleManifest({ generatedAt: "2026-08-20T04:00:00.000Z" })),
-  );
-  ahead.schema = MANIFEST_SCHEMA_VERSION + 1;
-  const found = await newestManifest({
-    fetchImpl: storeOf({
-      [`${PREFIX}/manifest-2026-08-20T00:00:00.000Z-a.json.gz`]:
-        serializeManifest(older),
-      [`${PREFIX}/manifest-2026-08-20T04:00:00.000Z-b.json.gz`]:
-        JSON.stringify(ahead),
-    }),
-  });
-  assertEquals(found?.generatedAt, "2026-08-20T00:00:00.000Z");
-});
-
-Deno.test("newestManifest still reports a body that is no manifest at all", async () => {
-  // Passing over one written ahead of this reader is not passing over a
-  // corrupt object: the first is a reader behind its publisher, and the
-  // second is a store nobody should be reporting a figure from.
-  const older = sampleManifest({ generatedAt: "2026-08-20T00:00:00.000Z" });
-  await assertRejects(
-    () =>
-      newestManifest({
-        fetchImpl: storeOf({
-          [`${PREFIX}/manifest-2026-08-20T00:00:00.000Z-a.json.gz`]:
-            serializeManifest(older),
-          [`${PREFIX}/manifest-2026-08-20T04:00:00.000Z-b.json.gz`]:
-            JSON.stringify({ schema: MANIFEST_SCHEMA_VERSION, entries: 7 }),
-        }),
-      }),
-    Error,
-    "not a manifest",
-  );
-});
-
 Deno.test("the reader looks where the publisher writes", () => {
   // Two spellings of the area would part company the first time either
   // moved, and what that produces is a reader listing objects that are
   // all refused: a fault where a figure should be.
   assertEquals(`${manifestPrefix(() => undefined)}/`, TEST_SELECTION_PREFIX);
-});
-
-Deno.test("newestManifest reports a store it can read none of", async () => {
-  // Reporting nothing would say the store holds no manifest. It holds
-  // several; this reader can read none of them, which is a different
-  // thing and the one a person has to be told about.
-  const ahead = (at: string) => {
-    const body = JSON.parse(serializeManifest(sampleManifest({ generatedAt: at })));
-    body.schema = MANIFEST_SCHEMA_VERSION + 1;
-    return JSON.stringify(body);
-  };
-  const objects: Record<string, string> = {};
-  for (let hour = 0; hour <= MANIFESTS_LOOKED_BACK; hour++) {
-    const at = `2026-08-20T${String(hour).padStart(2, "0")}:00:00.000Z`;
-    objects[`${PREFIX}/manifest-${at}-a.json.gz`] = ahead(at);
-  }
-  await assertRejects(
-    () => newestManifest({ fetchImpl: storeOf(objects) }),
-    Error,
-    "newer shape",
-  );
 });
 
 Deno.test("newestManifest reports nothing when the store holds none", async () => {

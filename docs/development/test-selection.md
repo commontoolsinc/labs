@@ -318,10 +318,14 @@ The area both are written under is named rather than numbered and does
 not move, so a run finds the aggregate the run before it left; a stored
 body says which shape it was written in, and a reader reads anything at
 or under its own forward, field by field. What a reader will not read is
-a body from further ahead than itself, which it passes over for the
-newest one behind it. So raising `MANIFEST_SCHEMA_VERSION` means giving
-the reader of whatever changed a way to read the shape before it, and
-nothing else.
+a body from further ahead than itself. `writtenAhead` is what every
+reader asks about that, so that what counts as too far ahead is answered
+in one place.
+
+A lane looks past such a body to the newest one behind it, over
+`MANIFESTS_LOOKED_BACK` manifests, because a lane with no manifest runs
+the whole corpus. The wall reports a fault instead and shows nothing,
+which costs a person a figure rather than costing a run its selection.
 
 **Nothing gates on it.** When the publisher fails, the previous manifest is
 still the newest one and consumers keep using it. A manifest going stale

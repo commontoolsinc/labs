@@ -566,9 +566,9 @@ A manifest is **untrusted input**. It is validated whole, and one bad
 field rejects the object rather than leaving a consumer obeying half of
 it. A manifest declaring a shape from further ahead than the reader is
 treated as absent, because a reader that does not know a field cannot
-know what obeying the rest would mean; the reader takes the newest one
-behind it instead, and that is a figure hours old where refusing would
-leave it with none.
+know what obeying the rest would mean. A reader whose answer decides
+what runs takes the newest one behind it instead, since a figure hours
+old is what it costs and the whole corpus is what refusing costs.
 
 A manifest declaring an earlier shape is read forward field by field. So
 is the publisher's own rolling aggregate, and for a stronger reason: the
