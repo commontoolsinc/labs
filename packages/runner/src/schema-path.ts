@@ -1,5 +1,7 @@
 /** Determines which paths a schema can select, independently of stored values. */
 
+import { schemaWithProperties } from "@commonfabric/data-model-schema";
+
 import type { JSONSchema } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
@@ -60,11 +62,13 @@ export function schemaPathSelection(
           const child = typeof branchRoot === "object"
             ? ContextualFlowControl.resolveSchemaRefsOrThrow(branchRoot)
             : branchRoot;
-          return selects(
-            typeof child === "boolean" ? child ? outer : false : combineSchema(
-              withStructuralType(outer),
-              withStructuralType(child),
-            ),
+          if (typeof child === "boolean") {
+            return selects(child ? outer : false, offset);
+          }
+          // Eager readers replace branch properties; lazy readers merge them.
+          // Admission must include complete paths exposed by either reader.
+          return selects(schemaWithProperties(outer, child), offset) || selects(
+            combineSchema(withStructuralType(outer), withStructuralType(child)),
             offset,
           );
         });

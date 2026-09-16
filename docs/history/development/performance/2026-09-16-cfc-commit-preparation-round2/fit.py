@@ -39,7 +39,7 @@ def fit(rows,products):
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("evidence", type=Path)
 args = parser.parse_args()
-data = json.loads(args.evidence.read_text())
+data = json.loads(args.evidence.read_text(encoding="utf-8"))
 if "raw" in data:
     import re
     grouped = collections.defaultdict(list)

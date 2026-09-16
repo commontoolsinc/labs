@@ -1186,11 +1186,18 @@ const storedMetadataFor = (
  */
 class VerifierMetadataResolver {
   #tx: IExtendedStorageTransaction;
-  #envelopes = new Map<string, Map<MediaType, CfcMetadata | undefined>>();
+  #envelopes = new Map<
+    MemorySpace,
+    Map<
+      ReturnType<typeof normalizeCellScope>,
+      Map<URI, Map<MediaType, CfcMetadata | undefined>>
+    >
+  >();
   #seenWrites = 0;
   #viewIndexes = new WeakMap<CfcMetadata, ConsumedLabelIndex>();
   #views = new WeakMap<CfcMetadata, Map<string, CfcLabelView | undefined>>();
   #labelIndexes = new WeakMap<CfcMetadata, ConsumedLabelIndex>();
+  #labels = new WeakMap<CfcMetadata, Map<string, IFCLabel | undefined>>();
   #coverIndexes = new WeakMap<CfcLabelView, ConsumedLabelIndex>();
   #covers = new WeakMap<
     CfcLabelView,
@@ -1209,11 +1216,20 @@ class VerifierMetadataResolver {
     scope: ReturnType<typeof normalizeCellScope>,
     type: MediaType,
   ): CfcMetadata | undefined {
-    const key = stringTupleKey([space, scope, id]);
-    let types = this.#envelopes.get(key);
+    let scopes = this.#envelopes.get(space);
+    if (scopes === undefined) {
+      scopes = new Map();
+      this.#envelopes.set(space, scopes);
+    }
+    let documents = scopes.get(scope);
+    if (documents === undefined) {
+      documents = new Map();
+      scopes.set(scope, documents);
+    }
+    let types = documents.get(id);
     if (types === undefined) {
       types = new Map();
-      this.#envelopes.set(key, types);
+      documents.set(id, types);
     }
     if (!types.has(type)) {
       types.set(type, storedMetadataFor(this.#tx, space, id, scope, type));
@@ -1223,6 +1239,13 @@ class VerifierMetadataResolver {
 
   /** Resolves a source label using the validated envelope's path index. */
   label(metadata: CfcMetadata, path: readonly string[]): IFCLabel | undefined {
+    let labels = this.#labels.get(metadata);
+    if (labels === undefined) {
+      labels = new Map();
+      this.#labels.set(metadata, labels);
+    }
+    const key = encodePointer(path);
+    if (labels.has(key)) return labels.get(key);
     let index = this.#labelIndexes.get(metadata);
     if (index === undefined) {
       index = new ConsumedLabelIndex(metadata.labelMap.entries, {
@@ -1234,10 +1257,12 @@ class VerifierMetadataResolver {
       });
       this.#labelIndexes.set(metadata, index);
     }
-    return labelForEntriesAtPath(
+    const label = labelForEntriesAtPath(
       index.overlapping(path, false).map(({ entry }) => entry),
       path,
     );
+    labels.set(key, label);
+    return label;
   }
 
   /** Reuses rebased views while their validated source envelope is unchanged. */
@@ -1341,18 +1366,34 @@ class VerifierMetadataResolver {
     const writes = getTransactionWriteAttempts(this.#tx.tx);
     if (writes === undefined) {
       this.#envelopes.clear();
+      this.#viewIndexes = new WeakMap();
+      this.#views = new WeakMap();
+      this.#labelIndexes = new WeakMap();
+      this.#labels = new WeakMap();
+      this.#coverIndexes = new WeakMap();
+      this.#covers = new WeakMap();
       this.#seenWrites = 0;
       return;
     }
     for (let index = this.#seenWrites; index < writes.length; index++) {
       const write = writes[index];
-      this.#envelopes.delete(
-        stringTupleKey([
-          write.space,
-          normalizeCellScope(write.scope),
-          write.id,
-        ]),
+      const documents = this.#envelopes.get(write.space)?.get(
+        normalizeCellScope(write.scope),
       );
+      const types = documents?.get(write.id);
+      for (const metadata of types?.values() ?? []) {
+        if (metadata === undefined) continue;
+        for (const view of this.#views.get(metadata)?.values() ?? []) {
+          if (view === undefined) continue;
+          this.#coverIndexes.delete(view);
+          this.#covers.delete(view);
+        }
+        this.#views.delete(metadata);
+        this.#viewIndexes.delete(metadata);
+        this.#labelIndexes.delete(metadata);
+        this.#labels.delete(metadata);
+      }
+      documents?.delete(write.id);
     }
     this.#seenWrites = writes.length;
   }
@@ -1456,7 +1497,7 @@ const candidateSchemasByTarget = (
 };
 
 /**
- * Maps each write target cell to the list of its write-authority-bearing inputs
+ * Maps each write target cell to its first write-authority-bearing input per path
  * (path + the implementation identity that authored each, captured when the
  * input was recorded). `writeAuthorizedBy` is verified per field, so we keep
  * each input's identity separately rather than collapsing a cell to a single
@@ -1473,29 +1514,20 @@ const writePolicyIdentitiesByTarget = (
   identityForInput: (input: WritePolicyInput) =>
     | ImplementationIdentity
     | undefined,
-): Map<
-  string,
-  Array<
-    { path: readonly string[]; identity: ImplementationIdentity | undefined }
-  >
-> => {
+): Map<string, Map<string, ImplementationIdentity | undefined>> => {
   const result = new Map<
     string,
-    Array<
-      { path: readonly string[]; identity: ImplementationIdentity | undefined }
-    >
+    Map<string, ImplementationIdentity | undefined>
   >();
   for (const input of inputs) {
     if (input.kind !== "schema" && input.kind !== "link-write") {
       continue;
     }
     const key = targetKey(input.target);
-    const list = result.get(key) ?? [];
-    list.push({
-      path: canonicalizeLogicalPath(input.target.path),
-      identity: identityForInput(input),
-    });
-    result.set(key, list);
+    let paths = result.get(key);
+    if (paths === undefined) result.set(key, paths = new Map());
+    const path = encodePointer(canonicalizeLogicalPath(input.target.path));
+    if (!paths.has(path)) paths.set(path, identityForInput(input));
   }
   return result;
 };
@@ -1507,27 +1539,16 @@ const writePolicyIdentitiesByTarget = (
  * is the one `writeAuthorizedBy` must be verified against.
  */
 const identityForSchemaPath = (
-  entries:
-    | Array<
-      { path: readonly string[]; identity: ImplementationIdentity | undefined }
-    >
-    | undefined,
+  entries: Map<string, ImplementationIdentity | undefined> | undefined,
   path: readonly string[],
 ): ImplementationIdentity | undefined => {
-  if (entries === undefined) {
-    return undefined;
+  if (entries === undefined) return undefined;
+  for (let depth = path.length; depth >= 0; depth--) {
+    const key = encodePointer(path.slice(0, depth));
+    // A deeper unattributed input shadows any attributed ancestor.
+    if (entries.has(key)) return entries.get(key);
   }
-  let bestLength = -1;
-  let bestIdentity: ImplementationIdentity | undefined;
-  for (const entry of entries) {
-    if (
-      concretePathHasPrefix(path, entry.path) && entry.path.length > bestLength
-    ) {
-      bestLength = entry.path.length;
-      bestIdentity = entry.identity;
-    }
-  }
-  return bestIdentity;
+  return undefined;
 };
 
 const targetKey = (target: {
@@ -2024,7 +2045,17 @@ const valueWriteTargets = (
     }
   >();
   const log = tx.getReactivityLog?.();
-  const forgedSystemWrites = tx.getCfcState().unprivilegedSystemWrites ?? [];
+  const forgedSystemDocuments = new Set<string>();
+  for (const recorded of tx.getCfcState().unprivilegedSystemWrites ?? []) {
+    // Document ids can contain slashes; each separator is a possible boundary.
+    for (
+      let offset = recorded.indexOf("/");
+      offset !== -1;
+      offset = recorded.indexOf("/", offset + 1)
+    ) {
+      forgedSystemDocuments.add(recorded.slice(0, offset));
+    }
+  }
   const seenWriteSpaces = new Set<MemorySpace>(
     [...(log?.writes ?? []), ...(log?.attemptedWrites ?? [])].map((write) =>
       write.space
@@ -2048,9 +2079,7 @@ const valueWriteTargets = (
         write.address.id.startsWith("cid:") ||
         (
           isReservedCfcDocumentId(write.address.id) &&
-          !forgedSystemWrites.some((recorded) =>
-            recorded.startsWith(`${write.address.id}/`)
-          )
+          !forgedSystemDocuments.has(write.address.id)
         ) ||
         rawPath[0] === "cfc" ||
         rawPath[0] === "source" ||
@@ -2931,13 +2960,12 @@ const storedSchemaClaimsForLinkWrites = (
   inputs: readonly LinkWritePolicyInput[],
 ): JSONSchema => {
   let result: JSONSchema | undefined;
-  const targetPaths = inputs.map((input) =>
-    canonicalizeLogicalPath(input.target.path)
-  );
+  const targetPaths = new PathPrefixIndex();
+  for (const input of inputs) {
+    targetPaths.add(canonicalizeLogicalPath(input.target.path));
+  }
   for (const entry of cfcSchemaEntries(schema)) {
-    if (
-      !targetPaths.some((targetPath) => pathsOverlap(targetPath, entry.path))
-    ) {
+    if (!targetPaths.overlaps(entry.path)) {
       continue;
     }
     const policySchema = linkWritePolicyOnlySchema(entry.schema, entry.path);
@@ -4290,16 +4318,24 @@ const verifyInputRequirements = (
   // while producing the current view. Refresh after that inspection so every
   // envelope resolution observes those writes.
   metadataResolver.refresh();
-  const readSources = currentReads.map((read) => ({
-    ...read,
-    path: canonicalizeLogicalPath(read.path),
-    metadata: metadataResolver.read(
+  const schemaEntries = cfcSchemaEntries(schema);
+  const needsReadLabels = provenance !== undefined ||
+    schemaEntries.some(({ schema: entrySchema }) => {
+      const ifc = isObjectOrArray(entrySchema) ? entrySchema.ifc : undefined;
+      return (ifc?.requiredIntegrity?.length ?? 0) > 0 ||
+        ifc?.maxConfidentiality !== undefined;
+    });
+  const sourceMetadata = currentReads.map((read) => {
+    // Gate paths are captured before resolving an envelope: backend reads may
+    // mutate a caller-owned path array. Ungated targets only need the address.
+    if (needsReadLabels) read.path = canonicalizeLogicalPath(read.path);
+    return metadataResolver.read(
       read.space,
       read.id,
       normalizeCellScope(read.scope),
       read.type ?? "application/json",
-    ),
-  }));
+    );
+  });
   if (provenance !== undefined) {
     provenance.clockLessReads = clockLessReads;
   }
@@ -4310,10 +4346,10 @@ const verifyInputRequirements = (
   // declaring `requiredIntegrity` or `maxConfidentiality` reads the result,
   // so the set is assembled on first ask and kept for the rest of the call.
   const buildGatedReads = () => {
-    const gatedReads = readSources.map(({ metadata, ...read }) => ({
+    const gatedReads = currentReads.map((read, index) => ({
       ...read,
       label: effectiveReadLabel(
-        metadata,
+        sourceMetadata[index],
         read.path,
         { nonRecursive: read.nonRecursive, consumes: "all" },
       ),
@@ -4359,7 +4395,7 @@ const verifyInputRequirements = (
     .filter((read) => !isProvenanceOnlyConsumedLabel(read.label!))
     .length;
 
-  for (const entry of cfcSchemaEntries(schema)) {
+  for (const entry of schemaEntries) {
     if (
       !ifcEntryAppliesToAttemptedWrite(
         tx,
