@@ -25,11 +25,11 @@ import {
  * as `throw`ing a "shouldn't call" error, with a handful of exceptions. The
  * point of this arrangement is that many concrete visitors won't need to
  * implement every visitor method, and TypeScript doesn't let one just implement
- * _part_ of an abstract class's contract and try to call the result
- * non-abstract. Subclasses of this class _do_ get to avoid a lot of the
- * boilerplate, but as a result there may be cases where an implementer forgot
- * about a method and only discovers it through testing or at runtime and not
- * because of the type checker.
+ * _part_ of an abstract class's contract and try to call the result concrete.
+ * Subclasses of this class _do_ get to avoid a lot of the boilerplate, but as a
+ * result there may be cases where an implementer forgot about a method and only
+ * discovers it through testing or at runtime and not because of the type
+ * checker.
  *
  * The methods that don't just `throw` a "shouldn't call" error:
  *
