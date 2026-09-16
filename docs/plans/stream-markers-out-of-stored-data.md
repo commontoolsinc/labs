@@ -188,7 +188,8 @@ rejected, exactly as today. Rule 3 keeps that restriction on purpose.
 Without the sentinel the derived document holds the `result` back-link meta
 and nothing else. It is still listed (the memory server's entity page selects
 current ids with no value condition, `memory/v2/engine.ts:2188`), still the
-record events are appended to, and still found by event auto-start. What it no
+id a served event's sidecar entry names (`of:stream-events:` docs,
+`memory/v2/engine.ts:2577`), and still found by event auto-start. What it no
 longer does is describe itself: a reader that has only the document cannot
 tell it is a stream.
 
@@ -483,10 +484,10 @@ stage 3: the value is ignored, and nothing reads it.
 ## Not in scope
 
 - Unifying streams with value cells, which `2-storage-format.md:95` floats.
-- Removing the stream's document altogether. Events are appended to that
-  record and auto-start finds the owner through its back-link; a stream that
-  is an address with no record needs another target for both, which is the
-  unification above.
+- Removing the stream's document altogether. Auto-start finds the owner
+  through the back-link on that record, and a served event's sidecar entry
+  names its id; a stream that is an address with no record needs another way
+  to reach the owner, which is the unification above.
 - Changing derived-cell identity or the manifest format.
 - Allowing a lift to take an input named `$event`.
 - The formal spec's wider encoding work; this plan only retires one row of its
