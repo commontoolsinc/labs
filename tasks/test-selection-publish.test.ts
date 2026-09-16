@@ -577,7 +577,7 @@ describe("publish()", () => {
     );
     expect(said).toContain("the cost model holds 0 suite(s) and 0 capability");
     expect(said).toContain("no suite has a measured cost in the last 7 day(s)");
-    expect(said).toContain("overruns");
+    expect(said).toContain("charged nothing for holding one");
   });
 
   it("names the lane measurements it had to decline", async () => {

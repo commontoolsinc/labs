@@ -415,13 +415,14 @@ describe("build", () => {
       expect(read.lanes).toEqual([]);
       // The test beside them is not one, so this counts the lane's own
       // measurements rather than everything the group held.
-      expect(read.declined).toBe(2);
+      expect(read.declinedDays).toEqual(["2026-08-20", "2026-08-20"]);
     });
 
     it("counts nothing declined in a group it could read", () => {
       expect(
-        readReport(stored(CI_NAME, context(), [record()]), NO_ALIASES).declined,
-      ).toBe(0);
+        readReport(stored(CI_NAME, context(), [record()]), NO_ALIASES)
+          .declinedDays,
+      ).toEqual([]);
     });
 
     it("keeps no lane measurement from a group nothing may read", () => {
@@ -753,6 +754,49 @@ describe("build", () => {
       ]);
       await fold.addUnordered(replaying([report, report]));
       expect(fold.declined).toBe(1);
+    });
+
+    it("passes over a declined measurement past the cost window", () => {
+      // A bootstrap reads far wider than the model is fitted across, so
+      // a count taking every day it read would offer a measurement from
+      // a day the model cannot reach as the reason it holds nothing.
+      const older = placeless();
+      older.startedAt = "2026-07-20T00:00:00.000Z";
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      fold.add([
+        stored(CI_NAME, older, [
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+            durationMs: 14_800,
+          }),
+        ]),
+      ]);
+      expect(fold.declined).toBe(0);
+    });
+
+    it("counts no declined measurement it cannot put in a day", () => {
+      // The group's own start time is the only thing that dates it, and
+      // one that will not read as a time dates nothing.
+      const undated = placeless();
+      undated.startedAt = "the other day";
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      fold.add([
+        stored(CI_NAME, undated, [
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+            durationMs: 14_800,
+          }),
+        ]),
+      ]);
+      expect(fold.declined).toBe(0);
     });
 
     it("counts a shard once however often it is handed over", async () => {

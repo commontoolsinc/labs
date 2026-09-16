@@ -659,15 +659,17 @@ and a lane killed part way through a batch leaves the pair unmatched, so
 a model can hold a capability setup and no suite at all.
 
 What a lane is charged for holding a suite is the suite's own figure, so
-a model with no suite in it charges every lane nothing beyond the tests
-it runs and a lane packed against it overruns the bound it is killed at.
-A run with no suite in its model says so rather than publishing the
-empty map in silence:
+a model with no suite in it charges nothing for holding one and a lane
+packed against it overruns the bound it is killed at. The capability
+setups and the prologue come from their own figures and are unaffected,
+which is why this is about the suites rather than everything a lane is
+charged. A run with no suite in its model says so rather than publishing
+the empty map in silence:
 
 ```
-test selection: no suite has a measured cost in the last 7 day(s), so
-the model charges every lane nothing beyond the tests it runs and a lane
-packed against this manifest overruns.
+test selection: no suite has a measured cost in the last 7 day(s), so a
+lane is charged nothing for holding one and a lane packed against this
+manifest overruns. See docs/development/test-selection.md.
 ```
 
 Four different things end there. One of them the run can tell you
@@ -687,10 +689,14 @@ however far back the publisher reads. That third line is what tells
 this apart from a lane that has not run, and it is the one case here
 anybody can act on.
 
-It is counted over the objects the run folded rather than over the
-window, so it is evidence when it appears and says nothing when it does
-not. A run that folds nothing new prints no such line whatever the store
-holds.
+It is counted over the objects the run folded, and over the same window
+the model is fitted across, so a run reading a wider window than the
+model's own — a bootstrap, or a window somebody asked for — does not
+offer a measurement from a day the model cannot reach as the reason a
+current model is empty. A measurement whose group carries no start time
+that reads as one has no day and is not counted at all. So the figure is
+evidence when it appears and says nothing when it does not: a run that
+folds nothing new prints no such line whatever the store holds.
 
 What `provenance` declines is wider than the record specification asks
 for. It refuses a run marked `fork: true` outright, on the stated

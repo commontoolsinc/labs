@@ -302,13 +302,17 @@ export interface ReadReport {
   lanes: LaneObservation[];
 
   /**
-   * Lane measurements in the groups nothing may read, which the cost
-   * model is therefore fitted without. A lane exercised only from a
-   * fork records what it measured like any other lane and contributes
-   * nothing, and counting what was declined is what tells that apart
-   * from no lane having run at all.
+   * The day of each lane measurement in a group nothing may read, which
+   * the cost model is therefore fitted without. A lane exercised only
+   * from runs the fold cannot place records what it measured like any
+   * other lane and contributes nothing, and these are what tell that
+   * apart from no lane having run at all.
+   *
+   * The day travels with each of them so that a caller holds them to
+   * the same window as the measurements it kept. A group whose start
+   * time will not read as one has no day, and contributes none.
    */
-  declined: number;
+  declinedDays: string[];
 }
 
 /**
@@ -325,7 +329,7 @@ export function readReport(
   const surfaces = new Map<string, Surface>();
   const durations = new Map<string, Map<string, number[]>>();
   const lanes: LaneObservation[] = [];
-  let declined = 0;
+  const declinedDays: string[] = [];
   for (const group of report.reports) {
     const where = provenance(group.context, report.objectName);
     if (
@@ -336,8 +340,12 @@ export function readReport(
       // would rewrite it: a group this cannot place has no day to
       // resolve an alias against, and no alias renames a measurement a
       // lane writes about itself.
-      for (const record of group.records) {
-        if (isLaneMeasurement(record.test)) declined++;
+      const startedAt = group.context?.startedAt;
+      if (startedAt !== undefined && Number.isFinite(Date.parse(startedAt))) {
+        const day = dayOf(startedAt);
+        for (const record of group.records) {
+          if (isLaneMeasurement(record.test)) declinedDays.push(day);
+        }
       }
       continue;
     }
@@ -390,7 +398,7 @@ export function readReport(
       byDay.set(day, [...(byDay.get(day) ?? []), record.durationMs]);
     }
   }
-  return { observations, surfaces, durations, lanes, declined };
+  return { observations, surfaces, durations, lanes, declinedDays };
 }
 
 /** The invocation unit and suite a record belongs to. */
@@ -780,11 +788,12 @@ export class Fold {
   }
 
   /**
-   * Lane measurements this fold read and had to decline, over the
-   * objects it folded. What the cost model is fitted from is what a
-   * lane measured about itself, so a figure here is a lane that ran and
-   * whose measurement cannot be used, which is a different thing from a
-   * lane that has not run.
+   * Lane measurements this fold read and had to decline, counted over
+   * the objects it folded and over the same window the cost model is
+   * fitted across. What that model is fitted from is what a lane
+   * measured about itself, so a figure here is a lane that ran inside
+   * the window and whose measurement cannot be used, which is a
+   * different thing from a lane that has not run.
    */
   get declined(): number {
     return this.#declined;
@@ -846,7 +855,7 @@ export class Fold {
         observations.push(observation);
       }
       this.#remember(read);
-      this.#declined += read.declined;
+      this.#countDeclined(read);
       this.#folded.push(report.objectName);
       this.#foldedIndex.add(report.objectName);
     }
@@ -894,7 +903,7 @@ export class Fold {
         }, this.#resolver);
         observations.add(read.observations);
         this.#remember(read);
-        this.#declined += read.declined;
+        this.#countDeclined(read);
       }
       this.#folded.push(report.objectName);
       this.#foldedIndex.add(report.objectName);
@@ -917,6 +926,20 @@ export class Fold {
    */
   #withinCostWindow(lane: LaneObservation): boolean {
     return daysBetween(lane.day, this.#today) <= COST_WINDOW_DAYS;
+  }
+
+  /**
+   * Counts the declined measurements of one object that the cost model
+   * would have been fitted over. A run reading a window wider than the
+   * model's own — a bootstrap, or a window somebody asked for — reads
+   * declined measurements from days the model does not reach, and a
+   * count including those would offer a stale measurement as the reason
+   * a current model is empty.
+   */
+  #countDeclined(read: ReadReport): void {
+    for (const day of read.declinedDays) {
+      if (daysBetween(day, this.#today) <= COST_WINDOW_DAYS) this.#declined++;
+    }
   }
 
   /** Closes the fold, sealing each day's cost and aging the counters. */
