@@ -11,7 +11,9 @@
 // - OPTIMISTIC-ENACT RECONCILE (T2.Q7): the flag-ON client's
 //   speculative run enacts the navigation immediately, carrying the
 //   same deterministic nonce — the authoritative intent CONVERGES on
-//   it and the journey ends with exactly ONE navigation;
+//   it. When the served round-trip wins that race instead, the
+//   arriving intent enacts and the speculative run stands down. Either
+//   way the journey ends with exactly ONE navigation;
 // - ACK + RETIREMENT (protocol.md §5): the channel acks by nonce (an
 //   ordinary authored write of the session's own `acks[nonce]` mark)
 //   and the next wave retires the acked entry — the instance drains,
@@ -157,9 +159,11 @@ describe("sx2 effect channel (Phase 4 gates)", () => {
     resultCell.key("go").send(undefined as never);
     await cc.runtime.idle();
 
-    // The OPTIMISTIC enactment (speculation.md §2's allowlisted
-    // navigateTo): the navigation happens before the authoritative
-    // intent's round-trip.
+    // The enactment (speculation.md §2's allowlisted navigateTo):
+    // optimistic, before the authoritative intent's round-trip, or on
+    // the channel's delivery of that intent when the served round-trip
+    // wins the race. The journey navigates ONCE; the closing assert
+    // holds it to that.
     await awaitNavigation();
 
     // The served intent lands in THIS session's instance and the
@@ -230,7 +234,9 @@ describe("sx2 effect channel (Phase 4 gates)", () => {
     assertEquals(
       navigations.length,
       1,
-      "the optimistic enactment converged by nonce — no re-enactment",
+      `the journey converged by nonce — no re-enactment; navigated to ${
+        JSON.stringify(navigations)
+      }`,
     );
 
     // The ack was counted (serving-loop.md §7's effectAcks — the
