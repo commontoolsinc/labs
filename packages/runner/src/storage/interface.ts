@@ -1429,6 +1429,7 @@ export interface IStorageTransaction {
     space: MemorySpace;
     id: URI;
     scope?: CellScope;
+    path?: readonly PropertyKey[];
   }): Iterable<TransactionWriteDetail>;
 
   /**

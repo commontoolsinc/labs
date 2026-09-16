@@ -92,11 +92,13 @@ Deno.test("writeDetailValueForTarget: uses document-narrowed write details when 
       space: MemorySpace;
       id: URI;
       scope?: string;
+      path?: readonly PropertyKey[];
     }) => {
       assertEquals(requested, {
         space: SPACE,
         id: ID,
         scope: SCOPE,
+        path: [],
       });
       return [wanted];
     },

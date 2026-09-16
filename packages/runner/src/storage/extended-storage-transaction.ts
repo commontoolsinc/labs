@@ -2967,6 +2967,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     space: MemorySpace;
     id: URI;
     scope?: CellScope;
+    path?: readonly PropertyKey[];
   }): Iterable<TransactionWriteDetail> {
     return this.tx.getWriteDetailsForTarget?.(target) ??
       this.getWriteDetails(target.space);
@@ -4167,6 +4168,7 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     space: MemorySpace;
     id: URI;
     scope?: CellScope;
+    path?: readonly PropertyKey[];
   }): Iterable<TransactionWriteDetail> {
     return this.#wrapped.getWriteDetailsForTarget?.(target) ??
       this.getWriteDetails(target.space);

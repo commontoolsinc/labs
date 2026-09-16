@@ -3333,10 +3333,9 @@ export const writeDetailValueForTarget = (
   },
   key: "value" | "previousValue",
 ): FabricValue => {
-  const { space, id, scope } = target;
   const writeDetails = [
-    ...(tx.getWriteDetailsForTarget?.({ space, id, scope }) ??
-      tx.getWriteDetails?.(space) ?? []),
+    ...(tx.getWriteDetailsForTarget?.(target) ??
+      tx.getWriteDetails?.(target.space) ?? []),
   ];
   const targetPath = target.path.map((entry) => String(entry));
   let matchingWrite:
