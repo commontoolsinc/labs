@@ -194,7 +194,9 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // board's demand narrowed to the eight members it reads — which narrows
     // the published projection with it, opens the link and author `kind`
     // domains a closed enum in provided data could never widen, and stops
-    // `addLink` requiring the two fields its handler already defaulted.
+    // `addLink` requiring the two fields its handler already defaulted. And
+    // the mention universe reaching a topic as a readable cell, the break
+    // the entry below records for the baselines after these.
     pattern: "topics/topic.tsx",
     baselines: [
       "20260729T022742Z-6pmDbdEVBz84jJRa",
@@ -231,9 +233,11 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "argument.mentionable",
     ],
     reason:
-      "Two accepted breaks on one pattern: the reference-graph rebuild on cell " +
-      "identity (docs/history/topics-crossref-identity-break.md), and the " +
-      "demand narrowing recorded below.",
+      "Three accepted breaks on one pattern: the reference-graph rebuild on " +
+      "cell identity (docs/history/topics-crossref-identity-break.md), the " +
+      "demand narrowing recorded below, and the mention universe's readable-" +
+      "cell narrowing, which these baselines carry as well " +
+      "(docs/history/topics-mentionable-readonly-break.md).",
     record: "docs/history/topics-demand-narrowing-break.md",
   },
   {
