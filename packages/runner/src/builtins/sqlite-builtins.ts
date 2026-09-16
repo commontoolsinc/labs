@@ -1463,46 +1463,6 @@ export function sqliteQuery(
                 requestHash: hash,
                 ...(withheld !== undefined ? { withheld } : {}),
               });
-              // Per-row label attachment (CFC Phase 3): the row label goes on
-              // the row's own document, at its root, beside the per-column
-              // labels `rowSchemas` carries. The document is read back through
-              // the stored link rather than taken from `storedRows`, so a row
-              // that was not stored as a document of its own is caught here.
-              if (anyPerRow) {
-                for (let i = 0; i < resultRows.length; i++) {
-                  const ifc = perRow[i];
-                  if (!ifc) {
-                    continue;
-                  }
-                  const rowCell = result.key("result").key(i).withTx(wtx);
-                  const raw = rowCell.getRaw();
-                  const link = parseLink(raw);
-                  if (!link?.id) {
-                    // Fail closed: a labeled row MUST carry its label; aborting
-                    // the tx surfaces as wrote.error -> q.error below.
-                    throw new Error(
-                      `sqlite: result row ${i} did not split into its own ` +
-                        "entity doc — cannot attach its per-row label",
-                    );
-                  }
-                  createCell(
-                    runtime,
-                    {
-                      ...link,
-                      space: link.space ?? base.space,
-                      scope: link.scope ?? base.scope,
-                      path: [],
-                    },
-                    wtx,
-                  ).asSchema(
-                    {
-                      ...rowSchemas[i],
-                      ifc,
-                    } as Parameters<Cell<unknown>["asSchema"]>[0],
-                  ).withTx(wtx)
-                    .set(resultRows[i]);
-                }
-              }
             });
             // Surface a write-back failure as `q.error` rather than leaving the
             // query stuck `pending` (editWithRetry returns the error, not throws).
