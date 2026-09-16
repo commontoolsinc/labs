@@ -509,6 +509,42 @@ The [metadata-width measurement](../history/development/performance/2026-09-14-c
 uses the same fixture to compare per-document validation and indexed path
 lookup. Index construction remains inside the collector timer.
 
+## Prepared CFC digests
+
+`packages/runner/test/cfc-prepared-digest.bench.ts` records 5, 50, or 200
+write policy inputs with 1 or 10 KiB payloads, plus 300 read activities and
+dereference traces. Each sample uses a fresh emulated-storage transaction.
+Construction, initial hashing for warm cases, validation, and abort are outside
+the timed interval. Policy names are distinct, so sorting does not repeatedly
+hash large records to break name ties.
+
+The five series measure the first digest, an unchanged second digest, a
+second digest after one additional write, direct hashing over warmed records
+in a fresh input wrapper, and preparation plus its unchanged recheck in one
+interval. The direct-hashing series bypasses the transaction epoch memo; the
+combined series measures the normal two-request shape. Diagnostics on stderr
+report the immutable-object hash-cache hits during the measured interval; an
+epoch-memo hit performs no hashing. Stdout remains the benchmark JSON report.
+
+```sh
+deno bench --no-lock -A --json packages/runner/test/cfc-prepared-digest.bench.ts
+```
+
+Prepared digests are process-local equality tokens over canonical activity.
+The transaction reuses the complete token until its activity epoch changes;
+decision-input recorders and write paths advance that epoch. A changed snapshot
+is canonicalized and hashed in full. The token belongs to one transaction: a
+fresh transaction prepares independently even when its effective CFC label is
+unchanged.
+
+Compare cache designs over preparation plus recheck as well as individual
+calls: a cold setup cost must be recovered within the requests a transaction
+actually makes. Include repeated executions of the same reactive nodes with
+fresh transaction records. Stable labels can accompany changed write values
+and newly allocated records, so neither label equality nor runtime uptime
+establishes that an identity-keyed cache is warm. For retention comparisons,
+probe live keys and discarded graphs separately across garbage collection.
+
 ## CFC path index queries
 
 `packages/runner/test/cfc-path-index.bench.ts` measures `PathPrefixIndex` and

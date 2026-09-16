@@ -11,6 +11,7 @@ import { expect } from "@std/expect";
 import { join, resolve } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
+import { toCompactDebugString } from "@commonfabric/data-model";
 import type { Identity } from "@commonfabric/identity";
 import {
   env,
@@ -141,13 +142,32 @@ async function fileBoardWithMembers(
     const member = (await pieces.getPieceCell(memberSlot, true))
       .asSchema<{ title?: string; shortName?: string }>();
     await member.pull();
-    await waitForCellValue<{ title?: string; shortName?: string }>(
-      pieces.runtime,
-      member,
-      (value) =>
-        value?.title === expectedTitle && value?.shortName === memberName,
-      { stuckLabel: "collection member result publication" },
-    );
+    let observed: unknown;
+    try {
+      await waitForCellValue<{ title?: string; shortName?: string }>(
+        pieces.runtime,
+        member,
+        (value) => {
+          observed = value === undefined
+            ? undefined
+            : { title: value.title, shortName: value.shortName };
+          return value?.title === expectedTitle &&
+            value?.shortName === memberName;
+        },
+        { stuckLabel: "collection member result publication" },
+      );
+    } catch (cause) {
+      throw new Error(
+        `Collection member publication failed: ${
+          toCompactDebugString({
+            expected: { title: expectedTitle, shortName: memberName },
+            observed,
+            member: member.getAsNormalizedFullLink(),
+          })
+        }`,
+        { cause },
+      );
+    }
   } finally {
     await pieces.dispose();
   }

@@ -4,6 +4,11 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Prepared digest cache selection](development/performance/2026-09-15-prepared-digest-cache-selection/) ([report](development/performance/2026-09-15-prepared-digest-cache-selection/README.md)) — four-arm comparison, repeated reactive executions, GC retention, paired timings, profiles, and replay patches selecting epoch-only memoization.
+
+- [Prepared digest unit ladder: paired summary](development/performance/2026-09-15-prepared-digest-paired-summary.md) — median timings and same-round speedups supplementing the original minimum-based summary.
+
+- [Prepared CFC digest measurements](development/performance/2026-09-15-prepared-digest.md) — alternating unit and labeled SQLite arm-B ladders, frozen-record cache counts, native-hasher profiles, and the cold-composition tradeoff.
 - [Research orientation and passage retrieval comparison](packages/cf-harness/research-passages-comparison-2026-09-16.md) — two-use research contract, exact passage search and batch reads, five matched tasks, preserved indexed composition, mixed latency and accuracy, inbox retrieval overlap and token regression, and browser/provenance verification.
 - [Scoped research implementation and matched comparison](packages/cf-harness/targeted-research-comparison-2026-09-16.md) — orient/answer/recipe bundle, ten matched turns, preserved indexed composition, mixed latency and recipe accuracy, a bounded follow-up recheck, six browser acceptance checks, and durable context/omission corrections.
 - [Indexed flow-read labels](development/performance/2026-09-15-cfc-flow-read-index.md) — generated transaction equivalence, the paired R by E grid, and shared arm-B attribution separating the improved flow lookup from the dominant authoritativeCoverFor scan.
