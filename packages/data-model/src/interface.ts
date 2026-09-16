@@ -15,6 +15,7 @@
 
 import type {
   FabricArrayPlus,
+  FabricInstancePlus,
   FabricPlainObjectPlus,
   FabricValuePlus,
 } from "./api.ts";
@@ -86,7 +87,7 @@ export type MutableFabricPlainObjectPlusLayer<PlusType> = Record<
 
 /** `PlusType` equivalent of `MutableFabricContainerValueLayer`. */
 export type MutableFabricContainerValuePlusLayer<PlusType> =
-  | FabricInstance // TODO(danfuzz): Probably wants to be `FabricInstancePlus`.
+  | FabricInstancePlus<PlusType>
   | MutableFabricArrayPlusLayer<PlusType>
   | MutableFabricPlainObjectPlusLayer<PlusType>;
 
