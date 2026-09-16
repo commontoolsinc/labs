@@ -21,13 +21,15 @@ import {
   type Manifest,
   objectUrl,
   parseManifest,
+  SELECTION_AREA,
 } from "@commonfabric/test-support/records";
 
 export const TEST_SELECTION_BUCKET = "cf-ci-metadata";
-// The trailing slash is what keeps the listing inside this version. A
-// bare "v1" prefix also matches "v10", so a later schema's manifests
-// would sort above these and hide the newest one a v1 reader may use.
-export const TEST_SELECTION_PREFIX = "labs/test-selection/v1/";
+// The area is the one the publisher names, rather than a second copy of
+// it here that would part company the first time either moved. The
+// trailing slash is what keeps the listing inside the area, since a bare
+// "v1" prefix also matches "v10".
+export const TEST_SELECTION_PREFIX = `labs/test-selection/${SELECTION_AREA}/`;
 
 /** The generation time in a manifest's object name, when it is one. */
 export function generatedAtOf(objectName: string): string | undefined {

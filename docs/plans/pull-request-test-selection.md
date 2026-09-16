@@ -2549,16 +2549,18 @@ The manifest is one gzipped JSON object per publisher run, created —
 never overwritten — under a new dataset area beside the records:
 
 ```text
-labs/test-selection/v<schema>/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
-labs/test-selection/v<schema>/state/<yyyy-mm-dd>-<ULID>.json.gz
+labs/test-selection/<area>/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
+labs/test-selection/<area>/state/<yyyy-mm-dd>-<ULID>.json.gz
 ```
 
-The schema segment is `MANIFEST_SCHEMA_VERSION`, so a format a reader
-cannot understand is one it never lists: an incompatible change moves the
-segment and leaves what came before where it is, and readers of either
-version see only their own manifests and their own state. What that costs
-is the state, since the publisher has none to carry forward under the new
-segment and stops asking for a bootstrap.
+The segment is `SELECTION_AREA`, a name rather than a number, and it does
+not move when the shape of what is stored does. A reader lists the one
+area and reads forward anything written in a shape behind its own,
+passing over anything ahead of it and taking the newest it knows. Moving
+the segment instead would leave the state behind in the old area, and
+the state is where every catch lives: the publisher would have none to
+carry forward and would stop and ask for a bootstrap, with nothing
+published in between and every consumer running the whole corpus.
 
 Write-once naming is not a stylistic choice: the store's writer
 credentials hold `objectCreator` and nothing else, cannot overwrite, and
@@ -2621,9 +2623,9 @@ fourth part only when a variant is present.
 
 The manifest is untrusted input to the lane runner, and is validated the
 same way record lines are: a malformed manifest is rejected whole, and a
-manifest whose schema version the runner does not know is treated as
-absent. Retention is a bucket lifecycle rule deleting manifests after 45
-days.
+manifest declaring a shape from further ahead than the runner is treated
+as absent, the runner taking the newest one behind it instead. Retention
+is a bucket lifecycle rule deleting manifests after 45 days.
 
 ## The publisher
 

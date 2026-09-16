@@ -52,12 +52,14 @@ import {
 import { type Suite, unavailableUnits } from "../test-topology/suite.ts";
 import {
   type Calibration,
+  declaredSchema,
   dialSnapshot,
   digestIdentities,
   type Manifest,
   MANIFEST_SCHEMA_VERSION,
   type ManifestEntry,
   type WithheldEntry,
+  writtenAhead,
 } from "./manifest.ts";
 import { ObservationSpool } from "./observation-spool.ts";
 import {
@@ -185,7 +187,13 @@ export function parseAggregate(text: string): AggregateState | undefined {
   }
   if (typeof value !== "object" || value === null) return undefined;
   const state = value as Record<string, unknown>;
-  if (state.schema !== MANIFEST_SCHEMA_VERSION) return undefined;
+  // An aggregate written under an older shape is read forward, field by
+  // field, the way each field below says. Refusing it instead would cost
+  // every catch it holds, which accumulate over unbounded history and
+  // cannot be recovered from a window of records.
+  if (declaredSchema(state) === undefined || writtenAhead(state)) {
+    return undefined;
+  }
   if (typeof state.day !== "string" || !Array.isArray(state.folded)) {
     return undefined;
   }
@@ -239,7 +247,19 @@ export function parseAggregate(text: string): AggregateState | undefined {
   for (const file of Object.values(files as Record<string, unknown>)) {
     if (typeof file !== "string") return undefined;
   }
-  const states = state.states as Record<string, IdentityState>;
+  // An identity whose state is not a record of one is dropped, and the
+  // rest of the aggregate is read. Such an identity is then read as one
+  // with no history, which is what a test nothing has been recorded for
+  // is, and what that costs is the identity running until it has a
+  // history again. Refusing the aggregate over it would cost every
+  // identity the one thing here that no window of records rebuilds.
+  const states: Record<string, IdentityState> = {};
+  for (const [key, held] of Object.entries(state.states)) {
+    if (typeof held !== "object" || held === null || Array.isArray(held)) {
+      continue;
+    }
+    states[key] = held as IdentityState;
+  }
   for (const identity of Object.values(states)) readCostsForward(identity);
   return {
     schema: MANIFEST_SCHEMA_VERSION,

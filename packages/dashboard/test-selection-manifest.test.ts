@@ -16,14 +16,16 @@ import {
   LANE_BUDGET_FALLBACK_SECONDS,
   laneBudgetOf,
   newestManifest,
+  TEST_SELECTION_PREFIX,
 } from "./test-selection-manifest.ts";
+import { manifestPrefix } from "../../tasks/test-selection/store.ts";
 import type { TestSelectionSource } from "./test-selection-history.ts";
 import { makeTestFlakes } from "./tiles/test-flakes.ts";
 import { makeTestSelection } from "./tiles/test-selection.ts";
 import { TEST_SELECTION_PATH } from "./test-selection-page.ts";
 import type { Ctx } from "./types.ts";
 
-const PREFIX = "labs/test-selection/v1";
+const PREFIX = TEST_SELECTION_PREFIX.replace(/\/$/, "");
 
 /**
  * A store answering one listing and the objects it named. Bodies are the
@@ -82,6 +84,13 @@ Deno.test("newestManifest reports a body that is not a manifest", async () => {
     Error,
     "not a manifest",
   );
+});
+
+Deno.test("the reader looks where the publisher writes", () => {
+  // Two spellings of the area would part company the first time either
+  // moved, and what that produces is a reader listing objects that are
+  // all refused: a fault where a figure should be.
+  assertEquals(`${manifestPrefix(() => undefined)}/`, TEST_SELECTION_PREFIX);
 });
 
 Deno.test("newestManifest reports nothing when the store holds none", async () => {

@@ -127,10 +127,14 @@ export type {
 } from "./store-reader.ts";
 export { recordsSpooledBy } from "./testing.ts";
 export {
+  declaredSchema,
   digestIdentities,
   MANIFEST_SCHEMA_VERSION,
+  MANIFESTS_LOOKED_BACK,
   parseManifest,
+  SELECTION_AREA,
   serializeManifest,
+  writtenAhead,
 } from "./selection.ts";
 export {
   freeCalibration,
