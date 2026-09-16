@@ -41,6 +41,14 @@ const countKey = (backstop: SilentBackstop): string =>
 // later `it` would erase a firing from an earlier one before the wrapper could
 // read it. A store the reset cannot reach closes that hole. Keyed by
 // `logger\0key`.
+//
+// The store is process-global, and a per-test before/after difference reads
+// firings back correctly because guarded tests never overlap. The guard lives
+// in the same preload as the fake clock, whose per-test wrapper replaces the
+// global `setTimeout` and `Date.now` at the start of a test and restores them
+// in a `finally` — coherent only when one test runs at a time — and the
+// package task starts no parallel run. So exactly one test's before/after
+// window is ever open, and a firing during it is that test's.
 const firedTotals = new Map<string, number>();
 const wrappedLoggers = new WeakSet<object>();
 
