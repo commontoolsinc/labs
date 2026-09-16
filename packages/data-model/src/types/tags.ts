@@ -26,6 +26,29 @@ export type FabricPrimitiveValueTag =
   typeof FABRIC_PRIMITIVE_VALUE_TAGS[keyof typeof FABRIC_PRIMITIVE_VALUE_TAGS];
 
 /**
+ * The tags of the non-fundamental JS classes (that is, neither plain object nor
+ * array) whose instances are recognized as included in the
+ * `FabricConvertibleJsObject` type. The tags all use the prefix `Js` to help
+ * minimize ambiguity.
+ */
+export const FABRIC_CONVERTIBLE_JS_OBJECT_TAGS = Object.freeze(
+  {
+    JsDate: "JsDate",
+    JsError: "JsError",
+    JsMap: "JsMap",
+    JsRegExp: "JsRegExp",
+    JsSet: "JsSet",
+    JsUint8Array: "JsUint8Array",
+  } as const,
+);
+
+/** One of the `FabricConvertibleJsObject` tag strings. */
+export type FabricConvertibleJsObjectTag =
+  typeof FABRIC_CONVERTIBLE_JS_OBJECT_TAGS[
+    keyof typeof FABRIC_CONVERTIBLE_JS_OBJECT_TAGS
+  ];
+
+/**
  * The tags of the JS primitive types (all of them other than `object` and
  * `function`), plus `null`.
  *
@@ -110,14 +133,9 @@ export type FabricValuePlusTag =
  */
 export const VALUE_TAGS = Object.freeze(
   {
+    ...FABRIC_CONVERTIBLE_JS_OBJECT_TAGS,
     ...FABRIC_VALUE_PLUS_TAGS,
     ...JS_TYPE_VALUE_TAGS,
-    JsDate: "JsDate",
-    JsError: "JsError",
-    JsMap: "JsMap",
-    JsRegExp: "JsRegExp",
-    JsSet: "JsSet",
-    JsUint8Array: "JsUint8Array",
   } as const,
 );
 
