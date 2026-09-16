@@ -658,9 +658,10 @@ records. A lane writes one per capability it opens and a pair per batch,
 and a lane killed part way through a batch leaves the pair unmatched, so
 a model can hold a capability setup and no suite at all.
 
-What a lane is charged for holding a suite is the suite's own figure, so
-a model with no suite in it charges nothing for holding one and a lane
-packed against it overruns the bound it is killed at. A capability setup
+A suite's own figures are what a lane is charged for holding the suite
+and for opening each of its units, so a model with no suite in it
+charges nothing for either and a lane packed against it overruns the
+bound it is killed at. A capability setup
 is measured from a lane's own records and is unaffected, and the
 prologue is a fixed dial rather than a measurement at all, so it is
 there whether any lane has measured anything or not. That is why this is
@@ -670,8 +671,9 @@ silence:
 
 ```
 test selection: no suite has a measured cost in the last 7 day(s), so a
-lane is charged nothing for holding one and a lane packed against this
-manifest overruns. See docs/development/test-selection.md.
+lane is charged nothing for holding one or for opening its units, and a
+lane packed against this manifest overruns. See
+docs/development/test-selection.md.
 ```
 
 Four different things end there. One of them the run can tell you

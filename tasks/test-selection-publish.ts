@@ -766,13 +766,14 @@ function summarize(
       `${Object.keys(manifest.calibration.setupCost).length} ` +
       `capability setup(s)`,
   );
-  // What a lane is charged for holding a suite at all is the suite's own
-  // figure, so a model with no suite in it charges nothing for holding
-  // one and a lane packed to its budget runs past the bound it is killed
-  // at. A capability setup is measured from a lane's own records and is
-  // unaffected, and the prologue is a fixed dial rather than a
-  // measurement, so it is there either way; this names the suites rather
-  // than everything a lane is charged. Four things end here — no
+  // A suite's own figures are what a lane is charged for holding the
+  // suite and for opening each of its units, so a model with no suite in
+  // it charges nothing for either and a lane packed to its budget runs
+  // past the bound it is killed at. A capability setup is measured from
+  // a lane's own records and is unaffected, and the prologue is a fixed
+  // dial rather than a measurement, so it is there either way; this
+  // names the suites rather than everything a lane is charged. Four
+  // things end here — no
   // lane has run, none recorded what it measured, the fold declines the
   // records of the ones that did, or the fold stopped reading a figure
   // it used to read — and the empty map alone says none of them.
@@ -780,8 +781,8 @@ function summarize(
     console.log(
       `test selection: no suite has a measured cost in the last ` +
         `${COST_WINDOW_DAYS} day(s), so a lane is charged nothing for ` +
-        `holding one and a lane packed against this manifest overruns. ` +
-        `See docs/development/test-selection.md.`,
+        `holding one or for opening its units, and a lane packed against ` +
+        `this manifest overruns. See docs/development/test-selection.md.`,
     );
     // Said only where there is a figure to say, so that a run with
     // nothing to report claims nothing. A lane that ran and whose
