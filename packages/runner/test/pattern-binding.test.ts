@@ -24,6 +24,7 @@ import { isCell } from "../src/cell.ts";
 import {
   areLinksSame,
   areNormalizedLinksSame,
+  createSigilLinkFromParsedLink,
   getDerivedInternalCellLink,
   getMetaCell,
   parseLink,
@@ -1173,6 +1174,32 @@ describe("pattern-binding", () => {
         { id: bId, path: ["mid"] },
         { id: bId, path: ["x"] },
       ]);
+    });
+
+    it("follows a chain whose redirect link carries a schema", () => {
+      // Each hop resolves under the link's own schema, which is what carries
+      // the scope caps along the path. A schema on the binding link leaves the
+      // chain the walk yields unchanged.
+      const testCell = runtime.getCell<Record<string, unknown>>(
+        space,
+        "schema-bearing chain",
+        undefined,
+        tx,
+      );
+      testCell.set({ x: 3 });
+      testCell.key("mid").set(
+        testCell.key("x").getAsWriteRedirectLink({ base: testCell }),
+      );
+      const binding = createSigilLinkFromParsedLink(
+        {
+          ...testCell.key("mid").getAsNormalizedFullLink(),
+          schema: { type: "number" },
+        },
+        { includeSchema: true, overwrite: "redirect" },
+      );
+      expect(parseLink(binding, testCell).schema).toBeDefined();
+      const links = findAllWriteRedirectCells(binding, testCell);
+      expect(links.map((l) => l.path)).toEqual([["mid"], ["x"]]);
     });
 
     it("should find all write redirect links in an array", () => {
