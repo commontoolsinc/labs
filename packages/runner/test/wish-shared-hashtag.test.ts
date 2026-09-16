@@ -339,7 +339,7 @@ Deno.test(
       expect(subscriptions).toBe(1);
     } finally {
       cancel();
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storageManager.close();
     }
   },

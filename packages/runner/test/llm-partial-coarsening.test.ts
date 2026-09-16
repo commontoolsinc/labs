@@ -82,7 +82,7 @@ describe("LLM partial batch coarsening (channel 6)", () => {
       });
       LLMClient.prototype.sendRequest = original;
       resetMockMode();
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storageManager.close();
     }
   });
@@ -135,7 +135,7 @@ describe("LLM partial batch coarsening (channel 6)", () => {
       response.resolve({ id: "posture", role: "assistant", content: "hi" });
       LLMClient.prototype.sendRequest = original;
       resetMockMode();
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storageManager.close();
     }
   });
@@ -217,7 +217,7 @@ describe("LLM partial batch coarsening (channel 6)", () => {
       for (const release of held) release();
       LLMClient.prototype.sendRequest = original;
       resetMockMode();
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storageManager.close();
     }
   });

@@ -91,6 +91,25 @@ describe("silent-backstop-guard", () => {
         'storage.v2 "conflict-read-repair-timeout"',
       );
     });
+
+    it("surfaces both the fired backstop and the body's own failure, keeping the cause", async () => {
+      // A body that rides the backstop and also fails its own assertion. The
+      // guard's error leads, appends that the body failed, and carries the
+      // body's error as the `cause` Deno prints under `Caused by:`.
+      const { success, transcript } = await runFixture(
+        "conflict-read-repair-backstop-body-fails.fixture.ts",
+      );
+      expect(
+        success,
+        `the guard did not fail a body that rode the backstop\n${transcript}`,
+      ).toBe(false);
+      expect(transcript).toContain("silent backstop fired during this test");
+      expect(transcript).toContain("The test body failed as well.");
+      expect(transcript).toContain("Caused by:");
+      expect(transcript).toContain(
+        "the body's own assertion, deliberately failing",
+      );
+    });
   });
 
   describe("firedBackstops()", () => {

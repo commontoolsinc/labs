@@ -29,18 +29,27 @@ const valueSchema = {
 /** Runs the ride once: the committed conflict is asserted, and the backstop
  * fires along the way. */
 export async function rideReadRepairBackstop(): Promise<void> {
-  const server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
-  const smA = EmulatedStorageManager.connectTo(server, { as: signer });
-  const runtimeA = new Runtime({
-    apiUrl: new URL(import.meta.url),
-    storageManager: smA,
-  });
-  const smB = EmulatedStorageManager.connectTo(server, { as: signer });
-  const runtimeB = new Runtime({
-    apiUrl: new URL(import.meta.url),
-    storageManager: smB,
-  });
+  // Declared out here and created inside the `try`, so a throw while
+  // constructing any of them still runs the `finally` for the ones that
+  // exist.
+  let server: ReturnType<typeof newSharedServer> | undefined;
+  let smA: EmulatedStorageManager | undefined;
+  let runtimeA: Runtime | undefined;
+  let smB: EmulatedStorageManager | undefined;
+  let runtimeB: Runtime | undefined;
   try {
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    smA = EmulatedStorageManager.connectTo(server, { as: signer });
+    runtimeA = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smA,
+    });
+    smB = EmulatedStorageManager.connectTo(server, { as: signer });
+    runtimeB = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smB,
+    });
+
     // A writes the document and holds its verdict; `synced()` would wait on
     // a marker the manual fan-out never delivers.
     const txA = runtimeA.edit();
@@ -61,10 +70,10 @@ export async function rideReadRepairBackstop(): Promise<void> {
     const refused = await txB.commit();
     expect(refused.error?.name).toBe("ConflictError");
   } finally {
-    await runtimeB.dispose({ closeStorage: false });
-    await runtimeA.dispose({ closeStorage: false });
-    await smB.close();
-    await smA.close();
-    await server.close();
+    await runtimeB?.dispose({ closeStorage: false });
+    await runtimeA?.dispose({ closeStorage: false });
+    await smB?.close();
+    await smA?.close();
+    await server?.close();
   }
 }
