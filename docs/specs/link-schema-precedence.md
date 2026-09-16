@@ -33,8 +33,9 @@ resolves every crossing. It is precedence, not intersection:
   that brought no shape of their own.
 
 `{ "type": "unknown" }` is a shaped reader, not an empty one: it is the
-deliberate request for reference semantics, so it wins the crossing and
-stays opaque through every deeper hop.
+deliberate request for reference semantics, so at a hop it wins the
+crossing and stays opaque through every deeper hop. At the read's entry
+it adopts the stored schema instead; see "The read entry" below.
 
 For the Contact example, a reader of
 
@@ -64,7 +65,11 @@ than the combine above: a stored schema that constrains replaces the
 schema the reader carried in, one that constrains nothing (`true`, `{}`,
 or a `cid:` reference resolving to either) leaves the reader's traveling,
 and a stored `false` selects nothing. The traversal then starts at the
-target with whichever schema won.
+target with whichever schema won. A reader wrapped in `asCell` is not
+addressed at the slot this way: its handle is minted at the traversal
+boundary, where the crossing is a hop and combines, so the handle keeps
+the reader's own schema (the asCell handle arm in
+`stored-link-schema-precedence.test.ts`).
 
 So the two ways of reaching one element answer differently when its link
 carries a constraining schema: read by its own path, the element projects
@@ -72,13 +77,13 @@ by the stored schema; read within its array, the array's traversal crosses
 the same link under the reader's item schema and the element projects by
 the reader's. `{ "type": "unknown" }` follows the same split in both
 directions — a reader typed `unknown` adopts the stored schema at the
-entry, and a stored `unknown` (what a `Writable<unknown>` slot stamps on
-the link it is set to) keeps a shaped reader's read by path a reference
-while the same reader reads through it within the array. A lazy view's
-re-entry at a link slot is a hop, not an entry, and combines. One policy
-for the entry and the hops is not stated here yet; the pins in
-`stored-link-schema-precedence.test.ts` record both answers as they
-stand.
+entry, and a stored `unknown` keeps a shaped reader's read by path a
+reference while the same reader reads through it within the array (no
+`set()` mints such a link: a cell written into a slot carries its own
+schema, never the slot's). A lazy view's re-entry at a link slot is a
+hop, not an entry, and combines. One policy for the entry and the hops is
+not stated here yet; the pins in `stored-link-schema-precedence.test.ts`
+record both answers as they stand.
 
 A link into another space carries its stored schema across the boundary
 recomposed into a self-contained form, its `cid:` closure loaded from the
@@ -226,7 +231,8 @@ asCell handle regression, and the inherited default.
 `packages/runner/test/cross-space-cid-schema.test.ts` pins the crossing's
 recomposition route by route, and
 `packages/patterns/collection-naming/board.test.tsx` pins a lift's view
-holding a `Record<string, unknown>` map's members as references. `packages/runner/test/reader-schema-precedence-config.test.ts`
+holding a `Record<string, unknown>` map's members as references.
+`packages/runner/test/reader-schema-precedence-config.test.ts`
 and the ambient-flag family in
 `packages/runner/test/experimental-options.test.ts` pin the
 construction-set ambient lifecycle (no teardown reset);

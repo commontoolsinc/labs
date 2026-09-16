@@ -28,6 +28,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
+import { isCellResult } from "../src/query-result-proxy.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { CellLinkRefPayload } from "../src/sigil-types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -51,6 +52,12 @@ const rowSchema = {
 const holderSchema = {
   type: "object",
   properties: { rows: { type: "array", items: rowSchema } },
+} as const satisfies JSONSchema;
+
+/** A stored shape that selects a different property than the reader. */
+const glazeSchema = {
+  type: "object",
+  properties: { glaze: { type: "string" } },
 } as const satisfies JSONSchema;
 
 /** The value a row link points at, wider than the row schema selects. */
@@ -154,12 +161,6 @@ describe("stored-link-schema-precedence", () => {
   });
 
   describe("a stored schema that constrains", () => {
-    /** A stored shape that selects a different property than the reader. */
-    const glazeSchema = {
-      type: "object",
-      properties: { glaze: { type: "string" } },
-    } as const satisfies JSONSchema;
-
     it("governs the projection in place of the reader's row schema", () => {
       const holder = holderOverLinkCarrying(glazeSchema);
 
@@ -192,23 +193,23 @@ describe("stored-link-schema-precedence", () => {
     it("adopts the stored schema for a reader typed `unknown`", () => {
       // The handle a caller keys into is typed `unknown`; the stored schema
       // is what describes the value the handle reaches.
-      const holder = holderOverLinkCarrying({
-        type: "object",
-        properties: { glaze: { type: "string" } },
-      });
+      const holder = holderOverLinkCarrying(glazeSchema);
       const element = holder.key("rows").key(0).asSchema(unknownSchema).get();
 
       expect(projectionOf(element)).toEqual({ glaze: "maple" });
     });
 
     it("keeps a shaped reader's read by path a reference under a stored `unknown`", () => {
-      // A `Writable<unknown>` slot stamps `unknown` on the link it is set to.
-      // Read by path, that declaration governs and the read holds the
-      // reference; read within the array, the reader's item schema governs
-      // the same link and reads through.
+      // A stored `unknown` is built here, not minted: `set()` carries the
+      // target's own schema, never the writer's. Read by path, the stored
+      // declaration governs and the read holds the reference, a live
+      // query-result proxy exposing nothing; read within the array, the
+      // reader's item schema governs the same link and reads through.
       const holder = holderOverLinkCarrying(unknownSchema);
 
-      expect(projectionOf(elementByPath(holder))).toEqual({});
+      const byPath = elementByPath(holder);
+      expect(isCellResult(byPath)).toBe(true);
+      expect(projectionOf(byPath)).toEqual({});
       expect(projectionOf(elementWithinArray(holder))).toEqual({
         title: "cruller",
       });
@@ -222,11 +223,6 @@ describe("stored-link-schema-precedence", () => {
     // a self-contained form at the crossing so the target space need not hold
     // the documents (docs/specs/content-addressed-schemas.md, "Space
     // boundaries"); read within the array, the reader's row schema governs.
-
-    const glazeSchema = {
-      type: "object",
-      properties: { glaze: { type: "string" } },
-    } as const satisfies JSONSchema;
 
     it("projects an element by path through the stored schema, recomposed", async () => {
       const row = runtime.getCell(
