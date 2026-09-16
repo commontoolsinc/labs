@@ -445,10 +445,13 @@ A renderer that shows a published name in place of a round trip takes that limit
 on. The editor's mention pill makes its name a round trip through the universe
 the editor completes mentions from. It shows a name only where the mention's
 destination is a row of that universe, found by identity, and the name it shows
-is that row's rather than anything the destination publishes, so a name that is
-shown is one a `#` query in the same editor offers back for the same
-destination. A destination the universe does not list shows no name, whatever it
-publishes.
+is that row's rather than anything the destination publishes. So a shown name is
+one a `#` query in the same editor offers back for the same destination, as far
+as that query's grammar reaches: the sigil takes digits, so a collection naming
+its members in words has those names shown on a pill but not offered by the
+query. Widening that is a question for the query grammar rather than for the
+renderer, which shows what the row carries either way. A destination the
+universe does not list shows no name, whatever it publishes.
 
 ### Two modes, chosen by destination
 

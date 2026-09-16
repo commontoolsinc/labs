@@ -96,16 +96,24 @@ beside the label, inside the pill: `42` for a member of a board that numbers its
 members. A destination no row stands for shows no name, whatever `shortName` it
 publishes for itself.
 
-The row is found by identity: `_universeShortNames` compares the destination's
-cell id with the piece id the resolution pass recorded for each row. The name
-comes from the row and is never read off the destination, because the two answer
-different questions. What a destination publishes is the name the collection
-that created it gave it, which means something only to a reader reading through
-that collection. The row carries what the collection publishing this universe
-calls the member, and a `#` query here matches that copy, so a name on a pill is
-one a `#` query in the same editor offers back for the same destination. That is
-the round trip `docs/specs/collection-naming.md` asks of a rendered spelling,
-under "Choosing the spelling".
+The row is found by identity: `_universeShortNames` compares the cell the
+reference map names with the one the resolution pass recorded for each row, over
+the whole of what tells two cells apart — document id, space, scope and path. A
+document id alone would not, because one id names a document in every space that
+holds it, and two paths into one document are two cells. The `cfcLabelView` a
+ref may also carry is left out: it is a main-thread display copy that drifts
+while CFC settles, so weighing it would leave a destination unrecognized for as
+long as the drift lasted. The name comes from the row and is never read off the
+destination, because the two answer different questions. What a destination
+publishes is the name the collection that created it gave it, which means
+something only to a reader reading through that collection. The row carries what
+the collection publishing this universe calls the member, and a `#` query here
+matches that copy, so a name on a pill is one a `#` query in the same editor
+offers back for the same destination — as far as the query's grammar reaches,
+the sigil taking digits, so a collection naming its members in words has those
+names shown but not offered. That is the round trip
+`docs/specs/collection-naming.md` asks of a rendered spelling, under "Choosing
+the spelling".
 
 A name is shown only while the editor can find it that way. A universe that
 changes takes every pill's name away until its rows have resolved again, and

@@ -1046,13 +1046,30 @@ describe("CFCodeEditor mention short names", () => {
   const KEY = "a3f9zz";
   const OTHER_KEY = "b7k2m1";
 
+  /**
+   * Where a cell sits, beyond its document id. Both helpers below default to
+   * the mock's own space and the document root, so a case that says nothing
+   * about either gets a row and a destination on one cell.
+   */
+  interface At {
+    space?: string;
+    path?: string[];
+  }
+
   /** A universe row standing for the piece `id`, which it calls `shortName`. */
-  function row(id: string, name: string, shortName: string) {
+  function row(
+    id: string,
+    name: string,
+    shortName: string,
+    { space, path = [] }: At = {},
+  ) {
     return {
       [NAME]: name,
       title: name,
       shortName,
-      piece: { "$link": { id, path: [] } },
+      piece: {
+        "$link": { id, path, ...(space === undefined ? {} : { space }) },
+      },
     };
   }
 
@@ -1061,10 +1078,15 @@ describe("CFCodeEditor mention short names", () => {
     id: string,
     name: string,
     shortName: string,
+    { space, path = [] }: At = {},
   ): CellHandle<Record<string, unknown>> {
     return createMockCellHandle<Record<string, unknown>>(
       { [NAME]: name, shortName },
-      { id } as Partial<CellRef>,
+      {
+        id,
+        path,
+        ...(space === undefined ? {} : { space }),
+      } as Partial<CellRef>,
     );
   }
 
@@ -1175,6 +1197,66 @@ describe("CFCodeEditor mention short names", () => {
     await publication();
 
     expect(refShortNames(view.state)).toEqual({ [OTHER_KEY]: "43" });
+  });
+
+  describe("a row sharing the destination's document id", () => {
+    // A document id holds in every space that stores the document, and a
+    // path names a cell within one, so an id alone does not say which cell a
+    // row stands for. Each case here puts a row and a destination on cells
+    // that agree on the id and differ in one other part of their identity:
+    // the row names a DIFFERENT cell, so its name belongs to no mention
+    // here. The second mention pins the moment, as above — its name arriving
+    // is what says the absence was decided rather than not yet reached.
+
+    async function namesUnder(
+      rowAt: { space?: string; path?: string[] },
+      destinationAt: { space?: string; path?: string[] },
+    ) {
+      const { element, view } = editorOver(
+        `See [Second item][${KEY}] and [Third item][${OTHER_KEY}].`,
+        {
+          [KEY]: destination("of:item-42", "Second item", "7", destinationAt),
+          [OTHER_KEY]: destination("of:item-43", "Third item", "43"),
+        },
+        [
+          row("of:item-42", "Second item", "42", rowAt),
+          row("of:item-43", "Third item", "43"),
+        ],
+      );
+
+      await element._resolvePieceIds();
+      element._setupRefDestinationSubscriptions();
+      await publication();
+
+      return refShortNames(view.state);
+    }
+
+    it("announces no name where the row's cell is in another space", async () => {
+      expect(
+        await namesUnder(
+          { space: "did:key:boardA" },
+          { space: "did:key:boardB" },
+        ),
+      ).toEqual({ [OTHER_KEY]: "43" });
+    });
+
+    it("announces no name where the row's cell is at another path", async () => {
+      expect(await namesUnder({ path: ["other"] }, { path: [] })).toEqual({
+        [OTHER_KEY]: "43",
+      });
+    });
+
+    it("announces the row's name where the whole identity agrees", async () => {
+      // The control: the same fixture with the two cells brought onto one
+      // identity does produce the name, so the absences above are the
+      // difference in identity and not the fixture failing to resolve.
+      expect(
+        await namesUnder(
+          { space: "did:key:boardA" },
+          { space: "did:key:boardA" },
+        ),
+      ).toEqual({ [KEY]: "42", [OTHER_KEY]: "43" });
+    });
   });
 
   describe("after the universe changes", () => {

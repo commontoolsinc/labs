@@ -181,6 +181,26 @@ function sameShortNames(
     keys.every((key) => a[key] === b[key]);
 }
 
+/**
+ * A string distinguishing the cell a handle names from every other cell.
+ *
+ * A document id alone does not: one id in two spaces is two documents, and
+ * two paths into one document are two cells. The fields here are the ones
+ * `CellHandle.equals()` weighs, less `cfcLabelView` — a main-thread display
+ * copy that drifts while CFC settles, so two handles on a single cell can
+ * carry different views, and weighing it would leave a destination
+ * unrecognized for as long as the drift lasted. Schema is out for the
+ * converse reason: `asSchema()` answers with another handle on the same
+ * cell, and a lens over a cell is not a different cell.
+ *
+ * JSON rather than joined text, so a path segment holding the separator
+ * cannot spell another cell's key.
+ */
+function cellIdentityKey<T>(cell: CellHandle<T>): string {
+  const ref = cell.ref();
+  return JSON.stringify([ref.id, ref.space, ref.scope ?? "space", ref.path]);
+}
+
 function escapeMarkdownImageAltText(text: string): string {
   return text.replace(/\\/g, "\\\\")
     .replace(/\[/g, "\\[")
@@ -3636,9 +3656,10 @@ export class CFCodeEditor extends BaseElement {
    * key: the name carried by the universe row standing for the mention's
    * destination.
    *
-   * The row is found by identity, comparing the destination's id with the
-   * piece id the resolution pass recorded for each row — both in the full
-   * form `CellHandle.id()` returns — and the name is the row's, never one the
+   * The row is found by identity, comparing the cell the reference map names
+   * with the one the resolution pass recorded for each row over the whole of
+   * what tells two cells apart, a document id alone holding in every space
+   * that stores the document. The name is the row's, never one the
    * destination publishes. A destination publishes the name its creating
    * collection gave it, which means something only where that collection is
    * read through (`docs/specs/collection-naming.md`, "The name a member
@@ -3657,17 +3678,24 @@ export class CFCodeEditor extends BaseElement {
     const rows = (this.mentionable?.get() ?? []) as MentionableArray;
     const namesByPiece = new Map<string, string>();
     for (let index = 0; index < rows.length; index++) {
-      const pieceId = this._resolvedPieceIds.get(index);
+      const pieceCell = this._resolvedPieceCells.get(index);
       const name = shortNameOf(rows[index]);
-      if (pieceId === undefined || name === "" || namesByPiece.has(pieceId)) {
+      // A row the pass could not resolve to a cell stands for nothing, and
+      // its own sub-cell is not the member.
+      if (pieceCell === undefined || pieceCell.id() === "" || name === "") {
         continue;
       }
-      namesByPiece.set(pieceId, name);
+      const identity = cellIdentityKey(pieceCell);
+      if (namesByPiece.has(identity)) continue;
+      namesByPiece.set(identity, name);
     }
 
     const names: Record<string, string> = {};
+    const refMap = this._refMap();
     for (const ref of this._documentRefs()) {
-      const name = namesByPiece.get(this._refDestinationId(ref.key));
+      const destination = refMap[ref.key]?.destination;
+      if (!isCellHandle(destination)) continue;
+      const name = namesByPiece.get(cellIdentityKey(destination));
       if (name !== undefined) names[ref.key] = name;
     }
     return names;
