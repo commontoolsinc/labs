@@ -1802,18 +1802,22 @@ the PIECE rather than in this call's answer is the same fact from the other
 side: a reader composed here reports no error and no rows in one breath, and it
 is the absent error that says the read is sound.
 
-The failure's own TEXT never reaches the model. A concern names what the model
-already holds: it wrote the composition, and a composed instance's outputs went
-through no release measurement, so the text is treated as every other thrown
-message this tool withholds is. What a model does with a named output is expose
-it under its own result schema and render it, where the release boundary
+The failure's own TEXT does not travel in the result. A concern names what the
+model already holds: it wrote the composition, and a composed instance's outputs
+went through no release measurement, so the text is treated as every other
+thrown message this tool withholds is. What a model does with a named output is
+expose it under its own result schema and render it, where the release boundary
 measures it like any other value.
 
 The text is kept in the artifact's `rawCauseMessage`, on the terms that field
 already states for thrown text: a composed instance is not something the model
 can address, so an operator reading the run back has nothing else to debug from,
 and the text cannot be recovered any other way. Each line names the same
-position the model was told about, so the two reports line up.
+position the model was told about, so the two reports line up. That artifact is
+no stronger a boundary than the field it rides in — its root is readable through
+`bash`, as that field's own documentation records, and CT-2117 carries the
+structural fix — so what the sentence above claims is about the result rather
+than about the machine.
 
 What the answer's values may carry is measured against the ceiling a model's
 context has, which admits nothing: a model's context is outside every space, so

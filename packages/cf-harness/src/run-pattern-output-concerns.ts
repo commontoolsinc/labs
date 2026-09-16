@@ -21,7 +21,8 @@
  * none of them reports something that is not there — which is the direction to
  * fail in for a disclosure that sits beside a result the run already returned.
  *
- * TEXT NEVER TRAVELS TO THE MODEL. A concern names the output it was read from
+ * TEXT DOES NOT TRAVEL IN THE RESULT. A concern names the output it was read
+ * from
  * and the pattern that produced it, both of which the model already holds — it
  * wrote the composition, and the identity is the one its own `cf:pattern:`
  * import addresses. The error's TEXT is a computation over data the model may
@@ -37,6 +38,14 @@
  * reading a run back has nothing else to debug from. So an observation is two
  * things — the concern, which is the model's, and the text, which is the
  * artifact's — and they are carried apart rather than filtered later.
+ *
+ * That artifact is NOT a stronger boundary than the field it rides in, and the
+ * claim above is about the result rather than about the machine. The same doc
+ * comment on `rawCauseMessage` records why: the artifact root is readable
+ * through `bash`, so a later turn or a delegated child sharing the workspace
+ * can reach what is written there, and CT-2117 carries the structural fix.
+ * This text is the class that field already holds and rests on the same
+ * decision; what it does not do is reach model context on its own.
  */
 
 import type { JSONSchema } from "@commonfabric/api";
