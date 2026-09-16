@@ -8,7 +8,7 @@
  * rather than one inside each of them.
  */
 
-import { constructorOfPrototype } from "@commonfabric/utils/objects";
+import { constructorOfObject } from "@commonfabric/utils/objects";
 import { isPlainObject, typeOfIncludingNull } from "@commonfabric/utils/types";
 
 import {
@@ -213,22 +213,39 @@ export function tagOfConvertibleJsValueElseNull(
 
   if (result !== null) {
     return result;
-  } else if (typeof value === "function") {
-    // Functions are not allowed as `FabricConvertibleJsValue`s. That said, the
-    // `typeof` test here is covering a pretty oddball case, namely when a value
-    // of type `function` is observed to have a `prototype` which matches one of
-    // the recognized convertible classes. This is in the zone of intentional
-    // misbehavior (at worst) or a _very_ surprising bug at best. However, in
-    // the context of value conversion, the test is pretty cheap and so
-    // reasonably worth doing.
-    return null;
   }
 
-  // The constructor (a/k/a class object) is read from the _prototype_, not from
-  // the value (which might turn out to have a misleading `constructor`
-  // property).
-  const proto = Object.getPrototypeOf(value);
-  const constructor = constructorOfPrototype(proto);
+  switch (typeof value) {
+    case "function": {
+      // Functions are not allowed as `FabricConvertibleJsValue`s. That said,
+      // the `typeof` test here is covering a pretty oddball case, namely when a
+      // value of type `function` is observed to have a `prototype` which
+      // matches one of the recognized convertible classes. This is in the zone
+      // of intentional misbehavior (at worst) or a _very_ surprising bug at
+      // best. However, in the context of value conversion, the test is pretty
+      // cheap and so reasonably worth doing.
+      return null;
+    }
+
+    case "object": {
+      // As of this writing, `value` must be a non-null value of type `object`
+      // here due to how `tagOfUnknownElseNull()` works. This is more of a
+      // defense-in-depth or separation of concerns.
+      if (value === null) {
+        return null;
+      }
+
+      // Otherwise handled below.
+      break;
+    }
+
+    default: {
+      // See the comment on `object` above.
+      return null;
+    }
+  }
+
+  const constructor = constructorOfObject(value);
 
   switch (constructor) {
     case Map: {
