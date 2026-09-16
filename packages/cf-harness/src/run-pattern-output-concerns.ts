@@ -14,6 +14,13 @@
  * beside the result. It is a disclosure and not a refusal: the run succeeded,
  * the piece stands, and what this adds is the reason to look.
  *
+ * What is reported is BOUNDED and may under-report. Only outputs the pattern's
+ * own schema declares are read, only at the top level, and only from the
+ * instances the recorder's buffer still holds; an instance that will not read
+ * back is dropped. Every one of those loses a reason to look at something, and
+ * none of them reports something that is not there — which is the direction to
+ * fail in for a disclosure that sits beside a result the run already returned.
+ *
  * TEXT NEVER TRAVELS TO THE MODEL. A concern names the output it was read from
  * and the pattern that produced it, both of which the model already holds — it
  * wrote the composition, and the identity is the one its own `cf:pattern:`
@@ -32,6 +39,7 @@
  * artifact's — and they are carried apart rather than filtered later.
  */
 
+import type { JSONSchema } from "@commonfabric/api";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 /** What an output says about itself. */
@@ -46,6 +54,26 @@ const RUNTIME_SQLITE_PREFIX = "sqlite: ";
 
 /** The output names a query's failure is conventionally exposed under. */
 const ERROR_KEYS: readonly string[] = ["error", "errorMessage"];
+
+/**
+ * The output names a pattern DECLARED, which is the whole of what may be
+ * reported. A property name is a channel: a pattern computing one out of the
+ * data it read would publish that data through the name, and nothing here goes
+ * through a release measurement. A declared name is a constant of the source
+ * the model composed, so reporting it discloses what the model already wrote.
+ *
+ * Only the schema's own top-level `properties` count. A name reached through a
+ * `$ref` or a combinator branch is one this cannot prove is declared, and the
+ * report fails closed on it: an output left unreported costs the reason to
+ * look at that output, and there is no name to disclose in its place.
+ */
+const declaredOutputNames = (schema: JSONSchema | undefined): Set<string> => {
+  const properties = isObjectNotArray(schema) &&
+      isObjectNotArray((schema as { properties?: unknown }).properties)
+    ? (schema as { properties: Record<string, unknown> }).properties
+    : undefined;
+  return new Set(properties === undefined ? [] : Object.keys(properties));
+};
 
 /**
  * The output name a read still in flight is exposed under, which `db.query`
@@ -115,19 +143,31 @@ const reportsFailure = (key: string, value: unknown): boolean =>
  * A result reporting itself `pending` has its emptiness passed over, on the
  * terms `PENDING_KEY` states: a read still in flight is empty because it has
  * not landed. Its failures are reported either way.
+ *
+ * An emptiness is read only off a result that REPORTS a read — one declaring an
+ * error branch or a pending flag, which is what a pattern reading a query
+ * exposes and what `db.query` answers with. An empty list is an ordinary shape
+ * for a result to hold, and calling every one of them a read that returned
+ * nothing would say "no rows" about a selection nobody has made yet. A failure
+ * is read off any result: a string reporting one is not an ordinary shape.
  */
 export const observedOutputsIn = (
   value: unknown,
+  schema: JSONSchema | undefined,
   patternId?: string,
 ): readonly ObservedOutput[] => {
   if (!isObjectNotArray(value)) return [];
+  const declared = declaredOutputNames(schema);
+  const reportsARead = declared.has(PENDING_KEY) ||
+    ERROR_KEYS.some((name) => declared.has(name));
   const pending = value[PENDING_KEY] === true;
   const observed: ObservedOutput[] = [];
   for (const [key, member] of Object.entries(value)) {
-    if (key.startsWith("$")) continue;
+    if (key.startsWith("$") || !declared.has(key)) continue;
     const concern: OutputConcernKind | undefined = reportsFailure(key, member)
       ? "error-branch"
-      : !pending && Array.isArray(member) && member.length === 0
+      : reportsARead && !pending && Array.isArray(member) &&
+          member.length === 0
       ? "no-rows"
       : undefined;
     if (concern === undefined) continue;

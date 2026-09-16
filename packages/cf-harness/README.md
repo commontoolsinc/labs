@@ -1774,10 +1774,29 @@ the pattern that produced it — which for a composed one is the id its own
 Absent when there is nothing to say, and one entry per pattern, output and kind
 however many times a pattern was materialized.
 
+Two bounds decide what a concern may be read from, and both fail closed. Only an
+output the pattern's own schema DECLARES at its top level is read: a property
+name is a channel, a name computed from what a pattern read would publish that
+data through the name, and nothing here goes through a release measurement,
+while a declared name is a constant of the source the model composed. And an
+emptiness is read only off a result that reports a read — one declaring an error
+branch or a `pending` flag — because an empty list is an ordinary shape for a
+result to hold, and calling every one of them a read that returned nothing would
+say "no rows" about a selection nobody has made yet. A failure is read off any
+result, since a string reporting one is not an ordinary shape.
+
+So the report UNDER-reports rather than over-reports, and is best-effort by
+construction. An output reached through a `$ref` or a combinator is not read, a
+nested one is not read, an instance the recorder's bounded buffer has evicted is
+not read, and an instance that will not read back is dropped while the rest of
+the report stands. Each of those costs a reason to look at something; none of
+them reports something that is not there, which is the direction to fail in for
+a disclosure sitting beside a result the run already returned.
+
 A result reporting itself `pending` has its emptiness passed over, and only its
 emptiness. A read still in flight is empty because it has not landed, and a
-query over a served store is in flight for the whole of the run that issued it
-— so an empty output read then is a fact about the clock rather than about the
+query over a served store is in flight for the whole of the run that issued it —
+so an empty output read then is a fact about the clock rather than about the
 data, while a failure read then is a failure either way. That the rows land on
 the PIECE rather than in this call's answer is the same fact from the other
 side: a reader composed here reports no error and no rows in one breath, and it

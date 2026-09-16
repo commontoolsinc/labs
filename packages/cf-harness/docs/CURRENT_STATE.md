@@ -279,9 +279,15 @@ The current package provides:
   settle window observed a cause — an action error attributed to the piece, or a
   convergence-budget episode whose deferred actions name this pattern — and
   otherwise still reports ok, since an empty result with no observed cause is
-  not evidence of failure; returns the result cell's canonical reference plus an
-  optionally schema-sanitized value, and leaves the piece detached (no recorded
-  origin) and out of the space's registered piece list, with run→piece
+  not evidence of failure; discloses beside a successful result, as
+  `outputConcerns`, every declared top-level output of every pattern the run
+  materialized — composed ones included, so a reader whose failure the composing
+  source passed on nowhere is still named — that reports a failure or, on a
+  result declaring a read, holds no rows, naming the output and the pattern
+  under the identity a `cf:pattern:` import addresses while the failure's own
+  text stays in the artifact; returns the result cell's canonical reference plus
+  an optionally schema-sanitized value, and leaves the piece detached (no
+  recorded origin) and out of the space's registered piece list, with run→piece
   provenance carried by the run's persisted artifacts. `assign_slug` names a
   piece afterwards, from any handle token referring to one: it validates the
   slug, fails closed on an availability question the space cannot answer,

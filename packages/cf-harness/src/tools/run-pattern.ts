@@ -1681,7 +1681,7 @@ export const runPatternTool: HarnessToolDefinition<
     const ownCellHash = comparableEntityHash(piece.id);
     const concernsTx = pieces.runtime.edit();
     const found: ObservedOutput[] = [];
-    try {
+    const scan = (async () => {
       for (
         const record of session.instantiations?.since(instantiationStart) ?? []
       ) {
@@ -1697,6 +1697,7 @@ export const runPatternTool: HarnessToolDefinition<
           const materialized = cellWithScopedLinkRequiredsRelaxed(instance);
           found.push(...observedOutputsIn(
             asSerializableValue(materialized.get()),
+            record.link.schema,
             record.cell === ownCellHash ? undefined : record.identity,
           ));
         } catch {
@@ -1706,8 +1707,16 @@ export const runPatternTool: HarnessToolDefinition<
           // dropped rather than taking the report down with it.
         }
       }
-    } finally {
-      concernsTx.abort("run_pattern output-concern read");
+    })();
+    // Raced with the signal like every other wait this tool performs: the
+    // scan resolves a graph, and a caller that gave up while it was in flight
+    // is told it was cancelled rather than handed an answer it stopped
+    // waiting for. The transaction is abandoned whichever way the race goes.
+    const scanned = await raceWithAbort(scan, signal);
+    concernsTx.abort("run_pattern output-concern read");
+    if (scanned === "aborted") {
+      stopPiece(piece.getCell());
+      return cancelledOutput();
     }
     const observedOutputs = dedupedObservedOutputs(found);
     // A result that settled to nothing is not a success to report. When the
