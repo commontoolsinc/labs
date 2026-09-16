@@ -10,13 +10,18 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { taggedHashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
+import type { URI } from "@commonfabric/memory/interface";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import {
   createNonReactiveTransaction,
   type ExtendedStorageTransaction,
+  TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  TransactionWriteDetail,
+} from "../src/storage/interface.ts";
 import { RuntimeOwnedStores } from "../src/cfc/runtime-owned-stores.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
@@ -267,6 +272,37 @@ describe("extended-storage-transaction", () => {
   });
 
   describe("a wrapped transaction", () => {
+    it("preserves document-narrowed write lookup and its compatibility fallback", () => {
+      const target = {
+        space,
+        id: "of:fid1:wrapped-write-target" as URI,
+        path: [] as const,
+      };
+      const details = [{
+        address: { ...target, path: ["value"] },
+        value: { title: "bounded" },
+      }] as unknown as TransactionWriteDetail[];
+
+      const narrowed = new TransactionWrapper({
+        getWriteDetailsForTarget: (requested: typeof target) => {
+          expect(requested).toEqual(target);
+          return details;
+        },
+        getWriteDetails: () => {
+          throw new Error("must preserve the narrowed lookup");
+        },
+      } as unknown as IExtendedStorageTransaction);
+      expect([...narrowed.getWriteDetailsForTarget(target)]).toEqual(details);
+
+      const compatible = new TransactionWrapper({
+        getWriteDetails: (requestedSpace) => {
+          expect(requestedSpace).toBe(space);
+          return details;
+        },
+      } as unknown as IExtendedStorageTransaction);
+      expect([...compatible.getWriteDetailsForTarget(target)]).toEqual(details);
+    });
+
     it("answers for the instant as the transaction it wraps does", async () => {
       const { tx, cell } = await seeded("wrapped-instant");
       const wrapper = createNonReactiveTransaction(tx);
