@@ -265,8 +265,10 @@ export function dayOf(startedAt: string): string {
 
 /**
  * Where one report's executions happened, and who saw them. Undefined for
- * a report a decision must not read: a fork run's records are authored by
- * the fork, and a run with no context cannot say where it came from.
+ * a report a decision must not read: a run with no context cannot say
+ * where it came from, a continuous-integration run naming no branch
+ * cannot be told apart from any other naming none, and a local object
+ * whose name holds no reporter has nobody to attribute it to.
  */
 export function provenance(
   context: RunContext | undefined,
@@ -279,12 +281,17 @@ export function provenance(
       ? undefined
       : { place: "local", source: reporter };
   }
-  if (context.ci === undefined || context.ci.fork === true) return undefined;
+  if (context.ci === undefined) return undefined;
   const branch = context.branch ?? "";
   if (branch.length === 0) return undefined;
-  const place = context.ci.event === "push" && branch === "main"
-    ? "main"
-    : "pr";
+  // A baseline is a run of code the tree itself carries: a push to the
+  // default branch that the fork flag does not mark. The flag marks a run
+  // whose head repository differs from this one, and marks a run whose
+  // payload did not name both, so neither can stand as a baseline.
+  const place =
+    context.ci.event === "push" && branch === "main" && !context.ci.fork
+      ? "main"
+      : "pr";
   return { place, source: branch };
 }
 
@@ -317,9 +324,8 @@ export interface ReadReport {
 
 /**
  * Reads one stored object. A report a decision must not read contributes
- * nothing: a fork run's records are authored by the fork, a group with no
- * context cannot say where it came from, and a group whose start time is
- * not a time has no place in the order the rules read along.
+ * nothing: `provenance()` says which those are, and a group whose start
+ * time is not a time has no place in the order the rules read along.
  */
 export function readReport(
   report: StoredReport,

@@ -14,6 +14,7 @@
 import {
   type AliasResolver,
   datePartition,
+  isLaneMeasurement,
   listObjects,
   loadAliasResolver,
   readObject,
@@ -81,10 +82,11 @@ export function isDayAggregate(value: unknown): value is DayAggregate {
 }
 
 /**
- * Fetches one day of the store and aggregates it per identity.
- * Fork-authored reports are excluded — these aggregates feed decisions —
- * and identities resolve through the alias file as of the day, so a
- * renamed test keeps one continuous series.
+ * Fetches one day of the store and aggregates it per identity. Identities
+ * resolve through the alias file as of the day, so a renamed test keeps
+ * one continuous series. A lane measuring its own setup or one of its
+ * batches is not a test, and carries the duration of everything it ran,
+ * so nothing here counts it.
  */
 export async function collectDay(
   day: string,
@@ -112,11 +114,11 @@ export async function collectDay(
     if (options.fetchImpl !== undefined) readOptions.fetch = options.fetchImpl;
     const report = await readObject(readOptions);
     for (const group of report.reports) {
-      if (group.context?.ci?.fork === true) continue;
       for (const record of group.records) {
         const test = options.aliases !== undefined
           ? options.aliases.resolve(record.test, day)
           : record.test;
+        if (isLaneMeasurement(test)) continue;
         const key = testIdentityKey(test);
         let entry = byKey.get(key);
         if (entry === undefined) {
@@ -143,7 +145,7 @@ export async function collectDay(
 }
 
 interface StoredHistory {
-  version: 1;
+  version: 2;
 
   /** Cached day aggregates; the refresh tail is always refetched. */
   days: Record<string, DayAggregate[]>;
@@ -152,7 +154,7 @@ interface StoredHistory {
 function isStoredHistory(value: unknown): value is StoredHistory {
   if (typeof value !== "object" || value === null) return false;
   const stored = value as Record<string, unknown>;
-  if (stored.version !== 1) return false;
+  if (stored.version !== 2) return false;
   if (typeof stored.days !== "object" || stored.days === null) return false;
   return Object.entries(stored.days as Record<string, unknown>).every(
     ([day, aggregates]) =>
@@ -202,7 +204,7 @@ export class TestRecordsHistoryStore {
     for (const [day, aggregates] of [...this.#days].sort()) {
       days[day] = aggregates;
     }
-    const stored: StoredHistory = { version: 1, days };
+    const stored: StoredHistory = { version: 2, days };
     const temporary = `${this.#file}.tmp-${crypto.randomUUID()}`;
     await Deno.writeTextFile(temporary, JSON.stringify(stored));
     await Deno.rename(temporary, this.#file);

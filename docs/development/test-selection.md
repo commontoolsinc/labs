@@ -702,18 +702,13 @@ that reads as one has no day and is not counted at all. So the figure is
 evidence when it appears and says nothing when it does not: a run that
 folds nothing new prints no such line whatever the store holds.
 
-What `provenance` declines is wider than the record specification asks
-for. It refuses a run marked `fork: true` outright, on the stated
-grounds that a fork run's records were authored by the fork. The
+What `provenance` declines is what the record specification asks it to.
+A run marked `fork: true` is a team member's fork run under the
 [trust boundaries](../specs/test-records.md#trust-boundaries-for-consumers)
-section says otherwise: the relay's member gate means every object in
-the store was authored under the write-access group's trust, a
-`fork: true` run is a team member's fork run whose content is trusted
-the same way a same-repository branch's is, and what the flag still
-tells a consumer is that the run executed unmerged pull-request code —
-which bears on taking a baseline, not on reading an observation. A lane
-exercised only from pull requests marked as forks therefore contributes
-nothing, and that is why no suite has a measured cost.
+the store holds every object to, and the flag bears on taking a baseline
+rather than on reading an observation, so a lane exercised from a fork's
+pull request is read like a lane exercised from any other. What is left
+unplaceable is a run whose own facts do not say where it ran.
 
 The other three the line cannot separate. No lane has run: nothing to
 measure and nothing to do. A lane has run and recorded nothing, which
@@ -828,9 +823,9 @@ shipped it — and two merges landing close together, which is the case
 this exists for, is exactly when the earlier relay is still running.
 
 The pull request's own run is read from the store instead, because the
-relay is where the trust decision about it was made: records from a fork
-run are authored by the fork, and the relay ships them only for a member.
-What the store holds is what this repository was willing to believe.
+relay is where the trust decision about it was made: it ships a fork run
+only for a team member, and the store is what that decision produced.
+Reading the run's own artifacts would go around that gate.
 
 The previous run is asked for by the parent commit's name rather than
 taken from a listing. Pushes to the default branch are not cancelled by

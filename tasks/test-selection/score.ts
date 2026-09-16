@@ -659,7 +659,7 @@ export interface DaySamples {
  * are not ordered and nothing but equality is asked of them; a day
  * carrying none was sealed before the stamps began, under the first set.
  */
-export const COST_RULE = 2;
+export const COST_RULE = 3;
 
 /** A fresh, empty sample. */
 export function emptySamples(): DaySamples {

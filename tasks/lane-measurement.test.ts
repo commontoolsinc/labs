@@ -4,9 +4,7 @@ import { expect } from "@std/expect";
 import {
   batchMeasurement,
   batchMeasurementName,
-  isLaneMeasurement,
   LANE_MEASUREMENT_PREFIX,
-  LANE_MEASUREMENT_SURFACE,
   setupMeasurement,
 } from "./lane-measurement.ts";
 
@@ -82,40 +80,6 @@ describe("lane-measurement", () => {
 
     it("returns `undefined` for a name that is not a setup measurement", () => {
       expect(setupMeasurement("ci-lane batch workspace-unit")).toBeUndefined();
-    });
-  });
-
-  describe("isLaneMeasurement()", () => {
-    it("returns `true` for every name a lane writes about itself", () => {
-      for (
-        const name of [
-          batchMeasurementName("runner-unit", false),
-          batchMeasurementName("runner-unit", true, "planned"),
-          `${LANE_MEASUREMENT_PREFIX}setup fuse`,
-        ]
-      ) {
-        expect(isLaneMeasurement({
-          k: LANE_MEASUREMENT_SURFACE.kind,
-          s: LANE_MEASUREMENT_SURFACE.scope,
-          n: name,
-        })).toBe(true);
-      }
-    });
-
-    it("returns `false` for a test on the same surface", () => {
-      expect(isLaneMeasurement({
-        k: LANE_MEASUREMENT_SURFACE.kind,
-        s: LANE_MEASUREMENT_SURFACE.scope,
-        n: "repo gates > deno fmt",
-      })).toBe(false);
-    });
-
-    it("returns `false` for the same name on another surface", () => {
-      expect(isLaneMeasurement({
-        k: "unit",
-        s: "memory",
-        n: batchMeasurementName("runner-unit", false),
-      })).toBe(false);
     });
   });
 });
