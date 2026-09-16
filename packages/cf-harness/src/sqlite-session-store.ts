@@ -1,4 +1,7 @@
+import { fromFileUrl } from "@std/path";
+
 import { Database } from "@db/sqlite";
+
 import {
   type HarnessChatBrowserAccessLease,
   type HarnessChatContext,
@@ -10,12 +13,15 @@ import {
   type HarnessChatTurnStatus,
 } from "./contracts/interactive-chat.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
-import type {
-  HarnessChatEventListOptions,
-  HarnessChatSessionSnapshot,
-  HarnessChatSessionStore,
-  HarnessChatSessionTurnEventMutation,
-  HarnessChatTurnListOptions,
+import {
+  type HarnessChatEventListOptions,
+  type HarnessChatSessionSnapshot,
+  type HarnessChatSessionStore,
+  type HarnessChatSessionTurnEventMutation,
+  HarnessChatStoreAliasedError,
+  HarnessChatStoreHeldError,
+  type HarnessChatStoreHolder,
+  type HarnessChatTurnListOptions,
 } from "./session-store.ts";
 
 const PRAGMAS = `
@@ -100,6 +106,12 @@ type TurnRow = {
 
 export interface OpenSqliteHarnessChatSessionStoreOptions {
   url: URL;
+
+  /**
+   * The record written beside the database for whoever is refused it. One
+   * naming this process is minted when none is given.
+   */
+  holder?: HarnessChatStoreHolder;
 }
 
 const databaseAddress = (url: URL): URL => {
@@ -132,6 +144,50 @@ const parseNullableJsonColumn = <Value>(
 ): Value | undefined =>
   value === null ? undefined : parseJsonColumn<Value>(value, column);
 
+/** Suffix of the file beside a database that carries its hold. */
+const HOLDER_FILE_SUFFIX = "-holder";
+
+/**
+ * Returns the path of the file carrying the hold on the database at `url`,
+ * which must exist. The database path is resolved through every link first,
+ * so two spellings of one database name one hold file rather than one each.
+ */
+export const sqliteHarnessChatSessionStoreHolderPath = async (
+  url: URL,
+): Promise<string> => `${await resolvedDatabasePath(url)}${HOLDER_FILE_SUFFIX}`;
+
+/** Returns the path of the database at `url`, resolved through every link. */
+const resolvedDatabasePath = (url: URL): Promise<string> =>
+  Deno.realPath(fromFileUrl(databaseAddress(url)));
+
+const isStoreHolder = (value: unknown): value is HarnessChatStoreHolder => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const holder = value as Record<string, unknown>;
+  return typeof holder.instanceId === "string" &&
+    typeof holder.pid === "number" &&
+    typeof holder.heldSince === "string";
+};
+
+/**
+ * Reads the holder record at `path`, or `undefined` where what is there is
+ * not one: the holder writes the record after taking the hold, so a reader
+ * refused in that moment can find the file empty or half written.
+ */
+const readStoreHolder = async (
+  path: string,
+): Promise<HarnessChatStoreHolder | undefined> => {
+  const text = await Deno.readTextFile(path);
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  return isStoreHolder(value) ? value : undefined;
+};
+
 const turnRowParams = (turn: HarnessChatTurnRecord) => ({
   session_id: turn.sessionId,
   turn_id: turn.turn.turnId,
@@ -154,8 +210,16 @@ const turnRowParams = (turn: HarnessChatTurnRecord) => ({
 export class SqliteHarnessChatSessionStore implements HarnessChatSessionStore {
   readonly database: Database;
 
-  constructor(database: Database) {
+  #holderFile?: Deno.FsFile;
+
+  /**
+   * Constructs a store over `database`. `holderFile` is the handle whose
+   * lock is the hold on the database, released when the store closes; a
+   * store without one belongs to this process alone.
+   */
+  constructor(database: Database, holderFile?: Deno.FsFile) {
     this.database = database;
+    this.#holderFile = holderFile;
   }
 
   saveSession(snapshot: HarnessChatSessionSnapshot): void {
@@ -442,8 +506,18 @@ export class SqliteHarnessChatSessionStore implements HarnessChatSessionStore {
     return row.sequence;
   }
 
+  /**
+   * Closes the database connection, then releases the hold, so no other
+   * process can take the database while this one still has it open; a
+   * connection that fails to close still releases it.
+   */
   close(): void {
-    this.database.close();
+    try {
+      this.database.close();
+    } finally {
+      this.#holderFile?.close();
+      this.#holderFile = undefined;
+    }
   }
 }
 
@@ -482,13 +556,74 @@ const decodeTurnRow = (row: TurnRow): HarnessChatTurnRecord => {
   };
 };
 
+/**
+ * Opens the database at `options.url` and holds it for this process until the
+ * store closes, creating the database and its schema when they are absent.
+ * The hold is an exclusive advisory lock on a file beside the database, taken
+ * before the database is connected: one that another live process holds is
+ * refused with a `HarnessChatStoreHeldError` naming that holder, and nothing
+ * has touched it. The operating system releases the lock with the handle, so
+ * a holder that exits without closing releases it just the same, and a hold
+ * is never stale while it is held. A hold is also the only evidence of a
+ * holder: a process that opened the database without taking one leaves no
+ * trace here, and its database reads as unheld. A database with more than
+ * one name (hard links) is refused under every name with a
+ * `HarnessChatStoreAliasedError`, since a hold beside one name is not seen
+ * from another.
+ */
 export const openSqliteHarnessChatSessionStore = async (
   options: OpenSqliteHarnessChatSessionStoreOptions,
 ): Promise<SqliteHarnessChatSessionStore> => {
-  const database = await new Database(databaseAddress(options.url), {
+  const address = databaseAddress(options.url);
+  // The hold file is named by the database's resolved path, so the database
+  // has to exist first; to SQLite an empty file is an empty database.
+  (await Deno.open(fromFileUrl(address), { write: true, create: true }))
+    .close();
+  const store = await resolvedDatabasePath(address);
+  // A hard link is a second name the resolution cannot see, and a hold
+  // beside one name would not be seen from the other.
+  const names = (await Deno.stat(store)).nlink ?? 1;
+  if (names > 1) {
+    throw new HarnessChatStoreAliasedError(store, names);
+  }
+  const holderPath = `${store}${HOLDER_FILE_SUFFIX}`;
+  const holderFile = await Deno.open(holderPath, {
+    read: true,
+    write: true,
     create: true,
   });
-  database.exec(PRAGMAS);
-  database.exec(INIT);
-  return new SqliteHarnessChatSessionStore(database);
+  try {
+    if (!(await holderFile.tryLock(true))) {
+      throw new HarnessChatStoreHeldError(
+        store,
+        await readStoreHolder(holderPath),
+      );
+    }
+    // Written in place: the lock lives on this file's inode, so a record
+    // renamed over it would leave later openers locking a file nobody holds.
+    await Deno.writeTextFile(
+      holderPath,
+      JSON.stringify(
+        options.holder ?? {
+          instanceId: crypto.randomUUID(),
+          pid: Deno.pid,
+          heldSince: new Date().toISOString(),
+        },
+      ),
+    );
+    const database = await new Database(address, {
+      create: true,
+    });
+    try {
+      database.exec(PRAGMAS);
+      database.exec(INIT);
+    } catch (error) {
+      database.close();
+      throw error;
+    }
+    return new SqliteHarnessChatSessionStore(database, holderFile);
+  } catch (error) {
+    holderFile.close();
+    throw error;
+  }
 };
