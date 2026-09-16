@@ -371,8 +371,9 @@ const DERIVATION_ROUNDS = 5;
 /**
  * Runs every case the read-budget groups name in {@link DERIVATION_ROUNDS}
  * rounds, each case in a process of its own started with `v8Flags`, writes the
- * read-budget limits module to stdout, and then runs {@link deriveControls} on
- * the limits it wrote. Each gated count of each measured phase gets
+ * read-budget limits module to stdout, and then, when every gated count
+ * repeated across the rounds, runs {@link deriveControls} on the limits it
+ * wrote. Each gated count of each measured phase gets
  * {@link limitFor} the largest value the rounds observed, or, where the rounds
  * observed different values, is written as ungated with those values.
  *
@@ -457,7 +458,7 @@ async function deriveLimits(v8Flags: readonly string[]): Promise<void> {
  * Runs each case of `ids` once under every regression variant the limits of
  * `limits` assign to it, each in a process of its own started with `v8Flags`,
  * and so shows every limit exceeded by a regression that grows the count it
- * gates. An ungated count is assigned no variant and is not checked.
+ * gates.
  *
  * @throws Error when a case fails or exhausts its heap, and when a variant
  * leaves a limit assigned to it unexceeded, naming the workload, case, phase,
