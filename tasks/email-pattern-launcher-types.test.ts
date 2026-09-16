@@ -1,37 +1,35 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
+import type { Equal, MustBeTrue } from "@commonfabric/utils/types";
 import { TILE_UI, UI, type VNode } from "commonfabric";
 import type {
   LaunchedPatternInfo,
   PatternOutput,
 } from "../packages/patterns/google/extractors/email-pattern-launcher.tsx";
 
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends
-  (<T>() => T extends B ? 1 : 2) ? true
-  : false;
-type Expect<T extends true> = T;
-
-type PendingIsBoolean = Expect<
+type PendingIsBoolean = MustBeTrue<
   Equal<LaunchedPatternInfo["pending"], boolean>
 >;
-type ErrorIsStringOrNull = Expect<
+type ErrorIsStringOrNull = MustBeTrue<
   Equal<LaunchedPatternInfo["error"], string | null>
 >;
-type ResultIsKnownLauncherBoundary = Expect<
+type ResultIsKnownLauncherBoundary = MustBeTrue<
   Equal<LaunchedPatternInfo["result"], Record<string, unknown> | null>
 >;
 type LaunchedPatternResult = NonNullable<LaunchedPatternInfo["result"]>;
-type OutputTileIsVNode = Expect<Equal<PatternOutput[typeof TILE_UI], VNode>>;
-type ResultUiStaysUnknownUntilNarrowed = Expect<
+type OutputTileIsVNode = MustBeTrue<
+  Equal<PatternOutput[typeof TILE_UI], VNode>
+>;
+type ResultUiStaysUnknownUntilNarrowed = MustBeTrue<
   Equal<LaunchedPatternResult[typeof UI], unknown>
 >;
-type ResultTileStaysUnknownUntilNarrowed = Expect<
+type ResultTileStaysUnknownUntilNarrowed = MustBeTrue<
   Equal<LaunchedPatternResult[typeof TILE_UI], unknown>
 >;
-type ChildSpecificFieldsStayUnknown = Expect<
+type ChildSpecificFieldsStayUnknown = MustBeTrue<
   Equal<LaunchedPatternResult["childSpecificField"], unknown>
 >;
-type UnknownIsNotVNode = Expect<
+type UnknownIsNotVNode = MustBeTrue<
   Equal<unknown extends VNode ? true : false, false>
 >;
 

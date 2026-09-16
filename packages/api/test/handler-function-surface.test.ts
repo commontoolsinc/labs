@@ -4,6 +4,7 @@ import type {
   HandlerFunction,
   Stream,
 } from "@commonfabric/api";
+import type { MustBeTrue, Same } from "@commonfabric/utils/types";
 
 /**
  * `HandlerFunction` is the `handler` a PATTERN sees — the same hand-maintained
@@ -14,9 +15,6 @@ import type {
  * `packages/runner/test/handler-overload-types.test.ts` covers the builder
  * half. Both must hold.
  */
-
-type MustBeTrue<T extends true> = T;
-type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
 interface AddTopic {
   title: string;

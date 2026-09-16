@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import type { ActionFunction, Stream } from "@commonfabric/api";
+import type { MustBeTrue, Same } from "@commonfabric/utils/types";
 
 /**
  * `ActionFunction` is the `action` a PATTERN sees: `commonfabric` resolves to
@@ -16,9 +17,6 @@ import type { ActionFunction, Stream } from "@commonfabric/api";
  * These assertions are the pattern-facing half. `packages/runner`'s
  * `action-overload-types.test.ts` covers the builder half; both must hold.
  */
-
-type MustBeTrue<T extends true> = T;
-type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
 interface AddTopic {
   title: string;
