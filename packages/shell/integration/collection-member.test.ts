@@ -115,21 +115,26 @@ async function fileBoardWithMembers(
 }
 
 /**
- * Settles the rendered view, then reports whether it shows one member with the
- * expected name.
+ * Syncs the worker's open spaces, settles the rendered view, then reports
+ * whether it shows one member with the expected name.
  *
- * An integration test holds no UI subscription, so asking whether the worker
- * is idle queues the pull work which renders the selected member.
+ * RuntimeClient.idle() deliberately excludes pulls and subscription
+ * convergence. The member arrives through both, so the test/debug barrier for
+ * every open space has to run before the worker and view can settle.
  */
 async function settledMemberNameIs(
   probe: ProbeApi,
   expected: string,
 ): Promise<boolean> {
-  const settle = (globalThis as typeof globalThis & {
-    commonfabric?: { viewSettled?: () => Promise<void> };
-  }).commonfabric?.viewSettled;
-  if (!settle) return false;
-  await settle();
+  const commonfabric = (globalThis as typeof globalThis & {
+    commonfabric?: {
+      rt?: { allSynced?: () => Promise<void> };
+      viewSettled?: () => Promise<void>;
+    };
+  }).commonfabric;
+  if (!commonfabric?.rt?.allSynced || !commonfabric.viewSettled) return false;
+  await commonfabric.rt.allSynced();
+  await commonfabric.viewSettled();
   const badges = probe.collect("[data-member-name]");
   return badges.length === 1 &&
     probe.deepText(badges[0]).trim() === expected;
