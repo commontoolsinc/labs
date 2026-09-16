@@ -42,6 +42,84 @@ declarations are rejected. See the
 [budget contract](../../docs/features/read-accounting.md#pattern-test-budgets)
 for measured transactions, exclusions, and settlement behavior.
 
+## Pattern test CFC posture and labeled fixtures
+
+`cf test` accepts `--cfc-flow-labels <off|derive|observe|persist>` and
+`--cfc-enforcement-mode <disabled|observe|enforce-explicit|enforce-strict>`.
+`derive` is an alias for the runtime's `observe` flow mode: compute the join
+without persisting derived labels. `--cfc-shell-posture` selects
+`enforce-explicit` and `persist`, the shell's two CFC dial defaults. It
+conflicts with either individual dial, in either argument order. The shorthand
+changes these two dials only; it does not simulate the browser or enable every
+CFC gate. An omitted dial retains the pattern-test preset (enforcement
+`enforce-explicit`, flow labels `off`). Every runtime prints its resolved
+posture, including each multi-user participant. Programmatic callers use
+`TestRunnerOptions.cfcFlowLabels` with the runtime names `off`, `observe`, or
+`persist`.
+
+A pattern test can create its own labeled store without a connector. Declare a
+column's `ifc` alongside its SQLite type and seed rows in an action:
+
+```tsx
+// Shown at module scope.
+import {
+  action,
+  assert,
+  pattern,
+  sqliteDatabase,
+  table,
+  TESTS,
+} from "commonfabric";
+
+export default pattern(() => {
+  const db = sqliteDatabase({
+    tables: {
+      orders: table({
+        id: "integer primary key",
+        glaze: {
+          type: "string",
+          sqlType: "text",
+          ifc: { confidentiality: ["bakery-private"] },
+        },
+      }),
+    },
+  });
+  const rows = db.query<{ id: number; glaze: string }>(
+    "SELECT id, glaze FROM orders ORDER BY id LIMIT 11",
+  );
+  return {
+    [TESTS]: [
+      {
+        action: action(() => {
+          db.exec("INSERT INTO orders VALUES (?, ?)", [1, "maple"]);
+        }),
+      },
+      { assertion: assert(() => rows.result?.[0]?.glaze === "maple") },
+    ],
+  };
+});
+```
+
+With enforcement at `enforce-explicit`, SQLite query results carry the declared
+column labels with flow labels `off` or `persist`. The flow dial controls their
+downstream derivation and persistence. Query result assertions settle
+asynchronous SQLite work; put one before a render step when measuring the mapped
+view separately from querying and row materialization.
+
+The verbose timing table always includes `prepareCfc`, `deriveFlowJoin`,
+`collectConsumedLabel`, and `preparedDigestFor`, even below the top-ten cutoff.
+A zero count means that interval did not call the operation. These are
+cumulative elapsed spans, nested inside preparation where applicable; do not add
+them as independent CPU time. The digest span covers canonicalization and
+hashing, including commit-time rechecks. Read counts retain their reactive-body
+boundary; preparation spans cover work outside that boundary. Explicit render
+steps print both timing and read tables. `--timing-measures-out` also captures
+the spans and the `runTestPattern/step/render_N/materialize` phase boundaries.
+
+The
+[mapped-render regression benchmark](../../docs/development/BENCHMARKS.md#labeled-pattern-test-mapped-render)
+uses this fixture mechanism at both postures.
+
 ## View pager
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source

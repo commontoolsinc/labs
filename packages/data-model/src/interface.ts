@@ -14,9 +14,9 @@
  */
 
 import type {
-  FabricArray,
-  FabricPlainObject,
-  FabricValue,
+  FabricArrayPlus,
+  FabricInstancePlus,
+  FabricPlainObjectPlus,
   FabricValuePlus,
 } from "./api.ts";
 import { FABRIC_INSTANCE_PLUS_BRAND, FABRIC_PRIMITIVE_BRAND } from "./api.ts";
@@ -31,11 +31,9 @@ export type * from "./api.ts";
 // "Layer" types
 //
 // A layer type is a `FabricValue`-like type whose claim stops at the root
-// container. `FabricValueLayer` leaves what the root holds untyped, and the
-// `Mutable*Layer` types keep what it holds as ordinary `FabricValue`s but
-// leave the root itself writable. In each case the root still carries the
-// other `FabricValue` restrictions on its kind of container (e.g., for an
-// array, no synthetic keys and no named properties other than `length`).
+// container. As with the main definitions, these have both "pure" and
+// `PlusType` variants, and the former is defined in terms of the latter, while
+// also being primary in terms of documentation.
 //
 
 /**
@@ -45,15 +43,15 @@ export type * from "./api.ts";
  * requires deep immutability -- the type is deeply `readonly` -- while actual
  * deep-freezing happens only tactically.
  */
-export type FabricValueLayer = FabricValuePlus<
-  Readonly<unknown[] | Record<string, unknown>>
->;
+export type FabricValueLayer = FabricValuePlusLayer<never>;
 
 /** A mutable array root whose elements remain `FabricValue`s. */
-export type MutableFabricArrayLayer = FabricValue[];
+export type MutableFabricArrayLayer = MutableFabricArrayPlusLayer<never>;
 
 /** A mutable record root whose values remain `FabricValue`s. */
-export type MutableFabricPlainObjectLayer = Record<string, FabricValue>;
+export type MutableFabricPlainObjectLayer = MutableFabricPlainObjectPlusLayer<
+  never
+>;
 
 /**
  * A `FabricContainerValue` with a mutable root. Nested containers remain
@@ -63,19 +61,44 @@ export type MutableFabricPlainObjectLayer = Record<string, FabricValue>;
  * something a type can layer over it.
  */
 export type MutableFabricContainerValueLayer =
-  | FabricInstance
-  | MutableFabricArrayLayer
-  | MutableFabricPlainObjectLayer;
+  MutableFabricContainerValuePlusLayer<never>;
 
 /**
  * A `FabricValue` with a mutable root container. Nested containers remain
  * ordinary (readonly) `FabricValue`s, so this models a single construction
  * layer rather than a deep thaw.
  */
-export type MutableFabricValueLayer =
-  | Exclude<FabricValue, FabricArray | FabricPlainObject>
-  | MutableFabricArrayLayer
-  | MutableFabricPlainObjectLayer;
+export type MutableFabricValueLayer = MutableFabricValuePlusLayer<never>;
+
+/** `PlusType` equivalent of `FabricValueLayer`. */
+export type FabricValuePlusLayer<PlusType> = FabricValuePlus<
+  | PlusType
+  | Readonly<unknown[] | Record<string, unknown>>
+>;
+
+/** `PlusType` equivalent of `MutableFabricArrayLayer`. */
+export type MutableFabricArrayPlusLayer<PlusType> = FabricValuePlus<PlusType>[];
+
+/** `PlusType` equivalent of `MutableFabricPlainObjectLayer`. */
+export type MutableFabricPlainObjectPlusLayer<PlusType> = Record<
+  string,
+  FabricValuePlus<PlusType>
+>;
+
+/** `PlusType` equivalent of `MutableFabricContainerValueLayer`. */
+export type MutableFabricContainerValuePlusLayer<PlusType> =
+  | FabricInstancePlus<PlusType>
+  | MutableFabricArrayPlusLayer<PlusType>
+  | MutableFabricPlainObjectPlusLayer<PlusType>;
+
+/** `PlusType` equivalent of `MutableFabricValueLayer`. */
+export type MutableFabricValuePlusLayer<PlusType> =
+  | Exclude<
+    FabricValuePlus<PlusType>,
+    FabricArrayPlus<PlusType> | FabricPlainObjectPlus<PlusType>
+  >
+  | MutableFabricArrayPlusLayer<PlusType>
+  | MutableFabricPlainObjectPlusLayer<PlusType>;
 
 //
 // Abstract base classes
@@ -199,6 +222,11 @@ export abstract class FabricPrimitive extends BaseFabricSpecialObject {
  *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
  * and belongs directly in `FabricValue` without wrapping.
+ *
+ * `tags-agreement.ts` stops compiling when this and
+ * `FABRIC_CONVERTIBLE_JS_OBJECT_TAGS` stop agreeing, and it reads each class
+ * from its declared `prototype`, so a member here is written the way the
+ * class's `prototype` is declared.
  */
 export type FabricConvertibleJsObject =
   | Error

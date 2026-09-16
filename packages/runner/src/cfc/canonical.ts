@@ -1,4 +1,5 @@
 import { hashStringOf } from "@commonfabric/data-model";
+import { getLogger } from "@commonfabric/utils/logger";
 import type { CfcConfClause } from "./clause.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type {
@@ -541,5 +542,14 @@ export const canonicalizePreparedDigestInput = (
     : {}),
 });
 
-export const preparedDigestFor = (input: PreparedDigestInput): string =>
-  hashStringOf(canonicalizePreparedDigestInput(input));
+const cfcLogger = getLogger("cfc", { enabled: false });
+
+/** Hashes canonical preparation inputs and records the digest span. */
+export const preparedDigestFor = (input: PreparedDigestInput): string => {
+  const started = performance.now();
+  try {
+    return hashStringOf(canonicalizePreparedDigestInput(input));
+  } finally {
+    cfcLogger.time(started, "preparedDigestFor");
+  }
+};
