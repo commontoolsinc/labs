@@ -108,6 +108,7 @@ describe("reactive retries", () => {
     errorName: string | undefined,
     initialRetries: number,
     options: {
+      awaitRetryReadiness?: (error: unknown) => Promise<void>;
       rejectPromise?: boolean;
       restoreInvalidCauses?: () => void;
       shared?: {
@@ -137,6 +138,9 @@ describe("reactive retries", () => {
           IExtendedStorageTransaction["commit"]
         >;
     await watchReactiveActionCommit({
+      canRetry: () => true,
+      awaitRetryReadiness: options.awaitRetryReadiness ??
+        (() => Promise.resolve()),
       action,
       tx: {} as IExtendedStorageTransaction,
       log: {} as ReactivityLog,
@@ -292,6 +296,40 @@ describe("reactive retries", () => {
     expect(r.queued).toBe(1);
     expect(r.resubscribed).toBe(1);
     expect(r.retries.get(r.action)).toBe(1);
+  });
+
+  it("requeues a live conflict after recovery rejects", async () => {
+    const r = await runWatcher("ConflictError", 0, {
+      awaitRetryReadiness: () => Promise.reject(new Error("session replaced")),
+    });
+    expect(r.queued).toBe(1);
+    expect(r.retries.has(r.action)).toBe(false);
+  });
+
+  it("repairs a conflict even when it carries no catch-up callback", async () => {
+    let recovered: unknown;
+    const error = { name: "ConflictError", message: "scoped dependency" };
+    const r = await runWatcher("ConflictError", 0, {
+      error,
+      awaitRetryReadiness: (rejection) => {
+        recovered = rejection;
+        return Promise.resolve();
+      },
+    });
+    expect(recovered).toBe(error);
+    expect(r.queued).toBe(1);
+  });
+
+  it("requeues local inconsistency without remote conflict repair", async () => {
+    let repairs = 0;
+    const r = await runWatcher("StorageTransactionInconsistent", 0, {
+      awaitRetryReadiness: () => {
+        repairs++;
+        return Promise.resolve();
+      },
+    });
+    expect(repairs).toBe(0);
+    expect(r.queued).toBe(1);
   });
 
   it("settles when reactive retry handling throws", async () => {

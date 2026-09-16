@@ -223,6 +223,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [Scoped conflict recovery review](packages/runner/scoped-conflict-recovery-review-2026-09-16.md) — 2026-09-16: review of merged scoped conflict pulls, the reactive scheduler integration gap, and the regression and lifetime requirements retained from the inactive transaction-owned repair proposal.
+
 - [Where the pattern type check spends its time](development/2026-09-15-cfcheck-cost-decomposition.md) — measured cost decomposition of `deno task cfcheck` over 414 patterns: a fixed cost under four seconds against 94% variable, four disjoint slices costing what one whole run costs, transform and emit at 77% of the batch against 22% for the type check, output-identical per-file emit, one program per file in the union, per-pattern costs spanning 1 ms to 2.4 s, and what a filtered run costs at seven sizes.
 - [Lazy materialization reload diagnosis](development/performance/2026-09-15-lazy-reload-diagnosis.md) — Current-main eager nullable-read failures, durable-state comparison, and a wrong-page reload observation.
 - [Notebook reload navigation policy](development/performance/2026-09-15-notebook-reload-navigation-policy.md) — Default-on wrong-selection reproduction and reload-test correction under the existing speculative-navigation contract.

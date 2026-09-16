@@ -255,6 +255,8 @@ describe("trigger reads survive failed runs", () => {
       >,
     );
     return watchReactiveActionCommit({
+      canRetry: () => true,
+      awaitRetryReadiness: () => Promise.resolve(),
       action,
       tx,
       log: { reads: [], shallowReads: [], writes: [] },
