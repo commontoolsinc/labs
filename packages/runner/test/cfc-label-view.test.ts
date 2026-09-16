@@ -1475,17 +1475,17 @@ describe("CFC label view helpers", () => {
       }),
       runtime: {
         readTx: () => ({
+          // The reserved `["cfc"]` position is what the reader addresses,
+          // so the read returns the envelope itself.
           readOrThrow: () => ({
-            cfc: {
+            version: 1,
+            schemaHash: "test-schema",
+            labelMap: {
               version: 1,
-              schemaHash: "test-schema",
-              labelMap: {
-                version: 1,
-                entries: [{
-                  path: [],
-                  label: { integrity: ["trusted-source"] },
-                }],
-              },
+              entries: [{
+                path: [],
+                label: { integrity: ["trusted-source"] },
+              }],
             },
           }),
         }),
