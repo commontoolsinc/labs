@@ -34,6 +34,7 @@ import {
   createSigilLinkFromParsedLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
+import type { RawBuiltinResult } from "../module.ts";
 import { systemPatternSource } from "../pattern-source-scheme.ts";
 import { setRunnableName } from "../runner-utils.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
@@ -52,6 +53,10 @@ import {
   recordRuntimeOwnedStore,
 } from "./runtime-owned-store.ts";
 import { scopedCell } from "./scope-policy.ts";
+import {
+  createWishProfileReadiness,
+  WishProfilePending,
+} from "./wish-profile-readiness.ts";
 import { wishStateSchemaForResult } from "./wish-schema.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 
@@ -121,6 +126,9 @@ class WishError extends Error {
     this.name = "WishError";
   }
 }
+
+/** A confirmed empty profile roster, for which Wish offers creation. */
+class NoProfileError extends WishError {}
 
 //
 // Interval #now constants and helpers
@@ -265,6 +273,7 @@ export function tagMatchesHashtag(
 
 type WishContext = {
   runtime: Runtime;
+  profileReadiness: ReturnType<typeof createWishProfileReadiness>;
   tx: IExtendedStorageTransaction;
   parentCell: Cell<any>;
   spaceCell?: Cell<unknown>;
@@ -467,15 +476,18 @@ function subscribeProfileName(cell: Cell<unknown>): void {
  * order. Identity is by the profile's own SPACE — each profile is a distinct
  * `ProfileHome.inSpace()` space, so the `defaultProfile` / `mru` links are
  * matched to candidates by space, not `Cell.equals` (see `sameProfileCell`;
- * CT-1842). There is no synthetic key. Returns [] when no valid profile exists
- * yet.
+ * CT-1842). Returns [] for an empty roster. Throws `WishProfilePending` while
+ * backing documents load, and `WishError` for an absent referenced profile.
  */
 function getProfileCandidateCells(
   ctx: WishContext,
 ): { ordered: Cell<unknown>[]; defaultValid: boolean } {
   const homeSpaceCell = getHomeSpaceCell(ctx);
+  ctx.profileReadiness.requireDocument(homeSpaceCell, ctx.tx);
   const defaultPattern = homeSpaceCell.key("defaultPattern").resolveAsCell();
-  const profilesCell = defaultPattern.key("profiles");
+  ctx.profileReadiness.requireDocument(defaultPattern, ctx.tx);
+  const profilesCell = defaultPattern.key("profiles").resolveAsCell();
+  ctx.profileReadiness.requireDocument(profilesCell, ctx.tx);
   // Read the list as cell references so a freshly-created profile (a link into
   // its own space, not yet loaded here) is still counted rather than collapsing
   // the whole list to `undefined`. See profileLinkListSchema.
@@ -486,6 +498,9 @@ function getProfileCandidateCells(
   for (let i = 0; i < length; i++) {
     const entry = profilesCell.key(i);
     const cell = entry.resolveAsCell();
+    if (!ctx.profileReadiness.requireDocument(cell, ctx.tx)) {
+      throw new WishError("Profile data is unavailable");
+    }
     if (
       !profileCellIsValid(
         cell,
@@ -544,7 +559,7 @@ function getProfileCandidateCells(
 function getDefaultProfileCell(ctx: WishContext): Cell<unknown> {
   const { ordered } = getProfileCandidateCells(ctx);
   if (ordered.length === 0) {
-    throw new WishError("No profile exists yet");
+    throw new NoProfileError("No profile exists yet");
   }
   return ordered[0];
 }
@@ -955,7 +970,7 @@ function resolveHomeSpaceTarget(
       if (ordered.length === 0) {
         // No profile yet — throw so the #profile error path falls back to the
         // create surface (see profileCreateUI).
-        throw new WishError("No profile exists yet");
+        throw new NoProfileError("No profile exists yet");
       }
       // Always expose the full, ordered roster as `candidates`. The wish action
       // below still makes `ordered[0]` the current profile and only renders the
@@ -1487,6 +1502,7 @@ function createSharedHashtagResolver(
     try {
       const baseResolutions = searchByHashtag(sharedParsed, {
         runtime: ctx.runtime,
+        profileReadiness: ctx.profileReadiness,
         tx,
         parentCell: ctx.parentCell,
         scope: sharedScope,
@@ -1945,6 +1961,7 @@ const TARGET_SCHEMA = internSchema(
   },
 );
 
+/** Resolves a wish and re-arms profile resolution after pending document loads. */
 export function wish(
   inputsCell: Cell<[unknown, unknown]>,
   sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
@@ -1952,8 +1969,9 @@ export function wish(
   cause: Cell<any>[],
   parentCell: Cell<any>,
   runtime: Runtime,
-): Action {
+): RawBuiltinResult {
   let cancelled = false;
+  const profileReadiness = createWishProfileReadiness(runtime, addCancel);
   // Per-instance cached #now cell — prevents non-idempotent re-runs from
   // Date.now() producing a different value each time the sync action fires.
   let nowCell: Cell<unknown> | undefined;
@@ -2872,7 +2890,8 @@ export function wish(
   // initial resolution. Synchronous: reads cell.get() which triggers sync and
   // returns undefined if data isn't loaded yet. The reactive system re-triggers
   // wish when the data arrives.
-  return (tx: IExtendedStorageTransaction) => {
+  const action: Action = (tx: IExtendedStorageTransaction) => {
+    if (cancelled) return;
     const actionStartedAt = performance.now();
     let actionQueryKey: string | undefined;
     let usedSharedHashtagResolver = false;
@@ -2927,6 +2946,7 @@ export function wish(
         if (query.startsWith("/") || /^#[a-zA-Z0-9-]+/.test(query)) {
           const ctx: WishContext = {
             runtime,
+            profileReadiness,
             tx,
             parentCell,
             scope,
@@ -3201,8 +3221,10 @@ export function wish(
               }
             }
           } catch (e) {
+            if (e instanceof WishProfilePending) return;
             const errorMsg = e instanceof WishError ? e.message : String(e);
-            const ui = parsed && isProfilePersonaTarget(parsed)
+            const ui = e instanceof NoProfileError && parsed &&
+                isProfilePersonaTarget(parsed)
               ? profileCreateUI(ctx)
               : errorUI(errorMsg);
             measureWishPhase(
@@ -3247,6 +3269,7 @@ export function wish(
           // Otherwise it's a generic query, instantiate suggestion.tsx
           const suggestionCtx: WishContext = {
             runtime,
+            profileReadiness,
             tx,
             parentCell,
             scope,
@@ -3301,4 +3324,5 @@ export function wish(
       );
     }
   };
+  return { action, onActionRegistered: profileReadiness.onActionRegistered };
 }

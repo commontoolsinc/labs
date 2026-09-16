@@ -143,10 +143,18 @@ wish({ query: "#profileSpace" }) // default profile's space cell
 
 `wish({ query: "#profile" }).result` is **always the single current profile** —
 the best of the ordered candidates (default → MRU → first) — in **every** mode
-(interactive, headless, and the blessed read). It is never `undefined` while a
-profile exists, and it never depends on the picker sidecar pattern running, so
+(interactive, headless, and the blessed read). Once profile data is loaded, it
+does not depend on the picker sidecar pattern running, so
 consumers can gate on `.result` without stranding in the multi-profile case
 (CT-1829). The `candidates` array holds all ordered profiles.
+
+Profile resolution waits for the Home root, roster, and referenced profile
+documents to load before publishing a new result or opening profile creation.
+While those reads are pending, the existing wish state is retained; a new wish
+can remain unset. Confirmation re-runs the wish even when a document is absent
+and no data arrives. A confirmed empty roster opens profile creation. A failed
+load or a roster entry pointing to an absent profile produces an error surface
+instead.
 
 The picker is the **switching affordance**, not the source of `.result`:
 selection is _state_, not a channel. When the picker's "Use" writes `mru` or

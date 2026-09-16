@@ -251,7 +251,8 @@ export interface MarkInvalidOptions {
 
   /** The invalidation is a RETRY the scheduler owes after a WAIT: a run
    * whose commit was refused for a stale basis, re-queued once the
-   * conflict's catch-up gate resolved. Not an input change — the trailing
+   * conflict's catch-up gate resolved, or a builtin whose output waited for
+   * document confirmation. Not an input change — the trailing
    * debounce coalesces input churn and a throttle spaces runs that produced
    * output, while a refused run left nothing durable and its wait was its
    * delay — so the retry is queued past both: the debounce is not re-armed,
