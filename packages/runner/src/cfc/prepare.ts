@@ -558,27 +558,24 @@ const effectiveReadLabel = (
      */
     excludeEntry?: (entry: LabelMapEntry) => boolean;
   },
+  index?: ConsumedLabelIndex,
 ): IFCLabel | undefined => {
-  const view = (read.consumes === "all" && read.excludeEntry === undefined) ||
-      metadata === undefined
-    ? metadata
-    : {
-      ...metadata,
-      labelMap: {
-        ...metadata.labelMap,
-        entries: metadata.labelMap.entries.filter((entry) =>
-          (read.consumes === "all" ||
-            readConsumesEntry(read.consumes, entry)) &&
-          read.excludeEntry?.(entry) !== true
-        ),
-      },
-    };
-  const base = labelAtPath(view, path);
-  if (read.nonRecursive === true || view === undefined) {
-    return base;
-  }
+  if (metadata === undefined) return undefined;
+  const candidates = index === undefined
+    ? metadata.labelMap.entries
+    : index.overlapping(path, read.nonRecursive !== true).map(({ entry }) =>
+      entry
+    );
+  const entries = read.consumes === "all" && read.excludeEntry === undefined
+    ? candidates
+    : candidates.filter((entry) =>
+      readConsumesEntry(read.consumes, entry) &&
+      read.excludeEntry?.(entry) !== true
+    );
+  const base = labelForEntriesAtPath(entries, path);
+  if (read.nonRecursive === true) return base;
   const parts: (IFCLabel | undefined)[] = [base];
-  for (const entry of view.labelMap.entries) {
+  for (const entry of entries) {
     if (entry.path.length <= path.length) continue;
     if (!isPrefix(path, entry.path)) continue;
     parts.push(entry.label);
@@ -2491,15 +2488,34 @@ export const deriveFlowJoin = (
   const labeledSpaces = options?.collectLabeledSpaces === true
     ? new Set<MemorySpace>()
     : undefined;
-  const metadataByDoc = new Map<string, CfcMetadata | undefined>();
+  // Each pass owns its snapshots: prepare can run again after metadata writes.
+  const metadataByDoc = new Map<string, {
+    metadata: CfcMetadata | undefined;
+    indexes: Map<ReadObservationShape, ConsumedLabelIndex>;
+  }>();
   // §8.12.8 readback exclusion: see `ownRestampContainerPaths`.
   const ownRestamps = ownRestampContainerPaths(tx);
   forEachFlowObservation(
     tx,
     (space, id, scope, type, logicalPath, observation) => {
       const key = targetKey({ space, id, scope });
-      if (!metadataByDoc.has(key)) {
-        metadataByDoc.set(key, storedMetadataFor(tx, space, id, scope, type));
+      let document = metadataByDoc.get(key);
+      if (document === undefined) {
+        document = {
+          metadata: storedMetadataFor(tx, space, id, scope, type),
+          indexes: new Map(),
+        };
+        metadataByDoc.set(key, document);
+      }
+      let index = document.indexes.get(observation.shape);
+      if (index === undefined && document.metadata !== undefined) {
+        index = new ConsumedLabelIndex(
+          document.metadata.labelMap.entries.filter((entry) =>
+            readConsumesEntry(observation.shape, entry)
+          ),
+          { canonicalPaths: true },
+        );
+        document.indexes.set(observation.shape, index);
       }
       const ownedContainers = ownRestamps.get(key);
       // `*`-template consumption keeps the C0 §6.1 row-3/row-4 boundary the
@@ -2527,7 +2543,7 @@ export const deriveFlowJoin = (
         observation.machinery ||
         ownedContainers !== undefined;
       const label = effectiveReadLabel(
-        metadataByDoc.get(key),
+        document.metadata,
         logicalPath,
         {
           nonRecursive: observation.nonRecursive,
@@ -2545,6 +2561,7 @@ export const deriveFlowJoin = (
             }
             : {}),
         },
+        index,
       );
       // Any observation with label CONTENT marks its space as a label
       // contributor. Deliberately over-approximate for integrity (an
