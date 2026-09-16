@@ -147,7 +147,7 @@ export abstract class BaseValueVisitor<
     _key: FabricValuePlus<PlusType>,
     _value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType> {
-    this.throwShouldntCall("visitedFabricPlainObject");
+    this.throwShouldntCall("visitedFabricPlainObjectEntry");
   }
 
   //
