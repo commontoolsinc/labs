@@ -161,11 +161,18 @@ What works today:
   compiles each named pattern into the space before compiling the source that
   imports it, so composition costs the import line and nothing else — and no
   part of an imported pattern's source reaches the conversation
-- publishing back to that index: a pattern the model authored and ran
-  successfully is recorded under the identity its compile recorded, with the
-  `description` and `hashtags` the `run_pattern` call named, unless the run was
-  started with `--no-pattern-index-publish`; it is not offered to search until
-  evidence earns discoverability. Curated seeding may opt in with
+- publishing back to that index: when publication is enabled, a pattern the
+  model authored and ran successfully with a non-empty `description` and a
+  durable content-addressed identity is queued under that identity, with the
+  `description` and `hashtags` the `run_pattern` call named. A run with no
+  index, disabled publication (`--no-pattern-index-publish`), an empty
+  description, or no durable pattern identity queues nothing. The tool's
+  `patternPublication` reports `status: "queued"`: the index has not confirmed
+  publication at tool return. The session flush sends its retained contributions
+  when it ends; index refusals and other publication failures are logged without
+  failing the pattern run. Saved tool results remain a record of what was known
+  at tool return. Accepted entries stay out of search until evidence earns
+  discoverability. Curated seeding may opt in with
   `CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE=1`
 - targeted exact-string edits plus whole-file replace/create and append writes
 - initial and in-run image attachments for model vision-capable flows
