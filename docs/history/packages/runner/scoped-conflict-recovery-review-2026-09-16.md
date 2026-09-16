@@ -38,9 +38,10 @@ assertion. The stored result and eventual settlement were the relevant outcomes.
 
 ## Disposition of the larger design
 
-The [design at the final reviewed draft commit][design] and its implementation
-remain available through immutable Git references. They proposed a stronger
-contract: transaction-owned repair coverage, complete receipts, explicit release,
+The [design at the final reviewed draft commit][design] and its
+[implementation][implementation] remain available through immutable Git
+references. They proposed a stronger contract: transaction-owned repair coverage,
+complete receipts, explicit release,
 and reconstruction after reconnect. The staged server component was inactive;
 client ownership and receipt validation had not been completed.
 
@@ -78,4 +79,5 @@ conflict-root watches, so further work needed to account for that overlap.
 [merged]: https://github.com/commontoolsinc/labs/pull/7217
 [draft]: https://github.com/commontoolsinc/labs/pull/7202
 [design]: https://github.com/commontoolsinc/labs/blob/5603bf4b0ff329672c5a49b96181d5392183236a/docs/plans/transaction-conflict-repair.md
+[implementation]: https://github.com/commontoolsinc/labs/tree/5603bf4b0ff329672c5a49b96181d5392183236a
 [other]: https://github.com/commontoolsinc/labs/pull/7068

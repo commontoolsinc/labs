@@ -219,6 +219,7 @@ export function watchReactiveActionCommit(state: {
   readonly onSuccess?: () => void;
 }): Promise<void> {
   const handleResult = async (error: unknown): Promise<void> => {
+    if (error && state.handleUnavailable?.()) return;
     if (!state.canRetry()) {
       if (error) abandonAction(state, error);
       return;
@@ -230,8 +231,6 @@ export function watchReactiveActionCommit(state: {
       state.onSuccess?.();
       return;
     }
-
-    if (state.handleUnavailable?.()) return;
 
     logger.info(
       "schedule-run-error",
@@ -306,11 +305,11 @@ export function watchReactiveActionCommit(state: {
         }
         // Removal, replacement, or write teardown can retire this run while
         // recovery is pending. Its completion must not revive that lifetime.
+        if (state.handleUnavailable?.()) return;
         if (!state.canRetry()) {
           abandonAction(state, error);
           return;
         }
-        if (state.handleUnavailable?.()) return;
       }
       // A re-run that waited on the catch-up gate is the scheduler's own,
       // not a fresh input change: the wait was its delay, and the refused

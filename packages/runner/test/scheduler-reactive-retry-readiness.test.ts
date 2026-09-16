@@ -3,7 +3,16 @@ import { describe, it } from "@std/testing/bdd";
 import { stub } from "@std/testing/mock";
 
 import type { Action } from "../src/scheduler/types.ts";
-import type { CommitError } from "../src/storage/interface.ts";
+import type {
+  CommitError,
+  IExtendedStorageTransaction,
+} from "../src/storage/interface.ts";
+import {
+  localReadFailure,
+  localReadsReady,
+  LocalReadUnavailable,
+  restrictToLocalReads,
+} from "../src/storage/local-read-policy.ts";
 import {
   createSchedulerTestRuntime,
   disposeSchedulerTestRuntime,
@@ -11,6 +20,45 @@ import {
 } from "./scheduler-test-utils.ts";
 
 describe("scheduler-reactive-retry-readiness", () => {
+  it("releases the local-read basis when removal precedes a commit rejection", async () => {
+    const fixture = createSchedulerTestRuntime(import.meta.url);
+    const { runtime } = fixture;
+    const verdict = Promise.withResolvers<void>();
+    let cancel: (() => void) | undefined;
+    try {
+      const input = runtime.getCell(space, "retired local input", undefined);
+      await runtime.editWithRetry((tx) => input.withTx(tx).set(1));
+      await input.sync();
+      const committing = Promise.withResolvers<IExtendedStorageTransaction>();
+      const edit = runtime.edit.bind(runtime);
+      using _edits = stub(runtime, "edit", (options) => {
+        const tx = edit(options);
+        const commit = tx.commit.bind(tx);
+        tx.commit = async (commitOptions) => {
+          committing.resolve(tx);
+          await verdict.promise;
+          return await commit(commitOptions);
+        };
+        return tx;
+      });
+      cancel = runtime.scheduler.subscribe((tx) => {
+        restrictToLocalReads(tx.tx);
+        input.withTx(tx).get();
+      }, { isEffect: true });
+      const tx = await committing.promise;
+      await runtime.idle();
+      cancel();
+      verdict.resolve();
+      await runtime.scheduler.idleWithPendingCommits();
+      expect(localReadFailure(tx)).toBeInstanceOf(LocalReadUnavailable);
+      expect(localReadsReady(tx)).toBe(true);
+    } finally {
+      verdict.resolve();
+      cancel?.();
+      await disposeSchedulerTestRuntime(fixture);
+    }
+  });
+
   for (const invocation of ["subscribe", "run", "run-after-removal"] as const) {
     for (
       const finish of [

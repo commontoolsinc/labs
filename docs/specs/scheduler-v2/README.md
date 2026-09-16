@@ -629,10 +629,11 @@ runnable(N) = N.status ∈ {invalid, never-ran} ∧ live(N) ∧ eligible(N)
    with a bounded retry policy for transient failure classes.
 7. Under persistence, attach the observation to the transaction (§9.3).
 
-Note what is *absent* from the run path relative to v1: no
-resubscribe/unsubscribe, no changed-write diffing and reader-marking (the
-channel does it), no demand-context entry/exit sets, no first-run/continuation
-set deletions, no conditional-scheduling cleanup.
+The run path refreshes live subscriptions incrementally, including during
+retry recovery, without tearing them down and recreating them. The change
+channel owns changed-write diffing and reader-marking. The run path has no
+demand-context entry/exit sets, first-run/continuation set deletions, or
+conditional-scheduling cleanup.
 
 ### 7.4 Ordering rules
 
