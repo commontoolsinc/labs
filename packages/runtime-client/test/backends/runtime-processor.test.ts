@@ -53,7 +53,6 @@ import {
   setLinkCfcLabelView,
 } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { StorageManager as WorkerStorageManager } from "@commonfabric/runner/storage/cache";
 import * as V2Storage from "@commonfabric/runner/storage/v2";
 
 import {
@@ -84,6 +83,7 @@ import {
 } from "@/backends/utils.ts";
 import type { WorkerClient } from "@/backends/worker-client.ts";
 import { buildProcessor } from "./build-processor.ts";
+import { stubWorkerBoot } from "./stub-worker-boot.ts";
 
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",
@@ -4814,15 +4814,10 @@ describe("runtime-processor", () => {
         as: cfcSigner,
         memoryHost: new URL("memory://"),
       }, server);
-      const originalOpen = WorkerStorageManager.open;
-      const originalHealthCheck = Runtime.prototype.healthCheck;
-      const originalWatchSiteTable = RuntimeProcessor.prototype.watchSiteTable;
+      const restoreBoot = stubWorkerBoot(() => storageManager);
       const originalSubscribe = Runtime.prototype.subscribeEventIntentOutcomes;
       let subscribed = false;
       let cancelled = 0;
-      WorkerStorageManager.open = () => storageManager;
-      Runtime.prototype.healthCheck = () => Promise.resolve(true);
-      RuntimeProcessor.prototype.watchSiteTable = () => {};
       Runtime.prototype.subscribeEventIntentOutcomes = () => {
         subscribed = true;
         return () => cancelled++;
@@ -4837,9 +4832,7 @@ describe("runtime-processor", () => {
         await processor.dispose();
         expect(cancelled).toBe(1);
       } finally {
-        WorkerStorageManager.open = originalOpen;
-        Runtime.prototype.healthCheck = originalHealthCheck;
-        RuntimeProcessor.prototype.watchSiteTable = originalWatchSiteTable;
+        restoreBoot();
         Runtime.prototype.subscribeEventIntentOutcomes = originalSubscribe;
         await storageManager.close();
         await server.close();

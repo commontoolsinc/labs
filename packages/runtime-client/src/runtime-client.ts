@@ -73,6 +73,7 @@ import {
 } from "./protocol/mod.ts";
 import { assertNoKeyMaterial } from "./shared/key-material.ts";
 import {
+  type EveryFieldOf,
   normalizeOrigin,
   normalizeSpaceHostMap,
 } from "./shared/security-context.ts";
@@ -131,6 +132,10 @@ export type RuntimeClientEvents = {
  * `Identity` values -- the signer and the space identity -- are left behind.
  * A client that attaches asserts which principal the runtime acts as and
  * supplies no key, and this is where a page's signer stops.
+ *
+ * Everything else is named, which the `satisfies` clause holds: a posture
+ * field this one drops is one the client asserts nothing about, and the
+ * runtime's own value for it then goes unchecked.
  */
 export function attachOptionsFrom(
   options: RuntimeClientOptions,
@@ -148,7 +153,7 @@ export function attachOptionsFrom(
     renderDeclassificationPolicy: options.renderDeclassificationPolicy,
     renderConfidentialityCeiling: options.renderConfidentialityCeiling,
     trustSnapshot: options.trustSnapshot,
-  };
+  } satisfies EveryFieldOf<RuntimeAttachOptions>;
 }
 
 export const $conn = Symbol("$request");
@@ -385,7 +390,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       renderDeclassificationPolicy: options.renderDeclassificationPolicy,
       renderConfidentialityCeiling: options.renderConfidentialityCeiling,
       trustSnapshot: options.trustSnapshot,
-    };
+    } satisfies EveryFieldOf<RuntimeSecurityContext>;
     // The far side refuses this too, and refusing before the send is what
     // matters for a shell: `key-material.ts` records why, and the short of it
     // is that a `MessagePort` between two WKWebViews throws `DataCloneError`
@@ -422,7 +427,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       forwardWorkerConsole: options.forwardWorkerConsole,
       patternCoverage: options.patternCoverage,
       concurrentWatchRefresh: options.concurrentWatchRefresh,
-    } satisfies Record<keyof Required<InitializationData>, unknown>;
+    } satisfies EveryFieldOf<InitializationData>;
     const initialized = await (new RuntimeConnection(transport)).initialize(
       data,
     );
