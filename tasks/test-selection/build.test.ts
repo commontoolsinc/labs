@@ -93,6 +93,8 @@ function stored(
 }
 
 const KEY = testIdentityKey({ k: "unit", s: "memory", n: "space > writes" });
+/** The file a record of that identity names. */
+const UNIT = "packages/memory/test/space.test.ts";
 const CI_NAME = "labs/test-records/submissions/ci/v1/2026/08/20/run-1-a.ndjson";
 const LOCAL_NAME =
   "labs/test-records/submissions/local/ianh/v1/2026/08/20/01K3-branch.ndjson";
@@ -405,6 +407,87 @@ describe("build", () => {
       expect(streamed.finish().states).toEqual(whole.states);
     });
 
+    it("gives every identity the aggregate scores a surface", () => {
+      // The publisher keeps the identities it can place, and it places
+      // from these. A fold that gathered them from its own reads alone
+      // would hand it the identities that ran inside its window and
+      // nothing else, so every identity that did not run inside it would
+      // leave the manifest while its scores stayed in the aggregate.
+      const carried = emptyAggregate("2026-08-20");
+      carried.states[KEY] = emptyState();
+      carried.files[KEY] = UNIT;
+      const surfaces = new Fold(carried, NO_ALIASES, "2026-08-20")
+        .finish().surfaces;
+      expect(surfaces.get(KEY)).toEqual({
+        suite: "unit:memory",
+        unit: UNIT,
+        fromFile: true,
+      });
+    });
+
+    it("reads an identity with no recorded file as its own unit", () => {
+      // A suite whose units are not files places an identity by its
+      // recorded name, and an identity whose records never named a file
+      // has nothing else to be placed by either.
+      const carried = emptyAggregate("2026-08-20");
+      carried.states[KEY] = emptyState();
+      const surfaces = new Fold(carried, NO_ALIASES, "2026-08-20")
+        .finish().surfaces;
+      expect(surfaces.get(KEY)).toEqual({
+        suite: "unit:memory",
+        unit: "space > writes",
+        fromFile: false,
+      });
+    });
+
+    it("writes the file a record named into the aggregate", () => {
+      const folded = foldReports(
+        emptyAggregate("2026-08-20"),
+        [stored(CI_NAME, context(), [record({ file: UNIT })])],
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      expect(folded.aggregate.files).toEqual({ [KEY]: UNIT });
+    });
+
+    it("gives no surface to a state key that names no identity", () => {
+      // The aggregate is stored input like every other object in the
+      // store, so a key that cannot be read back into a test is passed
+      // over rather than thrown on. The state stays where it is and
+      // nothing downstream is built from it: the manifest is built from
+      // the identities the surfaces place.
+      const carried = emptyAggregate("2026-08-20");
+      carried.states["not an identity key"] = emptyState();
+      carried.states[KEY] = emptyState();
+      const folded = new Fold(carried, NO_ALIASES, "2026-08-20").finish();
+      expect(folded.states.has("not an identity key")).toBe(true);
+      expect(folded.surfaces.has("not an identity key")).toBe(false);
+      expect(folded.surfaces.has(KEY)).toBe(true);
+    });
+
+    it("drops a carried file for an identity it holds no state for", () => {
+      // The files are seeded from the states and written back from the
+      // surfaces those seeded, so the map cannot name an identity the
+      // aggregate does not score. Without that it would only ever grow:
+      // nothing else removes an entry from it.
+      const carried = emptyAggregate("2026-08-20");
+      carried.files[KEY] = UNIT;
+      const folded = new Fold(carried, NO_ALIASES, "2026-08-20").finish();
+      expect(folded.surfaces.has(KEY)).toBe(false);
+      expect(folded.aggregate.files).toEqual({});
+    });
+
+    it("keeps a carried file a later record does not name", () => {
+      // A record with no file says what an unmapped record can say, and
+      // the file an earlier one named is the better answer.
+      const carried = emptyAggregate("2026-08-20");
+      carried.states[KEY] = emptyState();
+      carried.files[KEY] = UNIT;
+      const fold = new Fold(carried, NO_ALIASES, "2026-08-20");
+      fold.add([stored(CI_NAME, context(), [record()])]);
+      expect(fold.finish().aggregate.files).toEqual({ [KEY]: UNIT });
+    });
+
     it("does not fold a day it took from a rollup", () => {
       // A rollup carries the day's reports whole, so its raw objects
       // never reach `folded`; a later run over a wide window has to ask
@@ -534,10 +617,14 @@ describe("build", () => {
       });
       aggregate.states[measurement] = emptyState();
       aggregate.states[KEY] = emptyState();
+      aggregate.files[measurement] = "tasks/ci-lane.ts";
 
-      const states = new Fold(aggregate, NO_ALIASES, "2026-08-20")
-        .finish().states;
+      const folded = new Fold(aggregate, NO_ALIASES, "2026-08-20").finish();
+      const states = folded.states;
       expect(states.has(measurement)).toBe(false);
+      // The file goes with the state, so the aggregate does not carry
+      // one for an identity nothing scores.
+      expect(folded.aggregate.files).toEqual({});
       // The test beside it survives, so this drains the measurements
       // rather than the aggregate.
       expect(states.has(KEY)).toBe(true);
@@ -559,14 +646,25 @@ describe("build", () => {
       expect(parseAggregate(JSON.stringify(aggregate))).toEqual(aggregate);
     });
 
-    it("carries what could not be placed into the next run", () => {
-      // A run compares what it cannot place against what the previous one
-      // could not, which is what tells an identity waiting for a record
-      // that places it from a surface whose records never carry one.
+    it("carries the file each identity's records named", () => {
+      // Which identities a manifest holds is decided from these, so a
+      // run that lost them would publish only what ran inside its own
+      // window.
       const aggregate = emptyAggregate("2026-08-20");
-      aggregate.unclaimed = [KEY];
-      expect(parseAggregate(JSON.stringify(aggregate))?.unclaimed)
-        .toEqual([KEY]);
+      aggregate.files[KEY] = UNIT;
+      expect(parseAggregate(JSON.stringify(aggregate))?.files)
+        .toEqual({ [KEY]: UNIT });
+    });
+
+    it("reads an aggregate written before the files as holding none", () => {
+      // Every identity in it is then read as its own invocation unit
+      // until one of its records names a file again.
+      const older = { ...emptyAggregate("2026-08-20") } as Record<
+        string,
+        unknown
+      >;
+      delete older.files;
+      expect(parseAggregate(JSON.stringify(older))?.files).toEqual({});
     });
 
     it("gives back the cost a day carrying a percentile was giving", () => {
@@ -625,16 +723,20 @@ describe("build", () => {
         .toBeUndefined();
     });
 
-    it("reads a malformed unplaced list as nothing to compare against", () => {
-      // Nothing in the fold reads this list, so an aggregate carrying
-      // something else in its place is read as holding no list rather
-      // than refused outright.
+    it("refuses an aggregate whose files it cannot read", () => {
+      // These decide which identities the manifest holds, so reading a
+      // shape this does not understand as an empty map would drop every
+      // identity that did not run inside the window.
       const older = { ...emptyAggregate("2026-08-20") } as Record<
         string,
         unknown
       >;
-      older.unclaimed = [7];
-      expect(parseAggregate(JSON.stringify(older))?.unclaimed).toBeUndefined();
+      older.files = { [KEY]: 7 };
+      expect(parseAggregate(JSON.stringify(older))).toBeUndefined();
+      older.files = [UNIT];
+      expect(parseAggregate(JSON.stringify(older))).toBeUndefined();
+      older.files = null;
+      expect(parseAggregate(JSON.stringify(older))).toBeUndefined();
     });
 
     it("returns undefined for anything that is not one", () => {

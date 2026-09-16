@@ -257,6 +257,42 @@ const mergeRuleRecords = (
 };
 
 /**
+ * Restores host-only annotations after validating unique, exact result joins.
+ * Unrecorded legacy results retain unknown omission status.
+ */
+export const restoreHarnessTranscriptOmissions = (
+  transcript: readonly HarnessTranscriptMessage[],
+  omissions: HarnessTranscriptOmissions,
+): void => {
+  const indices = new Set<number>();
+  const outputIds = new Set<string>();
+  for (const result of omissions.results) {
+    if (indices.has(result.transcriptIndex) || outputIds.has(result.outputId)) {
+      throw new Error("Stored transcript omissions repeat a result");
+    }
+    indices.add(result.transcriptIndex);
+    outputIds.add(result.outputId);
+    const message = transcript[result.transcriptIndex];
+    const identity = message === undefined
+      ? undefined
+      : resultProvenanceOf(message);
+    if (
+      identity === undefined || identity.outputId !== result.outputId ||
+      identity.toolId !== result.toolId ||
+      identity.toolCallId !== result.toolCallId
+    ) {
+      throw new Error("Stored transcript omissions do not match their result");
+    }
+  }
+  for (const result of omissions.results) {
+    annotateHarnessTranscriptResultOmissions(
+      transcript[result.transcriptIndex],
+      result.rules,
+    );
+  }
+};
+
+/**
  * Builds the durable omission join for `transcript`, retaining entries already
  * recorded for messages loaded from a prior process.
  *

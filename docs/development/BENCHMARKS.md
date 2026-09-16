@@ -583,6 +583,21 @@ path traversal plus wildcard candidates under matching container prefixes and
 the entries returned. Recursive root reads and wildcard queries can still
 consume the whole map; the grid measures narrow concrete reads.
 
+## CFC authoritative label coverage
+
+`packages/runner/test/cfc-authoritative-cover.bench.ts` compares a plain scan
+with the prefix-only `ConsumedLabelIndex` lookup used to protect carried link
+labels from longest-prefix shadowing. It uses the path-index source grid and
+8,192 concrete queries per sample. Each query selects all deepest matching
+entries; wildcard queries are covered by unit tests and use the scan fallback.
+
+The timer includes index construction and candidate selection. Divide the
+reported nanoseconds by 8,192 for amortized per-query cost. Label merging,
+fixture creation, and scan-equivalence assertions are outside this benchmark;
+persistence tests verify the final labels. Construction is paid once per link
+write that has a usable carried entry, so the amortized result depends on the
+number of queries per write.
+
 ## Scoped snapshot memo reuse
 
 `packages/runner/test/snapshot-memo.bench.ts` measures repeated CFC label-view

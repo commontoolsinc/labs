@@ -230,6 +230,9 @@ export interface HarnessRunState {
   /** Admitted research kits and host-confirmed records retained by this run. */
   researchRuns?: HarnessResearchRunSummary[];
 
+  /** Current user goal carried into research and delegated work. */
+  researchGoal?: string;
+
   /** Opening-research intent and recoverable model-context handoff. */
   openingResearch?: HarnessOpeningResearch;
 
@@ -308,6 +311,7 @@ export interface CreateHarnessRunStateOptions {
   patternRefs?: HarnessPatternRef[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   researchRuns?: HarnessResearchRunSummary[];
+  researchGoal?: string;
   openingResearch?: HarnessOpeningResearch;
   researchFailures?: number;
   docsQueryFailures?: number;
@@ -453,6 +457,9 @@ export const createHarnessRunState = (
     ...(options.policyDecisions !== undefined
       ? { policyDecisions: [...options.policyDecisions] }
       : {}),
+    ...(options.researchGoal === undefined
+      ? {}
+      : { researchGoal: options.researchGoal }),
     ...(options.researchRuns !== undefined
       ? { researchRuns: structuredClone(options.researchRuns) }
       : {}),

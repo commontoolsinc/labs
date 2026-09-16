@@ -1,3 +1,5 @@
+import type { HarnessCfcModelContext } from "./contracts/cfc-model-context.ts";
+import type { HarnessResearchRunSummary } from "./contracts/research.ts";
 import type {
   HarnessChatEventEnvelope,
   HarnessChatSessionStatus,
@@ -6,9 +8,24 @@ import type {
 } from "./contracts/interactive-chat.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 
+/** Bounded prior findings plus the full label influence of retained history. */
+export interface HarnessChatResearchContext {
+  /** User goal established by the first completed task in this context. */
+  researchGoal?: string;
+
+  /** Admitted results retained as historical leads for the next root task. */
+  runs: readonly HarnessResearchRunSummary[];
+
+  /** Existing model-context accounting, including sources outside selected results. */
+  cfcModelContext?: HarnessCfcModelContext;
+}
+
 export interface HarnessChatSessionSnapshot {
   session: HarnessChatSessionStatus;
   transcript: readonly HarnessTranscriptMessage[];
+
+  /** Host-owned research context, committed with resumable model history. */
+  researchContext?: HarnessChatResearchContext;
 }
 
 export interface HarnessChatEventListOptions {
