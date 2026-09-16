@@ -660,11 +660,13 @@ a model can hold a capability setup and no suite at all.
 
 What a lane is charged for holding a suite is the suite's own figure, so
 a model with no suite in it charges nothing for holding one and a lane
-packed against it overruns the bound it is killed at. The capability
-setups and the prologue come from their own figures and are unaffected,
-which is why this is about the suites rather than everything a lane is
-charged. A run with no suite in its model says so rather than publishing
-the empty map in silence:
+packed against it overruns the bound it is killed at. A capability setup
+is measured from a lane's own records and is unaffected, and the
+prologue is a fixed dial rather than a measurement at all, so it is
+there whether any lane has measured anything or not. That is why this is
+about the suites rather than everything a lane is charged. A run with no
+suite in its model says so rather than publishing the empty map in
+silence:
 
 ```
 test selection: no suite has a measured cost in the last 7 day(s), so a

@@ -769,9 +769,10 @@ function summarize(
   // What a lane is charged for holding a suite at all is the suite's own
   // figure, so a model with no suite in it charges nothing for holding
   // one and a lane packed to its budget runs past the bound it is killed
-  // at. The capability setups and the prologue are charged from their
-  // own figures and are unaffected, which is why this names the suites
-  // rather than everything a lane is charged. Four things end here — no
+  // at. A capability setup is measured from a lane's own records and is
+  // unaffected, and the prologue is a fixed dial rather than a
+  // measurement, so it is there either way; this names the suites rather
+  // than everything a lane is charged. Four things end here — no
   // lane has run, none recorded what it measured, the fold declines the
   // records of the ones that did, or the fold stopped reading a figure
   // it used to read — and the empty map alone says none of them.
