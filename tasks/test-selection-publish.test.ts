@@ -395,6 +395,7 @@ function laneObject(
   at: string,
   planned = 40,
   spent = 92,
+  units = 1,
 ): string {
   const context: RunContext = {
     schema: 1,
@@ -427,6 +428,7 @@ function laneObject(
     measured("ci-lane setup fuse", 14_800),
     measured("ci-lane batch workspace-unit", spent * 1000),
     measured("ci-lane planned batch workspace-unit", planned * 1000),
+    measured("ci-lane units batch workspace-unit", units),
   ]);
 }
 
@@ -508,7 +510,7 @@ describe("publish()", () => {
     // one observation there is nothing to say about how that cost grows
     // with the work, so the whole difference is the suite's fixed cost.
     expect(manifest.calibration.suites["workspace-unit"])
-      .toEqual({ overhead: 52, correction: 1 });
+      .toEqual({ overhead: 52, correction: 1, unitOverhead: 0 });
   });
 
   it("publishes a cost model the manifest reader will carry", async () => {

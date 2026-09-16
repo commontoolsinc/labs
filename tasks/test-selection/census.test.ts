@@ -3,7 +3,11 @@ import { describe, it } from "@std/testing/bdd";
 import { testIdentityKey } from "@commonfabric/test-support/records";
 
 import { census, unknownIdentity } from "./census.ts";
-import type { Manifest, ManifestEntry } from "./manifest.ts";
+import {
+  type Manifest,
+  MANIFEST_SCHEMA_VERSION,
+  type ManifestEntry,
+} from "./manifest.ts";
 import type { Suite } from "../test-topology/suite.ts";
 import { loadTopology } from "../test-topology.ts";
 
@@ -34,13 +38,13 @@ function suite(partial: Partial<Suite> & { id: string }): Suite {
 /** A manifest carrying exactly these entries. */
 function manifestOf(entries: readonly Partial<ManifestEntry>[]): Manifest {
   return {
-    schema: 1,
+    schema: MANIFEST_SCHEMA_VERSION,
     generatedAt: "2026-09-01T00:00:00.000Z",
     seed: "seed",
     commit: "c".repeat(40),
     runs: 1,
     dials: {},
-    calibration: { setupCost: {}, suites: {}, unitOverhead: {}, prologue: 40 },
+    calibration: { setupCost: {}, suites: {}, prologue: 40 },
     entries: entries.map((entry) => ({
       test: { k: "unit", s: "bakery", n: "glaze > sets" },
       suite: "workspace-unit",

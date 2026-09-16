@@ -206,13 +206,13 @@ three look identical in a source file, and somebody who tunes a measured
 value is arguing with a tape measure while somebody who tries to tune a
 derived one is editing a line that is not there.
 
-Three more numbers are measured, and they are not in the table because
+Four more numbers are measured, and they are not in the table because
 they are not in `policy.ts`: `setupCost` for each capability, and
-`suiteOverhead` and `correction` for each suite. They are fitted from the
-lanes' own timing records and published in the manifest, one set per
-publisher run, which is where to read them. Nothing hand-edits them, and a
-manifest carrying a strange one is a measurement to look at rather than a
-setting to fix.
+`suiteOverhead`, `correction` and `unitOverhead` for each suite. They are
+fitted from the lanes' own timing records and published in the manifest,
+one set per publisher run, which is where to read them. Nothing hand-edits
+them, and a manifest carrying a strange one is a measurement to look at
+rather than a setting to fix.
 
 | Dial | Default | Units | Set by | Why you would move it, and which way |
 | --- | --- | --- | --- | --- |
@@ -247,6 +247,7 @@ setting to fix.
 | `FILL_EXPLORATION_SHARE` | 0.15 | share of the run's budget | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
 | `MIN_CORRECTION_SPAN_SECONDS` | 23 | seconds | derived | A tenth of a lane's budget, measured as the widest gap between two batches' charges. Down when a suite's real slope is going unbelieved for too long; up when a slope fitted inside a narrow range is being read far outside it. |
 | `MIN_CORRECTION_SAMPLES` | 3 | batches | chosen | Up when a slope is being fitted from too little and swinging about; down when a suite's real slope takes too long to be believed. |
+| `MIN_UNIT_SPAN_UNITS` | 50 | units | chosen | The widest gap between two batches' sizes a suite needs before what one more unit costs it is believed. Down when a suite's real per-unit cost is going unbelieved for too long; up when a slope fitted across a few units is being read across hundreds. |
 | `FLAKE_EXCLUSION_RATE` | 0.005 | share of runs | chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |
 | `FLAKE_MIN_EXECUTIONS` | 2 | runs of one item | chosen | What an item that has ever disagreed runs. Down to one when the cheapest evidence of intermittency is not worth a second execution; nowhere useful above two, since the line through the anchor covers everything flakier. |
 | `FLAKE_ANCHOR_RATE` | 0.01 | share of runs | chosen | With `FLAKE_ANCHOR_EXECUTIONS`, the point the count's line passes through. Down to make the count climb faster with the rate; up to make it climb slower. |
@@ -523,11 +524,13 @@ next.
 Left out of everything scored, they are not discarded. The publisher
 keeps them in its rolling aggregate over `COST_WINDOW_DAYS`, the same
 window it measures a test's cost over, and fits `setupCost`,
-`suiteOverhead` and `correction` from them for the next manifest. A lane
-writes one record per capability it opens and two per batch — what it
-was packed to spend, and what it spent — and it is the pair that makes a
-fit possible, since what the packer expected the tests to take cannot be
-recovered from the records the batch produced.
+`suiteOverhead`, `correction` and `unitOverhead` from them for the next
+manifest. A lane writes one record per capability it opens and three per
+batch — what it spent, what it was packed to spend, and how many units it
+opened — and it is the second and third that make a fit possible. Neither
+can be recovered from the records the batch produced: those say what the
+tests took rather than what the packer expected them to take, and a unit
+whose tests all recorded nothing leaves no trace of having been opened.
 
 The publisher leaves all of those out rather than putting an entry in the
 manifest that no lane could run. The next record that says enough puts the

@@ -166,6 +166,26 @@ export const MIN_CORRECTION_SPAN_SECONDS = LANE_BUDGET_SECONDS / 10;
  */
 export const MIN_CORRECTION_SAMPLES = 3;
 
+/**
+ * How far apart a suite's batches must have been in size before its
+ * fitted per-unit cost is believed: the most units any of them held, less
+ * the fewest.
+ *
+ * This is `MIN_CORRECTION_SPAN_SECONDS`'s reasoning in the units the
+ * regressor counts, and it is here for the same reason: a slope read far
+ * outside the range it was fitted over says whatever that range's noise
+ * said. A unit has been measured to cost around half a second, where a
+ * batch's wall time on a shared runner moves by several seconds for
+ * reasons that have nothing to do with what the batch held, so a slope
+ * fitted across a handful of units is describing the runner. Fifty units
+ * at half a second is about the width the seconds dial asks for.
+ *
+ * Below this the slope is zero, which is the reading that needs no
+ * evidence, and the suite's intercept carries what a unit costs: a batch
+ * of one unit is charged what a batch of many was seen to cost.
+ */
+export const MIN_UNIT_SPAN_UNITS = 50;
+
 /** The flake rate above which an item leaves the selectable set. */
 export const FLAKE_EXCLUSION_RATE = 0.005;
 
@@ -655,6 +675,17 @@ export const DIALS: readonly Dial[] = [
     why:
       "Up when a slope is being fitted from too little and swinging about; " +
       "down when a suite's real slope takes too long to be believed.",
+  },
+  {
+    name: "MIN_UNIT_SPAN_UNITS",
+    value: MIN_UNIT_SPAN_UNITS,
+    unit: "units",
+    setBy: "chosen",
+    why:
+      "The widest gap between two batches' sizes a suite needs before what " +
+      "one more unit costs it is believed. Down when a suite's real " +
+      "per-unit cost is going unbelieved for too long; up when a slope " +
+      "fitted across a few units is being read across hundreds.",
   },
   {
     name: "FLAKE_EXCLUSION_RATE",

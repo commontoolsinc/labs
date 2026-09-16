@@ -25,7 +25,11 @@ import {
   recordSurface,
   reportFromText,
 } from "./build.ts";
-import { parseManifest, serializeManifest } from "./manifest.ts";
+import {
+  MANIFEST_SCHEMA_VERSION,
+  parseManifest,
+  serializeManifest,
+} from "./manifest.ts";
 import type { Suite } from "../test-topology/suite.ts";
 import {
   costSeconds,
@@ -324,8 +328,8 @@ describe("build", () => {
     it("keeps a lane's measurements of itself for the cost model", () => {
       // Left out of everything scored, and not discarded either: what
       // the packer charges a lane beyond its tests is fitted from them.
-      // One group is one lane's artifact, so a batch's two halves are
-      // here together.
+      // One group is one lane's artifact, so a batch's three
+      // measurements are here together.
       const read = readReport(
         stored(CI_NAME, context(), [
           record(),
@@ -345,12 +349,26 @@ describe("build", () => {
             },
             durationMs: 40_000,
           }),
+          record({
+            test: {
+              k: "gate",
+              s: "ci",
+              n: "ci-lane units batch workspace-unit",
+            },
+            durationMs: 17,
+          }),
         ]),
         NO_ALIASES,
       );
       expect(read.lanes).toEqual([
         { day: "2026-08-20", capability: "fuse", seconds: 14.8 },
-        { day: "2026-08-20", suite: "workspace-unit", planned: 40, spent: 92 },
+        {
+          day: "2026-08-20",
+          suite: "workspace-unit",
+          planned: 40,
+          spent: 92,
+          units: 17,
+        },
       ]);
     });
 
@@ -687,7 +705,13 @@ describe("build", () => {
       const aggregate = emptyAggregate("2026-08-20");
       aggregate.lanes = [
         { day: "2026-08-20", capability: "fuse", seconds: 14.8 },
-        { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
+        {
+          day: "2026-08-20",
+          suite: "runner-unit",
+          planned: 10,
+          spent: 30,
+          units: 4,
+        },
       ];
       expect(parseAggregate(JSON.stringify(aggregate))?.lanes)
         .toEqual(aggregate.lanes);
@@ -696,16 +720,24 @@ describe("build", () => {
     it("drops a stored lane measurement it cannot read", () => {
       // Each one stands alone, so one that will not read is dropped by
       // itself rather than taking a week of measurements with it. The
-      // fit reads every figure in one as a number, and a stored
-      // `Infinity` or `NaN` arrives here as `null`.
+      // fit reads all three of a batch's figures as numbers, so one
+      // short of them says nothing it can use, and a stored `Infinity`
+      // or `NaN` arrives here as `null`.
       const older = { ...emptyAggregate("2026-08-20") } as Record<
         string,
         unknown
       >;
       older.lanes = [
         { day: "2026-08-20", capability: "fuse", seconds: "a while" },
-        { day: "2026-08-20", suite: "runner-unit", planned: 10 },
-        { day: "2026-08-20", suite: "runner-unit", planned: NaN, spent: 30 },
+        { day: "2026-08-20", suite: "runner-unit", planned: 10, units: 4 },
+        {
+          day: "2026-08-20",
+          suite: "runner-unit",
+          planned: NaN,
+          spent: 30,
+          units: 4,
+        },
+        { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
         { day: 7, capability: "fuse", seconds: 1 },
         "fuse took a while",
         null,
@@ -742,12 +774,16 @@ describe("build", () => {
     it("returns undefined for anything that is not one", () => {
       expect(parseAggregate("{not json")).toBeUndefined();
       expect(parseAggregate('{"schema":99}')).toBeUndefined();
-      expect(parseAggregate('{"schema":1,"day":"x"}')).toBeUndefined();
+      expect(
+        parseAggregate(
+          JSON.stringify({ schema: MANIFEST_SCHEMA_VERSION, day: "x" }),
+        ),
+      ).toBeUndefined();
     });
 
     it("refuses a shape it would otherwise have to guess at", () => {
       const whole = {
-        schema: 1,
+        schema: MANIFEST_SCHEMA_VERSION,
         day: "2026-08-20",
         folded: [],
         states: {},
@@ -776,7 +812,7 @@ describe("build", () => {
       // No compacted list at all is the truthful reading that nothing
       // was compacted, which is different from a list it cannot read.
       const before = {
-        schema: 1,
+        schema: MANIFEST_SCHEMA_VERSION,
         day: "2026-08-20",
         folded: [],
         states: {},
@@ -1173,6 +1209,10 @@ describe("the days a fold keeps a lane's measurements over", () => {
           test: { k: "gate", s: "ci", n: "ci-lane planned batch runner-unit" },
           durationMs: 10_000,
         }),
+        record({
+          test: { k: "gate", s: "ci", n: "ci-lane units batch runner-unit" },
+          durationMs: 4,
+        }),
       ],
     );
   }
@@ -1189,7 +1229,13 @@ describe("the days a fold keeps a lane's measurements over", () => {
 
   it("keeps what a lane measured on a day inside the window", () => {
     expect(keptAfterFolding(["2026-08-20"])).toEqual([
-      { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
+      {
+        day: "2026-08-20",
+        suite: "runner-unit",
+        planned: 10,
+        spent: 30,
+        units: 4,
+      },
     ]);
   });
 
@@ -1242,7 +1288,13 @@ describe("the days a fold keeps a lane's measurements over", () => {
     expect(saved).toBeDefined();
     const second = new Fold(saved!, NO_ALIASES, "2026-08-20");
     expect(second.finish().aggregate.lanes).toEqual([
-      { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
+      {
+        day: "2026-08-20",
+        suite: "runner-unit",
+        planned: 10,
+        spent: 30,
+        units: 4,
+      },
     ]);
   });
 });

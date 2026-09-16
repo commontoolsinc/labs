@@ -406,8 +406,9 @@ describe("verdictFor()", () => {
       })],
       calibration: {
         setupCost: {},
-        suites: { "workspace-unit": { overhead: 400, correction: 1 } },
-        unitOverhead: {},
+        suites: {
+          "workspace-unit": { overhead: 400, correction: 1, unitOverhead: 0 },
+        },
         prologue: 0,
       },
     });
