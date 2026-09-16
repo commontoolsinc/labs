@@ -320,7 +320,9 @@ describe(
             .cfcFlowLabels,
         ).toBe(mode);
       }
-      expect((await initParticipant(server, {})).cfcFlowLabels).toBe("off");
+      expect((await initParticipant(server, {})).cfcFlowLabels).toBe(
+        "persist",
+      );
     });
 
     it("rejects an invalid flow-label mode before initializing a participant", async () => {
