@@ -8,6 +8,8 @@ import { getMetaLink } from "../src/link-utils.ts";
 import { Runtime, type ServerRunInfo } from "../src/runtime.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import { stampSpeculationRunContext } from "../src/speculation/overlay-destination.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
@@ -115,10 +117,14 @@ export default pattern<{ shortName: string }>(({ shortName }) => ({
       reached,
       argument,
       storedArgument,
-      async start(context?: ServerRunInfo) {
+      async start(
+        context?: ServerRunInfo,
+        wrap: (tx: IExtendedStorageTransaction) => IExtendedStorageTransaction =
+          (tx) => tx,
+      ) {
         const tx = reader.edit();
         if (context !== undefined) stampSpeculationRunContext(tx, context);
-        reader.run(tx, readerPattern, { shortName: "3" }, reached);
+        reader.run(wrap(tx), readerPattern, { shortName: "3" }, reached);
         reader.prepareTxForCommit(tx);
         expect((await tx.commit()).error).toBeUndefined();
         expect(deferred).toBe(true);
@@ -184,6 +190,63 @@ export default pattern<{ shortName: string }>(({ shortName }) => ({
     await fixture.start({ actionId: "derived-child", kind: "derivation" });
     await fixture.finish();
     expect(fixture.storedArgument()).toEqual({ shortName: "2" });
+    expect(fixture.argument.get()).toEqual({ shortName: "3" });
+  });
+
+  it("keeps a wrapped speculative child argument out of durable storage", async () => {
+    const fixture = await setup();
+    await fixture.start(
+      handlerContext,
+      (tx) => new TransactionWrapper(tx, { nonReactive: true }),
+    );
+    await fixture.finish();
+    expect(fixture.storedArgument()).toEqual({ shortName: "2" });
+    expect(fixture.argument.get()).toEqual({ shortName: "3" });
+    fixture.reader.speculationOverlay!.retireIntent(
+      fixture.space,
+      "parent-event",
+    );
+    await fixture.finish();
+    expect(fixture.argument.get()).toEqual({ shortName: "2" });
+  });
+
+  it("retires a deferred child under the nearest stamp in a wrapper chain", async () => {
+    const fixture = await setup();
+    await fixture.start(handlerContext, (tx) => {
+      const wrapped = new TransactionWrapper(tx, { nonReactive: true });
+      stampSpeculationRunContext(wrapped, {
+        actionId: "wrapped-child",
+        kind: "event-handler",
+        eventId: "wrapped-event",
+      });
+      return new TransactionWrapper(wrapped);
+    });
+    await fixture.finish();
+    expect(fixture.storedArgument()).toEqual({ shortName: "2" });
+    expect(fixture.argument.get()).toEqual({ shortName: "3" });
+
+    fixture.reader.speculationOverlay!.retireIntent(
+      fixture.space,
+      "parent-event",
+    );
+    await fixture.finish();
+    expect(fixture.argument.get()).toEqual({ shortName: "3" });
+    fixture.reader.speculationOverlay!.retireIntent(
+      fixture.space,
+      "wrapped-event",
+    );
+    await fixture.finish();
+    expect(fixture.argument.get()).toEqual({ shortName: "2" });
+  });
+
+  it("persists a deferred authored child through unstamped wrappers", async () => {
+    const fixture = await setup();
+    await fixture.start(
+      undefined,
+      (tx) => new TransactionWrapper(new TransactionWrapper(tx)),
+    );
+    await fixture.finish();
+    expect(fixture.storedArgument()).toEqual({ shortName: "3" });
     expect(fixture.argument.get()).toEqual({ shortName: "3" });
   });
 
