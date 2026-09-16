@@ -187,30 +187,6 @@ export const harnessSessionToolBacking = (
  * reaches every surface at once — and a tool whose backing this session lacks
  * is absent rather than offered and failing.
  */
-/**
- * The parent tool surface a session offers when nothing narrows it: what its
- * backings support, plus `run_skill_script` where the operator allows skill
- * scripts and a registry backs one.
- *
- * Backing and authorization are different questions, and
- * {@link parentToolIdsForBacking} answers only the first: `run_skill_script`
- * appears in its withheld set and never in the list it builds, so a backing
- * alone never offers the tool. The switch is what offers it — and offering it
- * here is what makes the registry half of that decision reach the run holding
- * the registry, rather than only the child holding an acquisition, which gets
- * it from its own surface.
- */
-const sessionParentToolIds = (
-  config: HarnessSessionConfig,
-): readonly BuiltinToolId[] => {
-  const backing = harnessSessionToolBacking(config);
-  const backed = parentToolIdsForBacking(backing);
-  return config.allowSkillScripts === true && backing.skillRegistryAvailable &&
-      !backed.includes("run_skill_script")
-    ? [...backed, "run_skill_script"]
-    : backed;
-};
-
 export const harnessSessionChatPolicy = (
   config: HarnessSessionConfig,
   promptSlot?: PromptSlotBinding,
@@ -224,6 +200,34 @@ export const harnessSessionChatPolicy = (
     : {}),
   ...(promptSlot !== undefined ? { promptSlot } : {}),
 });
+
+/**
+ * The parent tool surface a session offers when nothing narrows it: what its
+ * backings support, plus `run_skill_script` where the operator allows a skill
+ * script and a registry backs one.
+ *
+ * Backing and authorization are different questions, and
+ * {@link parentToolIdsForBacking} answers only the first: `run_skill_script`
+ * appears in its withheld set and never in the list it builds, so a backing
+ * alone never offers the tool. What offers it is the operator allowing a
+ * script to run — the run-wide switch, or an exact entry — and offering it
+ * here is what makes that decision reach the run holding the registry, rather
+ * than only a child holding an acquisition, which gets it from its own
+ * surface. The gate at the call still decides which script, and whether a
+ * host target needs an exact name.
+ */
+const sessionParentToolIds = (
+  config: HarnessSessionConfig,
+): readonly BuiltinToolId[] => {
+  const backing = harnessSessionToolBacking(config);
+  const backed = parentToolIdsForBacking(backing);
+  const allowsAScript = config.allowSkillScripts === true ||
+    (config.allowedSkillScripts?.length ?? 0) > 0;
+  return allowsAScript && backing.skillRegistryAvailable &&
+      !backed.includes("run_skill_script")
+    ? [...backed, "run_skill_script"]
+    : backed;
+};
 
 /** The sandbox bind mounts this session provisions, in one list. */
 export const harnessSessionAdditionalMounts = (

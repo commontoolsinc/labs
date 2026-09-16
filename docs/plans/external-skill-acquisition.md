@@ -420,8 +420,10 @@ there.
 
 ## What this plan does not do
 
-- It does not execute anything fetched, and it does not extend the operator
-  script allowlist.
+- Acquisition itself executes nothing it fetches, and this plan adds no way for
+  the operator to allow a script: an acquired skill's script runs only where the
+  operator already allows skill scripts, by the same decision a registry
+  skill's script answers to.
 - It does not retire the trusted operator `--skills-root` path.
 - It does not build CT-2068's declassification predicate, and nothing here
   should be taken as a precedent for an integrity fact granting permission.
