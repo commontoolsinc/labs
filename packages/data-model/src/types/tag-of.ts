@@ -123,9 +123,7 @@ export function tagOfFabricValueElseNull<PlusType = never>(
     return isPlusType?.(value) ? VALUE_TAGS.PlusType : null;
   } else if (jsType !== "object") {
     return jsType;
-  }
-
-  if (Array.isArray(value)) {
+  } else if (Array.isArray(value)) {
     return VALUE_TAGS.Array;
   } else if (isPlainObject(value)) {
     return VALUE_TAGS.Object;
@@ -184,8 +182,7 @@ export function tagOfConvertibleJsValueElseNull(
   const jsType = typeOfIncludingNull(value);
 
   if (jsType === VALUE_TAGS.function) {
-    // A function is no `FabricConvertibleJsValue`, so its tag is not one this
-    // returns.
+    // Functions are not compatible with `FabricConvertibleJsValue`.
     return null;
   } else if (jsType !== "object") {
     return jsType;
