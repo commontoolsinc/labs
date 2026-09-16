@@ -107,6 +107,8 @@ covers on its own.
 
 ```tsx
 // Shown at module scope.
+import { computed, Default, pattern, type SqliteDb } from "commonfabric";
+
 export default pattern<{ ledger: SqliteDb; month?: string | Default<""> }>(
   ({ ledger, month }) => {
     // Read out of `month` rather than `month` itself, so a caller forwarding a

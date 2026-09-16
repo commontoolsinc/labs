@@ -43,6 +43,7 @@ const ledgerTable = () =>
     pending: "integer",
     category_primary: "text",
     iso_currency_code: "text",
+    status: "text",
     deleted: "integer",
     deleted_at: "text",
   });
@@ -50,8 +51,8 @@ const ledgerTable = () =>
 const insertSql = (): string =>
   "INSERT INTO rows_plaid_transaction (record_id, transaction_id, " +
   "account_id, date, amount, signed_amount, merchant_name, name, pending, " +
-  "category_primary, iso_currency_code, deleted, deleted_at) " +
-  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+  "category_primary, iso_currency_code, status, deleted, deleted_at) " +
+  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
 /**
  * Seeds one live row, one tombstone and one row in the next month. The
@@ -72,6 +73,7 @@ const seedLedger = handler<void, { db: SqliteDb }>((_, { db }) => {
     0,
     "GENERAL_SERVICES",
     "USD",
+    "posted",
     0,
     "",
   ]);
@@ -87,6 +89,7 @@ const seedLedger = handler<void, { db: SqliteDb }>((_, { db }) => {
     0,
     "GENERAL_MERCHANDISE",
     "USD",
+    "posted",
     1,
     "2026-03-07T12:00:00Z",
   ]);
@@ -102,6 +105,7 @@ const seedLedger = handler<void, { db: SqliteDb }>((_, { db }) => {
     0,
     "GENERAL_SERVICES",
     "USD",
+    "posted",
     0,
     "",
   ]);
@@ -161,9 +165,10 @@ const seedCurrentMonth = handler<void, { db: SqliteDb }>((_, { db }) => {
   db.exec(
     "INSERT INTO rows_plaid_transaction (record_id, transaction_id, " +
       "account_id, date, amount, signed_amount, merchant_name, name, " +
-      "pending, category_primary, iso_currency_code, deleted, deleted_at) " +
+      "pending, category_primary, iso_currency_code, status, deleted, " +
+      "deleted_at) " +
       "VALUES (?, ?, ?, strftime('%Y-%m', 'now', 'localtime') || '-15', " +
-      "?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
       "current",
       "txn-current",
@@ -175,6 +180,7 @@ const seedCurrentMonth = handler<void, { db: SqliteDb }>((_, { db }) => {
       0,
       "GENERAL_SERVICES",
       "USD",
+      "posted",
       0,
       "",
     ],
@@ -257,6 +263,9 @@ export default pattern(() => {
       { assertion: assert(() => ledger.rows[0].date === "2026-03-04") },
       { assertion: assert(() => ledger.rows[0].signed_amount === -84.2) },
       { assertion: assert(() => ledger.rows[0].pending === 0) },
+      // Projected because the connector store's row-label rule reads it: a
+      // query that drops it is refused there and reports an empty ledger.
+      { assertion: assert(() => ledger.rows[0].status === "posted") },
       { assertion: assert(() => ledger.month === "2026-03") },
       { assertion: assert(() => ledger.errorMessage === "") },
       { assertion: assert(() => ledger[NAME] === "Transactions 2026-03 (1)") },
@@ -322,6 +331,12 @@ export default pattern(() => {
       // month from the clock, and the row the seed dated in it. Forwarding
       // reads `undefined` rather than leaving the key out, so the input's own
       // default is not what makes this hold.
+      //
+      // Read for the first time HERE, after the seed, and that is what makes
+      // the row visible: the atom takes no `reactOn`, so a read that already
+      // settled over an empty table would not run again for a write. An
+      // assertion over `forwarded` placed before the seed would settle that
+      // read and take the row away from these.
       { assertion: assert(() => forwarded.errorMessage === "") },
       { assertion: assert(() => forwarded.month.length === 7) },
       { assertion: assert(() => forwarded.rowCount === 1) },
