@@ -487,9 +487,8 @@ The second is the identities the topology has no unit for:
 
 ```
 test selection: the topology has no unit for 3295 identities, so no lane
-can be asked to run one. An identity is left out until one of its records
-says enough to work out which unit it is in. See
-docs/development/test-selection.md.
+can be asked to run one. What puts an identity here, and what takes it
+out again, is in docs/development/test-selection.md.
 test selection: those 3295 were recorded by 12 surface(s): unit:utils 742,
 unit:runtime-client 509, unit:ts-transformers 379,
 unit:schema-generator 314, unit:js-compiler 153, and 7 more
@@ -535,13 +534,16 @@ manifest that no lane could run. The next record that says enough puts the
 identity back in.
 
 The count spans every identity the aggregate holds rather than the ones
-this run read, because the surfaces it is taken from do. Two different
-things are in it. One is an identity whose records have never said which
-unit it is in, which is the one to act on. The other is an identity
-nothing records any more: a deleted or renamed test keeps its state in
-the aggregate, and the file its records named may be one no suite has a
-unit for now. Nothing in the count separates the two, and the surfaces
-named beside it are the only handle on which is which.
+this run read, because the surfaces it is taken from do. Three different
+things are in it. The first is an identity whose records have never said
+which unit it is in, which is the one to act on, and the next record
+that says enough takes it out. The second is an identity nothing records
+any more: a deleted or renamed test keeps its state in the aggregate,
+and the file its records named may be one no suite has a unit for now.
+The third is an identity two suites both claim, which no record can
+settle, and which the drift guard fails on separately. Nothing in the
+count separates the three, and the surfaces named beside it are the only
+handle on which is which.
 
 The first runs after a change to what the aggregate carries report the
 whole corpus here. An aggregate written before the files were carried

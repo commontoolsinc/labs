@@ -743,9 +743,8 @@ function summarize(
     console.log(
       `test selection: the topology has no unit for ` +
         `${unplaced.unclaimed.length} identities, so no lane can be asked ` +
-        `to run one. An identity is left out until one of its records ` +
-        `says enough to work out which unit it is in. See ` +
-        `docs/development/test-selection.md.`,
+        `to run one. What puts an identity here, and what takes it out ` +
+        `again, is in docs/development/test-selection.md.`,
     );
     console.log(
       `test selection: those ${unplaced.unclaimed.length} were recorded ` +
