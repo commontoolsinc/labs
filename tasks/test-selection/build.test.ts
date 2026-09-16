@@ -910,6 +910,25 @@ describe("build", () => {
       expect(costSeconds(parsed.states[KEY]!, "2026-08-20")).toBe(4);
     });
 
+    it("drops an identity whose state is not one, and reads the rest", () => {
+      // The aggregate holds the catches, which no window of records
+      // rebuilds, so one identity nothing can be read out of must not
+      // cost every other identity its history. The one dropped is then
+      // read as a test with no history, which is mandatory, so it runs.
+      for (const held of ["oops", 7, null, []]) {
+        const aggregate = JSON.parse(
+          JSON.stringify(emptyAggregate("2026-08-20")),
+        );
+        const kept = emptyState();
+        kept.mainCatches = 4;
+        aggregate.states["broken"] = held;
+        aggregate.states[KEY] = kept;
+        const read = parseAggregate(JSON.stringify(aggregate));
+        expect(read?.states[KEY]?.mainCatches).toBe(4);
+        expect(Object.hasOwn(read!.states, "broken")).toBe(false);
+      }
+    });
+
     it("reads an aggregate written in an earlier shape forward", () => {
       // An aggregate holds every catch a test has ever been credited
       // with, over unbounded history, and a window of records cannot

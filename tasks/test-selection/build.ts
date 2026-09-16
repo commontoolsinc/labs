@@ -247,7 +247,19 @@ export function parseAggregate(text: string): AggregateState | undefined {
   for (const file of Object.values(files as Record<string, unknown>)) {
     if (typeof file !== "string") return undefined;
   }
-  const states = state.states as Record<string, IdentityState>;
+  // An identity whose state is not a record of one is dropped, and the
+  // rest of the aggregate is read. Such an identity is then read as one
+  // with no history, which is what a test nothing has been recorded for
+  // is, and what that costs is the identity running until it has a
+  // history again. Refusing the aggregate over it would cost every
+  // identity the one thing here that no window of records rebuilds.
+  const states: Record<string, IdentityState> = {};
+  for (const [key, held] of Object.entries(state.states)) {
+    if (typeof held !== "object" || held === null || Array.isArray(held)) {
+      continue;
+    }
+    states[key] = held as IdentityState;
+  }
   for (const identity of Object.values(states)) readCostsForward(identity);
   return {
     schema: MANIFEST_SCHEMA_VERSION,
