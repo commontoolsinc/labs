@@ -777,6 +777,48 @@ describe("run-pattern", () => {
       );
     });
 
+    it("answers over an instance whose result will not read back", async () => {
+      // The disclosure reads every pattern the run materialized, and one it
+      // cannot read says nothing about the others or about the run. A cell
+      // whose pull rejects is what a torn-down instance and a store that
+      // stopped answering both look like from inside the scan.
+      const pristineFromLink = runtime.getCellFromLink.bind(runtime);
+      const runtimeWithLink = runtime as unknown as {
+        getCellFromLink: typeof pristineFromLink;
+      };
+      let settled = false;
+      runtimeWithLink.getCellFromLink = ((
+        ...args: Parameters<typeof pristineFromLink>
+      ) => {
+        const cell = pristineFromLink(...args);
+        return settled
+          ? new Proxy(cell, {
+            get: (target, property, receiver) =>
+              property === "pull"
+                ? () => Promise.reject(new Error("the store stopped answering"))
+                : Reflect.get(target, property, receiver),
+          })
+          : cell;
+      }) as typeof pristineFromLink;
+      const syncedBefore = pieces.synced.bind(pieces);
+      (pieces as unknown as { synced: () => Promise<void> }).synced =
+        async () => {
+          await syncedBefore();
+          settled = true;
+        };
+
+      const result = await createEngine().invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+
+      expect(output.status).toBe("ok");
+      expect((output.value as { doubled: number }).doubled).toBe(42);
+      expect(output.outputConcerns).toBeUndefined();
+    });
+
     it("fails the run when the invocation materialized a session-only pointer", async () => {
       // What the runner reports for a root no stored artifact names: a
       // `keyless:` pointer stamped somewhere in the created piece's graph.
@@ -2602,6 +2644,44 @@ describe("run-pattern", () => {
       } finally {
         await dispose();
       }
+    });
+
+    it("returns a `cancelled` output when the signal aborts during the output-concern scan", async () => {
+      // The scan is the one reader of `since()`, and it asks as it begins, so
+      // aborting there lands the signal while the scan is in flight — with
+      // the release measurement's own race already resolved.
+      const controller = new AbortController();
+      const aborting: FabricPatternInstantiations = {
+        sequence: () => recorder.instantiations.sequence(),
+        since: (from) => {
+          controller.abort();
+          return recorder.instantiations.since(from);
+        },
+        keylessSince: (from) => recorder.instantiations.keylessSince(from),
+      };
+      const stopped: unknown[] = [];
+      const runner = runtime.runner as unknown as {
+        stop: (cell: unknown) => unknown;
+      };
+      const originalStop = runner.stop.bind(runtime.runner);
+      runner.stop = (cell) => {
+        stopped.push(cell);
+        return originalStop(cell);
+      };
+
+      const result = await createEngine(aborting).invokeBuiltinTool(
+        "run_pattern",
+        {
+          sourceText: DOUBLING_PATTERN_SOURCE,
+          inputs: { n: 21 },
+          resultSchema: DOUBLED_RESULT_SCHEMA,
+        },
+        { signal: controller.signal },
+      );
+      const output = result.output as RunPatternToolErrorOutput;
+
+      expect(output.status).toBe("cancelled");
+      expect(stopped.length).toBe(1);
     });
 
     it("surfaces a rejected session construction as a structured error and invokes the factory again on the next call", async () => {
