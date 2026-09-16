@@ -5,6 +5,7 @@ cd "$SCRIPT_DIR/.."
 
 # Source shared utilities
 source "$SCRIPT_DIR/common/port-utils.sh"
+source "$SCRIPT_DIR/common/console-args.sh"
 read_base_ports
 
 require_command() {
@@ -49,6 +50,10 @@ BG_UPDATER=false
 # fact about the process tree, not a request for a console, and a flag is the
 # only thing loom needs to know about cf-harness.
 CF_HARNESS=false
+# Whether the console this script may start runs skill scripts in its sandbox.
+# The operator's decision, and no part of starting a fabric implies it, so it
+# is off unless named and passed through to the launcher, which prints it.
+CF_HARNESS_ALLOW_SKILL_SCRIPTS_FLAG=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --force)
@@ -61,6 +66,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --cf-harness)
             CF_HARNESS=true
+            shift
+            ;;
+        --allow-skill-scripts)
+            CF_HARNESS_ALLOW_SKILL_SCRIPTS_FLAG=true
             shift
             ;;
         --bg-updater)
@@ -419,24 +428,16 @@ if [[ "$CF_HARNESS" == "true" ]]; then
     # `--instance` is how the identity and space are read off a loom instance;
     # without one, `CF_IDENTITY` and `CF_SPACE` name them and their absence is
     # the launcher's named error.
-    CONSOLE_ARGS=(
-        --port "$CONSOLE_PORT"
-        --fabric-api-url "$TOOLSHED_API_URL"
-    )
-    if [[ -n "${LOOM_INSTANCE_ID:-}" ]]; then
-        CONSOLE_ARGS+=(--instance "$LOOM_INSTANCE_ID")
-    fi
     # The toolshed above runs in `packages/toolshed`, so an unset `MEMORY_DIR`
     # leaves it on that directory's own `cache/memory`, which is the store the
     # console then has to read.
     CONSOLE_STORE=${MEMORY_DIR:-"$(cd "$SCRIPT_DIR/../packages/toolshed" && pwd)/cache/memory"}
-    CONSOLE_ARGS+=(--store "$CONSOLE_STORE")
-    # `DB_PATH` puts the toolshed in single-file mode, where the directory the
-    # console would otherwise walk holds nothing. Naming the file keeps the
-    # console reading the store this fabric is actually writing.
-    if [[ -n "${DB_PATH:-}" ]]; then
-        CONSOLE_ARGS+=(-- --space-db "$DB_PATH")
-    fi
+    export CONSOLE_PORT TOOLSHED_API_URL CONSOLE_STORE \
+        CF_HARNESS_ALLOW_SKILL_SCRIPTS_FLAG
+    CONSOLE_ARGS=()
+    while IFS= read -r console_arg; do
+        CONSOLE_ARGS+=("$console_arg")
+    done < <(console_launch_args)
 
     echo ""
     echo "Starting cf-harness console on port $CONSOLE_PORT..."

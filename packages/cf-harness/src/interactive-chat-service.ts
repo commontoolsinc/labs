@@ -798,6 +798,13 @@ export class HarnessInteractiveChatService {
     this.#maxInMemoryEvents = options.maxInMemoryEvents;
   }
 
+  /**
+   * Loads every session, turn, and event the store holds and settles the
+   * turns no process is running. A durable store reaches this service held
+   * for its own process — a SQLite store another live process holds is
+   * refused at open — so every non-terminal turn it carries was left by a
+   * process that has exited.
+   */
   async initializeFromStore(): Promise<void> {
     if (this.#sessionStore === undefined) {
       return;

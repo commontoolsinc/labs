@@ -120,6 +120,18 @@ describe("the acquired-skill mount a delegation gives its child", () => {
       ).toEqual({ allowedSkillScripts: [], toolIds: [] });
     });
 
+    it("grants the tool when the operator allows skill scripts", () => {
+      // The run's one decision, brought to a child whose profile does not
+      // carry the tool. No entry names anything.
+      expect(acquiredSkillScriptSurface([], acquiredAt(COMMIT_SHA), true))
+        .toEqual({ allowedSkillScripts: [], toolIds: ["run_skill_script"] });
+    });
+
+    it("grants nothing to a child given no acquired skill, however it reads", () => {
+      expect(acquiredSkillScriptSurface([], undefined, true))
+        .toEqual({ allowedSkillScripts: [], toolIds: [] });
+    });
+
     it("grants no tool when the operator allowlisted nothing at the pin", () => {
       // An acquisition is not an authorization: mounting the bytes and being
       // allowed to run one are separate decisions, and the second is the

@@ -320,6 +320,7 @@ describe("research session context", () => {
       store.database.exec(
         "ALTER TABLE chat_session DROP COLUMN transcript_omissions",
       );
+      store.close();
       const exec = Database.prototype.exec;
       {
         using _fault = stub(
@@ -338,16 +339,21 @@ describe("research session context", () => {
         await expect(openSqliteHarnessChatSessionStore({ url })).rejects
           .toThrow("migration refused");
       }
-      const columns = store.database.prepare("PRAGMA table_info(chat_session)")
-        .all() as { name: string }[];
-      expect(columns.map((column) => column.name)).toEqual([
-        "session_id",
-        "status",
-        "transcript",
-        "created_at",
-        "updated_at",
-        "closed_at",
-      ]);
+      const database = await new Database(url);
+      try {
+        const columns = database.prepare("PRAGMA table_info(chat_session)")
+          .all() as { name: string }[];
+        expect(columns.map((column) => column.name)).toEqual([
+          "session_id",
+          "status",
+          "transcript",
+          "created_at",
+          "updated_at",
+          "closed_at",
+        ]);
+      } finally {
+        database.close();
+      }
       const reopened = await openSqliteHarnessChatSessionStore({ url });
       reopened.close();
     } finally {

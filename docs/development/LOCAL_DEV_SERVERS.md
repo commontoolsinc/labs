@@ -42,6 +42,12 @@ record outranks the environment**, so a shell that happens to export
 instance's store or sign with another key. The printout says which of the three
 decided each value.
 
+`--allow-skill-scripts` alongside `--cf-harness` lets that console run the
+scripts of the skills it holds, in its sandbox, registry and acquired alike; it
+is off unless named. `start-local-dev.sh` passes it to `console:launch`, which
+resolves it and prints it beside the record that decided it.
+`packages/cf-harness/console/README.md` has the rest.
+
 The console is a surface on the fabric rather than part of it. It needs Docker
 and a connected model provider, and when it cannot start — either of those
 missing, its port taken, a value underivable — it says so in the script's output

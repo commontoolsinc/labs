@@ -127,13 +127,13 @@ The current package provides:
 - a skills registry over `--skills-root`, defaulting for a run out of a labs
   checkout to that checkout's own `skills/` tree, with the resolved tree and its
   source recorded in run state and printed in operator output; skill preload by
-  name, indexed supporting-resource reads, and exact allowlisted Deno/Bash skill
-  scripts (which run in the sandbox, and so still ask for the flag). The same
-  allowlist and the same execution path take an acquired skill's script, keyed
-  by the pin its bytes were read at and checked against the digest taken at
-  acquisition; the tool output and the execution record carry that acquisition
-  in place of the registry digest fields, and the invocation is labeled with
-  confidentiality alone, because a non-empty `integrity` array in
+  name, indexed supporting-resource reads, and Deno/Bash skill scripts run in
+  the sandbox where the operator allows them — `--allow-skill-scripts` for every
+  skill the run holds, registry and acquired alike, or an exact entry for one.
+  The same execution path takes an acquired skill's script, checked against the
+  digest taken at acquisition; the tool output and the execution record carry
+  that acquisition in place of the registry digest fields, and the invocation is
+  labeled with confidentiality alone, because a non-empty `integrity` array in
   `cfcInputLabels` makes the sandbox fail to start (CT-2302);
 - recoverable rejection of a malformed tool call: a name no tool answers to,
   arguments that are not a JSON object, or a `delegate_task` argument of the

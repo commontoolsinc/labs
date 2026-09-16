@@ -540,6 +540,7 @@ export const resolveConsoleConfig = async (
       "no-child-composition-guidance",
       "no-pattern-index-publish",
       "pattern-index-publish-discoverable",
+      "allow-skill-scripts",
     ],
     collect: ["host-mount"],
   });
@@ -733,9 +734,14 @@ export const resolveConsoleConfig = async (
       parsed["host-mount"] as string[] | undefined,
       cwd,
     ),
+    // Whether a skill this console holds may have its scripts run in the
+    // sandbox: the operator's one decision, taken at launch rather than per
+    // task, since it is about the server rather than about the work.
+    allowSkillScripts: parsed["allow-skill-scripts"] === true ||
+      nonEmpty(env.CF_HARNESS_ALLOW_SKILL_SCRIPTS) === "1",
     // The rest of the session description this surface does not vary. Skills
-    // are scanned rather than preloaded by name, scripts are not allowlisted,
-    // handles materialize nowhere, and a task's input cells and pattern
+    // are scanned rather than preloaded by name, no individual script is
+    // named, handles materialize nowhere, and a task's input cells and pattern
     // references arrive per task on `/api/task` rather than at startup.
     skillNames: [],
     allowedSkillScripts: [],

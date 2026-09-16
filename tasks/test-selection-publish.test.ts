@@ -89,6 +89,12 @@ async function saying(call: () => Promise<unknown>): Promise<string> {
   return lines.join("\n");
 }
 
+/** The manifest a run created. */
+async function publishedManifest(created: Map<string, Uint8Array>) {
+  const name = [...created.keys()].find((one) => one.includes("/manifest-"))!;
+  return parseManifest(await gunzipToText(created.get(name)!))!;
+}
+
 /** The aggregate of the newest state object a run created. */
 async function newestState(
   created: Map<string, Uint8Array>,
@@ -371,6 +377,47 @@ function localObject(commit: string, at: string): string {
   }]);
 }
 
+/** One object holding what one lane measured about itself. */
+function laneObject(
+  commit: string,
+  at: string,
+  planned = 40,
+  spent = 92,
+): string {
+  const context: RunContext = {
+    schema: 1,
+    line: "context",
+    reportId: `report-${commit}`,
+    repo: "commontoolsinc/labs",
+    commit,
+    dirty: false,
+    branch: "main",
+    env: "ci",
+    ci: {
+      workflowRunId: commit,
+      runAttempt: 1,
+      workflow: "deno.yml",
+      job: "Lane 1",
+      event: "push",
+    },
+    os: "linux",
+    arch: "x86_64",
+    denoVersion: "2.9.4",
+    startedAt: at,
+  };
+  const measured = (name: string, ms: number): TestRecord => ({
+    line: "record",
+    test: { k: "gate", s: "ci", n: name },
+    outcome: "pass",
+    durationMs: ms,
+  });
+  return buildObjectBody(context, [
+    measured("ci-lane setup fuse", 14_800),
+    measured("ci-lane batch workspace-unit", spent * 1000),
+    measured("ci-lane planned batch workspace-unit", planned * 1000),
+  ]);
+}
+
 /** The two runs a fresh store is seeded with: a failure, then its fix. */
 function seed(): Record<string, string> {
   return {
@@ -427,6 +474,69 @@ describe("publish()", () => {
     // `CATCH_WEIGHT_MAIN` written out: comparing against the dial would
     // hold just as well for a dial of zero and a catch never counted.
     expect(manifest!.entries[0]!.inputs.catches).toBe(1.5);
+  });
+
+  it("publishes what a lane costs beyond the tests it runs", async () => {
+    const objects = seed();
+    objects[CI(DAY, "3")] = laneObject("c3", "2026-08-20T03:00:00.000Z");
+    const { store, created } = fakeStore(objects);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      suites,
+      noBaselines,
+    );
+    const manifest = await publishedManifest(created);
+    expect(manifest.calibration.setupCost).toEqual({ fuse: 14.8 });
+    // The lane spent 92 seconds on a batch it was charged 40 for. With
+    // one observation there is nothing to say about how that cost grows
+    // with the work, so the whole difference is the suite's fixed cost.
+    expect(manifest.calibration.suites["workspace-unit"])
+      .toEqual({ overhead: 52, correction: 1 });
+  });
+
+  it("publishes a cost model the manifest reader will carry", async () => {
+    // A correction at or below zero is refused, and the whole manifest is
+    // refused with it, so one suite whose batches were packed for more
+    // and more while spending less and less would leave every lane
+    // reading no manifest at all.
+    const objects = seed();
+    [[30, 300], [60, 200], [90, 100]].forEach(([planned, spent], lane) => {
+      objects[CI(DAY, `lane-${lane}`)] = laneObject(
+        `c-lane-${lane}`,
+        `2026-08-20T0${lane + 3}:00:00.000Z`,
+        planned,
+        spent,
+      );
+    });
+    const { store, created } = fakeStore(objects);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      suites,
+      noBaselines,
+    );
+    const name = [...created.keys()].find((one) => one.includes("/manifest-"))!;
+    const manifest = parseManifest(await gunzipToText(created.get(name)!));
+    expect(manifest).toBeDefined();
+    expect(manifest!.calibration.suites["workspace-unit"]!.correction)
+      .toBeGreaterThan(0);
+  });
+
+  it("publishes an empty cost model when no lane has measured one", async () => {
+    const { store, created } = fakeStore(seed());
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      suites,
+      noBaselines,
+    );
+    const manifest = await publishedManifest(created);
+    expect(manifest.calibration.setupCost).toEqual({});
+    expect(manifest.calibration.suites).toEqual({});
   });
 
   it("leaves out an identity no suite claims, and says how many", async () => {

@@ -228,6 +228,7 @@ const CLI_BOOLEAN_FLAGS = [
   "no-skill-catalog",
   "no-docs-corpus",
   "no-pattern-index-publish",
+  "allow-skill-scripts",
 ] as const;
 const CLI_COLLECT_FLAGS = [
   "allow-tool",
@@ -497,7 +498,9 @@ Options:
                                 search_skills and acquire_skill require --skills-registry-url,
                                 research requires a documentation corpus or pattern index (query_docs is a deprecated input alias),
                                 and the three loom_* tools require --loom-authoring-config (or CF_HARNESS_LOOM_AUTHORING_CONFIG)
-  --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path,
+  --allow-skill-scripts         Run skill scripts in the sandbox, for every skill this run holds,
+                                registry and acquired alike. Off unless named.
+  --allow-skill-script <spec>   Allow one exact skill script (repeatable: skill:scripts/path,
                                 where skill is a registry name or an acquired pin owner/repo/slug@<commit sha>;
                                 a registry name requires --skills-root, a pin does not)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
@@ -1831,6 +1834,7 @@ export const parseCfHarnessCliArgs = async (
     ...(docsCorpus !== undefined ? { docsCorpus } : {}),
     ...(skillsRootSandboxPath !== undefined ? { skillsRootSandboxPath } : {}),
     skillNames,
+    allowSkillScripts: args["allow-skill-scripts"] === true,
     allowedSkillScripts,
     skillScriptExecutionTarget,
     skillCatalogEnabled: args["no-skill-catalog"] !== true,

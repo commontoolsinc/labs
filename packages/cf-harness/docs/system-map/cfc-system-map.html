@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-16", sha: "59e8a2540c+research-passages" };
+    const SNAPSHOT = { date: "2026-09-16", sha: "5559522e4f+research-passages" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -1875,7 +1875,7 @@
         kind: "Child harness",
         band: "agent",
         body:
-          `<p>Spawned by <code>delegate_task</code> with a fresh context, seeded with exactly the parent tokens its brief names. It writes a pattern, runs it in the trusted fabric session, and returns a handle to the piece. Its return is schema-validated and sanitized: sealed strings become tokens, stray token-shaped text is scrubbed.</p><p>In today's demo run, five of these each called <code>run_pattern</code> over the finance cell, built a real dashboard, and had its values refused twelve times: the first label-driven refusals ever.</p>`,
+          `<p>Spawned by <code>delegate_task</code> with a fresh context, seeded with exactly the parent tokens its brief names. It writes a pattern, runs it in the trusted fabric session, and returns a handle to the piece. Its return is schema-validated and sanitized: sealed strings become tokens, stray token-shaped text is scrubbed.</p><p>It is also the only context that may read a piece's existing source. <code>read_piece_source</code> answers a handle with that piece's current authored files and the labels it carries; <code>revise_piece</code> replaces them through the runtime's own compatibility check and returns a revision id, never source. Both are withheld from every parent surface, because this profile's return contract has no field for source in any encoding — so program text a third party authored reaches the context that has to edit it and stops there. The artifact root is the exception and is not this boundary's: a parent's <code>bash</code> can still read the raw child output (CT-2117).</p><p>In today's demo run, five of these each called <code>run_pattern</code> over the finance cell, built a real dashboard, and had its values refused twelve times: the first label-driven refusals ever.</p>`,
         threats: ["t4", "t19"],
       },
       child_browser: {
@@ -1916,7 +1916,7 @@
         kind: "Trusted text",
         band: "agent",
         body:
-          `<p>Skills preloaded from the local registry, digest-pinned, with indexed resource reads and an exact allowlist of Deno or Bash scripts. Skill text is context, not operator instruction. The ruling that operator-provided text is trusted for confidentiality and labeled for integrity (CT-2173) covers operator docs; skills follow by extension, and none of it is implemented yet: workspace reads still release into context with an empty label (CT-2165).</p>`,
+          `<p>Skills preloaded from the local registry, digest-pinned, with indexed resource reads and Deno or Bash scripts the operator allows — one run-wide switch (<code>--allow-skill-scripts</code>) covering every skill the run holds, or an exact per-script entry. Host-target execution still takes the exact entry. Skill text is context, not operator instruction. The ruling that operator-provided text is trusted for confidentiality and labeled for integrity (CT-2173) covers operator docs; skills follow by extension, and none of it is implemented yet: workspace reads still release into context with an empty label (CT-2165).</p>`,
       },
       docs: {
         kind: "Trusted text",
@@ -2091,7 +2091,7 @@
       },
       g_ingest: {
         body:
-          `<p><code>acquire_skill</code> pins the skill by digest, stamps <code>ExternalIngest</code> integrity, and hands back a capability-typed handle. Fetched skill text remains context.</p><p>A pinned skill's <code>scripts/</code> comes with its instructions, held outside every mount the acquiring parent holds, and mounted read-only into the one child the handle is delegated to. Running one is the operator's decision — the same <code>run_skill_script</code> allowlist a registry skill's script passes, keyed by the pin — and it is re-checked against the digest taken at acquisition. Its invocation is labeled with confidentiality alone: a non-empty integrity array makes the sandbox fail to start (CT-2302), so the acquisition rides the tool output instead.</p>`,
+          `<p><code>acquire_skill</code> pins the skill by digest, stamps <code>ExternalIngest</code> integrity, and hands back a capability-typed handle. Fetched skill text remains context.</p><p>A pinned skill's <code>scripts/</code> comes with its instructions, held outside every mount the acquiring parent holds, and mounted read-only into the one child the handle is delegated to. Running one is the operator's decision — the same <code>run_skill_script</code> gate a registry skill's script passes, satisfied by the run-wide <code>--allow-skill-scripts</code> switch or by an entry keyed on the pin — and it is re-checked against the digest taken at acquisition. Its invocation is labeled with confidentiality alone: a non-empty integrity array makes the sandbox fail to start (CT-2302), so the acquisition rides the tool output instead.</p>`,
         why:
           "The stamp is written but never read at a release site, so integrity provenance does not yet change any decision.",
         close: [
