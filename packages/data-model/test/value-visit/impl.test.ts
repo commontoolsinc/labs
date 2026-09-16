@@ -59,6 +59,7 @@ describe("value-visit/impl", () => {
       // half is that the engine, told by `isPlusType()` that the value is
       // outside the domain, throws the domain error rather than reaching
       // `visitPlusType()`, whose base implementation throws a different one.
+
       class Strict extends BaseValueVisitor<never, number> {}
 
       const vis = new Strict();
