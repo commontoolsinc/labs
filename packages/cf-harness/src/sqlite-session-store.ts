@@ -32,8 +32,6 @@ const PRAGMAS = `
 `;
 
 const INIT = `
-BEGIN TRANSACTION;
-
 CREATE TABLE IF NOT EXISTS chat_session (
   session_id  TEXT NOT NULL PRIMARY KEY,
   status      TEXT NOT NULL,
@@ -84,7 +82,6 @@ CREATE INDEX IF NOT EXISTS idx_chat_event_session_sequence
 CREATE INDEX IF NOT EXISTS idx_chat_event_emitted_at
   ON chat_event (emitted_at);
 
-COMMIT;
 `;
 
 type SessionRow = {
@@ -529,18 +526,28 @@ export const openSqliteHarnessChatSessionStore = async (
   const database = await new Database(databaseAddress(options.url), {
     create: true,
   });
-  database.exec(PRAGMAS);
-  database.exec(INIT);
-  const columns = database.prepare("PRAGMA table_info(chat_session)").all() as {
-    name: string;
-  }[];
-  if (!columns.some((column) => column.name === "research_context")) {
-    database.exec("ALTER TABLE chat_session ADD COLUMN research_context TEXT");
-  }
-  if (!columns.some((column) => column.name === "transcript_omissions")) {
-    database.exec(
-      "ALTER TABLE chat_session ADD COLUMN transcript_omissions TEXT",
-    );
+  try {
+    database.exec(PRAGMAS);
+    database.transaction(() => {
+      database.exec(INIT);
+      const columns = database.prepare("PRAGMA table_info(chat_session)")
+        .all() as {
+          name: string;
+        }[];
+      if (!columns.some((column) => column.name === "research_context")) {
+        database.exec(
+          "ALTER TABLE chat_session ADD COLUMN research_context TEXT",
+        );
+      }
+      if (!columns.some((column) => column.name === "transcript_omissions")) {
+        database.exec(
+          "ALTER TABLE chat_session ADD COLUMN transcript_omissions TEXT",
+        );
+      }
+    }).immediate();
+  } catch (error) {
+    database.close();
+    throw error;
   }
   return new SqliteHarnessChatSessionStore(database);
 };

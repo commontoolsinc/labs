@@ -1,6 +1,9 @@
 import { expect } from "@std/expect";
 import { join, toFileUrl } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
+
+import { Database } from "@db/sqlite";
 
 import type { HarnessCfcModelContext } from "../src/contracts/cfc-model-context.ts";
 import type { HarnessResearchRunSummary } from "../src/contracts/research.ts";
@@ -106,11 +109,13 @@ describe("research session context", () => {
       await service.waitForTurn("session", "first");
       const checkpoint = store.getSession("session");
       expect(checkpoint?.researchContext).toEqual({
+        researchGoal: "Find the data contract",
         runs: [resultRecord],
         cfcModelContext: cfc,
       });
       expect(optionsSeen[0].inheritedResearchRuns).toBeUndefined();
       expect(optionsSeen[0].taskText).toBe("Find the data contract");
+      expect(optionsSeen[0].researchGoal).toBe("Find the data contract");
       store.close();
       store = await openSqliteHarnessChatSessionStore({
         url: toFileUrl(join(root, "chat.sqlite")),
@@ -137,6 +142,7 @@ describe("research session context", () => {
       expect(optionsSeen[1].taskText).toBe(
         "Does the same contract support a filter?",
       );
+      expect(optionsSeen[1].researchGoal).toBe("Find the data contract");
       expect(tasks).toEqual([
         "Find the data contract",
         undefined,
@@ -146,6 +152,18 @@ describe("research session context", () => {
       );
       expect(store.getSession("session")?.transcript).toEqual(
         checkpoint?.transcript,
+      );
+      fail = false;
+      await service.startTurn("third", {
+        sessionId: "session",
+        turnId: "third",
+        input: { text: "Which component can render it?" },
+      });
+      await service.waitForTurn("session", "third");
+      expect(optionsSeen[2].taskText).toBe("Which component can render it?");
+      expect(optionsSeen[2].researchGoal).toBe("Find the data contract");
+      expect(store.getSession("session")?.researchContext?.researchGoal).toBe(
+        "Find the data contract",
       );
     } finally {
       store.close();
@@ -286,6 +304,108 @@ describe("research session context", () => {
       expect(store.getSession("legacy")).toEqual(before);
       expect(store.getSession("legacy")?.researchContext).toBeUndefined();
     } finally {
+      store.close();
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("rolls back both legacy columns when the second migration fails", async () => {
+    const root = await Deno.makeTempDir();
+    const url = toFileUrl(join(root, "chat.sqlite"));
+    const store = await openSqliteHarnessChatSessionStore({ url });
+    try {
+      store.database.exec(
+        "ALTER TABLE chat_session DROP COLUMN research_context",
+      );
+      store.database.exec(
+        "ALTER TABLE chat_session DROP COLUMN transcript_omissions",
+      );
+      const exec = Database.prototype.exec;
+      {
+        using _fault = stub(
+          Database.prototype,
+          "exec",
+          function (this: Database, ...args: Parameters<Database["exec"]>) {
+            if (
+              args[0] ===
+                "ALTER TABLE chat_session ADD COLUMN transcript_omissions TEXT"
+            ) {
+              throw new Error("migration refused");
+            }
+            return exec.apply(this, args);
+          },
+        );
+        await expect(openSqliteHarnessChatSessionStore({ url })).rejects
+          .toThrow("migration refused");
+      }
+      const columns = store.database.prepare("PRAGMA table_info(chat_session)")
+        .all() as { name: string }[];
+      expect(columns.map((column) => column.name)).toEqual([
+        "session_id",
+        "status",
+        "transcript",
+        "created_at",
+        "updated_at",
+        "closed_at",
+      ]);
+      const reopened = await openSqliteHarnessChatSessionStore({ url });
+      reopened.close();
+    } finally {
+      store.close();
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("holds the SQLite write lock while inspecting and migrating legacy columns", async () => {
+    const root = await Deno.makeTempDir();
+    const url = toFileUrl(join(root, "chat.sqlite"));
+    let store = await openSqliteHarnessChatSessionStore({ url });
+    const contender = await new Database(url);
+    contender.exec("PRAGMA busy_timeout = 0");
+    try {
+      store.database.exec(
+        "ALTER TABLE chat_session DROP COLUMN research_context",
+      );
+      store.database.exec(
+        "ALTER TABLE chat_session DROP COLUMN transcript_omissions",
+      );
+      store.close();
+      const prepare = Database.prototype.prepare;
+      const lockResults: string[] = [];
+      {
+        using _probe = stub(
+          Database.prototype,
+          "prepare",
+          function (this: Database, sql: string) {
+            if (sql === "PRAGMA table_info(chat_session)") {
+              try {
+                contender.exec("BEGIN IMMEDIATE");
+                contender.exec("ROLLBACK");
+                lockResults.push("acquired");
+              } catch (error) {
+                lockResults.push(
+                  error instanceof Error ? error.message : String(error),
+                );
+              }
+            }
+            return prepare.call(this, sql);
+          },
+        );
+        store = await openSqliteHarnessChatSessionStore({ url });
+        expect(lockResults).toEqual([
+          expect.stringContaining("database is locked"),
+        ]);
+      }
+      expect(store.database.prepare("PRAGMA table_info(chat_session)").all())
+        .toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ name: "research_context" }),
+            expect.objectContaining({ name: "transcript_omissions" }),
+          ]),
+        );
+      expect(() => contender.exec("BEGIN IMMEDIATE; ROLLBACK;")).not.toThrow();
+    } finally {
+      contender.close();
       store.close();
       await Deno.remove(root, { recursive: true });
     }

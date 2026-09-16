@@ -356,7 +356,7 @@ export interface HarnessResearchRunSummary {
   /** Tool output that owns the full artifact record. */
   outputId: string;
 
-  /** Structured implementation kit handed to the caller. */
+  /** Orientation, answer, or saved implementation kit handed to the caller. */
   kit: HarnessResearchResult;
 
   /** Every pattern whose record the host confirmed during the run. */

@@ -112,11 +112,12 @@ The current package provides:
   usage and failure counts included in the parent record. Context selection
   retains the latest orientation and two answers. Private follow-ups receive
   selected findings and source locations without copying prior examples or
-  bindings. Interactive sessions persist that context and full CFC influence
-  with completed history; later tasks treat old bindings as historical. Child
-  handle transfer reads only selected current bindings; its inherited CFC
-  context retains the full parent influence even when no kit is selected. Kits
-  and confirmed records persist through delegation, while local authored-source
+  bindings. Interactive sessions persist that context, the original user goal,
+  and full CFC influence with completed history. Follow-ups retain that goal
+  alongside the current request; old bindings remain historical. Child handle
+  transfer reads only selected current bindings; its inherited CFC context
+  retains the full parent influence even when no kit is selected. Kits and
+  confirmed records persist through delegation, while local authored-source
   artifacts record the research ids that shaped them. `query_docs` is accepted
   only as a legacy CLI or persisted-policy alias and is normalized without
   rewriting old transcript or run-state evidence;

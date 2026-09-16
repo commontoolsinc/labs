@@ -1369,13 +1369,14 @@ Documentation sections remain complete at ingestion; an exact read returns
 `nextOffset` until the section is finished. Search and reads carry the document
 title and full ancestor heading path, keeping iframe guest guidance
 distinguishable from ordinary compiled pattern guidance. Search can be narrowed
-by a corpus-relative `pathPrefix`. Search returns up to ten matches with exact
-passages, favoring complete paragraphs and fenced examples. `list_doc_sections`
-returns a paginated outline with ids and section sizes. `open_doc_section`
-accepts one `sectionId` or up to eight `sectionIds`; each read defaults to
-32,000 characters and accepts a smaller `maxChars`. A batch is admitted only if
-all its reads fit the remaining total budget. Neither purpose is required to
-spend its full budget.
+by a corpus-relative `pathPrefix` matching an exact document or a directory and
+its slash-delimited descendants. An empty prefix selects the whole corpus.
+Search returns up to ten matches with exact passages, favoring complete
+paragraphs and fenced examples. `list_doc_sections` returns a paginated outline
+with ids and section sizes. `open_doc_section` accepts one `sectionId` or up to
+eight `sectionIds`; each read defaults to 32,000 characters and accepts a
+smaller `maxChars`. A batch is admitted only if all its reads fit the remaining
+total budget. Neither purpose is required to spend its full budget.
 
 The documentation corpus is Markdown split at headings and read on the host from
 the roots the run resolved, never through the sandbox mount. Configure it with
@@ -1496,18 +1497,21 @@ chronological order. Saved unscoped kits are interpreted in one read boundary:
 orientation. Stored transcripts are not rewritten. Saved unscoped kits retain
 their implementation admission contract; new calls use the two purposes above.
 
-Interactive sessions commit selected research and the full model-context CFC
-record atomically with resumable history. A later root task inherits those
-findings as historical context, including after SQLite restart. It receives
-current grants independently; earlier bindings are not automatically transferred
-to a child. A failed or canceled turn cannot replace the research checkpoint of
-the last completed turn.
+Interactive sessions commit the original user goal, selected research, and the
+full model-context CFC record atomically with resumable history. A later root
+task retains that goal alongside its current request and inherits those findings
+as historical context, including after SQLite restart. It receives current
+grants independently; earlier bindings are not automatically transferred to a
+child. A failed or canceled turn cannot replace the research checkpoint of the
+last completed turn.
 
 SQLite checkpoints also retain the existing transcript-omissions record.
-Restoration verifies each recorded result's identity before attaching its
-host-only annotations; serialized model messages contain none of that metadata.
-Legacy checkpoints without omission records remain distinguishable from results
-known to have no omissions.
+Restoration verifies every recorded result's unique identity before attaching
+any host-only annotations; serialized model messages contain none of that
+metadata. Results without a legacy omission record retain unknown omission
+status, distinguishable from results known to have no omissions. SQLite schema
+inspection and migration share an immediate transaction, so concurrent openers
+cannot both migrate the same missing column.
 
 Children receive projected findings and retain the selected raw summaries in run
 state, joined by research run id. An inherited orientation lists only handles

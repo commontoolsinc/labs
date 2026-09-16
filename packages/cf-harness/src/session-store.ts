@@ -10,6 +10,9 @@ import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 
 /** Bounded prior findings plus the full label influence of retained history. */
 export interface HarnessChatResearchContext {
+  /** User goal established by the first completed task in this context. */
+  researchGoal?: string;
+
   /** Admitted results retained as historical leads for the next root task. */
   runs: readonly HarnessResearchRunSummary[];
 

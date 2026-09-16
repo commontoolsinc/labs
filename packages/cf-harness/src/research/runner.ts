@@ -270,10 +270,9 @@ const SEARCH_DOCS_TOOL: HarnessModelToolDescriptor = {
       query: { type: "string", minLength: 2 },
       pathPrefix: {
         type: "string",
-        minLength: 1,
         maxLength: 1_000,
         description:
-          "Optional corpus-relative document or directory prefix to keep the search in the relevant guide or skill.",
+          "Optional corpus-relative document or directory. Matches that exact path and slash-delimited descendants; empty selects the whole corpus.",
       },
       limit: { type: "integer", minimum: 1, maximum: 10 },
     },
@@ -896,7 +895,8 @@ const invokeResearchTool = async (
         : "";
       const eligible = (request.corpus?.sections ?? []).filter((section) =>
         section.integrity.some(isOperatorProvisionedReferenceAtom) &&
-        section.path.startsWith(prefix)
+        (prefix === "" || section.path === prefix ||
+          section.path.startsWith(prefix.endsWith("/") ? prefix : prefix + "/"))
       );
       for (const section of eligible) {
         addSourceLabel(state, {

@@ -48,9 +48,12 @@ Only split into `schemas.tsx` or additional modules when:
 - the main file becomes harder to evolve than to split
 
 These choices organize the source of one pattern. They do not require all of a
-user's goal to live in one pattern. Import suitable indexed components, connect
-their inputs and outputs, and author the smallest missing reusable piece. A
-useful new component can then be contributed to the catalog for later goals.
+user's goal to live in one pattern. When the host provides a pattern index,
+compose suitable indexed components through its `cf:pattern:<patternId>` imports.
+Otherwise, compose available local patterns through ordinary file imports.
+Connect their inputs and outputs, and author the smallest missing reusable
+piece. A useful new component can then be contributed to the catalog for later
+goals.
 
 ## Multi-User Patterns
 

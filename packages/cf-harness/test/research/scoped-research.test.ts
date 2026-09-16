@@ -225,6 +225,56 @@ describe("scoped research", () => {
     );
   });
 
+  for (
+    const prefix of ["common/guide", "common/guide/", "common/guide.md", ""]
+  ) {
+    it(`limits outlines and cited searches to the exact path or descendants for prefix '${prefix}'`, async () => {
+      const paths = [
+        "common/guide.md",
+        "common/guide.md.extra",
+        "common/guide/intro.md",
+        "common/guidebook/intro.md",
+      ];
+      const expected = prefix === ""
+        ? paths
+        : prefix === "common/guide.md"
+        ? [paths[0]]
+        : [paths[2]];
+      const docs = {
+        ...corpus(""),
+        files: paths.length,
+        sections: paths.flatMap((path) =>
+          splitMarkdownSections({
+            path,
+            integrity: [operatorProvisionedReferenceAtom("docs")],
+          }, "# Collection\nUse computed to filter the collection.")
+        ),
+      };
+      const trial = run([
+        () =>
+          calls(["list_doc_sections", { pathPrefix: prefix }], ["search_docs", {
+            pathPrefix: prefix,
+            query: "computed",
+          }]),
+        (request) => {
+          expect(
+            output(request, "list_doc_sections")[0].sections.map((
+              section: { path: string },
+            ) => section.path),
+          ).toEqual(expected);
+          expect(
+            output(request, "search_docs")[0].results.map((
+              section: { path: string },
+            ) => section.path),
+          ).toEqual(expected);
+          return final({ ...brief(), leads: [], questions: [] });
+        },
+      ], { corpus: docs });
+      const reply = await trial.result;
+      expect(reply.record.sourceReads).toHaveLength(expected.length);
+    });
+  }
+
   it("refuses an over-budget batch without admitting any of its passages", async () => {
     const docs = corpus(
       "# One\n" + "a".repeat(32_000) + "\n# Two\n" + "b".repeat(32_000) +

@@ -565,6 +565,11 @@ describe("prompt-loop cross-agent address handles", () => {
         "The final filtering rule remains unresolved",
       );
       expect(childMessages).not.toContain(HASH_A);
+      if (binding === "historical") {
+        expect(childMessages).toContain(
+          "These bindings belong to an earlier task. Only current granted tokens may be used; describe them before rebinding.",
+        );
+      }
       if (binding === "declared") {
         const command = dispatchedCommand(sandbox, "cf cell get ");
         expect(command).toContain(table.entries[0]!.ref);

@@ -1487,6 +1487,8 @@ export class HarnessInteractiveChatService {
     browserAccess: HarnessChatBrowserAccessLease | undefined,
   ): Promise<void> {
     const session = record.status;
+    const researchGoal = record.researchContext?.researchGoal ??
+      params.input.text;
     // Seeded only when the durable history carries no system message. A turn
     // persists the transcript it ran, so the second turn of a seeded session
     // finds the message already there and prepends nothing.
@@ -1515,6 +1517,7 @@ export class HarnessInteractiveChatService {
             params.input.loomId,
           ),
           taskText: params.input.text,
+          researchGoal,
           ...(record.researchContext === undefined ? {} : {
             inheritedResearchRuns: record.researchContext.runs.map((run) => ({
               ...run,
@@ -1624,6 +1627,7 @@ export class HarnessInteractiveChatService {
       }, {
         transcript: [...result.transcript],
         researchContext: {
+          researchGoal,
           runs: selectResearchContext(result.runState.researchRuns ?? []),
           ...(result.runState.cfcModelContext === undefined
             ? {}

@@ -256,12 +256,22 @@ const mergeRuleRecords = (
   });
 };
 
-/** Restores host-only annotations from a checkpoint with exact result identities. */
+/**
+ * Restores host-only annotations after validating unique, exact result joins.
+ * Unrecorded legacy results retain unknown omission status.
+ */
 export const restoreHarnessTranscriptOmissions = (
   transcript: readonly HarnessTranscriptMessage[],
   omissions: HarnessTranscriptOmissions,
 ): void => {
+  const indices = new Set<number>();
+  const outputIds = new Set<string>();
   for (const result of omissions.results) {
+    if (indices.has(result.transcriptIndex) || outputIds.has(result.outputId)) {
+      throw new Error("Stored transcript omissions repeat a result");
+    }
+    indices.add(result.transcriptIndex);
+    outputIds.add(result.outputId);
     const message = transcript[result.transcriptIndex];
     const identity = message === undefined
       ? undefined
@@ -273,7 +283,12 @@ export const restoreHarnessTranscriptOmissions = (
     ) {
       throw new Error("Stored transcript omissions do not match their result");
     }
-    annotateHarnessTranscriptResultOmissions(message, result.rules);
+  }
+  for (const result of omissions.results) {
+    annotateHarnessTranscriptResultOmissions(
+      transcript[result.transcriptIndex],
+      result.rules,
+    );
   }
 };
 

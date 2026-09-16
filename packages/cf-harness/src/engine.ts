@@ -363,7 +363,7 @@ export interface CreateHarnessEngineOptions
    */
   inheritedResearchRuns?: readonly HarnessResearchRunSummary[];
 
-  /** Root user goal preserved when a child receives a narrower delegated task. */
+  /** Root user goal retained across follow-up questions and delegated tasks. */
   researchGoal?: string;
 
   /** Parent model-context labels retained by a newly delegated child. */
