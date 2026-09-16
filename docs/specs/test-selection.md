@@ -163,10 +163,12 @@ the bound a lane is killed at are the same order of magnitude, so a test
 that hits one is otherwise reported as fitting no lane and held out of
 every pull request that does not touch it.
 
-A day records which set of these rules sealed it. These rules change,
-and a day sealed under earlier ones did not measure what these measure,
-so such a day answers only until these rules have sealed a day for that
-test, and is dropped the moment they do. Carried instead, it would
+A day records which set of these rules sealed it, and a day carrying no
+such record was sealed before any set was recorded, which reads as
+another set. These rules change, and a day sealed under earlier ones did
+not measure what these measure, so such a day answers only until these
+rules have sealed a day for that test, and is dropped the moment they
+do. Carried instead, it would
 decide what runs for the whole of the window, and a safety net's bound
 is the figure that outcome is worst for.
 
