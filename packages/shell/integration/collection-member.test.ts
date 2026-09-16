@@ -11,6 +11,7 @@ import { expect } from "@std/expect";
 import { join, resolve } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
+import type { Identity } from "@commonfabric/identity";
 import {
   env,
   type ProbeApi,
@@ -18,6 +19,8 @@ import {
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { writeTempIdentity } from "@commonfabric/integration/temp-identity";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import { PiecesController } from "@commonfabric/piece/ops";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 
 import "../src/globals.ts";
@@ -93,10 +96,15 @@ async function fileBoard(identityPath: string): Promise<string> {
  * what tells a resolver it names a collection.
  */
 async function fileBoardWithMembers(
+  identity: Identity,
   identityPath: string,
   slug: string,
   titles: readonly string[],
 ): Promise<string> {
+  const expectedTitle = titles.at(-1);
+  if (expectedTitle === undefined) {
+    throw new Error("A collection fixture needs at least one member.");
+  }
   const boardId = await fileBoard(identityPath);
   for (const title of titles) {
     await cf(
@@ -105,6 +113,43 @@ async function fileBoardWithMembers(
       ["addItem", JSON.stringify({ title, agentName: "shell integration" })],
     );
   }
+
+  // A served handler returns when its own transaction commits. The board and
+  // the member publish their derived results in the serving cycle after it,
+  // so prove that a fresh reader sees the exact member before publishing the
+  // collection's name.
+  const pieces = await PiecesController.initialize({
+    apiUrl: new URL(API_URL),
+    identity,
+    space: SPACE_NAME,
+  });
+  try {
+    const board = await pieces.get(boardId, false);
+    const memberName = String(titles.length);
+    const memberSlot = (await board.result.getCell())
+      .key("names")
+      .key(memberName);
+    // The namespace deliberately keeps an unread link. Wait for that stored
+    // slot first, then follow it to prove the member's own result is ready.
+    await memberSlot.pull();
+    await waitForCellValue(
+      pieces.runtime,
+      memberSlot,
+      () => memberSlot.getRaw({ lastNode: "value" }) !== undefined,
+    );
+    const member = memberSlot.resolveAsCell()
+      .asSchema<{ title?: string; shortName?: string }>();
+    await member.pull();
+    await waitForCellValue<{ title?: string; shortName?: string }>(
+      pieces.runtime,
+      member,
+      (value) =>
+        value?.title === expectedTitle && value?.shortName === memberName,
+    );
+  } finally {
+    await pieces.dispose();
+  }
+
   await cf(identityPath, [
     "piece",
     "set-slug",
@@ -114,27 +159,11 @@ async function fileBoardWithMembers(
   return boardId;
 }
 
-/**
- * Syncs the worker's open spaces, settles the rendered view, then reports
- * whether it shows one member with the expected name.
- *
- * RuntimeClient.idle() deliberately excludes pulls and subscription
- * convergence. The member arrives through both, so the test/debug barrier for
- * every open space has to run before the worker and view can settle.
- */
-async function settledMemberNameIs(
+/** Whether the rendered view shows one member with the expected name. */
+function memberNameIs(
   probe: ProbeApi,
   expected: string,
-): Promise<boolean> {
-  const commonfabric = (globalThis as typeof globalThis & {
-    commonfabric?: {
-      rt?: { allSynced?: () => Promise<void> };
-      viewSettled?: () => Promise<void>;
-    };
-  }).commonfabric;
-  if (!commonfabric?.rt?.allSynced || !commonfabric.viewSettled) return false;
-  await commonfabric.rt.allSynced();
-  await commonfabric.viewSettled();
+): boolean {
   const badges = probe.collect("[data-member-name]");
   return badges.length === 1 &&
     probe.deepText(badges[0]).trim() === expected;
@@ -155,7 +184,7 @@ describe("shell collection members", () => {
       });
       const { identity, path: identityPath } = tempIdentity;
       const slug = `members-${crypto.randomUUID()}`;
-      await fileBoardWithMembers(identityPath, slug, [
+      await fileBoardWithMembers(identity, identityPath, slug, [
         "Glaze recipes",
         "Oven schedule",
       ]);
@@ -168,9 +197,13 @@ describe("shell collection members", () => {
 
       // One badge, reading the board's name for this member. The board
       // renders one per item, so a page carrying exactly one is the member's.
-      await waitForCondition(shell.page(), settledMemberNameIs, {
+      await waitForCondition(shell.page(), memberNameIs, {
         args: ["2"],
       });
+      const pathname = await shell.page().evaluate(() =>
+        globalThis.location.pathname
+      );
+      expect(pathname).toBe(`/${SPACE_NAME}/${slug}/2`);
       // The tab names the piece the shell opened. Member 2 is the second item
       // filed, and the board would name itself for its item count instead.
       await waitForCondition(
@@ -185,7 +218,7 @@ describe("shell collection members", () => {
       });
       const { identity, path: identityPath } = tempIdentity;
       const slug = `portable-${crypto.randomUUID()}`;
-      await fileBoardWithMembers(identityPath, slug, [
+      await fileBoardWithMembers(identity, identityPath, slug, [
         "Glaze recipes",
         "Oven schedule",
       ]);
@@ -201,7 +234,7 @@ describe("shell collection members", () => {
         identity,
       });
 
-      await waitForCondition(shell.page(), settledMemberNameIs, {
+      await waitForCondition(shell.page(), memberNameIs, {
         args: ["2"],
       });
       // The mark says which segment is the space and is no part of it, so the
@@ -225,7 +258,9 @@ describe("shell collection members", () => {
       });
       const { identity, path: identityPath } = tempIdentity;
       const slug = `missing-${crypto.randomUUID()}`;
-      await fileBoardWithMembers(identityPath, slug, ["Glaze recipes"]);
+      await fileBoardWithMembers(identity, identityPath, slug, [
+        "Glaze recipes",
+      ]);
 
       await shell.goto({
         frontendUrl: FRONTEND_URL,
@@ -251,7 +286,9 @@ describe("shell collection members", () => {
       });
       const { identity, path: identityPath } = tempIdentity;
       const slug = `nested-${crypto.randomUUID()}`;
-      await fileBoardWithMembers(identityPath, slug, ["Glaze recipes"]);
+      await fileBoardWithMembers(identity, identityPath, slug, [
+        "Glaze recipes",
+      ]);
 
       // Member 1 is held, so what refuses this page is its address rather
       // than the collection. The page is served at the longer address, and
