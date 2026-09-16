@@ -146,7 +146,7 @@ export type ValueTag = typeof VALUE_TAGS[keyof typeof VALUE_TAGS];
 
 /**
  * Tag for any value that could possibly be a valid `FabricConvertibleJsValue`:
- * every tag but `function`.
+ * every tag but `function` and `PlusType`.
  */
 export type ConvertibleJsValueTag = Exclude<
   ValueTag,
