@@ -5,7 +5,10 @@ import {
   testIdentityKey,
   type TestRecord,
 } from "@commonfabric/test-support/records";
-import type { CapabilityId } from "./ci-capabilities.ts";
+import {
+  CAPABILITY_LOG_TAIL_LINES,
+  type CapabilityId,
+} from "./ci-capabilities.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 
 import {
@@ -20,6 +23,7 @@ import {
   COVERAGE_REPORT_DIR,
   COVERAGE_REPORT_FILE,
   describeAccounting,
+  describeCapabilityLogs,
   describeConflicts,
   describeCoverage,
   describePlan,
@@ -1076,6 +1080,53 @@ describe("running a lane's work", () => {
     // runs in spite of being withheld.
     expect(printed).toContain("yes, the change reaches it");
     expect(printed).toContain("| no |");
+  });
+
+  it("prints the end of a capability's log, saying what it dropped", async () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    const written = Array.from(
+      { length: CAPABILITY_LOG_TAIL_LINES + 30 },
+      (_unused, index) => `line ${index}`,
+    );
+    try {
+      await describeCapabilityLogs(
+        [{ capability: "toolshed", path: "/tmp/toolshed-1.log" }],
+        () => Promise.resolve(`${written.join("\n")}\n`),
+      );
+    } finally {
+      console.log = log;
+    }
+    const printed = lines.join("\n");
+    expect(printed).toContain("--- toolshed log ---");
+    expect(printed).toContain(
+      `last ${CAPABILITY_LOG_TAIL_LINES} of ${written.length} ` +
+        "line(s); 30 earlier dropped",
+    );
+    // The end is what a run that went wrong wrote last, so it is the end
+    // that is kept.
+    expect(printed).toContain(`line ${written.length - 1}`);
+    expect(printed).not.toContain("line 29\n");
+  });
+
+  it("reports a log it could not read rather than throwing", async () => {
+    // The lane is already failing when this runs, and a report that threw
+    // would replace the failure it was printed beside.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      await describeCapabilityLogs(
+        [{ capability: "toolshed", path: "/tmp/never-written.log" }],
+        () => Promise.reject(new Error("no such file")),
+      );
+    } finally {
+      console.log = log;
+    }
+    expect(lines.join("\n")).toContain("--- toolshed log ---");
+    expect(lines.join("\n")).toContain("(unreadable:");
+    expect(lines.join("\n")).toContain("no such file");
   });
 
   it("names the records no suite describes", () => {
@@ -2323,6 +2374,52 @@ describe("what a lane does with the batches it was given", () => {
       console.log = log;
       await Deno.remove(dir, { recursive: true }).catch(() => {});
     }
+  });
+
+  it("fails on the way out when running a batch throws", async () => {
+    // A lane whose loop threw has failed, whatever the batches before it
+    // said, and it is the one that most needs what its capabilities
+    // wrote: the teardown reads their logs out of the work directory
+    // before removing it, and a lane still holding `ok` true would have
+    // removed them unread.
+    const log = console.log;
+    console.log = () => {};
+    let thrown: unknown;
+    try {
+      await runLane(
+        {
+          lane: 1,
+          of: 1,
+          full: false,
+          dryRun: false,
+          laneCount: false,
+          root: REPOSITORY,
+          at: "2026-09-01T00:00:00Z",
+        },
+        {
+          manifest: selecting(),
+          topology: () =>
+            Promise.resolve([
+              suite({
+                id: "workspace-unit",
+                units: [UNIT],
+                locate: () => ({ level: "unit" as const, unit: UNIT }),
+                command: () =>
+                  Promise.reject(new Error("the command could not be built")),
+              }),
+            ]),
+          spool: () => undefined,
+        },
+      );
+    } catch (error) {
+      thrown = error;
+    } finally {
+      console.log = log;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain(
+      "the command could not be built",
+    );
   });
 
   it("fails when a batch failed, having run it", async () => {
