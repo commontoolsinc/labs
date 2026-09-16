@@ -214,12 +214,13 @@ export function tagOfConvertibleJsValueElseNull(
   if (result !== null) {
     return result;
   } else if (typeof value === "function") {
-    // Functions are not part of `FabricConvertibleJsValue`. That said, the
-    // `typeof` test here is covering a pretty oddball case, namely if a
-    // `function` ends up with a `prototype` which matches one of the recognized
-    // classes. This is in the zone of intentional misbehavior (at worst) or a
-    // _very_ surprising bug at best. However, in the context of value
-    // conversion, the test is pretty cheap and so reasonably worth doing.
+    // Functions are not allowed as `FabricConvertibleJsValue`s. That said, the
+    // `typeof` test here is covering a pretty oddball case, namely when a value
+    // of type `function` is observed to have a `prototype` which matches one of
+    // the recognized convertible classes. This is in the zone of intentional
+    // misbehavior (at worst) or a _very_ surprising bug at best. However, in
+    // the context of value conversion, the test is pretty cheap and so
+    // reasonably worth doing.
     return null;
   }
 
