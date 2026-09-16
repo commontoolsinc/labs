@@ -1,16 +1,16 @@
 # Lazy materialization fast-follow
 
-Status: F0 and F2 complete, F2 as an explicit deferral; F1 done as far as the
-deferral needed, with three bullets carried forward; F3's evidence assembled,
-with partial integration coverage recorded; F3's decision, F4, and F5 pending, the
-decision with the flag's owner and the rest behind it. This plan is the
-separate follow-up to the
-[computation-cost](../history/plans/pattern-computation-cost.md) arc, whose
-[implementation
-record](../history/plans/pattern-computation-cost-implementation.md) transferred
-its D1/D2 measurements here. It owns the handler investigation, default-on
-rollout evidence, flag retirement, and those measurements. It does not authorize
-a live lunch-poll update.
+Status: F0 and F2 complete, F2 as an explicit deferral; F1 complete to that
+boundary; F3 evidence assembled with the eager-mode limitation documented. F4 is
+optional owner-led work outside this arc. F5 measurements and guidance remain
+pending and do not depend on switch retirement.
+
+This follow-up to the
+[computation-cost](../history/plans/pattern-computation-cost.md) arc owns the
+handler investigation, default-on behavior evidence, and the D1/D2 measurements
+transferred by its
+[implementation record](../history/plans/pattern-computation-cost-implementation.md).
+It does not authorize a live lunch-poll update.
 
 The [lazy materialization design](lazy-cell-materialization.md) defines the
 schema-observing view and snapshot contracts. Lift arguments use that view under
@@ -22,13 +22,16 @@ integration problem.
 
 ## Scope and decision
 
-Complete the outstanding work in this plan after the computation-cost arc, with
-independent PRs and acceptance evidence. Keep handler semantics separate from
-removing the lift-path rollout switch: either can expose a correctness issue the
-other does not address. The removal condition and the flag's author remain
-recorded in the registry's [summary
-table](../development/EXPERIMENTAL_OPTIONS.md#summary-table), which names
-Bernhard Seefeld.
+Complete measurements and guidance for the current default-on lift behavior. The
+runtime's flag owner, Bernhard Seefeld, decides whether and when to retire its
+rollout switch. Retirement is optional owner-led work, not a prerequisite to
+completing this arc or its measurement matrix. The prepared retirement PR is a
+proposal the owner may adopt, revise, or decline.
+
+Keep the eager-mode limitation visible: disabling the flag is not a qualified
+rollback. A retirement proposal must separately settle its rollback route; that
+operational decision does not block measuring the supported default. Lazy
+handler contexts remain explicitly deferred under F1/F2.
 
 ## Execution tracker
 
@@ -36,14 +39,14 @@ Mark a step complete only with its linked evidence. Capture decisions and
 completed investigations in `docs/history/`; update the live contract documents
 in the same PR as behavior changes.
 
-| Step | Depends on                  | Deliverable                                                           | State                                                                                                                                                                  |
-| ---- | --------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F0   | Computation-cost acceptance | Fixed baseline and remaining-call-site inventory                      | Done: [F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md)                                                                 |
-| F1   | F0                          | Handler materialization contract and measured prototype               | Done as far as the deferral needed, three bullets carried forward: [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)        |
-| F2   | F1                          | Reviewed handler integration, or an explicit evidence-backed deferral | Done: deferred, with the blocker and the conditions for revisiting in the [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md) |
-| F3   | F0                          | Default-on rollout evidence and flag-retirement decision              | Evidence: [F3 record](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md); decision pending with the flag's owner               |
-| F4   | F3                          | Remove the lift rollout switch and redundant fallback dispatch        | Pending                                                                                                                                                                |
-| F5   | F2, F4                      | Repeat measurement matrix, update guidance, and archive plans         | Pending                                                                                                                                                                |
+| Step | Depends on                  | Deliverable                                                                  | State                                                                                                                                                                                                                                           |
+| ---- | --------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F0   | Computation-cost acceptance | Fixed baseline and remaining-call-site inventory                             | Done: [F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md)                                                                                                                                          |
+| F1   | F0                          | Handler materialization contract and measured prototype                      | Done as far as the deferral needed, three bullets carried forward: [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)                                                                                 |
+| F2   | F1                          | Reviewed handler integration, or an explicit evidence-backed deferral        | Done: deferred, with the blocker and the conditions for revisiting in the [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)                                                                          |
+| F3   | F0                          | Default-on evidence and documented fallback limitations                      | Done: [rollout evidence](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md) and [reload diagnosis](../history/development/performance/2026-09-15-lazy-reload-diagnosis.md); eager mode is not qualified |
+| F4   | Owner decision              | Optional removal of the lift rollout switch                                  | Outside this arc; owner-led proposal, not a completion gate                                                                                                                                                                                     |
+| F5   | F2, F3                      | Repeat default-on measurement matrix, update guidance, and archive this plan | Pending; independent of F4                                                                                                                                                                                                                      |
 
 F1/F2 and F3 can proceed independently. F4 does not depend on making handlers
 lazy: F1 identified no shared contract that would require that order. The
@@ -63,13 +66,12 @@ unmarked transactions still require.
       work, graph size, allocation/retention, and disabled-accounting durations
       in separate windows. Preserve their different accounting boundaries.
 
-The [F0
-baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md)
+The
+[F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md)
 holds the inventory, the posture table, and the per-phase handler dispatch
 measurement from `packages/runner/test/handler-dispatch-cost.bench.ts`; the
 completed-attempt and reactive-body reads the step names are in the
-[representative lunch poll
-rehearsal](../history/development/performance/2026-09-12-representative-lunch-poll-rehearsal.md).
+[representative lunch poll rehearsal](../history/development/performance/2026-09-12-representative-lunch-poll-rehearsal.md).
 Its retention probe was inconclusive and is recorded as such; the representative
 copy was not re-run and its limitations carry forward. Two of its findings shape
 F1: the dependency preflight, not the argument read, is the largest fixed cost
@@ -103,12 +105,12 @@ which a view would narrow.
 - [ ] Test read/write snapshots, defaults and absent-path dependencies,
       cross-space context, labels read before and after policy preparation,
       escaped views, and asynchronous handler continuations where supported.
-      Asynchronous continuations, a result built from values read through
-      the view, and an absent optional field are pinned by the deferred
-      prototype's tests, which are not in the tree; a view itself escaping
-      into result handling, snapshots, a default followed by the value's
-      arrival, cross-space context, and labels around policy preparation are
-      not pinned anywhere, and the deferral leaves them open.
+      Asynchronous continuations, a result built from values read through the
+      view, and an absent optional field are pinned by the deferred prototype's
+      tests, which are not in the tree; a view itself escaping into result
+      handling, snapshots, a default followed by the value's arrival,
+      cross-space context, and labels around policy preparation are not pinned
+      anywhere, and the deferral leaves them open.
 - [x] Compare a scalar read from a large bound context with a full walk and with
       mutation-heavy handlers. Measure argument setup separately from the body
       and commit preparation so work is not merely moved out of a counter.
@@ -118,8 +120,8 @@ which a view would narrow.
       condition for revisiting it. A deferral must be explicit, not an unchecked
       handler exception hidden in a completed lift rollout.
 
-The [F1
-record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)
+The
+[F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)
 holds the contract, the prototype, its tests, and the measurements. The outcome
 is a deferral: the prototype preserves the event contract, but its measured
 consequence is a win only for a handler that reads a whole list and touches
@@ -143,58 +145,45 @@ event-finalization paths. Keep the mark's lifetime bounded to the argument/body
 contract; result serialization, policy preparation and scheduler bookkeeping
 must not accidentally inherit it.
 
-### F3/F4 — Retire the lift rollout switch
+### F3 — Default-on evidence and fallback limits
 
-- [x] Assemble default-on evidence with exact revisions, environments, covered
-      workloads, observed failures, and any use of the rollback override. State
-      the observation period; elapsed time alone is not acceptance.
-- [ ] Run the relevant equivalence, refusal, snapshot and dependency tests in
-      both current flag postures. Resolve unexplained differences and check
-      production-like client/server behavior on isolated data. The runner
-      suite has been run at both postures; the F3 record holds the
-      off-posture result. The [integration evidence](../history/development/performance/2026-09-14-lazy-off-integration.md)
-      adds isolated eager-posture runner, runtime-client, and shell/browser results;
-      remaining product coverage and owner decisions are explicit in that record.
-      The [reload evidence](../history/development/performance/2026-09-14-lazy-materialization-reload-evidence.md)
-      records served eager browser errors and an unresolved default-on control
-      failure; those findings remain part of the acceptance decision.
-      The [reload diagnosis](../history/development/performance/2026-09-15-lazy-reload-diagnosis.md)
-      identifies the eager nullable-cell input and a stalled browser displaying
-      a note instead of its notebook. The [navigation-policy diagnosis](../history/development/performance/2026-09-15-notebook-reload-navigation-policy.md)
-      ties the reload test's selection assumption to the existing speculative
-      navigation contract: source assertions must read the captured notebook,
-      and reload measurement must explicitly select it. The corrected default-on
-      scenario passes; eager renders all notes but fails on nullable reads.
-      Resolve the eager correctness gap or select a rollback route that does not
-      depend on that posture before retiring the flag.
-      The [derived-state correction decision](../history/development/2026-09-14-derived-state-correction.md)
-      permits two exact stale fetch-status transitions during vintage replay;
-      it does not retire the flag or waive other state-loss findings.
-- [ ] Obtain the retirement decision from the flag's owner with a concrete
-      rollback route. No live data mutation is implied by this plan; coordinate
-      any live deployment separately. Bernhard Seefeld, whom the registry's
-      [summary table](../development/EXPERIMENTAL_OPTIONS.md#summary-table)
-      records as the flag's author, holds the decision as its owner; the F3
-      record's [What a retirement decision needs to
-      name](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md#what-a-retirement-decision-needs-to-name)
-      lists what the decision has to settle.
-- [ ] Make the accepted lift behavior unconditional and remove the flag's
-      registry entry, environment/runtime option, obsolete conditional dispatch,
-      and flag-specific documentation and tests. Retain substantive semantic
-      tests and eager machinery used by other callers.
-- [ ] Run affected package suites, authoritative pattern checks when patterns
-      change, repository type/format/lint checks, and applicable independent
-      gates. Require clean antagonistic and Cubic reviews before merging.
+The
+[rollout evidence](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md)
+records revisions, execution postures, observed failures, and coverage limits.
+The
+[integration evidence](../history/development/performance/2026-09-14-lazy-off-integration.md)
+and
+[reload diagnosis](../history/development/performance/2026-09-15-lazy-reload-diagnosis.md)
+show that eager execution can deliver an unavailable nullable input and fail
+with browser errors. Rendering the notes alone does not qualify that fallback.
+The
+[navigation-policy diagnosis](../history/development/performance/2026-09-15-notebook-reload-navigation-policy.md)
+explains the corrected notebook selection; the default-on scenario passes.
+
+The
+[derived-state correction decision](../history/development/2026-09-14-derived-state-correction.md)
+permits two exact stale fetch-status transitions during vintage replay. Other
+state-loss findings must be investigated rather than covered by that exception.
+
+### F4 — Optional owner-led retirement
+
+The flag owner decides whether to retain the default-on switch, repair and
+qualify eager execution, or retire the switch with a separately reviewed
+rollback route. The prepared retirement proposal supplies implementation and
+evidence for that decision; this arc does not drive its approval or merge. Any
+retirement change still needs applicable tests, CI, antagonistic review, and
+Cubic review. Live deployment remains separately coordinated.
 
 ### F5 — Measure and close
 
-- [ ] Repeat F0 after each behavioral or flag change, using matched inputs and
-      demanded surfaces. Report changes in access count separately from changes
-      in per-access cost, handler cost, initialization and maintenance.
+- [ ] Repeat F0 on a pinned revision with the current default-on flag posture,
+      using matched inputs and demanded surfaces. Report changes in access count
+      separately from changes in per-access cost, handler cost, initialization
+      and maintenance.
 - [ ] Repeat mounted headless/browser and same-/cross-space comparisons; keep
       instrumentation disabled for timing and retain correctness assertions.
 - [ ] Publish the evidence and any remaining limitation, update author/runtime
-      guidance, and archive this plan and the completed design tracker under the
+      guidance, and archive this plan under the
       [documentation lifecycle](../README.md).
 
 ## Out of scope
