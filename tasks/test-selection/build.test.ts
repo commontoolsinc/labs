@@ -450,6 +450,18 @@ describe("build", () => {
       expect(folded.aggregate.files).toEqual({ [KEY]: UNIT });
     });
 
+    it("drops a carried file for an identity it holds no state for", () => {
+      // The files are seeded from the states and written back from the
+      // surfaces those seeded, so the map cannot name an identity the
+      // aggregate does not score. Without that it would only ever grow:
+      // nothing else removes an entry from it.
+      const carried = emptyAggregate("2026-08-20");
+      carried.files[KEY] = UNIT;
+      const folded = new Fold(carried, NO_ALIASES, "2026-08-20").finish();
+      expect(folded.surfaces.has(KEY)).toBe(false);
+      expect(folded.aggregate.files).toEqual({});
+    });
+
     it("keeps a carried file a later record does not name", () => {
       // A record with no file says what an unmapped record can say, and
       // the file an earlier one named is the better answer.
