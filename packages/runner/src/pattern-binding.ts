@@ -25,7 +25,7 @@ import {
   type JSONSchema,
   type JSONValue,
 } from "./builder/types.ts";
-import { type AnyCell } from "./cell.ts";
+import { type AnyCell, internCellLinkSchema } from "./cell.ts";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
@@ -866,13 +866,21 @@ export function findAllWriteRedirectCells<T>(
         // Whether the target holds a further redirect is a question about
         // which reference sits there, so the probe stops at the reference and
         // leaves the target's content unread: it consumes the pointer's own
-        // label and none of the content labels at that position. The link's
-        // schema carries the scope caps resolution honors along the path, and
-        // resolution reads the replica as it stands and kicks no sync, so what
-        // a run reads is named by the pre-sync, not by this walk.
-        const target = resolveLink(baseCell.runtime, tx, link, "top", {
-          markIfcCrossings: true,
-        });
+        // label and none of the content labels at that position. The walk
+        // builds no cell, so it kicks no sync of its own; resolution kicks a
+        // document's pull where it follows a hop the replica cannot serve, as
+        // it does for every reader. The link's schema carries the scope caps
+        // resolution honors along the path, interned so that the schema-keyed
+        // caches downstream of the walk stay warm.
+        const target = resolveLink(
+          baseCell.runtime,
+          tx,
+          link.schema === undefined
+            ? link
+            : { ...link, schema: internCellLinkSchema(link.schema) },
+          "top",
+          { markIfcCrossings: true },
+        );
         // A chained redirect resolves against the document it is stored in —
         // where resolution landed — rather than against the original
         // `baseCell`: a relative redirect in a cross-document target must
