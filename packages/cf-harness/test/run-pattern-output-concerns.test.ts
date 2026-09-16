@@ -1,17 +1,19 @@
 /**
- * What `run_pattern` reads off a materialized pattern's own outputs, and what
- * it says about them. The end-to-end statement — that a composed reader's
- * failure reaches the run's answer while the run still succeeds — is in
- * run-pattern-pattern-index.test.ts, where a composition has an index to
- * resolve through.
+ * What `run_pattern` reads off a materialized pattern's own outputs, what it
+ * tells the model, and what it keeps for the artifact alone. The end-to-end
+ * statement — that a composed reader's failure reaches the run's answer while
+ * the run still succeeds — is in run-pattern-pattern-index.test.ts, where a
+ * composition has an index to resolve through.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  dedupedOutputConcerns,
+  dedupedObservedOutputs,
+  type ObservedOutput,
+  observedOutputCause,
+  observedOutputsIn,
   OUTPUT_CONCERN_MESSAGES,
-  outputConcernsIn,
 } from "../src/run-pattern-output-concerns.ts";
 
 /** The outputs a connector-reading atom exposes beside its rows. */
@@ -26,15 +28,20 @@ const readerResult = (
   ...overrides,
 });
 
+/** What each observation says, as `<key>:<kind>`. */
+const positions = (observed: readonly ObservedOutput[]): string[] =>
+  observed.map((one) => `${one.concern.key}:${one.concern.concern}`);
+
 describe("run-pattern-output-concerns", () => {
-  describe("outputConcernsIn()", () => {
+  describe("observedOutputsIn()", () => {
     it("returns nothing for a result whose reads all landed", () => {
-      expect(outputConcernsIn(readerResult())).toEqual([]);
+      expect(observedOutputsIn(readerResult())).toEqual([]);
     });
 
     it("names the output an error message was read from", () => {
       expect(
-        outputConcernsIn(readerResult({ errorMessage: "no such column: x" })),
+        observedOutputsIn(readerResult({ errorMessage: "no such column: x" }))
+          .map((one) => one.concern),
       ).toEqual([{
         concern: "error-branch",
         key: "errorMessage",
@@ -44,93 +51,146 @@ describe("run-pattern-output-concerns", () => {
 
     it("names the pattern an output was read from when one is given", () => {
       expect(
-        outputConcernsIn(
+        observedOutputsIn(
           readerResult({ errorMessage: "no such column: x" }),
           "patternIdentity",
-        )[0].patternId,
+        )[0].concern.patternId,
       ).toBe("patternIdentity");
     });
 
-    it("carries none of the error's own text", () => {
-      const concerns = outputConcernsIn(
+    it("keeps the error's own text out of what the model is told", () => {
+      const observed = observedOutputsIn(
         readerResult({ errorMessage: "no such column: secretColumnName" }),
       );
 
-      expect(JSON.stringify(concerns)).not.toContain("secretColumnName");
+      expect(JSON.stringify(observed.map((one) => one.concern)))
+        .not.toContain("secretColumnName");
+      expect(observed[0].text).toBe("no such column: secretColumnName");
     });
 
     it("reads a runtime SQLite failure under an output named anything", () => {
       expect(
-        outputConcernsIn({
+        positions(observedOutputsIn({
           status: "sqlite: param is undefined (it may be a value that isn't " +
             "ready yet); pass a resolved value, or null for SQL NULL",
-        }).map((concern) => concern.key),
-      ).toEqual(["status"]);
+        })),
+      ).toEqual(["status:error-branch"]);
     });
 
     it("leaves a string that merely mentions sqlite alone", () => {
-      expect(outputConcernsIn({ caption: "rows from the sqlite store" }))
+      expect(observedOutputsIn({ caption: "rows from the sqlite store" }))
         .toEqual([]);
     });
 
-    it("names an output holding no rows", () => {
-      expect(
-        outputConcernsIn(readerResult({ rows: [], rowCount: 0 })),
-      ).toEqual([{
+    it("names an output holding no rows, with no text to keep", () => {
+      const observed = observedOutputsIn(
+        readerResult({ rows: [], rowCount: 0 }),
+      );
+
+      expect(observed.map((one) => one.concern)).toEqual([{
         concern: "no-rows",
         key: "rows",
         message: OUTPUT_CONCERN_MESSAGES["no-rows"],
       }]);
+      expect(observed[0].text).toBe("");
     });
 
     it("names both an output that failed and an output left empty", () => {
       expect(
-        outputConcernsIn(readerResult({
+        positions(observedOutputsIn(readerResult({
           rows: [],
           rowCount: 0,
           errorMessage: "sqlite: param is undefined",
-        })).map((concern) => `${concern.key}:${concern.concern}`),
+        }))),
       ).toEqual(["rows:no-rows", "errorMessage:error-branch"]);
     });
 
+    it("passes over an empty output of a read still in flight", () => {
+      expect(
+        positions(observedOutputsIn(
+          readerResult({ rows: [], rowCount: 0, pending: true }),
+        )),
+      ).toEqual([]);
+    });
+
+    it("names the failure of a read still in flight", () => {
+      expect(
+        positions(observedOutputsIn(readerResult({
+          rows: [],
+          pending: true,
+          errorMessage: "no such column: x",
+        }))),
+      ).toEqual(["errorMessage:error-branch"]);
+    });
+
     it("leaves the framework's own result keys alone", () => {
-      expect(outputConcernsIn({ $UI: [], $NAME: "" })).toEqual([]);
+      expect(observedOutputsIn({ $UI: [], $NAME: "" })).toEqual([]);
     });
 
     it("reads only the top level of a result", () => {
-      expect(outputConcernsIn({ inner: { rows: [], errorMessage: "broke" } }))
+      expect(observedOutputsIn({ inner: { rows: [], errorMessage: "broke" } }))
         .toEqual([]);
     });
 
     it("returns nothing for a result that is not an object", () => {
-      expect(outputConcernsIn(["rows"])).toEqual([]);
-      expect(outputConcernsIn(undefined)).toEqual([]);
+      expect(observedOutputsIn(["rows"])).toEqual([]);
+      expect(observedOutputsIn(undefined)).toEqual([]);
     });
   });
 
-  describe("dedupedOutputConcerns()", () => {
+  describe("dedupedObservedOutputs()", () => {
     it("states an output one pattern reported many times once", () => {
-      const repeated = outputConcernsIn({ rows: [] }, "reader");
+      const repeated = observedOutputsIn({ rows: [] }, "reader");
 
-      expect(dedupedOutputConcerns([...repeated, ...repeated, ...repeated]))
+      expect(dedupedObservedOutputs([...repeated, ...repeated, ...repeated]))
         .toEqual(repeated);
     });
 
     it("keeps the same output read from two different patterns", () => {
       expect(
-        dedupedOutputConcerns([
-          ...outputConcernsIn({ rows: [] }, "ledger"),
-          ...outputConcernsIn({ rows: [] }, "mailbox"),
-        ]).map((concern) => concern.patternId),
+        dedupedObservedOutputs([
+          ...observedOutputsIn({ rows: [] }, "ledger"),
+          ...observedOutputsIn({ rows: [] }, "mailbox"),
+        ]).map((one) => one.concern.patternId),
       ).toEqual(["ledger", "mailbox"]);
     });
 
     it("keeps two outputs of one pattern apart", () => {
       expect(
-        dedupedOutputConcerns(
-          outputConcernsIn({ rows: [], errorMessage: "broke" }, "reader"),
-        ).map((concern) => `${concern.key}:${concern.concern}`),
+        positions(dedupedObservedOutputs(
+          observedOutputsIn({ rows: [], errorMessage: "broke" }, "reader"),
+        )),
       ).toEqual(["rows:no-rows", "errorMessage:error-branch"]);
+    });
+  });
+
+  describe("observedOutputCause()", () => {
+    it("returns nothing when nothing was observed", () => {
+      expect(observedOutputCause([])).toBeUndefined();
+    });
+
+    it("names each position and the text the model was not told", () => {
+      expect(
+        observedOutputCause(
+          observedOutputsIn({ errorMessage: "no such column: x" }, "reader"),
+        ),
+      ).toBe("reader errorMessage (error-branch): no such column: x");
+    });
+
+    it("names the run's own result for an output no pattern id came with", () => {
+      expect(observedOutputCause(observedOutputsIn({ rows: [] })))
+        .toBe("this run's own result rows (no-rows)");
+    });
+
+    it("writes one line per observation", () => {
+      expect(
+        observedOutputCause(
+          observedOutputsIn({ rows: [], errorMessage: "broke" }, "reader"),
+        )?.split("\n"),
+      ).toEqual([
+        "reader rows (no-rows)",
+        "reader errorMessage (error-branch): broke",
+      ]);
     });
   });
 });

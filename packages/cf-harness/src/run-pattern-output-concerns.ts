@@ -14,15 +14,22 @@
  * beside the result. It is a disclosure and not a refusal: the run succeeded,
  * the piece stands, and what this adds is the reason to look.
  *
- * TEXT NEVER TRAVELS. A concern names the output it was read from and the
- * pattern that produced it, both of which the model already holds — it wrote
- * the composition, and the identity is the one its own `cf:pattern:` import
- * addresses. The error's TEXT is a computation over data the model may not
- * read, on the same terms as every other thrown message `run_pattern`
+ * TEXT NEVER TRAVELS TO THE MODEL. A concern names the output it was read from
+ * and the pattern that produced it, both of which the model already holds — it
+ * wrote the composition, and the identity is the one its own `cf:pattern:`
+ * import addresses. The error's TEXT is a computation over data the model may
+ * not read, on the same terms as every other thrown message `run_pattern`
  * withholds, and a composed instance's outputs went through no release
  * measurement. A model told which output reports a failure passes that output
  * on and reads it under its own result schema, where the release boundary
  * measures it like any other value.
+ *
+ * The text is kept for the run's ARTIFACT, on the terms `rawCauseMessage`
+ * already states for thrown text: it cannot be recovered any other way, since
+ * a composed instance is not something the model can address, and an operator
+ * reading a run back has nothing else to debug from. So an observation is two
+ * things — the concern, which is the model's, and the text, which is the
+ * artifact's — and they are carried apart rather than filtered later.
  */
 
 import { isObjectNotArray } from "@commonfabric/utils/types";
@@ -39,6 +46,15 @@ const RUNTIME_SQLITE_PREFIX = "sqlite: ";
 
 /** The output names a query's failure is conventionally exposed under. */
 const ERROR_KEYS: readonly string[] = ["error", "errorMessage"];
+
+/**
+ * The output name a read still in flight is exposed under, which `db.query`
+ * answers with and every atom passes on. An emptiness read while it is true
+ * is the emptiness of a read that has not landed, and says nothing about the
+ * data — a query over a served store is in flight for the whole of the run
+ * that issued it. A failure read then is still a failure.
+ */
+const PENDING_KEY = "pending";
 
 /**
  * What each kind means and what to do about it. Fixed text drawn from here
@@ -74,6 +90,15 @@ export interface RunPatternOutputConcern {
   message: string;
 }
 
+/**
+ * One output as it was read: what the model is told, and the text only the
+ * artifact keeps. `text` is empty for an output that reports no failure.
+ */
+export interface ObservedOutput {
+  concern: RunPatternOutputConcern;
+  text: string;
+}
+
 /** Whether `value` is a non-empty string reporting a failure under `key`. */
 const reportsFailure = (key: string, value: unknown): boolean =>
   typeof value === "string" && value !== "" &&
@@ -86,53 +111,79 @@ const reportsFailure = (key: string, value: unknown): boolean =>
  * pattern chose, and walking into it would report the emptiness of every
  * empty list a result happens to carry rather than the emptiness of a read.
  * Framework keys (`$NAME`, `$UI`) are not outputs and are left alone.
+ *
+ * A result reporting itself `pending` has its emptiness passed over, on the
+ * terms `PENDING_KEY` states: a read still in flight is empty because it has
+ * not landed. Its failures are reported either way.
  */
-export const outputConcernsIn = (
+export const observedOutputsIn = (
   value: unknown,
   patternId?: string,
-): readonly RunPatternOutputConcern[] => {
+): readonly ObservedOutput[] => {
   if (!isObjectNotArray(value)) return [];
-  const concerns: RunPatternOutputConcern[] = [];
+  const pending = value[PENDING_KEY] === true;
+  const observed: ObservedOutput[] = [];
   for (const [key, member] of Object.entries(value)) {
     if (key.startsWith("$")) continue;
     const concern: OutputConcernKind | undefined = reportsFailure(key, member)
       ? "error-branch"
-      : Array.isArray(member) && member.length === 0
+      : !pending && Array.isArray(member) && member.length === 0
       ? "no-rows"
       : undefined;
     if (concern === undefined) continue;
-    concerns.push({
-      concern,
-      key,
-      ...(patternId === undefined ? {} : { patternId }),
-      message: OUTPUT_CONCERN_MESSAGES[concern],
+    observed.push({
+      concern: {
+        concern,
+        key,
+        ...(patternId === undefined ? {} : { patternId }),
+        message: OUTPUT_CONCERN_MESSAGES[concern],
+      },
+      text: typeof member === "string" ? member : "",
     });
   }
-  return concerns;
+  return observed;
 };
 
 /**
- * `concerns` with each (pattern, output, kind) stated once, in the order they
+ * `observed` with each (pattern, output, kind) stated once, in the order they
  * were first read.
  *
  * A pattern materialized once per row of a list reports the same output as
  * many times, and a report that repeated it would say nothing the first entry
  * did not.
  */
-export const dedupedOutputConcerns = (
-  concerns: readonly RunPatternOutputConcern[],
-): readonly RunPatternOutputConcern[] => {
+export const dedupedObservedOutputs = (
+  observed: readonly ObservedOutput[],
+): readonly ObservedOutput[] => {
   const seen = new Set<string>();
-  const deduped: RunPatternOutputConcern[] = [];
-  for (const concern of concerns) {
+  const deduped: ObservedOutput[] = [];
+  for (const one of observed) {
     const key = JSON.stringify([
-      concern.patternId ?? null,
-      concern.key,
-      concern.concern,
+      one.concern.patternId ?? null,
+      one.concern.key,
+      one.concern.concern,
     ]);
     if (seen.has(key)) continue;
     seen.add(key);
-    deduped.push(concern);
+    deduped.push(one);
   }
   return deduped;
 };
+
+/**
+ * What the artifact keeps about `observed`: the same positions the model was
+ * told about, each with the text it was told nothing of. An output reporting
+ * no text contributes its position alone, so the two reports name the same
+ * set and a reader can line them up.
+ */
+export const observedOutputCause = (
+  observed: readonly ObservedOutput[],
+): string | undefined =>
+  observed.length === 0
+    ? undefined
+    : observed.map((one) =>
+      `${
+        one.concern.patternId ?? "this run's own result"
+      } ${one.concern.key} ` +
+      `(${one.concern.concern})${one.text === "" ? "" : `: ${one.text}`}`
+    ).join("\n");

@@ -1774,12 +1774,27 @@ the pattern that produced it — which for a composed one is the id its own
 Absent when there is nothing to say, and one entry per pattern, output and kind
 however many times a pattern was materialized.
 
-The failure's own TEXT never travels. A concern names what the model already
-holds: it wrote the composition, and a composed instance's outputs went through
-no release measurement, so the text is treated as every other thrown message
-this tool withholds is. What a model does with a named output is expose it under
-its own result schema and render it, where the release boundary measures it like
-any other value.
+A result reporting itself `pending` has its emptiness passed over, and only its
+emptiness. A read still in flight is empty because it has not landed, and a
+query over a served store is in flight for the whole of the run that issued it
+— so an empty output read then is a fact about the clock rather than about the
+data, while a failure read then is a failure either way. That the rows land on
+the PIECE rather than in this call's answer is the same fact from the other
+side: a reader composed here reports no error and no rows in one breath, and it
+is the absent error that says the read is sound.
+
+The failure's own TEXT never reaches the model. A concern names what the model
+already holds: it wrote the composition, and a composed instance's outputs went
+through no release measurement, so the text is treated as every other thrown
+message this tool withholds is. What a model does with a named output is expose
+it under its own result schema and render it, where the release boundary
+measures it like any other value.
+
+The text is kept in the artifact's `rawCauseMessage`, on the terms that field
+already states for thrown text: a composed instance is not something the model
+can address, so an operator reading the run back has nothing else to debug from,
+and the text cannot be recovered any other way. Each line names the same
+position the model was told about, so the two reports line up.
 
 What the answer's values may carry is measured against the ceiling a model's
 context has, which admits nothing: a model's context is outside every space, so
