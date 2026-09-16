@@ -314,13 +314,33 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
   });
 
   it("attaches row labels to reserved SQLite alias rows", async () => {
+    const rowCount = 2;
+    const schemaWritesByTarget = new Map<string, number>();
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    (runtime as any).editWithRetry = (fn: any, ...args: any[]) =>
+      originalEditWithRetry((writeTx) => {
+        const value = fn(writeTx);
+        const prepared = (writeTx as any).accessForTestingOnly
+          .buildPreparedDigestInput();
+        for (const input of prepared.writePolicyInputs ?? []) {
+          if (input.kind !== "schema" || input.target?.path?.length !== 0) {
+            continue;
+          }
+          const id = String(input.target.id);
+          schemaWritesByTarget.set(id, (schemaWritesByTarget.get(id) ?? 0) + 1);
+        }
+        return value;
+      }, ...args);
     const provider = runtime.storageManager.open(space) as unknown as {
       sqliteQuery: (...a: unknown[]) => Promise<unknown>;
     };
     const original = provider.sqliteQuery.bind(provider);
     provider.sqliteQuery = () =>
       Promise.resolve({
-        rows: [Object.fromEntries([["constructor", 1]])],
+        rows: Array.from(
+          { length: rowCount },
+          (_, i) => Object.fromEntries([["constructor", i + 1]]),
+        ),
         columns: [{ output: "constructor", table: "items", column: "id" }],
       });
     try {
@@ -364,18 +384,24 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
         await runtime.settled();
         expect(view.get().pending).toBe(false);
         expect(view.get().error).toBeUndefined();
-        expect(view.get().result).toEqual([[["constructor", 1]]]);
-        const rowLabel = cfcLabelViewForCell(
-          result.key("result").key(0).resolveAsCell(),
-        );
-        expect(cfcConfidentialityForObservationNode({
-          labelView: rowLabel,
-          logicalPath: [],
-        })).toContainEqual("secret");
-        expect(cfcConfidentialityForObservationNode({
-          labelView: rowLabel,
-          logicalPath: ["0", "1"],
-        })).toEqual(expect.arrayContaining(["secret", "column-secret"]));
+        expect(view.get().result).toEqual(Array.from(
+          { length: rowCount },
+          (_, i) => [["constructor", i + 1]],
+        ));
+        for (let i = 0; i < rowCount; i++) {
+          const rowCell = result.key("result").key(i).resolveAsCell();
+          const rowLabel = cfcLabelViewForCell(rowCell);
+          expect(cfcConfidentialityForObservationNode({
+            labelView: rowLabel,
+            logicalPath: [],
+          })).toContainEqual("secret");
+          expect(cfcConfidentialityForObservationNode({
+            labelView: rowLabel,
+            logicalPath: ["0", "1"],
+          })).toEqual(expect.arrayContaining(["secret", "column-secret"]));
+          const rowId = rowCell.getAsNormalizedFullLink().id;
+          expect(schemaWritesByTarget.get(rowId)).toBe(1);
+        }
       } finally {
         cancel();
       }
