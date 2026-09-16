@@ -774,12 +774,16 @@ describe("build", () => {
     it("returns undefined for anything that is not one", () => {
       expect(parseAggregate("{not json")).toBeUndefined();
       expect(parseAggregate('{"schema":99}')).toBeUndefined();
-      expect(parseAggregate('{"schema":1,"day":"x"}')).toBeUndefined();
+      expect(
+        parseAggregate(
+          JSON.stringify({ schema: MANIFEST_SCHEMA_VERSION, day: "x" }),
+        ),
+      ).toBeUndefined();
     });
 
     it("refuses a shape it would otherwise have to guess at", () => {
       const whole = {
-        schema: 1,
+        schema: MANIFEST_SCHEMA_VERSION,
         day: "2026-08-20",
         folded: [],
         states: {},

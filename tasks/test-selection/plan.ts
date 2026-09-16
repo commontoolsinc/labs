@@ -193,7 +193,13 @@ interface Filling {
   /** The suites whose overheads this lane has paid. */
   suites: Set<string>;
 
-  /** The invocation units whose overheads this lane has paid. */
+  /**
+   * The invocation units whose overheads this lane has paid, each named
+   * by its suite as well as its path. Two suites name the same path where
+   * they run the same file two ways — the two postures of a pattern
+   * integration test, a package built for two targets — and each of those
+   * is a runner started and a module loaded of its own.
+   */
   units: Set<string>;
 
   /** Seconds of work placed here so far. */
@@ -227,6 +233,11 @@ function capabilityCost(manifest: Manifest, capability: string): number {
   return manifest.calibration.setupCost[capability] ?? 0;
 }
 
+/** How a lane names one unit of one suite among the units it has opened. */
+function openedUnit(entry: ManifestEntry): string {
+  return `${entry.suite}\t${entry.unit}`;
+}
+
 /**
  * What adding this identity to this lane would cost: its own time times
  * its suite's correction, plus its suite's overhead where the lane is not
@@ -245,7 +256,7 @@ function marginalCost(
   const correction = fitted?.correction ?? 1;
   let cost = entry.cost * correction * repeats;
   if (!lane.suites.has(entry.suite)) cost += fitted?.overhead ?? 0;
-  if (!lane.units.has(entry.unit)) cost += fitted?.unitOverhead ?? 0;
+  if (!lane.units.has(openedUnit(entry))) cost += fitted?.unitOverhead ?? 0;
   for (const capability of input.capabilities.get(entry.suite) ?? []) {
     if (!lane.capabilities.has(capability)) {
       cost += capabilityCost(manifest, capability);
@@ -334,7 +345,7 @@ function place(
   lane.selections.push({ entry, reason, repeats });
   lane.load += spot.cost;
   lane.suites.add(entry.suite);
-  lane.units.add(entry.unit);
+  lane.units.add(openedUnit(entry));
   for (const capability of input.capabilities.get(entry.suite) ?? []) {
     lane.capabilities.add(capability);
   }

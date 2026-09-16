@@ -725,6 +725,46 @@ describe("plan", () => {
       expect(result.lanes[0]!.projectedSeconds).toBeCloseTo(8, 6);
     });
 
+    it("charges each suite for a unit path the two of them share", () => {
+      // Two suites name the same path where they run the same file two
+      // ways: the two postures of a pattern integration test, a package
+      // built for two targets. Each is a runner started and a module
+      // loaded of its own, so a lane holding both pays for both.
+      const manifest = sampleManifest({
+        entries: ["pattern-integration", "pattern-integration-opposite"].map(
+          (suite) =>
+            sampleEntry({
+              k: "integration",
+              s: "patterns",
+              n: "poll",
+              v: suite,
+            }, {
+              cost: 1,
+              suite,
+              unit: "packages/patterns/integration/all.test.ts",
+            }),
+        ),
+        calibration: {
+          setupCost: {},
+          suites: {
+            "pattern-integration": {
+              overhead: 0,
+              correction: 1,
+              unitOverhead: 5,
+            },
+            "pattern-integration-opposite": {
+              overhead: 0,
+              correction: 1,
+              unitOverhead: 5,
+            },
+          },
+          prologue: 0,
+        },
+      });
+      const result = run(manifest, { lanes: 1 });
+      expect(result.lanes[0]!.projectedSeconds).toBeCloseTo(12, 6);
+    });
+
     it("applies the suite's fitted correction to a measured cost", () => {
       const manifest = sampleManifest({
         entries: entries(1, () => ({ cost: 2 })),

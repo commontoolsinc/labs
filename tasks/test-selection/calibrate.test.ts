@@ -402,10 +402,12 @@ describe("calibrate", () => {
     });
 
     it("believes no per-unit cost from batches of about one size", () => {
-      // The same reasoning in the units the regressor counts: a suite
-      // whose batches have all held four or five units says nothing about
-      // what the nine hundredth would cost, and the difference between
-      // those batches is the runner rather than the suite.
+      // The same reasoning in the units the regressor counts. These
+      // batches differ from each other by three units where fifty is
+      // what a per-unit cost has to be spread over before it is
+      // believed, so what separates them is the runner rather than the
+      // suite, and a slope fitted across them would be read out at the
+      // nine hundredth unit.
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES + 1 }, (_, i) => ({
           suite: "s",
@@ -425,7 +427,7 @@ describe("calibrate", () => {
       // it has always been fitted. The second reading bends off the line,
       // by a quarter of what a unit count has to vary by before it is
       // believed. That is the case the widest gap between two batches'
-      // sizes passes — 50 units against 166 — and the gap left after the
+      // sizes passes several times over, and the gap left after the
       // tests are accounted for does not.
       const bends = Math.round(MIN_UNIT_SPAN_UNITS / 4);
       for (const bend of [0, bends]) {

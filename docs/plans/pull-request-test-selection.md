@@ -2495,7 +2495,7 @@ The object carries:
 - every dial it was built with, so the manifest explains its own
   behavior and two manifests can be diffed for why they differ;
 - the calibration numbers: `setupCost` per capability, and
-  `suiteOverhead` and `correction` per suite;
+  `suiteOverhead`, `correction` and `unitOverhead` per suite;
 - every item: its complete identity or identities, optional variants
   included, its suite, its file, its cost, its score, the inputs behind
   that score, its flake rate, its repeat count, and the last day

@@ -526,7 +526,7 @@ keeps them in its rolling aggregate over `COST_WINDOW_DAYS`, the same
 window it measures a test's cost over, and fits `setupCost`,
 `suiteOverhead`, `correction` and `unitOverhead` from them for the next
 manifest. A lane writes one record per capability it opens and three per
-batch — what it was packed to spend, what it spent, and how many units it
+batch — what it spent, what it was packed to spend, and how many units it
 opened — and it is the second and third that make a fit possible. Neither
 can be recovered from the records the batch produced: those say what the
 tests took rather than what the packer expected them to take, and a unit
