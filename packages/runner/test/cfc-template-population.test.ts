@@ -815,6 +815,48 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
       ),
     ).toEqual([]);
   });
+
+  it("puts a labeled element's own label at the slot that holds it", async () => {
+    // The marked-read case earlier in this block runs over an element
+    // carrying no label, so the empty join it measures would be empty
+    // whatever the classification did. This one gives the element a label of
+    // its own, which is what a coordinator's marked scope stops consuming,
+    // and asks where that label is instead.
+    //
+    // It is at the slot. `list.set(members)` writes a link per member, and
+    // the link write mints the source document's label at the slot the link
+    // lands in, so a reader reaching element 0 through the container consumes
+    // it. The marked wiring reads add nothing beyond that; the same reads
+    // unmarked add the coarser copy over the transaction.
+
+    const rt = makeRuntime();
+    await seedDoc(rt, "gp-el-lab", { n: 1 }, [
+      { path: [], label: { confidentiality: ["el-label"] } },
+    ]);
+    const criteriaId = await seedDoc(rt, "gp-criteria-lab", { keep: true }, []);
+    const listId = await buildGenericList(rt, "gp-list-lab", criteriaId, [
+      "gp-el-lab",
+    ]);
+
+    const slotEntries = entriesOf(listId).filter((entry) =>
+      entry.origin === "link" && entry.path.join("/") === "0"
+    );
+    expect(slotEntries.flatMap((entry) => entry.label.confidentiality ?? []))
+      .toEqual(["el-label"]);
+
+    const probeSlot = (tx: ReturnType<Runtime["edit"]>) =>
+      tx.read(readAddress(listId, ["0"]), { meta: linkResolutionProbe });
+
+    const marked = await flowJoinOf(rt, (tx) => {
+      tx.runWithAmbientReadMeta(machineryRead, () => probeSlot(tx));
+    });
+    expect(marked).toEqual([]);
+
+    // The control: the same probe unmarked does consume it, so the label the
+    // marked probe left alone was there to be consumed.
+    const unmarked = await flowJoinOf(rt, (tx) => probeSlot(tx));
+    expect(unmarked).toContainEqual("el-label");
+  });
 });
 
 describe("CFC template population (Stage A): class-split resolution", () => {

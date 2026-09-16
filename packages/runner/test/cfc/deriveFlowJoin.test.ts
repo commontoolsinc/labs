@@ -40,6 +40,12 @@ function scan(
   machinery: boolean,
   nonRecursive = shape === "shape",
 ): IFCLabel {
+  // A reference-identity read issued by the runtime's own wiring is not an
+  // observation at all: `forEachFlowObservation` skips it beside the ones a
+  // dereference trace covers, so it consumes nothing and marks no space.
+  if (shape === "followRef" && machinery) {
+    return { confidentiality: [], integrity: [] };
+  }
   const template = (entry: LabelMapEntry) =>
     (entry.origin === "structure" || entry.origin === "derived") &&
     entry.path.includes("*");
