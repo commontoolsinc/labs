@@ -185,6 +185,21 @@ Deno.test("a tile and the page name a schema rather than saying nothing useful",
   assertEquals(body.includes("temporarily unavailable"), false);
 });
 
+Deno.test("a body that is not an object declares no version", async () => {
+  // A body is untrusted input, and JSON has values that are not objects.
+  // Neither of these declares a version, and asking one whether it owns a
+  // field is a question only an object answers.
+  const name = `${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`;
+  for (const body of ["null", "42", '"a string"']) {
+    const error = await assertRejects(
+      () => newestManifest({ fetchImpl: storeOf({ [name]: body }) }),
+      Error,
+      "not a manifest",
+    );
+    assertEquals(error instanceof ManifestSchemaError, false);
+  }
+});
+
 Deno.test("a version inherited from the prototype is not a declared one", async () => {
   // A body declares a version in its own field or not at all. Reading an
   // inherited one would refuse an object that is no manifest at all, and
