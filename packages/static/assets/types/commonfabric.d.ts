@@ -81,20 +81,12 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
 //
 
 /**
- * The nominal brand of `FabricInstance`: an interned symbol, so that every
- * realm and every copy of this module agree on its value, and so that the
- * member it keys can never be mistaken for data -- a symbol-keyed member has
- * no place in a schema. A runtime instance never carries the key.
- */
-export const FABRIC_INSTANCE_BRAND = Symbol.for("@commonfabric/FabricInstance");
-
-/**
- * The nominal brand of `FabricInstancePlus`, declared on it and on
- * `FabricInstance`, whose type in a declaration is the `PlusType` the instance
- * may hold: an interned symbol, so that every realm and every copy of this
- * module agree on its value, and so that the member it keys can never be
- * mistaken for data -- a symbol-keyed member has no place in a schema. A
- * runtime instance never carries the key.
+ * The nominal brand of `FabricInstancePlus`, and so of `FabricInstance`, whose
+ * type in a declaration is the `PlusType` the instance may hold: an interned
+ * symbol, so that every realm and every copy of this module agree on its
+ * value, and so that the member it keys can never be mistaken for data -- a
+ * symbol-keyed member has no place in a schema. A runtime instance never
+ * carries the key.
  */
 export const FABRIC_INSTANCE_PLUS_BRAND = Symbol.for(
   "@commonfabric/FabricInstancePlus",
@@ -318,15 +310,10 @@ export declare const FabricPrimitive:
  */
 export interface FabricInstancePlus<PlusType> {
   /**
-   * The nominal brand that tells a `FabricInstance` from any other object with
-   * the two clone methods, in the type system. It exists only in the type
-   * system: a runtime instance never carries the key.
-   */
-  readonly [FABRIC_INSTANCE_BRAND]: true;
-
-  /**
-   * The nominal brand that carries `PlusType`. It exists only in the type
-   * system, as the brand above does.
+   * The nominal brand that tells an instance from any other object with the
+   * two clone methods, in the type system, and whose type is the `PlusType`
+   * the instance may hold. It exists only in the type system: a runtime
+   * instance never carries the key.
    */
   readonly [FABRIC_INSTANCE_PLUS_BRAND]: PlusType;
 
