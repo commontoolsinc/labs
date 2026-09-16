@@ -2911,6 +2911,85 @@ describe("piece schema compatibility", () => {
     ).toThrow(/enum\/const became more restrictive/);
   });
 
+  it("reads a bare enum's or const's type set from its values", () => {
+    // `{enum: [...]}` with no `type`, the spelling a literal union compiles
+    // to, admits exactly the types its values carry. So a `type: "string"`
+    // schema accepts a string enum whichever proof reaches it, and an enum
+    // candidate is judged by the enum rule rather than refused on type.
+
+    const states = ["open", "draft", "merged", "closed"];
+    expect(() => assertSchemaSubset({ enum: states }, { type: "string" }))
+      .not.toThrow();
+    expect(() => assertSchemaSubset({ const: "open" }, { type: "string" }))
+      .not.toThrow();
+
+    const argumentWith = (state: JSONSchema): Pattern =>
+      pattern(
+        { type: "object", properties: { state } },
+        oldPattern.resultSchema,
+      );
+    const resultWith = (state: JSONSchema): Pattern =>
+      pattern(
+        oldPattern.argumentSchema,
+        { type: "object", properties: { state } },
+      );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        argumentWith({ enum: states }),
+        argumentWith({ type: "string" }),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        argumentWith({ type: "string" }),
+        argumentWith({ enum: states }),
+      )
+    ).toThrow(/argument\.state: enum\/const became more restrictive/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        resultWith({ type: "string" }),
+        resultWith({ enum: states }),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        resultWith({ enum: states }),
+        resultWith({ type: "string" }),
+      )
+    ).toThrow(/result\.state: enum\/const became more restrictive/);
+  });
+
+  it("throws for a bare enum listing a value type the candidate does not accept", () => {
+    // Each listed value contributes the type the runtime validates it as:
+    // an integral number is an `integer`, and a `FabricPrimitive` its own
+    // class name, which an `object` schema accepts as well.
+
+    expect(() => assertSchemaSubset({ enum: ["a", 1] }, { type: "string" }))
+      .toThrow(/type integer is not accepted by the candidate schema/);
+    expect(() => assertSchemaSubset({ enum: [1, 2.5] }, { type: "number" }))
+      .not.toThrow();
+    expect(() => assertSchemaSubset({ enum: [1, 2.5] }, { type: "integer" }))
+      .toThrow(/type number is not accepted by the candidate schema/);
+    expect(() => assertSchemaSubset({ enum: [null] }, { type: "null" }))
+      .not.toThrow();
+    expect(() =>
+      assertSchemaSubset({ enum: [true, false] }, { type: "boolean" })
+    ).not.toThrow();
+    expect(() => assertSchemaSubset({ enum: [["a"]] }, { type: "array" }))
+      .not.toThrow();
+    expect(() => assertSchemaSubset({ enum: [{ a: 1 }] }, { type: "object" }))
+      .not.toThrow();
+
+    const bytes = {
+      enum: [new FabricBytes(new Uint8Array([1]))],
+    } as unknown as JSONSchema;
+    expect(() => assertSchemaSubset(bytes, { type: "FabricBytes" }))
+      .not.toThrow();
+    expect(() => assertSchemaSubset(bytes, { type: "object" })).not.toThrow();
+    expect(() => assertSchemaSubset(bytes, { type: "FabricHash" }))
+      .toThrow(/type FabricBytes is not accepted by the candidate schema/);
+  });
+
   it("treats `FabricPrimitive` types as subtypes of object (one-way)", () => {
     // A "FabricBytes" source widens safely into an "object" target; the
     // reverse narrows and must be flagged. Same-type stays compatible.
