@@ -172,7 +172,9 @@ describe("view-piece-registration", () => {
     registration!();
   });
 
-  it("cancels a partial graph when its stored identity changes", async () => {
+  it("installs a handler node without reading its stream's document", async () => {
+    // A handler registers on the stream its `$event` names; nothing about the
+    // stream's document has to be locally available for the graph to install.
     const event = runtime.getCell(space, "unavailable event", undefined);
     await runtime.editWithRetry((tx) =>
       root.withTx(tx).setMetaRaw(
@@ -182,7 +184,11 @@ describe("view-piece-registration", () => {
       )
     );
     pattern.nodes.push({
-      module: { type: "javascript", implementation: () => {} },
+      module: {
+        type: "javascript",
+        wrapper: "handler",
+        implementation: () => {},
+      },
       inputs: { $event: { $alias: { cell: "argument", path: [] } } },
       outputs: {},
     });
@@ -193,22 +199,16 @@ describe("view-piece-registration", () => {
       () => true,
     );
     expect(registration).toBeDefined();
-    expect(registration!.graphIsInstalled()).toBe(false);
+    expect(registration!.graphIsInstalled()).toBe(true);
     const replica = runtime.storageManager.open(space).replica as Required<
       ISpaceReplica
     >;
     {
       using _coverage = stub(replica, "hasLocalDocumentCoverage", () => false);
       expect(registration!.resume()).toBe(true);
-      expect(registration!.graphIsInstalled()).toBe(false);
+      expect(registration!.graphIsInstalled()).toBe(true);
     }
-    await runtime.editWithRetry((tx) =>
-      root.withTx(tx).setMetaRaw("patternIdentity", {
-        ...source,
-        identity: "replacement",
-      }, rawMetaWriteAuthorization)
-    );
-    expect(registration!.resume()).toBe(false);
+    registration!();
     expect(registration!.graphIsInstalled()).toBe(false);
     expect(root.get()).toEqual({ $UI: "confirmed" });
   });

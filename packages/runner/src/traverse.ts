@@ -709,10 +709,7 @@ function prepareAnyOfBranch(
   const types = resolved.type !== undefined
     ? (Array.isArray(resolved.type) ? resolved.type : [resolved.type])
     : undefined;
-  const required =
-    schemaTypeIncludesObject(resolved.type) && Array.isArray(resolved.required)
-      ? resolved.required as readonly string[]
-      : undefined;
+  const required = requiredValueProperties(resolved);
   return {
     optionIsFalse: false,
     merged,
@@ -721,6 +718,32 @@ function prepareAnyOfBranch(
     types,
     required,
   };
+}
+
+/**
+ * The `required` property names of `resolved` that a value has to carry:
+ * every required name except one whose property schema declares a stream.
+ * A stream position holds no value — its handle is minted from the schema
+ * alone — so its absence from a value says nothing about the value's shape.
+ * `undefined` when the schema admits no object or requires nothing.
+ */
+function requiredValueProperties(
+  resolved: JSONSchemaObj,
+): readonly string[] | undefined {
+  if (
+    !schemaTypeIncludesObject(resolved.type) ||
+    !Array.isArray(resolved.required)
+  ) {
+    return undefined;
+  }
+  const properties = isObjectNotArray(resolved.properties)
+    ? resolved.properties
+    : undefined;
+  return (resolved.required as readonly string[]).filter((name) =>
+    !ContextualFlowControl.declaresStream(
+      properties?.[name] as JSONSchema | undefined,
+    )
+  );
 }
 
 /**
@@ -5081,13 +5104,28 @@ export class SchemaObjectTraverser<V extends FabricValue>
           continue;
         }
         const propSchema = ContextualFlowControl.resolveSchemaRefs(subSchema);
-        if (!isObjectOrArray(propSchema) || propSchema.default == undefined) {
+        if (!isObjectOrArray(propSchema)) {
           continue;
         }
         const propAddress = {
           ...doc.address,
           path: appendToPath(doc.address.path, propKey),
         };
+        if (ContextualFlowControl.declaresStream(propSchema)) {
+          // A declared stream position is materialized whether or not the
+          // data names it: the handle is minted from the schema alone, the
+          // way an inline value at an asCell boundary is above, so a key the
+          // data lacks there is not a missing property. Nothing is traversed:
+          // the event schema describes what the stream accepts, not a value.
+          filteredObj[propKey] = this.objectCreator.createObject(
+            getNormalizedLink(propAddress, propSchema),
+            undefined,
+          );
+          continue;
+        }
+        if (propSchema.default == undefined) {
+          continue;
+        }
         if (SchemaObjectTraverser.hasAsCell(propSchema)) {
           const { ok: val, error } = this.traverseWithSchema({
             address: propAddress,
@@ -5417,11 +5455,9 @@ export function canBranchMatch(
   // Const/enum checks are omitted — property values may contain unresolved
   // links that would match after link resolution during traversal.
   if (isObjectOrArray(value)) {
-    if (
-      schemaTypeIncludesObject(resolved.type) &&
-      Array.isArray(resolved.required)
-    ) {
-      for (const req of resolved.required) {
+    const required = requiredValueProperties(resolved);
+    if (required !== undefined) {
+      for (const req of required) {
         // A `FabricSpecialObject`'s surface is class accessors, so its
         // membership test is prototype-chain `in`; the nominal brand key has no
         // runtime existence and is satisfied by construction (the `TODO`

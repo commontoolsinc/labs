@@ -413,6 +413,31 @@ export function createSigilLinkFromParsedLink(
 /**
  * Controls which `asCell` schema entries survive {@link sanitizeSchemaForLinks}.
  */
+/**
+ * Returns `schema` stamped as a stream position: a `stream` entry at the
+ * front of its `asCell` list, over the event schema the stream accepts. An
+ * `asCell` entry the event schema already carries describes the event and
+ * stays behind the stamp, which is the order the runtime reads a list of
+ * kinds in. A schema whose front entry is already `stream` is returned as it
+ * is. This is the declaration every link to a stream carries, since the
+ * document behind a stream holds nothing that says what the position is.
+ */
+export function declareStreamSchema(
+  schema: JSONSchema | undefined,
+): JSONSchema {
+  if (schema === undefined || schema === true) {
+    return { asCell: ["stream"] };
+  }
+  if (schema === false) {
+    return { not: true, asCell: ["stream"] };
+  }
+  const entries = Array.isArray(schema.asCell) ? schema.asCell : [];
+  const front = entries[0];
+  const frontKind = typeof front === "string" ? front : front?.kind;
+  if (frontKind === "stream") return schema;
+  return { ...schema, asCell: ["stream", ...entries] };
+}
+
 export enum KeepAsCell {
   // Strip all asCell entries (cell, opaque, and stream).
   None = "None",

@@ -3901,14 +3901,11 @@ export function llmDialog(
     }
     const { result, internal } = cells;
 
-    // Stream markers belong to every resolved instance; an initialized
-    // symbolic handle does not establish another actor's stored state.
+    // An empty `pinnedCells` belongs to every resolved instance; an
+    // initialized symbolic handle does not establish another actor's stored
+    // state.
     result.withTx(tx).setRawUntyped({
       ...result.withTx(tx).getRaw(),
-      addMessage: { $stream: true },
-      cancelGeneration: { $stream: true },
-      pinCell: { $stream: true },
-      unpinAllCells: { $stream: true },
       pinnedCells: result.withTx(tx).key("pinnedCells").get() ?? [],
     } as FabricValue);
 

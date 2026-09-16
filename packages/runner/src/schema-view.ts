@@ -591,8 +591,12 @@ export function materializeSchemaView(
     const narrowed = childSchema(schema, key);
     if (!Object.hasOwn(value, key)) {
       // A declared default stands in for an absent required key, exactly as it
-      // does for an eager read.
-      if (declaredDefault(narrowed) !== undefined) continue;
+      // does for an eager read, and so does a declared stream: its handle is
+      // minted from the schema alone.
+      if (
+        declaredDefault(narrowed) !== undefined ||
+        ContextualFlowControl.declaresStream(narrowed)
+      ) continue;
       return mismatch(`missing required property ${JSON.stringify(key)}`);
     }
     // A required property the schema does not select cannot be satisfied while
@@ -618,8 +622,11 @@ export function materializeSchemaView(
   );
 }
 
-/** The keys a reader sees: the data's own keys the schema selects, plus any
- * declared property that is absent but carries a default. */
+/**
+ * The keys a reader sees: the data's own keys the schema selects, plus any
+ * declared property that is absent but carries a default or declares a
+ * stream.
+ */
 const visibleKeys = (
   schema: JSONSchema | undefined,
   value: Record<string, FabricValue>,
@@ -630,7 +637,11 @@ const visibleKeys = (
   if (isObjectOrArray(schema) && isObjectOrArray(schema.properties)) {
     for (const key of Object.keys(schema.properties)) {
       if (Object.hasOwn(value, key)) continue;
-      if (declaredDefault(childSchema(schema, key)) === undefined) continue;
+      const narrowed = childSchema(schema, key);
+      if (
+        declaredDefault(narrowed) === undefined &&
+        !ContextualFlowControl.declaresStream(narrowed)
+      ) continue;
       keys.push(key);
     }
   }
@@ -726,6 +737,17 @@ function createObjectView(
       // a refusal carries, for the case that is not a refusal: the schema does
       // not require this key, so reading it is an ordinary miss, not a mismatch.
       tx.readValueOrThrow({ ...link, path: [...link.path, key] });
+      if (ContextualFlowControl.declaresStream(narrowed)) {
+        return readChild(
+          runtime,
+          tx,
+          link,
+          key,
+          narrowed,
+          cfcLabelView,
+          synced,
+        );
+      }
       const fallback = declaredDefault(narrowed);
       if (fallback === undefined) return undefined;
       return processDefaultValue(

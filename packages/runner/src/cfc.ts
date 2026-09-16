@@ -831,6 +831,17 @@ export class ContextualFlowControl {
     return typeof entry === "string" ? entry : entry?.kind;
   }
 
+  /**
+   * Whether `schema` declares a stream position: its outermost `asCell` entry
+   * is of kind `stream`. Such a position holds no value, and its handle is
+   * minted from the schema alone.
+   */
+  static declaresStream(schema: JSONSchema | undefined): boolean {
+    return ContextualFlowControl.getAsCellKind(
+      ContextualFlowControl.getAsCellValues(schema).at(0),
+    ) === "stream";
+  }
+
   static getAsCellScope(
     entry: AsCellEntry | undefined,
   ): SchemaScope | undefined {

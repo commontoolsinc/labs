@@ -654,7 +654,7 @@ declare module "@commonfabric/api" {
       scope?: CellScope;
       nodes: Set<NodeRef>;
       frame: Frame;
-      value?: FactoryInput<T> | T;
+      kind?: CellKind;
       name?: unknown;
       external?: unknown;
     };
@@ -1112,6 +1112,15 @@ export class CellImpl<T extends FabricValue>
     return this.#kind === "cell" || this.#kind === "readonly";
   }
 
+  /**
+   * The kind this cell was constructed as: `stream` for a handle minted for a
+   * stream position, `cell` otherwise. Read off the handle alone, with nothing
+   * read from storage, which is what a write boundary needs from it.
+   */
+  get kind(): CellKind {
+    return this.#kind;
+  }
+
   [cfcLabelViewSymbol](): CfcLabelView | undefined {
     return cloneCfcLabelView(this.#cfcLabelView);
   }
@@ -1336,7 +1345,9 @@ export class CellImpl<T extends FabricValue>
       ? resolveExternalRootRefForStructure(resolvedToValueLink.schema)
       : resolvedToValueLink.schema;
     if (
-      ContextualFlowControl.getAsCellValues(streamSchema).at(0) === "stream"
+      ContextualFlowControl.getAsCellKind(
+        ContextualFlowControl.getAsCellValues(streamSchema).at(0),
+      ) === "stream"
     ) {
       return true;
     }
@@ -3480,7 +3491,8 @@ export class CellImpl<T extends FabricValue>
 
   /**
    * Export cell metadata for introspection, similar to Reactive's export method.
-   * If the cell has a link, it's included as 'external'.
+   * If the cell has a link, it's included as 'external'. `kind` is the cell's
+   * kind, which is what tells a stream from a value cell.
    */
   export(): {
     cell: OpaqueCell<unknown>;
@@ -3489,7 +3501,7 @@ export class CellImpl<T extends FabricValue>
     scope?: CellScope;
     nodes: Set<NodeRef>;
     frame: Frame;
-    value?: FactoryInput<T> | T;
+    kind?: CellKind;
     name?: unknown;
     external?: unknown;
   } {
@@ -3509,10 +3521,7 @@ export class CellImpl<T extends FabricValue>
       scope: isCellScope(this.#_link.scope) ? this.#_link.scope : undefined,
       nodes: cellNodes.get(this.#causeContainer.cell) ?? new Set(),
       frame: this.#frame,
-      // Cast needed: stream sentinel marker isn't actually of type T
-      value: this.#kind === "stream"
-        ? { $stream: true } as unknown as T
-        : undefined,
+      kind: this.#kind,
       name: this.#causeContainer.cause,
       external: this.#_link.id
         ? this.getAsWriteRedirectLink({

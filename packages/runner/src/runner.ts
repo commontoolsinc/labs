@@ -12,6 +12,7 @@ import {
   toCompactDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
+import { SCHEMA_META_MEMBER } from "@commonfabric/data-model-schema/schema-refs";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -48,7 +49,6 @@ import {
   type Frame,
   isModule,
   isPattern,
-  isStreamValue,
   type JSONSchema,
   JSONValue,
   type Module,
@@ -103,7 +103,10 @@ import {
   type RawNodeCause,
 } from "./module.ts";
 import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
-import { writeResultSchemaMeta } from "./result-schema-meta.ts";
+import {
+  resultSchemaMetaSpelling,
+  writeResultSchemaMeta,
+} from "./result-schema-meta.ts";
 import {
   resolveScopeKey,
   type ScopeKey,
@@ -2984,6 +2987,18 @@ export class Runner {
         link: derivedSigilLink,
       });
       setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
+      const streamSchema = declaredStreamSchema(descriptor);
+      if (streamSchema !== undefined) {
+        // A stream's document holds no value, so its `schema` metadata is
+        // what lets a reader of the document alone tell that it is a stream.
+        // Written blind on every setup, as the back-link above is, so a
+        // cold-cache resume pays no probe read for it.
+        derivedCell.setMetaRaw(
+          SCHEMA_META_MEMBER,
+          resultSchemaMetaSpelling(streamSchema),
+          rawMetaWriteAuthorization,
+        );
+      }
       if (manifestMatch === -1) {
         // Seed the build-time default for the freshly created cell. The
         // manifest entry and this default are written together in one
@@ -3757,10 +3772,10 @@ export class Runner {
    * the root and heal only the nested pieces the controller never sees (a
    * profile mounted via a #wish, say). Profiles are plain `inSpace` pieces and
    * are never a space's `defaultPattern` (only the controller sets that), so
-   * they are correctly not excluded. Called only on the rare brick path, so the
-   * space-cell read costs nothing on a healthy start. A read failure returns
-   * false: better to attempt the idempotent, fail-closed repair than to leave a
-   * piece bricked because a lookup raced.
+   * they are correctly not excluded. Called only on the rare repair path, so
+   * the space-cell read costs nothing on a healthy start. A read failure
+   * returns false: better to attempt the idempotent, fail-closed repair than
+   * to leave a piece bricked because a lookup raced.
    */
   #isSpaceDefaultPattern(resultCell: Cell<unknown>): boolean {
     try {
@@ -3783,6 +3798,28 @@ export class Runner {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Whether the internal-cell manifest stored on `resultCell` names every
+   * derived internal cell of `pattern`. `false` says no setup for this pattern
+   * ran over this document, which is what the cold-start repair in
+   * `#startCore()` turns on.
+   */
+  #storedManifestCovers(resultCell: Cell<unknown>, pattern: Pattern): boolean {
+    const descriptors = pattern.derivedInternalCells ?? [];
+    if (descriptors.length === 0) return true;
+    const stored = convertibleJsFromFabricValue(
+      resultCell.getMetaRaw("internal", { meta: ignoreReadForScheduling }),
+    );
+    if (!Array.isArray(stored)) return false;
+    const manifest = stored as InternalCellDescriptor[];
+    return descriptors.every((descriptor) =>
+      manifest.some((entry) =>
+        deepEqual(entry.partialCause, descriptor.partialCause) &&
+        entry.kind === descriptor.kind
+      )
+    );
   }
 
   /** Convert a module to pattern format */
@@ -4468,12 +4505,9 @@ export class Runner {
     // is inert by design (keyless patterns change only via a fresh run()).
     const setupPatternWatcher = () => {
       // A hot-swap targets a DIFFERENT program over this piece's existing doc:
-      // the incoming pattern's internal cells — handler { "$stream": true }
-      // markers included — and its argument-schema defaults have never been
-      // materialized here. A fresh start() does that in its setup phase;
-      // skipping it makes every handler node of the incoming pattern fail as
-      // "Handler used as lift" at instantiation (the 2026-07-22 estuary
-      // home-root swap failure). Run the same setup state first, and only
+      // the incoming pattern's internal cells and its argument-schema
+      // defaults have never been materialized here. A fresh start() does
+      // that in its setup phase, so run the same setup state first, and only
       // tear down the old nodes once it commits — a failed setup leaves the
       // running pattern in place instead of a dead piece.
       const swapToPattern = (
@@ -4555,10 +4589,10 @@ export class Runner {
         // lease-lost abort) AFTER commit() resolved — so the running
         // graph is replaced only once the setup is DURABLY accepted
         // (waveSettlementOf). On withdrawal the OLD graph stays: v2
-        // running against withdrawn setup is the "Handler used as lift"
-        // failure class, while old-graph-plus-new-pointer is a coherent
-        // not-yet-swapped state a later pointer write (or reactivation)
-        // repairs.
+        // running against withdrawn setup would read internal cells that
+        // setup never materialized, while old-graph-plus-new-pointer is a
+        // coherent not-yet-swapped state a later pointer write (or
+        // reactivation) repairs.
         void (async () => {
           try {
             this.#applySetupState(
@@ -4910,136 +4944,132 @@ export class Runner {
     // WITHOUT a setup phase. A nested/embedded piece — a profile mounted via a
     // `#wish`, say — is instantiated by the runtime's start walk, and no
     // pattern watcher is armed yet to self-heal (setupPatternWatcher runs only
-    // AFTER a successful instantiate). If such a piece's stored doc predates its
-    // pattern's setup (a pre-manifest internal-cell layout, or a handler stream
-    // added after the doc was created), the `{ "$stream": true }` markers were
-    // never materialized and instantiation throws "Handler used as lift … marker
-    // was never written". A fresh run() would materialize them; this is the same
-    // repair the home ROOT got in startEnsuredDefaultPattern, reachable at last
-    // for the nested pieces that never pass through it.
+    // AFTER a successful instantiate). Such a piece's stored doc can have been
+    // set up by one version of its pattern and then pointed at another with no
+    // setup for it: the internal cells the new version's setup would have
+    // materialized — a handler's stream among them — have no manifest entry
+    // and no result projection reaching them, and nothing about the stored
+    // doc changes on its own. A fresh run() would materialize them; this is
+    // the same repair the home ROOT gets in startEnsuredDefaultPattern,
+    // reachable here for the nested pieces that never pass through it.
     //
-    // The repair moves no durable identity pointer; this setup replays the
-    // pattern the pointer already names. On exactly that
-    // failure, re-run the pinned pattern's OWN setup state (samePattern=true:
-    // materializes the missing internal cells but leaves the existing argument
-    // — the piece's data — untouched; no roll-forward, no user-data rewrite),
-    // then retry once. Fail-closed: a non-matching or failed repair rethrows the
-    // ORIGINAL error, so the caller's cleanup leaves the piece exactly as it was.
-    // Only the plain start path is repaired — a caller-supplied `useTx` is a
-    // setup/run transaction that is already materializing state and never hits
-    // this failure, so it is skipped rather than reasoned about.
+    // The trigger is that stored state and nothing else: a setup-completion
+    // marker naming another version, and a manifest missing one of this
+    // pattern's derived internal cells. The repair moves no durable identity
+    // pointer; it replays the pattern the pointer already names
+    // (samePattern=true: materializes the missing internal cells but leaves
+    // the existing argument — the piece's data — untouched; no roll-forward,
+    // no user-data rewrite). Fail-closed: a repair that cannot proceed throws
+    // and leaves the piece exactly as it was. Only the plain start path is
+    // repaired — a caller-supplied `useTx` is a setup/run transaction that is
+    // already materializing state, so it is skipped rather than reasoned about.
     const instantiateInitialPattern = (
       pattern: Pattern,
       ref: { identity: string; symbol: string } | undefined,
       useTx?: IExtendedStorageTransaction,
     ) => {
-      try {
+      if (
+        useTx !== undefined ||
+        ref === undefined ||
+        storedSetupMarker(resultCell, ref) !== "other" ||
+        this.#storedManifestCovers(resultCell, pattern) ||
+        // The root/default pattern is the PieceController's to repair (it has
+        // the richer roll-forward + clear-error path); defer to it there.
+        this.#isSpaceDefaultPattern(resultCell)
+      ) {
         instantiatePattern(pattern, useTx);
-      } catch (instantiateError) {
-        if (
-          useTx !== undefined ||
-          ref === undefined ||
-          !isMissingStreamMarkerFailure(instantiateError) ||
-          // The root/default pattern is the PieceController's to repair (it has
-          // the richer roll-forward + clear-error path); defer to it there.
-          this.#isSpaceDefaultPattern(resultCell)
-        ) {
-          throw instantiateError;
-        }
-        // Tear down the nodes the failed attempt partially wired.
-        cancelNodes?.();
-        // ONE repair transaction holds the precondition re-read, the setup
-        // state, the retry instantiate, AND prepare — staged together or not at
-        // all, so there is no window in which setup commits and the retry then
-        // races it. EVERY step sits inside the try: any failure (including the
-        // precondition read or prepare throwing) aborts the tx and rethrows the
-        // ORIGINAL instantiate error, so the piece is left exactly as it was.
-        const repairTx = this.#runtime.edit();
-        // Self-minted repair tx inside `#startCore()` — piece machinery with
-        // no scheduler run around it; bookkeeping per serving-loop.md
-        // §3d (reachable server-side via the demand loader's start).
-        this.#runtime.stampServerRun(repairTx, {
-          actionId: `piece-start-repair/${resultCell.sourceURI}`,
-          kind: "bookkeeping",
-        });
-        try {
-          // Precondition: the pinned identity must still equal the ref diagnosed
-          // above. A concurrent updater or boot may have moved it; re-running
-          // the stale pinned pattern's setup would roll that newer identity
-          // back. The read is through repairTx so it also participates in commit
-          // conflict detection (mirrors the controller repair's
-          // expectedPatternIdentity).
-          const currentRef = getPatternIdentityRef(resultCell.withTx(repairTx));
-          if (
-            currentRef === undefined ||
-            currentRef.identity !== ref.identity ||
-            currentRef.symbol !== ref.symbol
-          ) {
-            throw instantiateError;
-          }
-          this.#applySetupState(
-            repairTx,
-            pattern,
-            ref,
-            // No re-stage, even though this doc's setup state may well have
-            // been staged by an older version: the precondition just re-read
-            // the pinned identity, so this is the SAME pattern repairing its
-            // own internal cells, not an update. Re-pointing the argument here
-            // would rewrite user data on a narrow instantiation repair.
-            {
-              sameStoredSetup: true,
-              restageStoredArgument: false,
-              // Inert here — `#applySetupState` reads only the two fields
-              // above — but stated rather than defaulted, because this repair
-              // deliberately leaves the piece's ARGUMENT alone even though its
-              // precondition proves the pattern is the same one.
-              storedSetupMatches: false,
-            },
-            undefined,
-            resultCell,
-          );
-          // Instantiate into the SAME tx: it reads the just-staged setup writes,
-          // so the once-missing markers resolve and node wiring succeeds.
-          instantiatePattern(pattern, repairTx);
-          this.#runtime.prepareTxForCommit(repairTx);
-        } catch {
-          repairTx.abort();
-          throw instantiateError;
-        }
-        // Staging succeeded, so this is a SPECULATIVE start: the graph is wired
-        // locally and start() returns success. The commit is deliberately not
-        // awaited (consistent with every other start path), so its outcome can
-        // NOT be thrown back to a start() that has already resolved. Instead a
-        // committed-with-{error} result OR a rejected commit Promise tears the
-        // piece down so a later start() re-heals it rather than taking the
-        // "already started" fast path over a dead registration.
-        //
-        // Scope-safe teardown: unregister ONLY this start's own `cancel`. A
-        // stop+restart during the pending commit installs a NEWER cancel under
-        // the same key; deleting `this.#cancels[key]` unconditionally (as
-        // cleanup() does) would clobber that live registration and orphan its
-        // graph. Delete the key only while it still holds our cancel — the same
-        // guard createDeferredStartOwnership uses — and always drop/invoke ours.
-        const teardownAfterFailedCommit = () => {
-          if (registrations.get(key) === cancel) registrations.delete(key);
-          this.#allCancels.delete(cancel);
-          cancel();
-        };
-        const repairActionId = `piece-start-repair/${resultCell.sourceURI}`;
-        repairTx.addCommitCallback((_committedTx, result) => {
-          if (result.error) {
-            // Surfaced BEFORE the teardown (stage P2-F, the F1
-            // fold-in): the pre-P2-F path tore the registration down
-            // silently — correct liveness, invisible failure.
-            this.#reportPieceStartCommitFailure(repairActionId, result.error);
-            teardownAfterFailedCommit();
-          }
-        });
-        repairTx.commit().catch((error) => {
-          this.#reportPieceStartCommitFailure(repairActionId, error);
-          teardownAfterFailedCommit();
-        });
+        return;
       }
+      // ONE repair transaction holds the precondition re-read, the setup
+      // state, the instantiate, AND prepare — staged together or not at all,
+      // so there is no window in which setup commits and the instantiate then
+      // races it. EVERY step sits inside the try: any failure aborts the tx
+      // and rethrows, so the piece is left exactly as it was.
+      const repairTx = this.#runtime.edit();
+      // Self-minted repair tx inside `#startCore()` — piece machinery with
+      // no scheduler run around it; bookkeeping per serving-loop.md
+      // §3d (reachable server-side via the demand loader's start).
+      this.#runtime.stampServerRun(repairTx, {
+        actionId: `piece-start-repair/${resultCell.sourceURI}`,
+        kind: "bookkeeping",
+      });
+      try {
+        // Precondition: the pinned identity must still equal `ref`. A
+        // concurrent updater or boot may have moved it; re-running the stale
+        // pinned pattern's setup would roll that newer identity back. The read
+        // is through repairTx so it also participates in commit conflict
+        // detection (mirrors the controller repair's expectedPatternIdentity).
+        const currentRef = getPatternIdentityRef(resultCell.withTx(repairTx));
+        if (
+          currentRef === undefined ||
+          currentRef.identity !== ref.identity ||
+          currentRef.symbol !== ref.symbol
+        ) {
+          throw new Error(
+            `Piece \`${resultCell.sourceURI}\` moved to another pattern ` +
+              "while its setup was being repaired",
+          );
+        }
+        this.#applySetupState(
+          repairTx,
+          pattern,
+          ref,
+          // No re-stage, even though this doc's setup state was staged by
+          // another version: the precondition just re-read the pinned
+          // identity, so this is the SAME pattern repairing its own internal
+          // cells, not an update. Re-pointing the argument here would rewrite
+          // user data on a narrow instantiation repair.
+          {
+            sameStoredSetup: true,
+            restageStoredArgument: false,
+            // Inert here — `#applySetupState` reads only the two fields
+            // above — but stated rather than defaulted, because this repair
+            // deliberately leaves the piece's ARGUMENT alone even though its
+            // precondition proves the pattern is the same one.
+            storedSetupMatches: false,
+          },
+          undefined,
+          resultCell,
+        );
+        // Instantiate into the SAME tx: it reads the just-staged setup writes.
+        instantiatePattern(pattern, repairTx);
+        this.#runtime.prepareTxForCommit(repairTx);
+      } catch (repairError) {
+        repairTx.abort();
+        throw repairError;
+      }
+      // Staging succeeded, so this is a SPECULATIVE start: the graph is wired
+      // locally and start() returns success. The commit is deliberately not
+      // awaited (consistent with every other start path), so its outcome can
+      // NOT be thrown back to a start() that has already resolved. Instead a
+      // committed-with-{error} result OR a rejected commit Promise tears the
+      // piece down so a later start() re-heals it rather than taking the
+      // "already started" fast path over a dead registration.
+      //
+      // Scope-safe teardown: unregister ONLY this start's own `cancel`. A
+      // stop+restart during the pending commit installs a NEWER cancel under
+      // the same key; deleting `this.#cancels[key]` unconditionally (as
+      // cleanup() does) would clobber that live registration and orphan its
+      // graph. Delete the key only while it still holds our cancel — the same
+      // guard createDeferredStartOwnership uses — and always drop/invoke ours.
+      const teardownAfterFailedCommit = () => {
+        if (registrations.get(key) === cancel) registrations.delete(key);
+        this.#allCancels.delete(cancel);
+        cancel();
+      };
+      const repairActionId = `piece-start-repair/${resultCell.sourceURI}`;
+      repairTx.addCommitCallback((_committedTx, result) => {
+        if (result.error) {
+          // Surfaced BEFORE the teardown, so a lost registration is a
+          // reported failure rather than a silent one.
+          this.#reportPieceStartCommitFailure(repairActionId, result.error);
+          teardownAfterFailedCommit();
+        }
+      });
+      repairTx.commit().catch((error) => {
+        this.#reportPieceStartCommitFailure(repairActionId, error);
+        teardownAfterFailedCommit();
+      });
     };
 
     const resultCellForRead = tx ? resultCell.withTx(tx) : resultCell;
@@ -5117,11 +5147,7 @@ export class Runner {
     // Sync path - instantiate immediately
     currentPatternKey = patternIdentityKey(initialRef);
     const initialPattern = this.#resolveToPattern(initialResolved);
-    instantiateInitialPattern(
-      initialPattern,
-      initialRef,
-      tx,
-    );
+    instantiateInitialPattern(initialPattern, initialRef, tx);
     runningRef = initialRef;
     runningPattern = initialPattern;
     if (!doNotUpdateOnPatternChange) {
@@ -5923,12 +5949,14 @@ export class Runner {
     resultCell: Cell<any>,
   ): boolean {
     const readTx = this.#familyReadTx(resultCell.tx?.tx.scopeKeyIdentity);
+    // The document record is what is probed, not its value: a stream's
+    // document carries metadata and no value at all.
     const present = (link: NormalizedFullLink): boolean =>
       readTx.readOrThrow(
         {
           space: link.space,
           id: link.id,
-          path: ["value"],
+          path: [],
           ...(link.scope !== undefined && { scope: link.scope }),
         },
         { meta: ignoreReadForScheduling },
@@ -5976,13 +6004,14 @@ export class Runner {
     // Presence probes on a read transaction of their own, so an absent
     // document enters neither the caller's dependencies nor its commit's
     // read set: the run that follows the name-sync reads these for real.
-    // The document itself is what is probed, not a value read through a
-    // schema, which answers an absent document with the schema's default.
-    // A cell nothing has written yet — a derived cell whose producer never
-    // ran — reads absent here too, and holds the run once; the probes stop
-    // at a budget (`NAMING_PROBE_BUDGET`), and a budget spent reads absent
-    // as well: a hold costs one name-sync, a wrong local verdict costs a
-    // conflicting commit.
+    // The document record itself is what is probed, not a value read
+    // through a schema, which answers an absent document with the schema's
+    // default, and not the value alone, which a stream's document never
+    // holds. A cell nothing has written at all — a derived cell no setup has
+    // materialized — reads absent here, and holds the run once; the probes
+    // stop at a budget (`NAMING_PROBE_BUDGET`), and a budget spent reads
+    // absent as well: a hold costs one name-sync, a wrong local verdict
+    // costs a conflicting commit.
     const readTx = this.#familyReadTx(identity);
     const cell = resultCell.withTx(readTx);
     let probes = this.#namingProbeBudget;
@@ -5997,7 +6026,7 @@ export class Runner {
         {
           space: link.space,
           id: link.id,
-          path: ["value"],
+          path: [],
           ...(link.scope !== undefined && { scope: link.scope }),
         },
         { meta: ignoreReadForScheduling },
@@ -8401,6 +8430,19 @@ export class Runner {
   }
 
   /**
+   * Whether a graph is registered for `resultCell`'s document: the piece is
+   * running, and a start would return on its fast path without touching the
+   * stored doc. A subpath cell answers for its root document.
+   */
+  isRunning<T>(resultCell: Cell<T>): boolean {
+    const link = resultCell.getAsNormalizedFullLink();
+    const rootCell = link.path.length > 0
+      ? this.#runtime.getCellFromLink({ ...link, path: [] })
+      : resultCell;
+    return this.#cancels.has(this.#getDocKey(rootCell));
+  }
+
+  /**
    * Stop a pattern. This will cancel the pattern and all its children.
    *
    * TODO: This isn't a good strategy, as other instances might depend on behavior
@@ -9380,48 +9422,48 @@ export class Runner {
   }
 
   /**
-   * If the final target of the link chain is a stream, return the first link
-   * as `streamLink`. When the inputs carry a `$event` key — i.e. the node was
-   * authored as a handler — but the chain does not end in a stream marker,
-   * return what it resolved to instead (`eventTarget`), so the caller can
-   * report why the node cannot be instantiated as a handler.
+   * The stream a handler node registers on, parsed from its `$event` input,
+   * or `undefined` for an action node. A node is a handler exactly when its
+   * module carries the handler wrapper, and its stream is whatever `$event`
+   * names: nothing is read at that target, which holds no value for a stream.
    *
-   * @param inputs
-   * @param base
-   * @param tx
-   * @returns
+   * A node that is one thing and shaped like the other is refused. A handler
+   * with no `$event` has nothing to register on. An action binding a `$event`
+   * is the shape a handler lowered where a lift belongs takes, and running it
+   * as an action would run a handler body as a computation.
    */
-  #resolveJavaScriptStreamLink(
+  #handlerStreamLink(
+    module: Module,
     inputs: FabricExecValue,
     base: NormalizedFullLink,
-    tx: IExtendedStorageTransaction,
-  ): {
-    streamLink?: NormalizedFullLink;
-    eventTarget?: { link?: NormalizedFullLink; value: FabricValue };
-  } {
-    if (!isObjectOrArray(inputs) || !("$event" in inputs)) return {};
-
-    // Sigil-only: `$event` is builder-generated and always unwraps to a sigil
-    // link; a residual `$alias` here could only be an embedded pattern's
-    // binding, which must not be followed at this level.
-    // Narrowing, not papering over: `$event` is a sigil link, which IS a
-    // `FabricValue`. Only the exec-typed container widens it here, and the
-    // sigil-only invariant above is what licenses the assertion.
-    let value = inputs.$event as FabricValue;
-    let lastLink: NormalizedFullLink | undefined;
-    while (isWriteRedirectLink(value)) {
-      lastLink = resolveLink(
-        this.#runtime,
-        tx,
-        parseLink(value, base),
-        "writeRedirect",
-      );
-      value = tx.readValueOrThrow(lastLink);
+    name: string | undefined,
+  ): NormalizedFullLink | undefined {
+    const event = isObjectOrArray(inputs) && "$event" in inputs
+      ? inputs.$event
+      : undefined;
+    const label = name ? `node \`${name}\`` : "node";
+    if (module.wrapper === "handler") {
+      if (event === undefined) {
+        throw new Error(`Handler ${label} has no \`$event\` input`);
+      }
+      // `$event` is builder-generated and always a sigil redirect link; a
+      // residual `$alias` here could only be an embedded pattern's binding,
+      // which must not be followed at this level.
+      if (!isWriteRedirectLink(event)) {
+        throw new Error(
+          `Handler ${label}'s \`$event\` input is not a link (got: ${
+            toCompactDebugString(event, { maxLength: 80 })
+          })`,
+        );
+      }
+      return parseLink(event, base);
     }
-
-    return isStreamValue(value)
-      ? { streamLink: parseLink(inputs.$event, base) }
-      : { eventTarget: { link: lastLink, value } };
+    if (event !== undefined) {
+      throw new Error(
+        `Lift ${label} binds a \`$event\` input, which only a handler takes`,
+      );
+    }
+    return undefined;
   }
 
   #createPatternFrame(
@@ -10487,12 +10529,6 @@ export class Runner {
       schedulerRehydration,
     }: JavaScriptNodeContext,
   ): void {
-    if (isObjectOrArray(inputs) && "$event" in inputs) {
-      throw new Error(
-        "Handler used as lift, because $stream: true was overwritten",
-      );
-    }
-
     const previousResultCellRef: JavaScriptActionResultCells = {
       byScope: new Map(),
     };
@@ -10885,22 +10921,15 @@ export class Runner {
       inputsCell: plan.inputsCell,
     };
 
-    const { streamLink, eventTarget } = this.#resolveJavaScriptStreamLink(
+    const streamLink = this.#handlerStreamLink(
+      module,
       inputs,
       resultCell.getAsNormalizedFullLink(),
-      tx,
+      name,
     );
     if (streamLink) {
       this.#instantiateJavaScriptHandlerNode({ ...context, streamLink });
       return;
-    }
-    if (eventTarget) {
-      // The node was authored as a handler ($event input), but its stream
-      // marker did not resolve. Report what actually happened instead of
-      // misclassifying the node as a lift.
-      throw new Error(
-        describeHandlerStreamFailure(name, eventTarget, resultCell),
-      );
     }
 
     this.#instantiateJavaScriptActionNode(context);
@@ -11795,73 +11824,16 @@ function getTxDebugActionId(
 }
 
 /**
- * Explain why a node authored as a handler ($event input) could not be
- * instantiated as one. The historical error here ("$stream: true was
- * overwritten") was misleading: the by-far most common cause is that the
- * marker read returned undefined because nothing was ever written at the
- * derived location — e.g. piece state persisted before the internal-cell
- * manifest format (#3911) keeps its markers elsewhere — not that anything
- * overwrote it.
+ * The schema of a derived internal cell its pattern declares as a stream, or
+ * `undefined` for one it declares as a value cell.
  */
-function describeHandlerStreamFailure(
-  name: string | undefined,
-  eventTarget: { link?: NormalizedFullLink; value: FabricValue },
-  resultCell: Cell<any>,
-): string {
-  const prefix = `Handler used as lift: ${
-    name ? `node "${name}"` : "node"
-  }'s $event input`;
-
-  if (eventTarget.link === undefined) {
-    return `${prefix} is not a stream reference (got: ${
-      toCompactDebugString(eventTarget.value, { maxLength: 80 })
-    })`;
-  }
-
-  const where = `${eventTarget.link.id}${
-    eventTarget.link.path.length > 0
-      ? ` at path [${eventTarget.link.path.join(", ")}]`
-      : ""
-  }`;
-
-  if (eventTarget.value === undefined) {
-    let hint = "";
-    try {
-      const internalMeta = resultCell.getMetaRaw("internal", {
-        meta: ignoreReadForScheduling,
-      });
-      if (internalMeta !== undefined && !Array.isArray(internalMeta)) {
-        hint = " This piece's internal metadata is a single-cell link " +
-          "(pre-manifest format), so its persisted state predates the " +
-          "current runtime's internal-cell layout; recreate the piece to " +
-          "repair it.";
-      }
-    } catch {
-      // Diagnostic only — never mask the primary error.
-    }
-    return `${prefix} resolves to ${where}, which reads undefined — the ` +
-      `{ "$stream": true } marker was never written there.${hint}`;
-  }
-
-  return `${prefix} resolves to ${where}, whose value is not a stream ` +
-    `marker — { "$stream": true } was overwritten (found: ${
-      toCompactDebugString(eventTarget.value, { maxLength: 80 })
-    })`;
-}
-
-/**
- * True only for the "marker was never written" variant of the handler-stream
- * failure above: a piece instantiated over a stored doc whose setup never
- * materialized the handler's `{ "$stream": true }` marker (a pre-manifest
- * internal-cell layout, or a handler stream added after the doc was created).
- * That is the case a fresh setup pass repairs. The sibling variants — "is not a
- * stream reference" and "was overwritten" — are NOT setup-missing and must not
- * match, so this keys on the distinctive `never written` phrasing rather than
- * the shared `Handler used as lift` prefix.
- */
-export function isMissingStreamMarkerFailure(error: unknown): boolean {
-  return error instanceof Error &&
-    error.message.includes("marker was never written");
+function declaredStreamSchema(
+  descriptor: { readonly schema?: JSONSchema },
+): JSONSchema | undefined {
+  const entry = ContextualFlowControl.getAsCellValues(descriptor.schema).at(0);
+  return ContextualFlowControl.getAsCellKind(entry) === "stream"
+    ? descriptor.schema
+    : undefined;
 }
 
 /**

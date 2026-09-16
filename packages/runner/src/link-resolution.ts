@@ -54,10 +54,15 @@ export type ResolvedFullLink = NormalizedFullLink & {
  * `$defs`. Such a schema selects every value, so it says nothing the
  * schema a resolution is already carrying does not, and a hop onto a link
  * bearing one keeps carrying rather than adopting it. `false` is not one
- * of these — it selects nothing, which is information.
+ * of these — it selects nothing, which is information. Nor is a schema
+ * carrying an `asCell` entry: it selects every value too, but it declares
+ * what the position holds — a stream, say — which the carried schema cannot
+ * say for it.
  */
 const schemaConstrainsNothing = (schema: JSONSchema | undefined): boolean =>
-  schema === undefined || ContextualFlowControl.isTrueSchema(schema);
+  schema === undefined ||
+  (ContextualFlowControl.isTrueSchema(schema) &&
+    ContextualFlowControl.getAsCellValues(schema).length === 0);
 
 export const MAX_PATH_RESOLUTION_LENGTH = 100;
 
