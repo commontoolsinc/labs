@@ -450,6 +450,21 @@ describe("build", () => {
       expect(folded.aggregate.files).toEqual({ [KEY]: UNIT });
     });
 
+    it("gives no surface to a state key that names no identity", () => {
+      // The aggregate is stored input like every other object in the
+      // store, so a key that cannot be read back into a test is passed
+      // over rather than thrown on. The state stays where it is and
+      // nothing downstream is built from it: the manifest is built from
+      // the identities the surfaces place.
+      const carried = emptyAggregate("2026-08-20");
+      carried.states["not an identity key"] = emptyState();
+      carried.states[KEY] = emptyState();
+      const folded = new Fold(carried, NO_ALIASES, "2026-08-20").finish();
+      expect(folded.states.has("not an identity key")).toBe(true);
+      expect(folded.surfaces.has("not an identity key")).toBe(false);
+      expect(folded.surfaces.has(KEY)).toBe(true);
+    });
+
     it("drops a carried file for an identity it holds no state for", () => {
       // The files are seeded from the states and written back from the
       // surfaces those seeded, so the map cannot name an identity the
