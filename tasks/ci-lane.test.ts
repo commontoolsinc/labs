@@ -1592,18 +1592,17 @@ describe("what a lane records about itself", () => {
     // reader that took it apart itself could not part company with the
     // writer.
     expect(batchMeasurement(batchMeasurementName("workspace-unit", false)))
-      .toEqual({ suite: "workspace-unit", measured: false });
+      .toEqual({ suite: "workspace-unit", measured: false, kind: "spent" });
     expect(batchMeasurement(batchMeasurementName("workspace-unit", true)))
-      .toEqual({ suite: "workspace-unit", measured: true });
+      .toEqual({ suite: "workspace-unit", measured: true, kind: "spent" });
     expect(batchMeasurement("ci-lane setup deno")).toBeUndefined();
     expect(batchMeasurement("ci-lane batch ")).toBeUndefined();
   });
 
   it("names what a measured batch cost apart from an unmeasured one", async () => {
     // Instrumenting a run costs it time, and how much is a property of
-    // the suite rather than a constant. One correction fitted over both
-    // would charge every unmeasured run part of what an instrumented one
-    // costs, and charge a measured one less than it takes.
+    // the suite rather than a constant, so the name records which kind of
+    // run the measurement came from.
     const spooledNames = async (coverage?: { dir: string }) => {
       const workDir = await Deno.makeTempDir({ prefix: "lane-measured-" });
       const spool = await Deno.makeTempDir({ prefix: "lane-spool-" });
@@ -1636,6 +1635,44 @@ describe("what a lane records about itself", () => {
     expect(await spooledNames({ dir: "/coverage" })).toContain(
       `ci-lane batch workspace-unit${MEASURED_BATCH_SUFFIX}`,
     );
+  });
+
+  it("writes what a batch spent beside what it was packed to spend", async () => {
+    // The publisher fits a suite's cost beyond its tests from the pair,
+    // and reads a batch only where both halves are there. What the packer
+    // expected cannot be recovered from the records the batch produced,
+    // because those say what the tests took instead.
+    const workDir = await Deno.makeTempDir({ prefix: "lane-planned-" });
+    const spool = await Deno.makeTempDir({ prefix: "lane-spool-" });
+    try {
+      await runBatch(
+        {
+          suite: suite({ id: "workspace-unit", units: ["one"] }),
+          units: [],
+          runs: new Map(),
+        },
+        lane,
+        workDir,
+        spool,
+        {},
+        undefined,
+        42.5,
+      );
+      const written: string[] = [];
+      for await (const entry of Deno.readDir(spool)) {
+        if (entry.isFile) {
+          written.push(await Deno.readTextFile(`${spool}/${entry.name}`));
+        }
+      }
+      const spooled = written.join("");
+      expect(spooled).toContain('ci-lane batch workspace-unit"');
+      expect(spooled).toContain('ci-lane planned batch workspace-unit"');
+      // The figure travels as a duration, so it arrives in milliseconds.
+      expect(spooled).toContain('"durationMs":42500');
+    } finally {
+      await Deno.remove(workDir, { recursive: true });
+      await Deno.remove(spool, { recursive: true });
+    }
   });
 
   /**

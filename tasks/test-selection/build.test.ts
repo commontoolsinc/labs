@@ -318,6 +318,55 @@ describe("build", () => {
       expect([...read.surfaces.keys()]).toEqual([KEY]);
       expect([...read.durations.keys()]).toEqual([KEY]);
     });
+
+    it("keeps a lane's measurements of itself for the cost model", () => {
+      // Left out of everything scored, and not discarded either: what
+      // the packer charges a lane beyond its tests is fitted from them.
+      // One group is one lane's artifact, so a batch's two halves are
+      // here together.
+      const read = readReport(
+        stored(CI_NAME, context(), [
+          record(),
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+            durationMs: 14_800,
+          }),
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+            durationMs: 92_000,
+          }),
+          record({
+            test: {
+              k: "gate",
+              s: "ci",
+              n: "ci-lane planned batch workspace-unit",
+            },
+            durationMs: 40_000,
+          }),
+        ]),
+        NO_ALIASES,
+      );
+      expect(read.lanes).toEqual([
+        { day: "2026-08-20", capability: "fuse", seconds: 14.8 },
+        { day: "2026-08-20", suite: "workspace-unit", planned: 40, spent: 92 },
+      ]);
+    });
+
+    it("keeps no lane measurement from a group nothing may read", () => {
+      const forked = context();
+      forked.ci!.fork = true;
+      expect(
+        readReport(
+          stored(CI_NAME, forked, [
+            record({
+              test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+              durationMs: 14_800,
+            }),
+          ]),
+          NO_ALIASES,
+        ).lanes,
+      ).toEqual([]);
+    });
   });
 
   describe("the fold", () => {
@@ -531,6 +580,49 @@ describe("build", () => {
       aggregate.states[KEY] = held;
       const parsed = parseAggregate(JSON.stringify(aggregate))!;
       expect(costSeconds(parsed.states[KEY]!, "2026-08-20")).toBe(4);
+    });
+
+    it("carries what lanes measured into the next run", () => {
+      // The fit reads a week of them, and a publisher run folds a few
+      // hours of objects, so they survive the aggregate rather than
+      // being read again each time.
+      const aggregate = emptyAggregate("2026-08-20");
+      aggregate.lanes = [
+        { day: "2026-08-20", capability: "fuse", seconds: 14.8 },
+        { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
+      ];
+      expect(parseAggregate(JSON.stringify(aggregate))?.lanes)
+        .toEqual(aggregate.lanes);
+    });
+
+    it("drops a stored lane measurement it cannot read", () => {
+      // Each one stands alone, so one that will not read is dropped by
+      // itself rather than taking a week of measurements with it. The
+      // fit reads every figure in one as a number, and a stored
+      // `Infinity` or `NaN` arrives here as `null`.
+      const older = { ...emptyAggregate("2026-08-20") } as Record<
+        string,
+        unknown
+      >;
+      older.lanes = [
+        { day: "2026-08-20", capability: "fuse", seconds: "a while" },
+        { day: "2026-08-20", suite: "runner-unit", planned: 10 },
+        { day: "2026-08-20", suite: "runner-unit", planned: NaN, spent: 30 },
+        { day: 7, capability: "fuse", seconds: 1 },
+        "fuse took a while",
+        null,
+        { day: "2026-08-20", capability: "fuse", seconds: 2.1 },
+      ];
+      expect(parseAggregate(JSON.stringify(older))?.lanes).toEqual([
+        { day: "2026-08-20", capability: "fuse", seconds: 2.1 },
+      ]);
+    });
+
+    it("reads an aggregate written before lanes measured themselves", () => {
+      expect(
+        parseAggregate(JSON.stringify(emptyAggregate("2026-08-20")))?.lanes,
+      )
+        .toBeUndefined();
     });
 
     it("reads a malformed unplaced list as nothing to compare against", () => {
@@ -959,6 +1051,97 @@ describe("a report holding a whole day", () => {
     );
     fold.add([stored(CI_NAME, context(), many)]);
     expect(fold.observations).toBe(many.length);
+  });
+});
+
+describe("the days a fold keeps a lane's measurements over", () => {
+  /** One lane's artifact: what a batch took, beside what it was charged. */
+  function laneRanOn(day: string, spentSeconds: number) {
+    return stored(
+      `labs/test-records/submissions/ci/v1/${
+        day.replaceAll("-", "/")
+      }/lane.ndjson`,
+      context({ startedAt: `${day}T00:00:00.000Z`, commit: `c-${day}` }),
+      [
+        record({
+          test: { k: "gate", s: "ci", n: "ci-lane batch runner-unit" },
+          durationMs: spentSeconds * 1000,
+        }),
+        record({
+          test: { k: "gate", s: "ci", n: "ci-lane planned batch runner-unit" },
+          durationMs: 10_000,
+        }),
+      ],
+    );
+  }
+
+  function keptAfterFolding(days: readonly string[]) {
+    const fold = new Fold(
+      emptyAggregate("2026-08-20"),
+      NO_ALIASES,
+      "2026-08-20",
+    );
+    for (const day of days) fold.add([laneRanOn(day, 30)]);
+    return fold.finish().aggregate.lanes;
+  }
+
+  it("keeps what a lane measured on a day inside the window", () => {
+    expect(keptAfterFolding(["2026-08-20"])).toEqual([
+      { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
+    ]);
+  });
+
+  it("keeps nothing a lane measured on a day the window cannot reach", () => {
+    // Reading one buys nothing, since the same `finish` that would keep
+    // it drops it again, and a bootstrap would hold sixty days of them
+    // at once.
+    const old = "2026-06-01";
+    expect(daysBetween(old, "2026-08-20")).toBeGreaterThan(COST_WINDOW_DAYS);
+    expect(keptAfterFolding([old])).toEqual([]);
+    expect(keptAfterFolding([old, "2026-08-20"])).toEqual(
+      keptAfterFolding(["2026-08-20"]),
+    );
+  });
+
+  it("keeps nothing whose day will not parse as one", () => {
+    // Both ends of the fold ask the same question, so a day that answers
+    // neither yes nor no is dropped at both rather than accepted at one.
+    const aggregate = emptyAggregate("2026-08-20");
+    aggregate.lanes = [
+      { day: "whenever", capability: "fuse", seconds: 14.8 },
+      { day: "2026-08-20", capability: "fuse", seconds: 2.1 },
+    ];
+    expect(
+      new Fold(aggregate, NO_ALIASES, "2026-08-20").finish().aggregate.lanes,
+    ).toEqual([{ day: "2026-08-20", capability: "fuse", seconds: 2.1 }]);
+  });
+
+  it("drops one it was already keeping once the window has passed it", () => {
+    // The two sides age separately. One already in the aggregate was
+    // inside the window when it arrived, and the window moved under it.
+    const aggregate = emptyAggregate("2026-08-20");
+    aggregate.lanes = [
+      { day: "2026-06-01", capability: "fuse", seconds: 14.8 },
+      { day: "2026-08-20", capability: "fuse", seconds: 2.1 },
+    ];
+    expect(
+      new Fold(aggregate, NO_ALIASES, "2026-08-20").finish().aggregate.lanes,
+    ).toEqual([{ day: "2026-08-20", capability: "fuse", seconds: 2.1 }]);
+  });
+
+  it("carries what lanes measured across a saved aggregate", () => {
+    const first = new Fold(
+      emptyAggregate("2026-08-20"),
+      NO_ALIASES,
+      "2026-08-20",
+    );
+    first.add([laneRanOn("2026-08-20", 30)]);
+    const saved = parseAggregate(JSON.stringify(first.finish().aggregate));
+    expect(saved).toBeDefined();
+    const second = new Fold(saved!, NO_ALIASES, "2026-08-20");
+    expect(second.finish().aggregate.lanes).toEqual([
+      { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
+    ]);
   });
 });
 

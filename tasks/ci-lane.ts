@@ -614,6 +614,7 @@ export async function runBatch(
   spool: string | undefined,
   env: Record<string, string>,
   coverage?: BatchCoverage,
+  plannedSeconds = 0,
 ): Promise<{
   ok: boolean;
   records: TestRecord[];
@@ -710,9 +711,23 @@ export async function runBatch(
   if (spool !== undefined) {
     spoolRecords(spool, [
       ...records,
+      // What the batch spent, and what it was packed to spend. Both are
+      // known only here: the second cannot be recovered from the records
+      // the batch produced, because those say what the tests took and
+      // not what the packer expected them to take. The publisher fits a
+      // suite's cost beyond its tests from the pair.
       timingRecord(
         batchMeasurementName(batch.suite.id, coverage !== undefined),
         seconds,
+        ok,
+      ),
+      timingRecord(
+        batchMeasurementName(
+          batch.suite.id,
+          coverage !== undefined,
+          "planned",
+        ),
+        plannedSeconds,
         ok,
       ),
     ]);
@@ -1268,6 +1283,7 @@ export async function runLane(
         // lane.
         opened.envFor(batch.suite.needs),
         batchCoverage(options, batch.suite.id, seen.coverage),
+        chosenFor(batch.suite.id, mine.selections).seconds,
       );
       conflicts.push(...result.conflicts);
       // The records decide, rather than the command's exit status: a
