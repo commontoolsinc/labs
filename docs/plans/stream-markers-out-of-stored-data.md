@@ -1,20 +1,23 @@
 # Stream markers out of stored data
 
-**Status:** design draft, not started. Investigated against `main` at
-`59e8a2540` (2026-09-15). Line references are to that tree.
+**Status:** stages 1 and 2 are implemented in open pull requests, #7583 and
+#7589, stacked in that order on `main`; neither has merged. Stage 3 is not
+started. Investigated against `main` at `59e8a2540` (2026-09-15); line
+references are to that tree unless an item names a stage branch.
 
 **Summary.** A handler's event stream is stored today as a document whose value
 is the sentinel `{ "$stream": true }`. That sentinel is the only thing handler
-instantiation reads to decide a node is a handler, and a whole repair apparatus
-exists to make that read succeed on documents whose setup never wrote it. The
+instantiation reads to decide a node is a handler, and the cold-start repairs
+are keyed on that read failing on documents whose setup never wrote it. The
 schema already knows which positions are streams — the `Stream<T>` brand
 becomes `asCell: ["stream"]` — so the runtime should not need a stored value
 to say the same thing. This plan moves stream-ness out of the value and into
 three places that are already durable: the link schema the builder emits, the
 module's own `wrapper: "handler"` flag, and a `schema` meta on the stream's
-document. Handler dispatch becomes structural, the marker-keyed repair
-machinery is deleted, and out-of-runtime consumers (FUSE, the shuttle listing,
-the state inspector) keep a one-document way to recognize a stream.
+document. Handler dispatch becomes structural, the cold-start repairs trigger
+on a structural mismatch instead of on the missing marker, and out-of-runtime
+consumers (FUSE, the shuttle listing, the state inspector) recognize a stream
+by following at most one schema reference from its document.
 
 The contract change to state up front: **a stream must be declared by schema,
 kind, or meta. A bare document can no longer be a stream.**
@@ -36,16 +39,19 @@ kind, or meta. A bare document can no longer be a stream.**
 
 Every other writer is hand-rolled: four fields in the llm-dialog builtin
 (`runner/src/builtins/llm-dialog.ts:3908`), the CLI test harness
-(`cli/lib/test-runner.ts:1369`), and 48 test files that build stream cells
-with `setRaw({ $stream: true })`.
+(`cli/lib/test-runner.ts:1369`), and the tests: eight files build a stream
+cell with `setRaw({ $stream: true })`, and some 45 more carry the literal in
+fakes and stored-document fixtures.
 
 ### The load-bearing reader
 
 `#resolveJavaScriptStreamLink` (`runner/src/runner.ts:9394`) follows the
 `$event` input through write redirects and reads the terminal value. Anything
 but the sentinel becomes a "Handler used as lift" failure (`runner.ts:10492`,
-`:10902`, `describeHandlerStreamFailure` at `:11806`). Everything downstream
-of that failure exists only because of the sentinel:
+`:10902`, `describeHandlerStreamFailure` at `:11806`). That failure class is
+the trigger for the cold-start repairs, whose causes are structural (a setup
+marker naming another version, a manifest missing an internal cell) and which
+therefore outlive the sentinel; only the keying goes:
 
 - `isMissingStreamMarkerFailure` (`runner.ts:11862`) and the cold-start
   nested-piece setup repair keyed on it (`runner.ts:4942`).
@@ -75,8 +81,11 @@ of that failure exists only because of the sentinel:
   `:554`, the shuttle listing's `kindOf` (`cli/lib/shuttle/listing.ts:434`),
   `state-inspector/model.ts:216` and `decode.ts:122`,
   `ui/.../cf-piece-menu.ts:155`. The CLI read guard
-  (`cli/lib/piece.ts:4707`) already answers from the link-derived schema
-  alone; only its comment still names the sentinel.
+  (`cli/lib/piece.ts:4707`) refuses on two signals, as its comment says: the
+  link-derived schema, and the stored value, which `detectCallableKind` reads
+  through `getRaw()` (`cli/lib/callable.ts:1226`) and hands to
+  `classifyCallableEntry` (`fuse/callables.ts:98`); `piece.test.ts:2617` pins
+  the value-only case.
 
 ### What already knows stream-ness without the value
 
@@ -114,14 +123,21 @@ emitted with the cell's sanitized schema (`builder/pattern.ts:509`). So the
 builder must stamp `asCell: ["stream"]` on both the descriptor schema and the
 alias schema it emits for a stream-kind cell.
 
-Once stamped, every path that reaches the stream through a stored link sees
-it: the `$event` sigil in stored node inputs and the result-field redirect both
-carry the descriptor/alias schema (manifest links are emitted with
-`includeSchema: true` at `runner.ts:2979`), and link resolution copies a
-stored redirect's schema onto the resolved link
+Once stamped, every path that reaches the stream through a link the builder or
+setup emits sees it: the `$event` sigil in stored node inputs and the
+result-field redirect both carry the descriptor/alias schema (manifest links
+are emitted with `includeSchema: true` at `runner.ts:2979`), and link
+resolution copies a stored redirect's schema onto the resolved link
 (`runner/src/link-resolution.ts:722`). `Cell.isStream` already resolves a
 content-addressed schema reference before looking for the stamp, so a stamp
 that rides as a reference is read the same way.
+
+A builtin that re-serializes a branch at run time is a separate writer.
+`getAsLink({ base })` carries a schema only when asked
+(`runner/src/link-utils.ts:391`), so `ifElse`, `when` and `unless`
+(`builtins/if-else.ts:77`, `when.ts:48`, `unless.ts:48`) must each ask for it
+when the selected branch declares a stream, or the link they store names the
+stream's document with nothing on it that says so.
 
 This bends one convention slightly: `asCell` normally describes the position
 that holds a handle, and the handle's own schema is the stripped one. Putting
@@ -142,7 +158,7 @@ handler that never fires.
 The dispatch rule:
 
 1. `module.wrapper === "handler"` and `$event` present: parse the `$event`
-   link and register on it. No value read. Once decision 1 lands, assert that
+   link and register on it. No value read. Stage 3 adds the assertion that
    the parsed link's schema declares a stream; that still reads nothing.
 2. Wrapper is `"handler"` and `$event` absent: throw, the node is malformed.
 3. No wrapper and `$event` present: throw with a message naming the
@@ -154,10 +170,13 @@ The dispatch rule:
 
 Hand-built handler nodes already carry the wrapper
 (`runner/test/ensure-piece-running.test.ts:694`,
-`cli/test/piece-verbs.test.ts:103`). The seven misuse tests at
-`runner/test/runner.test.ts:1528` through `:1738` omit it deliberately and
-bind `$event` to data or a literal; they keep failing, now on the structural
-check.
+`cli/test/piece-verbs.test.ts:103`). Of the seven tests at
+`runner/test/runner.test.ts:1528` through `:1738` that omit it, four exist to
+read a value at `$event` (a missing marker, an overwritten marker, the
+pre-manifest hint, the truncated diagnostic) and go with the value read; the
+three that bind `$event` to a literal stay and fail on the structural check,
+and a positive test beside them registers a handler on a stream whose document
+holds no value.
 
 A user-authored lift that legitimately wants an input named `$event` stays
 rejected, exactly as today. Rule 3 keeps that restriction on purpose.
@@ -170,7 +189,7 @@ with no value condition, `memory/v2/engine.ts:2188`) and still found by event
 auto-start, but a raw-value reader can no longer tell it is a stream without a
 cross-document lookup into the owning piece's manifest:
 
-- The state inspector would classify it as `owned-cell` labelled "(lineage)"
+- The state inspector would classify it as `owned-cell` labeled "(lineage)"
   (`state-inspector/model.ts:383`) and the `stream` entity kind would stop
   firing.
 - The shuttle listing classifies a position from its materialized value alone
@@ -180,11 +199,11 @@ cross-document lookup into the owning piece's manifest:
 - The FUSE entities view would project an empty owned document.
 - The FUSE piece view is mostly fine, because the bridge reads results through
   the pattern's result schema (`piece/src/ops/piece-controller.ts:4990`) and
-  its classifier consults the child cell's schema and handle
+  its classifier falls back to the child handle when the value says nothing
   (`fuse/cell-bridge.ts:4782`, keeping the entry at `:4787` even when the
-  value is undefined). The gap is nested objects: the tree builder's
-  value-only walk (`fuse/tree-builder.ts:554`) sees an undefined value and the
-  key vanishes from the JSON.
+  value is undefined; the schema argument only detects tools until stage 2).
+  The gap is nested objects: the tree builder's JSON sibling is built from
+  values (`fuse/tree-builder.ts:544`), so an undefined value drops the key.
 
 So setup writes a `schema` meta onto the derived stream document, carrying the
 stamped stream schema, at the same point it writes the `result` back-link. The
@@ -194,12 +213,21 @@ by `get()`, never reaches handler dispatch, and never confuses a schema-less
 proxy read. Cost: one extra meta write per stream per setup, in the transaction
 that already writes the back-link.
 
+In-runtime readers do not consult the meta today, which is why stage 3 gives
+`Cell.isStream` and the proxy a meta read as their last resort in place of the
+value read: a bare address to the stream document, with no stored link hop to
+carry a stamp, otherwise loses its declaration when the value read goes. The
+llm-dialog read and invoke tools dispatch on such an address
+(`runner/src/builtins/llm-dialog.ts:2067`, `:2078`), built from an
+LLM-supplied path with no schema (`:2050`).
+
 ## Stages
 
 Three PRs. The first keeps the value fallback so nothing that still holds a
-sentinel breaks; the last removes it. Stage 1 landed as #7583 and stage 2 as
-#7589, stacked on it; where either stage did something other than what the
-list below first said, the item says what happened and why.
+sentinel breaks; the last removes it. Stage 1 is open as #7583 and stage 2 as
+#7589, stacked on it. A checked item is done in that PR; an unchecked item
+under stage 1 or 2 is still owed there. Where a stage does something other
+than what the list first said, the item says what it does now and why.
 
 ### Stage 1 — Runner: stop writing, stop needing (#7583)
 
@@ -215,7 +243,8 @@ list below first said, the item says what happened and why.
       spelling, so with content-addressed schemas on it is a `cid:` reference
       and the declaration lives in the schema document it names; a raw-storage
       reader follows one reference, not none.
-- [x] Handler dispatch follows decision 2. `describeHandlerStreamFailure`,
+- [x] Handler dispatch follows decision 2, without rule 1's schema assertion,
+      which stage 3 adds. `describeHandlerStreamFailure`,
       `isMissingStreamMarkerFailure` and the `runner.ts:10492` throw are gone,
       and a lift binding `$event` is refused by name. The cold-start repairs
       stay, on structural triggers rather than the marker: a nested piece
@@ -223,9 +252,9 @@ list below first said, the item says what happened and why.
       lacks one of the pattern's internal cells, and the controller refuses a
       stopped root whose marker names another version and hands it to the
       existing repair (`Runner.isRunning()` keeps a running root out of it).
-      Deleting the repairs outright regressed nested pieces, which came up
-      with no result aliases. `nested-piece-setup-repair.test.ts` therefore
-      stays, rewritten for the structural trigger.
+      Without the repair a nested piece comes up with no result aliases, so
+      `nested-piece-setup-repair.test.ts` stays, rewritten for the structural
+      trigger.
 - [x] Remove the four hand-written sentinels in llm-dialog and confirm its
       result schema marks those fields as streams.
 - [x] `processDefaultValue` mints a stream-kind cell instead of a sentinel
@@ -239,6 +268,13 @@ list below first said, the item says what happened and why.
       case that added the proxy fallback and that `sidebar.tsx:84` still works
       around. Under this design it works only because the stored alias link
       carries the stamp.
+- [ ] `when` and `unless` carry the stamp on the link they write when the
+      selected branch declares a stream, as `ifElse` now does
+      (`builtins/if-else.ts` asks for `includeSchema` off
+      `declaresStream(resolvedRef.schema)`), and one test per builtin asserts
+      the emitted link's schema. Without it a stream chosen through either
+      resolves to a link with no stamp and no value, and its `send()` becomes
+      a value write once stage 3 lands.
 - [x] Not foreseen: every read path treats a declared stream position as a
       handle whether or not the data names it — the eager traversal, the
       schema view, the defaults path — with `required` checks exempting such
@@ -275,8 +311,11 @@ list below first said, the item says what happened and why.
       projection of a bare stream document, which `#materializeTreeValue`
       already leaves empty rather than failing. Both are follow-ups if anyone
       wants them.
-- [x] CLI read guard: already schema-only; update the comment at
-      `cli/lib/piece.ts:4694`.
+- [ ] CLI read guard: the comment at `cli/lib/piece.ts:4694` keeps naming
+      both of its signals, the link-derived schema and the stored value,
+      because `detectCallableKind` reads the value through `getRaw()`
+      (`cli/lib/callable.ts:1226`) until stage 3 removes that read. Stage 2's
+      rewrite of the comment claims one signal and reverts to two.
 - [x] Piece menu: already schema-first with a parent-schema fallback
       (`cf-piece-menu.ts:1851`); remove `isRawStreamMarker`.
 - [x] Test fixtures, in part. Every fixture that built a stream through a real
@@ -288,15 +327,19 @@ list below first said, the item says what happened and why.
       the way setup does, since their durable appends land on the stream's
       document, and their serving-side handles declare the stream too, since
       a send decides stream-or-write off the handle. The CLI test harness
-      (`test-runner.ts`) likewise. Pure fakes that answer the sentinel from
-      `getRaw` are deferred to stage 3 (see there): they exercise the value
+      (`test-runner.ts`) likewise. Pure fakes whose `getRaw` returns the
+      sentinel are deferred to stage 3 (see there): they exercise the value
       fallback that stage removes, and would be rewritten twice otherwise.
 - [x] Docs. The six live documents and the formal spec's encoding table now
       describe the declaration, and the formal spec says the marker is retired
       rather than renamed to `/Stream@1`. The builder README and the lunch-poll
-      deploy guide follow. Comments in pattern sources (`sidebar.tsx`,
-      `gideon-tests`, `gmail-agentic-search.tsx`) still mention the marker:
-      editing a pattern's source changes its identity, so they are left alone.
+      deploy guide follow. Comments in pattern sources (`sidebar.tsx:84`,
+      `gmail-agentic-search.tsx:1136`) still mention the marker: editing a
+      pattern's source changes its identity, so they are left alone.
+      `gideon-tests/test-cross-piece-client.tsx:71` is not a comment: its
+      handler branches on `innerValue.$stream` and reports "Stream not found"
+      for a stream set up under stage 1. It is a manual fixture that no CI
+      job dispatches; stage 3 rewrites it (see there).
 - [x] Not foreseen: a stream declared through a `$ref` into the schema's own
       `$defs`, or through a composition whose branches agree (`allOf` with
       plain constraints beside it, a uniform `anyOf`/`oneOf`), was not a
@@ -325,13 +368,29 @@ list below first said, the item says what happened and why.
       value check (`model.ts` and `decode.ts`), the shuttle listing's
       (`kindOf`), FUSE's `isStreamValue` in `callables.ts`, and `isStreamValue`
       in `runner/src/builder/types.ts` (and its re-export).
-- [ ] Rewrite the pure fakes deferred from stage 2, whose `getRaw` answers the
+- [ ] `Cell.isStream` and the query-result proxy read the stream document's
+      `schema` meta as their last resort, in place of the value: a meta read,
+      not a value read, so it taints nothing. This covers links a handler or
+      lift wrote into data before stage 1, which no setup pass rewrites
+      (`data-updating.ts:1283` stamps only a new write), and bare addresses to
+      the stream document, the llm-dialog dispatch at
+      `builtins/llm-dialog.ts:2067` among them.
+- [ ] Handler dispatch asserts that the parsed `$event` link's schema declares
+      a stream (decision 2, rule 1).
+- [ ] `detectCallableKind` stops reading the value (`cli/lib/callable.ts:1226`),
+      and the read-guard comment at `cli/lib/piece.ts:4694` then names one
+      signal.
+- [ ] Rewrite the pure fakes deferred from stage 2, whose `getRaw` returns the
       sentinel: the CLI's `piece-call`, `piece-connection`, `exec`,
       `exec-read-options`, `read-options-four-ways` and
       `verb-undeclared-field` doubles, and the inline-verb case in
       `piece.test.ts` that exists to pin the sentinel path. Each should carry
-      `schema: { asCell: ["stream"] }` or `isStream: () => true` and answer
+      `schema: { asCell: ["stream"] }` or `isStream: () => true` and return
       `undefined` from `getRaw`.
+- [ ] `gideon-tests/test-cross-piece-client.tsx` sends without inspecting the
+      stream's value, and its baseline is refreshed with
+      `deno task pattern-compat --update`, the documented remedy for the
+      identity change.
 - [ ] Decide the raw-document fixtures that model older data:
       `scripts/topics-export.test.ts`, `storage-subscription-filter.bench.ts`
       and the codec round-trip case in `data-model/test/codecs.test.ts`. The
@@ -342,17 +401,25 @@ list below first said, the item says what happened and why.
       pattern sources whose comments cannot change without changing the
       pattern's identity.
 
-Stage 3 can ship once every space that matters has had a setup pass under
-stage 1, which re-emits manifest links with stamped schemas. Documents that
-still hold a sentinel are harmless after stage 3: the value is ignored, and
-nothing reads it.
+Stage 3 has no observable precondition in the data. Setup re-emits only
+manifest links; a running piece reuses its setup without re-emitting them
+(`runner.ts:2838`); the setup marker records pattern identity, not a format
+(`runner.ts:3257`); and links written into data before stage 1 are never
+rewritten. So the meta-read fallback above is what lets the value read go, not
+a waiting period. Documents that still hold a sentinel are harmless after
+stage 3: the value is ignored, and nothing reads it.
 
 ## Testing
 
 - Every handler node in `runner/test` instantiates with no value at its
   `$event` target. Assert the derived document holds no value after setup.
-- The seven misuse tests at `runner.test.ts:1528` onward keep failing, with
-  the new message.
+- The three `refuses ...` tests at `runner.test.ts:1528` onward fail on the
+  structural check, with its message, and the positive test beside them
+  registers a handler on a stream whose document holds no value.
+- `when` and `unless` over a stream emit a link whose schema declares it, as
+  `ifElse` does.
+- A bare address to a meta-only stream document is a stream to `Cell.isStream`
+  and to the proxy, with nothing stored.
 - A lift whose inputs carry `$event` fails at instantiation with the
   lift-with-event-input message (the lunch-poll trap, pinned as a unit test).
 - `ensurePieceRunning` still auto-starts a piece from an event sent to a
@@ -379,9 +446,12 @@ nothing reads it.
 - **Root-level `asCell` on the derived cell's own schema.** Any code that calls
   `get()` on a derived stream cell with its own schema now gets a handle back.
   Audit `getDerivedInternalCell` callers; today none read a stream's value.
-- **Unstamped stored links during transition.** Pieces whose last setup ran
-  before stage 1 carry unstamped manifest links until their next setup pass.
-  The retained value fallback covers them; that is why stage 3 waits.
+- **Unstamped stored links.** Pieces whose last setup ran before stage 1 carry
+  unstamped manifest links until their next setup pass, and links a handler or
+  lift wrote into data before stage 1 are never rewritten. The value fallback
+  covers both until stage 3 and the meta-read fallback after it; a `send()`
+  through a link neither covers becomes a value write with no error, which is
+  the failure to watch for.
 - **The `.map` sub-pattern case.** The proxy fallback was added for it, and the
   sidebar pattern still documents the failure. Do not remove the fallback
   before the regression test is green.
