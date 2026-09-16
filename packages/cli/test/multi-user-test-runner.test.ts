@@ -311,18 +311,16 @@ describe(
 
     it("builds every requested flow-label mode into the participant runtime", async () => {
       const server = StandaloneMemoryServer.start();
-      try {
-        for (const mode of ["off", "observe", "persist"] as const) {
-          expect(
-            (await initParticipant(server, { cfcFlowLabels: mode }))
-              .cfcFlowLabels,
-          )
-            .toBe(mode);
-        }
-        expect((await initParticipant(server, {})).cfcFlowLabels).toBe("off");
-      } finally {
-        await server.close();
+      // Disposal retains both errors if the assertion and shutdown fail.
+      await using cleanup = new AsyncDisposableStack();
+      cleanup.defer(() => server.close());
+      for (const mode of ["off", "observe", "persist"] as const) {
+        expect(
+          (await initParticipant(server, { cfcFlowLabels: mode }))
+            .cfcFlowLabels,
+        ).toBe(mode);
       }
+      expect((await initParticipant(server, {})).cfcFlowLabels).toBe("off");
     });
 
     it("rejects an invalid flow-label mode before initializing a participant", async () => {
