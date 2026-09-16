@@ -168,15 +168,13 @@ const ForwardedMonthCaller = pattern<
  * month the read resolves, so the count the assertions make is the same on
  * both sides of the boundary rather than right for all but an instant.
  */
-const monthOffsetDate = (months: string): string =>
-  `date(strftime('%Y-%m', 'now', 'localtime') || '-15', '${months}')`;
-
 const seedCurrentMonth = handler<void, { db: SqliteDb }>((_, { db }) => {
-  const insert = (offset: string): string =>
+  const insert = (months: string): string =>
     "INSERT INTO rows_plaid_transaction (record_id, transaction_id, " +
     "account_id, date, amount, signed_amount, merchant_name, name, " +
     "pending, category_primary, iso_currency_code, status, deleted, " +
-    `deleted_at) VALUES (?, ?, ?, ${offset}, ` +
+    "deleted_at) VALUES (?, ?, ?, " +
+    `date(strftime('%Y-%m', 'now', 'localtime') || '-15', '${months}'), ` +
     "?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
   const row = (id: string) => [
     id,
@@ -193,8 +191,8 @@ const seedCurrentMonth = handler<void, { db: SqliteDb }>((_, { db }) => {
     0,
     "",
   ];
-  db.exec(insert(monthOffsetDate("+0 month")), row("current"));
-  db.exec(insert(monthOffsetDate("+1 month")), row("next"));
+  db.exec(insert("+0 month"), row("current"));
+  db.exec(insert("+1 month"), row("next"));
 });
 
 export default pattern(() => {
