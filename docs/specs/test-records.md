@@ -96,8 +96,12 @@ A record carries `outcome` (`pass`, `fail`, or `skip`), `durationMs` from
 the runner's own measurement (never a clock inside the test process, which
 several packages fake), and optionally `file`, the repository-relative
 source path when the producer reliably knows it — metadata, not identity.
-`cfcheck` items carry a zero duration: the batch is one TypeScript program
-and per-file durations do not exist there.
+A `cfcheck` item's duration is what the batch spent on that pattern's own
+files. The gate is its own runner and measures them itself: the compiler
+times each file it checks and each file it emits, and the batch charges
+every file to the one program that resolved it. The run's program-wide
+parse and bind belongs to no pattern and is in none of them, which is why
+those durations sum to less than the run takes.
 
 For a suite ingested from a JUnit report, `file` comes from one of two
 places and the second overrides the first. Deno names a case's class after

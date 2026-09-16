@@ -716,7 +716,7 @@ mechanism is a skip list rather than a selection list.
 
 ### Every invocation unit, and the identities inside it
 
-There are eight kinds of invocation unit across the topology, and two of
+There are nine kinds of invocation unit across the topology, and two of
 them hold more than one identity. One of the two holds almost everything:
 the workspace and runner unit shards alone carry 15,997 of the reference
 build's 17,999 executions.
@@ -726,17 +726,18 @@ build's 17,999 executions.
 | A `deno test` file | `workspace-unit`, `runner-unit`, `pattern-integration` and its ON arm, `package-integration` and its ON arm, `generated-patterns`, `cli-deno`, `pattern-reload` | Every bare `Deno.test` in the file, and every `it`, named as its describe chain joined with `" > "`. The container testcase Deno also reports is dropped at ingestion, so a `describe` is not an identity | The skip list, through the preload for a bare `Deno.test` and through the remapped `describe`/`it` for the rest. This is the row the whole section is about. |
 | A pattern file run by `cf test` | `pattern-unit` | One. The runner writes one record per pattern file | Nothing to reach: the file is the identity. |
 | A pattern file checked by the compatibility gate | `pattern-compat` | One, named `pattern-compat <key>`, which the task appends itself as each file's verdict is known | Nothing to reach. The task already takes `--only` to restrict which files it reads. |
+| A pattern file type-checked by `cfcheck` | `cfcheck` | One, named `cfcheck <path>`, carrying what the batch spent on that pattern's own files | Nothing to reach. The task takes `--only` the same way, and the unit is the path the diff names. |
 | A single-step arm of `integration.sh` | `cli-core` | One, named for its step | Nothing to reach. The script's own whole-invocation record is suite-level and belongs to no invocation unit at all. |
 | One gate command | `repo-gates`, `repo-history-gates` | One, named for the gate that ran | Nothing to reach. |
 | One `deno check` invocation | `typecheck` | One, named for the path group it checked, which the task records itself | Nothing to reach. |
-| A whole task carrying one record | `cfcheck`, `pattern-vintage` | One, for everything the task did | Nothing to reach, and nothing finer exists: the suite is its own identity. |
+| A whole task carrying one record | `pattern-vintage` | One, for everything the task did | Nothing to reach, and nothing finer exists: the suite is its own identity. |
 | A section of `fuse-exec.sh` | `cli-fuse` | The phases that section alone selects. The phases more than one section runs record against the suite instead, since they name no single section | Nothing to reach below the section. A mount comes up for the section, not for the phase, so its phases run or are skipped together. |
 
-Six of the eight rows are one identity per invocation, which is why this
+Seven of the nine rows are one identity per invocation, which is why this
 change is smaller than removing a concept sounds. The topology does not
 gain a mechanism for them; they simply stop being described as items
 holding one identity each and start being described as identities. The
-seventh, `cli-fuse`, holds the phases of whichever section ran, and there
+eighth, `cli-fuse`, holds the phases of whichever section ran, and there
 is nothing finer for the topology to reach, since a mount comes up for the
 section rather than for the phase.
 

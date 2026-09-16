@@ -161,7 +161,13 @@ describe("the test topology", () => {
       { test: { k: "gate", s: "repo", n: "check-test-aliases" } },
       { test: { k: "gate", s: "repo", n: "pattern-compat annotation.tsx" } },
       { test: { k: "gate", s: "repo", n: "pattern-vintage a b c" } },
-      { test: { k: "typecheck", s: "repo", n: "cfcheck a.tsx" } },
+      {
+        test: {
+          k: "typecheck",
+          s: "repo",
+          n: "cfcheck packages/patterns/annotation.tsx",
+        },
+      },
       { test: { k: "typecheck", s: "memory", n: "deno-check" } },
       {
         test: {
