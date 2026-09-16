@@ -71,6 +71,7 @@ function context(fields: Partial<RunContext> = {}): RunContext {
       workflow: "deno.yml",
       job: "Test (1/8)",
       event: "push",
+      fork: false,
     },
     os: "linux",
     arch: "x86_64",
@@ -150,10 +151,40 @@ describe("build", () => {
       });
     });
 
-    it("declines a fork run, whose records the fork authored", () => {
+    it("reads a fork run as a pull request", () => {
+      // See `docs/specs/test-records.md`, "Trust boundaries for
+      // consumers", for what the store's member gate leaves the fork flag
+      // meaning.
+
+      const forked = context({ branch: "fix-writes" });
+      forked.ci!.event = "pull_request";
+      forked.ci!.fork = true;
+      expect(provenance(forked, CI_NAME)).toEqual({
+        place: "pr",
+        source: "fix-writes",
+      });
+    });
+
+    it("reads a fork-marked push to main as a pull request", () => {
+      // A baseline is code the tree itself carries, and a run this
+      // repository cannot place reads as a fork, so one never stands as a
+      // baseline.
+
       const forked = context();
       forked.ci!.fork = true;
-      expect(provenance(forked, CI_NAME)).toBeUndefined();
+      expect(provenance(forked, CI_NAME)).toEqual({
+        place: "pr",
+        source: "main",
+      });
+    });
+
+    it("declines a run carrying no continuous-integration facts", () => {
+      // Where a run ran is read from those facts, so a context that is
+      // not a workstation's and carries none says nothing this can use.
+
+      const bare = context();
+      delete bare.ci;
+      expect(provenance(bare, CI_NAME)).toBeUndefined();
     });
 
     it("declines a report with no context", () => {
@@ -307,13 +338,14 @@ describe("build", () => {
       ).toEqual([]);
     });
 
-    it("reads nothing from a fork run", () => {
-      const forked = context();
+    it("reads a fork run's records", () => {
+      const forked = context({ branch: "fix-writes" });
+      forked.ci!.event = "pull_request";
       forked.ci!.fork = true;
       expect(
         readReport(stored(CI_NAME, forked, [record()]), NO_ALIASES)
-          .observations,
-      ).toEqual([]);
+          .observations.map((seen) => seen.place),
+      ).toEqual(["pr"]);
     });
 
     it("reads nothing from a lane measuring itself", () => {
@@ -425,8 +457,9 @@ describe("build", () => {
       ).toEqual([]);
     });
 
-    it("keeps no lane measurement from a group nothing may read", () => {
-      const forked = context();
+    it("keeps a fork run's measurements of itself", () => {
+      const forked = context({ branch: "fix-writes" });
+      forked.ci!.event = "pull_request";
       forked.ci!.fork = true;
       expect(
         readReport(
@@ -438,7 +471,7 @@ describe("build", () => {
           ]),
           NO_ALIASES,
         ).lanes,
-      ).toEqual([]);
+      ).toEqual([{ day: "2026-08-20", capability: "fuse", seconds: 14.8 }]);
     });
   });
 

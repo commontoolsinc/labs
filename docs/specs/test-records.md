@@ -421,8 +421,12 @@ an infra-managed variable of numeric actor ids): team members work from
 personal forks, so this keeps the team's own fork data while the
 public, immutable store accepts nothing authored by anyone else. A fork
 run by an unlisted actor, a fork run with no readable actor, and any
-fork run under an empty or missing list ship nothing. For runs that do
-ship, the relay composes each artifact's context (run identity and
+fork run under an empty or missing list ship nothing. A run is a fork run
+when the payload names both repositories and they differ, and when the
+payload names fewer than both, so a run this relay cannot place is gated
+as a fork and carries the flag that keeps it out of a consumer's
+baselines. For runs that do ship, the relay composes each artifact's
+context (run identity and
 provenance from the trusted event payload; the checked-out commit, job
 display name, and machine facts from the artifact's own `job.json`,
 which the payload does not carry) and creates one object per artifact.

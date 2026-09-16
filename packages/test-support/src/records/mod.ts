@@ -19,6 +19,11 @@ export type {
   TestRecord,
 } from "./schema.ts";
 export {
+  isLaneMeasurement,
+  LANE_MEASUREMENT_PREFIX,
+  LANE_MEASUREMENT_SURFACE,
+} from "./lane-measurement.ts";
+export {
   AGENT_VARIABLE,
   agentLabel,
   defaultSpoolRoot,

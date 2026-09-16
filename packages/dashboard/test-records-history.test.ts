@@ -96,10 +96,44 @@ Deno.test("collectDay separates variant records from default history", async () 
   }]);
 });
 
-Deno.test("collectDay excludes fork-authored reports", async () => {
-  // A body holding two reports, the second fork-authored: its records must not
-  // reach the decision-feeding aggregates.
+Deno.test("collectDay counts nothing for a lane measuring itself", async () => {
+  // A lane writes what its setup and each of its batches cost through the
+  // record machinery every test uses, so those arrive beside the tests they
+  // were recorded with. A batch carries the duration of everything it ran.
 
+  const laneBatch = JSON.stringify({
+    line: "record",
+    test: { k: "gate", s: "ci", n: "ci-lane batch runner-unit" },
+    outcome: "pass",
+    durationMs: 322_500,
+  });
+  const aggregates = await collectDay("2026/08/16", {
+    fetchImpl: storeFetch([PASS, laneBatch]),
+  });
+  assertEquals(aggregates.map(({ key }) => key), [
+    '["unit","bakery","glaze"]',
+  ]);
+});
+
+Deno.test("collectDay counts a fork run's report", async () => {
+  // A body holding two reports, one from this repository and one from a fork.
+  // See `docs/specs/test-records.md`, "Trust boundaries for consumers", for
+  // what the store's member gate leaves the fork flag meaning.
+
+  const sameRepositoryContext = JSON.stringify({
+    schema: 1,
+    line: "context",
+    reportId: "01HISTORYSAME00000000000",
+    repo: "commontoolsinc/labs",
+    commit: "a".repeat(40),
+    dirty: false,
+    env: "ci",
+    ci: { workflowRunId: "1", runAttempt: 1, workflow: "CI", job: "Check" },
+    os: "linux",
+    arch: "x86_64",
+    denoVersion: "2.9.4",
+    startedAt: "2026-08-16T01:00:00Z",
+  });
   const forkContext = JSON.stringify({
     schema: 1,
     line: "context",
@@ -130,21 +164,22 @@ Deno.test("collectDay excludes fork-authored reports", async () => {
         ),
       );
     }
-    const trusted = new Response(
-      [PASS, forkContext, FAIL].join("\n") + "\n",
-      { status: 200 },
+    return Promise.resolve(
+      new Response(
+        [sameRepositoryContext, PASS, forkContext, FAIL].join("\n") + "\n",
+        { status: 200 },
+      ),
     );
-    return Promise.resolve(trusted);
   }) as typeof fetch;
   const aggregates = await collectDay("2026/08/16", { fetchImpl });
   assertEquals(aggregates, [{
     key: '["unit","bakery","glaze"]',
     day: "2026/08/16",
-    runs: 1,
-    failures: 0,
+    runs: 2,
+    failures: 1,
     skips: 0,
-    totalDurationMs: 100,
-    maxDurationMs: 100,
+    totalDurationMs: 400,
+    maxDurationMs: 300,
   }]);
 });
 
@@ -159,6 +194,27 @@ Deno.test("collectDay resolves identities through the alias file", async () => {
     aliases,
   });
   assertEquals(aggregates[0]?.key, '["unit","bakery","glaze > sets"]');
+});
+
+Deno.test("collectDay asks the alias file nothing about a lane measurement", async () => {
+  // What a record is, is read from the identity the lane wrote, so the
+  // alias file cannot turn a lane's overhead into a test's history.
+
+  const laneBatch = JSON.stringify({
+    line: "record",
+    test: { k: "gate", s: "ci", n: "ci-lane batch runner-unit" },
+    outcome: "pass",
+    durationMs: 322_500,
+  });
+  const aggregates = await collectDay("2026/08/16", {
+    fetchImpl: storeFetch([laneBatch]),
+    aliases: new AliasResolver([{
+      date: "2026-08-17",
+      from: { k: "gate", s: "ci", n: "ci-lane batch runner-unit" },
+      to: { k: "unit", s: "bakery", n: "glaze" },
+    }]),
+  });
+  assertEquals(aggregates, []);
 });
 
 Deno.test("isDayAggregate rejects inconsistent aggregates", () => {
@@ -237,7 +293,7 @@ Deno.test("the store ignores a cache whose day keys disagree", async () => {
     await Deno.writeTextFile(
       file,
       JSON.stringify({
-        version: 1,
+        version: 2,
         days: {
           "2026/08/15": [{
             key: '["unit","bakery","glaze"]',
