@@ -1351,8 +1351,10 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   server's root-existence coverage are recorded by OW18 below.
   The `executor/space-server-terminal-structure.test.ts` controls observe the
   real engine's durable result at every covering commit for creation during
-  confirmation, across a flush deadline, through an owning backlink, and with
-  sealed writes pending. `executor/space-server-terminal-confirmation.test.ts`
+  confirmation, across a flush deadline, at each deadline check the settle
+  loop makes once its input barrier has passed — the re-armed structure retry
+  and the scheduler probe — through an owning backlink, and with sealed
+  writes pending. `executor/space-server-terminal-confirmation.test.ts`
   covers traversed-address demand, departure and return, sync failure, and
   teardown. `ensure-piece-running-scope.test.ts` distinguishes same-ID links
   across scopes from true cycles under both execution postures.
