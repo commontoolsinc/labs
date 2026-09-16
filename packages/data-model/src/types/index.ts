@@ -5,6 +5,7 @@
  * refusal of a `FabricInstance` where a walk cannot admit one.
  */
 
+export * from "./interface.ts";
 export * from "./narrowing.ts";
 export * from "./refuseFabricInstance.ts";
 export * from "./tag-of.ts";
