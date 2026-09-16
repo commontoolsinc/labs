@@ -66,6 +66,7 @@ import type {
   CfcLabelMetadataObservation,
   CfcLabelMetadataProtectionMode,
   CfcPolicyEvaluationMode,
+  CfcPreparationWork,
   CfcRefusalDetail,
   CfcTriggerReadGating,
   CfcTxState,
@@ -2236,6 +2237,9 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
 
   /** Counts a full consumed-label collection without changing CFC state. */
   noteCfcConsumedLabelWalk(): void;
+
+  /** Counts prepare work without changing relevance or digest state. */
+  noteCfcPreparationWork(kind: CfcPreparationWork, count?: number): void;
 
   /**
    * The trusted policy-writer path for CFC grant documents (§8.12.7 route

@@ -62,8 +62,9 @@
  * |                            | patternTest/unitTest (per-test laxer mode) and   |
  * |                            | remoteClient/browserWorker (host-controlled      |
  * |                            | rollout)                                         |
- * | cfcFlowLabels              | core-default (off); remoteClient / browserWorker |
- * |                            | delta (host-controlled rollout)                  |
+ * | cfcFlowLabels              | core-default (off); patternTest override and      |
+ * |                            | remoteClient / browserWorker host-controlled     |
+ * |                            | rollout                                          |
  * | cfcWriteFloor              | core-default (off); remoteClient delta           |
  * |                            | (host-controlled rollout) — flip in coreOptions  |
  * |                            | when a first-party rollout begins                |
@@ -878,6 +879,9 @@ export interface PatternTestPresetParams extends CoreParams {
   /** Per-test laxer mode; defaults to the shared core pin. */
   cfcEnforcementMode?: CfcEnforcementMode;
 
+  /** Per-test flow-label propagation; defaults to the shared core posture. */
+  cfcFlowLabels?: CfcFlowLabelsMode;
+
   /** Statement-coverage collector for `cf test` and the pattern harnesses. */
   patternCoverage?: PatternCoverageCollector;
 
@@ -1031,6 +1035,9 @@ export const runtimePresets = {
       ...core,
       ...(params.cfcEnforcementMode !== undefined
         ? { cfcEnforcementMode: params.cfcEnforcementMode }
+        : {}),
+      ...(params.cfcFlowLabels !== undefined
+        ? { cfcFlowLabels: params.cfcFlowLabels }
         : {}),
       ...(params.fetch !== undefined ? { fetch: params.fetch } : {}),
       ...(params.errorHandlers !== undefined

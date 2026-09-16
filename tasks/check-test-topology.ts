@@ -24,12 +24,15 @@
  * the tree carries such an identity, which is what puts it out of the
  * tree half's reach.
  *
- * The store half runs on `main`. It reads a run's records and fails on
- * any identity no suite recognizes, or that more than one suite claims.
- * This catches the subtler case: a surface that is registered and whose
- * files enumerate, but whose recorded names or configuration do not map
- * back to the topology, which would leave those tests running in the
- * full run and never selectable on a pull request.
+ * The store half runs on `main`, over the records of the run that
+ * checked this tree out, and fails on any identity no suite recognizes,
+ * or that more than one suite claims. This catches the subtler case: a
+ * surface that is registered and whose files enumerate, but whose
+ * recorded names or configuration do not map back to the topology, which
+ * would leave those tests running in the full run and never selectable
+ * on a pull request. Records from another commit are refused rather than
+ * judged, because a tree disagrees with an earlier run's records over
+ * every test deleted or renamed since.
  *
  * The reverse direction is reported rather than failed. A unit the
  * topology holds that no run has ever recorded is either a test that
@@ -37,7 +40,8 @@
  * about without blocking anybody.
  *
  *   deno task check-test-topology            # tree and workflows
- *   deno task check-test-topology --records <file>...   # those and the store
+ *   deno task check-test-topology --commit <sha> --records <file>...
+ *                                            # those and the store
  */
 
 import * as path from "@std/path";
@@ -57,6 +61,11 @@ import { dayOf } from "./test-selection/build.ts";
 import { DENO_TEST_FILE } from "./test-topology/deno-task.ts";
 import { claimsFor, loadTopology } from "./test-topology.ts";
 import { type Suite, unavailableUnits } from "./test-topology/suite.ts";
+
+/** What the command line takes, for a command line it cannot act on. */
+const USAGE = `usage:
+  check-test-topology                                   tree and workflows
+  check-test-topology --commit <sha> --records <file>...   and the store`;
 
 /**
  * What the tree half looks at. The same rule the topology enumerates a
@@ -357,17 +366,50 @@ export function checkWorkflows(
 export interface StoredIdentity {
   test: TestIdentity;
   file?: string;
+
+  /** The commit the run that recorded it was checked out at. */
+  commit?: string;
 }
 
 /**
  * The store half: every recorded identity is claimed by exactly one
  * suite, and every unit some run recorded is reported when no run did.
+ *
+ * The records have to be the ones this tree produced, which is what the
+ * commit says. A tree judged against an earlier run's records disagrees
+ * with them for every test the change between the two deleted, since the
+ * topology has no unit for a test the tree no longer holds; the same
+ * goes for a rename, whose alias reaches records from earlier days and
+ * not records from today. Both are the repository working as intended,
+ * and a guard that fails on them is a guard that fails on deleting a
+ * test. So a record from another commit is refused rather than judged,
+ * and so is one that names no commit, which is a record whose group
+ * carried no context and which nothing can hold to this tree.
  */
 export function checkStore(
   suites: readonly Suite[],
   records: readonly StoredIdentity[],
+  commit: string,
 ): Finding[] {
   const findings: Finding[] = [];
+  const elsewhere = new Set<string>();
+  let unattributed = 0;
+  for (const record of records) {
+    if (record.commit === undefined) unattributed += 1;
+    else if (record.commit !== commit) elsewhere.add(record.commit);
+  }
+  if (elsewhere.size > 0 || unattributed > 0) {
+    const named = [...elsewhere].sort();
+    if (unattributed > 0) {
+      named.push(`${unattributed} record(s) carrying no commit`);
+    }
+    return [{
+      fails: true,
+      message: `the records name ${named.join(", ")} and this tree is ` +
+        `${commit}: the store half judges a tree by the records that tree ` +
+        `produced`,
+    }];
+  }
   const seen = new Set<string>();
   const recorded = new Set<string>();
   for (const record of records) {
@@ -438,6 +480,9 @@ export async function readRecords(
         records.push({
           test: resolved,
           ...(record.file === undefined ? {} : { file: record.file }),
+          ...(group.context === undefined
+            ? {}
+            : { commit: group.context.commit }),
         });
       }
     }
@@ -450,31 +495,69 @@ export interface CheckOptions {
   /** The tree to walk. */
   root: string;
 
-  /** Files holding a run's records, for the store half. */
-  records?: readonly string[];
+  /**
+   * What the store half is to judge: a run's records, and the commit
+   * that run checked out. The two travel together, so neither can be
+   * given without the other.
+   */
+  store?: { records: readonly string[]; commit: string };
 }
 
-/** Reads the command line into what the check should do. */
+/** A command line the check cannot act on. */
+export class UsageError extends Error {
+  override name = "UsageError";
+}
+
+/**
+ * Reads the command line into what the check should do. An argument it
+ * does not understand raises, rather than being passed over: a dropped
+ * record file leaves the store half judging part of a run and reporting
+ * that the topology accounts for everything.
+ */
 export function parseCheckArgs(
   args: readonly string[],
   root: string,
 ): CheckOptions {
   const records: string[] = [];
-  let reading = false;
-  for (const arg of args) {
-    if (arg === "--records") {
-      reading = true;
+  let commit: string | undefined;
+  let asked = false;
+  for (let at = 0; at < args.length; at++) {
+    const arg = args[at]!;
+    if (arg === "--commit") {
+      if (commit !== undefined) throw new UsageError("--commit twice");
+      const named = args[at + 1];
+      if (named === undefined || named.length === 0 || named.startsWith("-")) {
+        throw new UsageError("--commit takes the commit the records name");
+      }
+      commit = named;
+      at += 1;
       continue;
     }
-    if (reading) records.push(arg);
+    if (arg === "--records") {
+      if (asked) throw new UsageError("--records twice");
+      asked = true;
+      continue;
+    }
+    if (!asked || arg.startsWith("-")) {
+      throw new UsageError(`unknown argument ${arg}`);
+    }
+    records.push(arg);
   }
-  return records.length === 0 ? { root } : { root, records };
+  if (!asked && commit === undefined) return { root };
+  if (!asked) {
+    throw new UsageError("--commit names the commit --records were made at");
+  }
+  if (records.length === 0) throw new UsageError("--records takes a file");
+  if (commit === undefined) {
+    throw new UsageError("--records needs --commit, the commit they name");
+  }
+  return { root, store: { records, commit } };
 }
 
 /**
  * Runs whichever halves the options ask for. The tree and workflow
  * halves always run, because they need nothing but the checkout; the
- * store half runs when a run's records are named.
+ * store half runs when a run's records and their commit are named.
  */
 export async function check(
   options: CheckOptions,
@@ -488,8 +571,12 @@ export async function check(
   findings.push(
     ...checkWorkflows(suites, await workflowRecords(options.root)),
   );
-  if (options.records !== undefined) {
-    findings.push(...checkStore(suites, await readRecords(options.records)));
+  if (options.store !== undefined) {
+    findings.push(...checkStore(
+      suites,
+      await readRecords(options.store.records),
+      options.store.commit,
+    ));
   }
   // The count travels with the findings because loading the topology
   // walks every workspace member and every test file, and doing that a
@@ -536,7 +623,15 @@ export async function main(
   args: readonly string[] = Deno.args,
   root: string = Deno.cwd(),
 ): Promise<number> {
-  const { findings, suites } = await check(parseCheckArgs(args, root));
+  let options: CheckOptions;
+  try {
+    options = parseCheckArgs(args, root);
+  } catch (error) {
+    if (!(error instanceof UsageError)) throw error;
+    console.error(`${error.message}\n${USAGE}`);
+    return 2;
+  }
+  const { findings, suites } = await check(options);
   return report(findings, suites) ? 0 : 1;
 }
 

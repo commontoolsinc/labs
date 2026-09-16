@@ -35,18 +35,19 @@ const BOARD_SOURCE = join(
   "collection-naming",
   "board.tsx",
 );
+const ITEM_SOURCE = join(
+  REPO_ROOT,
+  "packages",
+  "patterns",
+  "collection-naming",
+  "item.tsx",
+);
 const decoder = new TextDecoder();
 
-/**
- * Run one `cf` command against the space these tests share. The identity and
- * server flags land between `args` and `tail`, because a callable name opens
- * the section its own arguments sit in: `cf piece call` reads everything past
- * the name as the handler's input.
- */
+/** Run one `cf` command against the space these tests share. */
 async function cf(
   identityPath: string,
   args: string[],
-  tail: string[] = [],
 ): Promise<string> {
   // Through the temporary lock, because a nested Deno resolves dependencies
   // of its own and would refresh the repository's `deno.lock` as a side
@@ -66,7 +67,6 @@ async function cf(
       API_URL,
       "--space",
       SPACE_NAME,
-      ...tail,
     ],
     env: { CF_LOG_LEVEL: "error" },
   });
@@ -80,14 +80,17 @@ async function cf(
   return stdout;
 }
 
-/** File the exemplar board, and return its id. */
-async function fileBoard(identityPath: string): Promise<string> {
-  const created = await cf(identityPath, ["piece", "new", BOARD_SOURCE]);
-  const boardId = created.match(/fid1:[^\s]+/)?.[0];
-  if (!boardId) {
+/** File an exemplar pattern, and return its piece id. */
+async function filePiece(
+  identityPath: string,
+  source: string,
+): Promise<string> {
+  const created = await cf(identityPath, ["piece", "new", source]);
+  const pieceId = created.match(/fid1:[^\s]+/)?.[0];
+  if (!pieceId) {
     throw new Error(`cf piece new did not print a fid1 id:\n${created}`);
   }
-  return boardId;
+  return pieceId;
 }
 
 /**
@@ -105,17 +108,35 @@ async function fileBoardWithMembers(
   if (titles.length === 0) {
     throw new Error("A collection fixture needs at least one member.");
   }
-  const boardId = await fileBoard(identityPath);
-  for (const [index, title] of titles.entries()) {
-    // Under server execution the detached call acknowledges the event append,
-    // not the served handler's result. Observe each publication before
-    // allocating the next name so the sequence cannot race the previous one.
-    await cf(
-      identityPath,
-      ["piece", "call", "--cell", `/of:${boardId}`, "--no-wait"],
-      ["addItem", JSON.stringify({ title, agentName: "shell integration" })],
-    );
+  const boardId = await filePiece(identityPath, BOARD_SOURCE);
+  const writer = await PiecesController.initialize({
+    apiUrl: new URL(API_URL),
+    identity,
+    space: SPACE_NAME,
+  });
+  try {
+    // Routing needs a fixed namespace whose targets are real pieces. Each
+    // member holds the same explicit name that the board maps to its link.
+    const entries = [];
+    for (const [index, title] of titles.entries()) {
+      const itemId = await filePiece(identityPath, ITEM_SOURCE);
+      const item = await writer.get(itemId, true);
+      const name = String(index + 1);
+      await item.setInput({ title, shortName: name });
+      entries.push([name, await item.result.getCell()] as const);
+    }
+    const board = await writer.get(boardId, true);
+    await board.setInput({
+      items: entries.map(([, item]) => item),
+      names: Object.fromEntries(entries),
+    });
+  } finally {
+    await writer.dispose();
+  }
 
+  // Prove that fresh readers see each exact member before publishing the
+  // collection's name.
+  for (const [index, title] of titles.entries()) {
     const pieces = await PiecesController.initialize({
       apiUrl: new URL(API_URL),
       identity,
@@ -352,7 +373,7 @@ describe("shell collection members", () => {
       // Bound to the board's root rather than to the map inside it, the slug
       // names a piece, and a segment after it has no collection to select
       // from. Only the real resolver says so.
-      const boardId = await fileBoard(identityPath);
+      const boardId = await filePiece(identityPath, BOARD_SOURCE);
       await cf(identityPath, ["piece", "set-slug", slug, `/of:${boardId}`]);
 
       await shell.goto({

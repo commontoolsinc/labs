@@ -23,6 +23,11 @@ describe("path-prefix-index", () => {
       for (const query of queries) {
         const expected = scan(sources, query);
         expect(index.hasPrefixOf(query)).toBe(expected);
+        expect(index.overlaps(query)).toBe(
+          sources.some((source) =>
+            isPrefix(source, query) || isPrefix(query, source)
+          ),
+        );
         hits += Number(expected);
       }
       expect(hits).toBeGreaterThan(0);
@@ -57,6 +62,8 @@ describe("path-prefix-index", () => {
   it("finds nothing in an empty index", () => {
     expect(indexOf([]).hasPrefixOf(["a"])).toBe(false);
     expect(indexOf([]).hasPrefixOf([])).toBe(false);
+    expect(indexOf([]).overlaps([])).toBe(false);
+    expect(indexOf([]).overlaps(["*"])).toBe(false);
   });
 
   it("takes a wildcard in the source as matching any segment", () => {
@@ -141,6 +148,11 @@ describe("path-prefix-index", () => {
       const index = indexOf(sources);
       for (const path of paths) {
         expect(index.hasPrefixOf(path)).toBe(scan(sources, path));
+        expect(index.overlaps(path)).toBe(
+          sources.some((source) =>
+            isPrefix(source, path) || isPrefix(path, source)
+          ),
+        );
         compared++;
       }
     }

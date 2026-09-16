@@ -35,6 +35,8 @@ import { Identity } from "@commonfabric/identity";
 import { cfcAtom } from "@commonfabric/api/cfc";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import { flowLabelWorkExists } from "../src/cfc/prepare.ts";
+import { linkResolutionProbe } from "../src/storage/reactivity-log.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-flow-probe-memo");
 
@@ -62,6 +64,56 @@ const probeCounts = (runtime: Runtime) => {
 };
 
 describe("CFC flow-label probe memo (stage C tuning T1)", () => {
+  it("keeps repeated negative relevance checks separate from later read classes", async () => {
+    const { runtime, storageManager } = newRuntime();
+    try {
+      const seed = runtime.edit();
+      const address = runtime.getCell(
+        signer.did(),
+        "class-relevance",
+        undefined,
+      )
+        .getAsNormalizedFullLink();
+      writeSeedEnvelopeDoc(seed, signer.did());
+      seed.writeOrThrow({ ...address, path: [] }, {
+        value: {},
+        cfc: {
+          version: 1,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: Array.from({ length: 40 }, (_, index) => ({
+              path: [`field-${index}`],
+              observes: "value",
+              label: { confidentiality: ["secret"] },
+            })),
+          },
+        },
+      });
+      expect((await seed.commit()).error).toBeUndefined();
+      const tx = runtime.edit();
+      try {
+        for (let index = 0; index < 40; index++) {
+          tx.readOrThrow({ ...address, path: ["value", `field-${index}`] }, {
+            nonRecursive: true,
+          });
+        }
+        expect(flowLabelWorkExists(tx)).toBe(false);
+        tx.readOrThrow({ ...address, path: ["value"] }, {
+          meta: linkResolutionProbe,
+        });
+        expect(flowLabelWorkExists(tx)).toBe(false);
+        tx.readOrThrow({ ...address, path: ["value"] });
+        expect(flowLabelWorkExists(tx)).toBe(true);
+      } finally {
+        tx.abort();
+      }
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("prepareTxForCommit then commit evaluate the probe ONCE: the second ask is a memo hit", async () => {
     const { runtime, storageManager } = newRuntime();
     try {

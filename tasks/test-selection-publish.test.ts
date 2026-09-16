@@ -28,6 +28,9 @@ import {
   parseAggregate,
   reportFromText,
 } from "./test-selection/build.ts";
+import { emptyState } from "./test-selection/score.ts";
+import { stateObjectName } from "./test-selection/store.ts";
+import { MANIFEST_SCHEMA_VERSION } from "./test-selection/manifest.ts";
 import type { Suite } from "./test-topology/suite.ts";
 import { join } from "@std/path";
 
@@ -73,6 +76,17 @@ const needsFile = () =>
     locate: (record) =>
       record.file === UNIT ? { level: "unit", unit: UNIT } : undefined,
   }]);
+
+/**
+ * A topology whose two suites both claim what the records carry, which
+ * is the defect the drift guard fails on: nothing in a record says which
+ * of them owns it.
+ */
+const twoSuites = () =>
+  Promise.resolve<Suite[]>([
+    TOPOLOGY[0]!,
+    { ...TOPOLOGY[0]!, id: "runner-unit" },
+  ]);
 
 /** Everything a call said on the standard output, as one string. */
 async function saying(call: () => Promise<unknown>): Promise<string> {
@@ -389,12 +403,20 @@ function localObject(commit: string, at: string): string {
   }]);
 }
 
-/** One object holding what one lane measured about itself. */
+/**
+ * One object holding what one lane measured about itself: a capability
+ * it opened, and both halves of one batch.
+ *
+ * `placeless` leaves the run naming no branch, which is a group the
+ * fold cannot place and therefore declines. `batch` set to false writes
+ * none of a batch's three measurements, which is what a lane killed
+ * part way through a batch leaves, and gives a model with a
+ * capability setup in it and no suite.
+ */
 function laneObject(
   commit: string,
   at: string,
-  planned = 40,
-  spent = 92,
+  { planned = 40, spent = 92, units = 1, placeless = false, batch = true } = {},
 ): string {
   const context: RunContext = {
     schema: 1,
@@ -403,7 +425,7 @@ function laneObject(
     repo: "commontoolsinc/labs",
     commit,
     dirty: false,
-    branch: "main",
+    ...(placeless ? {} : { branch: "main" }),
     env: "ci",
     ci: {
       workflowRunId: commit,
@@ -426,7 +448,12 @@ function laneObject(
   return buildObjectBody(context, [
     measured("ci-lane setup fuse", 14_800),
     measured("ci-lane batch workspace-unit", spent * 1000),
-    measured("ci-lane planned batch workspace-unit", planned * 1000),
+    ...(batch
+      ? [
+        measured("ci-lane planned batch workspace-unit", planned * 1000),
+        measured("ci-lane units batch workspace-unit", units),
+      ]
+      : []),
   ]);
 }
 
@@ -508,7 +535,7 @@ describe("publish()", () => {
     // one observation there is nothing to say about how that cost grows
     // with the work, so the whole difference is the suite's fixed cost.
     expect(manifest.calibration.suites["workspace-unit"])
-      .toEqual({ overhead: 52, correction: 1 });
+      .toEqual({ overhead: 52, correction: 1, unitOverhead: 0 });
   });
 
   it("publishes a cost model the manifest reader will carry", async () => {
@@ -521,8 +548,7 @@ describe("publish()", () => {
       objects[CI(DAY, `lane-${lane}`)] = laneObject(
         `c-lane-${lane}`,
         `2026-08-20T0${lane + 3}:00:00.000Z`,
-        planned,
-        spent,
+        { planned, spent },
       );
     });
     const { store, created } = fakeStore(objects);
@@ -538,6 +564,63 @@ describe("publish()", () => {
     expect(manifest).toBeDefined();
     expect(manifest!.calibration.suites["workspace-unit"]!.correction)
       .toBeGreaterThan(0);
+  });
+
+  it("says so when no lane measurement reached the cost model", async () => {
+    // Every cause ends in the same empty map — no lane has run, none
+    // recorded what it measured, the fold declines the records of the
+    // ones that did, or the fold stopped reading a figure. A manifest
+    // carrying the empty map says none of that on its own.
+    const { store } = fakeStore(seed());
+    const said = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, suites, noBaselines)
+    );
+    expect(said).toContain("the cost model holds 0 suite(s) and 0 capability");
+    expect(said).toContain("no suite has a measured cost in the last 7 day(s)");
+    expect(said).toContain("charged nothing for holding one or for opening");
+  });
+
+  it("names the lane measurements it had to decline", async () => {
+    // The distinction an operator can act on: a lane that ran and whose
+    // measurement cannot be read, rather than a lane that has not run.
+    const objects = seed();
+    objects[CI(DAY, "3")] = laneObject("c3", "2026-08-20T03:00:00.000Z", {
+      placeless: true,
+    });
+    const { store } = fakeStore(objects);
+    const said = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, suites, noBaselines)
+    );
+    expect(said).toContain("no suite has a measured cost in the last 7 day(s)");
+    expect(said).toContain("4 lane measurement(s) this run read");
+    expect(said).toContain("the fold could not place");
+  });
+
+  it("warns for a model holding a setup and no suite", async () => {
+    // What a lane is charged for holding a suite at all is the suite's
+    // own figure, so a model with a capability setup in it and no suite
+    // charges a lane nothing for the batch it runs.
+    const objects = seed();
+    objects[CI(DAY, "3")] = laneObject("c3", "2026-08-20T03:00:00.000Z", {
+      batch: false,
+    });
+    const { store } = fakeStore(objects);
+    const said = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, suites, noBaselines)
+    );
+    expect(said).toContain("holds 0 suite(s) and 1 capability setup(s)");
+    expect(said).toContain("no suite has a measured cost");
+  });
+
+  it("says what the cost model holds when a lane has measured it", async () => {
+    const objects = seed();
+    objects[CI(DAY, "3")] = laneObject("c3", "2026-08-20T03:00:00.000Z");
+    const { store } = fakeStore(objects);
+    const said = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, suites, noBaselines)
+    );
+    expect(said).toContain("the cost model holds 1 suite(s) and 1 capability");
+    expect(said).not.toContain("overruns");
   });
 
   it("publishes an empty cost model when no lane has measured one", async () => {
@@ -581,7 +664,7 @@ describe("publish()", () => {
     );
     expect(manifest!.entries).toEqual([]);
     expect(lines.join("\n")).toContain(
-      "the topology has no unit for 1 identities",
+      "no suite claims 1 identities",
     );
   });
 
@@ -689,7 +772,7 @@ describe("publish()", () => {
       publish(["--days", "1"], store, LATER, lostUnit, noBaselines)
     );
     expect(await newestManifest(created)).toEqual([]);
-    expect(lines).toContain("the topology has no unit for 1 identities");
+    expect(lines).toContain("no suite claims 1 identities");
   });
 
   it("keeps an identity placed by name through a window it did not run in", async () => {
@@ -1262,6 +1345,93 @@ describe("publish() over a day that has been compacted", () => {
       .toBe(0);
     expect(read).toEqual(shards);
     expect(peak).toBeLessThanOrEqual(SHARD_CHUNK);
+  });
+});
+
+describe("publish() over an aggregate holding tests the tree has lost", () => {
+  const NOW = new Date("2026-08-20T12:00:00.000Z");
+  // Named through the store rather than written out: the schema version
+  // is a segment of the path, so a spelled-out one would stop being the
+  // place the publisher looks the next time the version moves.
+  const STATE = stateObjectName("2026-08-19", "0");
+  const DELETED = JSON.stringify(["unit", "memory", "space > erases"]);
+  const SILENT = JSON.stringify(["unit", "memory", "space > unreported"]);
+
+  /** An aggregate carrying two identities this topology cannot place. */
+  function carrying(): string {
+    return JSON.stringify({
+      schema: MANIFEST_SCHEMA_VERSION,
+      day: "2026-08-19",
+      folded: [],
+      compacted: [],
+      states: {
+        // A test deleted long enough ago for every window to have passed
+        // over it: no unit, and no run inside what a state still holds.
+        [DELETED]: { ...emptyState(), mainCatches: 2 },
+        // A test that runs and whose records never say which file it is
+        // in: no unit either, and running all the same.
+        [SILENT]: { ...emptyState(), runsByDay: { "2026-08-20": 3 } },
+      },
+      files: {
+        [DELETED]: "packages/memory/test/erase.test.ts",
+        [SILENT]: "packages/memory/test/unreported.test.ts",
+      },
+    });
+  }
+
+  it("stops carrying the deleted test and keeps the silent one", async () => {
+    const { store, created } = fakeStore({ ...seed(), [STATE]: carrying() });
+    expect(
+      await publish(["--days", "1"], store, NOW, needsFile, noBaselines),
+    ).toBe(0);
+    const written = [...created.keys()].find((name) =>
+      name.includes("/state/")
+    )!;
+    const after = parseAggregate(await gunzipToText(created.get(written)!))!;
+    expect(Object.keys(after.states)).not.toContain(DELETED);
+    expect(Object.keys(after.files)).not.toContain(DELETED);
+    // Nothing places this one either, and dropping it would throw away
+    // the history of a test that is running right now.
+    expect(Object.keys(after.states)).toContain(SILENT);
+  });
+
+  it("says which identities left the tree and which are still recording", async () => {
+    const { store } = fakeStore({ ...seed(), [STATE]: carrying() });
+    const said = await saying(() =>
+      publish(["--days", "1"], store, NOW, needsFile, noBaselines)
+    );
+    expect(said).toContain("1 identities have left the tree");
+    // The seeded runs record no file either, so they are unplaced and
+    // running, which is the other half of what the count separates.
+    expect(said).toContain(
+      "no suite claims 2 identities the aggregate still carries",
+    );
+  });
+});
+
+describe("publish() over a topology two suites read the same way", () => {
+  const NOW = new Date("2026-08-20T12:00:00.000Z");
+
+  it("names the identities neither suite can be given", async () => {
+    // Placing one either way would put the work in whichever suite came
+    // first, so the publisher holds them out and says how many. The
+    // count is apart from the tests that have left because the tree
+    // holds these twice over rather than not at all.
+    const { store, created } = fakeStore(seed());
+    const said = await saying(() =>
+      publish(
+        ["--bootstrap", "--days", "1"],
+        store,
+        NOW,
+        twoSuites,
+        noBaselines,
+      )
+    );
+    expect(said).toContain("1 identities are claimed by more than one suite");
+    expect(said).toContain("unit:memory 1");
+    // Held out of the manifest rather than placed under one of them.
+    const manifest = await publishedManifest(created);
+    expect(manifest.entries).toEqual([]);
   });
 });
 

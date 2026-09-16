@@ -16,13 +16,12 @@
  */
 
 import {
-  listObjects,
   type LanePlan,
+  listObjects,
   type Manifest,
   objectUrl,
   parseManifest,
 } from "@commonfabric/test-support/records";
-import { memo } from "./lib.ts";
 
 export const TEST_SELECTION_BUCKET = "cf-ci-metadata";
 // The trailing slash is what keeps the listing inside this version. A
@@ -43,42 +42,57 @@ export async function newestManifest(options: {
   prefix?: string;
   fetchImpl?: typeof fetch;
 } = {}): Promise<Manifest | undefined> {
-  const bucket = options.bucket ?? TEST_SELECTION_BUCKET;
-  const prefix = options.prefix ?? TEST_SELECTION_PREFIX;
-  const doFetch = options.fetchImpl ?? fetch;
-  const names = await listObjects({ bucket, prefix, fetch: doFetch });
-  const newest = names.filter((name) => generatedAtOf(name) !== undefined)
-    .sort().at(-1);
+  const newest = (await manifestNames(options)).at(-1);
   if (newest === undefined) return undefined;
-  const response = await doFetch(objectUrl(bucket, newest));
+  return readManifest(newest, options);
+}
+
+/** Lists the available manifests in generation order. */
+export async function manifestNames(options: {
+  bucket?: string;
+  prefix?: string;
+  fetchImpl?: typeof fetch;
+} = {}): Promise<string[]> {
+  const names = await listObjects({
+    bucket: options.bucket ?? TEST_SELECTION_BUCKET,
+    prefix: options.prefix ?? TEST_SELECTION_PREFIX,
+    fetch: options.fetchImpl ?? fetch,
+  });
+  return names.filter((name) => {
+    const at = generatedAtOf(name);
+    return at !== undefined && Number.isFinite(Date.parse(at));
+  }).sort();
+}
+
+/** Fetches and validates a manifest, throwing when the object is unreadable. */
+export async function readManifest(name: string, options: {
+  bucket?: string;
+  fetchImpl?: typeof fetch;
+} = {}): Promise<Manifest> {
+  const response = await (options.fetchImpl ?? fetch)(
+    objectUrl(options.bucket ?? TEST_SELECTION_BUCKET, name),
+  );
   if (!response.ok) {
-    throw new Error(`manifest ${newest}: HTTP ${response.status}`);
+    throw new Error(`manifest ${name}: HTTP ${response.status}`);
   }
   // The store serves these with transcoding, so a plain fetch has
   // already decoded the gzip the object is stored under.
   const manifest = parseManifest(await response.text());
   if (manifest === undefined) {
-    throw new Error(`manifest ${newest}: not a manifest`);
+    throw new Error(`manifest ${name}: not a manifest`);
   }
   return manifest;
 }
 
 /**
- * How long one read of the manifest is shared. A manifest carries an entry
- * for every identity the store knows, so a read of one is far the largest
- * the wall makes, and the two tiles that want one are due together on this
- * same cadence and take a single read between them.
+ * How long a manifest listing and its measurements are shared. The tiles
+ * refresh on the same cadence as the workflow activity. Unchanged manifests
+ * reuse their full latest inventory or their cached historical counts.
  */
-export const MANIFEST_SHARE_MS = 15 * 60_000;
+export const MANIFEST_SHARE_MS = 30_000;
 
 /** Where a tile or a page gets the manifest it reports on. */
 export type ManifestReader = () => Promise<Manifest | undefined>;
-
-/** The reader the wall runs on: one shared read per share window. */
-export const sharedManifest: ManifestReader = memo(
-  MANIFEST_SHARE_MS,
-  () => newestManifest(),
-);
 
 /**
  * A positive number the manifest's dials name, or `fallback` when they do

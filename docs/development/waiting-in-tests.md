@@ -12,7 +12,8 @@ studies](waiting-in-tests-rationale.md), holds the analysis behind these
 rules: the full argument for why a bounded timeout is never a guarantee, the
 sizing of the deno-web-test backstop, how the runner clock classifies timers
 across SES lockdown, the real-clock exemptions that were retired, why the
-runtime-client suite keeps the real clock, the CSP suite worked through as a
+runtime-client suite keeps the real clock, why neither runtime-disposal
+teardown carries a bound, the CSP suite worked through as a
 proving-a-negative example, the FUSE exec suite's design, and the production
 waits that apply the same principle outside tests. Nothing there is needed to
 write an ordinary test; read it when you need to know why a rule is what it
@@ -86,6 +87,18 @@ is the price of a collection that always returns, paid because the summary
 exists to explain a run already in trouble. The budget is a caller's option,
 so a case that wants the backstop exercised asks for a short one rather than
 waiting out the default.
+
+One bound a browser test runs under is not the repository's to sort, and
+belongs in an audit of these for that reason: astral puts its own deadline on
+every `page.evaluate`, so a page that never answers ends the call whether or
+not anything here asked for that. It sorts differently from the ones above,
+because it re-waits on the one in-flight call rather than reissuing it, which
+leaves a late answer still returned. [Sizing the deno-web-test
+backstop](waiting-in-tests-rationale.md#sizing-the-deno-web-test-backstop)
+works that mechanism through and says what each of the two harnesses running
+under it sets the deadline to; [Tearing a runtime down waits on its
+worker](#tearing-a-runtime-down-waits-on-its-worker) is where a test leans on
+it hardest.
 
 ## The primitives to use instead
 
@@ -438,6 +451,12 @@ tests. It sleeps on the sink and applies its predicate to the cell only after
 iteration cap over it. Its predicate takes `T | undefined`, since a cell holds
 no value until its piece writes one.
 
+When that wait fails, its error includes the cell address, predicate, and last
+read value, with the original failure as its cause. An Error's name is retained
+on the wrapper. The value is rendered only at failure, with bounded depth and
+length; a live value reflects its state at that point. This keeps healthy waits
+from traversing data just for diagnostics.
+
 The runner's llm tests wait on that shape often enough to have a name for it.
 `waitForLlmSettled`, in `packages/runner/test/support/llm-result.ts`, resolves
 once `llm`, `generateText` or `generateObject` has finished a request. It is a
@@ -545,8 +564,8 @@ test after `testTimeout` — 40 seconds by default, set per suite in
 `deno-web-test.config.ts` — and fails that test with a message naming it and
 saying how long it waited, leaving the rest of the run to report as usual.
 
-This is the distinction `waitForCondition`'s `timeout` draws, one level up: a
-stuck-condition safety net rather than a bound at the call site. It is why a
+This is the distinction `waitForCondition`'s safety net draws, one level up: a
+stuck-condition bound rather than a bound at the call site. It is why a
 wait inside one of these tests still takes no timeout of its own — adding one
 per call site would cap what each wait can observe, which is the thing being
 avoided, while the harness bound only decides when to stop believing a test will
@@ -566,6 +585,48 @@ document](waiting-in-tests-rationale.md#sizing-the-deno-web-test-backstop).
 `packages/deno-web-test/README.md` records what the bound does not cover: a test
 blocking the event loop outright, and the stuck test's own work, which goes on
 running in the page afterwards.
+
+## Tearing a runtime down waits on its worker
+
+A teardown that drops a runtime waits for the worker to say it is done.
+`RuntimeConnection.dispose()` sends a `Dispose` request and waits for the
+reply before it touches the transport, so that the storage the worker has
+buffered is flushed before the thread carrying it stops. Requests here carry
+no deadline, and this one is exempt from the abort that settles every other
+request in flight, which leaves the reply as the only thing that settles it. A
+worker that has stopped answering therefore never lets `dispose()` return.
+Neither of the two teardowns that await one adds a bound of its own, and what
+each is left exposed to differs.
+
+The browser teardown, `disposePageRuntime` in
+`packages/integration/shell-utils.ts`, asks the page through `page.evaluate`,
+which astral bounds on its own account at about five minutes for these suites
+— [the rationale
+document](waiting-in-tests-rationale.md#sizing-the-deno-web-test-backstop)
+has the mechanism and the arithmetic. That is a bound relied on rather than
+kept, and the teardown adds none of its own.
+
+What astral's bound does not supply is a name: a `RetryError` says only that
+the attempts ran out. So the catch reports the page instead, through the probe
+[the shared state primitive](#a-shared-state-primitive) describes. Nothing
+settled the disposal's request, so it is still in flight when the probe reads
+it, and the pending-request lines name it and say how long it has been
+outstanding. Those come from `RuntimeClient.getPendingRequests`, which reads
+main-thread bookkeeping and needs no round trip, so a wedged worker is the
+case it still answers. A failure warns rather than throws, since this is
+cleanup: a caller whose work is done has nothing left for it to fail, and a
+`finally` reaching it has a failure of its own to carry.
+
+The in-process suite, `packages/runtime-client/integration/client.test.ts`,
+binds each client with `await using`, so its teardown is `dispose()` itself
+with nothing between. Nothing bounds that: the worker holds Deno's event loop
+open, so the fail-fast the in-process waits above rely on never fires, and the
+run reaches the CI step limit. What places such a hang is the runner's own
+output — the last test printed without an `ok` is the one whose teardown is
+waiting — and what it is waiting for is a `Dispose` reply by construction,
+since that is the only request a teardown sends. Why a bound is not the answer
+there is in [the rationale
+document](waiting-in-tests-rationale.md#the-runtime-disposal-teardowns).
 
 ## Waiting for the scheduler and for the worker reconciler
 
@@ -1209,7 +1270,8 @@ come true, with a stack that points at `waitFor` and nothing about the page.
 the identity it was awaiting where one was given, the last state it managed to
 read, and what the page held at the moment it gave up: the document's URL,
 title, and HTTP status, whether the shell's `x-root-view` element is in it,
-whether `globalThis.app` is there and which view it holds, and the tail of
+whether `globalThis.app` is there and which view it holds, the requests its
+runtime has sent the worker and has no reply to, and the tail of
 console messages `Page.applyConsoleFormatter` retains in the page. The page half
 of that is `readShellPageProbe` in
 `packages/integration/shell-page-probe.ts`; `describeStateWaitFailure` in
@@ -1226,13 +1288,28 @@ instance the toolshed's `Failed to proxy to ...` page, served with a 502 when
 its own fetch to the shell dev server fails. Without the check, every test in
 the run waits out the full minute and reports nothing that names the cause.
 
-`login()` reports the same block, for the same reason. It waits on
-`waitForCondition` for the shell to publish `globalThis.app`, and a document
-that is not the shell never publishes it, so that wait reaches the
-stuck-condition net five minutes later saying only that it did. The runtime
-handshake after it names which of its two stages ran out and nothing about the
-page it ran against. Both are wrapped, so any login failure names the identity
-being logged in as and what the page held. `readAndDescribeShellPage` is the
+`waitForCondition` carries the same block, and carries it for every wait rather
+than for a wrapped few. A wait that reaches the stuck-condition net renders the
+source the page ran, the arguments it was handed one to a line, the last throw
+the predicate itself made where it made one, and the page it ran out against;
+`describeConditionWaitFailure` in `packages/integration/utils.ts` assembles
+that. The source is usually what names the wait, waits carrying no names of
+their own, and where several sites share one predicate the arguments are what
+tell them apart. The predicate's own throw is the part nothing else can supply:
+a predicate that throws on every evaluation leaves a page identical to one a
+predicate merely reads as false.
+
+The net is five minutes and no test can sit through one, so its length for a
+single wait is read from `CF_WAIT_FOR_CONDITION_TIMEOUT_MS`. That exists for
+the tests that drive this report and for nothing else: shortening the net in a
+run caps what a wait may observe, which is what the net is written to avoid.
+
+`login()` reports the same block, and adds what the wait cannot know. It waits
+on `waitForCondition` for the shell to publish `globalThis.app`, which a
+document that is not the shell never publishes, and the runtime handshake after
+it names which of its two stages ran out and nothing about the page it ran
+against. Both are wrapped, so any login failure names the identity being logged
+in as and what the page held. `readAndDescribeShellPage` is the
 whole of what a report needs from a page — it reads the probe, renders it, and
 reports a page it could not read at all rather than replacing the failure being
 reported with a second one. Reach for it, rather than pairing the read and the

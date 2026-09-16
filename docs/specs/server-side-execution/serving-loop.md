@@ -974,9 +974,31 @@ carving an exception. The serving side's and the OFF arm's
 deferred starts keep `bookkeeping`; the rule for wave-seal
 internal writes is unchanged.
 
+What decides the stamp is the run the start came FROM, not the
+call site that minted the transaction, so every deferred start a
+flag-ON client mints carries its originating run's context. The
+NAMED-FAMILY start is the one that makes the difference visible:
+it sets a piece up once the execution family it waited for lands,
+and it mints its transaction afresh rather than from a commit
+callback, so under the narrower reading it took `bookkeeping` and
+COMMITTED. What it writes is the argument the originating run
+computed, which for a speculative run is a value only the echo
+holds — a collection whose create allocates a name and stores it
+in the member it creates has the served member's stored name
+replaced by the client's next allocation, while the collection's
+map still records that member under the name the server gave it.
+Both speculable kinds reach that start: a handler's echo, and a
+derivation instantiating a pattern, which protocol.md §1's
+ratified no-creation-carve-out holds to the same rule with no
+exception for a transaction a start mints for itself. The whole
+run context travels, so the entry retires under the originating
+event and a cascade child stays reachable from its root, and the
+lookup that finds it walks a transaction's wrappers to the
+nearest stamp, as the serving side's wave-context lookup does.
+
 **The bookkeeping-stamped deferred start's refusal arm: catch up
-and start (RULED 2026-08-24).** The OTHER deferred start — the
-`bookkeeping`-stamped one, which commits to the store — can be
+and start (RULED 2026-08-24).** A deferred start that keeps the
+`bookkeeping` stamp — the one that commits to the store — can be
 REFUSED for a stale confirmed read when the serving side
 materialized the piece first (the first-hydration race,
 verification-coverage.md OW45 arm B). Under the flag that refusal

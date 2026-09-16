@@ -11,6 +11,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { DeepDefault, Default } from "@commonfabric/api";
 import type { Cell } from "@commonfabric/runner";
+import type { MustBeTrue } from "@commonfabric/utils/types";
 
 import type {
   RequireDefaults,
@@ -27,8 +28,6 @@ import type {
  */
 type AssertEqual<T, U> = [T] extends [U] ? [U] extends [T] ? true : never
   : never;
-
-type MustBeTrue<T extends true> = T;
 
 /**
  * Flattens an intersection type to a plain object type so that

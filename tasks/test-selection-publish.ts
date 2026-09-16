@@ -48,6 +48,7 @@ import {
   buildManifest,
   CI_SOURCE,
   dayOf,
+  departed,
   emptyAggregate,
   Fold,
   locateSurfaces,
@@ -73,7 +74,11 @@ import {
   serializeManifest,
 } from "./test-selection/manifest.ts";
 import { plan } from "./test-selection/plan.ts";
-import { LANE_BUDGET_SECONDS, LANES } from "./test-selection/policy.ts";
+import {
+  COST_WINDOW_DAYS,
+  LANE_BUDGET_SECONDS,
+  LANES,
+} from "./test-selection/policy.ts";
 
 /**
  * Everything this reaches the world through. The default is the real
@@ -597,6 +602,16 @@ export async function publish(
   // built without it names surfaces nothing in the tree answers to.
   const suites = await topology();
   const { placed, unplaced } = locateSurfaces(suites, folded.surfaces);
+  // A test the tree no longer holds leaves the aggregate here rather
+  // than being carried and rescored for the rest of the store's life.
+  // The state written below is the one the next run reads, so dropping
+  // the entries from it is the whole of what forgetting an identity is.
+  const left = departed(suites, unplaced, folded);
+  for (const key of left) {
+    delete folded.aggregate.states[key];
+    delete folded.aggregate.files[key];
+    folded.states.delete(key);
+  }
   const states = new Map(
     [...folded.states].filter(([key]) => placed.has(key)),
   );
@@ -652,7 +667,14 @@ export async function publish(
       })),
   }));
 
-  summarize(manifest, reference, folded.observations, unplaced);
+  summarize(
+    manifest,
+    reference,
+    folded.observations,
+    unplaced,
+    left,
+    fold.declined,
+  );
 
   if (options.out !== undefined) {
     await Deno.mkdir(options.out, { recursive: true });
@@ -726,11 +748,54 @@ function summarize(
   reference: ReturnType<typeof plan>,
   observations: number,
   unplaced: Unplaced,
+  left: readonly string[],
+  declined: number,
 ): void {
   console.log(
     `test selection: folded ${observations} execution(s); the manifest ` +
       `holds ${manifest.entries.length} identities`,
   );
+  // Said every run, so that a model nobody measured is as visible as one
+  // somebody did. The two halves are counted apart because they come
+  // from different records: a lane writes one per capability it opens,
+  // and a pair per batch, and a lane killed part way through a batch
+  // leaves the pair unmatched and contributes a setup cost alone.
+  const suites = Object.keys(manifest.calibration.suites).length;
+  console.log(
+    `test selection: the cost model holds ${suites} suite(s) and ` +
+      `${Object.keys(manifest.calibration.setupCost).length} ` +
+      `capability setup(s)`,
+  );
+  // A suite's own figures are what a lane is charged for holding the
+  // suite and for opening each of its units, so a model with no suite in
+  // it charges nothing for either and a lane packed to its budget runs
+  // past the bound it is killed at. A capability setup is measured from
+  // a lane's own records and is unaffected, and the prologue is a fixed
+  // dial rather than a measurement, so it is there either way; this
+  // names the suites rather than everything a lane is charged. Four
+  // things end here — no
+  // lane has run, none recorded what it measured, the fold declines the
+  // records of the ones that did, or the fold stopped reading a figure
+  // it used to read — and the empty map alone says none of them.
+  if (suites === 0) {
+    console.log(
+      `test selection: no suite has a measured cost in the last ` +
+        `${COST_WINDOW_DAYS} day(s), so a lane is charged nothing for ` +
+        `holding one or for opening its units, and a lane packed against ` +
+        `this manifest overruns. See docs/development/test-selection.md.`,
+    );
+    // Said only where there is a figure to say, so that a run with
+    // nothing to report claims nothing. A lane that ran and whose
+    // measurement cannot be read is a different thing from a lane that
+    // has not run, and it is the one an operator can act on.
+    if (declined > 0) {
+      console.log(
+        `test selection: ${declined} lane measurement(s) this run read ` +
+          `came from a run the fold could not place, so the model was ` +
+          `fitted without them.`,
+      );
+    }
+  }
   if (unplaced.suiteLevel.length > 0) {
     console.log(
       `test selection: ${unplaced.suiteLevel.length} identities measure a ` +
@@ -739,16 +804,44 @@ function summarize(
         `is missing and there is nothing to act on.`,
     );
   }
-  if (unplaced.unclaimed.length > 0) {
+  if (left.length > 0) {
     console.log(
-      `test selection: the topology has no unit for ` +
-        `${unplaced.unclaimed.length} identities, so no lane can be asked ` +
-        `to run one. What puts an identity here, and what takes it out ` +
-        `again, is in docs/development/test-selection.md.`,
+      `test selection: ${left.length} identities have left the tree: no ` +
+        `suite claims them and no run of them has been recorded inside ` +
+        `the window a state keeps counters for. Their states are dropped ` +
+        `from the aggregate.`,
     );
     console.log(
-      `test selection: those ${unplaced.unclaimed.length} were recorded ` +
-        `by ${namingSurfaces(unplaced.unclaimed)}`,
+      `test selection: those ${left.length} were recorded by ` +
+        `${namingSurfaces(left)}`,
+    );
+  }
+  const gone = new Set(left);
+  const unclaimed = unplaced.unclaimed.filter((key) => !gone.has(key));
+  if (unclaimed.length > 0) {
+    console.log(
+      `test selection: no suite claims ${unclaimed.length} identities the ` +
+        `aggregate still carries, so no lane can be asked to run one. ` +
+        `Each has run inside the window a state keeps counters for, or a ` +
+        `configuration declares its unit unavailable. What puts an ` +
+        `identity here, and what takes it out again, is in ` +
+        `docs/development/test-selection.md.`,
+    );
+    console.log(
+      `test selection: those ${unclaimed.length} were recorded ` +
+        `by ${namingSurfaces(unclaimed)}`,
+    );
+  }
+  if (unplaced.contested.length > 0) {
+    console.log(
+      `test selection: ${unplaced.contested.length} identities are ` +
+        `claimed by more than one suite, which is a topology defect the ` +
+        `drift guard fails on. They are left out rather than placed in ` +
+        `whichever suite came first.`,
+    );
+    console.log(
+      `test selection: those ${unplaced.contested.length} were recorded ` +
+        `by ${namingSurfaces(unplaced.contested)}`,
     );
   }
   const held = new Map<string, number>();

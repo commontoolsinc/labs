@@ -225,9 +225,12 @@ export function explainLines(
   if (entry === undefined) {
     return [
       `${key}`,
-      "  The store has no record of it, so it is mandatory: an identity",
-      "  with no history runs. A test just added is in this position, and",
-      "  so is one just renamed, until a run on `main` records it.",
+      "  The manifest has no entry for it, and what that means depends on",
+      "  the tree. An available unit no manifest knows is mandatory, so a",
+      "  test just added, one just renamed, and one whose records never",
+      "  say which unit it is in all run until a run on `main` records",
+      "  them. Nothing runs a test the tree no longer holds, and nothing",
+      "  runs one whose unit a configuration declares unavailable.",
     ];
   }
   const lines = [

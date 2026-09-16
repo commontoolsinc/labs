@@ -442,14 +442,16 @@ calls the member; it settles nothing about which collection a reference
 addresses, which stays the reading context's question.
 
 A renderer that shows a published name in place of a round trip takes that limit
-on, and one does. The editor's mention pill shows whatever name a mention's
-destination publishes — whichever collection assigned it, and whatever
-collection the reader is reading through — so a destination named by another
-collection contributes a number that reads as this one's
-([#6985](https://github.com/commontoolsinc/labs/issues/6985)). The round trip
-above is what removes it: take the name from the destination's row in the
-collection the reader is reading through, found by identity, and show none when
-there is no such row.
+on. The editor's mention pill makes its name a round trip through the universe
+the editor completes mentions from. It shows a name only where the mention's
+destination is a row of that universe, found by identity, and the name it shows
+is that row's rather than anything the destination publishes. So a shown name is
+one a `#` query in the same editor offers back for the same destination, as far
+as that query's grammar reaches: the sigil takes digits, so a collection naming
+its members in words has those names shown on a pill but not offered by the
+query. Widening that is a question for the query grammar rather than for the
+renderer, which shows what the row carries either way. A destination the
+universe does not list shows no name, whatever it publishes.
 
 ### Two modes, chosen by destination
 
@@ -734,11 +736,35 @@ in `NamingDeclaration` (`packages/patterns/collection-naming/naming.ts`) — and
 resolver reading it could verify that a binding and its target agree and report
 a mismatch. Nothing reads the declaration: no collection sets `name`, no
 resolver compares one, and member resolution
-(`packages/runner/src/slug-resolution.ts`) is a map lookup that consults neither
-the declared grammar nor the policy. Making one consumer real is
-[#6986](https://github.com/commontoolsinc/labs/issues/6986), whose natural first
-consumer is that check, with a name assigned onto a collection written into the
-declaration.
+(`packages/runner/src/slug-resolution.ts`) reads no part of it. Making one
+consumer real is [#6986](https://github.com/commontoolsinc/labs/issues/6986),
+whose natural first consumer is that check, with a name assigned onto a
+collection written into the declaration.
+
+**Whether member resolution applies a collection's grammar.** It applies no
+member-name grammar
+([#6994](https://github.com/commontoolsinc/labs/issues/6994)):
+`resolveSlugReference` (`packages/runner/src/slug-resolution.ts`) looks the
+segment after a collection's name up as a key of that collection's map. The
+allocator's grammar lives in the collection's library, as `isMemberName` in
+`packages/patterns/collection-naming/naming.ts`. So a key the allocator would
+never issue still resolves: `top/007` resolves to whatever piece a writer stored
+under the key `007`, while the names table publishes no row for it.
+
+The resolver does not hardcode that grammar because the two sit at opposite ends
+of the pace layers in `AGENTS.md`: the decimal grammar belongs to the
+collection's library, in `packages/patterns` at the top, and the resolver sits
+in `runner`, at the foundation. Hardcoded, it would also refuse the members of
+any collection that names them some other way, such as `docs/getting-started` in
+"Names resolve through collections". Applying each collection's own grammar
+would take reading it from the collection's `naming` declaration. Nothing reads
+that declaration today (the question above,
+[#6986](https://github.com/commontoolsinc/labs/issues/6986)), and it carries no
+complete grammar predicate to test a key against. Its fields are `name`,
+`policy`, and `compact`, and only the last says anything about a member name at
+all — the eligibility rule in "The compact form" above — which rules one
+character out rather than saying what a name is. That route is open, not
+planned.
 
 **Whether a collection accepting names from people** reuses the space-level
 claim path or needs its own.

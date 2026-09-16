@@ -48,6 +48,7 @@ class ControlledWorker {
           allowConsoleErrors: false,
           allowConsoleWarnings: false,
           cfcEnforcementMode: "enforce-explicit",
+          cfcFlowLabels: "off",
         } satisfies ParticipantInitResult;
         break;
       case "assertion":

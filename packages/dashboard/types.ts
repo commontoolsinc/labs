@@ -3,7 +3,9 @@
  * statuses a tile may report, the render-ready view its `collect()` returns,
  * the shared context it is handed to gather that view, and the drill-down
  * routes it may claim. A file under tiles/ becomes a tile by exporting a
- * `Tile`.
+ * `Tile`. Its optional `collectActivity()` is refreshed independently:
+ * `true` shows workflow activity, `false` means idle, and `undefined` means
+ * activity is unavailable.
  */
 
 export type Status = "good" | "warn" | "bad" | "unknown";
@@ -47,6 +49,9 @@ export interface Tile {
   // GitHub workflow snapshots that drive this tile. The scheduler refreshes
   // each source independently and publishes its due dependent tiles together.
   runSources?: readonly RunSource[];
+  // Optional workflow activity, refreshed independently on the tile's interval.
+  // true lights the running badge; false or undefined clears it.
+  collectActivity?(ctx: Ctx): Promise<boolean | undefined>;
   collect(ctx: Ctx, publish?: (view: TileView) => void): Promise<TileView>; // publish usable data before slower work completes
   routes?: Route[]; // optional drill-down routes this tile owns
 }

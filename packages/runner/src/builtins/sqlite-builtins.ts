@@ -45,6 +45,7 @@ import {
   waveRunContextOf,
   waveSettlementOf,
 } from "../executor/wave.ts";
+import { speculationRunContextOf } from "../speculation/overlay-destination.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { meetCfcObservationCeilings } from "../cfc/observation.ts";
@@ -757,19 +758,13 @@ type QueryState = {
  * - `"hit"`: the stored key matches AND a result/error landed — the
  *   stored result IS the value (§4's hit rule; a bare claim is NOT a
  *   hit).
- * - `"dedupe"`: a pending claim for this key stands and either this
- *   node instance has the RPC in flight, or the run is NOT a served
- *   (stamped) run — the OFF arm keeps today's committed-state dedupe
- *   byte for byte (its inline flush leaves no routine dropped-effect
- *   path; the reload-orphaned-claim residue there is a pre-existing
- *   main behavior, out of stage-G scope).
- * - `"issue"`: no stored key for this hash — or, under the SERVING
- *   posture, an ORPHANED claim: a pending marker with no in-flight
- *   work in this process means the effect was dropped after its wave
- *   committed (park, crash, discarded batch) and nothing else will
- *   ever re-issue it — §6 step 3's re-miss premise, restored for the
- *   one builtin whose key alone cannot carry it. Re-issuing a READ is
- *   side-effect-free.
+ * - `"dedupe"`: a pending claim for this key stands and either this node
+ *   instance has the RPC in flight or the run is speculative. A speculative
+ *   derivation drops SQLite effects, so it cannot own or recover a query.
+ * - `"issue"`: no stored key for this hash — or a pending claim with no
+ *   in-flight work in this process. Another runtime may still own the claim,
+ *   but re-issuing a read is side-effect-free and hash-guarded completion
+ *   makes the overlap safe.
  *
  * Exported for unit testing only — not part of the builtin surface.
  */
@@ -780,15 +775,13 @@ export function sqliteQueryMemoDecision(options: {
   /** This node instance holds the RPC in flight right now. */
   inFlightHere: boolean;
 
-  /** The evaluation runs as a stamped serving run (a wave run context
-   * is present — the serving loop's signature; ON-arm client
-   * speculation and the OFF arm are unstamped). */
-  servedRun: boolean;
+  /** The evaluation belongs to a client speculation overlay. */
+  speculativeRun: boolean;
 }): "hit" | "dedupe" | "issue" {
   if (options.stored?.requestHash !== options.hash) return "issue";
   if (options.stored.pending !== true) return "hit";
-  if (options.inFlightHere) return "dedupe";
-  return options.servedRun ? "issue" : "dedupe";
+  if (options.inFlightHere || options.speculativeRun) return "dedupe";
+  return "issue";
 }
 
 /** sqliteQuery: reactive server-side read. */
@@ -1090,7 +1083,7 @@ export function sqliteQuery(
       stored: storedBeforeClaim,
       hash,
       inFlightHere: inFlightIssues.has(effectKey),
-      servedRun,
+      speculativeRun: speculationRunContextOf(tx) !== undefined,
     });
     if (decision === "hit") {
       // The §4 memo hit (server-execution v2): the committed result records

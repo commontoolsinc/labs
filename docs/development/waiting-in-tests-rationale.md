@@ -8,7 +8,8 @@ This document holds the analysis behind that guidance: the full argument for
 why a bounded timeout is never a guarantee, the sizing of the one backstop
 that argument bears on hardest, how the runner clock classifies timers across
 SES lockdown, the real-clock exemptions that were retired and what each hang
-turned out to be, why the runtime-client suite keeps the real clock, worked
+turned out to be, why the runtime-client suite keeps the real clock, why
+neither runtime-disposal teardown carries a bound, worked
 examples studied in enough depth to copy — proving a negative in the CSP
 suite, and the FUSE exec suite's design — and the production waits that apply
 the same principle outside tests.
@@ -82,6 +83,20 @@ Without the harness bound, a stuck test ran until astral's retried deadline on
 `page.evaluate` ran out of attempts, 53 to 57 seconds later, and threw a
 `RetryError` that named no test, printed no summary, and abandoned every test
 file still queued.
+
+That deadline is on every `page.evaluate` a browser test makes, not only the
+ones this harness issues, so it is worth knowing what it comes to elsewhere.
+Astral wraps the protocol call in `retry(() => deadline(call, timeout))` over
+a promise it creates once, so the five attempts re-wait on that same in-flight
+call rather than reissuing it: the evaluate runs once, and an answer that
+arrives late is still returned by whichever attempt is live for it. What
+differs between harnesses is the timeout. `deno-web-test` leaves astral's own
+ten seconds, which is where the fifty-second floor above comes from.
+`packages/integration`'s `Browser.launch` writes sixty seconds onto the page
+instead, so an evaluate the browser integration suites make ends after five
+minutes of deadline plus up to fifteen seconds of the retry's backoff. Neither
+is a bound this repository keeps, and neither wants a second one underneath
+it.
 
 By the test in [the section
 above](#why-a-bounded-timeout-is-never-a-guarantee), the harness bound's early
@@ -252,6 +267,77 @@ a `setInterval` scheduled from `src/` re-arms forever, so every connection a
 test builds would drive the clock to the runaway guard. Adopting the harness
 would mean excluding the very files that own timers, and no test in the suite
 observes a controllable time window a fake clock would help with.
+
+## The runtime disposal teardowns
+
+[Tearing a runtime down waits on its
+worker](waiting-in-tests.md#tearing-a-runtime-down-waits-on-its-worker) states
+what the two teardowns do. This is the analysis behind the part of it that
+looks like an omission: the failure each is exposed to is a worker that
+answers nothing, and neither carries a clock.
+
+The browser half needs none because it already has one, astral's, described in
+[the section above](#sizing-the-deno-web-test-backstop). Not capping a slow
+call is what makes that bound tolerable, and the property is astral's rather
+than ours.
+
+So what the browser half was missing was never a bound but a name. A
+`RetryError` names no request, and the teardown that catches it is cleanup, so
+a run ends with a warning that says a disposal failed and nothing about why.
+Reporting the page closes that, because `RuntimeClient.getPendingRequests` is
+main-thread bookkeeping: the request records live on the page's side of the
+boundary, and reading them asks the worker for nothing. A worker that has
+stopped answering is the case the read still answers, and what it answers with
+is the disposal's own request and its age.
+
+The in-process half is the one where a bound is arguable, and the argument is
+worth setting out because the first two objections to it are weaker than they
+look.
+
+The first is that an early fire drops writes. It would: the reply the teardown
+waits for is the worker's confirmation that it has flushed, so terminating the
+worker before that reply arrives loses whatever was still buffered. How much
+that is, the main thread cannot tell. The worker flushes before it replies, so
+a reply that never arrived leaves every state open: nothing written, part of
+it, or all of it with the reply lost afterwards.
+
+What narrows the objection is not how far the flush got but what terminating
+adds to it. A worker that is genuinely stuck writes nothing further whether it
+is terminated or left alone, so a bound firing on one costs only the wait it
+ends. The exposure is the slow-but-healthy disposal — a large flush, a
+contended machine, a clock jump — which a bound would kill mid-flush, losing
+writes that were still on their way. In this suite even that is local: each
+test opens a space under a fresh random name and disposes as the last thing in
+its scope, so no later read reaches the writes a killed flush dropped. By the
+test in [Wall-clock time is not a measure of
+progress](waiting-in-tests.md#wall-clock-time-is-not-a-measure-of-progress),
+an early fire there is safe.
+
+The second is the cost of writing it. The teardown is `dispose()` itself,
+reached through `Symbol.asyncDispose` at every `await using` in the file, so a
+bound has nowhere to sit that is neither production code — which would put a
+clock back on the path production deliberately does without — nor a change to
+what the file's helper hands back at every one of those bindings.
+
+What settles it is neither of those. It is that a hang there is already
+placed, and a bound adds one fact to that. Deno's runner prints a test's name
+when it starts and its verdict when it ends, so the last test printed without
+an `ok` is the one whose teardown is waiting, and what it waits for is a
+`Dispose` reply by construction — that is the only request a teardown sends.
+A bound would add the age of the wait, which the step's own duration already
+gives, and it would add a timer on a cleanup path to do it. The step limit
+ends the run either way. The runner prints that name unbuffered only while it
+runs the file's tests in sequence, which is what this package's test task
+does; `--parallel` withholds it.
+
+Two claims there were checked rather than assumed, because the whole argument
+rests on them. A live `Worker` holds Deno's event loop open, so the fail-fast
+that [the primitives
+section](waiting-in-tests.md#the-primitives-to-use-instead) relies on for
+in-process waits does not fire: a test awaiting a promise nothing resolves
+fails on its own in milliseconds, and the same test with a live `Worker`
+beside it runs until it is killed. That run's output ends at the test's name
+followed by its `...`, which is the line a reader places the hang by.
 
 ## Proving a negative: the CSP suite as a worked example
 

@@ -113,6 +113,64 @@ const seedPlainDoc = async (
 };
 
 describe("CFC prefix-provenance precision counters (Stage 0, doc §6)", () => {
+  it("captures gate paths before a backend metadata read can mutate them", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager });
+    try {
+      await seedPlainDoc(runtime, "path-capture-source", {
+        guarded: "untrusted",
+        allowed: "trusted",
+      });
+      const tx = runtime.edit();
+      const source = runtime.getCell(signer.did(), "path-capture-source")
+        .getAsNormalizedFullLink();
+      runtime.getCell(signer.did(), "path-capture-sink", SINK_SCHEMA, tx)
+        .set({ out: "target" });
+      const path = ["value", "guarded"];
+      const view = new Proxy(tx, {
+        get(target, property) {
+          if (property === "getPotentiallyExternalReadActivities") {
+            return () => [{ ...source, path, meta: {} }];
+          }
+          if (property === "readOrThrow") {
+            return (...args: Parameters<typeof target.readOrThrow>) => {
+              if (args[0].id === source.id && args[0].path[0] === "cfc") {
+                path[1] = "allowed";
+                return {
+                  version: 1,
+                  schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+                  labelMap: {
+                    version: 1,
+                    entries: [{
+                      path: ["guarded"],
+                      label: { integrity: [OTHER_ATOM] },
+                    }, {
+                      path: ["allowed"],
+                      label: { integrity: [FLOOR_ATOM] },
+                    }],
+                  },
+                };
+              }
+              return target.readOrThrow(...args);
+            };
+          }
+          const member = Reflect.get(target, property, target);
+          return typeof member === "function" ? member.bind(target) : member;
+        },
+      });
+      expect(
+        prepareBoundaryCommit(view).some((reason) =>
+          reason.includes("requiredIntegrity failed")
+        ),
+      ).toBe(true);
+      expect(path).toEqual(["value", "allowed"]);
+      tx.abort();
+    } finally {
+      await runtime.dispose({ closeStorage: false });
+      await storageManager.close();
+    }
+  });
+
   it("enforces input floors through the raw journal when candidate inspection is unavailable", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({ storageManager });

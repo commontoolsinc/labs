@@ -1759,6 +1759,66 @@ carries no handle code. The persisted tool-output artifact keeps the raw
 reference, the raw result value, and the `pieceId` — a bare fabric identifier
 the handle boundary never swaps, so it stays out of the model-facing rendering.
 
+`outputConcerns` is what the run's own outputs say about the reads behind them,
+and it is a DISCLOSURE rather than a refusal: the run succeeded, the piece
+stands, and this is the reason to look at it. A composed reader exposes its
+failure and its emptiness as outputs — an `errorMessage` beside its `rows` — and
+a pattern composing it is free to pass neither on, which is how a run answers
+`ok` over a result whose every figure is zero. So every pattern the run
+materialized is read where it stands, the run's own root included, and each
+output reporting a failure (a non-empty `error` or `errorMessage`, or any string
+carrying the `sqlite:` prefix the runtime writes its own SQLite failures under)
+or holding no rows (an empty list) is named: the output's key, the identity of
+the pattern that produced it — which for a composed one is the id its own
+`cf:pattern:` import addresses — and fixed text saying what to do about it.
+Absent when there is nothing to say, and one entry per pattern, output and kind
+however many times a pattern was materialized.
+
+Two bounds decide what a concern may be read from, and both fail closed. Only an
+output the pattern's own schema DECLARES at its top level is read: a property
+name is a channel, a name computed from what a pattern read would publish that
+data through the name, and nothing here goes through a release measurement,
+while a declared name is a constant of the source the model composed. And an
+emptiness is read only off a result that reports a read — one declaring an error
+branch or a `pending` flag — because an empty list is an ordinary shape for a
+result to hold, and calling every one of them a read that returned nothing would
+say "no rows" about a selection nobody has made yet. A failure is read off any
+result, since a string reporting one is not an ordinary shape.
+
+So the report UNDER-reports rather than over-reports, and is best-effort by
+construction. An output reached through a `$ref` or a combinator is not read, a
+nested one is not read, an instance the recorder's bounded buffer has evicted is
+not read, and an instance that will not read back is dropped while the rest of
+the report stands. Each of those costs a reason to look at something; none of
+them reports something that is not there, which is the direction to fail in for
+a disclosure sitting beside a result the run already returned.
+
+A result reporting itself `pending` has its emptiness passed over, and only its
+emptiness. A read still in flight is empty because it has not landed, and a
+query over a served store is in flight for the whole of the run that issued it —
+so an empty output read then is a fact about the clock rather than about the
+data, while a failure read then is a failure either way. That the rows land on
+the PIECE rather than in this call's answer is the same fact from the other
+side: a reader composed here reports no error and no rows in one breath, and it
+is the absent error that says the read is sound.
+
+The failure's own TEXT does not travel in the result. A concern names what the
+model already holds: it wrote the composition, and a composed instance's outputs
+went through no release measurement, so the text is treated as every other
+thrown message this tool withholds is. What a model does with a named output is
+expose it under its own result schema and render it, where the release boundary
+measures it like any other value.
+
+The text is kept in the artifact's `rawCauseMessage`, on the terms that field
+already states for thrown text: a composed instance is not something the model
+can address, so an operator reading the run back has nothing else to debug from,
+and the text cannot be recovered any other way. Each line names the same
+position the model was told about, so the two reports line up. That artifact is
+no stronger a boundary than the field it rides in — its root is readable through
+`bash`, as that field's own documentation records, and CT-2117 carries the
+structural fix — so what the sentence above claims is about the result rather
+than about the machine.
+
 What the answer's values may carry is measured against the ceiling a model's
 context has, which admits nothing: a model's context is outside every space, so
 no confidentiality clause names an audience it belongs to. The reference is not

@@ -93,6 +93,7 @@ import {
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+  type CfcPreparationWork,
   POST_COMMIT_RELEASE_REJECTED,
   runtimeWritePolicyAuthorized,
 } from "../cfc/types.ts";
@@ -219,6 +220,9 @@ type CfcInstrumentationHooks = {
 
   /** One full consumed-label collection was started. Measurement only. */
   onConsumedLabelWalk?(): void;
+
+  /** Work performed by preparation, including label lookup and stamping. */
+  onPreparationWork?(kind: CfcPreparationWork, count: number): void;
 
   /** One dereference trace was recorded, and how many the transaction holds
    * after it. `probeBelongsToDereference` scans this set once per read
@@ -2036,6 +2040,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcInstrumentation.onConsumedLabelWalk?.();
   }
 
+  /** @inheritDoc */
+  noteCfcPreparationWork(kind: CfcPreparationWork, count = 1): void {
+    this.#cfcInstrumentation.onPreparationWork?.(kind, count);
+  }
+
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
     this.#assertWritable("writeCfcGrant()");
     // The trusted policy-writer path (§8.12.7 route 2a, design §2.3
@@ -2649,7 +2658,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  /** Evaluates CFC gates and records the complete preparation interval. */
   prepareCfc(): string {
+    const started = performance.now();
+    try {
+      return this.#prepareCfc();
+    } finally {
+      logger.time(started, "prepareCfc");
+    }
+  }
+
+  /** Evaluates gates and seals preparation inputs for this transaction. */
+  #prepareCfc(): string {
     // Verification always runs. There is deliberately no caller-supplied input
     // override: the commit-time digest recheck only confirms the prepared input
     // matches real activity, so accepting an external input here would let a
@@ -4007,6 +4027,11 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   /** @inheritDoc */
   noteCfcConsumedLabelWalk(): void {
     this.#wrapped.noteCfcConsumedLabelWalk();
+  }
+
+  /** @inheritDoc */
+  noteCfcPreparationWork(kind: CfcPreparationWork, count = 1): void {
+    this.#wrapped.noteCfcPreparationWork(kind, count);
   }
 
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {

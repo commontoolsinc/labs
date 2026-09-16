@@ -838,6 +838,21 @@ export interface CfcRuntimeStats {
   /** Full consumed-label collections, including sink and host release checks. */
   consumedLabelWalks: number;
 
+  /** Overlap queries containing a wildcard segment. */
+  overlapWildcardQueries: number;
+
+  /** Overlap queries containing only concrete segments. */
+  overlapConcreteQueries: number;
+
+  /** Authoritative cover lookups for carried link-view entries. */
+  authoritativeCoverCalls: number;
+
+  /** Child templates minted by flow persistence. */
+  flowTemplateEntriesMinted: number;
+
+  /** Containers receiving child templates from flow persistence. */
+  flowTemplateContainers: number;
+
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
   cfcDigestInvalidations: number;
@@ -885,6 +900,11 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   dereferenceTracesMax: 0,
   refusalDetailsRecorded: 0,
   consumedLabelWalks: 0,
+  overlapWildcardQueries: 0,
+  overlapConcreteQueries: 0,
+  authoritativeCoverCalls: 0,
+  flowTemplateEntriesMinted: 0,
+  flowTemplateContainers: 0,
   cfcPreparedTx: 0,
   cfcPrepareRejects: 0,
   cfcDigestInvalidations: 0,
@@ -2320,6 +2340,9 @@ export class Runtime {
       },
       onRefusalDetail: () => {
         this.#cfcStats.refusalDetailsRecorded += 1;
+      },
+      onPreparationWork: (kind, count) => {
+        this.#cfcStats[kind] += count;
       },
       onConsumedLabelWalk: () => {
         this.#cfcStats.consumedLabelWalks += 1;

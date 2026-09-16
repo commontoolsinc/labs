@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   type Constructor,
+  type Equal,
   isBoolean,
   isFiniteNumber,
   isFunction,
@@ -16,7 +17,9 @@ import {
   isString,
   isUnsafeObjectKey,
   type JsTypeTagIncludingNull,
+  type MustBeTrue,
   Mutable,
+  type Same,
   typeOfIncludingNull,
   unsafeObjectKeyIn,
 } from "@commonfabric/utils/types";
@@ -476,10 +479,71 @@ describe("types", () => {
 
       const typeOf = (value: unknown) => typeof value;
       type TypeOfTag = ReturnType<typeof typeOf>;
-      type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
-        : false;
 
       const _same: Same<TypeOfTag | "null", JsTypeTagIncludingNull> = true;
+    });
+  });
+
+  describe("Same", () => {
+    // Each case pairs the claim with its control: a comparison that reads the
+    // other way, so that `true` is the comparison's verdict rather than the
+    // only thing it can say.
+
+    it("is `true` for a type and itself, and `false` for two unrelated types", () => {
+      const _same: Same<string, string> = true;
+      const _unrelated: Same<string, number> = false;
+    });
+
+    it("is `true` across `any` in a type argument", () => {
+      const _any: Same<Map<any, any>, Map<string, number>> = true;
+      const _concrete: Same<Map<string, string>, Map<string, number>> = false;
+    });
+
+    it("is `true` across a `readonly` modifier on a property", () => {
+      const _property: Same<{ readonly a: number }, { a: number }> = true;
+      const _array: Same<readonly number[], number[]> = false;
+    });
+
+    it("is `true` for a union and a type each of its members is assignable to", () => {
+      const _subtype: Same<Error | TypeError, Error> = true;
+      const _disjoint: Same<Error | Date, Error> = false;
+    });
+  });
+
+  describe("Equal", () => {
+    it("is `true` for a type and itself, and `false` for two unrelated types", () => {
+      const _same: Equal<string, string> = true;
+      const _unrelated: Equal<string, number> = false;
+    });
+
+    it("is `false` across `any` in a type argument", () => {
+      const _any: Equal<Map<any, any>, Map<string, number>> = false;
+      const _written: Equal<Map<any, any>, Map<any, any>> = true;
+    });
+
+    it("is `false` across a `readonly` modifier on a property", () => {
+      const _property: Equal<{ readonly a: number }, { a: number }> = false;
+      const _written: Equal<{ readonly a: number }, { readonly a: number }> =
+        true;
+    });
+
+    it("is `false` for a union and a type each of its members is assignable to", () => {
+      const _subtype: Equal<Error | TypeError, Error> = false;
+      const _written: Equal<Error | TypeError, Error | TypeError> = true;
+    });
+  });
+
+  describe("MustBeTrue", () => {
+    it("compiles for `true` and for nothing else `Same` or `Equal` can yield", () => {
+      type _True = MustBeTrue<true>;
+      // @ts-expect-error `false` does not satisfy the constraint
+      type _False = MustBeTrue<false>;
+      // @ts-expect-error `boolean` does not satisfy the constraint
+      type _Boolean = MustBeTrue<boolean>;
+    });
+
+    it("compiles for `never`, which a comparison yielding it on mismatch passes vacuously", () => {
+      type _Never = MustBeTrue<never>;
     });
   });
 

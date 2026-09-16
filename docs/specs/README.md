@@ -83,6 +83,7 @@ decision is reversed or superseded).
 - [Template population](cfc-template-population.md)
 - [Value-level provenance](cfc-value-level-provenance.md)
 - [Per-write read-prefix provenance](cfc-write-prefix-provenance.md)
+- [Write-destination reads](cfc-write-destination-reads.md)
 - [Sandboxing](sandboxing/README.md)
 - [Toolshed access control](toolshed-access-control.md)
 

@@ -26,6 +26,31 @@ export type FabricPrimitiveValueTag =
   typeof FABRIC_PRIMITIVE_VALUE_TAGS[keyof typeof FABRIC_PRIMITIVE_VALUE_TAGS];
 
 /**
+ * The tags of the non-fundamental JS classes (that is, neither plain object nor
+ * array) whose instances are recognized as included in the
+ * `FabricConvertibleJsObject` type. Each tag is `Js` followed by the name of
+ * the global class it stands for, which keeps the tags unambiguous and is what
+ * ties each one to its class: `tags-agreement.ts` stops compiling when this
+ * table and `FabricConvertibleJsObject` stop agreeing.
+ */
+export const FABRIC_CONVERTIBLE_JS_OBJECT_TAGS = Object.freeze(
+  {
+    JsDate: "JsDate",
+    JsError: "JsError",
+    JsMap: "JsMap",
+    JsRegExp: "JsRegExp",
+    JsSet: "JsSet",
+    JsUint8Array: "JsUint8Array",
+  } as const,
+);
+
+/** One of the `FabricConvertibleJsObject` tag strings. */
+export type FabricConvertibleJsObjectTag =
+  typeof FABRIC_CONVERTIBLE_JS_OBJECT_TAGS[
+    keyof typeof FABRIC_CONVERTIBLE_JS_OBJECT_TAGS
+  ];
+
+/**
  * The tags of the JS primitive types (all of them other than `object` and
  * `function`), plus `null`.
  *
@@ -63,12 +88,7 @@ export type JsTypeValueTag =
 export const PRIMITIVE_VALUE_TAGS = Object.freeze(
   {
     ...JS_PRIMITIVE_TYPE_VALUE_TAGS,
-    FabricEpochNsec: "FabricEpochNsec",
-    FabricEpochDay: "FabricEpochDay",
-    FabricHash: "FabricHash",
-    FabricBytes: "FabricBytes",
-    FabricKeyPair: "FabricKeyPair",
-    FabricRegExp: "FabricRegExp",
+    ...FABRIC_PRIMITIVE_VALUE_TAGS,
   } as const,
 );
 
@@ -79,10 +99,10 @@ export type PrimitiveValueTag =
 /** Tags for all values that could possibly be valid `FabricValue`s. */
 export const FABRIC_VALUE_TAGS = Object.freeze(
   {
+    ...PRIMITIVE_VALUE_TAGS,
     Array: "Array",
     FabricInstance: "FabricInstance",
     Object: "Object",
-    ...PRIMITIVE_VALUE_TAGS,
   } as const,
 );
 
@@ -91,35 +111,32 @@ export type FabricValueTag =
   typeof FABRIC_VALUE_TAGS[keyof typeof FABRIC_VALUE_TAGS];
 
 /**
+ * Tags for all values that could possibly be either a valid `FabricValue` or
+ * the designated `PlusType` of a `FabricValuePlus`.
+ */
+export const FABRIC_VALUE_PLUS_TAGS = Object.freeze(
+  {
+    ...FABRIC_VALUE_TAGS,
+    PlusType: "PlusType",
+  } as const,
+);
+
+/**
+ * Tag for any value that could possibly be either a valid `FabricValue` or
+ * the designated `PlusType` of a `FabricValuePlus`.
+ */
+export type FabricValuePlusTag =
+  typeof FABRIC_VALUE_PLUS_TAGS[keyof typeof FABRIC_VALUE_PLUS_TAGS];
+
+/**
  * Tags identifying the value types that this system recognizes for dispatch.
- * These are distinct from wire-format `TAGS`.
- *
- * Covers the following:
- * * **JS types**: every primitive and a function, each represented by its
- *   `typeof` name, plus `null`. These are `JS_TYPE_VALUE_TAGS`, which this
- *   table includes whole.
- * * **Native JS builtins**: arrays and plain objects represented by `Array`
- *   and `Object`, and classes represented by their respective names under a
- *   `Js` prefix.
- * * **`FabricPrimitive`s**: classes defined by this package which are
- *   considered equivalent to primitives (always frozen, pass through conversion
- *   unchanged) but aren't under the open-ended `FabricInstance` umbrella. These
- *   are `FABRIC_PRIMITIVE_VALUE_TAGS`, which this table includes whole.
- * * **`FabricInstance`s**: container classes defined by this package, all
- *   represented by the type `FabricInstance`.
+ * These are distinct from wire-format `TAGS`. Covers all the tags defined by
+ * this submodule.
  */
 export const VALUE_TAGS = Object.freeze(
   {
-    Array: "Array",
-    FabricInstance: "FabricInstance",
-    JsDate: "JsDate",
-    JsError: "JsError",
-    JsMap: "JsMap",
-    JsRegExp: "JsRegExp",
-    JsSet: "JsSet",
-    JsUint8Array: "JsUint8Array",
-    Object: "Object",
-    ...FABRIC_PRIMITIVE_VALUE_TAGS,
+    ...FABRIC_CONVERTIBLE_JS_OBJECT_TAGS,
+    ...FABRIC_VALUE_PLUS_TAGS,
     ...JS_TYPE_VALUE_TAGS,
   } as const,
 );
@@ -129,9 +146,9 @@ export type ValueTag = typeof VALUE_TAGS[keyof typeof VALUE_TAGS];
 
 /**
  * Tag for any value that could possibly be a valid `FabricConvertibleJsValue`:
- * every tag but `function`.
+ * every tag but `function` and `PlusType`.
  */
 export type ConvertibleJsValueTag = Exclude<
   ValueTag,
-  typeof VALUE_TAGS.function
+  typeof VALUE_TAGS.function | typeof VALUE_TAGS.PlusType
 >;

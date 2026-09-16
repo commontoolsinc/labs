@@ -276,11 +276,23 @@ export async function runMultiUserTestPattern(
           // A test that names a mode names it for every participant, the way
           // the single-user runner honors it.
           cfcEnforcementMode: options.cfcEnforcementMode,
+          cfcFlowLabels: options.cfcFlowLabels,
         }) as ParticipantInitResult;
         assertParticipantRung(
           spec.name,
           options.cfcEnforcementMode,
           init.cfcEnforcementMode,
+        );
+        if (
+          options.cfcFlowLabels !== undefined &&
+          init.cfcFlowLabels !== options.cfcFlowLabels
+        ) {
+          throw new Error(
+            `Participant "${spec.name}" resolved flow labels to ${init.cfcFlowLabels}, expected ${options.cfcFlowLabels}`,
+          );
+        }
+        console.log(
+          `  [${spec.name}] CFC posture: enforcement=${init.cfcEnforcementMode} flowLabels=${init.cfcFlowLabels}`,
         );
         participants.push({
           spec,

@@ -4,6 +4,13 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [2026-09-16 CFC evidence review](development/performance/2026-09-16-cfc-evidence-review.md) — Phase warmup verification and deterministic browser comparison including capture identity and size.
+- [2026-09-16 CFC callback argument narrowing withdrawal](development/performance/2026-09-16-cfc-argument-narrowing-withdrawal.md) — Server-execution Lunch Poll regression, controlled isolation, and the final PR performance-claim boundary.
+- [2026-09-16 CFC browser evidence reproduction](development/performance/2026-09-16-cfc-browser-evidence-reproduction.md) — Exact comparator revisions, reproduced historical hashes, and portable mappings for external capture artifacts.
+- [CFC commit preparation: wildcard covers and carried labels](development/performance/2026-09-16-cfc-commit-preparation-round2/README.md) — loop audit, exact read/write grid, paired browser scaling, complete label equivalence, and an explicitly labeled SQL aggregate fixture.
+- [2026-09-16 CFC preparation cache follow-up](development/performance/2026-09-16-cfc-prepare-cache-followup/README.md) — Identity-cache measurements, preserved label/refusal checks, and additional indexed candidate scans for PR 7604.
+
+- [Pattern-test CFC posture measurement](development/performance/2026-09-15-cfc-pattern-test-posture.md) — 2026-09-15; five alternating headless mapped-render and labeled-copy samples at N=11/50/150, with resolved postures and preparation spans.
 - [Prepared digest cache selection](development/performance/2026-09-15-prepared-digest-cache-selection/) ([report](development/performance/2026-09-15-prepared-digest-cache-selection/README.md)) — four-arm comparison, repeated reactive executions, GC retention, paired timings, profiles, and replay patches selecting epoch-only memoization.
 
 - [Prepared digest unit ladder: paired summary](development/performance/2026-09-15-prepared-digest-paired-summary.md) — median timings and same-round speedups supplementing the original minimum-based summary.
@@ -223,6 +230,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 ## Investigations, journals, and working notes
 
 - [Where the pattern type check spends its time](development/2026-09-15-cfcheck-cost-decomposition.md) — measured cost decomposition of `deno task cfcheck` over 414 patterns: a fixed cost under four seconds against 94% variable, four disjoint slices costing what one whole run costs, transform and emit at 77% of the batch against 22% for the type check, output-identical per-file emit, one program per file in the union, per-pattern costs spanning 1 ms to 2.4 s, and what a filtered run costs at seven sizes.
+- [Where a unit suite's batch spends its time](development/2026-09-15-unit-suite-cost-decomposition.md) — measured cost decomposition of the `workspace-unit` and `runner-unit` test-selection batches from five lane artifacts and a workstation: serial invocations inside a batch, a `runner-unit` residual of 0.51 to 0.55 seconds a unit across a 68-fold range of batch sizes, a load-only curve of 0.216 seconds a unit through a near-zero intercept, the two-term model pricing `workspace-unit` at 1054.7 seconds against a 230-second budget, what a third per-unit term gives instead, coverage instrumentation costing 1.5 to 2.9 times, and the manifest under-costing that made the `workspace-unit` observations unusable.
 - [Lazy materialization reload diagnosis](development/performance/2026-09-15-lazy-reload-diagnosis.md) — Current-main eager nullable-read failures, durable-state comparison, and a wrong-page reload observation.
 - [Notebook reload navigation policy](development/performance/2026-09-15-notebook-reload-navigation-policy.md) — Default-on wrong-selection reproduction and reload-test correction under the existing speculative-navigation contract.
 

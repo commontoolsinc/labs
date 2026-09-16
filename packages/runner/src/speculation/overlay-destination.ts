@@ -122,7 +122,19 @@ export const stampSpeculationRunContext = (
 
 export const speculationRunContextOf = (
   tx: IExtendedStorageTransaction,
-): ServerRunInfo | undefined => speculationRunContexts.get(tx);
+): ServerRunInfo | undefined => {
+  // Wrappers preserve the run's context; a stamp on a nearer wrapper takes
+  // precedence, as it does for the serving side's waveRunContextOf.
+  let current: IExtendedStorageTransaction | undefined = tx;
+  while (current !== undefined) {
+    const context = speculationRunContexts.get(current);
+    if (context !== undefined) return context;
+    current = (current as {
+      wrappedTransaction?: IExtendedStorageTransaction;
+    }).wrappedTransaction;
+  }
+  return undefined;
+};
 
 /** The one effect kind a speculative run may still enact: reversible,
  * client-enacted navigation (speculation.md §2's optimistic navigate;

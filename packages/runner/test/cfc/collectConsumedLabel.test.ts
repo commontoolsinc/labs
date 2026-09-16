@@ -53,6 +53,21 @@ function observation(
 }
 
 describe("collectConsumedLabel()", () => {
+  it("keeps distinct atoms at one source while collapsing structural duplicates", () => {
+    const atoms = Array.from({ length: 40 }, (_, index) => ({
+      type: "secret",
+      index,
+    }));
+    const clones = atoms.map(({ type, index }) => ({ index, type }));
+    const result = collectConsumedLabel(transaction([
+      observation(address, [...atoms, ...clones]),
+    ]));
+    expect(result.sources.map((source) => source.atom)).toEqual(atoms);
+    expect(result.sources.every((source) => source.read === address)).toBe(
+      true,
+    );
+  });
+
   it("keeps structurally distinct clauses and their first source in encounter order", () => {
     const first = { a: 1, b: 2 };
     const second = { a: 2, b: 1 };

@@ -218,6 +218,50 @@ describe("refusal-detail", () => {
       expect(attribution).toBe("none");
     });
 
+    it("retains clause-first source order across many distinct clauses", () => {
+      const sources = Array.from(
+        { length: 80 },
+        (_, index) =>
+          sourceOf(
+            { kind: "secret", number: index % 20 },
+            `of:read-${index}`,
+            [],
+            ["field"],
+          ),
+      );
+      const offending = [19, 0, 7, 100].map((number) => ({
+        number,
+        kind: "secret",
+      }));
+      const { inputs, attribution } = describeRefusalInputs(offending, sources);
+      expect(inputs.map((input) => input.read.id)).toEqual(
+        [19, 0, 7].flatMap((number) =>
+          [0, 20, 40, 60].map((offset) => `of:read-${number + offset}`)
+        ),
+      );
+      expect(inputs.map((input) => input.atoms)).toEqual(
+        offending.slice(0, 3).flatMap((atom) =>
+          Array.from({ length: 4 }, () => [renderCfcAtom(atom)])
+        ),
+      );
+      expect(attribution).toBe("partial");
+    });
+
+    it("retains the first rendered clause order for one read with repeated offenders", () => {
+      const clauses = Array.from(
+        { length: 40 },
+        (_, index) => `secret-${index}`,
+      );
+      const sources = clauses.map((atom) =>
+        sourceOf(atom, "of:one-read", [], ["field"])
+      );
+      const first = [...clauses].reverse();
+      const result = describeRefusalInputs([...first, ...clauses], sources);
+      expect(result.inputs).toHaveLength(1);
+      expect(result.inputs[0].atoms).toEqual(first.map(renderCfcAtom));
+      expect(result.attribution).toBe("complete");
+    });
+
     it("returns `none` when no source claims any offending clause", () => {
       expect(describeRefusalInputs(["medical"], []).attribution).toBe("none");
     });

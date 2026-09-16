@@ -21,9 +21,9 @@
  *    identity. An open signed for host A cannot be replayed to host B.
  */
 
-import { hashOf } from "@commonfabric/data-model";
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
+import { hashOf, isFabricPlainObject } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { isObjectNotArray } from "@commonfabric/utils/types";
 import { fromDID } from "../util.ts";
 import { MEMORY_PROTOCOL, type SessionOpenChallenge } from "../v2.ts";
 
@@ -47,7 +47,7 @@ export const authorizationError = (
   );
 
 const sameSessionDescriptor = (
-  left: Record<string, unknown>,
+  left: FabricPlainObject,
   right: {
     sessionId?: string;
     seenSeq?: number;
@@ -70,14 +70,14 @@ const sameSessionDescriptor = (
 export type SessionOpenMessage = {
   space: string;
   session: { sessionId?: string; seenSeq?: number; sessionToken?: string };
-  invocation?: Record<string, unknown>;
-  authorization?: unknown;
+  invocation?: FabricPlainObject;
+  authorization?: FabricValue;
 };
 
 /**
  * The `session.open` authorization AFTER validation. Deliberately not the
  * declared type of `SessionOpenMessage.authorization`: that field is whatever
- * the peer sent, so it stays `unknown` and only
+ * the peer sent, so it stays a bare `FabricValue` and only
  * {@link wireAuthorizationOf} may produce this type.
  *
  * The signature crosses the wire as a `FabricBytes` -- the canonical binary
@@ -94,9 +94,9 @@ export type WireSessionOpenAuthorization = {
  * the untrusted field to the named shape.
  */
 export const wireAuthorizationOf = (
-  authorization: unknown,
+  authorization: FabricValue,
 ): WireSessionOpenAuthorization | undefined => {
-  if (!isObjectNotArray(authorization)) return undefined;
+  if (!isFabricPlainObject(authorization)) return undefined;
   const { signature } = authorization;
   return signature instanceof FabricBytes ? { signature } : undefined;
 };
@@ -127,7 +127,7 @@ export const verifySessionOpenAuthorization = async (
 ): Promise<string> => {
   const wireAuthorization = wireAuthorizationOf(message.authorization);
   const signature = wireAuthorization?.signature.slice() ?? null;
-  if (!isObjectNotArray(message.invocation) || signature === null) {
+  if (!isFabricPlainObject(message.invocation) || signature === null) {
     throw authorizationError("memory session.open requires authorization");
   }
 
@@ -136,9 +136,9 @@ export const verifySessionOpenAuthorization = async (
     typeof invocation.iss !== "string" ||
     invocation.cmd !== "session.open" ||
     invocation.sub !== message.space ||
-    !isObjectNotArray(invocation.args) ||
+    !isFabricPlainObject(invocation.args) ||
     invocation.args.protocol !== MEMORY_PROTOCOL ||
-    !isObjectNotArray(invocation.args.session) ||
+    !isFabricPlainObject(invocation.args.session) ||
     !sameSessionDescriptor(invocation.args.session, message.session)
   ) {
     throw authorizationError("memory session.open authorization mismatch");

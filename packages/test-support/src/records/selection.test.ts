@@ -14,7 +14,6 @@ const TEST = { k: "unit", s: "memory", n: "space > writes" };
 const CALIBRATION = {
   setupCost: {},
   suites: {},
-  unitOverhead: {},
   prologue: 0,
 };
 
@@ -159,6 +158,7 @@ describe("selection", () => {
       manifest.calibration.suites["workspace-unit"] = {
         overhead: 0,
         correction: 0,
+        unitOverhead: 0,
       };
       expect(parseManifest(JSON.stringify(manifest))).toBeUndefined();
     });
@@ -256,7 +256,6 @@ describe("selection", () => {
         withField("calibration", {
           setupCost: { a: -1 },
           suites: {},
-          unitOverhead: {},
           prologue: 0,
         }),
       ],
@@ -265,7 +264,6 @@ describe("selection", () => {
         withField("calibration", {
           setupCost: {},
           suites: {},
-          unitOverhead: {},
           prologue: -1,
         }),
       ],
@@ -273,8 +271,7 @@ describe("selection", () => {
         "a suite overhead below zero",
         withField("calibration", {
           setupCost: {},
-          suites: { s: { overhead: -1, correction: 1 } },
-          unitOverhead: {},
+          suites: { s: { overhead: -1, correction: 1, unitOverhead: 0 } },
           prologue: 0,
         }),
       ],
@@ -428,19 +425,31 @@ describe("selection", () => {
         "a suite overhead that is not a number",
         withField("calibration", {
           ...CALIBRATION,
-          suites: { unit: { overhead: "some", correction: 1 } },
+          suites: {
+            unit: { overhead: "some", correction: 1, unitOverhead: 0 },
+          },
         }),
       ],
       [
         "a suite correction that is not a number",
         withField("calibration", {
           ...CALIBRATION,
-          suites: { unit: { overhead: 0, correction: null } },
+          suites: { unit: { overhead: 0, correction: null, unitOverhead: 0 } },
         }),
       ],
       [
-        "a unit overhead that is not a record",
-        withField("calibration", { ...CALIBRATION, unitOverhead: 7 }),
+        "a suite unit overhead below zero",
+        withField("calibration", {
+          ...CALIBRATION,
+          suites: { unit: { overhead: 0, correction: 1, unitOverhead: -1 } },
+        }),
+      ],
+      [
+        "a suite with no unit overhead at all",
+        withField("calibration", {
+          ...CALIBRATION,
+          suites: { unit: { overhead: 0, correction: 1 } },
+        }),
       ],
       [
         "a prologue that is not a number",
@@ -526,8 +535,13 @@ describe("selection", () => {
         }],
         calibration: {
           setupCost: { toolshed: 60 },
-          suites: { "pattern-integration": { overhead: 50, correction: 1.2 } },
-          unitOverhead: { "packages/patterns/one.test.ts": 10 },
+          suites: {
+            "pattern-integration": {
+              overhead: 50,
+              correction: 1.2,
+              unitOverhead: 10,
+            },
+          },
           prologue: 3,
         },
         lanes: [{
