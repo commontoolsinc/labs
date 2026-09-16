@@ -73,6 +73,14 @@ third party authored, rather than a new route.
 Two tools, both on `PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS` and on no
 other surface.
 
+A parent reaches them by delegating, and has to be told so. Keeping a
+capability off a surface leaves that surface unable to tell "you may not do
+this here" from "this cannot be done", and a model reads the second: the
+first live run refused the request outright, having tried every tool it
+held, because nothing in `delegate_task` said a pattern-author child could
+change a piece rather than build one. That sentence is now in the `profile`
+description a parent reads when it chooses one.
+
 ### `read_piece_source`
 
 Takes a handle token naming a piece root and returns that piece's current
