@@ -315,11 +315,12 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
 
   it("attaches row labels to reserved SQLite alias rows", async () => {
     const rowCount = 2;
-    const schemaWritesByTarget = new Map<string, number>();
+    const schemaWritesByAttempt: Map<string, number>[] = [];
     const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
     (runtime as any).editWithRetry = (fn: any, ...args: any[]) =>
       originalEditWithRetry((writeTx) => {
         const value = fn(writeTx);
+        const schemaWritesByTarget = new Map<string, number>();
         const prepared = (writeTx as any).accessForTestingOnly
           .buildPreparedDigestInput();
         for (const input of prepared.writePolicyInputs ?? []) {
@@ -329,6 +330,7 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
           const id = String(input.target.id);
           schemaWritesByTarget.set(id, (schemaWritesByTarget.get(id) ?? 0) + 1);
         }
+        schemaWritesByAttempt.push(schemaWritesByTarget);
         return value;
       }, ...args);
     const provider = runtime.storageManager.open(space) as unknown as {
@@ -400,7 +402,11 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
             logicalPath: ["0", "1"],
           })).toEqual(expect.arrayContaining(["secret", "column-secret"]));
           const rowId = rowCell.getAsNormalizedFullLink().id;
-          expect(schemaWritesByTarget.get(rowId)).toBe(1);
+          const rowAttempts = schemaWritesByAttempt
+            .map((attempt) => attempt.get(rowId))
+            .filter((count): count is number => count !== undefined);
+          expect(rowAttempts.length).toBeGreaterThan(0);
+          expect(rowAttempts.every((count) => count === 1)).toBe(true);
         }
       } finally {
         cancel();
