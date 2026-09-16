@@ -93,7 +93,7 @@ export const FABRIC_VALUE_PLUS_TAGS = Object.freeze(
   {
     ...FABRIC_VALUE_TAGS,
     PlusType: "PlusType",
-  },
+  } as const,
 );
 
 /**
