@@ -10,6 +10,7 @@ import { entityKey } from "../src/scheduler/keys.ts";
 import { stampSpeculationRunContext } from "../src/speculation/overlay-destination.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { markDurableReadTx } from "../src/storage/reactivity-log.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
@@ -265,5 +266,36 @@ export default pattern<{ shortName: string }>(({ shortName }) => ({
     expect(fixture.storedArgument()).toEqual({ shortName: "3" });
     expect(fixture.argument.get()).toEqual({ shortName: "3" });
     expect(fixture.reader.speculationOverlay).toBeUndefined();
+  });
+
+  it("keeps a deferred authored start on its original durable read view", async () => {
+    const fixture = await setup();
+    await fixture.argument.sync();
+    const echo = fixture.reader.edit();
+    stampSpeculationRunContext(echo, {
+      actionId: "argument-echo",
+      kind: "event-handler",
+      eventId: "argument-event",
+    });
+    fixture.argument.withTx(echo).set({ shortName: "4" });
+    fixture.reader.prepareTxForCommit(echo);
+    expect((await echo.commit()).error).toBeUndefined();
+    expect(fixture.argument.get()).toEqual({ shortName: "4" });
+
+    await fixture.start(
+      { actionId: "parent-instantiation", kind: "bookkeeping" },
+      (tx) => {
+        markDurableReadTx(tx);
+        return new TransactionWrapper(tx, { nonReactive: true });
+      },
+    );
+    await fixture.finish();
+    expect(fixture.storedArgument()).toEqual({ shortName: "3" });
+    expect(fixture.reader.runner.cancels.has(
+      entityKey(
+        fixture.reached.getAsNormalizedFullLink(),
+        fixture.reader.scopeKeyIdentity,
+      ),
+    )).toBe(true);
   });
 });
