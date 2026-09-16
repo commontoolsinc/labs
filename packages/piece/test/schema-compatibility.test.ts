@@ -55,6 +55,44 @@ const oldPattern = pattern(
   },
 );
 
+/**
+ * A value of each `FabricPrimitive` class, keyed by the schema type name that
+ * matches it. The `satisfies` closes the classes over the vocabulary's names.
+ */
+const FABRIC_PRIMITIVE_VALUES = {
+  FabricBytes: new FabricBytes(new Uint8Array([1])),
+  FabricEpochDay: new FabricEpochDay(0n),
+  FabricEpochNsec: new FabricEpochNsec(0n),
+  FabricHash: new FabricHash(new Uint8Array(32), "fid1"),
+  FabricKeyPair: new FabricKeyPair(
+    "ExampleAlgorithm",
+    new Uint8Array([1]),
+    new Uint8Array([2]),
+  ),
+  FabricRegExp: new FabricRegExp(/a/),
+} satisfies Record<FabricPrimitiveSchemaType, FabricPrimitive>;
+
+/**
+ * Returns every string-keyed member on the prototype chain of a value in
+ * {@link FABRIC_PRIMITIVE_VALUES} below `Object.prototype`, together with a
+ * name none of those values has and the brand key.
+ */
+function fabricPrimitiveMemberNames(): Set<string> {
+  const names = new Set(["absentFromEveryClass", FABRIC_SPECIAL_OBJECT_BRAND]);
+  for (const value of Object.values(FABRIC_PRIMITIVE_VALUES)) {
+    for (
+      let prototype = Object.getPrototypeOf(value);
+      prototype !== Object.prototype;
+      prototype = Object.getPrototypeOf(prototype)
+    ) {
+      for (const name of Object.getOwnPropertyNames(prototype)) {
+        names.add(name);
+      }
+    }
+  }
+  return names;
+}
+
 /** An object whose `maxProperties` a second merged member would break. */
 const boundedObject: JSONSchema = {
   type: "object",
@@ -1206,6 +1244,7 @@ describe("piece schema compatibility", () => {
     const stableSource: JSONSchema = {
       type: "object",
       properties,
+      required: ["y"],
       additionalProperties: false,
     };
     const stableTarget: JSONSchema = {
@@ -1214,7 +1253,7 @@ describe("piece schema compatibility", () => {
         ...properties,
         x: { type: "number", default: 0 },
       },
-      required: ["x"],
+      required: ["x", "y"],
       additionalProperties: false,
     };
     expect(() => assertSchemaSubset(stableSource, stableTarget)).not.toThrow();
@@ -2426,11 +2465,15 @@ describe("piece schema compatibility", () => {
   });
 
   it("fills an unconstrained required member's default for links but refuses its introduction from `true` during evolution", () => {
+    // The link source requires a key no `FabricPrimitive` has, which keeps
+    // every value it admits a record that can receive the default.
+
     const target: JSONSchema = {
       required: ["count"],
       properties: { count: { default: 1 } },
     };
-    expect(() => assertSchemaSubset(true, target)).not.toThrow();
+    expect(() => assertSchemaSubset({ required: ["title"] }, target)).not
+      .toThrow();
     expect(() =>
       assertPatternSchemasBackwardCompatible(
         pattern(true, true),
@@ -3325,46 +3368,16 @@ describe("piece schema compatibility", () => {
     });
 
     it("refuses exactly the member names the validator finds missing, for every class in the vocabulary", () => {
-      // The `satisfies` closes the classes over the vocabulary's names. The
-      // member names are every string-keyed member on any of their prototype
-      // chains below `Object.prototype`, a name none of them has, and the
-      // brand key.
-
-      const values = {
-        FabricBytes: new FabricBytes(new Uint8Array([1])),
-        FabricEpochDay: new FabricEpochDay(0n),
-        FabricEpochNsec: new FabricEpochNsec(0n),
-        FabricHash: new FabricHash(new Uint8Array(32), "fid1"),
-        FabricKeyPair: new FabricKeyPair(
-          "ExampleAlgorithm",
-          new Uint8Array([1]),
-          new Uint8Array([2]),
-        ),
-        FabricRegExp: new FabricRegExp(/a/),
-      } satisfies Record<FabricPrimitiveSchemaType, FabricPrimitive>;
-      const names = new Set([
-        "absentFromEveryClass",
-        FABRIC_SPECIAL_OBJECT_BRAND,
-      ]);
-      for (const value of Object.values(values)) {
-        for (
-          let prototype = Object.getPrototypeOf(value);
-          prototype !== Object.prototype;
-          prototype = Object.getPrototypeOf(prototype)
-        ) {
-          for (const name of Object.getOwnPropertyNames(prototype)) {
-            names.add(name);
-          }
-        }
-      }
-
       const verdicts: { type: string; name: string; accepted: boolean }[] = [];
       const disagreements: typeof verdicts = [];
       for (const type of FABRIC_PRIMITIVE_SCHEMA_TYPES) {
-        for (const name of names) {
+        for (const name of fabricPrimitiveMemberNames()) {
           const target: JSONSchema = { type: "object", required: [name] };
-          const accepted =
-            validateSchemaValue(target, values[type], target) === undefined;
+          const accepted = validateSchemaValue(
+            target,
+            FABRIC_PRIMITIVE_VALUES[type],
+            target,
+          ) === undefined;
           let proved = true;
           try {
             assertSchemaSubset({ type }, target);
@@ -3386,6 +3399,123 @@ describe("piece schema compatibility", () => {
         name: "tag",
         accepted: false,
       });
+    });
+  });
+
+  describe("a newly required field's default against a source admitting a `FabricPrimitive`", () => {
+    // Default insertion cannot add a key to a `FabricPrimitive`, since every
+    // instance is frozen, and the runtime checks `required` keys on one with
+    // `in`. Each link case reads the validator's verdict on a value beside the
+    // proof's, so the two agree on the spelling in front of them.
+
+    const bytes = FABRIC_PRIMITIVE_VALUES.FabricBytes;
+    const hash = FABRIC_PRIMITIVE_VALUES.FabricHash;
+    const defaulted = (key: string, required: string[] = []): JSONSchema => ({
+      type: "object",
+      properties: { [key]: { default: 1 } },
+      required: [...required, key],
+    });
+
+    it("throws for a link whose `object`, `true`, or `unknown` source admits a `FabricBytes` lacking the field", () => {
+      // The runtime does not check `required` under `type: "unknown"`, so the
+      // `unknown` source admits every `FabricPrimitive` whatever it requires.
+
+      const untypedTarget: JSONSchema = {
+        properties: { x: { default: 1 } },
+        required: ["x"],
+      };
+      const cases: [JSONSchema, JSONSchema][] = [
+        [{ type: "object" }, defaulted("x")],
+        [true, untypedTarget],
+        [{ type: "unknown", required: ["title"] }, untypedTarget],
+      ];
+      for (const [source, target] of cases) {
+        expect(validateSchemaValue(source, bytes, source)).toBeUndefined();
+        expect(validateSchemaValue(target, bytes, target)).toBe(
+          "missing required property x",
+        );
+        expect(() => assertSchemaSubset(source, target)).toThrow(
+          /value\.x: newly required field is not a member of `FabricBytes`, which takes no default/,
+        );
+      }
+    });
+
+    it("does not throw for a link whose source requires a key no `FabricPrimitive` has", () => {
+      const source: JSONSchema = {
+        type: "object",
+        properties: { title: { type: "string" } },
+        required: ["title"],
+      };
+      const target: JSONSchema = {
+        type: "object",
+        properties: { title: { type: "string" }, x: { default: 1 } },
+        required: ["title", "x"],
+      };
+      expect(validateSchemaValue(source, bytes, source)).toBe(
+        "missing required property title",
+      );
+      expect(() => assertSchemaSubset(source, target)).not.toThrow();
+    });
+
+    it("throws for a field a `FabricHash` the source's `required` admits lacks, and not for one it has", () => {
+      // `required: ["length"]` admits a `FabricBytes` and a `FabricHash`. Both
+      // have `copyInto`, and only the `FabricBytes` has `slice`.
+
+      const source: JSONSchema = { type: "object", required: ["length"] };
+      expect(validateSchemaValue(source, hash, source)).toBeUndefined();
+
+      const copyInto = defaulted("copyInto", ["length"]);
+      expect(validateSchemaValue(copyInto, hash, copyInto)).toBeUndefined();
+      expect(() => assertSchemaSubset(source, copyInto)).not.toThrow();
+
+      const slice = defaulted("slice", ["length"]);
+      expect(validateSchemaValue(slice, hash, slice)).toBe(
+        "missing required property slice",
+      );
+      expect(() => assertSchemaSubset(source, slice)).toThrow(
+        /value\.slice: newly required field is not a member of `FabricHash`/,
+      );
+    });
+
+    it("throws for exactly the fields some value of the vocabulary fails the validator on, under an `object` source", () => {
+      const verdicts: { name: string; accepted: boolean }[] = [];
+      const disagreements: typeof verdicts = [];
+      for (const name of fabricPrimitiveMemberNames()) {
+        const target = defaulted(name);
+        const accepted = Object.values(FABRIC_PRIMITIVE_VALUES).every((value) =>
+          validateSchemaValue(target, value, target) === undefined
+        );
+        let proved = true;
+        try {
+          assertSchemaSubset({ type: "object" }, target);
+        } catch {
+          proved = false;
+        }
+        verdicts.push({ name, accepted });
+        if (proved !== accepted) disagreements.push({ name, accepted });
+      }
+      expect(disagreements).toEqual([]);
+      expect(verdicts).toContainEqual({ name: "constructor", accepted: true });
+      expect(verdicts).toContainEqual({ name: "length", accepted: false });
+    });
+
+    it("does not throw for a pattern update adding the field under an `object` argument slot", () => {
+      // An update keeps the default. Setup validates the stored argument
+      // against the candidate and refuses a `FabricPrimitive` lacking the
+      // field (`packages/runner/test/pattern-update-argument-validation.test.ts`).
+
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(
+            { type: "object", properties: { stamp: { type: "object" } } },
+            { type: "object" },
+          ),
+          pattern(
+            { type: "object", properties: { stamp: defaulted("zone") } },
+            { type: "object" },
+          ),
+        )
+      ).not.toThrow();
     });
   });
 

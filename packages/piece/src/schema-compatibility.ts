@@ -13,6 +13,7 @@ import {
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
 import {
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
   type FabricPrimitiveSchemaType,
   isFabricPrimitiveSchemaType,
 } from "@commonfabric/api";
@@ -542,7 +543,10 @@ const comparableIfc = (ifc: unknown): unknown => {
  * leaves a writer's value unread, where a dropped result field breaks a reader,
  * so only the result side preserves its named fields outright. A candidate that
  * cannot hold a dropped field's value is still refused, by the ordinary
- * named-property proof against its additionalProperties contract. What keeps
+ * named-property proof against its additionalProperties contract. A newly
+ * required field is admitted on a valid default, which a `FabricPrimitive`
+ * stored where that field's object belongs never receives: the value is frozen,
+ * so the runtime's `required` check on it still fails. What keeps
  * those allowances sound is a second check at update time rather than anything
  * provable here: pattern setup re-stages the piece's stored argument
  * against the incoming schema and validates it inside the setup transaction, so
@@ -690,6 +694,11 @@ export function assertPatternSchemasBackwardCompatible(
  * Conservatively prove that every value described by `source` is accepted by
  * `target`. This is used for durable links: validating only their current
  * materialization is insufficient because the linked cell can change later.
+ *
+ * Materialization fills a valid target default before validation, so a
+ * default admits a field the target newly requires, provided every
+ * `FabricPrimitive` class the source admits already has that field: a
+ * `FabricPrimitive` is frozen and never receives the default.
  *
  * The `ifc` reduction {@link comparableIfc} performs reaches this proof as
  * well, where the two claims come from two separate pieces and a differing
@@ -1110,16 +1119,30 @@ function objectSubsetIssue(
   const allowEvolutionDefaults = allowEvolutionPolicy &&
     context.allowEvolutionDefaults;
   if (context.role === "argument") {
+    let admittedPrimitiveTypes: FabricPrimitiveSchemaType[] | undefined;
     for (const property of targetRequired) {
+      if (sourceRequired.has(property)) continue;
       if (
-        !sourceRequired.has(property) &&
-        (!(context.allowTargetDefaults || allowEvolutionDefaults) ||
-          !schemaProvidesValidDefault(
-            targetProperties[property],
-            context.targetRoot,
-          ))
+        !(context.allowTargetDefaults || allowEvolutionDefaults) ||
+        !schemaProvidesValidDefault(
+          targetProperties[property],
+          context.targetRoot,
+        )
       ) {
         return `${path}.${property}: newly required argument field has no default`;
+      }
+      // Link materialization inserts the default into a record, but a
+      // `FabricPrimitive` is frozen, so one the source admits without the
+      // field keeps failing the runtime's `required` check. A pattern update
+      // keeps the default, backed by the update-time check that
+      // `assertPatternSchemasBackwardCompatible()` describes.
+      if (context.defaultComparison !== "target") continue;
+      admittedPrimitiveTypes ??= fabricPrimitiveTypesAdmittedBy(source);
+      const unfilled = admittedPrimitiveTypes.find((type) =>
+        !fabricPrimitiveHasRequiredKey(type, property)
+      );
+      if (unfilled !== undefined) {
+        return `${path}.${property}: newly required field is not a member of \`${unfilled}\`, which takes no default`;
       }
     }
 
@@ -1353,11 +1376,9 @@ const FABRIC_PRIMITIVE_CLASSES: {
  * {@link objectSubsetIssue} does not run for a source typed this way, so this
  * is the whole object proof for such a source.
  *
- * Membership is read off the class's prototype. `BaseFabricPrimitive` freezes
- * each instance at construction, which leaves a subclass no own field to add,
- * so every key `in` finds on a value is on that prototype chain; a key found
- * only on an instance would be reported missing here. A target default does not
- * supply a missing key, since nothing can be written onto a frozen value.
+ * Membership is decided by {@link fabricPrimitiveHasRequiredKey}. A target
+ * default does not supply a missing key, since nothing can be written onto a
+ * frozen value.
  */
 function fabricPrimitiveRequiredIssue(
   source: SchemaObject,
@@ -1374,13 +1395,60 @@ function fabricPrimitiveRequiredIssue(
   }
   for (const type of schemaTypes(source) ?? []) {
     if (!isFabricPrimitiveSchemaType(type)) continue;
-    const { prototype } = FABRIC_PRIMITIVE_CLASSES[type];
     for (const key of target.required) {
-      if (key === FABRIC_SPECIAL_OBJECT_BRAND || key in prototype) continue;
+      if (fabricPrimitiveHasRequiredKey(type, key)) continue;
       return `${path}.${key}: required field is not a member of \`${type}\``;
     }
   }
   return undefined;
+}
+
+/**
+ * Whether the runtime's `required` check finds `key` on every value of the
+ * `FabricPrimitive` class `type` names. That check is `in`, and excuses
+ * `FABRIC_SPECIAL_OBJECT_BRAND`.
+ *
+ * Membership is read off the class's prototype. `BaseFabricPrimitive` freezes
+ * each instance at construction, which leaves a subclass no own field to add,
+ * so every key `in` finds on a value is on that prototype chain; a key found
+ * only on an instance would be reported missing here.
+ */
+function fabricPrimitiveHasRequiredKey(
+  type: FabricPrimitiveSchemaType,
+  key: string,
+): boolean {
+  return key === FABRIC_SPECIAL_OBJECT_BRAND ||
+    key in FABRIC_PRIMITIVE_CLASSES[type].prototype;
+}
+
+/**
+ * Helper for {@link objectSubsetIssue}, which returns the `FabricPrimitive`
+ * type names whose values `schema` admits by its `type` and `required`. A name
+ * among the schema's types is admitted, and so is every name when those types
+ * are unbounded or include `object` or `unknown`. The runtime checks `required`
+ * on a `FabricPrimitive` only when the schema declares no `type` or its type
+ * list includes `object`, and there a class missing one of those keys is not
+ * admitted.
+ *
+ * No other keyword is read, so a schema whose other constraints refuse every
+ * `FabricPrimitive` still admits them here.
+ */
+function fabricPrimitiveTypesAdmittedBy(
+  schema: SchemaObject,
+): FabricPrimitiveSchemaType[] {
+  const types = schemaTypes(schema);
+  const declared = typeof schema.type === "string"
+    ? [schema.type]
+    : schema.type;
+  const checksRequired = declared === undefined || declared.includes("object");
+  return FABRIC_PRIMITIVE_SCHEMA_TYPES.filter((type) =>
+    (types === undefined ||
+      types.some((admitted) => schemaTypeAdmits(admitted, type))) &&
+    (!checksRequired ||
+      (schema.required ?? []).every((key) =>
+        fabricPrimitiveHasRequiredKey(type, key)
+      ))
+  );
 }
 
 function matchingPatternPropertySchemas(
