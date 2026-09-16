@@ -18,6 +18,7 @@ import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFabricSession } from "../src/fabric-session.ts";
 import {
   createFabricInstantiationRecorder,
+  type FabricInstantiationRecord,
   type FabricInstantiationRecorder,
   type FabricPatternInstantiations,
 } from "../src/fabric-instantiations.ts";
@@ -661,13 +662,20 @@ class FakeSandboxRuntime implements SandboxRuntime {
   }
 }
 
-const STRANDED_RECORDS = [{
+const STRANDED_ENTITY =
+  "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc" as const;
+
+const STRANDED_RECORDS: readonly FabricInstantiationRecord[] = [{
   sequence: 1,
   identity: "keyless:zStranded",
   symbol: "default",
-  cell: comparableEntityHash(
-    "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc",
-  )!,
+  cell: comparableEntityHash(STRANDED_ENTITY)!,
+  link: {
+    id: STRANDED_ENTITY,
+    space: signer.did(),
+    scope: "space",
+    path: [],
+  },
 }];
 
 describe("run-pattern", () => {
@@ -767,6 +775,71 @@ describe("run-pattern", () => {
       expect(recorded.some((one) => one.identity.startsWith("keyless:"))).toBe(
         false,
       );
+    });
+
+    it("answers over an instance whose result will not read back", async () => {
+      // The disclosure reads every pattern the run materialized, and one it
+      // cannot read says nothing about the others or about the run. A cell
+      // whose pull rejects is what a torn-down instance and a store that
+      // stopped answering both look like from inside the scan.
+      const pristineFromLink = runtime.getCellFromLink.bind(runtime);
+      const runtimeWithLink = runtime as unknown as {
+        getCellFromLink: typeof pristineFromLink;
+      };
+      let settled = false;
+      // Counted, because every assertion below also holds for a scan that
+      // read every instance cleanly: what says the failure path ran is that
+      // it ran, not that the run came back.
+      let refusedReads = 0;
+      // `withTx` answers a cell of its own, and the scan pulls THAT one, so
+      // the refusal has to follow the cell across it rather than sit on the
+      // one the link produced.
+      const refusingRead = <T>(cell: T): T =>
+        new Proxy(cell as object, {
+          get: (target, property, receiver) => {
+            if (property === "pull") {
+              return () => {
+                refusedReads += 1;
+                return Promise.reject(
+                  new Error("the store stopped answering"),
+                );
+              };
+            }
+            const member = Reflect.get(target, property, receiver);
+            if (property === "withTx" && typeof member === "function") {
+              return (...args: unknown[]) =>
+                refusingRead((member as (...a: unknown[]) => unknown).apply(
+                  target,
+                  args,
+                ));
+            }
+            return member;
+          },
+        }) as T;
+      runtimeWithLink.getCellFromLink = ((
+        ...args: Parameters<typeof pristineFromLink>
+      ) => {
+        const cell = pristineFromLink(...args);
+        return settled ? refusingRead(cell) : cell;
+      }) as typeof pristineFromLink;
+      const syncedBefore = pieces.synced.bind(pieces);
+      (pieces as unknown as { synced: () => Promise<void> }).synced =
+        async () => {
+          await syncedBefore();
+          settled = true;
+        };
+
+      const result = await createEngine().invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+
+      expect(refusedReads).toBeGreaterThan(0);
+      expect(output.status).toBe("ok");
+      expect((output.value as { doubled: number }).doubled).toBe(42);
+      expect(output.outputConcerns).toBeUndefined();
     });
 
     it("fails the run when the invocation materialized a session-only pointer", async () => {
@@ -2594,6 +2667,44 @@ describe("run-pattern", () => {
       } finally {
         await dispose();
       }
+    });
+
+    it("returns a `cancelled` output when the signal aborts during the output-concern scan", async () => {
+      // The scan is the one reader of `since()`, and it asks as it begins, so
+      // aborting there lands the signal while the scan is in flight — with
+      // the release measurement's own race already resolved.
+      const controller = new AbortController();
+      const aborting: FabricPatternInstantiations = {
+        sequence: () => recorder.instantiations.sequence(),
+        since: (from) => {
+          controller.abort();
+          return recorder.instantiations.since(from);
+        },
+        keylessSince: (from) => recorder.instantiations.keylessSince(from),
+      };
+      const stopped: unknown[] = [];
+      const runner = runtime.runner as unknown as {
+        stop: (cell: unknown) => unknown;
+      };
+      const originalStop = runner.stop.bind(runtime.runner);
+      runner.stop = (cell) => {
+        stopped.push(cell);
+        return originalStop(cell);
+      };
+
+      const result = await createEngine(aborting).invokeBuiltinTool(
+        "run_pattern",
+        {
+          sourceText: DOUBLING_PATTERN_SOURCE,
+          inputs: { n: 21 },
+          resultSchema: DOUBLED_RESULT_SCHEMA,
+        },
+        { signal: controller.signal },
+      );
+      const output = result.output as RunPatternToolErrorOutput;
+
+      expect(output.status).toBe("cancelled");
+      expect(stopped.length).toBe(1);
     });
 
     it("surfaces a rejected session construction as a structured error and invokes the factory again on the next call", async () => {
