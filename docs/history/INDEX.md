@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Wildcard-source path indexes](development/performance/2026-09-15-cfc-wildcard-source-index.md) — generated-corpus equivalence, paired source-wildcard query measurements, and shared arm-B profiles locating the remaining authoritative-cover scan.
+
 - [Loom investigation review clarifications](development/performance/2026-09-15-loom-person-inbox-review-clarifications.md) — complete 203-document access-shape accounting and raw repetitions explaining independently calculated policy and opening medians.
 
 - [Loom person-inbox policy budget](development/performance/2026-09-15-loom-person-inbox-policy-budget.md) — nine retained-candidate policy preparations below 200 ms, per-node click attribution, full runtime validation, interleaved raw measurements, and rejected preconstruction experiments exposing quadratic label coverage.

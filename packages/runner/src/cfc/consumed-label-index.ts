@@ -1,8 +1,9 @@
 /**
  * Indexes the label paths a consumed read can overlap, in label-map order.
- * Concrete paths follow one trie branch; a wildcard on either side uses the
- * same prefix predicate as a scan. Callers still apply origin and read-depth
- * rules to the candidates, which include both ancestors and descendants.
+ * Concrete queries follow one trie branch and check wildcard sources bucketed
+ * by their concrete prefix. Wildcard queries scan using the same prefix
+ * predicate. Callers still apply origin and read-depth rules to the candidates,
+ * which include both ancestors and descendants.
  */
 
 import { canonicalizeLogicalPath } from "./canonical.ts";
@@ -29,6 +30,9 @@ type Node = {
   /** Entries ending at this node. */
   exact: IndexedEntry[];
 
+  /** Entries whose first wildcard immediately follows this node. */
+  wildcard: IndexedEntry[];
+
   /** Entries at this node and below it, in original map order. */
   descendants: IndexedEntry[];
 };
@@ -37,23 +41,23 @@ type Node = {
 const createNode = (): Node => ({
   children: new Map(),
   exact: [],
+  wildcard: [],
   descendants: [],
 });
 
 /** A collection-local snapshot of one validated label map. */
 export class ConsumedLabelIndex {
   #root = createNode();
-  #wildcard = false;
 
   /** Constructs an instance over validated entries, canonicalizing each path once. */
   constructor(entries: readonly LabelMapEntry[]) {
     for (const [ordinal, entry] of entries.entries()) {
       const path = canonicalizeLogicalPath(entry.path);
       const indexed = { entry, path, ordinal };
-      if (path.includes("*")) this.#wildcard = true;
       let current = this.#root;
       current.descendants.push(indexed);
       for (const segment of path) {
+        if (segment === "*") break;
         let child = current.children.get(segment);
         if (child === undefined) {
           child = createNode();
@@ -62,7 +66,8 @@ export class ConsumedLabelIndex {
         current = child;
         current.descendants.push(indexed);
       }
-      current.exact.push(indexed);
+      if (path.includes("*")) current.wildcard.push(indexed);
+      else current.exact.push(indexed);
     }
   }
 
@@ -73,7 +78,7 @@ export class ConsumedLabelIndex {
    */
   overlapping(path: readonly string[]): readonly IndexedEntry[] {
     if (path.length === 0) return this.#root.descendants;
-    if (this.#wildcard || path.includes("*")) {
+    if (path.includes("*")) {
       return this.#root.descendants.filter((source) =>
         isPrefix(source.path, path) || isPrefix(path, source.path)
       );
@@ -82,12 +87,19 @@ export class ConsumedLabelIndex {
     let current = this.#root;
     for (const segment of path) {
       for (const entry of current.exact) candidates.push(entry);
+      for (const source of current.wildcard) {
+        if (isPrefix(source.path, path) || isPrefix(path, source.path)) {
+          candidates.push(source);
+        }
+      }
       const child = current.children.get(segment);
       if (child === undefined) {
         return candidates.sort((a, b) => a.ordinal - b.ordinal);
       }
       current = child;
     }
+    // The query ends at a concrete prefix. Every entry below it overlaps,
+    // including wildcard tails bucketed here or at a deeper concrete node.
     for (const entry of current.descendants) candidates.push(entry);
     return candidates.sort((a, b) => a.ordinal - b.ordinal);
   }
