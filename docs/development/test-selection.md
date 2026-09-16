@@ -701,9 +701,9 @@ the store was authored under the write-access group's trust, a
 `fork: true` run is a team member's fork run whose content is trusted
 the same way a same-repository branch's is, and what the flag still
 tells a consumer is that the run executed unmerged pull-request code —
-which bears on taking a baseline, not on reading an observation. Every
-lane self-measurement in the store today sits behind that refusal, which
-is why no suite has a measured cost.
+which bears on taking a baseline, not on reading an observation. A lane
+exercised only from pull requests marked as forks therefore contributes
+nothing, and that is why no suite has a measured cost.
 
 The other three the line cannot separate. No lane has run: nothing to
 measure and nothing to do. A lane has run and recorded nothing, which
