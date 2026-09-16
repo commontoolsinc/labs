@@ -5562,6 +5562,7 @@ export const collectConsumedLabel = (
    */
   sources: readonly ConsumedAtomSource[];
 } => {
+  tx.noteCfcConsumedLabelWalk?.();
   const atoms: unknown[] = [];
   const modulePolicySpaces = new Map<string, Set<MemorySpace>>();
   const sources: ConsumedAtomSource[] = [];
@@ -6336,9 +6337,10 @@ export const prepareBoundaryCommit = (
   // Read provenance for a refusal's remedy channel, computed only if a gate
   // below actually refuses. `collectConsumedLabel` walks every read against
   // every label-map entry of the document it resolved to, which is work no
-  // committing transaction should do just in case; a misfit is rare and pays
-  // for it then. The set is transaction-global — wider than the per-write
-  // prefix the writer-fit decision itself runs on — so a named input is a
+  // committing transaction should do just in case. Strict writer-fit refusals
+  // pay for it; persist-and-flag diagnostics need only the atoms. The set is
+  // transaction-global — wider than the per-write prefix the writer-fit
+  // decision itself runs on — so a named input is a
   // read that genuinely carried the atom, while `attribution` stays the
   // honest statement of whether the named ones account for all of them.
   let memoizedRefusalSources: readonly ConsumedAtomSource[] | undefined;
@@ -7631,19 +7633,19 @@ export const prepareBoundaryCommit = (
                 path.join("/")
               } (canWrite, §8.12.4): ` +
               offendingAtoms.join(", ");
-            tx.recordCfcRefusalDetail?.({
-              gate: "writer-fit",
-              target: {
-                space: target.space,
-                id,
-                scope: target.scope,
-                path: [...path],
-              } as CfcAddress,
-              offendingAtoms,
-              ...describeRefusalInputs(offending, refusalSources()),
-              reason: misfit,
-            });
             if (writerFitRejects) {
+              tx.recordCfcRefusalDetail?.({
+                gate: "writer-fit",
+                target: {
+                  space: target.space,
+                  id,
+                  scope: target.scope,
+                  path: [...path],
+                } as CfcAddress,
+                offendingAtoms,
+                ...describeRefusalInputs(offending, refusalSources()),
+                reason: misfit,
+              });
               reasons.push(verdictReason(misfit));
             } else {
               tx.noteCfcDiagnostic(`writer-fit(persist-and-flag): ${misfit}`);

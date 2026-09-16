@@ -345,6 +345,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
     const runtime = newRuntime(storageManager);
     try {
       await seedSecretSource(runtime, "writer-fit-explicit-source");
+      runtime.resetCfcStats();
 
       const tx = runtime.edit();
       const source = runtime.getCell(
@@ -382,6 +383,10 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       expect(flags[0]).toContain("writer-fit confidentiality misfit");
       expect(flags[0]).toContain(`for ${derivedId} at /`);
       expect(flags[0]).toContain("(canWrite, §8.12.4)");
+      expect(flags[0]).toContain("secret");
+      expect(tx.getCfcState().refusalDetails).toEqual([]);
+      expect(runtime.getCfcStats().refusalDetailsRecorded).toBe(0);
+      expect(runtime.getCfcStats().consumedLabelWalks).toBe(0);
     } finally {
       await runtime.dispose();
       await storageManager.close();
