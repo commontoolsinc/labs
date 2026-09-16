@@ -37,7 +37,12 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     };
   };
 
-  const setup = async () => {
+  const setup = async (
+    additionalEntries: Array<{
+      path: string[];
+      label: { confidentiality: string[] };
+    }> = [],
+  ) => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -70,6 +75,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
           entries: [
             { path: [], label: { confidentiality: ["source-root"] } },
             { path: ["secret"], label: { confidentiality: [fullCaveat] } },
+            ...additionalEntries,
           ],
         },
       },
@@ -201,6 +207,45 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
       await storageManager.close();
     }
   });
+
+  for (const segment of ["0", "*"]) {
+    it(`joins every deepest authoritative cover for a ${segment} carried path`, async () => {
+      const { storageManager, runtime, sourceId } = await setup([
+        { path: ["rows"], label: { confidentiality: ["ancestor"] } },
+        { path: ["rows", "0"], label: { confidentiality: ["exact"] } },
+        { path: ["rows", "*"], label: { confidentiality: ["template"] } },
+        { path: ["rows", "0"], label: { confidentiality: ["duplicate"] } },
+        {
+          path: ["rows", "0", "child", "deeper"],
+          label: { confidentiality: ["descendant"] },
+        },
+      ]);
+      try {
+        const persistedId = await commitLinkWrite(runtime, sourceId, {
+          version: 1,
+          entries: [{
+            path: ["rows", segment, "child"],
+            label: { confidentiality: ["carried"] },
+          }],
+        });
+        const persisted = persistedEntriesFor(storageManager, persistedId)
+          .find((entry) =>
+            entry.origin === "link" &&
+            entry.path.join("/") === `field/rows/${segment}/child`
+          );
+        expect(persisted).toBeDefined();
+        expect(persisted!.label.confidentiality).toEqual([
+          "template",
+          "exact",
+          "duplicate",
+          "carried",
+        ]);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+  }
 
   it("persists the full caveat when the view carries a redacted copy", async () => {
     const { storageManager, runtime, sourceId, fullCaveat } = await setup();

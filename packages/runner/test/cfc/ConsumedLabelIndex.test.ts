@@ -13,6 +13,29 @@ const entry = (path: string[], ordinal: number): LabelMapEntry => ({
 });
 
 describe("ConsumedLabelIndex", () => {
+  it("retains canonical payload paths and duplicate covering entries", () => {
+    const paths = [
+      [],
+      ["value"],
+      ["value", "*"],
+      ["value", "field"],
+      ["value", "field"],
+      ["value", "field", "child"],
+      ["field"],
+    ];
+    const entries = paths.map(entry);
+    const index = new ConsumedLabelIndex(entries, { canonicalPaths: true });
+    paths[3].push("changed");
+    expect(
+      index.overlapping(["value", "field"], false).map((item) => item.ordinal),
+    ).toEqual([0, 1, 2, 3, 4]);
+    expect(index.overlapping([], false).map((item) => item.ordinal)).toEqual([
+      0,
+    ]);
+    expect(index.overlapping(["value", "*"], false).map((item) => item.ordinal))
+      .toEqual([0, 1, 2, 3, 4]);
+  });
+
   for (const { size, fraction } of PATH_INDEX_GRID) {
     it(`retains scan order for ${size} sources with ${fraction} wildcard fraction`, () => {
       const { sources, queries } = pathIndexCorpus(size, fraction);
@@ -25,6 +48,8 @@ describe("ConsumedLabelIndex", () => {
         expect(index.overlapping(query).map((item) => item.entry)).toEqual(
           expected,
         );
+        expect(index.overlapping(query, false).map((item) => item.entry))
+          .toEqual(entries.filter((item) => isPrefix(item.path, query)));
       }
     });
   }
@@ -80,6 +105,12 @@ describe("ConsumedLabelIndex", () => {
         expect(index.overlapping(path).map((item) => item.entry)).toEqual(
           expected,
         );
+        expect(index.overlapping(path, false).map((item) => item.entry))
+          .toEqual(
+            entries.filter((item) =>
+              isPrefix(canonicalizeLogicalPath(item.path), path)
+            ),
+          );
       }
     }
   });
