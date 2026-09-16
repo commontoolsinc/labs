@@ -5,8 +5,10 @@ import { Identity } from "@commonfabric/identity";
 
 import type { OpaqueCell, PatternFactory } from "@commonfabric/api";
 import { cfcLabelViewForResolvedCellWithStatus } from "../src/cfc/label-view.ts";
+import type { CfcPreparationWork } from "../src/cfc/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
@@ -17,6 +19,45 @@ const signer = await Identity.fromPassphrase("cfc-prepare-round2");
 const space = signer.did();
 
 describe("CFC prepare reproduction", () => {
+  it("preserves preparation counts through nested transaction wrappers and resets", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const tx = runtime.edit();
+    try {
+      const wrapped = new TransactionWrapper(new TransactionWrapper(tx));
+      const kinds = [
+        "overlapWildcardQueries",
+        "overlapConcreteQueries",
+        "authoritativeCoverCalls",
+        "flowTemplateEntriesMinted",
+        "flowTemplateContainers",
+      ] as const satisfies readonly CfcPreparationWork[];
+      const before = runtime.getCfcStats();
+      for (const kind of kinds) {
+        expect(before[kind]).toBe(0);
+        wrapped.noteCfcPreparationWork(kind);
+        wrapped.noteCfcPreparationWork(kind, 3);
+        wrapped.noteCfcPreparationWork(kind, 0);
+        expect(runtime.getCfcStats()[kind]).toBe(4);
+        expect(before[kind]).toBe(0);
+      }
+      const counted = runtime.getCfcStats();
+      runtime.resetCfcStats();
+      for (const kind of kinds) {
+        expect(runtime.getCfcStats()[kind]).toBe(0);
+        expect(counted[kind]).toBe(4);
+        wrapped.noteCfcPreparationWork(kind, 2);
+        expect(runtime.getCfcStats()[kind]).toBe(2);
+      }
+    } finally {
+      tx.abort();
+      await runtime.dispose();
+    }
+  });
+
   it("instantiates fifty labeled map elements and counts preparation work", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
