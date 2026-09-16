@@ -420,9 +420,41 @@ export function batchesOf(
       (a.unit < b.unit ? -1 : a.unit > b.unit ? 1 : 0)
     );
   }
-  return [...batches.values()].sort((a, b) =>
-    a.suite.id < b.suite.id ? -1 : a.suite.id > b.suite.id ? 1 : 0
+  // What a lane costs beyond its tests is fitted from what its batches
+  // were seen to take, and a lane that runs out of time is killed with
+  // its later batches unrun and unmeasured. So the order a lane takes
+  // its batches in decides which suites the cost model can ever learn,
+  // and a suite the model cannot price is one that makes lanes run out
+  // of time. Two keys answer that, in this order.
+  //
+  // A suite nothing has measured goes ahead of one something has,
+  // because it is the one worth measuring. And within each group the
+  // largest share of the lane goes first, because a lane that runs out
+  // of time should have spent it on the batch most worth knowing about
+  // and dropped the cheap ones. Ordering by the identifier instead put
+  // the three largest suites last by the alphabet, and every lane died
+  // before reaching them.
+  //
+  // Both keys are a function of the plan, so the order is the same on
+  // the default branch as on a change, which is what the identifier was
+  // there for.
+  const fitted = manifest?.calibration.suites ?? {};
+  const charged = new Map(
+    [...batches.keys()].map((
+      suiteId,
+    ) => [suiteId, chosenFor(suiteId, selections).seconds]),
   );
+  const key = (batch: Batch) => ({
+    unmeasured: fitted[batch.suite.id] === undefined ? 0 : 1,
+    seconds: charged.get(batch.suite.id) ?? 0,
+  });
+  return [...batches.values()].sort((a, b) => {
+    const left = key(a);
+    const right = key(b);
+    return left.unmeasured - right.unmeasured ||
+      right.seconds - left.seconds ||
+      (a.suite.id < b.suite.id ? -1 : a.suite.id > b.suite.id ? 1 : 0);
+  });
 }
 
 /** What running one invocation came to. */
