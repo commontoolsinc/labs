@@ -778,6 +778,27 @@ describe("build", () => {
       expect(fold.declined).toBe(0);
     });
 
+    it("counts no declined measurement from a group with no context", () => {
+      // A group carrying no context at all says neither where it ran nor
+      // when, so its measurements are declined and dated nowhere.
+      const read = readReport({
+        objectName: CI_NAME,
+        context: undefined,
+        records: [],
+        reports: [{
+          context: undefined,
+          records: [
+            record({
+              test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+              durationMs: 14_800,
+            }),
+          ],
+        }],
+      }, NO_ALIASES);
+      expect(read.lanes).toEqual([]);
+      expect(read.declinedDays).toEqual([]);
+    });
+
     it("counts no declined measurement it cannot put in a day", () => {
       // The group's own start time is the only thing that dates it, and
       // one that will not read as a time dates nothing.
