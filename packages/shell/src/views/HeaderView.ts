@@ -654,8 +654,8 @@ export class XHeaderView extends BaseView {
   #resizeTimer?: ReturnType<typeof setTimeout>;
 
   /**
-   * The favorites subscription step, the favorited-piece test, and the three
-   * click handlers, which a test drives directly.
+   * The favorites subscription step, the favorited-piece test, the three
+   * click handlers, and the piece-name task, which a test drives directly.
    */
   get accessForTestingOnly(): {
     ensureFavoritesSubscription(): void;
@@ -663,6 +663,10 @@ export class XHeaderView extends BaseView {
     handleLogoClick(e: Event): void;
     handleToggleFavorite(e: Event): Promise<void>;
     copyReference(e: Event): Promise<void>;
+    pieces: Task<
+      readonly [RuntimeInternals | undefined, DID | undefined, boolean],
+      PieceItem[]
+    >;
   } {
     return {
       ensureFavoritesSubscription: () => this.#ensureFavoritesSubscription(),
@@ -670,6 +674,7 @@ export class XHeaderView extends BaseView {
       handleLogoClick: (e) => this.#handleLogoClick(e),
       handleToggleFavorite: (e) => this.#handleToggleFavorite(e),
       copyReference: (e) => this.#handleCopyReference(e),
+      pieces: this.#pieces,
     };
   }
 
