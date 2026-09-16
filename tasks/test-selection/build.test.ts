@@ -4,6 +4,7 @@ import {
   AliasResolver,
   buildObjectBody,
   type RunContext,
+  type StoredReport,
   testIdentityKey,
   type TestRecord,
 } from "@commonfabric/test-support/records";
@@ -87,6 +88,22 @@ function record(fields: Partial<TestRecord> = {}): TestRecord {
     durationMs: 40,
     ...fields,
   };
+}
+
+/**
+ * A run context the fold cannot place, because it names no branch. What
+ * decides a group's place is read from the run's own facts, and this one
+ * says nothing about where it ran.
+ */
+function placeless(): RunContext {
+  const context_ = context();
+  delete context_.branch;
+  return context_;
+}
+
+/** Reports as the rollup path hands them over, one at a time. */
+async function* replaying(reports: readonly StoredReport[]) {
+  for (const report of reports) yield report;
 }
 
 /** One stored object, built the way the relay builds one. */
@@ -374,6 +391,40 @@ describe("build", () => {
       ]);
     });
 
+    it("counts a lane measurement it had to decline", () => {
+      // A lane whose run the fold cannot place records what it measured
+      // like any other lane. Counting what was declined is what tells a
+      // lane whose measurement cannot be used from a lane that has not
+      // run. A run naming no branch is the case here, because what
+      // decides a group's place is read from the run's own facts and
+      // this one says nothing about where it ran.
+      const read = readReport(
+        stored(CI_NAME, placeless(), [
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+            durationMs: 14_800,
+          }),
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+            durationMs: 92_000,
+          }),
+          record(),
+        ]),
+        NO_ALIASES,
+      );
+      expect(read.lanes).toEqual([]);
+      // The test beside them is not one, so this counts the lane's own
+      // measurements rather than everything the group held.
+      expect(read.declinedDays).toEqual(["2026-08-20", "2026-08-20"]);
+    });
+
+    it("counts nothing declined in a group it could read", () => {
+      expect(
+        readReport(stored(CI_NAME, context(), [record()]), NO_ALIASES)
+          .declinedDays,
+      ).toEqual([]);
+    });
+
     it("keeps no lane measurement from a group nothing may read", () => {
       const forked = context();
       forked.ci!.fork = true;
@@ -648,6 +699,165 @@ describe("build", () => {
       // The test beside it survives, so this drains the measurements
       // rather than the aggregate.
       expect(states.has(KEY)).toBe(true);
+    });
+
+    it("counts an object once however often it is handed over", () => {
+      // The counters add rather than replace, so a second fold of one
+      // object would count every execution in it twice.
+      const report = stored(CI_NAME, context(), [record()]);
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      fold.add([report]);
+      fold.add([report]);
+      const finished = fold.finish();
+      expect(finished.observations).toBe(1);
+      const state = finished.states.get(KEY)!;
+      expect(state.runsByDay["2026-08-20"]).toBe(1);
+      expect(state.costByDay["2026-08-20"]!.count).toBe(1);
+      expect(finished.aggregate.folded).toEqual([CI_NAME]);
+    });
+
+    it("counts a declined measurement once however often it arrives", () => {
+      // The count of what was declined adds the way every other counter
+      // does, so a second fold of one object would report a lane twice
+      // over as having measured something the model was fitted without.
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      const report = stored(CI_NAME, placeless(), [
+        record({
+          test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+          durationMs: 14_800,
+        }),
+      ]);
+      fold.add([report]);
+      fold.add([report]);
+      expect(fold.declined).toBe(1);
+    });
+
+    it("counts a declined measurement in a shard once", async () => {
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      const report = stored(CI_NAME, placeless(), [
+        record({
+          test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+          durationMs: 14_800,
+        }),
+      ]);
+      await fold.addUnordered(replaying([report, report]));
+      expect(fold.declined).toBe(1);
+    });
+
+    it("passes over a declined measurement past the cost window", () => {
+      // A bootstrap reads far wider than the model is fitted across, so
+      // a count taking every day it read would offer a measurement from
+      // a day the model cannot reach as the reason it holds nothing.
+      const older = placeless();
+      older.startedAt = "2026-07-20T00:00:00.000Z";
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      fold.add([
+        stored(CI_NAME, older, [
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+            durationMs: 14_800,
+          }),
+        ]),
+      ]);
+      expect(fold.declined).toBe(0);
+    });
+
+    it("counts no declined measurement from a group with no context", () => {
+      // A group carrying no context at all says neither where it ran nor
+      // when, so its measurements are declined and dated nowhere.
+      const read = readReport({
+        objectName: CI_NAME,
+        context: undefined,
+        records: [],
+        reports: [{
+          context: undefined,
+          records: [
+            record({
+              test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+              durationMs: 14_800,
+            }),
+          ],
+        }],
+      }, NO_ALIASES);
+      expect(read.lanes).toEqual([]);
+      expect(read.declinedDays).toEqual([]);
+    });
+
+    it("counts no declined measurement it cannot put in a day", () => {
+      // The group's own start time is the only thing that dates it, and
+      // one that will not read as a time dates nothing.
+      const undated = placeless();
+      undated.startedAt = "the other day";
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      fold.add([
+        stored(CI_NAME, undated, [
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+            durationMs: 14_800,
+          }),
+        ]),
+      ]);
+      expect(fold.declined).toBe(0);
+    });
+
+    it("counts an object once when one batch carries it twice", () => {
+      // The rule lives in the fold rather than in each caller, because a
+      // caller filtering by what the aggregate already holds cannot see
+      // a copy the same batch folded a moment ago.
+      const report = stored(CI_NAME, context(), [record()]);
+      const folded = foldReports(
+        emptyAggregate("2026-08-20"),
+        [report, report],
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      expect(folded.observations).toBe(1);
+      expect(folded.states.get(KEY)!.runsByDay["2026-08-20"]).toBe(1);
+      expect(folded.aggregate.folded).toEqual([CI_NAME]);
+    });
+
+    it("counts a shard once however often it is handed over", async () => {
+      const report = stored(CI_NAME, context(), [record()]);
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      await fold.addUnordered(replaying([report, report]));
+      const finished = fold.finish();
+      expect(finished.observations).toBe(1);
+      expect(finished.states.get(KEY)!.runsByDay["2026-08-20"]).toBe(1);
+      expect(finished.aggregate.folded).toEqual([CI_NAME]);
+    });
+
+    it("counts nothing from an object a saved aggregate already held", () => {
+      const aggregate = emptyAggregate("2026-08-20");
+      aggregate.folded.push(CI_NAME);
+      const fold = new Fold(aggregate, NO_ALIASES, "2026-08-20");
+      fold.add([stored(CI_NAME, context(), [record()])]);
+      const finished = fold.finish();
+      expect(finished.observations).toBe(0);
+      expect(finished.aggregate.folded).toEqual([CI_NAME]);
     });
 
     it("does not fold an object it has already folded", () => {

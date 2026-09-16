@@ -300,6 +300,19 @@ export interface ReadReport {
 
   /** What the lanes in this object measured about themselves. */
   lanes: LaneObservation[];
+
+  /**
+   * The day of each lane measurement in a group nothing may read, which
+   * the cost model is therefore fitted without. A lane exercised only
+   * from runs the fold cannot place records what it measured like any
+   * other lane and contributes nothing, and these are what tell that
+   * apart from no lane having run at all.
+   *
+   * The day travels with each of them so that a caller holds them to
+   * the same window as the measurements it kept. A group whose start
+   * time will not read as one has no day, and contributes none.
+   */
+  declinedDays: string[];
 }
 
 /**
@@ -316,12 +329,24 @@ export function readReport(
   const surfaces = new Map<string, Surface>();
   const durations = new Map<string, Map<string, number[]>>();
   const lanes: LaneObservation[] = [];
+  const declinedDays: string[] = [];
   for (const group of report.reports) {
     const where = provenance(group.context, report.objectName);
     if (
       where === undefined || group.context === undefined ||
       !Number.isFinite(Date.parse(group.context.startedAt))
     ) {
+      // The identity as the lane wrote it, rather than as the resolver
+      // would rewrite it: a group this cannot place has no day to
+      // resolve an alias against, and no alias renames a measurement a
+      // lane writes about itself.
+      const startedAt = group.context?.startedAt;
+      if (startedAt !== undefined && Number.isFinite(Date.parse(startedAt))) {
+        const day = dayOf(startedAt);
+        for (const record of group.records) {
+          if (isLaneMeasurement(record.test)) declinedDays.push(day);
+        }
+      }
       continue;
     }
     const day = dayOf(group.context.startedAt);
@@ -373,7 +398,7 @@ export function readReport(
       byDay.set(day, [...(byDay.get(day) ?? []), record.durationMs]);
     }
   }
-  return { observations, surfaces, durations, lanes };
+  return { observations, surfaces, durations, lanes, declinedDays };
 }
 
 /** The invocation unit and suite a record belongs to. */
@@ -709,6 +734,7 @@ export class Fold {
   readonly #resolver: AliasResolver;
   readonly #today: string;
   #observations = 0;
+  #declined = 0;
 
   constructor(
     aggregate: AggregateState,
@@ -761,6 +787,18 @@ export class Fold {
     return this.#observations;
   }
 
+  /**
+   * Lane measurements this fold read and had to decline, counted over
+   * the objects it folded and over the same window the cost model is
+   * fitted across. What that model is fitted from is what a lane
+   * measured about itself, so a figure here is a lane that ran inside
+   * the window and whose measurement cannot be used, which is a
+   * different thing from a lane that has not run.
+   */
+  get declined(): number {
+    return this.#declined;
+  }
+
   /** Whether this object's records are already part of the aggregate. */
   knows(objectName: string): boolean {
     return this.#foldedIndex.has(objectName);
@@ -799,10 +837,16 @@ export class Fold {
    * batches must be later than earlier ones, because the rules that decide
    * whether a failure is a catch look backwards at what `main` last said
    * and forwards at what it says next.
+   *
+   * An object the aggregate already holds contributes nothing, however
+   * often it is handed over. Its executions are in the counters and its
+   * durations in the day's samples, and both of those add rather than
+   * replace, so folding one a second time would count all of it twice.
    */
   add(reports: readonly StoredReport[]): void {
     const observations: Observation[] = [];
     for (const report of reports) {
+      if (this.#foldedIndex.has(report.objectName)) continue;
       const read = readReport(report, this.#resolver);
       // Appended one at a time rather than spread: a rollup shard holds a
       // whole day, and spreading that many arguments onto the stack is
@@ -811,6 +855,7 @@ export class Fold {
         observations.push(observation);
       }
       this.#remember(read);
+      this.#countDeclined(read);
       this.#folded.push(report.objectName);
       this.#foldedIndex.add(report.objectName);
     }
@@ -841,10 +886,14 @@ export class Fold {
    * Folds one logical batch from reports arriving in arbitrary order.
    * Each run is spooled to disk, then replayed in time order for every
    * evidence pass and the final classification pass.
+   *
+   * An object the aggregate already holds contributes nothing, the way
+   * `add` passes over one.
    */
   async addUnordered(reports: AsyncIterable<StoredReport>): Promise<void> {
     using observations = new ObservationSpool();
     for await (const report of reports) {
+      if (this.#foldedIndex.has(report.objectName)) continue;
       for (const group of report.reports) {
         const read = readReport({
           objectName: report.objectName,
@@ -854,6 +903,7 @@ export class Fold {
         }, this.#resolver);
         observations.add(read.observations);
         this.#remember(read);
+        this.#countDeclined(read);
       }
       this.#folded.push(report.objectName);
       this.#foldedIndex.add(report.objectName);
@@ -876,6 +926,20 @@ export class Fold {
    */
   #withinCostWindow(lane: LaneObservation): boolean {
     return daysBetween(lane.day, this.#today) <= COST_WINDOW_DAYS;
+  }
+
+  /**
+   * Counts the declined measurements of one object that the cost model
+   * would have been fitted over. A run reading a window wider than the
+   * model's own — a bootstrap, or a window somebody asked for — reads
+   * declined measurements from days the model does not reach, and a
+   * count including those would offer a stale measurement as the reason
+   * a current model is empty.
+   */
+  #countDeclined(read: ReadReport): void {
+    for (const day of read.declinedDays) {
+      if (daysBetween(day, this.#today) <= COST_WINDOW_DAYS) this.#declined++;
+    }
   }
 
   /** Closes the fold, sealing each day's cost and aging the counters. */
@@ -964,7 +1028,7 @@ export function foldReports(
   today: string,
 ): FoldResult {
   const fold = new Fold(aggregate, resolver, today);
-  fold.add(reports.filter((report) => !fold.knows(report.objectName)));
+  fold.add(reports);
   return fold.finish();
 }
 

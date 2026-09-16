@@ -643,6 +643,105 @@ JUnit path on the job's ship step, the `--preload` naming
 joined onto. Where the records do have a file, the file is one no suite
 has a unit for, and the answer is in the topology rather than in the job.
 
+### When the cost model is empty
+
+Every run says what the cost model holds, so that one nobody measured is
+as visible as one somebody did:
+
+```
+test selection: the cost model holds 12 suite(s) and 5 capability
+setup(s)
+```
+
+The two halves are counted apart because they come from different
+records. A lane writes one per capability it opens and a pair per batch,
+and a lane killed part way through a batch leaves the pair unmatched, so
+a model can hold a capability setup and no suite at all.
+
+A suite's own figures are what a lane is charged for holding the suite
+and for opening each of its units, so a model with no suite in it
+charges nothing for either and a lane packed against it overruns the
+bound it is killed at. A capability setup
+is measured from a lane's own records and is unaffected, and the
+prologue is a fixed dial rather than a measurement at all, so it is
+there whether any lane has measured anything or not. That is why this is
+about the suites rather than everything a lane is charged. A run with no
+suite in its model says so rather than publishing the empty map in
+silence:
+
+```
+test selection: no suite has a measured cost in the last 7 day(s), so a
+lane is charged nothing for holding one or for opening its units, and a
+lane packed against this manifest overruns. See
+docs/development/test-selection.md.
+```
+
+Four different things end there. One of them the run can tell you
+about, and a third line says so when it applies:
+
+```
+test selection: 15 lane measurement(s) this run read came from a run
+the fold could not place, so the model was fitted without them.
+```
+
+**The fold declines the records of lanes that did run.** `provenance`
+decides where a run's executions happened from the run's own facts, and
+a run it cannot place contributes nothing — not its observations, not
+its durations, and not what its lanes measured. A lane exercised only
+from such runs therefore contributes nothing however long it runs and
+however far back the publisher reads. That third line is what tells
+this apart from a lane that has not run, and it is the one case here
+anybody can act on.
+
+It is counted over the objects the run folded, and over the same window
+the model is fitted across, so a run reading a wider window than the
+model's own — a bootstrap, or a window somebody asked for — does not
+offer a measurement from a day the model cannot reach as the reason a
+current model is empty. A measurement whose group carries no start time
+that reads as one has no day and is not counted at all. So the figure is
+evidence when it appears and says nothing when it does not: a run that
+folds nothing new prints no such line whatever the store holds.
+
+What `provenance` declines is wider than the record specification asks
+for. It refuses a run marked `fork: true` outright, on the stated
+grounds that a fork run's records were authored by the fork. The
+[trust boundaries](../specs/test-records.md#trust-boundaries-for-consumers)
+section says otherwise: the relay's member gate means every object in
+the store was authored under the write-access group's trust, a
+`fork: true` run is a team member's fork run whose content is trusted
+the same way a same-repository branch's is, and what the flag still
+tells a consumer is that the run executed unmerged pull-request code —
+which bears on taking a baseline, not on reading an observation. A lane
+exercised only from pull requests marked as forks therefore contributes
+nothing, and that is why no suite has a measured cost.
+
+The other three the line cannot separate. No lane has run: nothing to
+measure and nothing to do. A lane has run and recorded nothing, which
+looks like any other suite that recorded nothing. Or the fold has
+stopped reading a figure it used to read, or never started reading one
+the lane now writes — `readReport` is where a stored object becomes the
+kinds of thing the publisher takes out of it, and the lane measurements
+are one of them, so a change on either side of that pair is invisible
+except through the empty model itself.
+
+All four fill in as soon as a lane run the fold can place lands: every
+object the publisher folds for the first time gives up its lane
+measurements, so one run puts a figure in the model and seven days of
+runs fill the window `COST_WINDOW_DAYS` names. Until then the model is
+not merely thin. Every figure in it is a maximum — the worst capability
+opening seen, and the largest gap between what a batch was charged and
+what it took — so a model fitted over part of a window reads lower than
+one fitted over all of it, and reading low is the direction that
+overruns a lane. A suite with nothing at all in the window is charged
+nothing.
+
+Nothing recovers a figure from before the publisher could read it. An
+object the aggregate has already folded is never folded again, because
+the counters it feeds add rather than replace, so a run that reads it
+twice counts every execution in it twice. What a bootstrap is for is the
+history that follows from the objects themselves; what no run can undo
+is a window that went by while nothing readable was being written.
+
 ## What the run on the default branch does with a flaky test
 
 A test whose flake share is above `FLAKE_EXCLUSION_RATE` is not selected

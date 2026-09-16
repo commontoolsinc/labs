@@ -74,7 +74,11 @@ import {
   serializeManifest,
 } from "./test-selection/manifest.ts";
 import { plan } from "./test-selection/plan.ts";
-import { LANE_BUDGET_SECONDS, LANES } from "./test-selection/policy.ts";
+import {
+  COST_WINDOW_DAYS,
+  LANE_BUDGET_SECONDS,
+  LANES,
+} from "./test-selection/policy.ts";
 
 /**
  * Everything this reaches the world through. The default is the real
@@ -663,7 +667,14 @@ export async function publish(
       })),
   }));
 
-  summarize(manifest, reference, folded.observations, unplaced, left);
+  summarize(
+    manifest,
+    reference,
+    folded.observations,
+    unplaced,
+    left,
+    fold.declined,
+  );
 
   if (options.out !== undefined) {
     await Deno.mkdir(options.out, { recursive: true });
@@ -738,11 +749,53 @@ function summarize(
   observations: number,
   unplaced: Unplaced,
   left: readonly string[],
+  declined: number,
 ): void {
   console.log(
     `test selection: folded ${observations} execution(s); the manifest ` +
       `holds ${manifest.entries.length} identities`,
   );
+  // Said every run, so that a model nobody measured is as visible as one
+  // somebody did. The two halves are counted apart because they come
+  // from different records: a lane writes one per capability it opens,
+  // and a pair per batch, and a lane killed part way through a batch
+  // leaves the pair unmatched and contributes a setup cost alone.
+  const suites = Object.keys(manifest.calibration.suites).length;
+  console.log(
+    `test selection: the cost model holds ${suites} suite(s) and ` +
+      `${Object.keys(manifest.calibration.setupCost).length} ` +
+      `capability setup(s)`,
+  );
+  // A suite's own figures are what a lane is charged for holding the
+  // suite and for opening each of its units, so a model with no suite in
+  // it charges nothing for either and a lane packed to its budget runs
+  // past the bound it is killed at. A capability setup is measured from
+  // a lane's own records and is unaffected, and the prologue is a fixed
+  // dial rather than a measurement, so it is there either way; this
+  // names the suites rather than everything a lane is charged. Four
+  // things end here — no
+  // lane has run, none recorded what it measured, the fold declines the
+  // records of the ones that did, or the fold stopped reading a figure
+  // it used to read — and the empty map alone says none of them.
+  if (suites === 0) {
+    console.log(
+      `test selection: no suite has a measured cost in the last ` +
+        `${COST_WINDOW_DAYS} day(s), so a lane is charged nothing for ` +
+        `holding one or for opening its units, and a lane packed against ` +
+        `this manifest overruns. See docs/development/test-selection.md.`,
+    );
+    // Said only where there is a figure to say, so that a run with
+    // nothing to report claims nothing. A lane that ran and whose
+    // measurement cannot be read is a different thing from a lane that
+    // has not run, and it is the one an operator can act on.
+    if (declined > 0) {
+      console.log(
+        `test selection: ${declined} lane measurement(s) this run read ` +
+          `came from a run the fold could not place, so the model was ` +
+          `fitted without them.`,
+      );
+    }
+  }
   if (unplaced.suiteLevel.length > 0) {
     console.log(
       `test selection: ${unplaced.suiteLevel.length} identities measure a ` +

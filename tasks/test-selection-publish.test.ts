@@ -403,13 +403,20 @@ function localObject(commit: string, at: string): string {
   }]);
 }
 
-/** One object holding what one lane measured about itself. */
+/**
+ * One object holding what one lane measured about itself: a capability
+ * it opened, and both halves of one batch.
+ *
+ * `placeless` leaves the run naming no branch, which is a group the
+ * fold cannot place and therefore declines. `batch` set to false writes
+ * none of a batch's three measurements, which is what a lane killed
+ * part way through a batch leaves, and gives a model with a
+ * capability setup in it and no suite.
+ */
 function laneObject(
   commit: string,
   at: string,
-  planned = 40,
-  spent = 92,
-  units = 1,
+  { planned = 40, spent = 92, units = 1, placeless = false, batch = true } = {},
 ): string {
   const context: RunContext = {
     schema: 1,
@@ -418,7 +425,7 @@ function laneObject(
     repo: "commontoolsinc/labs",
     commit,
     dirty: false,
-    branch: "main",
+    ...(placeless ? {} : { branch: "main" }),
     env: "ci",
     ci: {
       workflowRunId: commit,
@@ -441,8 +448,12 @@ function laneObject(
   return buildObjectBody(context, [
     measured("ci-lane setup fuse", 14_800),
     measured("ci-lane batch workspace-unit", spent * 1000),
-    measured("ci-lane planned batch workspace-unit", planned * 1000),
-    measured("ci-lane units batch workspace-unit", units),
+    ...(batch
+      ? [
+        measured("ci-lane planned batch workspace-unit", planned * 1000),
+        measured("ci-lane units batch workspace-unit", units),
+      ]
+      : []),
   ]);
 }
 
@@ -537,8 +548,7 @@ describe("publish()", () => {
       objects[CI(DAY, `lane-${lane}`)] = laneObject(
         `c-lane-${lane}`,
         `2026-08-20T0${lane + 3}:00:00.000Z`,
-        planned,
-        spent,
+        { planned, spent },
       );
     });
     const { store, created } = fakeStore(objects);
@@ -554,6 +564,63 @@ describe("publish()", () => {
     expect(manifest).toBeDefined();
     expect(manifest!.calibration.suites["workspace-unit"]!.correction)
       .toBeGreaterThan(0);
+  });
+
+  it("says so when no lane measurement reached the cost model", async () => {
+    // Every cause ends in the same empty map — no lane has run, none
+    // recorded what it measured, the fold declines the records of the
+    // ones that did, or the fold stopped reading a figure. A manifest
+    // carrying the empty map says none of that on its own.
+    const { store } = fakeStore(seed());
+    const said = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, suites, noBaselines)
+    );
+    expect(said).toContain("the cost model holds 0 suite(s) and 0 capability");
+    expect(said).toContain("no suite has a measured cost in the last 7 day(s)");
+    expect(said).toContain("charged nothing for holding one or for opening");
+  });
+
+  it("names the lane measurements it had to decline", async () => {
+    // The distinction an operator can act on: a lane that ran and whose
+    // measurement cannot be read, rather than a lane that has not run.
+    const objects = seed();
+    objects[CI(DAY, "3")] = laneObject("c3", "2026-08-20T03:00:00.000Z", {
+      placeless: true,
+    });
+    const { store } = fakeStore(objects);
+    const said = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, suites, noBaselines)
+    );
+    expect(said).toContain("no suite has a measured cost in the last 7 day(s)");
+    expect(said).toContain("4 lane measurement(s) this run read");
+    expect(said).toContain("the fold could not place");
+  });
+
+  it("warns for a model holding a setup and no suite", async () => {
+    // What a lane is charged for holding a suite at all is the suite's
+    // own figure, so a model with a capability setup in it and no suite
+    // charges a lane nothing for the batch it runs.
+    const objects = seed();
+    objects[CI(DAY, "3")] = laneObject("c3", "2026-08-20T03:00:00.000Z", {
+      batch: false,
+    });
+    const { store } = fakeStore(objects);
+    const said = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, suites, noBaselines)
+    );
+    expect(said).toContain("holds 0 suite(s) and 1 capability setup(s)");
+    expect(said).toContain("no suite has a measured cost");
+  });
+
+  it("says what the cost model holds when a lane has measured it", async () => {
+    const objects = seed();
+    objects[CI(DAY, "3")] = laneObject("c3", "2026-08-20T03:00:00.000Z");
+    const { store } = fakeStore(objects);
+    const said = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, suites, noBaselines)
+    );
+    expect(said).toContain("the cost model holds 1 suite(s) and 1 capability");
+    expect(said).not.toContain("overruns");
   });
 
   it("publishes an empty cost model when no lane has measured one", async () => {
