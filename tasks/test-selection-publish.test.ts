@@ -23,7 +23,6 @@ import {
   type TestRecord,
 } from "@commonfabric/test-support/records";
 import {
-  type AggregateState,
   emptyAggregate,
   Fold,
   parseAggregate,
@@ -31,7 +30,6 @@ import {
 } from "./test-selection/build.ts";
 import type { Suite } from "./test-topology/suite.ts";
 import { join } from "@std/path";
-import { stateObjectName } from "./test-selection/store.ts";
 
 /**
  * A topology holding the one suite these cases record against. Supplied
@@ -93,15 +91,6 @@ async function saying(call: () => Promise<unknown>): Promise<string> {
 async function publishedManifest(created: Map<string, Uint8Array>) {
   const name = [...created.keys()].find((one) => one.includes("/manifest-"))!;
   return parseManifest(await gunzipToText(created.get(name)!))!;
-}
-
-/** The aggregate of the newest state object a run created. */
-async function newestState(
-  created: Map<string, Uint8Array>,
-): Promise<AggregateState> {
-  const newest = [...created.keys()].filter((name) => name.includes("/state/"))
-    .sort().at(-1)!;
-  return JSON.parse(await gunzipToText(created.get(newest)!));
 }
 
 /**
