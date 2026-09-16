@@ -12,6 +12,7 @@ import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
+import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { validateStructuredResultValue } from "@commonfabric/runner/cfc";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -157,6 +158,13 @@ describe("piece-source", () => {
     await storageManager?.close();
     globalThis.fetch = originalFetch;
   });
+
+  function createSessionlessEngine() {
+    return new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: `piece-source-nosession-${crypto.randomUUID()}`,
+    });
+  }
 
   function createEngine() {
     return new CfHarnessEngine({
@@ -336,6 +344,147 @@ describe("piece-source", () => {
       // The piece still runs what it ran: an incompatible candidate is
       // refused rather than applied and left broken, and this tool exposes no
       // override that would take it anyway.
+      const after = (await engine.invokeBuiltinTool("read_piece_source", {
+        token: created.resultRef,
+      })).output as ReadPieceSourceToolSuccessOutput;
+      expect(after.files.map((file) => file.contents)).toContain(
+        DOUBLING_PATTERN_SOURCE,
+      );
+    });
+  });
+
+  describe("refusals", () => {
+    // Every one of these is a refusal a caller can reach, and each says which
+    // of the mistakes it was rather than failing the call: a run with nothing
+    // to reach a piece through, a missing argument, and a token that names
+    // nothing are three different answers.
+
+    it("refuses both tools in a run with no fabric session", async () => {
+      const engine = createSessionlessEngine();
+
+      for (const toolId of ["read_piece_source", "revise_piece"] as const) {
+        const result = await engine.invokeBuiltinTool(toolId, {
+          token: "cfh:a:whatever",
+          sourceText: "export default 1;",
+        });
+        const output = result.output as PieceSourceToolErrorOutput;
+        expect(output.status).toBe("error");
+        expect(output.message).toContain("requires a fabric session");
+      }
+    });
+
+    it("refuses an empty token, naming the argument it wanted", async () => {
+      const engine = createEngine();
+
+      for (const toolId of ["read_piece_source", "revise_piece"] as const) {
+        const result = await engine.invokeBuiltinTool(toolId, {
+          token: "   ",
+          sourceText: DOUBLING_PATTERN_SOURCE,
+        });
+        const output = result.output as PieceSourceToolErrorOutput;
+        expect(output.status).toBe("error");
+        expect(output.message).toContain("requires a token naming a piece");
+      }
+    });
+
+    it("refuses revise_piece with no sourceText", async () => {
+      const engine = createEngine();
+      const created = await createPiece(engine);
+
+      const result = await engine.invokeBuiltinTool("revise_piece", {
+        token: created.resultRef,
+        sourceText: "",
+      });
+      const output = result.output as PieceSourceToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("requires the revised sourceText");
+    });
+
+    it("refuses a token that parses as no reference at all", async () => {
+      const engine = createEngine();
+
+      const result = await engine.invokeBuiltinTool("read_piece_source", {
+        token: "not a reference",
+      });
+      const output = result.output as PieceSourceToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("does not name a reference this run");
+    });
+
+    it("refuses a token naming a cell that is not a piece", async () => {
+      // A document with no pattern identity is not a piece, and reading its
+      // "source" would be reading a cell that has none.
+      const engine = createEngine();
+      const plain = runtime.getCell(
+        pieces.getSpace(),
+        `piece-source-plain-${crypto.randomUUID()}`,
+        undefined,
+      );
+      await runtime.editWithRetry((tx) => {
+        plain.withTx(tx).set({ note: "not a piece" });
+      });
+      await runtime.idle();
+      const ref = createLLMFriendlyLink(
+        plain.getAsNormalizedFullLink(),
+        pieces.getSpace(),
+      );
+
+      const result = await engine.invokeBuiltinTool("read_piece_source", {
+        token: ref,
+      });
+      const output = result.output as PieceSourceToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("does not refer to a piece");
+    });
+
+    it("refuses revise_piece a token that names no piece, before compiling anything", async () => {
+      // The resolution refusal comes first, so a caller that named the wrong
+      // thing is told that rather than being told its source did not compile.
+      const engine = createEngine();
+
+      const result = await engine.invokeBuiltinTool("revise_piece", {
+        token: "not a reference",
+        sourceText: DOUBLING_PATTERN_SOURCE,
+      });
+      const output = result.output as PieceSourceToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("does not name a reference this run");
+    });
+
+    it("says so when the fabric session cannot be established", async () => {
+      // A session that refuses to build is a different answer from a run
+      // configured without one, and the caller is told which.
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: `piece-source-badsession-${crypto.randomUUID()}`,
+        fabricSessionFactory: () =>
+          Promise.reject(new Error("the deployment refused this identity")),
+      });
+
+      for (const toolId of ["read_piece_source", "revise_piece"] as const) {
+        const result = await engine.invokeBuiltinTool(toolId, {
+          token: "/of:fid1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          sourceText: DOUBLING_PATTERN_SOURCE,
+        });
+        const output = result.output as PieceSourceToolErrorOutput;
+        expect(output.status).toBe("error");
+        expect(output.message).toContain(
+          "could not establish the fabric session",
+        );
+      }
+    });
+
+    it("refuses a candidate that does not compile, keeping the piece on its source", async () => {
+      const engine = createEngine();
+      const created = await createPiece(engine);
+
+      const result = await engine.invokeBuiltinTool("revise_piece", {
+        token: created.resultRef,
+        sourceText: "this is not TypeScript at all (((",
+      });
+      const output = result.output as PieceSourceToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("revise_piece could not compile");
       const after = (await engine.invokeBuiltinTool("read_piece_source", {
         token: created.resultRef,
       })).output as ReadPieceSourceToolSuccessOutput;
