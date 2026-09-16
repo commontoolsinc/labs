@@ -28,8 +28,10 @@ export type FabricPrimitiveValueTag =
 /**
  * The tags of the non-fundamental JS classes (that is, neither plain object nor
  * array) whose instances are recognized as included in the
- * `FabricConvertibleJsObject` type. The tags all use the prefix `Js` to help
- * minimize ambiguity.
+ * `FabricConvertibleJsObject` type. Each tag is `Js` followed by the name of
+ * the global class it stands for, which keeps the tags unambiguous and is what
+ * ties each one to its class: `tags-agreement.ts` stops compiling when this
+ * table and `FabricConvertibleJsObject` stop agreeing.
  */
 export const FABRIC_CONVERTIBLE_JS_OBJECT_TAGS = Object.freeze(
   {

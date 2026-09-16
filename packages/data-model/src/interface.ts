@@ -222,6 +222,11 @@ export abstract class FabricPrimitive extends BaseFabricSpecialObject {
  *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
  * and belongs directly in `FabricValue` without wrapping.
+ *
+ * `tags-agreement.ts` stops compiling when this and
+ * `FABRIC_CONVERTIBLE_JS_OBJECT_TAGS` stop agreeing, and it reads each class
+ * from its declared `prototype`, so a member here is written the way the
+ * class's `prototype` is declared.
  */
 export type FabricConvertibleJsObject =
   | Error
