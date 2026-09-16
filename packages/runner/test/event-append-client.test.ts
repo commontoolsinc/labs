@@ -788,6 +788,7 @@ describe("the fire fork (protocol.md §1's scheduler tell)", () => {
       clientRuntime,
       argument.key("value"),
       (value) => value === 11,
+      { stuckLabel: "the cascade to render 11" },
     );
     // ...but the store received exactly ONE authored commit — the ROOT
     // fire's append. The cascade send happened inside a

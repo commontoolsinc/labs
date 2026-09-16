@@ -480,7 +480,6 @@ export class EventAppendQueue {
       }
       // Every queued stream is paced: hold until the earliest refill.
       this.#pacedHolds += 1;
-      this.#onPacedHold?.();
       await new Promise<void>((resolve) => {
         this.#retryRelease = resolve;
         this.#retryTimer = setTimeout(() => {
@@ -488,6 +487,16 @@ export class EventAppendQueue {
           this.#retryRelease = undefined;
           resolve();
         }, Number.isFinite(minDeficitMs) ? minDeficitMs : 1);
+        // Reported with the release and the timer already in place, so a
+        // `close()` from the hook reaches both.
+        try {
+          this.#onPacedHold?.();
+        } catch (error) {
+          logger.warn("event-queue-paced-hold-observer-failed", () => [
+            "paced-hold observer threw",
+            error,
+          ]);
+        }
       });
     }
   }

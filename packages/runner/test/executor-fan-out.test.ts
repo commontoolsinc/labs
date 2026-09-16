@@ -219,9 +219,10 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       entry.space === activatedSpace && entry.outcome === "active"
     );
 
+  let pokes = 0;
+
   /** Commit an authored poke and wait for the loop to cover it — one
    * wave cycle, ordered after anything the loop was going to run. */
-  let pokes = 0;
   const settleACycle = async (engine: Engine.Engine): Promise<void> => {
     pokes += 1;
     const poker = openClient(aliceSigner);

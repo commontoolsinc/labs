@@ -39,6 +39,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
+import { withStuckNet } from "@commonfabric/test-support/stuck-net";
 import {
   ArrivalLog,
   awaitAdmitted,
@@ -432,6 +433,7 @@ describe("stage F serving loop", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
 
     // The derived commits: class derived, holder = the DR1 holder
@@ -758,6 +760,7 @@ describe("stage F serving loop", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 100,
+      { stuckLabel: "the client's total to reach 100" },
     );
 
     // §7: the not-loadable-yet attempt was COUNTED, not silent — since
@@ -885,6 +888,7 @@ describe("stage F serving loop", () => {
       clientRuntime,
       clientResult.key("doubled"),
       (doubled: unknown) => JSON.stringify(doubled ?? null) === "[4,6,8]",
+      { stuckLabel: "the client's doubled array to reach [4,6,8]" },
     );
 
     // The throw storm is GONE, by counter (serving-loop.md §7: tests
@@ -947,9 +951,12 @@ describe("stage F serving loop", () => {
         n,
       );
       expect((await tx.commit()).error).toBeUndefined();
+      const kickSeq = Engine.serverSeq(engine);
       // Each kick gets its own cycle rather than sharing one, which is
       // what makes the deferral counter below a per-root observation.
-      await awaitEach(cycles, () => readWatermarkSeq(engine) >= 1);
+      // The target is THIS kick's seq: a watermark that already covers an
+      // earlier kick says nothing about this one.
+      await awaitEach(cycles, () => readWatermarkSeq(engine) >= kickSeq);
     }
 
     // The ruled counter behavior: excluded roots produce ZERO deferral
@@ -1047,6 +1054,7 @@ describe("stage F serving loop", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
 
     // Phase 2 — the strict W-soundness probe (protocol.md §4): with
@@ -1156,6 +1164,7 @@ describe("stage F serving loop", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
 
     // The pattern-pointer write: an ordinary AUTHORED input under the
@@ -1182,6 +1191,7 @@ describe("stage F serving loop", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 43,
+      { stuckLabel: "the client's total to reach 43 after the swap" },
     );
     // The SWAPPED derivation's own commit: derived-class commits landed
     // AFTER the pre-swap baseline, under the loop's own holder — v1's
@@ -1443,7 +1453,10 @@ describe("stage F serving loop", () => {
     // renew timer alive. whenParked resolves only after this tenure's
     // park path completed — renew stopped, runtime disposed, lease
     // released.
-    await spaceServer.whenParked;
+    await withStuckNet(
+      spaceServer.whenParked,
+      "the aborted wave's park to complete",
+    );
 
     // What follows the failure park is the host's DESIGNED recovery arm:
     // the still-open client session is live demand, so the host
@@ -1538,13 +1551,11 @@ describe("stage F serving loop", () => {
     blowUp = true;
     first.noteDemandChanged();
 
-    // Park LIVENESS: whenParked must resolve despite the hung dispose.
-    // Pre-fix, the park awaits the dispose forever and this race times
-    // out — the observed zombie.
     // Park LIVENESS: `whenParked` resolves despite the hung dispose.
-    // Pre-fix the park awaits the dispose forever and this never
-    // returns, which is the zombie stated as a wait.
-    await first.whenParked;
+    // Pre-fix the park awaits the dispose forever, which the net below
+    // reports rather than holding the suite open: the hung dispose keeps
+    // the process alive, so nothing else would end the run.
+    await withStuckNet(first.whenParked, "the hung-dispose park to complete");
     // Counted, not just logged (§7 posture).
     expect(host.stats().parkDisposeTimeouts).toBeGreaterThanOrEqual(1);
 
@@ -1706,7 +1717,10 @@ describe("stage F serving loop", () => {
     const failTx = clientRuntime.edit();
     input.withTx(failTx).set({ value: 1_001 });
     expect((await failTx.commit()).error).toBeUndefined();
-    await failing.whenParked;
+    await withStuckNet(
+      failing.whenParked,
+      "the failing tenure's park to complete",
+    );
     const failedAgainAt = Date.now();
     const countBefore = activationTimes.length;
     const trigger = clientRuntime.edit();
@@ -2013,6 +2027,7 @@ describe("stage F serving loop", () => {
       clientResult.key("fetch").key("result"),
       (result: { from?: string } | undefined) =>
         result?.from === "https://stage-g.test/one",
+      { stuckLabel: "the first leg's fetch result to render" },
     );
     expect(calls.filter((url) => url.endsWith("/one")).length).toBe(1);
     const stats1 = host.stats();
@@ -2077,6 +2092,7 @@ describe("stage F serving loop", () => {
       clientRuntime,
       clientResult.key("fetch").key("error"),
       (error: unknown) => error !== undefined,
+      { stuckLabel: "the failing fetch's error to render" },
     );
     expect(calls.filter((url) => url.endsWith("/fails")).length).toBe(1);
     // No timer retry, pinned DETERMINISTICALLY (round-2 thread 10): a
@@ -2116,6 +2132,7 @@ describe("stage F serving loop", () => {
       clientResult.key("fetch").key("result"),
       (result: { from?: string } | undefined) =>
         result?.from === "https://stage-g.test/two",
+      { stuckLabel: "the second leg's fetch result to render" },
     );
     expect(calls.filter((url) => url.endsWith("/two")).length).toBe(1);
     // FINAL stability re-check, after every later leg's waves and
@@ -2437,6 +2454,7 @@ describe("stage F serving loop", () => {
         clientResult.key("fetch").key("result"),
         (result: { from?: string } | undefined) =>
           result?.from === `https://stage-g.test/${leg}`,
+        { stuckLabel: "this leg's fetch result to render" },
       );
       // The retirement-liveness pin: the completion settled (the value
       // is client-visible), so the whenApplied barrier resolved and the
@@ -2586,6 +2604,7 @@ describe("stage F serving loop", () => {
       clientRuntime,
       watched.key("value"),
       (value: number | undefined) => value === 7,
+      { stuckLabel: "the watched value to reach 7" },
     );
     expect(host.stats().outbox.completed).toBeGreaterThanOrEqual(1);
   });

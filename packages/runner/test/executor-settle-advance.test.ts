@@ -76,7 +76,6 @@ import {
   awaitAdmitted,
   awaitEach,
   awaitReplica,
-  settleServing,
 } from "./support/serving-waits.ts";
 import { waitOnDelivery } from "./support/wait-on-delivery.ts";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
@@ -122,6 +121,7 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
       onActivationSettled: (activatedSpace, outcome) =>
         activations.record({ space: activatedSpace, outcome }),
       onEffectRetired: retirements.record,
+      onWaveCycle: cycles.record,
     });
 
   /** Resolves once the space has an ACTIVE tenure. The serving pattern
@@ -133,35 +133,22 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
       entry.space === space && entry.outcome === "active"
     );
 
-  /** Commit an authored poke and wait for the loop to cover it — one
-   * wave cycle, ordered after anything the loop was going to run of its
-   * own accord. */
   let activations: ArrivalLog<{ space: string; outcome: string }>;
+
   /** Each in-flight effect as the outbox retires it — the counts that
    * drop with it move inside the outbox's own continuations. */
   let retirements: ArrivalLog<void>;
-  let pokes = 0;
-  const settleACycle = async (): Promise<void> => {
-    const engine = await server.engineForSpace(space);
-    pokes += 1;
-    const poke = clientRuntime.getCell<{ n: number }>(
-      space,
-      `settle-cycle-poke-${pokes}`,
-      undefined,
-    );
-    await poke.sync();
-    const tx = clientRuntime.edit();
-    poke.withTx(tx).set({ n: pokes });
-    expect((await tx.commit()).error).toBeUndefined();
-    await settleServing(engine, clientRuntime, space);
-  };
+
+  /** Each wave cycle as it ends — the loop arms its input wait
+   * synchronously after one. */
+  let cycles: ArrivalLog<MemorySpace>;
 
   beforeEach(() => {
     server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
     onServingRuntime = undefined;
     activations = new ArrivalLog();
     retirements = new ArrivalLog();
-    pokes = 0;
+    cycles = new ArrivalLog();
   });
 
   afterEach(async () => {
@@ -296,6 +283,7 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
     await awaitAdmitted(
       server,
@@ -383,6 +371,7 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
     const overlay = clientRuntime.speculationOverlay;
     expect(overlay).toBeDefined();
@@ -424,6 +413,7 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
     // No authored commit drove the heal (the report's keystroke probe
     // is exactly what S1 makes unnecessary).
@@ -497,15 +487,15 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
     });
     const advancesBefore = host.stats().settleAdvances.count;
     const wavesBefore = host.stats().waves;
-    // The quiet claim, behind a barrier rather than a window: the loop
-    // runs on input, so a fresh authored one whose coverage the
-    // watermark reports is ordered after whatever the latch would have
-    // driven by now. Past it the counters have moved by at most the
-    // poke's own wave; a re-arming latch moves them without bound.
-    await settleACycle();
-    expect(host.stats().settleAdvances.count)
-      .toBeLessThanOrEqual(advancesBefore + 1);
-    expect(host.stats().waves).toBeLessThanOrEqual(wavesBefore + 1);
+    // The quiet claim, observed rather than sampled over a window: a
+    // re-arming latch keeps finding work of its own, so its loop never
+    // reaches the input wait. The suspension IS the claim, and the
+    // counters are read at it — unmoved, with no poke of the test's own
+    // to allow for.
+    const quietServer = host.spaceServer(space)!;
+    await awaitEach(cycles, () => quietServer.suspendedOnInput);
+    expect(host.stats().settleAdvances.count).toBe(advancesBefore);
+    expect(host.stats().waves).toBe(wavesBefore);
     cancelDemand();
   });
 
@@ -555,6 +545,7 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
     // OFF derives client-side and commits as today: derived-class
     // commits and the watermark doc do not exist, so neither does any
@@ -673,6 +664,7 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
     await awaitAdmitted(
       server,
@@ -693,6 +685,7 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 49,
+      { stuckLabel: "the client's total to reach 49" },
     );
     await foldInjections.reached(1);
     expect(foldError).toBeUndefined();

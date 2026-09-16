@@ -34,6 +34,7 @@ import { ExecutorHost } from "../src/executor/host.ts";
 import {
   ArrivalLog,
   awaitAdmitted,
+  awaitEach,
   settleServing,
 } from "./support/serving-waits.ts";
 import {
@@ -134,6 +135,18 @@ describe("executor-warm-request", () => {
   const activated = (space: MemorySpace): Promise<unknown> =>
     activations.matching((entry) =>
       entry.space === space && entry.outcome === "active"
+    );
+
+  /** Resolves once `space` has an ACTIVE tenure recorded after the first
+   * `from` entries. A successor's activation is what the tests below
+   * wait for, and its predecessor's is already in the log. */
+  const activatedSince = (space: MemorySpace, from: number): Promise<void> =>
+    awaitEach(
+      activations,
+      () =>
+        activations.entries.slice(from).some((entry) =>
+          entry.space === space && entry.outcome === "active"
+        ),
     );
 
   /** Commit an authored poke into `space` and wait for the loop to cover
@@ -367,6 +380,7 @@ describe("executor-warm-request", () => {
     const cancel = demandCell.sink(() => {});
     try {
       await activated(pSpace);
+      const firstTenure = activations.entries.length;
       const target = host!.spaceServer(pSpace)!;
       const pEngine = await server.engineForSpace(pSpace);
       const terminals = () => host!.stats().structureLoadTerminal;
@@ -417,7 +431,7 @@ describe("executor-warm-request", () => {
       // c1, plus c2. Before the fix the count stopped at +2 — the
       // first notice reactivated the space, the second was dropped
       // with the dying tenure.
-      await activated(pSpace);
+      await activatedSince(pSpace, firstTenure);
       await settleACycle(pEngine, pSpace);
       expect(terminals()).toBeGreaterThanOrEqual(t1 + 3);
     } finally {
@@ -447,6 +461,7 @@ describe("executor-warm-request", () => {
     const cancel = demandCell.sink(() => {});
     try {
       await activated(pSpace);
+      const firstTenure = activations.entries.length;
       const target = host!.spaceServer(pSpace)!;
       const pEngine = await server.engineForSpace(pSpace);
       const terminals = () => host!.stats().structureLoadTerminal;
@@ -496,7 +511,7 @@ describe("executor-warm-request", () => {
         writes: [{ id: "of:warm-fail-c2", scopeKey: "space" }],
         warm: true,
       });
-      await activated(pSpace);
+      await activatedSince(pSpace, firstTenure);
       await settleACycle(pEngine, pSpace);
       expect(terminals()).toBeGreaterThanOrEqual(t1 + 3);
     } finally {

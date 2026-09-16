@@ -290,8 +290,13 @@ describe("Phase 6 outbox budgets (serving-loop.md §5)", () => {
       expect(outbox.carriageFor(key)).toEqual(survivor);
       outbox.deferRetirement(key, readable.promise);
       work.resolve();
-      await awaitEach(retirements, () => outbox.inflightCount === 1);
-      expect(stats.outbox.completed).toBe(2);
+      // Both halves, because the blocker retires before the survivor's
+      // work completes: an in-flight set of one alone can be that earlier
+      // retirement rather than the state this test is about.
+      await awaitEach(
+        retirements,
+        () => outbox.inflightCount === 1 && stats.outbox.completed === 2,
+      );
       outbox.admitSealedEffects([{
         tx,
         context: first,
@@ -422,6 +427,9 @@ describe("Phase 6 outbox budgets (serving-loop.md §5)", () => {
       await started.promise;
       outbox.deferRetirement(key, readable.promise);
       work.resolve();
+      // The retirement alone here: this test's completion count reaches
+      // two after the last retirement, so a predicate wanting both at one
+      // arrival would wait for an arrival that never comes.
       await awaitEach(retirements, () => outbox.inflightCount === 1);
       expect(stats.outbox.completed).toBe(2);
       expect(outbox.carriageFor(key)).toEqual(replacement);

@@ -240,6 +240,7 @@ describe("Phase 5 cross-space serving", () => {
         clientRuntime,
         clientResult.key("total"),
         (total: number | undefined) => total === 101,
+        { stuckLabel: "the client's total to reach 101" },
       );
       expect(host.spaceServer(homeSpace)?.active).toBe(true);
 
@@ -257,6 +258,7 @@ describe("Phase 5 cross-space serving", () => {
         clientRuntime,
         clientResult.key("total"),
         (total: number | undefined) => total === 102,
+        { stuckLabel: "the client's total to reach 102" },
       );
     } finally {
       cancel();
@@ -503,13 +505,9 @@ describe("Phase 5 cross-space serving", () => {
       foreignCell.withTx(tx).set({ value: 41 });
       expect((await tx.commit()).error).toBeUndefined();
 
-      // The forcing was attempted and failed; the sink then refused the
-      // creation-granted batch (INV-13 mirror) — the fresh space stays
-      // EMPTY (no genesis, no data).
+      // The forcing was attempted and failed.
       await forcingAttempts.matching((attempted) => attempted === pSpace);
       const pEngine = await server.engineForSpace(pSpace);
-      expect(host!.spaceServer(homeSpace)?.active ?? false).toBe(true);
-      expect(serverSeq(pEngine)).toBe(0);
 
       // Failure isolation: a plain home-space write STILL commits — the
       // loop was not parked by the misdirected provisioning.
@@ -531,6 +529,13 @@ describe("Phase 5 cross-space serving", () => {
         server,
         () => selectDocHead(homeEngine, { id: probeId, scopeKey: "space" }) > 0,
       );
+
+      // Read past that admission: the loop carried the refused batch and
+      // then this write, so the sink having refused the creation-granted
+      // batch (INV-13 mirror) — the fresh space EMPTY, no genesis and no
+      // data — is a settled state rather than one these reads raced.
+      expect(host!.spaceServer(homeSpace)?.active ?? false).toBe(true);
+      expect(serverSeq(pEngine)).toBe(0);
     } finally {
       cancel();
     }
@@ -1320,6 +1325,7 @@ describe("Phase 5 cross-space serving", () => {
         clientRuntime,
         clientResult.key("total"),
         (total: number | undefined) => total === 501,
+        { stuckLabel: "the client's total to reach 501" },
       );
       expect(host.spaceServer(homeSpace)?.active).toBe(true);
 
@@ -1365,6 +1371,7 @@ describe("Phase 5 cross-space serving", () => {
         clientRuntime,
         clientResult.key("total"),
         (total: number | undefined) => total === 502,
+        { stuckLabel: "the client's total to reach 502" },
       );
       expect(host.spaceServer(homeSpace)?.active).toBe(true);
       await awaitAdmitted(

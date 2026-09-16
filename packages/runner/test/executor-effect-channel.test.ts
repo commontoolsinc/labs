@@ -58,6 +58,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
+import { withStuckNet } from "@commonfabric/test-support/stuck-net";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
@@ -741,7 +742,10 @@ describe("Phase 4 client-effect channel", () => {
       // quiescence BEFORE the gated input barrier) — without this the
       // intrusion below can land as ordinary next-wave input and no
       // conflict ever happens (a vacuously green schedule).
-      await serving.settleGateEntered.promise;
+      await withStuckNet(
+        serving.settleGateEntered.promise,
+        "a settle to reach the armed gate",
+      );
       expect(host!.stats().events.processed).toBeGreaterThanOrEqual(1);
 
       // The mid-wave intrusion: an authored whole-doc set of the

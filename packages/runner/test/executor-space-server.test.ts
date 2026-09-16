@@ -744,9 +744,10 @@ describe("stage G SpaceServer recovery seams", () => {
       },
     });
     expect(await created.activate()).toBe(true);
-    // Plain renewals report nothing. The renew ticks every 25 ms for the
-    // rest of this test, so the count assertions after the blip below
-    // are what catch a renewal that reported.
+    // Activation itself reports nothing. Whether a PLAIN renewal reports
+    // is carried by the count assertions after the blip below: the renew
+    // ticks every 25 ms for the rest of this test, so a renewal that
+    // reported would push the count past the one the blip produces.
     expect(notices).toEqual([]);
     expect(stats.lease.lost).toBe(0);
 

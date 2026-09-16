@@ -259,6 +259,7 @@ describe("Phase 2 speculation overlay", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
     const overlay = clientRuntime.speculationOverlay;
     expect(overlay).toBeDefined();
@@ -327,6 +328,7 @@ describe("Phase 2 speculation overlay", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 56,
+      { stuckLabel: "the authoritative total to render as 56" },
     );
 
     // The single-deriver envelope (testing.md §4): every derived-class
@@ -444,6 +446,7 @@ describe("Phase 2 speculation overlay", () => {
       clientRuntime,
       argument.key("value"),
       (value: number | undefined) => (value ?? 0) >= 1,
+      { stuckLabel: "the argument's value to take the handler's write" },
     );
     expect(overlay!.entryCount(space)).toBeGreaterThanOrEqual(1);
     // The durable half of the doc the handler wrote did NOT change:
@@ -915,6 +918,7 @@ describe("Phase 2 speculation overlay", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
     const overlay = clientRuntime.speculationOverlay!;
     expect(overlay.entryCount(space)).toBeGreaterThanOrEqual(1);
@@ -1018,6 +1022,7 @@ describe("Phase 2 speculation overlay", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
     const overlay = clientRuntime.speculationOverlay!;
     const echoEntries = overlay.entryCount(space);
@@ -1077,6 +1082,7 @@ describe("Phase 2 speculation overlay", () => {
         readerRuntime,
         readerResult.key("total"),
         (total: number | undefined) => total === 777,
+        { stuckLabel: "the reader's total to reach 777" },
       );
     } finally {
       await readerRuntime.dispose();
@@ -1247,6 +1253,7 @@ describe("Phase 2 speculation overlay", () => {
         readerRuntime,
         readerDraft.key("name"),
         (name: string | undefined) => name === "typed-name",
+        { stuckLabel: "the reader to see the typed draft name" },
       );
     } finally {
       await readerRuntime.dispose();
@@ -1439,6 +1446,7 @@ describe("Phase 2 speculation overlay", () => {
         readerRuntime,
         readerDraft.key("name"),
         (name: string | undefined) => name === "typed-name",
+        { stuckLabel: "the reader to see the typed draft name" },
       );
     } finally {
       await readerRuntime.dispose();
@@ -1615,6 +1623,7 @@ describe("Phase 2 speculation overlay", () => {
         readerRuntime,
         readerDraft.key("name"),
         (name: string | undefined) => name === "typed-name",
+        { stuckLabel: "the reader to see the typed draft name" },
       );
     } finally {
       await readerRuntime.dispose();
@@ -1792,6 +1801,7 @@ describe("Phase 2 speculation overlay", () => {
         readerRuntime,
         readerDraft.key("name"),
         (name: string | undefined) => name === "typed-name",
+        { stuckLabel: "the reader to see the typed draft name" },
       );
     } finally {
       await readerRuntime.dispose();
@@ -2824,6 +2834,7 @@ describe("Phase 2 speculation overlay", () => {
       clientRuntime,
       clientResult.key("total"),
       (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
 
     const engine = await server.engineForSpace(space);
@@ -3321,6 +3332,7 @@ describe("Phase 2 speculation overlay", () => {
         seeder.runtime,
         seeded.result.key("doubled"),
         (doubled: number[] | undefined) => (doubled ?? []).length === 2,
+        { stuckLabel: "the seeded two-element array to render" },
       );
       await seeder.runtime.storageManager.synced();
       // The derived document itself, so the arrival below lands on the
@@ -3351,6 +3363,10 @@ describe("Phase 2 speculation overlay", () => {
       clientRuntime,
       client.result.key("doubled"),
       (doubled: number[] | undefined) => (doubled ?? []).length === 2,
+      {
+        stuckLabel:
+          "the stored two-element array to render at the flag-ON client",
+      },
     );
     // The same derived document both sides derive into, so the arrival
     // below lands under the entry this client seals rather than beside it.
@@ -3375,6 +3391,7 @@ describe("Phase 2 speculation overlay", () => {
       clientRuntime,
       client.result.key("doubled"),
       (doubled: number[] | undefined) => (doubled ?? []).length === 3,
+      { stuckLabel: "the speculative three-element echo to render" },
     );
     expect(clientRuntime.speculationOverlay!.entryCount(space))
       .toBeGreaterThanOrEqual(1);

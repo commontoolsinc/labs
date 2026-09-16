@@ -284,6 +284,10 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
    * what a file measuring demand rows, waves and wakes needs from a
    * barrier. */
   const settleACycle = async (): Promise<void> => {
+    // The tenure has to exist before its demand can be poked. Activation
+    // is driven from the admission feed, so a caller that has only
+    // committed does not yet have one.
+    await activated();
     const before = cycles.entries.length;
     host!.spaceServer(space)!.noteDemandChanged();
     await cycles.reached(before + 1);

@@ -1493,6 +1493,7 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
       runtime,
       argument.key("value"),
       (value: number | undefined) => value === 1,
+      { stuckLabel: "the handler's increment to render" },
     );
     await ackArrivals.reached(1);
     expect(ackStatus).not.toBe("error");
@@ -1559,6 +1560,7 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
       argument.key("users"),
       (users: Array<{ name?: string }> | undefined) =>
         users?.length === 1 && users[0]?.name === "Alice",
+      { stuckLabel: "the added user to render" },
     );
     // And it STAYS one: a re-speculation would be this runtime's own
     // scheduler work over a fresh echo, and the drain runs it.
@@ -1593,6 +1595,7 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
       runtime,
       argument.key("value"),
       (value: number | undefined) => value === 1,
+      { stuckLabel: "the handler's increment to render" },
     );
     cancelDemand();
   });

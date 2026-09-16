@@ -606,6 +606,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
       reader,
       liveness,
       (value: { n?: number } | undefined) => value?.n === 2,
+      { stuckLabel: "the reader's liveness cell to carry the writer's update" },
     );
 
     // And the request-shaped path still answers ok (pre-containment

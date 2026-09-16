@@ -198,6 +198,7 @@ describe("unresolved-input lift semantics (RULED 2026-08-21)", () => {
       readerRuntime,
       result.key("out"),
       (out) => Array.isArray(out) && out.length === 2,
+      { stuckLabel: "the lift's output to hold both entries" },
     );
     expect(result.key("out").get()).toEqual(["hello", "world"]);
     expect(actionFailures).toEqual([]);
@@ -236,6 +237,7 @@ describe("unresolved-input lift semantics (RULED 2026-08-21)", () => {
       readerRuntime,
       result.key("out"),
       (out) => out === null,
+      { stuckLabel: "the lift's output to fall back to null" },
     );
     expect(actionFailures).toEqual([]);
     cancel();

@@ -224,6 +224,7 @@ describe("UI cell write conflict retry (the :133 stall's consumer seam)", () => 
         readerRuntime,
         readerCell.key("drafts").key("message"),
         (message) => message === "typed",
+        { stuckLabel: "the reader to see the typed draft message" },
       );
     } finally {
       await readerRuntime.dispose();

@@ -453,7 +453,16 @@ export class SpaceOutbox {
     this.#inflight.delete(key);
     this.#carriage.delete(key);
     if (entry.countsAsRequest) this.#stats.memo.inflight -= 1;
-    this.#onEffectRetired?.();
+    try {
+      this.#onEffectRetired?.();
+    } catch (error) {
+      // The caller resolves the entry's retirement promise after this
+      // returns, and `settle()` sleeps on that promise.
+      logger.warn("effect-retired-observer-failed", () => [
+        `effect ${key} retirement observer threw`,
+        error,
+      ]);
+    }
   }
 
   async #runEffect(key: string, entry: InflightEffect): Promise<void> {

@@ -382,8 +382,10 @@ A set of edges carries them, and
   counters move inside a cycle and are visible only as numbers afterwards, so
   `awaitEach(log, predicate)` re-reads them when one has run.
 - `SpaceServerOptions.onRootEnsure` reports each space-root ensure attempt's
-  outcome. A skip and a deadline failure write nothing, so no commit and no
-  document marks them.
+  outcome. A skip writes nothing at all, and a deadline failure reports
+  `failed` while the ensure it gave up on runs on detached and may write later,
+  so at the moment either is reported there is no commit for a test to wait
+  on.
 - `SpaceServerOptions.onEventDrainPass` reports the end of a drain pass, which
   is where `events.processed` moves. A pass ends before the settle that
   follows it, so a wait on that counter at the cycle boundary instead sleeps
@@ -1101,10 +1103,12 @@ boundary the test can await without adding one to production code.
   row, a watermark advance, a stats counter. They are
   `executor-compile-and-run`, `engine-read-through`, `executor-lifecycle-verbs`,
   `executor-fetch-program-instances`, `executor-fetch-instances` and
-  `executor-sqlite-instances`, and each waits on state one of the boundaries
-  listed under "Suites that drive a live memory server" above reports. They are
-  conversions left undone rather than polls this section endorses, so the helper
-  stays for as long as they do and no longer. Its deadline is a
+  `executor-sqlite-instances`. What they poll is the same material the
+  boundaries listed under "Suites that drive a live memory server" above
+  report — an engine row, a watermark seq, a stats counter, whether a tenure is
+  active, a cell read after `sync()` — so each is a conversion left undone
+  rather than a poll this section endorses, and the helper stays for as long as
+  they do and no longer. Its deadline is a
   stuck-condition backstop of the same kind, for the same reason — the serving
   loop holds the event loop open through its lease-renew interval, so the
   fail-fast described above never fires. What the poll interval under it costs

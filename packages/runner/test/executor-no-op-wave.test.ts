@@ -226,6 +226,7 @@ describe("all-no-op wave (the land-off tx-boundary pin)", () => {
       clientRuntime,
       clientResult.key("total"),
       (total) => total === 7,
+      { stuckLabel: "the client's total to reach 7" },
     );
     // Let the first wave fully settle before sampling: wait on the
     // INPUT's coverage (never on raw serverSeq — see maxAuthoredSeq).
@@ -337,6 +338,7 @@ describe("all-no-op wave (the land-off tx-boundary pin)", () => {
       clientRuntime,
       clientResult.key("total"),
       (total) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
     const derivedAfterFirst = derivedSeqs(engine).length;
     {
@@ -351,6 +353,7 @@ describe("all-no-op wave (the land-off tx-boundary pin)", () => {
       clientRuntime,
       clientResult.key("total"),
       (total) => total === 63,
+      { stuckLabel: "the client's total to reach 63" },
     );
     expect(derivedSeqs(engine).length).toBeGreaterThan(derivedAfterFirst);
     cancelDemand();

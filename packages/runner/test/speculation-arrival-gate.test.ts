@@ -286,6 +286,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       alice,
       result.key("echo"),
       (echo) => echo === "echo:A",
+      { stuckLabel: "the speculative echo of A to render" },
     );
     const overlay = alice.speculationOverlay!;
     expect(overlay.entryCount(space)).toBeGreaterThanOrEqual(1);
@@ -394,6 +395,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       alice,
       result.key("echo"),
       (echo) => echo === "echo:server",
+      { stuckLabel: "the server's echo to replace the speculative one" },
     );
     expect(overlay.entryCount(space)).toBe(0);
     // A re-speculate/re-retire loop would be scheduler work off the same
@@ -619,6 +621,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       alice,
       result.key("echo"),
       (echo) => echo === "echo:A",
+      { stuckLabel: "the speculative echo of A to render" },
     );
     const overlay = alice.speculationOverlay!;
     expect(overlay.entryCount(space)).toBeGreaterThanOrEqual(1);
@@ -697,6 +700,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       alice,
       result.key("echo"),
       (echo) => echo === "echo:server",
+      { stuckLabel: "the server's echo to replace the speculative one" },
     );
     expect(overlay.entryCount(space)).toBe(0);
     expect(overlay.arrivalSweepCount).toBeGreaterThan(arrivalSweepsBefore);
@@ -1581,6 +1585,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       alice,
       cellFor(alice, divergentId),
       (value) => value?.v === "stored",
+      { stuckLabel: "the divergent cell to render its stored value" },
     );
     expect(destination.entryCount(space)).toBe(1);
     expect(cellFor(alice, identicalId).get()?.v).toBe("stored");
