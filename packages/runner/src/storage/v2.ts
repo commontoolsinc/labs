@@ -383,7 +383,11 @@ const readAddress = (
 ): string => {
   const scope = normalizeCellScope(read.scope);
   const instance = scope === "space" ? read.id : `${read.id}@${scope}`;
-  return `${instance}${encodePointer(read.path)}`;
+  // `encodePointer` escapes the separator within each segment, so an entity
+  // or a path segment holding one cannot spell another address. It writes a
+  // separator before every segment, including the first, which the entity
+  // does not take.
+  return encodePointer([instance, ...read.path]).slice(1);
 };
 
 /**

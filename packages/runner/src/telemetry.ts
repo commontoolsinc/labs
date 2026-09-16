@@ -371,7 +371,9 @@ export type RuntimeTelemetryMarker = {
   /**
    * The addresses in the commit's conflict set: entity, then `@user` or
    * `@session` for a scoped instance, then the path within the document.
-   * A whole-document read is the entity alone.
+   * A whole-document read is the entity alone. An entity or a path segment
+   * holding a separator carries it escaped, the way a JSON Pointer segment
+   * does, so no address can spell another.
    *
    * This is the set as `commitReadActivities` left it, so a read the
    * commit made and a mergeable operation then covered is absent. Commit
