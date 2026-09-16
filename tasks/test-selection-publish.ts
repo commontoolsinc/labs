@@ -787,8 +787,8 @@ function summarize(
     if (declined > 0) {
       console.log(
         `test selection: ${declined} lane measurement(s) this run read ` +
-          `came from a run nothing may read, a fork's pull request among ` +
-          `them, so the model was fitted without them.`,
+          `came from a run the fold could not place, so the model was ` +
+          `fitted without them.`,
       );
     }
   }

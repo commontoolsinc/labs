@@ -407,15 +407,16 @@ function localObject(commit: string, at: string): string {
  * One object holding what one lane measured about itself: a capability
  * it opened, and both halves of one batch.
  *
- * `fork` makes the run one the fold declines. `batch` set to false
- * writes none of a batch's three measurements, which is what a lane
- * killed part way through a batch leaves, and gives a model with a
+ * `placeless` leaves the run naming no branch, which is a group the
+ * fold cannot place and therefore declines. `batch` set to false writes
+ * none of a batch's three measurements, which is what a lane killed
+ * part way through a batch leaves, and gives a model with a
  * capability setup in it and no suite.
  */
 function laneObject(
   commit: string,
   at: string,
-  { planned = 40, spent = 92, units = 1, fork = false, batch = true } = {},
+  { planned = 40, spent = 92, units = 1, placeless = false, batch = true } = {},
 ): string {
   const context: RunContext = {
     schema: 1,
@@ -424,7 +425,7 @@ function laneObject(
     repo: "commontoolsinc/labs",
     commit,
     dirty: false,
-    branch: "main",
+    ...(placeless ? {} : { branch: "main" }),
     env: "ci",
     ci: {
       workflowRunId: commit,
@@ -432,7 +433,6 @@ function laneObject(
       workflow: "deno.yml",
       job: "Lane 1",
       event: "push",
-      ...(fork ? { fork: true } : {}),
     },
     os: "linux",
     arch: "x86_64",
@@ -585,7 +585,7 @@ describe("publish()", () => {
     // measurement cannot be read, rather than a lane that has not run.
     const objects = seed();
     objects[CI(DAY, "3")] = laneObject("c3", "2026-08-20T03:00:00.000Z", {
-      fork: true,
+      placeless: true,
     });
     const { store } = fakeStore(objects);
     const said = await saying(() =>
@@ -593,7 +593,7 @@ describe("publish()", () => {
     );
     expect(said).toContain("no suite has a measured cost in the last 7 day(s)");
     expect(said).toContain("4 lane measurement(s) this run read");
-    expect(said).toContain("fork's pull request");
+    expect(said).toContain("the fold could not place");
   });
 
   it("warns for a model holding a setup and no suite", async () => {

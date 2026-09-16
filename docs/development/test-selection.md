@@ -675,24 +675,35 @@ about, and a third line says so when it applies:
 
 ```
 test selection: 15 lane measurement(s) this run read came from a run
-nothing may read, a fork's pull request among them, so the model was
-fitted without them.
+the fold could not place, so the model was fitted without them.
 ```
 
-**The fold declines the records of the lanes that did run.** A lane
-whose run was a fork's pull request records what it measured like any
-other, and the fold reads no record a fork authored — the same rule that
-keeps a fork's test outcomes out of every score. So a lane exercised
-only from a fork contributes nothing however long it runs and however
-far back the publisher reads. Getting a figure into the cost model means
-running the lane from a branch of this repository. That second line is
-what tells this apart from a lane that has not run, and it is the one
-case here anybody can act on.
+**The fold declines the records of lanes that did run.** `provenance`
+decides where a run's executions happened from the run's own facts, and
+a run it cannot place contributes nothing — not its observations, not
+its durations, and not what its lanes measured. A lane exercised only
+from such runs therefore contributes nothing however long it runs and
+however far back the publisher reads. That third line is what tells
+this apart from a lane that has not run, and it is the one case here
+anybody can act on.
 
 It is counted over the objects the run folded rather than over the
 window, so it is evidence when it appears and says nothing when it does
 not. A run that folds nothing new prints no such line whatever the store
 holds.
+
+What `provenance` declines is wider than the record specification asks
+for. It refuses a run marked `fork: true` outright, on the stated
+grounds that a fork run's records were authored by the fork. The
+[trust boundaries](../specs/test-records.md#trust-boundaries-for-consumers)
+section says otherwise: the relay's member gate means every object in
+the store was authored under the write-access group's trust, a
+`fork: true` run is a team member's fork run whose content is trusted
+the same way a same-repository branch's is, and what the flag still
+tells a consumer is that the run executed unmerged pull-request code —
+which bears on taking a baseline, not on reading an observation. Every
+lane self-measurement in the store today sits behind that refusal, which
+is why no suite has a measured cost.
 
 The other three the line cannot separate. No lane has run: nothing to
 measure and nothing to do. A lane has run and recorded nothing, which
@@ -703,7 +714,7 @@ kinds of thing the publisher takes out of it, and the lane measurements
 are one of them, so a change on either side of that pair is invisible
 except through the empty model itself.
 
-All four fill in as soon as a readable lane run lands: every
+All four fill in as soon as a lane run the fold can place lands: every
 object the publisher folds for the first time gives up its lane
 measurements, so one run puts a figure in the model and seven days of
 runs fill the window `COST_WINDOW_DAYS` names. Until then the model is
