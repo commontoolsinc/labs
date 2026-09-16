@@ -80,20 +80,18 @@ export function tagOfFabricPrimitiveElseNull(
  * used to make a determination if the value would otherwise be considered
  * invalid.
  *
- * This function is _usually_ not the one that is most appropriate to use from
- * this module. Most of the time there should be a properly-typed
- * `FabricValue`-ish value that can be passed to `tagOfFabricValue()` or
- * similar, or in the case of wrangling "wild west" values, there is
- * `tagOfConvertibleJsValueElseNull()`.
+ * This function is intentionally not `export`ed, as the two cases it covers are
+ * better handled by the `export`ed ones. The point of this function is to help
+ * keep this file DRY.
  */
-export function tagOfUnknownElseNull(
+function tagOfUnknownElseNull(
   value: unknown,
 ): FabricValueTag | null;
-export function tagOfUnknownElseNull<PlusType = never>(
+function tagOfUnknownElseNull<PlusType = never>(
   value: unknown,
   isPlusType: PlusTypePredicate<PlusType> | undefined,
 ): FabricValuePlusTag | null;
-export function tagOfUnknownElseNull<PlusType = never>(
+function tagOfUnknownElseNull<PlusType = never>(
   value: unknown,
   isPlusType?: PlusTypePredicate<PlusType> | undefined,
 ): FabricValuePlusTag | null {
