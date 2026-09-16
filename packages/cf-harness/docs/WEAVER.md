@@ -7,8 +7,11 @@ pattern in the index through the console's `POST /api/index/feedback` route,
 signed with the console's fabric identity. A task places a panel in the current
 loom that streams the session live, and when the turn ends the panel is replaced
 by the finished piece, rendered in the person's own loom space under their own
-identity. `more <text>` continues the last session; a task that names a pattern
-id from `/patterns` has the session use that pattern.
+identity. Every task starts its own session; a task that names a pattern id from
+`/patterns` has the session use that pattern. The pill carries no way to
+continue a session yet: the console accepts a `sessionId` on a task, and the
+reference has to come from the piece the person is looking at (CT-2344,
+CT-2349).
 
 The arrangement rests on one fact: **the console and loom share one fabric.**
 The console runs against loom's toolshed, signs with loom's identity key, and
@@ -277,7 +280,6 @@ Mac. Then, in Weaver's settings under Services:
 - `/cf-harness <task>` starts a fresh session and places the live panel in the
   current loom. A turn runs for minutes; the panel streams throughout, and the
   piece replaces it when the turn ends.
-- `more <text>` continues the last session.
 - `/feedback <patternId> up|down` records one vote on a pattern the index holds,
   signed with the console's fabric identity; the pill answers "recorded up for
   <patternId>" or the console's own refusal. An up vote is what promotes a
