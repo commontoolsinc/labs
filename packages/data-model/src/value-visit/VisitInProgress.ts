@@ -4,14 +4,14 @@ import { type Primitive } from "@commonfabric/utils/types";
 
 import { codecOf, NULL_LIVE_ENVIRONMENT } from "@/codec-common/index.ts";
 import { isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
-import {
-  type FabricArray,
-  type FabricContainerValue,
-  FabricInstance,
-  type FabricPlainObject,
+import type {
+  FabricArrayPlus,
+  FabricContainerValuePlus,
+  FabricInstancePlus,
+  FabricPlainObjectPlus,
   FabricPrimitive,
-  type FabricValue,
-  type FabricValuePlus,
+  FabricValue,
+  FabricValuePlus,
 } from "@/interface.ts";
 import {
   type FabricValueTag,
@@ -52,13 +52,13 @@ type VisitSubtypeOfForm<PlusType> = {
  * heavyweight operation -- the one extra allocation is small potatoes, and it
  * keeps the code a wee bit simpler.
  */
-type RecurseOfForm = {
+type RecurseOfForm<PlusType> = {
   readonly type: "recurseOf";
   readonly containerTag:
     | typeof VALUE_TAGS.Array
     | typeof VALUE_TAGS.FabricInstance
     | typeof VALUE_TAGS.Object;
-  readonly container: FabricContainerValue;
+  readonly container: FabricContainerValuePlus<PlusType>;
   readonly doKeys: boolean;
   readonly doValues: boolean;
 };
@@ -224,7 +224,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
   #visitResolvingSubtype(
     value: FabricValuePlus<PlusType>,
   ):
-    | RecurseOfForm
+    | RecurseOfForm<PlusType>
     | Exclude<
       LeafVisitorResult<PlusType, ResultType>,
       ReplaceForm<PlusType>
@@ -257,7 +257,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
 
       switch (tag) {
         case VALUE_TAGS.Array: {
-          const array = value as FabricArray;
+          const array = value as FabricArrayPlus<PlusType>;
           result = vis.visitFabricContainer(array);
           if (result?.type === "visitSubtype") {
             result = vis.visitFabricArray(array);
@@ -266,7 +266,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
         }
 
         case VALUE_TAGS.FabricInstance: {
-          const instance = value as FabricInstance;
+          const instance = value as FabricInstancePlus<PlusType>;
           result = vis.visitFabricContainer(instance);
           if (result?.type === "visitSubtype") {
             result = vis.visitFabricInstance(instance);
@@ -275,7 +275,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
         }
 
         case VALUE_TAGS.Object: {
-          const object = value as FabricPlainObject;
+          const object = value as FabricPlainObjectPlus<PlusType>;
           result = vis.visitFabricContainer(object);
           if (result?.type === "visitSubtype") {
             result = vis.visitFabricPlainObject(object);
@@ -332,7 +332,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
   #visitResolvingCyclesAndReplacement(
     value: FabricValuePlus<PlusType>,
   ):
-    | RecurseOfForm
+    | RecurseOfForm<PlusType>
     | VisitSubtypeOfForm<PlusType>
     | Exclude<
       DispatchingVisitorResult<PlusType, ResultType>,
@@ -372,9 +372,9 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
    * Recurses into a `FabricArray`, iterating over all its elements, in response
    * to a `recurse` result.
    */
-  #recurseFabricArray(result: RecurseOfForm): BaselineVisitResult<ResultType> {
+  #recurseFabricArray(result: RecurseOfForm<PlusType>): BaselineVisitResult<ResultType> {
     const { container, doValues } = result;
-    const array = container as FabricArray;
+    const array = container as FabricArrayPlus<PlusType>;
     const vis = this.#visitor;
 
     if (!doValues) {
@@ -450,10 +450,10 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
    * per its normal codec.
    */
   #recurseFabricInstance(
-    result: RecurseOfForm,
+    result: RecurseOfForm<PlusType>,
   ): BaselineVisitResult<ResultType> {
     const { container, doValues } = result;
-    const instance = container as FabricInstance;
+    const instance = container as FabricInstancePlus<PlusType>;
     const vis = this.#visitor;
 
     if (!doValues) {
@@ -491,10 +491,10 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
    * response to a `recurse` result.
    */
   #recurseFabricPlainObject(
-    result: RecurseOfForm,
+    result: RecurseOfForm<PlusType>,
   ): BaselineVisitResult<ResultType> {
     const { container, doKeys, doValues } = result;
-    const plainObj = container as FabricPlainObject;
+    const plainObj = container as FabricPlainObjectPlus<PlusType>;
     const vis = this.#visitor;
 
     if (!(doKeys || doValues)) {
@@ -550,7 +550,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
     result: RecurseForm,
     finalValue: FabricValuePlus<PlusType>,
     finalValueTagIfKnown?: FabricValueTag | null,
-  ): RecurseOfForm {
+  ): RecurseOfForm<PlusType> {
     const tag = (finalValueTagIfKnown === undefined)
       ? this.#tagOfValueElseNull(finalValue)
       : finalValueTagIfKnown;
@@ -562,7 +562,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
         return {
           type: "recurseOf",
           containerTag: tag,
-          container: finalValue as FabricContainerValue,
+          container: finalValue as FabricContainerValuePlus<PlusType>,
           doKeys: result.doKeys,
           doValues: result.doValues,
         };

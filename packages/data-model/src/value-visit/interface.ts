@@ -6,14 +6,14 @@ import { type Primitive } from "@commonfabric/utils/types";
 
 import { type PrimitiveValueTag } from "@/types";
 
-import {
-  type FabricArray,
-  type FabricContainerValue,
-  FabricInstance,
-  type FabricPlainObject,
+import type {
+  FabricArrayPlus,
+  FabricContainerValuePlus,
+  FabricInstancePlus,
+  FabricPlainObjectPlus,
   FabricPrimitive,
-  type FabricValue,
-  type FabricValuePlus,
+  FabricValue,
+  FabricValuePlus,
 } from "@/interface.ts";
 
 //
@@ -215,21 +215,21 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
    * Visits the given `FabricArray`.
    */
   visitFabricArray(
-    value: FabricArray,
+    value: FabricArrayPlus<PlusType>,
   ): LeafVisitorResult<PlusType, ResultType>;
 
   /**
    * Visits the given `FabricInstance`.
    */
   visitFabricInstance(
-    value: FabricInstance,
+    value: FabricInstancePlus<PlusType>,
   ): LeafVisitorResult<PlusType, ResultType>;
 
   /**
    * Visits the given `FabricPlainObject`.
    */
   visitFabricPlainObject(
-    value: FabricPlainObject,
+    value: FabricPlainObjectPlus<PlusType>,
   ): LeafVisitorResult<PlusType, ResultType>;
 
   /**
@@ -239,7 +239,7 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
    * `visitFabricPlainObject()`.
    */
   visitFabricContainer(
-    value: FabricContainerValue,
+    value: FabricContainerValuePlus<PlusType>,
   ): DispatchingVisitorResult<PlusType, ResultType>;
 
   /**
@@ -274,7 +274,7 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
    * and is called _after_ the element itself was directly visited.
    */
   visitedFabricArrayElement(
-    array: FabricArray,
+    array: FabricArrayPlus<PlusType>,
     index: number,
     value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType>;
@@ -292,7 +292,7 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
    * the visitor returning a `recurse` result for a visited array.
    */
   visitedFabricArrayGap(
-    array: FabricArray,
+    array: FabricArrayPlus<PlusType>,
     start: number,
     count: number,
   ): BaselineVisitResult<ResultType>;
@@ -304,8 +304,8 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
    * state was directly visited.
    */
   visitedFabricInstance(
-    instance: FabricInstance,
-    state: FabricValue,
+    instance: FabricInstancePlus<PlusType>,
+    state: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType>;
 
   /**
@@ -315,7 +315,7 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
    * value were directly visited.
    */
   visitedFabricPlainObjectEntry(
-    container: FabricPlainObject,
+    container: FabricPlainObjectPlus<PlusType>,
     key: FabricValuePlus<PlusType>,
     value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType>;
