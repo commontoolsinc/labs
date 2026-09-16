@@ -127,9 +127,9 @@ export const LedgerMonthTransactions = pattern<
 >(({ bank, month }) => {
   // The param is a value READ out of `month`, not `month` itself. A query
   // binds the reference it is handed and resolves it without the declared
-  // default, so a caller forwarding a month input of its own that nobody
-  // supplied — one that reads `undefined` — fails the whole read instead of
-  // getting the month the SQL above resolves the empty string to.
+  // default, so a month a caller forwarded and nobody supplied reaches the
+  // query as `undefined`, and an undefined param fails the whole read rather
+  // than resolving to the month the SQL above answers an empty string with.
   const monthParam = computed(() => month);
 
   const monthRead = bank.query<{ month: string }>(monthSql(), {

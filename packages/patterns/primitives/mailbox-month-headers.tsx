@@ -130,9 +130,10 @@ export const MailboxMonthHeaders = pattern<
 >(({ mail, month, limit }) => {
   // Each param is a value READ out of its input, not the input itself. A
   // query binds the reference it is handed and resolves it without the
-  // declared default, so a caller forwarding inputs of its own that nobody
-  // supplied — ones that read `undefined` — fails the whole read instead of
-  // getting what the SQL above resolves an empty month and an absent limit to.
+  // declared default, so an input a caller forwarded and nobody supplied
+  // reaches the query as `undefined`, and an undefined param fails the whole
+  // read rather than resolving to what the SQL above answers an empty month
+  // and an absent limit with.
   const monthParam = computed(() => month);
   const limitParam = computed(() => limit);
 
