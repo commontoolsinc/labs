@@ -32,7 +32,7 @@ export type * from "./api.ts";
 // A layer type is a `FabricValue`-like type whose claim stops at the root
 // container. As with the main definitions, these have both "pure" and
 // `PlusType` variants, and the former is defined in terms of the latter, while
-// the latter is treated as primary in terms of documentation.
+// also being primary in terms of documentation.
 //
 
 /**
