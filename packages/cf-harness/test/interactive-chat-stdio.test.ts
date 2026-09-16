@@ -1492,6 +1492,62 @@ Deno.test("interactive stdio refuses a session database another live process hol
   );
 });
 
+Deno.test("interactive stdio still rejects with `HarnessChatStoreHeldError` when its error output is locked", async () => {
+  const dir = await Deno.makeTempDir();
+  const dbPath = join(dir, "chat.sqlite");
+  const holder = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(dbPath),
+  });
+  const stdout = captureOutputLines();
+  const locked = new WritableStream<Uint8Array>();
+  const lock = locked.getWriter();
+  try {
+    await assertRejects(
+      () =>
+        runHarnessInteractiveChatStdio({
+          sessionDbPath: dbPath,
+          input: encodeInputLines([]),
+          output: stdout.output,
+          errorOutput: locked,
+        }),
+      HarnessChatStoreHeldError,
+    );
+    assertEquals(stdout.lines(), []);
+  } finally {
+    lock.releaseLock();
+    holder.close();
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("interactive stdio still rejects with `HarnessChatStoreHeldError` when its error output fails to write", async () => {
+  const dir = await Deno.makeTempDir();
+  const dbPath = join(dir, "chat.sqlite");
+  const holder = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(dbPath),
+  });
+  const stdout = captureOutputLines();
+  const failing = new WritableStream<Uint8Array>({
+    write: () => Promise.reject(new Error("the error sink went away")),
+  });
+  try {
+    await assertRejects(
+      () =>
+        runHarnessInteractiveChatStdio({
+          sessionDbPath: dbPath,
+          input: encodeInputLines([]),
+          output: stdout.output,
+          errorOutput: failing,
+        }),
+      HarnessChatStoreHeldError,
+    );
+    assertEquals(stdout.lines(), []);
+  } finally {
+    holder.close();
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("interactive stdio writes one refusal line to its error output for a held session database", async () => {
   const dir = await Deno.makeTempDir();
   const dbPath = join(dir, "chat.sqlite");

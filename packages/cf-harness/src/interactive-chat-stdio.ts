@@ -747,15 +747,21 @@ export const runHarnessInteractiveChatStdio = async (
   } catch (error) {
     if (error instanceof HarnessChatStoreHeldError) {
       // A host reading stderr can act on the refusal without parsing prose;
-      // the error itself still reaches the entry point's own handler.
-      const errorWriter = (options.errorOutput ?? Deno.stderr.writable)
-        .getWriter();
+      // the error itself still reaches the entry point's own handler. The
+      // line is best effort: a sink that is locked or fails to take it must
+      // not replace the refusal with a failure of its own.
       try {
-        await errorWriter.write(
-          encoder.encode(`${harnessChatStoreHeldRefusalLine(error)}\n`),
-        );
-      } finally {
-        errorWriter.releaseLock();
+        const errorWriter = (options.errorOutput ?? Deno.stderr.writable)
+          .getWriter();
+        try {
+          await errorWriter.write(
+            encoder.encode(`${harnessChatStoreHeldRefusalLine(error)}\n`),
+          );
+        } finally {
+          errorWriter.releaseLock();
+        }
+      } catch {
+        // The refusal below is what the caller acts on.
       }
     }
     throw error;
