@@ -40,38 +40,40 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-// FIXTURE: map-plain-array-callback-local-comparison
-// Verifies: a callback-local binding inside a directly rendered synchronous
-// plain-array .map() lowers like the same binding in the pattern body
-//   COLUMN_INDICES.map(fn)                  -> plain .map() remains plain
+// FIXTURE: map-plain-array-vnode-through-local
+// Verifies: a render-collecting plain-array .map() keeps its callback-local
+// lowering when the collected view nodes flow through a local
+//   const columns = COLUMN_INDICES.map(fn)  -> plain .map() remains plain
 //   const isToday = weekDates?.[colIdx] === todayDate
 //                                           -> lift-applied binding capturing
 //                                              weekDates, todayDate and colIdx
-//   isToday as a JSX ternary condition      -> ifElse over the lifted binding
-// Context: The fixed-column calendar shape — a plain index array mapped inside
-// JSX, with the per-column comparison named before it is used as a condition
+//   {columns} as the JSX child              -> the local carries view nodes,
+//                                              not cells, so the flow is
+//                                              ordinary data
+// Context: The calendar shape with the mapped columns named before rendering —
+// every lowered value is embedded in the returned view nodes, so the map
+// result needs no flow restriction
 export default pattern((__cf_pattern_input) => {
     const weekDates = __cf_pattern_input.key("weekDates");
     const todayDate = __cf_pattern_input.key("todayDate");
+    const columns = COLUMN_INDICES.map((colIdx) => {
+        const isToday = __cfLift_1({
+            weekDates: weekDates,
+            todayDate: todayDate,
+            colIdx: colIdx
+        }).for("isToday", true);
+        return <div>{__cfHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            "enum": ["Today", "Other"]
+        } as const satisfies __cfHelpers.JSONSchema, isToday, "Today", "Other")}</div>;
+    });
     return {
-        [UI]: (<div>
-        {COLUMN_INDICES.map((colIdx) => {
-                const isToday = __cfLift_1({
-                    weekDates: weekDates,
-                    todayDate: todayDate,
-                    colIdx: colIdx
-                }).for("isToday", true);
-                return <div>{__cfHelpers.ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    "enum": ["Today", "Other"]
-                } as const satisfies __cfHelpers.JSONSchema, isToday, "Today", "Other")}</div>;
-            })}
-      </div>)
+        [UI]: <div>{columns}</div>,
     };
 }, {
     type: "object",

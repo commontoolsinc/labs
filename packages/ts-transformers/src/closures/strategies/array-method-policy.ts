@@ -3,7 +3,6 @@ import ts from "typescript";
 import {
   classifyArrayMethodCall,
   detectCallKind,
-  getCallArgumentPosition,
   getEnclosingFunctionLikeDeclaration,
   getTypeAtLocationWithFallback,
   hasReactiveCollectionProvenance,
@@ -18,7 +17,7 @@ import {
 import { unwrapExpression } from "../../utils/expression.ts";
 import { isFallbackOperator } from "../../utils/reactive-keys.ts";
 import { classifyOpaquePathTerminalCall } from "../../transformers/opaque-roots.ts";
-import { classifyExpressionSiteHandling } from "../../transformers/expression-site-policy.ts";
+import { getSiteLiftedCollectionLocalSymbol } from "../../transformers/expression-site-policy.ts";
 
 /**
  * Detects a fallback-guarded reactive receiver: `(<reactive> ?? fallback)` or
@@ -92,86 +91,6 @@ function hasSharedReactiveCollectionProvenance(
         .syntheticReactiveCollectionRegistry,
     },
   );
-}
-
-/**
- * Whether the receiver is a pattern-scope variable whose initializer the
- * expression-site machinery lifts — `const view = rows.get().filter(...)`,
- * `const linksView = asArray(links.get()).filter((l) => l)`. The lift is
- * created by PatternOwnedExpressionSiteLowering, which runs AFTER the closure
- * stage (C-002), so at decision time the binding still reads as its authored
- * initializer and no registry entry can exist yet — the same decision-time
- * race CT-1778 records for helper-call results. The cure is the same: decide
- * from the shape that will exist, by asking the site machinery itself whether
- * the initializer classifies as a lowerable site. A binding whose initializer
- * is site-lifted holds a Reactive at runtime, so an array method over it must
- * take the WithPattern form or the runtime rejects it.
- */
-function getSiteLiftedCollectionLocalSymbol(
-  mapTarget: ts.Expression,
-  context: TransformationContext,
-): ts.Symbol | undefined {
-  const target = unwrapExpression(mapTarget);
-  if (!ts.isIdentifier(target)) {
-    return undefined;
-  }
-
-  const originalTarget = ts.getOriginalNode(target);
-  const symbol = context.checker.getSymbolAtLocation(target) ??
-    (
-      originalTarget !== target && ts.isIdentifier(originalTarget)
-        ? context.checker.getSymbolAtLocation(originalTarget)
-        : undefined
-    );
-  const declaration = symbol?.valueDeclaration;
-  if (
-    !declaration || !ts.isVariableDeclaration(declaration) ||
-    !declaration.initializer
-  ) {
-    return undefined;
-  }
-
-  const initializer = declaration.initializer;
-  if (context.getReactiveContext(initializer).kind !== "pattern") {
-    return undefined;
-  }
-
-  // Only bindings in the pattern-builder callback body itself are
-  // site-lifted. A local inside a JSX IIFE is owned by the IIFE
-  // decomposition, and a local inside any other callback by that callback's
-  // own lowering — treating either as already-reactive here would misroute
-  // it.
-  let enclosing: ts.Node | undefined = declaration.parent;
-  while (enclosing && !ts.isFunctionLike(enclosing)) {
-    enclosing = enclosing.parent;
-  }
-  if (
-    !enclosing ||
-    !(ts.isArrowFunction(enclosing) || ts.isFunctionExpression(enclosing))
-  ) {
-    return undefined;
-  }
-  const builderPosition = getCallArgumentPosition(enclosing);
-  if (!builderPosition) {
-    return undefined;
-  }
-  const builderKind = detectCallKind(builderPosition.call, context.checker);
-  if (
-    builderKind?.kind !== "builder" ||
-    (builderKind.builderName !== "pattern" &&
-      builderKind.builderName !== "render")
-  ) {
-    return undefined;
-  }
-
-  const analyze = context.getDataFlowAnalyzer();
-  const decision = classifyExpressionSiteHandling(
-    initializer,
-    "variable-initializer",
-    context,
-    analyze,
-  );
-  return decision.kind !== "skip" && decision.lowerable ? symbol : undefined;
 }
 
 /**

@@ -439,16 +439,6 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
     }
   });
 
-  // Color selection actions (for create modal)
-  const colorActions = COLORS.map((color) =>
-    action(() => newEventColor.set(color))
-  );
-
-  // Color selection actions (for edit modal)
-  const editColorActions = COLORS.map((color) =>
-    action(() => editEventColor.set(color))
-  );
-
   // Edit form helpers
   const onEditStartTimeChange = action((e: { detail: { value: string } }) => {
     const newStart = e?.detail?.value;
@@ -643,7 +633,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               <div>
                 <label style={STYLES.label}>Color</label>
                 <div style={{ display: "flex", gap: "6px" }}>
-                  {COLORS.map((c, idx) => (
+                  {COLORS.map((c) => (
                     <div
                       style={{
                         ...STYLES.colorSwatch,
@@ -652,7 +642,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                           ? "2px solid #111"
                           : "2px solid transparent",
                       }}
-                      onClick={colorActions[idx]}
+                      onClick={() => newEventColor.set(c)}
                     />
                   ))}
                 </div>
@@ -774,7 +764,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
               <div>
                 <label style={STYLES.label}>Color</label>
                 <div style={{ display: "flex", gap: "6px" }}>
-                  {COLORS.map((c, idx) => (
+                  {COLORS.map((c) => (
                     <div
                       style={{
                         ...STYLES.colorSwatch,
@@ -783,7 +773,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                           ? "2px solid #111"
                           : "2px solid transparent",
                       }}
-                      onClick={editColorActions[idx]}
+                      onClick={() => editEventColor.set(c)}
                     />
                   ))}
                 </div>
@@ -954,32 +944,6 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                     lastDropTime.set(Date.now());
                   });
 
-                  // Click handlers for creating events at specific hours
-                  const hourClickActions = HOURS.map((hour) =>
-                    action(() => {
-                      if (Date.now() - lastDropTime.get() < 300) {
-                        return;
-                      }
-                      newEventTitle.set("");
-                      newEventDate.set(columnDate);
-                      newEventStartTime.set(
-                        `${
-                          (hour.idx + DAY_START).toString().padStart(2, "0")
-                        }:00`,
-                      );
-                      newEventEndTime.set(
-                        addHoursToTime(
-                          `${
-                            (hour.idx + DAY_START).toString().padStart(2, "0")
-                          }:00`,
-                          1,
-                        ),
-                      );
-                      newEventColor.set(COLORS[0]);
-                      showNewEventPrompt.set(true);
-                    })
-                  );
-
                   return (
                     <div
                       style={{
@@ -1028,7 +992,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                         oncf-drop={handleDayDrop}
                         style={{ position: "relative", flex: "1" }}
                       >
-                        {HOURS.map((hour, hourIdx) => (
+                        {HOURS.map((hour) => (
                           <div
                             style={{
                               position: "absolute",
@@ -1039,7 +1003,25 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                               borderTop: "1px solid #e5e7eb",
                               cursor: "pointer",
                             }}
-                            onClick={hourClickActions[hourIdx]}
+                            onClick={() => {
+                              if (Date.now() - lastDropTime.get() < 300) {
+                                return;
+                              }
+                              const startTime = `${
+                                (hour.idx + DAY_START).toString().padStart(
+                                  2,
+                                  "0",
+                                )
+                              }:00`;
+                              newEventTitle.set("");
+                              newEventDate.set(columnDate);
+                              newEventStartTime.set(startTime);
+                              newEventEndTime.set(
+                                addHoursToTime(startTime, 1),
+                              );
+                              newEventColor.set(COLORS[0]);
+                              showNewEventPrompt.set(true);
+                            }}
                           />
                         ))}
                       </cf-drop-zone>

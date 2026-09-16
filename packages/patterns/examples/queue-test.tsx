@@ -27,7 +27,11 @@ export default pattern<QueueTestInput>(({ title }) => {
     "What is 5+5? Reply in one word.",
   ];
 
-  const responses = prompts.map((prompt) =>
+  // A reactive receiver, so the collection lowers to `mapWithPattern` and
+  // each prompt owns a persistent `generateText` node. A plain-array map here
+  // would collect the reactive results into a native array instead.
+  const queuedPrompts = computed(() => prompts);
+  const responses = queuedPrompts.map((prompt) =>
     generateText({
       prompt,
       model: "anthropic:claude-haiku-4-5",

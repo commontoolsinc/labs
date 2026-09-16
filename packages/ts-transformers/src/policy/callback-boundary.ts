@@ -6,7 +6,7 @@ import {
   detectCallKind,
   getPatternBuilderCallbackArgument,
   getPatternToolCallbackArgument,
-  isCollectingPlainArrayMethodCallback,
+  isRenderSafePlainArrayMapCallback,
 } from "../ast/call-kind.ts";
 import { isEventHandlerJsxAttribute } from "../ast/event-handlers.ts";
 import { outermostTransparentWrapper } from "../utils/expression.ts";
@@ -411,7 +411,7 @@ export function getCallbackBoundarySemantics(
         "reactive-array-method" ||
       (supportedKind === "plain-array-value" &&
         !!lookup &&
-        isCollectingPlainArrayMethodCallback(
+        isRenderSafePlainArrayMapCallback(
           callback,
           checker,
           (sourceFile) => lookup.isSourceFileDefaultLibrary(sourceFile),
