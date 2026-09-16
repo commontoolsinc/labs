@@ -412,7 +412,7 @@ describe("fabric special objects through the runner's walks", () => {
       expect(isFabricInstanceOrView([1])).toBe(false);
       expect(isFabricInstanceOrView(null)).toBe(false);
       // An own `constructor` is data sharing the name, not the class, and
-      // cannot answer for an instance.
+      // cannot answer for an instance; the answer never reads the name.
       expect(isFabricInstanceOrView({ constructor: FabricError })).toBe(false);
     });
 
@@ -537,8 +537,9 @@ describe("fabric special objects through the runner's walks", () => {
       // identity case above), so the merge took the instance for a record and
       // copied it, and the copy's descriptor query met the freeze shield the
       // view's stub target lacks: a proxy-invariant `TypeError` where a
-      // verdict was owed. The merge asks `isFabricInstanceOrView()` now and
-      // hands the view back as the leaf `traverseDAG` made it.
+      // verdict was owed. The merge asks `isFabricInstanceOrView()` now,
+      // which asks `instanceof` of the object the view stands for, and hands
+      // the view back as the leaf `traverseDAG` made it.
 
       const cell = runtime.getCell<{ err: unknown }>(
         space,
