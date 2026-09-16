@@ -1,4 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 import {
   assignPatternIntegrationShards,
   INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES,
@@ -179,6 +181,33 @@ Deno.test("pattern integration assignments separate expensive files", async () =
     expensiveFiles.length,
     "expensive files should run in distinct shards",
   );
+});
+
+describe("select-pattern-integration-files", () => {
+  it("puts no more files in the distinct-shard group than there are shards", async () => {
+    // `assignWeightedShards` gives a group distinct shards only while the
+    // group fits in them, and falls back to ordinary weighted placement for
+    // every member once it does not. The fallback is silent, and the other
+    // tests here stay green through it, since the five files they name would
+    // still land on five shards.
+
+    const files = await listPatternIntegrationTests();
+    const expensiveFiles = files.filter((name) =>
+      !INTERNALLY_SHARDED_FILE_NAMES.has(name) &&
+      (PATTERN_INTEGRATION_TEST_WEIGHTS[name] ?? 1) >=
+        PATTERN_INTEGRATION_DISTINCT_WEIGHT_MINIMUM
+    );
+
+    expect(
+      expensiveFiles.length,
+      `${expensiveFiles.length} files weigh at least ` +
+        `${PATTERN_INTEGRATION_DISTINCT_WEIGHT_MINIMUM}s and so ask for ` +
+        `distinct shards, more than the ${PATTERN_INTEGRATION_SHARD_COUNT} ` +
+        `shards there are: ${expensiveFiles.join(", ")}. A group this large ` +
+        `runs no distinct-shard constraint at all, so raise the minimum until ` +
+        `the group fits, or cut what the heaviest files cost.`,
+    ).toBeLessThanOrEqual(PATTERN_INTEGRATION_SHARD_COUNT);
+  });
 });
 
 Deno.test("pattern integration weights stay within the internal-work floor", async () => {

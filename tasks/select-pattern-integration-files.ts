@@ -33,11 +33,13 @@ export const PATTERN_INTEGRATION_INITIAL_SHARD_LOADS = [
 export const PATTERN_INTEGRATION_SHARD_COUNT =
   PATTERN_INTEGRATION_INITIAL_SHARD_LOADS.length;
 
-// Relative weights from the latest successful CI profile. Files absent from
-// the profile receive a unit weight.
+// Each weight is a measured wall time in seconds, and a file this table does
+// not name is weighted one second. The measurement differs between the blocks
+// below, so each says which one it is.
 export const PATTERN_INTEGRATION_TEST_WEIGHTS: Readonly<
   Record<string, number>
 > = {
+  // From the latest successful CI profile.
   "cf-code-editor.test.ts": 40.7,
   "convergence-storm.test.ts": 30.0,
   "lunch-poll-vote.test.ts": 42.5,
@@ -74,6 +76,15 @@ export const PATTERN_INTEGRATION_TEST_WEIGHTS: Readonly<
   "chat-note.test.ts": 0.3,
   "chatbot.test.ts": 0.4,
   "fetch-json.test.ts": 0.4,
+  // The Topics read-budget files, each the seconds this branch's CI run
+  // 35032776362 reports for the file in the JUnit timing its Pattern
+  // Integration Tests jobs upload. These are the default arm's, the slower of
+  // the two; the opposite server-execution arm ran the same files in 27.8,
+  // 18.5, 16.4 and 16.3 seconds.
+  "topics-read-budget-small-and-threads.test.ts": 84.5,
+  "topics-read-budget-mentions-16.test.ts": 49.3,
+  "topics-read-budget-single-bucket.test.ts": 40.9,
+  "topics-read-budget-high-degree.test.ts": 30.1,
 };
 // Files at or above this measured duration occupy distinct shards.
 export const PATTERN_INTEGRATION_DISTINCT_WEIGHT_MINIMUM = 31;

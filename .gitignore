@@ -68,3 +68,9 @@ docs/.doccheck*
 # removes each one in a `finally`, so these survive only when a run is
 # interrupted, at which point `git add -A` would otherwise commit one.
 tasks/.write-lcov-uncompiled.*.ts
+
+# What `scripts/topics-computation-cost.ts --derive-limits` prints, which the
+# re-derive command in docs/development/BENCHMARKS.md moves over the Topics
+# read-budget limits table once the derivation succeeds. A failed derivation
+# leaves this file behind holding the counts it did observe.
+topics-read-budget-limits.derived
