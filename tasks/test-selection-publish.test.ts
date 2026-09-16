@@ -410,6 +410,7 @@ function laneObject(
   planned = 40,
   spent = 92,
   units = 1,
+  fork = false,
 ): string {
   const context: RunContext = {
     schema: 1,
@@ -426,6 +427,7 @@ function laneObject(
       workflow: "deno.yml",
       job: "Lane 1",
       event: "push",
+      ...(fork ? { fork: true } : {}),
     },
     os: "linux",
     arch: "x86_64",
@@ -554,6 +556,51 @@ describe("publish()", () => {
     expect(manifest).toBeDefined();
     expect(manifest!.calibration.suites["workspace-unit"]!.correction)
       .toBeGreaterThan(0);
+  });
+
+  it("says so when no lane measurement reached the cost model", async () => {
+    // Every cause ends in the same empty map — no lane has run, none
+    // recorded what it measured, the fold declines the records of the
+    // ones that did, or the fold stopped reading a figure. A manifest
+    // carrying the empty map says none of that on its own.
+    const { store } = fakeStore(seed());
+    const said = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, suites, noBaselines)
+    );
+    expect(said).toContain("no lane measurement of the last 7 day(s)");
+    expect(said).toContain("overruns");
+  });
+
+  it("names the lane measurements it had to decline", async () => {
+    // The distinction an operator can act on: a lane that ran and whose
+    // measurement cannot be read, rather than a lane that has not run.
+    const objects = seed();
+    objects[CI(DAY, "3")] = laneObject(
+      "c3",
+      "2026-08-20T03:00:00.000Z",
+      40,
+      92,
+      1,
+      true,
+    );
+    const { store } = fakeStore(objects);
+    const said = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, suites, noBaselines)
+    );
+    expect(said).toContain("no lane measurement of the last 7 day(s)");
+    expect(said).toContain("4 lane measurement(s) this run read");
+    expect(said).toContain("fork's pull request");
+  });
+
+  it("says what the cost model holds when a lane has measured it", async () => {
+    const objects = seed();
+    objects[CI(DAY, "3")] = laneObject("c3", "2026-08-20T03:00:00.000Z");
+    const { store } = fakeStore(objects);
+    const said = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, suites, noBaselines)
+    );
+    expect(said).toContain("the cost model holds 1 suite(s) and 1 capability");
+    expect(said).not.toContain("overruns");
   });
 
   it("publishes an empty cost model when no lane has measured one", async () => {

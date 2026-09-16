@@ -300,6 +300,15 @@ export interface ReadReport {
 
   /** What the lanes in this object measured about themselves. */
   lanes: LaneObservation[];
+
+  /**
+   * Lane measurements in the groups nothing may read, which the cost
+   * model is therefore fitted without. A lane exercised only from a
+   * fork records what it measured like any other lane and contributes
+   * nothing, and counting what was declined is what tells that apart
+   * from no lane having run at all.
+   */
+  declined: number;
 }
 
 /**
@@ -316,12 +325,20 @@ export function readReport(
   const surfaces = new Map<string, Surface>();
   const durations = new Map<string, Map<string, number[]>>();
   const lanes: LaneObservation[] = [];
+  let declined = 0;
   for (const group of report.reports) {
     const where = provenance(group.context, report.objectName);
     if (
       where === undefined || group.context === undefined ||
       !Number.isFinite(Date.parse(group.context.startedAt))
     ) {
+      // The identity as the lane wrote it, rather than as the resolver
+      // would rewrite it: a group this cannot place has no day to
+      // resolve an alias against, and no alias renames a measurement a
+      // lane writes about itself.
+      for (const record of group.records) {
+        if (isLaneMeasurement(record.test)) declined++;
+      }
       continue;
     }
     const day = dayOf(group.context.startedAt);
@@ -373,7 +390,7 @@ export function readReport(
       byDay.set(day, [...(byDay.get(day) ?? []), record.durationMs]);
     }
   }
-  return { observations, surfaces, durations, lanes };
+  return { observations, surfaces, durations, lanes, declined };
 }
 
 /** The invocation unit and suite a record belongs to. */
@@ -709,6 +726,7 @@ export class Fold {
   readonly #resolver: AliasResolver;
   readonly #today: string;
   #observations = 0;
+  #declined = 0;
 
   constructor(
     aggregate: AggregateState,
@@ -761,6 +779,17 @@ export class Fold {
     return this.#observations;
   }
 
+  /**
+   * Lane measurements this fold read and had to decline, over the
+   * objects it folded. What the cost model is fitted from is what a
+   * lane measured about itself, so a figure here is a lane that ran and
+   * whose measurement cannot be used, which is a different thing from a
+   * lane that has not run.
+   */
+  get declined(): number {
+    return this.#declined;
+  }
+
   /** Whether this object's records are already part of the aggregate. */
   knows(objectName: string): boolean {
     return this.#foldedIndex.has(objectName);
@@ -799,10 +828,16 @@ export class Fold {
    * batches must be later than earlier ones, because the rules that decide
    * whether a failure is a catch look backwards at what `main` last said
    * and forwards at what it says next.
+   *
+   * An object the aggregate already holds contributes nothing, however
+   * often it is handed over. Its executions are in the counters and its
+   * durations in the day's samples, and both of those add rather than
+   * replace, so folding one a second time would count all of it twice.
    */
   add(reports: readonly StoredReport[]): void {
     const observations: Observation[] = [];
     for (const report of reports) {
+      if (this.#foldedIndex.has(report.objectName)) continue;
       const read = readReport(report, this.#resolver);
       // Appended one at a time rather than spread: a rollup shard holds a
       // whole day, and spreading that many arguments onto the stack is
@@ -811,6 +846,7 @@ export class Fold {
         observations.push(observation);
       }
       this.#remember(read);
+      this.#declined += read.declined;
       this.#folded.push(report.objectName);
       this.#foldedIndex.add(report.objectName);
     }
@@ -841,10 +877,14 @@ export class Fold {
    * Folds one logical batch from reports arriving in arbitrary order.
    * Each run is spooled to disk, then replayed in time order for every
    * evidence pass and the final classification pass.
+   *
+   * An object the aggregate already holds contributes nothing, the way
+   * `add` passes over one.
    */
   async addUnordered(reports: AsyncIterable<StoredReport>): Promise<void> {
     using observations = new ObservationSpool();
     for await (const report of reports) {
+      if (this.#foldedIndex.has(report.objectName)) continue;
       for (const group of report.reports) {
         const read = readReport({
           objectName: report.objectName,
@@ -854,6 +894,7 @@ export class Fold {
         }, this.#resolver);
         observations.add(read.observations);
         this.#remember(read);
+        this.#declined += read.declined;
       }
       this.#folded.push(report.objectName);
       this.#foldedIndex.add(report.objectName);
@@ -964,7 +1005,7 @@ export function foldReports(
   today: string,
 ): FoldResult {
   const fold = new Fold(aggregate, resolver, today);
-  fold.add(reports.filter((report) => !fold.knows(report.objectName)));
+  fold.add(reports);
   return fold.finish();
 }
 

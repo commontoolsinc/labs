@@ -4,6 +4,7 @@ import {
   AliasResolver,
   buildObjectBody,
   type RunContext,
+  type StoredReport,
   testIdentityKey,
   type TestRecord,
 } from "@commonfabric/test-support/records";
@@ -87,6 +88,11 @@ function record(fields: Partial<TestRecord> = {}): TestRecord {
     durationMs: 40,
     ...fields,
   };
+}
+
+/** Reports as the rollup path hands them over, one at a time. */
+async function* replaying(reports: readonly StoredReport[]) {
+  for (const report of reports) yield report;
 }
 
 /** One stored object, built the way the relay builds one. */
@@ -374,6 +380,38 @@ describe("build", () => {
       ]);
     });
 
+    it("counts a lane measurement it had to decline", () => {
+      // A lane exercised only from a fork records what it measured like
+      // any other lane. Counting what was declined is what tells a lane
+      // whose measurement cannot be used from a lane that has not run.
+      const forked = context();
+      forked.ci!.fork = true;
+      const read = readReport(
+        stored(CI_NAME, forked, [
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+            durationMs: 14_800,
+          }),
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+            durationMs: 92_000,
+          }),
+          record(),
+        ]),
+        NO_ALIASES,
+      );
+      expect(read.lanes).toEqual([]);
+      // The test beside them is not one, so this counts the lane's own
+      // measurements rather than everything the group held.
+      expect(read.declined).toBe(2);
+    });
+
+    it("counts nothing declined in a group it could read", () => {
+      expect(
+        readReport(stored(CI_NAME, context(), [record()]), NO_ALIASES).declined,
+      ).toBe(0);
+    });
+
     it("keeps no lane measurement from a group nothing may read", () => {
       const forked = context();
       forked.ci!.fork = true;
@@ -648,6 +686,49 @@ describe("build", () => {
       // The test beside it survives, so this drains the measurements
       // rather than the aggregate.
       expect(states.has(KEY)).toBe(true);
+    });
+
+    it("counts an object once however often it is handed over", () => {
+      // The counters add rather than replace, so a second fold of one
+      // object would count every execution in it twice.
+      const report = stored(CI_NAME, context(), [record()]);
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      fold.add([report]);
+      fold.add([report]);
+      const finished = fold.finish();
+      expect(finished.observations).toBe(1);
+      const state = finished.states.get(KEY)!;
+      expect(state.runsByDay["2026-08-20"]).toBe(1);
+      expect(state.costByDay["2026-08-20"]!.count).toBe(1);
+      expect(finished.aggregate.folded).toEqual([CI_NAME]);
+    });
+
+    it("counts a shard once however often it is handed over", async () => {
+      const report = stored(CI_NAME, context(), [record()]);
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      await fold.addUnordered(replaying([report, report]));
+      const finished = fold.finish();
+      expect(finished.observations).toBe(1);
+      expect(finished.states.get(KEY)!.runsByDay["2026-08-20"]).toBe(1);
+      expect(finished.aggregate.folded).toEqual([CI_NAME]);
+    });
+
+    it("counts nothing from an object a saved aggregate already held", () => {
+      const aggregate = emptyAggregate("2026-08-20");
+      aggregate.folded.push(CI_NAME);
+      const fold = new Fold(aggregate, NO_ALIASES, "2026-08-20");
+      fold.add([stored(CI_NAME, context(), [record()])]);
+      const finished = fold.finish();
+      expect(finished.observations).toBe(0);
+      expect(finished.aggregate.folded).toEqual([CI_NAME]);
     });
 
     it("does not fold an object it has already folded", () => {

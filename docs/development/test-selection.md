@@ -643,6 +643,70 @@ JUnit path on the job's ship step, the `--preload` naming
 joined onto. Where the records do have a file, the file is one no suite
 has a unit for, and the answer is in the topology rather than in the job.
 
+### When the cost model is empty
+
+A cost model with no suite in it charges every lane nothing beyond the
+tests it runs, and a lane packed against it overruns the bound it is
+killed at. A run says so rather than publishing the empty map in
+silence:
+
+```
+test selection: no lane measurement of the last 7 day(s) reached the
+cost model, so it charges every lane nothing beyond the tests it runs.
+A lane packed against this manifest overruns.
+```
+
+Four different things end there. One of them the run can tell you
+about, and a second line says so when it applies:
+
+```
+test selection: 15 lane measurement(s) this run read came from a run
+nothing may read, a fork's pull request among them, so the model was
+fitted without them.
+```
+
+**The fold declines the records of the lanes that did run.** A lane
+whose run was a fork's pull request records what it measured like any
+other, and the fold reads no record a fork authored — the same rule that
+keeps a fork's test outcomes out of every score. So a lane exercised
+only from a fork contributes nothing however long it runs and however
+far back the publisher reads. Getting a figure into the cost model means
+running the lane from a branch of this repository. That second line is
+what tells this apart from a lane that has not run, and it is the one
+case here anybody can act on.
+
+It is counted over the objects the run folded rather than over the
+window, so it is evidence when it appears and says nothing when it does
+not. A run that folds nothing new prints no such line whatever the store
+holds.
+
+The other three the line cannot separate. No lane has run: nothing to
+measure and nothing to do. A lane has run and recorded nothing, which
+looks like any other suite that recorded nothing. Or the fold has
+stopped reading a figure it used to read, or never started reading one
+the lane now writes — `readReport` is where a stored object becomes the
+kinds of thing the publisher takes out of it, and the lane measurements
+are one of them, so a change on either side of that pair is invisible
+except through the empty model itself.
+
+All four fill in as soon as a readable lane run lands: every
+object the publisher folds for the first time gives up its lane
+measurements, so one run puts a figure in the model and seven days of
+runs fill the window `COST_WINDOW_DAYS` names. Until then the model is
+not merely thin. Every figure in it is a maximum — the worst capability
+opening seen, and the largest gap between what a batch was charged and
+what it took — so a model fitted over part of a window reads lower than
+one fitted over all of it, and reading low is the direction that
+overruns a lane. A suite with nothing at all in the window is charged
+nothing.
+
+Nothing recovers a figure from before the publisher could read it. An
+object the aggregate has already folded is never folded again, because
+the counters it feeds add rather than replace, so a run that reads it
+twice counts every execution in it twice. What a bootstrap is for is the
+history that follows from the objects themselves; what no run can undo
+is a window that went by while nothing readable was being written.
+
 ## What the run on the default branch does with a flaky test
 
 A test whose flake share is above `FLAKE_EXCLUSION_RATE` is not selected
