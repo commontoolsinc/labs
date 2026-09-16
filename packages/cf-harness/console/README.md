@@ -134,7 +134,29 @@ Every environment variable has a flag, and the flag wins:
 | `--space-db`            | `CF_HARNESS_SPACE_DB`                | the space's own database, discovered  |
 | `--max-model-turns`     | `CF_HARNESS_CONSOLE_MAX_MODEL_TURNS` | the prompt loop's default             |
 | `--skills-root`         | `CF_HARNESS_CONSOLE_SKILLS_ROOT`     | the repository's `skills/` tree       |
+| `--allow-skill-scripts` | `CF_HARNESS_ALLOW_SKILL_SCRIPTS=1`   | off; scripts do not run               |
 | `--host-mount`          | —                                    | none; repeatable                      |
+
+### Skill scripts
+
+Whether a skill this console holds may have its scripts run in the sandbox is
+the operator's decision, and the console takes it at launch rather than per
+task, since it is about the server rather than about the work:
+
+```sh
+./scripts/start-local-dev.sh --cf-harness --allow-skill-scripts
+```
+
+Off unless named, and naming it once covers every skill the run holds — a
+registry skill and an acquired one alike, because what a script is trusted with
+is the sandbox it runs in, which does not vary with where the skill came from.
+The value is printed beside the record that decided it, with the rest of what
+the launch resolved, so what a console will run is on screen before it binds.
+
+The switch decides whether scripts run and nothing about which bytes. A registry
+script is still checked against the run-start registry snapshot, and an acquired
+one against the digest taken when it was acquired, so a file changed on the host
+after either still refuses.
 
 Publishing to the index is configured the way the CLI configures it, by the same
 names:

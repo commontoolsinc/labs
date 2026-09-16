@@ -16,7 +16,9 @@ import type {
   HarnessResearchInputBinding,
   HarnessResearchKit,
   HarnessResearchPatternRecord,
+  HarnessResearchPurpose,
   HarnessResearchRecommendationKind,
+  HarnessResearchResult,
   HarnessResearchRule,
   HarnessResearchSourceRead,
   HarnessResearchStatus,
@@ -43,6 +45,8 @@ export interface RawResearchResult {
   verification?: unknown;
   sourceIds?: unknown;
   missing?: unknown;
+  leads?: unknown;
+  questions?: unknown;
 }
 
 /** Host observations against which a proposed kit is admitted. */
@@ -50,15 +54,21 @@ export interface ResearchAdmissionEvidence {
   /** Exact reads completed in this research call. */
   sourceReads: readonly HarnessResearchSourceRead[];
 
+  /** Current general handles, including those not described by this call. */
+  handleTokens?: readonly string[];
+
   /** Pattern identities confirmed by indexed inspection. */
   confirmedPatterns: ReadonlyMap<string, HarnessResearchPatternRecord>;
 
   /** Successful descriptions of the available general handles. */
   describedHandles: ReadonlyMap<string, HarnessResearchHandleRecord>;
+
+  /** Uninspected metadata returned by the index search. */
+  searchedPatterns?: ReadonlyMap<string, HarnessResearchPatternRecord>;
 }
 
 /** JSON result requested from the private research model. */
-export const RESEARCH_RESULT_SCHEMA: JSONSchema = {
+export const RESEARCH_RESULT_SCHEMA = {
   type: "object",
   properties: {
     status: { type: "string", enum: ["complete", "incomplete"] },
@@ -137,6 +147,86 @@ export const RESEARCH_RESULT_SCHEMA: JSONSchema = {
     "missing",
   ],
   additionalProperties: false,
+} satisfies JSONSchema;
+
+/** Requests only the fields needed for the caller's chosen scope. */
+export const researchResultSchema = (
+  purpose: HarnessResearchPurpose | undefined,
+): JSONSchema => {
+  if (purpose === undefined) return RESEARCH_RESULT_SCHEMA;
+  const schema = RESEARCH_RESULT_SCHEMA;
+  const fields = [
+    "status",
+    "summary",
+    "inputs",
+    "rules",
+    "sourceIds",
+    "missing",
+  ] as const;
+  const properties: Record<string, JSONSchema> = Object.fromEntries(
+    fields.map((key) => [key, schema.properties[key]]),
+  );
+  properties.rules = {
+    ...RESEARCH_RULES_SCHEMA,
+    maxItems: 12,
+  };
+  properties.missing = {
+    type: "array",
+    maxItems: 4,
+    items: { type: "string", maxLength: 500 },
+  };
+  properties.selectedPatternIds = schema.properties.selectedPatternIds;
+  properties.summary = { type: "string", maxLength: 4_000 };
+  properties.example = {
+    oneOf: [{
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["run-pattern-input"] },
+        invocation: RUN_PATTERN_INPUT_SCHEMA,
+        sourceIds: schema.properties.example.properties.sourceIds,
+      },
+      required: ["kind", "invocation", "sourceIds"],
+      additionalProperties: false,
+    }, {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["pattern-source"] },
+        content: {
+          type: "string",
+          maxLength: MAX_RESEARCH_EXAMPLE_CHARS,
+        },
+        sourceIds: schema.properties.example.properties.sourceIds,
+      },
+      required: ["kind", "content", "sourceIds"],
+      additionalProperties: false,
+    }],
+  };
+  if (purpose === "orient") {
+    properties.leads = {
+      type: "array",
+      maxItems: 3,
+      items: {
+        type: "object",
+        properties: {
+          patternId: { type: "string" },
+          question: { type: "string", maxLength: 500 },
+        },
+        required: ["patternId", "question"],
+        additionalProperties: false,
+      },
+    };
+    properties.questions = {
+      type: "array",
+      maxItems: 3,
+      items: { type: "string", maxLength: 500 },
+    };
+  }
+  return {
+    type: "object",
+    properties,
+    required: Object.keys(properties).filter((key) => key !== "example"),
+    additionalProperties: false,
+  };
 };
 
 const citedSourceIds = (raw: RawResearchResult): string[] =>
@@ -280,7 +370,12 @@ const parseExample = async (
 ): Promise<HarnessResearchExample | undefined> => {
   const record = objectValue(value);
   const kind = record.kind;
-  const content = typeof record.content === "string" ? record.content : "";
+  const content =
+    kind === "run-pattern-input" && record.invocation !== undefined
+      ? JSON.stringify(record.invocation)
+      : typeof record.content === "string"
+      ? record.content
+      : "";
   if (
     (kind !== "run-pattern-input" && kind !== "pattern-source") ||
     content.length === 0
@@ -341,12 +436,12 @@ const parseExample = async (
   return { kind, content, sourceIds: admitted, syntax };
 };
 
-/** Returns an admitted kit with explicit blockers for unsupported claims. */
-export const admitResearchKit = async (
-  task: string,
+/** Closes the source catalog and admits only observed patterns and bindings. */
+const admitEvidence = (
   raw: RawResearchResult,
   state: ResearchAdmissionEvidence,
-): Promise<HarnessResearchKit> => {
+  selectPatterns = true,
+) => {
   const missing = stringList(raw.missing);
   const sourceMap = new Map(
     state.sourceReads.map((read) => [read.sourceId, read]),
@@ -360,7 +455,9 @@ export const admitResearchKit = async (
     }
     return [structuredClone(read)];
   });
-  const selectedIds = unique(stringList(raw.selectedPatternIds, 8, 500));
+  const selectedIds = selectPatterns
+    ? unique(stringList(raw.selectedPatternIds, 8, 500))
+    : [];
   const patterns = selectedIds.flatMap((id) => {
     const pattern = state.confirmedPatterns.get(id);
     if (pattern === undefined) {
@@ -369,6 +466,19 @@ export const admitResearchKit = async (
     }
     return [structuredClone(pattern)];
   });
+  const inputs = parseInputs(raw.inputs, state.describedHandles, missing);
+  const rules = parseRules(raw.rules, sourceMap, missing);
+  return { missing, sourceMap, sources, patterns, inputs, rules };
+};
+
+/** Returns an admitted kit with explicit blockers for unsupported claims. */
+export const admitResearchKit = async (
+  task: string,
+  raw: RawResearchResult,
+  state: ResearchAdmissionEvidence,
+): Promise<HarnessResearchKit> => {
+  const { missing, sourceMap, sources, patterns, inputs, rules } =
+    admitEvidence(raw, state);
   const recommendationRecord = objectValue(raw.recommendation);
   const kindValue = recommendationRecord.kind;
   const kind: HarnessResearchRecommendationKind =
@@ -376,8 +486,6 @@ export const admitResearchKit = async (
       kindValue === "author" || kindValue === "focused-api"
       ? kindValue
       : "author";
-  const inputs = parseInputs(raw.inputs, state.describedHandles, missing);
-  const rules = parseRules(raw.rules, sourceMap, missing);
   const example = await parseExample(raw.example, sourceMap, missing, patterns);
   if ((kind === "direct-run" || kind === "compose") && patterns.length === 0) {
     missing.push(`${kind} requires an inspected published pattern`);
@@ -429,5 +537,76 @@ export const admitResearchKit = async (
     verification: stringList(raw.verification),
     sources,
     missing: dedupedMissing,
+  };
+};
+
+/** Admits a scoped result through the same exact evidence and binding checks. */
+export const admitResearchResult = async (
+  task: string,
+  raw: RawResearchResult,
+  state: ResearchAdmissionEvidence,
+  purpose?: HarnessResearchPurpose,
+): Promise<HarnessResearchResult> => {
+  if (purpose !== undefined) {
+    validateStructuredResultValue({
+      schema: researchResultSchema(purpose),
+      value: raw,
+    });
+  }
+  if (purpose === undefined) return await admitResearchKit(task, raw, state);
+  const { missing, sourceMap, sources, inputs, rules, patterns } =
+    admitEvidence(raw, state);
+  const example = await parseExample(raw.example, sourceMap, missing, patterns);
+  if (patterns.some((pattern) => pattern.sourceIdentityVerified !== true)) {
+    missing.push(
+      "selected patterns require verified published source identities",
+    );
+  }
+  if (
+    purpose === "answer" && rules.length === 0 && inputs.length === 0 &&
+    example === undefined
+  ) {
+    missing.push(
+      "an answer requires a cited fact or a successfully described input",
+    );
+  }
+  const leads = purpose === "orient"
+    ? (Array.isArray(raw.leads) ? raw.leads : []).slice(0, 3).flatMap(
+      (entry) => {
+        const candidate = objectValue(entry);
+        const id = stringValue(candidate.patternId, 500);
+        const record = state.searchedPatterns?.get(id);
+        if (record === undefined) {
+          missing.push(
+            `candidate ${id} was not returned by index search or task attachments`,
+          );
+          return [];
+        }
+        return [{
+          pattern: structuredClone(record),
+          question: stringValue(candidate.question, 500),
+        }];
+      },
+    )
+    : [];
+  const findings = {
+    status: raw.status === "complete" && missing.length === 0
+      ? "complete" as const
+      : "incomplete" as const,
+    task,
+    summary: stringValue(raw.summary, 4_000),
+    ...(example === undefined ? {} : { example }),
+    inputs,
+    patterns,
+    rules,
+    sources,
+    missing: unique(missing),
+  };
+  return purpose === "answer" ? { ...findings, purpose } : {
+    ...findings,
+    purpose,
+    leads,
+    availableHandleTokens: [...(state.handleTokens ?? [])],
+    questions: stringList(raw.questions, 3, 500),
   };
 };

@@ -65,6 +65,12 @@ export interface HarnessDocsCorpusSection {
    */
   heading: string;
 
+  /** Document's first top-level heading, when retained by the corpus loader. */
+  documentTitle?: string;
+
+  /** Ancestor headings followed by this section's heading. */
+  headingPath?: readonly string[];
+
   text: string;
 
   /** The endorsement, which is what made this text eligible for an answer. */

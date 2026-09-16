@@ -433,6 +433,49 @@ describe("launch", () => {
       );
     });
 
+    it("does not run skill scripts unless a launch says so", () => {
+      const plan = resolveConsoleLaunchPlan(RECORDS, {});
+
+      expect(plan.environment.CF_HARNESS_ALLOW_SKILL_SCRIPTS).toBeUndefined();
+      expect(
+        consoleLaunchReport(plan).find((line) =>
+          line.includes("skill scripts")
+        ),
+      ).toContain("not run");
+    });
+
+    it("runs skill scripts when a launch names the switch", () => {
+      const plan = resolveConsoleLaunchPlan(RECORDS, {
+        allowSkillScripts: true,
+      });
+
+      expect(plan.environment.CF_HARNESS_ALLOW_SKILL_SCRIPTS).toBe("1");
+      const reported = consoleLaunchReport(plan).find((line) =>
+        line.includes("skill scripts")
+      );
+      expect(reported).toContain("run in the sandbox");
+      expect(reported).toContain("named on the command line");
+    });
+
+    it("runs skill scripts when the variable carries the switch", () => {
+      const plan = resolveConsoleLaunchPlan(RECORDS, {
+        inheritedAllowSkillScripts: true,
+      });
+
+      expect(plan.environment.CF_HARNESS_ALLOW_SKILL_SCRIPTS).toBe("1");
+      expect(
+        consoleLaunchReport(plan).find((line) =>
+          line.includes("skill scripts")
+        ),
+      ).toContain("inherited");
+    });
+
+    it("names the skill-script variable among the ones the launcher owns", () => {
+      expect(LAUNCHER_OWNED_VARIABLES).toContain(
+        "CF_HARNESS_ALLOW_SKILL_SCRIPTS",
+      );
+    });
+
     it("throws when an index is both named and waived", () => {
       expect(() =>
         resolveConsoleLaunchPlan(RECORDS, { ...OPTIONS, noPatternIndex: true })
@@ -906,6 +949,55 @@ describe("launch", () => {
       expect(plan.environment.CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE).toBe(
         "observe",
       );
+    });
+
+    it("reads the switch from the flag and from the variable", async () => {
+      const named = await prepareConsoleLaunch(
+        [...NAMED_ARGS, "--allow-skill-scripts"],
+        {},
+        io(),
+      );
+      expect(named.plan.environment.CF_HARNESS_ALLOW_SKILL_SCRIPTS).toBe("1");
+
+      const inherited = await prepareConsoleLaunch(
+        NAMED_ARGS,
+        { CF_HARNESS_ALLOW_SKILL_SCRIPTS: "1" },
+        io(),
+      );
+      expect(inherited.plan.environment.CF_HARNESS_ALLOW_SKILL_SCRIPTS).toBe(
+        "1",
+      );
+
+      const neither = await prepareConsoleLaunch(NAMED_ARGS, {}, io());
+      expect(neither.plan.environment.CF_HARNESS_ALLOW_SKILL_SCRIPTS)
+        .toBeUndefined();
+    });
+
+    it("refuses the skill-script switch passed through to the console", async () => {
+      // Every spelling that would enable it on the server: a boolean flag
+      // still parses `=true` and `=1`, so the bare token is not the whole of
+      // what has to be caught.
+      for (
+        const argument of [
+          "--allow-skill-scripts",
+          "--allow-skill-scripts=true",
+          "--allow-skill-scripts=1",
+        ]
+      ) {
+        await expect(
+          prepareConsoleLaunch([...NAMED_ARGS, "--", argument], {}, io()),
+        ).rejects.toThrow("cannot be passed through");
+      }
+    });
+
+    it("passes other console flags through unchanged", async () => {
+      const { consoleArgs } = await prepareConsoleLaunch(
+        [...NAMED_ARGS, "--", "--host-mount", "name=c"],
+        {},
+        io(),
+      );
+
+      expect(consoleArgs).toEqual(["--host-mount", "name=c"]);
     });
 
     it("leaves the registries out when both are waived", async () => {

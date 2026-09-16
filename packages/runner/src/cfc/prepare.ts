@@ -559,27 +559,24 @@ const effectiveReadLabel = (
      */
     excludeEntry?: (entry: LabelMapEntry) => boolean;
   },
+  index?: ConsumedLabelIndex,
 ): IFCLabel | undefined => {
-  const view = (read.consumes === "all" && read.excludeEntry === undefined) ||
-      metadata === undefined
-    ? metadata
-    : {
-      ...metadata,
-      labelMap: {
-        ...metadata.labelMap,
-        entries: metadata.labelMap.entries.filter((entry) =>
-          (read.consumes === "all" ||
-            readConsumesEntry(read.consumes, entry)) &&
-          read.excludeEntry?.(entry) !== true
-        ),
-      },
-    };
-  const base = labelAtPath(view, path);
-  if (read.nonRecursive === true || view === undefined) {
-    return base;
-  }
+  if (metadata === undefined) return undefined;
+  const candidates = index === undefined
+    ? metadata.labelMap.entries
+    : index.overlapping(path, read.nonRecursive !== true).map(({ entry }) =>
+      entry
+    );
+  const entries = read.consumes === "all" && read.excludeEntry === undefined
+    ? candidates
+    : candidates.filter((entry) =>
+      readConsumesEntry(read.consumes, entry) &&
+      read.excludeEntry?.(entry) !== true
+    );
+  const base = labelForEntriesAtPath(entries, path);
+  if (read.nonRecursive === true) return base;
   const parts: (IFCLabel | undefined)[] = [base];
-  for (const entry of view.labelMap.entries) {
+  for (const entry of entries) {
     if (entry.path.length <= path.length) continue;
     if (!isPrefix(path, entry.path)) continue;
     parts.push(entry.label);
@@ -2492,15 +2489,34 @@ const deriveFlowJoinImpl = (
   const labeledSpaces = options?.collectLabeledSpaces === true
     ? new Set<MemorySpace>()
     : undefined;
-  const metadataByDoc = new Map<string, CfcMetadata | undefined>();
+  // Each pass owns its snapshots: prepare can run again after metadata writes.
+  const metadataByDoc = new Map<string, {
+    metadata: CfcMetadata | undefined;
+    indexes: Map<ReadObservationShape, ConsumedLabelIndex>;
+  }>();
   // §8.12.8 readback exclusion: see `ownRestampContainerPaths`.
   const ownRestamps = ownRestampContainerPaths(tx);
   forEachFlowObservation(
     tx,
     (space, id, scope, type, logicalPath, observation) => {
       const key = targetKey({ space, id, scope });
-      if (!metadataByDoc.has(key)) {
-        metadataByDoc.set(key, storedMetadataFor(tx, space, id, scope, type));
+      let document = metadataByDoc.get(key);
+      if (document === undefined) {
+        document = {
+          metadata: storedMetadataFor(tx, space, id, scope, type),
+          indexes: new Map(),
+        };
+        metadataByDoc.set(key, document);
+      }
+      let index = document.indexes.get(observation.shape);
+      if (index === undefined && document.metadata !== undefined) {
+        index = new ConsumedLabelIndex(
+          document.metadata.labelMap.entries.filter((entry) =>
+            readConsumesEntry(observation.shape, entry)
+          ),
+          { canonicalPaths: true },
+        );
+        document.indexes.set(observation.shape, index);
       }
       const ownedContainers = ownRestamps.get(key);
       // `*`-template consumption keeps the C0 §6.1 row-3/row-4 boundary the
@@ -2528,7 +2544,7 @@ const deriveFlowJoinImpl = (
         observation.machinery ||
         ownedContainers !== undefined;
       const label = effectiveReadLabel(
-        metadataByDoc.get(key),
+        document.metadata,
         logicalPath,
         {
           nonRecursive: observation.nonRecursive,
@@ -2546,6 +2562,7 @@ const deriveFlowJoinImpl = (
             }
             : {}),
         },
+        index,
       );
       // Any observation with label CONTENT marks its space as a label
       // contributor. Deliberately over-approximate for integrity (an
@@ -5563,6 +5580,7 @@ const collectConsumedLabelImpl = (
    */
   sources: readonly ConsumedAtomSource[];
 } => {
+  tx.noteCfcConsumedLabelWalk?.();
   const atoms: unknown[] = [];
   const modulePolicySpaces = new Map<string, Set<MemorySpace>>();
   const sources: ConsumedAtomSource[] = [];
@@ -6337,9 +6355,10 @@ export const prepareBoundaryCommit = (
   // Read provenance for a refusal's remedy channel, computed only if a gate
   // below actually refuses. `collectConsumedLabel` walks every read against
   // every label-map entry of the document it resolved to, which is work no
-  // committing transaction should do just in case; a misfit is rare and pays
-  // for it then. The set is transaction-global — wider than the per-write
-  // prefix the writer-fit decision itself runs on — so a named input is a
+  // committing transaction should do just in case. Strict writer-fit refusals
+  // pay for it; persist-and-flag diagnostics need only the atoms. The set is
+  // transaction-global — wider than the per-write prefix the writer-fit
+  // decision itself runs on — so a named input is a
   // read that genuinely carried the atom, while `attribution` stays the
   // honest statement of whether the named ones account for all of them.
   let memoizedRefusalSources: readonly ConsumedAtomSource[] | undefined;
@@ -7205,12 +7224,20 @@ export const prepareBoundaryCommit = (
           label: entry.label,
         })),
       ];
+      let authoritativeIndex: ConsumedLabelIndex | undefined;
       const authoritativeCoverFor = (
         entryPath: readonly string[],
       ): IFCLabel | undefined => {
+        authoritativeIndex ??= new ConsumedLabelIndex(authoritativeEntries, {
+          canonicalPaths: true,
+        });
         let best: { path: readonly string[]; label: IFCLabel } | undefined;
-        for (const auth of authoritativeEntries) {
-          if (!isPrefix(auth.path, entryPath)) continue;
+        for (
+          const { entry: auth } of authoritativeIndex.overlapping(
+            entryPath,
+            false,
+          )
+        ) {
           if (best === undefined || auth.path.length > best.path.length) {
             best = auth;
           } else if (auth.path.length === best.path.length) {
@@ -7632,19 +7659,19 @@ export const prepareBoundaryCommit = (
                 path.join("/")
               } (canWrite, §8.12.4): ` +
               offendingAtoms.join(", ");
-            tx.recordCfcRefusalDetail?.({
-              gate: "writer-fit",
-              target: {
-                space: target.space,
-                id,
-                scope: target.scope,
-                path: [...path],
-              } as CfcAddress,
-              offendingAtoms,
-              ...describeRefusalInputs(offending, refusalSources()),
-              reason: misfit,
-            });
             if (writerFitRejects) {
+              tx.recordCfcRefusalDetail?.({
+                gate: "writer-fit",
+                target: {
+                  space: target.space,
+                  id,
+                  scope: target.scope,
+                  path: [...path],
+                } as CfcAddress,
+                offendingAtoms,
+                ...describeRefusalInputs(offending, refusalSources()),
+                reason: misfit,
+              });
               reasons.push(verdictReason(misfit));
             } else {
               tx.noteCfcDiagnostic(`writer-fit(persist-and-flag): ${misfit}`);

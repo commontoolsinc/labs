@@ -831,6 +831,13 @@ export interface CfcRuntimeStats {
   dereferenceTracesRecorded: number;
 
   dereferenceTracesMax: number;
+
+  /** Structured refusal details recorded across transaction prepares. */
+  refusalDetailsRecorded: number;
+
+  /** Full consumed-label collections, including sink and host release checks. */
+  consumedLabelWalks: number;
+
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
   cfcDigestInvalidations: number;
@@ -876,6 +883,8 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   flowLabelProbeMemoHits: 0,
   dereferenceTracesRecorded: 0,
   dereferenceTracesMax: 0,
+  refusalDetailsRecorded: 0,
+  consumedLabelWalks: 0,
   cfcPreparedTx: 0,
   cfcPrepareRejects: 0,
   cfcDigestInvalidations: 0,
@@ -2308,6 +2317,12 @@ export class Runtime {
       },
       onPreparedTx: () => {
         this.#cfcStats.cfcPreparedTx += 1;
+      },
+      onRefusalDetail: () => {
+        this.#cfcStats.refusalDetailsRecorded += 1;
+      },
+      onConsumedLabelWalk: () => {
+        this.#cfcStats.consumedLabelWalks += 1;
       },
       onPrepareReject: (refusal) => {
         this.#cfcStats.cfcPrepareRejects += 1;

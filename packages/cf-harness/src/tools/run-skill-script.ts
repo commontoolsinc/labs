@@ -102,7 +102,7 @@ export const runSkillScriptToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_skill_script",
   title: "Run Skill Script",
   description:
-    "Run an exact allowlisted script bundled under scripts/ in a cf-harness skill the run holds. Name a configured skill by its registry name, or a skill this run acquired by its pin, owner/repo/slug@<commit sha>. Either way the skill must be activated for this run and the script must still match the digest it was pinned at: the run-start registry snapshot for a configured skill, the bytes the pinned commit served for an acquired one.",
+    "Run a script bundled under scripts/ in a cf-harness skill the run holds, where the operator allows it: either this run runs skill scripts at all, in which case any indexed script of a held skill may run, or that exact script is named. A host-target profile always needs the exact name. Name a configured skill by its registry name, or a skill this run acquired by its pin, owner/repo/slug@<commit sha>. Either way the skill must be activated for this run and the script must still match the digest it was pinned at: the run-start registry snapshot for a configured skill, the bytes the pinned commit served for an acquired one.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
@@ -776,7 +776,14 @@ const resolveRegistrySkillScript = (
       },
     };
   }
+  // The switch is about running scripts in the SANDBOX, so it does not reach
+  // a profile whose target is the host: host execution stays exactly-named,
+  // which is what the `browser` profile's two entries are. Widening it here
+  // would let any activated script run outside the sandbox on the strength of
+  // a decision that never mentioned the host.
   if (
+    !(context.allowSkillScripts === true &&
+      context.skillScriptExecutionTarget !== "host") &&
     !isSkillScriptAllowlisted(context.allowedSkillScripts, {
       skill: skillName,
       path,
@@ -786,8 +793,11 @@ const resolveRegistrySkillScript = (
       ok: false,
       error: {
         code: "script_not_allowlisted",
-        message:
-          `skill script is not exactly allowlisted: ${skill.name}:${path}`,
+        message: context.skillScriptExecutionTarget === "host"
+          ? `this run runs no host skill script that is not named exactly: ` +
+            `${skill.name}:${path}`
+          : `this run does not run skill scripts: ${skill.name}:${path}. ` +
+            `Skill scripts run in the sandbox when the operator allows them`,
       },
     };
   }
@@ -898,6 +908,7 @@ const resolveAcquiredSkillScript = (
     };
   }
   if (
+    context.allowSkillScripts !== true &&
     !isSkillScriptAllowlisted(context.allowedSkillScripts, {
       skill: skillName,
       path,
@@ -907,8 +918,8 @@ const resolveAcquiredSkillScript = (
       ok: false,
       error: {
         code: "script_not_allowlisted",
-        message:
-          `skill script is not exactly allowlisted: ${skillName}:${path}`,
+        message: `this run does not run skill scripts: ${skillName}:${path}. ` +
+          `Skill scripts run in the sandbox when the operator allows them`,
       },
       acquisition: activation.acquisition,
     };

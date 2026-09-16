@@ -321,3 +321,36 @@ describe("session-assembly", () => {
     });
   });
 });
+
+Deno.test("harnessSessionChatPolicy offers run_skill_script for an exact entry", () => {
+  // An entry is as much the operator allowing a script as the switch is, so
+  // it offers the tool too; which script may run is decided at the call.
+  const base = {
+    workspace: "/workspace",
+    artifactRoot: "/artifacts",
+    maxModelTurns: 8,
+    skillsRoot: "/workspace/skills",
+    skillNames: [],
+    allowedSkillScripts: [],
+    skillScriptExecutionTarget: "sandbox",
+    handleValueOrigins: [],
+    inputCells: [],
+    connectorGrants: [],
+    patternRefs: [],
+    allowedSubagentProfiles: [],
+  } as unknown as HarnessSessionConfig;
+
+  expect(harnessSessionChatPolicy(base).allowedToolIds).not.toContain(
+    "run_skill_script",
+  );
+  expect(
+    harnessSessionChatPolicy({
+      ...base,
+      allowedSkillScripts: [{ skill: "cf-tidy", path: "scripts/tidy.sh" }],
+    }).allowedToolIds,
+  ).toContain("run_skill_script");
+  expect(
+    harnessSessionChatPolicy({ ...base, allowSkillScripts: true })
+      .allowedToolIds,
+  ).toContain("run_skill_script");
+});

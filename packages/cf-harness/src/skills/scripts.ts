@@ -1,11 +1,8 @@
 import { normalize as normalizeResourcePath } from "@std/path/posix";
 import type { HarnessAllowedSkillScript } from "../contracts/skill.ts";
-import { parseSkillsShSkillId } from "../skills-sh/pin.ts";
+import { parseSkillsShSkillId, splitSkillsShPin } from "../skills-sh/pin.ts";
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-
-/** A full lowercase Git commit SHA, which is the whole of an acquired pin. */
-const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
 
 /**
  * Whether `skill` names an acquired skill rather than a registry one: a
@@ -19,17 +16,14 @@ const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
 export const parseAcquiredSkillPin = (
   skill: string,
 ): { readonly id: string; readonly commitSha: string } | undefined => {
-  const at = skill.lastIndexOf("@");
-  if (at <= 0) return undefined;
-  const id = skill.slice(0, at);
-  const commitSha = skill.slice(at + 1);
-  if (!COMMIT_SHA_PATTERN.test(commitSha)) return undefined;
+  const split = splitSkillsShPin(skill);
+  if (split === undefined) return undefined;
   try {
-    parseSkillsShSkillId(id);
+    parseSkillsShSkillId(split.id);
   } catch {
     return undefined;
   }
-  return { id, commitSha };
+  return split;
 };
 
 /**

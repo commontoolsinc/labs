@@ -17,8 +17,17 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { BaseFabricSpecialObject } from "@/fabric-bases/BaseFabricSpecialObject.ts";
-import type { FabricSpecialObject } from "@/interface.ts";
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
+import type {
+  FabricInstance,
+  FabricInstancePlus,
+  FabricSpecialObject,
+  FabricValue,
+  FabricValuePlus,
+} from "@/interface.ts";
+import {
+  JSON_CODEC,
+  type LiveEnvironment,
+} from "@/codec-interface/interface.ts";
 import {
   CODEC,
   codecOf,
@@ -36,6 +45,36 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
  */
 function outOfContract(value: BaseFabricSpecialObject): FabricSpecialObject {
   return value as unknown as FabricSpecialObject;
+}
+
+// The carrier below is checked when the file is type-checked, not when it
+// runs: each assignment in it pins what `codecOf()` infers from its argument,
+// and the `@ts-expect-error` marks the one it must refuse.
+
+declare const env: LiveEnvironment;
+declare const instance: FabricInstance;
+declare const instancePlusError: FabricInstancePlus<Error>;
+
+/** Carrier for the checks on what `codecOf()` infers for its result. */
+function codecOfTypeChecks() {
+  // A `FabricInstance` yields a codec at `never`, so its decoded values are
+  // `FabricValue`s. That pins the inference rather than the assignment: at
+  // `unknown`, which is where a failed inference lands, `decode()` would
+  // return `unknown`.
+  const atNever: NonterminalCodec<never> = codecOf(instance);
+  const decoded: FabricValue = codecOf(instance).decode("X@1", null, env);
+
+  // A `FabricInstancePlus<Error>` yields a codec at `Error`, which takes the
+  // instance and exposes its state at that same `PlusType`.
+  const atError: NonterminalCodec<Error> = codecOf(instancePlusError);
+  const state: FabricValuePlus<Error> = codecOf(instancePlusError).encode(
+    instancePlusError,
+    env,
+  );
+  // @ts-expect-error a codec at `Error` is not one at `never`
+  const notNever: NonterminalCodec = codecOf(instancePlusError);
+
+  return { atNever, decoded, atError, state, notNever };
 }
 
 describe("codecOf()", () => {
@@ -89,6 +128,14 @@ describe("codecOf()", () => {
       class NoCodec extends BaseFabricSpecialObject {}
       expect(() => codecOf(outOfContract(new NoCodec()), JSON_CODEC))
         .toThrow("no `[CODEC]`");
+    });
+  });
+
+  describe("result type", () => {
+    it("is at the `PlusType` of the value, `never` for a `FabricInstance`", () => {
+      // The type checker decides the claim; at run time only the carrier is
+      // observable.
+      expect(typeof codecOfTypeChecks).toBe("function");
     });
   });
 });

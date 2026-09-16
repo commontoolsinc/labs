@@ -366,6 +366,83 @@ describe("console/server", () => {
       expect(policy.allowedToolIds).toContain("acquire_skill");
     });
 
+    it("runs skill scripts when the console was launched with the switch", async () => {
+      const named = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--allow-skill-scripts",
+        ],
+        {},
+        "/console",
+      );
+      expect(named.allowSkillScripts).toBe(true);
+
+      const inherited = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+        ],
+        { CF_HARNESS_ALLOW_SKILL_SCRIPTS: "1" },
+        "/console",
+      );
+      expect(inherited.allowSkillScripts).toBe(true);
+    });
+
+    it("runs no skill script when the console was launched without it", async () => {
+      expect((await config()).allowSkillScripts).toBe(false);
+    });
+
+    it("offers `run_skill_script` when a registry backs it and the switch is on", async () => {
+      // Backing alone never offers this tool — it appears only in the withheld
+      // set — so without this the switch would reach an acquired child through
+      // its own surface and never reach the run holding the registry, and the
+      // registry half of one decision would be undeliverable.
+      const withSwitch = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--skills-root",
+          "/workspace/skills",
+          "--allow-skill-scripts",
+        ],
+        {},
+        "/console",
+      );
+      const withNeither = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--skills-root",
+          "/workspace/skills",
+        ],
+        {},
+        "/console",
+      );
+
+      expect(harnessSessionChatPolicy(withSwitch).allowedToolIds).toContain(
+        "run_skill_script",
+      );
+      expect(harnessSessionChatPolicy(withNeither).allowedToolIds).not
+        .toContain("run_skill_script");
+    });
+
     it("withholds the skill tools from a session with no registry", async () => {
       const policy = harnessSessionChatPolicy(await config());
       expect(policy.allowedToolIds).not.toContain("search_skills");

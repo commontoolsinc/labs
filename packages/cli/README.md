@@ -100,10 +100,11 @@ export default pattern(() => {
 });
 ```
 
-SQLite query results carry the declared column labels under either posture. The
-flow dial controls their downstream derivation and persistence. Query result
-assertions settle asynchronous SQLite work; put one before a render step when
-measuring the mapped view separately from querying and row materialization.
+With enforcement at `enforce-explicit`, SQLite query results carry the declared
+column labels with flow labels `off` or `persist`. The flow dial controls their
+downstream derivation and persistence. Query result assertions settle
+asynchronous SQLite work; put one before a render step when measuring the mapped
+view separately from querying and row materialization.
 
 The verbose timing table always includes `prepareCfc`, `deriveFlowJoin`,
 `collectConsumedLabel`, and `preparedDigestFor`, even below the top-ten cutoff.

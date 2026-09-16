@@ -19,11 +19,7 @@ import type {
   FabricValue,
   FabricValuePlus,
 } from "./api.ts";
-import {
-  FABRIC_INSTANCE_BRAND,
-  FABRIC_INSTANCE_PLUS_BRAND,
-  FABRIC_PRIMITIVE_BRAND,
-} from "./api.ts";
+import { FABRIC_INSTANCE_PLUS_BRAND, FABRIC_PRIMITIVE_BRAND } from "./api.ts";
 import { BaseFabricSpecialObject } from "./fabric-bases/BaseFabricSpecialObject.ts";
 
 // We re-`export` all the _types_ from `./api.ts`, so that they're consistently
@@ -120,21 +116,13 @@ export type MutableFabricValueLayer =
 export abstract class FabricInstance extends BaseFabricSpecialObject {
   /**
    * The nominal brand that tells a `FabricInstance` from any other object with
-   * the two clone methods, in the type system; the runtime root carries no
-   * brand, so this member is what makes the class nominal. `declare` emits no
-   * runtime member, and nothing ever reads the key. `api.ts` declares the
-   * identical member, and `api-agreement.ts` stops compiling if the two stop
-   * agreeing.
+   * the two clone methods, in the type system, at `never` since an instance of
+   * this class holds only `FabricValue`s; the runtime root carries no brand,
+   * so this member is what makes the class nominal. `declare` emits no runtime
+   * member, and nothing ever reads the key. `api.ts` declares the identical
+   * member, and `api-agreement.ts` stops compiling if the two stop agreeing.
    */
-  declare readonly [FABRIC_INSTANCE_BRAND]: true;
-
-  /**
-   * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`, at
-   * `never` here since an instance of this class holds only `FabricValue`s.
-   * Declared the way the brand above is, and for the same reasons; `api.ts`
-   * declares the identical member.
-   */
-  declare readonly [FABRIC_INSTANCE_PLUS_BRAND]?: never;
+  declare readonly [FABRIC_INSTANCE_PLUS_BRAND]: never;
 
   /**
    * Returns a new deep clone of this instance with equivalent data but no

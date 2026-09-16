@@ -42,6 +42,7 @@ import {
   storePrefix,
 } from "./test-records-config.ts";
 import { rollupShards } from "./test-records-compact.ts";
+import { calibrate, laneObservations } from "./test-selection/calibrate.ts";
 import {
   type AggregateState,
   buildManifest,
@@ -55,7 +56,6 @@ import {
   surfaceName,
   type Unplaced,
 } from "./test-selection/build.ts";
-import { isLaneMeasurement } from "./lane-measurement.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 import { publishableBaselines } from "./test-selection/baselines.ts";
 import type { Suite } from "./test-topology/suite.ts";
@@ -597,24 +597,6 @@ export async function publish(
   // built without it names surfaces nothing in the tree answers to.
   const suites = await topology();
   const { placed, unplaced } = locateSurfaces(suites, folded.surfaces);
-  // What nothing has worked out a unit for, kept from one publish to the
-  // next. A surface records on its own schedule, and a run reads surfaces
-  // only from the objects it folds for the first time, so a surface
-  // recording less often than this runs is absent from most runs. An
-  // entry is removed when the topology has a unit for its identity, and
-  // one an earlier run wrote is removed as soon as it names something the
-  // count no longer holds.
-  const stillUnplaced = (key: string): boolean => {
-    if (placed.has(key)) return false;
-    const test = testIdentityOfKey(key);
-    return test !== undefined && !isLaneMeasurement(test);
-  };
-  folded.aggregate.unclaimed = [
-    ...new Set([
-      ...(aggregate.unclaimed ?? []).filter(stillUnplaced),
-      ...unplaced.unclaimed,
-    ]),
-  ].sort();
   const states = new Map(
     [...folded.states].filter(([key]) => placed.has(key)),
   );
@@ -627,6 +609,13 @@ export async function publish(
     seed: ulid(),
     commit,
     runs: runs.size,
+    // What a lane costs beyond the tests it runs, from what lanes have
+    // spent. Without it the packer charges nothing for opening a
+    // capability, starting a runner, or loading a module, and a lane
+    // packed to its budget runs past the bound it is killed at.
+    calibration: calibrate(
+      laneObservations(folded.aggregate.lanes ?? []),
+    ),
   });
   // What the coverage gate compares a pull request against. It comes from
   // outside the fold, because the counts are published by the full run on
@@ -663,13 +652,7 @@ export async function publish(
       })),
   }));
 
-  summarize(
-    manifest,
-    reference,
-    folded.observations,
-    unplaced,
-    aggregate.unclaimed,
-  );
+  summarize(manifest, reference, folded.observations, unplaced);
 
   if (options.out !== undefined) {
     await Deno.mkdir(options.out, { recursive: true });
@@ -737,26 +720,16 @@ export function namingSurfaces(keys: readonly string[]): string {
     (rest > 0 ? `, and ${rest} more` : "");
 }
 
-/**
- * What the job summary says: the shape of what this run decided.
- *
- * `wasUnclaimed` is everything no run had worked out a unit for by the
- * previous publish, from the aggregate this run read. It separates an
- * identity recorded once and not yet given a unit from one whose records
- * keep arriving and keep saying too little. A run folding into an empty
- * aggregate has nothing to compare against, and so does one reading an
- * aggregate that records no such list; both say neither.
- */
+/** What the job summary says: the shape of what this run decided. */
 function summarize(
   manifest: ReturnType<typeof buildManifest>,
   reference: ReturnType<typeof plan>,
   observations: number,
   unplaced: Unplaced,
-  wasUnclaimed: readonly string[] | undefined,
 ): void {
   console.log(
-    `test selection: folded ${observations} execution(s) into ` +
-      `${manifest.entries.length} identities`,
+    `test selection: folded ${observations} execution(s); the manifest ` +
+      `holds ${manifest.entries.length} identities`,
   );
   if (unplaced.suiteLevel.length > 0) {
     console.log(
@@ -770,35 +743,13 @@ function summarize(
     console.log(
       `test selection: the topology has no unit for ` +
         `${unplaced.unclaimed.length} identities, so no lane can be asked ` +
-        `to run one. An identity is left out until one of its records ` +
-        `says enough to work out which unit it is in.`,
+        `to run one. What puts an identity here, and what takes it out ` +
+        `again, is in docs/development/test-selection.md.`,
     );
     console.log(
       `test selection: those ${unplaced.unclaimed.length} were recorded ` +
         `by ${namingSurfaces(unplaced.unclaimed)}`,
     );
-    if (wasUnclaimed !== undefined) {
-      const before = new Set(wasUnclaimed);
-      const stuck = unplaced.unclaimed.filter((key) => before.has(key));
-      if (stuck.length === 0) {
-        console.log(
-          `test selection: none of them were in this count at the last ` +
-            `publish, so nothing has been recorded twice with no unit.`,
-        );
-      } else {
-        console.log(
-          `test selection: ${stuck.length} of them were in this count at ` +
-            `the last publish too, so more of their records have been ` +
-            `read since and those records still do not say which unit. A ` +
-            `surface whose records never say which unit is worth fixing. ` +
-            `See docs/development/test-selection.md.`,
-        );
-        console.log(
-          `test selection: those ${stuck.length} were recorded by ` +
-            `${namingSurfaces(stuck)}`,
-        );
-      }
-    }
   }
   const held = new Map<string, number>();
   for (const entry of manifest.withheld) {

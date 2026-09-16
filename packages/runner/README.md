@@ -66,6 +66,21 @@ accounting off leaves cumulative statistics available and stops collecting new
 samples. This control applies to that worker; it does not configure a server or
 another browser's runtime.
 
+## CFC preparation counters
+
+`runtime.getCfcStats()` returns a snapshot of cumulative CFC counters;
+`runtime.resetCfcStats()` clears them. `refusalDetailsRecorded` counts
+structured details recorded by prepare gates. Writer-fit records these only for
+`enforce-strict` refusals; lower modes retain the offending atoms in
+`writer-fit(persist-and-flag)` diagnostics.
+
+`consumedLabelWalks` counts full consumed-label collections, including
+writer-fit attribution, sink-ceiling checks, and host release checks. Writer-fit
+shares one collection across a prepare's refused write paths. Sink and host
+checks may collect on succeeding operations too, so this counter measures work
+rather than rejected commits. Both counters are measurement only and do not
+affect CFC relevance, preparation, or enforcement.
+
 ## Architecture
 
 The Runner has been refactored to eliminate singleton patterns in favor of

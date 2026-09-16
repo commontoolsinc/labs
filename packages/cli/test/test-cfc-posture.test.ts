@@ -57,7 +57,9 @@ describe("test-cfc-posture", () => {
       if (flags === "--cfc-shell-posture") {
         expect(report).toMatch(/cfc\/deriveFlowJoin\s+Δn=\s*[1-9]/);
         expect(report).toMatch(/cfc\/preparedDigestFor\s+Δn=\s*[1-9]/);
-        expect(report).toMatch(/cfc\/collectConsumedLabel\s+Δn=\s*[1-9]/);
+        // Successful writes skip refusal-source collection, but its zero count
+        // must remain visible beside the active preparation spans.
+        expect(report).toMatch(/cfc\/collectConsumedLabel\s+Δn=\s*0/);
       } else {
         expect(report).not.toMatch(/cfc\/deriveFlowJoin\s+Δn=\s*[1-9]/);
       }

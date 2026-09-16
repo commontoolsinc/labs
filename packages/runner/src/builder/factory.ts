@@ -110,7 +110,6 @@ import {
 } from "./types.ts";
 import {
   CFC_CANONICAL_ALIAS_NAMES,
-  FABRIC_INSTANCE_BRAND,
   FABRIC_INSTANCE_PLUS_BRAND,
   FABRIC_PRIMITIVE_BRAND,
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
@@ -326,7 +325,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     isFabricPrimitiveSchemaType,
     FABRIC_INSTANCE_PLUS_BRAND,
     FABRIC_PRIMITIVE_BRAND,
-    FABRIC_INSTANCE_BRAND,
     MERGEABLE_OP_METHODS,
     CFC_CANONICAL_ALIAS_NAMES,
 

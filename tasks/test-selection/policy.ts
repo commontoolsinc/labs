@@ -134,6 +134,38 @@ export const FILL_DENSITY_SHARE = 0.25;
 /** The share spent on items the value ordering did not pick. */
 export const FILL_EXPLORATION_SHARE = 0.15;
 
+/**
+ * How far apart a suite's batches must have been charged before its
+ * fitted slope is believed: the largest figure any of them was charged,
+ * less the smallest.
+ *
+ * A slope says what one more second of test time costs, and it is read
+ * far outside the range it was fitted over: a suite charged six seconds
+ * in every batch anybody has seen may be charged thousands the first
+ * time a lane packs it whole. Inside a narrow range the fixed cost
+ * dominates and the slope is noise, so fitting one there and reading it
+ * out there is how a lane comes to believe that six thousand seconds of
+ * tests are free. A range is narrow wherever it sits, so this is the
+ * width of the range rather than where it falls: batches charged 229,
+ * 230 and 230 seconds say as little about a slope as batches charged
+ * two, three and four.
+ *
+ * Below this the slope is one, which is the reading that needs no
+ * evidence: a second of test time costs a second.
+ */
+export const MIN_CORRECTION_SPAN_SECONDS = LANE_BUDGET_SECONDS / 10;
+
+/**
+ * Observations a suite needs before its slope is fitted at all.
+ *
+ * Two points fit a line exactly, so a line through two of them says
+ * whatever they say and nothing about their noise. It is low because a
+ * slope fitted too high only over-charges, where one fitted too low lets
+ * a lane pack work it has no time for: two batches of one suite have
+ * fitted a slope of zero, which says a second of its tests costs nothing.
+ */
+export const MIN_CORRECTION_SAMPLES = 3;
+
 /** The flake rate above which an item leaves the selectable set. */
 export const FLAKE_EXCLUSION_RATE = 0.005;
 
@@ -604,6 +636,25 @@ export const DIALS: readonly Dial[] = [
     why:
       "Up when the unselected corpus is going stale; down when lanes spend " +
       "the share on tests that never find anything.",
+  },
+  {
+    name: "MIN_CORRECTION_SPAN_SECONDS",
+    value: MIN_CORRECTION_SPAN_SECONDS,
+    unit: "seconds",
+    setBy: "derived",
+    why: "A tenth of a lane's budget, measured as the widest gap between two " +
+      "batches' charges. Down when a suite's real slope is going unbelieved " +
+      "for too long; up when a slope fitted inside a narrow range is being " +
+      "read far outside it.",
+  },
+  {
+    name: "MIN_CORRECTION_SAMPLES",
+    value: MIN_CORRECTION_SAMPLES,
+    unit: "batches",
+    setBy: "chosen",
+    why:
+      "Up when a slope is being fitted from too little and swinging about; " +
+      "down when a suite's real slope takes too long to be believed.",
   },
   {
     name: "FLAKE_EXCLUSION_RATE",

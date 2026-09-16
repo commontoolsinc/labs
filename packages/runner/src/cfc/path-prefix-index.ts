@@ -1,5 +1,5 @@
 /**
- * An index over a set of paths answering the one question `isPrefix` is asked
+ * An index over a set of paths for the one question `isPrefix` is asked
  * in bulk: is ANY path in the set a prefix of this one?
  *
  * A linear scan costs the set's size per query, and the set is a document's
@@ -8,16 +8,15 @@
  * instead, which is small and does not grow with the set.
  *
  * The predicate is `isPrefix` below, which treats `"*"` as matching any segment
- * on EITHER side. The index answers that question rather than restating it, and
+ * on EITHER side. The index implements that predicate, and
  * a test holds the two together across a generated corpus.
  *
- * The trie serves the wholly concrete case and declines everything else, which
- * is what makes its bound unconditional. A `"*"` on either side turns a walk
- * into a search: in the QUERY it would follow every child at that depth, which
- * measured **730x slower** than the scan on a 256-source set; among the SOURCES
- * it would double the frontier at every level that carries one, so the walk
- * grows with the set rather than with the path. Either one takes the scan
- * instead, leaving the walk a single node per segment. Both shapes are benched.
+ * Concrete queries follow one branch. Each node also buckets sources whose
+ * first wildcard follows that node's concrete prefix; only buckets on the
+ * query's branch need `isPrefix` checks. Cost depends on the query length and
+ * those candidates, including all wildcard sources when they start with `"*"`.
+ * A wildcard QUERY uses the scan: walking every child at its wildcard depth
+ * measured 730x slower than scanning a 256-source set.
  */
 
 /**
@@ -38,59 +37,74 @@ export const isPrefix = (
     segment === path[index] || segment === "*" || path[index] === "*"
   );
 
+/** A path segment, with wildcard candidates sharing its concrete prefix. */
 type PathPrefixNode = {
+  /** Next path segments, including wildcard tails retained for deduplication. */
   children: Map<string, PathPrefixNode>;
+
+  /** Whether an added path ends here. */
   terminal: boolean;
+
+  /** Sources whose first wildcard immediately follows this node. */
+  wildcardPaths: (readonly string[])[];
 };
+
+/** Constructs an empty path node. */
+const createNode = (): PathPrefixNode => ({
+  children: new Map(),
+  terminal: false,
+  wildcardPaths: [],
+});
 
 /** A set of paths, queried for whether any of them prefixes a given path. */
 export class PathPrefixIndex {
-  #root: PathPrefixNode = { children: new Map(), terminal: false };
+  #root = createNode();
 
   /** The same paths, for the queries the trie declines. */
   #paths: (readonly string[])[] = [];
-
-  /** Whether any source carries a `"*"`, which sends every query to the scan. */
-  #wildcardSource = false;
-
-  /**
-   * Add a path to the set. Adding the same path twice is a no-op, for the
-   * scanned copy as much as for the trie — a duplicate there would be rescanned
-   * on every wildcard query for no gain. The path is copied rather than
-   * retained, so a caller that reuses a mutable array cannot make the two
-   * representations disagree.
-   */
-  add(path: readonly string[]): void {
-    if (path.includes("*")) this.#wildcardSource = true;
-    let node = this.#root;
-    for (const segment of path) {
-      let next = node.children.get(segment);
-      if (next === undefined) {
-        next = { children: new Map(), terminal: false };
-        node.children.set(segment, next);
-      }
-      node = next;
-    }
-    if (node.terminal) return;
-    node.terminal = true;
-    this.#paths.push([...path]);
-  }
 
   /** What the wildcard fallback scans, for a test that pins its contents. */
   get accessForTestingOnly(): { scannedPaths: readonly (readonly string[])[] } {
     return { scannedPaths: this.#paths };
   }
 
+  /**
+   * Adds a path to the set. Adding the same path twice is a no-op, for the
+   * scanned copy as much as for the trie — a duplicate there would be rescanned
+   * on every wildcard query for no gain. The path is copied rather than
+   * retained, so a caller that reuses a mutable array cannot make the two
+   * representations disagree.
+   */
+  add(path: readonly string[]): void {
+    let node = this.#root;
+    let wildcardNode: PathPrefixNode | undefined;
+    for (const segment of path) {
+      if (segment === "*" && wildcardNode === undefined) wildcardNode = node;
+      let next = node.children.get(segment);
+      if (next === undefined) {
+        next = createNode();
+        node.children.set(segment, next);
+      }
+      node = next;
+    }
+    if (node.terminal) return;
+    node.terminal = true;
+    const copy = [...path];
+    this.#paths.push(copy);
+    wildcardNode?.wildcardPaths.push(copy);
+  }
+
   /** Whether any added path is a prefix of `path`, by `isPrefix`'s rules. */
   hasPrefixOf(path: readonly string[]): boolean {
     if (this.#root.terminal) return true;
-    if (this.#wildcardSource || path.includes("*")) {
+    if (path.includes("*")) {
       return this.#paths.some((source) => isPrefix(source, path));
     }
-    // Both sides are concrete here, so the walk follows one child per segment
-    // and costs the query path's length whatever the set holds.
     let node = this.#root;
     for (const segment of path) {
+      for (const source of node.wildcardPaths) {
+        if (isPrefix(source, path)) return true;
+      }
       const next = node.children.get(segment);
       if (next === undefined) return false;
       if (next.terminal) return true;
