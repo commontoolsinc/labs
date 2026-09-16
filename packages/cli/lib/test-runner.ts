@@ -67,7 +67,10 @@ import type {
   SettleStats,
   Stream,
 } from "@commonfabric/runner";
-import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type {
+  CfcEnforcementMode,
+  CfcFlowLabelsMode,
+} from "@commonfabric/runner/cfc";
 import {
   type CDFPoint,
   clearTimingMeasures,
@@ -382,6 +385,9 @@ export interface TestRunnerOptions {
   /** Override CFC enforcement mode for the test runtime. */
   cfcEnforcementMode?: CfcEnforcementMode;
 
+  /** Override flow-label propagation for every test runtime. */
+  cfcFlowLabels?: CfcFlowLabelsMode;
+
   /** Shared compiled-module-byte cache for direct harness compiles. */
   moduleByteCache?: ModuleByteCache;
 
@@ -598,6 +604,11 @@ function printLoggerStats(
   label?: string,
   statsInclude: string[] = [],
 ): void {
+  statsInclude = [
+    "cfc",
+    "extended-storage-transaction/prepareCfc",
+    ...statsInclude,
+  ];
   const counts = useDelta ? getGlobalLogCountDeltas() : getGlobalLogCounts();
   const dp = useDelta ? "Δ" : "";
   const labelStr = label ? ` | ${label}:` : ":";
@@ -646,6 +657,20 @@ function printLoggerStats(
           max: timing.max,
         });
       }
+    }
+  }
+
+  // Zero rows distinguish a phase that did no CFC work from a missing probe.
+  for (
+    const name of [
+      "extended-storage-transaction/prepareCfc",
+      "cfc/deriveFlowJoin",
+      "cfc/collectConsumedLabel",
+      "cfc/preparedDigestFor",
+    ]
+  ) {
+    if (!entries.some((entry) => entry.name === name)) {
+      entries.push({ name, n: 0, total: 0, avg: 0, p50: 0, p95: 0, max: 0 });
     }
   }
 
@@ -1159,6 +1184,9 @@ export async function runTestPattern(
         ...(options.cfcEnforcementMode !== undefined
           ? { cfcEnforcementMode: options.cfcEnforcementMode }
           : {}),
+        ...(options.cfcFlowLabels !== undefined
+          ? { cfcFlowLabels: options.cfcFlowLabels }
+          : {}),
         ...(options.storageHost?.onPatternInstantiated !== undefined
           ? { onPatternInstantiated: options.storageHost.onPatternInstantiated }
           : {}),
@@ -1175,6 +1203,9 @@ export async function runTestPattern(
           }
         },
       })),
+  );
+  console.log(
+    `  CFC posture: enforcement=${runtime.cfcEnforcementMode} flowLabels=${runtime.cfcFlowLabels}`,
   );
   if (!options.noIdempotencyCheck) runtime.enableIdempotencyCheck();
   else if (options.verbose) {
@@ -1217,6 +1248,17 @@ export async function runTestPattern(
     ) return;
     for (const line of readCost.format(label, options.statsActionLimit ?? 10)) {
       console.log(line);
+    }
+  };
+  const printStepTimings = (label: string, started: number) => {
+    const duration = performance.now() - started;
+    if (options.verbose && duration >= (options.statsThreshold ?? 5000)) {
+      printLoggerStats(
+        performance.now() - startTime,
+        true,
+        `${label} took ${fmtMs(duration)}`,
+        options.statsInclude,
+      );
     }
   };
   if (readCost !== undefined) {
@@ -1668,6 +1710,7 @@ export async function runTestPattern(
             if (!stepValue.skip) await settleFully(i);
           } finally {
             printReadCost(`settle_${i}`, itemStart);
+            printStepTimings(`settle_${i}`, itemStart);
           }
           continue;
         }
@@ -1681,9 +1724,13 @@ export async function runTestPattern(
           const renderName = `render_${renderCount}`;
           try {
             if (!stepValue.skip) {
-              await materializeTestVDOM(
-                stepCell.key("render") as Cell<unknown>,
-                () => settleRuntime(renderName, 20),
+              await withPhase(
+                ["runTestPattern", "step", renderName, "materialize"],
+                () =>
+                  materializeTestVDOM(
+                    stepCell.key("render") as Cell<unknown>,
+                    () => settleRuntime(renderName, 20),
+                  ),
               );
               if (options.verbose) console.log(`  ◇ ${renderName}`);
             } else if (options.verbose) {
@@ -1691,6 +1738,7 @@ export async function runTestPattern(
             }
           } finally {
             printReadCost(renderName, itemStart);
+            printStepTimings(renderName, itemStart);
           }
           continue;
         }

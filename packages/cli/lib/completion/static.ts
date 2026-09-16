@@ -37,6 +37,8 @@ const ENUMERATED_OPTION_VALUES: Readonly<Record<string, readonly string[]>> = {
   "color": ["auto", "always", "never"],
   "language": languageNames(),
   "cfc-mode": [...CFC_ENFORCEMENT_MODES],
+  "cfc-enforcement-mode": [...CFC_ENFORCEMENT_MODES],
+  "cfc-flow-labels": ["off", "derive", "observe", "persist"],
   // `cf piece map --format`.
   "format": ["ascii", "dot"],
   // `cf piece survey --side`: which document holds the collection.
