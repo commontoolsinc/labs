@@ -248,7 +248,10 @@ describe("trigger reads survive failed runs", () => {
     onQueueExecution?: () => void;
   }): Promise<void> {
     const action: Action = () => {};
-    const tx = { tx: {} } as IExtendedStorageTransaction;
+    const tx = {
+      tx: {},
+      abandonStagedWork: () => {},
+    } as unknown as IExtendedStorageTransaction;
     const commitPromise = Promise.resolve(
       { error: args.error } as Awaited<
         ReturnType<IExtendedStorageTransaction["commit"]>

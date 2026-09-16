@@ -20,6 +20,48 @@ import {
 } from "./scheduler-test-utils.ts";
 
 describe("scheduler-reactive-retry-readiness", () => {
+  it("does not wake a replacement registration's consumers when an old commit succeeds", async () => {
+    const fixture = createSchedulerTestRuntime(import.meta.url);
+    const { runtime } = fixture;
+    const verdict = Promise.withResolvers<void>();
+    const committing = Promise.withResolvers<void>();
+    const edit = runtime.edit.bind(runtime);
+    let held = false;
+    using _edits = stub(runtime, "edit", (options) => {
+      const tx = edit(options);
+      if (!held) {
+        held = true;
+        const commit = tx.commit.bind(tx);
+        tx.commit = async (commitOptions) => {
+          committing.resolve();
+          await verdict.promise;
+          return await commit(commitOptions);
+        };
+      }
+      return tx;
+    });
+    const wakes = stub(runtime.scheduler, "noteViewActionCurrent");
+    const action: Action = () => {};
+    try {
+      runtime.scheduler.subscribe(action, { isEffect: true });
+      await committing.promise;
+      await runtime.idle();
+      runtime.scheduler.unsubscribe(action);
+      runtime.scheduler.subscribe(action, { isEffect: true });
+      await runtime.idle();
+      expect(wakes.calls.length).toBe(1);
+      expect(wakes.calls[0].args).toEqual([action]);
+      verdict.resolve();
+      await runtime.scheduler.idleWithPendingCommits();
+      expect(wakes.calls.length).toBe(1);
+    } finally {
+      verdict.resolve();
+      wakes.restore();
+      runtime.scheduler.unsubscribe(action);
+      await disposeSchedulerTestRuntime(fixture);
+    }
+  });
+
   it("releases the local-read basis when removal precedes a commit rejection", async () => {
     const fixture = createSchedulerTestRuntime(import.meta.url);
     const { runtime } = fixture;

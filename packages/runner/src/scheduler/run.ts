@@ -193,7 +193,7 @@ export function startReactiveActionCommit(state: {
 }
 
 export function watchReactiveActionCommit(state: {
-  /** Whether this run still owns an active registration and may retry. */
+  /** Whether this run may retry or wake consumers of its registration. */
   readonly canRetry: () => boolean;
 
   /** Waits for catch-up and scoped conflict pulls before requeueing. */
@@ -216,19 +216,19 @@ export function watchReactiveActionCommit(state: {
   readonly getActionId: (action: Action) => string;
   readonly reportTerminalRejection?: (error: Error) => void;
   readonly handleUnavailable?: () => boolean;
+
+  /** Wakes consumers after a successful commit of a still-active registration. */
   readonly onSuccess?: () => void;
 }): Promise<void> {
   const handleResult = async (error: unknown): Promise<void> => {
     if (error && state.handleUnavailable?.()) return;
-    if (!state.canRetry()) {
-      if (error) abandonAction(state, error);
-      return;
-    }
     if (!error) {
-      // Clear retries after successful commit.
+      // Retry counts belong to the action across registrations. A successful
+      // commit ends the sequence even if its registration has been retired,
+      // but only a live run may wake that registration's consumers.
       state.retries.delete(state.action);
       state.offBudgetRetries.delete(state.action);
-      state.onSuccess?.();
+      if (state.canRetry()) state.onSuccess?.();
       return;
     }
 
@@ -237,6 +237,30 @@ export function watchReactiveActionCommit(state: {
       "Error committing transaction",
       error,
     );
+
+    // Permanent (precondition) and terminal (deterministic commit-rule refusal)
+    // rejections end the retry sequence even when its registration is retired.
+    // A later input-triggered run gets a fresh budget for transient failures.
+    // A terminal refusal is a verdict on the action's output and reaches the
+    // error channel (§7.6); a permanent lost idempotency race stays quiet.
+    if (isPermanentRejection(error) || isTerminalRejection(error)) {
+      state.retries.delete(state.action);
+      state.offBudgetRetries.delete(state.action);
+      if (isTerminalRejection(error)) {
+        state.reportTerminalRejection?.(
+          toTerminalRejectionError(error, state.action),
+        );
+      }
+      abandonAction(state, error);
+      return;
+    }
+
+    // Retry preparation refreshes the subscription, so check its lifetime
+    // before restoring dependencies as well as after asynchronous recovery.
+    if (!state.canRetry()) {
+      abandonAction(state, error);
+      return;
+    }
 
     // A reactive compute is not a transactional retrier. A stale-basis rejection
     // means the value the action read is no longer current, so re-running against
@@ -327,33 +351,6 @@ export function watchReactiveActionCommit(state: {
       state.markInvalid(state.action, { retry: waitedForCatchUp });
       state.pending.add(state.action);
       state.queueExecution();
-      return;
-    }
-
-    // Permanent (precondition) and terminal (deterministic commit-rule refusal —
-    // `isTerminalRejection`) rejections are never retried: re-running recomputes
-    // the identical refused write, and the doomed re-runs would starve
-    // concurrent siblings. This definitively ENDS the current retry sequence, so
-    // clear the counter — exactly like the success path above — before returning:
-    // a later re-run triggered by changed inputs is a fresh sequence that must
-    // keep its full bounded budget for a genuinely transient failure, not inherit
-    // a count accumulated by earlier transient attempts or the terminal one.
-    // Resubscribe still happens (finalizeReactiveActionCommit), so a real input
-    // change re-triggers.
-    //
-    // A terminal rejection additionally SURFACES (spec scheduler-v2 §7.6):
-    // it is a verdict on the action's own output, so it reaches the
-    // scheduler's error channel with the refusal carried along, where a
-    // permanent rejection — a benign lost idempotency race — stays quiet.
-    if (isPermanentRejection(error) || isTerminalRejection(error)) {
-      state.retries.delete(state.action);
-      state.offBudgetRetries.delete(state.action);
-      if (isTerminalRejection(error)) {
-        state.reportTerminalRejection?.(
-          toTerminalRejectionError(error, state.action),
-        );
-      }
-      abandonAction(state, error);
       return;
     }
 
@@ -1273,7 +1270,6 @@ function finalizeReactiveActionCommit(
     handleUnavailable: () => parkUnavailableRun(state, args),
     reportTerminalRejection: (error) => state.handleError(error, args.action),
   };
-
   const handled = watchReactiveActionCommit(commitState);
   // The barrier entry commit() registered settles with the commit promise,
   // but the disposition above — a conflict's catch-up-then-requeue in
