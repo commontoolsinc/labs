@@ -814,6 +814,42 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
     expect(unmarked).toContainEqual("el-label");
     expect(unmarked).toContainEqual("memb-secret");
   });
+
+  it("a dereference trace covers a slot probe under either marking", async () => {
+    // The dereference trace is the whole of the standalone/machinery
+    // boundary (CFC §4.6.3), so it decides alone: a probe the trace covers
+    // consumes nothing at the slot, neither the pointer label nor the
+    // membership template, whether or not it carries `machineryRead`. The
+    // follow's taint arrives through the reads of the target.
+
+    const rt = makeRuntime();
+    const elId = await seedDoc(rt, "gp-el-tc", { n: 4 }, [
+      { path: [], label: { confidentiality: ["el-label"] } },
+    ]);
+    const criteriaId = await seedDoc(rt, "gp-criteria-tc", { keep: true }, [
+      { path: [], label: { confidentiality: ["memb-secret"] } },
+    ]);
+    const listId = await buildGenericList(rt, "gp-list-tc", criteriaId, [
+      "gp-el-tc",
+    ]);
+
+    const tracedProbe = (tx: ReturnType<Runtime["edit"]>) => {
+      tx.read(readAddress(listId, ["0"]), { meta: linkResolutionProbe });
+      tx.recordCfcDereferenceTrace({
+        source: { space, id: listId, scope: "space", path: ["0"] },
+        target: { space, id: elId, scope: "space", path: [] },
+        kind: "value",
+      });
+    };
+
+    expect(await flowJoinOf(rt, tracedProbe)).toEqual([]);
+    expect(
+      await flowJoinOf(
+        rt,
+        (tx) => tx.runWithAmbientReadMeta(machineryRead, () => tracedProbe(tx)),
+      ),
+    ).toEqual([]);
+  });
 });
 
 describe("CFC template population (Stage A): class-split resolution", () => {
