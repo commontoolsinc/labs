@@ -1,11 +1,14 @@
 """Replay paired wildcard-index measurements against the recorded baseline.
 
-Set CHECKOUT to the Labs checkout containing this change. Prints JSONL to stdout;
-all generated baseline modules are isolated in a temporary directory.
+Set CHECKOUT to the Labs checkout containing this change and the recorded
+baseline commit's history. A shallow checkout must fetch that commit first;
+the history check prints the exact command if it is missing. Prints JSONL to
+stdout; all generated baseline modules are isolated in a temporary directory.
 """
 
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import tempfile
 
@@ -51,6 +54,17 @@ for (const {size, fraction} of PATH_INDEX_GRID) {
 
 BASE = "53baf62fdaf9dae6824bc9c5a0da812a64b95d6c"
 checkout = Path(os.environ["CHECKOUT"]).resolve()
+baseline = subprocess.run(
+    ["git", "cat-file", "-e", f"{BASE}^{{commit}}"],
+    cwd=checkout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+)
+if baseline.returncode != 0:
+    fetch = shlex.join(["git", "-C", str(checkout), "fetch", "origin", BASE])
+    raise SystemExit(
+        f"CHECKOUT must contain baseline commit {BASE}. "
+        f"Fetch its history before replaying:\n{fetch}"
+    )
+
 with tempfile.TemporaryDirectory(prefix="cfc-wildcard-replay-") as directory:
     scratch = Path(directory)
     for name in ["path-prefix-index.ts", "consumed-label-index.ts"]:
