@@ -15,86 +15,26 @@ import type { RuntimeProgram } from "@commonfabric/runner";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { FragmentWriter } from "@commonfabric/test-support/records";
 import { createRuntime } from "../packages/cli/lib/dev.ts";
-import {
-  collectAllPatternFiles,
-  matchesPatternFilter,
-} from "./pattern-files.ts";
+import { formatError, selectionFor, shardLabel, USAGE } from "./cfcheck-lib.ts";
+import { collectAllPatternFiles } from "./pattern-files.ts";
 
-function formatError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-/**
- * The `--only` terms a command line carries. An argument that is not one, and
- * a `--only` carrying nothing, both end the run: a term dropped for being
- * empty leaves the run looking unfiltered, so it would check the whole corpus
- * while its caller was charged for one pattern.
- */
-function parseOnly(argv: readonly string[]): string[] {
-  const only: string[] = [];
-  const refuse = (why: string): never => {
-    console.error(why);
-    console.error("usage: deno task cfcheck [--only <pattern>]...");
-    Deno.exit(2);
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const argument = argv[i]!;
-    let value: string;
-    if (argument === "--only") {
-      value = argv[++i] ?? refuse("--only needs a value");
-    } else if (argument.startsWith("--only=")) {
-      value = argument.slice("--only=".length);
-    } else value = refuse(`Unknown argument: ${argument}`);
-    // A value opening with `--` is the caller's next flag, read as a
-    // filter. It matches no pattern, so the run would check nothing and
-    // say so only by the count it prints.
-    if (value.length === 0 || value.startsWith("--")) {
-      refuse(`--only needs a value, and was given ${JSON.stringify(value)}`);
-    }
-    only.push(value);
-  }
-  return only;
-}
-
-// Optional sharding for CI fan-out: CFCHECK_SHARD="i/n" (1-based) checks only
-// the files where (index % n) == (i - 1). Pattern compiles are single-threaded
-// CPU work, so n shards run as n parallel CI jobs.
-function parseShard(): { index: number; count: number } {
-  const raw = Deno.env.get("CFCHECK_SHARD");
-  if (!raw) return { index: 0, count: 1 };
-  const match = raw.match(/^(\d+)\/(\d+)$/);
-  if (!match) {
-    console.error(`Invalid CFCHECK_SHARD "${raw}"; expected "i/n" (1-based).`);
-    Deno.exit(1);
-  }
-  const index = Number(match[1]) - 1;
-  const count = Number(match[2]);
-  if (count < 1 || index < 0 || index >= count) {
-    console.error(`CFCHECK_SHARD "${raw}" out of range.`);
-    Deno.exit(1);
-  }
-  return { index, count };
-}
-
-const only = parseOnly(Deno.args);
-const shard = parseShard();
-
-const allFiles = await collectAllPatternFiles();
-const selected = only.length === 0
-  ? allFiles
-  : allFiles.filter((file) =>
-    only.some((match) => matchesPatternFilter(file, match))
+let selected: ReturnType<typeof selectionFor>;
+try {
+  selected = selectionFor(
+    await collectAllPatternFiles(),
+    Deno.args,
+    Deno.env.get("CFCHECK_SHARD"),
   );
-const filesToCheck = selected.filter((_file, i) =>
-  i % shard.count === shard.index
-);
-
-const shardLabel = shard.count > 1
-  ? ` [shard ${shard.index + 1}/${shard.count}]`
-  : "";
+} catch (error) {
+  console.error(formatError(error));
+  console.error(USAGE);
+  Deno.exit(2);
+}
+const filesToCheck = selected.files;
 console.log(
-  `Common Fabric checking ${filesToCheck.length} pattern files${shardLabel}.`,
+  `Common Fabric checking ${filesToCheck.length} pattern files${
+    shardLabel(selected.shard)
+  }.`,
 );
 
 const failures: Array<{ file: string; error: string }> = [];

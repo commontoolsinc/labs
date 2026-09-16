@@ -374,6 +374,19 @@ describe("the repository's gate suites", () => {
         test: { k: "typecheck", s: "repo", n: `cfcheck ${pattern}` },
       }),
     ).toBeUndefined();
+    // The pattern check declines a name of its own surface that is
+    // neither its suite's nor one of its patterns', rather than reading
+    // the tail of any name at all as a path.
+    expect(
+      byId("cfcheck").locate({
+        test: { k: "typecheck", s: "repo", n: "deno-check" },
+      }),
+    ).toBeUndefined();
+    expect(
+      byId("cfcheck").locate({
+        test: { k: "typecheck", s: "repo", n: "cfcheck no/such/pattern.tsx" },
+      }),
+    ).toBeUndefined();
   });
 
   it("restricts a pattern gate to the patterns it was given", async () => {
