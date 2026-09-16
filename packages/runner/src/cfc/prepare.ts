@@ -2455,11 +2455,7 @@ const isReplacedMembershipEntry = (
     containers.has(pathKey(entryPath.slice(0, -1)));
 };
 
-// Exported for tests: the trigger-read cid: guard above defends
-// construction paths that bypass the addCfcTriggerReads ingest filter, and
-// with the tx state sealed (getCfcState() is a read-only view) the only way
-// to exercise it is to hand deriveFlowJoin a state carrying a smuggled
-// entry directly.
+/** Helper for `deriveFlowJoin`, which computes labels from transaction reads. */
 const deriveFlowJoinImpl = (
   tx: IExtendedStorageTransaction,
   options?: {
@@ -8120,7 +8116,13 @@ export const prepareBoundaryCommit = (
 
 const cfcLogger = getLogger("cfc", { enabled: false });
 
-/** Derives the transaction flow join and records its preparation span. */
+/**
+ * Derives the transaction flow join and records its preparation span.
+ *
+ * Exported so tests can supply transaction state containing a `cid:` trigger
+ * read that bypassed `addCfcTriggerReads` and verify its exclusion. A live
+ * transaction exposes sealed state through the read-only `getCfcState()` view.
+ */
 export const deriveFlowJoin: typeof deriveFlowJoinImpl = (tx, options) => {
   const started = performance.now();
   try {
