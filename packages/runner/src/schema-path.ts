@@ -1,10 +1,19 @@
 /** Determines which paths a schema can select, independently of stored values. */
 
-import { schemaWithProperties } from "@commonfabric/data-model-schema";
-
 import type { JSONSchema } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
+import { combineSchema } from "./traverse.ts";
+
+function withStructuralType(schema: JSONSchema): JSONSchema {
+  if (typeof schema === "boolean" || schema.type !== undefined) return schema;
+  return schema.properties !== undefined ||
+      schema.additionalProperties !== undefined
+    ? { ...schema, type: "object" }
+    : schema.items !== undefined || schema.prefixItems !== undefined
+    ? { ...schema, type: "array" }
+    : schema;
+}
 
 /**
  * Whether a schema can expose a path in its materialized projection.
@@ -52,24 +61,19 @@ export function schemaPathSelection(
             ? ContextualFlowControl.resolveSchemaRefsOrThrow(branchRoot)
             : branchRoot;
           return selects(
-            typeof child === "boolean"
-              ? child ? outer : false
-              : schemaWithProperties(outer, child),
+            typeof child === "boolean" ? child ? outer : false : combineSchema(
+              withStructuralType(outer),
+              withStructuralType(child),
+            ),
             offset,
           );
         });
       }
       // Runtime projections also accept structural schemas without `type`.
-      const shaped = resolved.type === undefined
-        ? resolved.properties !== undefined ||
-            resolved.additionalProperties !== undefined
-          ? { ...resolved, type: "object" as const }
-          : resolved.items !== undefined || resolved.prefixItems !== undefined
-          ? { ...resolved, type: "array" as const }
-          : resolved
-        : resolved;
+      const shaped = withStructuralType(resolved);
       if (
-        options.allowArrayLength && path[offset] === "length" &&
+        typeof shaped !== "boolean" && options.allowArrayLength &&
+        path[offset] === "length" &&
         offset === path.length - 1 && (shaped.type === "array" ||
           Array.isArray(shaped.type) && shaped.type.includes("array"))
       ) return true;

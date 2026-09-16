@@ -20,6 +20,22 @@ function schemaSelectsPath(
 }
 
 describe("schemaPathSelection", () => {
+  it("retains outer properties beside alternative properties", () => {
+    for (const keyword of ["anyOf", "oneOf", "allOf"] as const) {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: { outer: { type: "number" } },
+        [keyword]: [{
+          type: "object",
+          properties: { inner: { type: "string" } },
+        }],
+      };
+      expect(schemaSelectsPath(schema, ["outer"])).toBe(true);
+      expect(schemaSelectsPath(schema, ["inner"])).toBe(true);
+      expect(schemaSelectsPath(schema, ["missing"])).toBe(false);
+    }
+  });
+
   it("selects declared optional inputs and excludes undeclared ancestors", () => {
     const schema: JSONSchema = {
       type: "object",

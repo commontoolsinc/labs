@@ -156,6 +156,24 @@ describe("deriveFlowJoin()", () => {
         },
       });
       expect((await seed.commit()).error).toBeUndefined();
+      const valueFields = runtime.edit();
+      try {
+        const literalPaths = [[], ["value"], ["value", "value"]];
+        for (const path of literalPaths) {
+          valueFields.readOrThrow({ ...address, path: ["value", ...path] }, {
+            nonRecursive: true,
+          });
+        }
+        expect(deriveFlowJoin(valueFields).confidentiality).toEqual(
+          uniqueCfcAtoms(
+            literalPaths.flatMap((path) =>
+              scan(entries, path, "shape", false).confidentiality ?? []
+            ),
+          ),
+        );
+      } finally {
+        valueFields.abort();
+      }
       const batch = runtime.edit();
       const batchLabels: IFCLabel[] = [];
       const batchIntegrity: unknown[][] = [];
@@ -164,7 +182,7 @@ describe("deriveFlowJoin()", () => {
         for (let index = 0; index < 30; index++) {
           const shape = readObservationShapes()[index % 3];
           const machinery = index % 2 === 0;
-          const path = paths[index];
+          const path = paths[index % 5];
           batch.readOrThrow({ ...address, path: ["value", ...path] }, {
             nonRecursive: shape === "shape",
             meta: {

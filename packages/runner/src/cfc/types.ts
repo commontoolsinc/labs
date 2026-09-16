@@ -992,3 +992,11 @@ export type CfcTxState = {
   // not an input to it.
   refusalDetails: CfcRefusalDetail[];
 };
+
+/** Work counted during CFC preparation, without affecting its verdict. */
+export type CfcPreparationWork =
+  | "overlapWildcardQueries"
+  | "overlapConcreteQueries"
+  | "authoritativeCoverCalls"
+  | "flowTemplateEntriesMinted"
+  | "flowTemplateContainers";
