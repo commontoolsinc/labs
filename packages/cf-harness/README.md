@@ -442,11 +442,13 @@ These dispositions keep the run lifecycle `completed` and the conversation
 reusable. `run-report.json` records `taskOutcome`, a union discriminated by
 `outcome: "completed" | "question" | "gave-up"`; only a question carries
 `question: { text }`, and only a give-up carries `reason`. The human sentence
-remains in `finalAssistantText`. Older reports without `taskOutcome` mean
-`completed`. The console projects that union into its HTTP 200 result and
-`turn_completed` event, with the session identity and current continuation
-availability described in [the console contract](console/README.md). Execution
-errors and cancellation keep their distinct lifecycle and HTTP results.
+remains in `finalAssistantText`, read from the admitted tool result before
+model-bound handle substitution. The transcript's tool result still carries
+tokens for model context. Older reports without `taskOutcome` mean `completed`.
+The console projects that union into its HTTP 200 result and `turn_completed`
+event, with the session identity and current continuation availability described
+in [the console contract](console/README.md). Execution errors and cancellation
+keep their distinct lifecycle and HTTP results.
 
 Missing-input discovery uses the current grants and safe handle metadata.
 "Found" needs released evidence; "absent" is limited to the granted scope

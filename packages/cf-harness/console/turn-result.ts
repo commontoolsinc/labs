@@ -253,7 +253,9 @@ const readTurnRunArtifacts = async (
       return undefined;
     }
     const taskOutcome = readHarnessTaskOutcome(
-      "taskOutcome" in reportValue ? reportValue.taskOutcome : undefined,
+      Object.hasOwn(reportValue, "taskOutcome")
+        ? (reportValue as Record<string, unknown>).taskOutcome
+        : undefined,
     );
     if (taskOutcome === undefined) return undefined;
     const currentTranscriptIndexes = new Set<number>();

@@ -1911,6 +1911,10 @@ const EDIT_FILE_STATUS_OBSERVATION_DETAIL =
 
 interface InvokedToolCallMessages {
   toolMessage: HarnessToolTranscriptMessage;
+
+  /** The admitted user-facing result before model-bound handle substitution. */
+  taskOutcome?: HarnessTaskOutcome;
+
   followupMessages?: readonly HarnessTranscriptMessage[];
   cfcModelContextObservations?:
     readonly HarnessCfcModelContextObservationInput[];
@@ -3718,17 +3722,12 @@ export class CfHarnessPromptLoop {
             toolCalls.length,
           );
           const toolMessage = invokedToolCall.toolMessage;
-          if (toolMessage.toolName === "finish_task") {
-            const output = JSON.parse(toolMessage.content);
-            const outcome = output.status === "ok"
-              ? readHarnessTaskOutcome(output.taskOutcome)
-              : undefined;
-            if (outcome !== undefined && outcome.outcome !== "completed") {
-              taskOutcome = outcome;
-              finalAssistantText = outcome.outcome === "question"
-                ? outcome.question.text
-                : outcome.reason;
-            }
+          const outcome = invokedToolCall.taskOutcome;
+          if (outcome !== undefined && outcome.outcome !== "completed") {
+            taskOutcome = outcome;
+            finalAssistantText = outcome.outcome === "question"
+              ? outcome.question.text
+              : outcome.reason;
           }
           transcript.push(toolMessage);
           // After the result rather than after the call that asked for it: a
@@ -4760,8 +4759,13 @@ export class CfHarnessPromptLoop {
         }],
       };
     }
+    const taskOutcome = toolId === "finish_task" &&
+        isObjectNotArray(result.output) && result.output.status === "ok"
+      ? readHarnessTaskOutcome(result.output.taskOutcome)
+      : undefined;
     return {
       toolMessage,
+      ...(taskOutcome !== undefined ? { taskOutcome } : {}),
       ...(modelOutputResult.cfcModelContextObservations !== undefined
         ? {
           cfcModelContextObservations:

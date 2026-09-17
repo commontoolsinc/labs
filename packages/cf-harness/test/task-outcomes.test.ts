@@ -47,12 +47,21 @@ const taskRequest = (input: unknown): Request =>
   });
 
 describe("task-outcomes", () => {
-  for (const outcome of ["question", "gave-up"] as const) {
-    it(`persists an admitted ${outcome} and stops after one model turn`, async () => {
+  for (
+    const [outcome, withAddress] of [
+      ["question", false],
+      ["gave-up", false],
+      ["question", true],
+      ["gave-up", true],
+    ] as const
+  ) {
+    it(`persists an admitted ${outcome}${withAddress ? " with an authored address" : ""} and stops after one model turn`, async () => {
       const artifactRoot = await Deno.makeTempDir();
-      const message = outcome === "question"
+      const address = `/of:fid1:${"R".repeat(43)}`;
+      const sentence = outcome === "question"
         ? "Please attach the mailbox you want me to use."
         : "I cannot inspect this source under the current permissions.";
+      const message = sentence + (withAddress ? ` Use ${address}.` : "");
       const taskOutcome = outcome === "question"
         ? { outcome, question: { text: message } }
         : { outcome, reason: message };
@@ -95,6 +104,14 @@ describe("task-outcomes", () => {
           "assistant",
           "tool",
         ]);
+        if (withAddress) {
+          const modelOutput = JSON.parse(result.transcript[2].content);
+          const modelSentence = outcome === "question"
+            ? modelOutput.taskOutcome.question.text
+            : modelOutput.taskOutcome.reason;
+          expect(modelSentence).toContain(" Use cfh:a:");
+          expect(modelSentence).not.toContain(address);
+        }
         const report = JSON.parse(
           await Deno.readTextFile(
             join(artifactRoot, "terminal", "run-report.json"),
