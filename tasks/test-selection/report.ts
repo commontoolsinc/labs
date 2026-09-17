@@ -37,6 +37,7 @@ import {
   coverageMetricGroupName,
   coverageMetricMeasuredSet,
 } from "../ci-check-lib.ts";
+import { isLaneMeasurement } from "../lane-measurement.ts";
 import type { WithheldReason } from "./manifest.ts";
 import {
   COVERAGE_COMMENT_LINES,
@@ -70,12 +71,21 @@ export type RunOutcomes = ReadonlyMap<string, Verdict>;
 /** Uncovered lines per coverage metric, as a run measured them. */
 export type CoverageFigures = ReadonlyMap<string, number>;
 
-/** Folds a run's records into one verdict per identity. */
+/**
+ * Folds a run's records into one verdict per identity, leaving out the
+ * lane's measurements of itself.
+ *
+ * A lane writes what its setup and each of its batches cost through the
+ * record machinery every test uses, and a batch that ended badly is
+ * written as a failure. Those are not tests, and what this feeds is a
+ * comment about tests.
+ */
 export function outcomesOf(
   records: Iterable<TestRecord>,
 ): Map<string, Verdict> {
   const seen = new Map<string, { pass: boolean; fail: boolean }>();
   for (const record of records) {
+    if (isLaneMeasurement(record.test)) continue;
     const key = testIdentityKey(record.test);
     const already = seen.get(key) ?? { pass: false, fail: false };
     if (record.outcome === "pass") already.pass = true;

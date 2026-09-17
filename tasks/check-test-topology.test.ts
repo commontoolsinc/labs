@@ -13,6 +13,7 @@ import {
   UsageError,
   workflowRecords,
 } from "./check-test-topology.ts";
+import { AliasResolver } from "@commonfabric/test-support/records";
 import type { Suite } from "./test-topology/suite.ts";
 
 /** A suite holding exactly what a case describes. */
@@ -626,7 +627,7 @@ describe("reading a run's records", () => {
       repo: "commonfabric/labs",
       commit: "c".repeat(40),
       dirty: false,
-      env: "ci",
+      env: "local",
       os: "linux",
       arch: "x86_64",
       denoVersion: "2.9.4",
@@ -661,6 +662,70 @@ describe("reading a run's records", () => {
       // is what locates a unit identity.
       expect(records[0]!.file).toBe("packages/oven/test/bake.test.ts");
       expect(records[1]!.test.v).toBe("server-execution");
+    } finally {
+      await Deno.remove(at);
+    }
+  });
+
+  it("reads a lane measuring itself as the lane wrote it", async () => {
+    // A scope-wide alias line renames every identity in a scope, so one
+    // covering the scope a lane measures itself on reaches the whole of
+    // what a lane has ever written. The claim check asks which suite
+    // claims a recorded identity, and no suite claims one of these.
+    const at = await Deno.makeTempFile({ suffix: ".ndjson" });
+    await Deno.writeTextFile(
+      at,
+      [
+        JSON.stringify({
+          schema: 1,
+          line: "context",
+          reportId: "01ALIASTEST00000000000000",
+          repo: "commonfabric/labs",
+          commit: "c".repeat(40),
+          dirty: false,
+          env: "local",
+          os: "linux",
+          arch: "x86_64",
+          denoVersion: "2.9.4",
+          startedAt: "2026-08-17T21:00:00.000Z",
+        }),
+        JSON.stringify({
+          line: "record",
+          test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+          outcome: "pass",
+          durationMs: 92_000,
+        }),
+        JSON.stringify({
+          line: "record",
+          test: { k: "unit", s: "ci", n: "bakes" },
+          outcome: "pass",
+          durationMs: 1,
+        }),
+      ].join("\n") + "\n",
+    );
+    try {
+      const records = await readRecords(
+        [at],
+        new AliasResolver([{
+          date: "2026-08-18",
+          from: { k: "gate", s: "ci" },
+          to: { k: "unit", s: "oven" },
+        }, {
+          date: "2026-08-18",
+          from: { k: "unit", s: "ci" },
+          to: { k: "unit", s: "oven" },
+        }]),
+      );
+      // A report whose context does not parse has no day to resolve an
+      // alias against, which leaves every identity as written and would
+      // pass this case without the reading under test running at all.
+      expect(records[0]!.commit).toBe("c".repeat(40));
+      expect(records.map((record) => [record.test.k, record.test.s])).toEqual([
+        ["gate", "ci"],
+        // The test beside it takes its rename, so the resolver was live
+        // and the measurement is what went past it.
+        ["unit", "oven"],
+      ]);
     } finally {
       await Deno.remove(at);
     }

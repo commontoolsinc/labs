@@ -598,7 +598,9 @@ enumerates them and no lane can be asked to run one, so no suite has a
 unit for them and none should. `isLaneMeasurement` is what says so, and
 everything that reads a recorded identity asks it: the drift guard, the
 publisher, and the fold that carries the surfaces from one run to the
-next.
+next. Each asks it of the identity the lane wrote, before the alias file
+rewrites anything, so no line in that file can turn a lane's overhead
+into a test's score.
 
 Left out of everything scored, they are not discarded. The publisher
 keeps them in its rolling aggregate over `COST_WINDOW_DAYS`, the same
