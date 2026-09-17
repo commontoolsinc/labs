@@ -55,6 +55,12 @@ export interface UnnamedConnectorHandle {
   connection: string;
   piece: string;
   reason: string;
+
+  /** Operator action that addresses the refusal. */
+  remedy: string;
+
+  /** Whether the records establish a refusal or leave the handle unreadable. */
+  state: "degraded" | "unknown";
 }
 
 /** What the records yielded: the grants to seed, and what they left out. */
@@ -206,12 +212,20 @@ export const resolveConnectorGrants = (
     const handle = asRecord(entry);
     const connection = asNonEmptyString(handle?.connection_id) ?? "(unnamed)";
     const piece = asNonEmptyString(handle?.piece) ?? "(unnamed)";
-    const skip = (reason: string): void => {
-      unnamed.push({ connection, piece, reason });
+    const skip = (
+      reason: string,
+      remedy: string,
+      state: "degraded" | "unknown" = "degraded",
+    ): void => {
+      unnamed.push({ connection, piece, reason, remedy, state });
     };
     const ref = asNonEmptyString(handle?.handle_ref);
     if (ref === undefined) {
-      skip("the receipt records no `handle_ref` for it");
+      skip(
+        "the receipt records no `handle_ref` for it",
+        "Reconcile this connector in Loom, then restart the console.",
+        "unknown",
+      );
       continue;
     }
     let link;
@@ -222,6 +236,8 @@ export const resolveConnectorGrants = (
         `its \`handle_ref\` does not parse: ${
           error instanceof Error ? error.message : String(error)
         }`,
+        "Repair this connector's injection receipt in Loom, then restart the console.",
+        "unknown",
       );
       continue;
     }
@@ -240,6 +256,7 @@ export const resolveConnectorGrants = (
             `names no space to check it against`
           : `its \`handle_ref\` names space \`${link.space}\`, which is not the ` +
             `space the receipt was written for`,
+        "Reconcile the connector into the configured space, then restart the console.",
       );
       continue;
     }
@@ -248,18 +265,23 @@ export const resolveConnectorGrants = (
       skip(
         `\`${records.piecesJsonPath}\` declares no \`sqlite_sources\` entry ` +
           `for this piece and connection`,
+        "Declare this piece and connection in pieces.json sqlite_sources, reconcile, and restart the console.",
       );
       continue;
     }
     const classes = declaredClasses(source);
     if (classes.length === 0) {
-      skip("its declared table contract carries no CFC class");
+      skip(
+        "its declared table contract carries no CFC class",
+        "Declare the per-column ifc.confidentiality Resource class in this connector's sqlite_sources, then restart the console.",
+      );
       continue;
     }
     if (classes.length > 1) {
       skip(
         `its declared table contract carries ${classes.length} CFC classes ` +
           `(${classes.join(", ")}), so one name would not say what it holds`,
+        "Use a connector table contract with one declared CFC class per grant, then restart the console.",
       );
       continue;
     }
@@ -267,12 +289,14 @@ export const resolveConnectorGrants = (
     if (RESERVED_GRANT_NAMES.has(name)) {
       skip(
         `its declared CFC class \`${name}\` is a name the harness already grants`,
+        "Choose a CFC class distinct from the harness's reserved grant names, then restart the console.",
       );
       continue;
     }
     if (!HANDLE_NAME_PATTERN.test(name)) {
       skip(
         `its declared CFC class \`${name}\` is not a name a model may be handed`,
+        `Choose a CFC class matching ${HANDLE_NAME_PATTERN}, then restart the console.`,
       );
       continue;
     }
@@ -281,6 +305,7 @@ export const resolveConnectorGrants = (
       skip(
         `its declared CFC class \`${name}\` is already the grant connection ` +
           `\`${claimed}\` was named by`,
+        `Select the intended connection for the ${name} class in Loom, then restart the console.`,
       );
       continue;
     }

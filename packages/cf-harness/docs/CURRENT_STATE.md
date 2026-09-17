@@ -44,6 +44,11 @@ the model to make policy decisions.
 
 The current package provides:
 
+- a console operator snapshot at `GET /api/health/detail`, retaining launch
+  decisions for all connector grants and refusals alongside independently cached
+  Docker and index observations, with deciding records, timestamps, causes, and
+  remedies; unknown observations remain distinct from failures, and reading the
+  route never waits for a live probe;
 - durable Loom composition, exact inspection, and bounded receipt recovery over
   an explicitly configured host command transport; current-turn console results
   include verified authored Loom receipts and the submitted origin. See
