@@ -181,14 +181,21 @@ export interface NotifyingManager {
  * later pass.
  */
 export const replicaChanges = (manager: NotifyingManager): Edge => (wake) => {
+  // `done` is the protocol's own way off the list, and it is what detaches
+  // this edge from a manager that has no `unsubscribe`.
+  let attached = true;
   const subscription: IStorageNotification = {
     next: () => {
+      if (!attached) return { done: true };
       wake();
       return { done: false };
     },
   };
   manager.subscribe(subscription);
-  return () => manager.unsubscribe?.(subscription);
+  return () => {
+    attached = false;
+    manager.unsubscribe?.(subscription);
+  };
 };
 
 /**

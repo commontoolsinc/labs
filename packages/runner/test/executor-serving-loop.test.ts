@@ -169,8 +169,12 @@ describe("stage F serving loop", () => {
       onWaveCycle: cycles.record,
       onActivationSettled: (activatedSpace, outcome) =>
         activations.record({ space: activatedSpace, outcome }),
-      onSpaceParked: (parkedSpace, reason) =>
-        parks.record({ space: parkedSpace, reason }),
+      onSpaceParked: (parkedSpace, reason) => {
+        parks.record({ space: parkedSpace, reason });
+        if (parkObserverThrows) {
+          throw new Error("park observer failure (test-injected)");
+        }
+      },
     });
 
   /** Every wave cycle a tenure completes, every activation outcome, and
@@ -179,6 +183,8 @@ describe("stage F serving loop", () => {
   let cycles: ArrivalLog<unknown>;
   let activations: ArrivalLog<{ space: string; outcome: string }>;
   let parks: ArrivalLog<{ space: string; reason: string }>;
+  /** When set, the park report throws. */
+  let parkObserverThrows = false;
   /** Each survived renewal blip the loop reports to the memory server.
    * The renew arm is timer-driven, so this is the only edge it has. */
   let reacquires: ArrivalLog<void>;
@@ -199,6 +205,7 @@ describe("stage F serving loop", () => {
     servingRuntime = undefined;
     onServingRuntime = undefined;
     servingFetch = undefined;
+    parkObserverThrows = false;
     cycles = new ArrivalLog();
     activations = new ArrivalLog();
     parks = new ArrivalLog();
@@ -1924,6 +1931,29 @@ describe("stage F serving loop", () => {
     releaseExecutionLease(engine, { space, holder }); // no-op if released
     const rival = executionLeaseHolder("did:key:idle-rival");
     expect(acquireExecutionLease(engine, { space, holder: rival })).toBe(true);
+  });
+
+  it("parks even when the park report throws: the tenure is unregistered and whenParked resolves", async () => {
+    // The report is a test diagnostic, and the rest of the host's park
+    // handler unregisters the server; `whenParked` resolves after it.
+    host = newHost({ idleParkMs: 600_000 });
+    openClient();
+    const clientResult = clientRuntime.getCell<{ total: number }>(
+      space,
+      "park-observer-throw",
+      undefined,
+    );
+    await clientResult.sync();
+    await activated();
+    const spaceServer = host.spaceServer(space)!;
+    parkObserverThrows = true;
+    await spaceServer.park("test-park-observer");
+    await withStuckNet(
+      spaceServer.whenParked,
+      "the park to complete past a throwing observer",
+    );
+    await parks.matching((entry) => entry.reason === "test-park-observer");
+    expect(host.spaceServer(space)).toBeUndefined();
   });
 
   it("serves an effectful node behind request-hash memoization: miss fires ONCE via the outbox; recovery memo-hits; retries are input-driven (serving-loop.md §4–§6; T7.Q5, T10.Q4, OW7)", async () => {

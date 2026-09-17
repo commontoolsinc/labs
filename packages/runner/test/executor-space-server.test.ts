@@ -96,6 +96,7 @@ describe("stage G SpaceServer recovery seams", () => {
     spaceServer = undefined;
     cycles = new ArrivalLog();
     parks = new ArrivalLog();
+    retirements = new ArrivalLog();
   });
 
   afterEach(async () => {
@@ -110,6 +111,9 @@ describe("stage G SpaceServer recovery seams", () => {
   let cycles: ArrivalLog<void>;
   /** Every park, with its reason. */
   let parks: ArrivalLog<string>;
+  /** Each in-flight effect as the outbox retires it — the activation
+   * re-send retires its row without a wave, so no cycle reports it. */
+  let retirements: ArrivalLog<void>;
 
   const newSpaceServer = (
     options: {
@@ -148,6 +152,7 @@ describe("stage G SpaceServer recovery seams", () => {
       localSeqRef: { value: 0 },
       stats,
       onWaveCycle: cycles.record,
+      onEffectRetired: retirements.record,
       onParked: parks.record,
       policy: options.policy ?? { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
       ...(options.onParked !== undefined ? { onParked: options.onParked } : {}),
@@ -260,11 +265,12 @@ describe("stage G SpaceServer recovery seams", () => {
     const created = newSpaceServer();
     expect(await created.activate()).toBe(true);
 
-    // Delivered by the activation re-send itself — no wave ran (no
-    // input, no demand): delete the re-send call in activate() and this
-    // times out with the row still pending.
+    // Delivered by the activation re-send itself — no wave ran (no input,
+    // no demand), so the re-send's own retirement is the edge here and a
+    // cycle never comes. Delete the re-send call in activate() and this
+    // never returns with the row still pending.
     await awaitEach(
-      cycles,
+      retirements,
       () =>
         selectPendingExecutionOutboxRows(engine, { branch: "" }).length === 0,
     );

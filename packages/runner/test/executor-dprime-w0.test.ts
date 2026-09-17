@@ -288,8 +288,13 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
     // is driven from the admission feed, so a caller that has only
     // committed does not yet have one.
     await activated();
+    const spaceServer = host!.spaceServer(space)!;
+    // Poke only once the loop is waiting for input. A cycle already in
+    // flight ends after the note and would satisfy the wait below without
+    // the note's own pass having run.
+    await awaitEach(cycles, () => spaceServer.suspendedOnInput);
     const before = cycles.entries.length;
-    host!.spaceServer(space)!.noteDemandChanged();
+    spaceServer.noteDemandChanged();
     await cycles.reached(before + 1);
   };
 

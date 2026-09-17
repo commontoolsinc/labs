@@ -617,7 +617,16 @@ export class ExecutorHost {
           }
           : {}),
         onParked: (reason) => {
-          this.#options.onSpaceParked?.(space, reason);
+          try {
+            this.#options.onSpaceParked?.(space, reason);
+          } catch (error) {
+            // The rest of this handler unregisters the parked server, and
+            // `whenParked` resolves after it.
+            logger.warn("space-parked-observer-failed", () => [
+              `space ${space}: park observer threw`,
+              error,
+            ]);
+          }
           // Loop failure and initialization lease loss extend the backoff
           // streak; an idle park clears it. Other parks
           // that say nothing about the space's health — lease loss,
