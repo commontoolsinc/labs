@@ -1147,8 +1147,10 @@ describe("schema-view", () => {
       getLogger("schema-view").countsByKey["unselected-key-read"]?.warn ?? 0;
 
     /**
-     * Runs `body` over the value a read of `value` under `schema` gives, and
-     * returns how many unselected-key reads it counted.
+     * Reads `value` under `schema`, runs `body` over what the read gives, and
+     * returns how many unselected-key reads the two counted together. The
+     * window opens before the read: an eager read does all its work inside
+     * `get()`, so a window opened after it would see none of that.
      */
     const countedDuring = async (
       cause: string,
@@ -1159,8 +1161,8 @@ describe("schema-view", () => {
     ): Promise<number> => {
       const { tx, get } = (await seeded(cause, value, schema))(lazy);
       try {
-        const view = get() as Record<string, unknown>;
         const before = unselectedReads();
+        const view = get() as Record<string, unknown>;
         body(view);
         return unselectedReads() - before;
       } finally {
@@ -1183,6 +1185,10 @@ describe("schema-view", () => {
       const logger = getLogger("schema-view");
       const printed: unknown[][] = [];
       const warn = console.warn;
+      // With `LOG_TO_STDERR=1` the logger writes to stderr and never reaches
+      // `console.warn`, so the route is pinned for the length of the capture.
+      const stderrRoute = Deno.env.get("LOG_TO_STDERR");
+      Deno.env.set("LOG_TO_STDERR", "0");
       logger.disabled = false;
       console.warn = (...args: unknown[]) => {
         printed.push(args);
@@ -1198,6 +1204,8 @@ describe("schema-view", () => {
       } finally {
         console.warn = warn;
         logger.disabled = true;
+        if (stderrRoute === undefined) Deno.env.delete("LOG_TO_STDERR");
+        else Deno.env.set("LOG_TO_STDERR", stderrRoute);
       }
 
       const line = printed.find((args) => args.includes("unselected-key-read"));

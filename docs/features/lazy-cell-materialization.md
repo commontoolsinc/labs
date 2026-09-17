@@ -116,9 +116,10 @@ select is absent to a reader. A schema that names its properties and admits no
 others selects only those; one that admits additional properties selects an
 unnamed key too, and this section is not about it. A view returns `undefined`
 for an unselected key, which is what the object an eager read filters gives, and
-nothing at the read tells that apart from a key that is not there. A reader in that position has a schema that
-selects less than its body reads: one written by hand narrower than the code, or
-a builder's input schema shrunk past a read the capability analysis did not see.
+nothing at the read tells that apart from a key that is not there. A reader in
+that position has a schema that selects less than its body reads: one written by
+hand narrower than the code, or a builder's input schema shrunk past a read the
+capability analysis did not see.
 
 A view counts such a read as a warning on the `schema-view` logger, under the
 key `unselected-key-read`. The logger is disabled by default, so nothing prints
