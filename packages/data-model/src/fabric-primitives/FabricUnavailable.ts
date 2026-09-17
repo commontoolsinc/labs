@@ -156,6 +156,8 @@ export class FabricUnavailable extends BaseFabricPrimitive
       );
     }
 
+    let storedMessage: string | null = null;
+
     if (reason === UNAVAILABLE_REASONS.error) {
       if (
         (typeof errorKind !== "string") ||
@@ -174,6 +176,11 @@ export class FabricUnavailable extends BaseFabricPrimitive
           }`,
         );
       }
+      // A message equal to the kind's default is stored as none.
+      storedMessage =
+        (errorMessage === FabricUnavailable.#DEFAULT_ERROR_MESSAGES[errorKind])
+          ? null
+          : errorMessage;
     } else if ((errorKind !== null) || (errorMessage !== null)) {
       throw new Error(
         `Reason ${
@@ -184,10 +191,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
 
     this.#reason = reason;
     this.#errorKind = errorKind;
-    this.#errorMessage = ((errorKind !== null) &&
-        (errorMessage === FabricUnavailable.#DEFAULT_ERROR_MESSAGES[errorKind]))
-      ? null
-      : errorMessage;
+    this.#errorMessage = storedMessage;
   }
 
   //
