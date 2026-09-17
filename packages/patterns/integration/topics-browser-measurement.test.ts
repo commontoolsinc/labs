@@ -230,9 +230,61 @@ describe("topics-browser-measurement", () => {
           operation: () => Promise.resolve(),
         }),
       ).rejects.toThrow(
-        "undemanded: the measured operation produced no runs with a read sample",
+        "undemanded: the measured operation produced no runs with a read " +
+          "sample; declare `mayRunNothing` for an operation that may",
       );
       expect(await samplesLeftInPage()).toEqual([]);
+    });
+
+    it("returns a sample recording a zero for an operation declared to run nothing", async () => {
+      // The declaration permits a zero; it does not assert one. The case below
+      // checks the other half, that an operation which does run is attributed
+      // as usual under the same declaration.
+
+      const sample = await measureTopicsReads(session.page, {
+        label: "undemanded, declared",
+        program,
+        operation: () => Promise.resolve(),
+        mayRunNothing: true,
+      });
+
+      checkSample(sample, () => {
+        expect(sample.mayRunNothing).toBe(true);
+        expect(sample.lifts.map((lift) => lift.runs)).toEqual([0, 0, 0, 0]);
+        expect(sample.remaining.runs).toBe(0);
+        expect(sample.graph.after.nodes).toBeGreaterThan(0);
+      });
+    });
+
+    it("attributes the runs of an operation that does run, under the same declaration", async () => {
+      // A browser of its own, in which no other case has opened a topic: an
+      // operation already run in a page can run nothing, which is the very
+      // thing the declaration permits, and this case is about the other half —
+      // that declaring it does not suppress runs the operation does complete.
+
+      const fresh = await openFreshSession();
+      try {
+        const sample = await measureTopicsReads(fresh.page, {
+          label: "open topic and return, declared",
+          program,
+          operation: async () => {
+            await openTopmostTopic(fresh);
+            await returnToBoard(fresh);
+          },
+          mayRunNothing: true,
+        });
+
+        checkSample(sample, () => {
+          expect(sample.mayRunNothing).toBe(true);
+          expect(
+            sample.lifts.filter((lift) => lift.runs === 0).map((lift) =>
+              lift.name
+            ),
+          ).toEqual([]);
+        });
+      } finally {
+        await fresh.close();
+      }
     });
 
     it("throws the operation's own error and leaves no sample in the page", async () => {

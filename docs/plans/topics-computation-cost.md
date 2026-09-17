@@ -264,7 +264,11 @@ comment-count, or last-activity lifts, so there is no work of theirs to measure
 headlessly. The tier's thread cases run under a workload of their own,
 `aggregates`, which demands every topic's present comment count and last
 activity and nothing else. Measure cold initialization, warm updates, and reopen
-or reconnect separately. Hold runtime, source package, data, demand, and feature
+or reconnect separately. T0 measured reopen in the browser tier and not
+reconnect: the browser measurement helper fails when the runtime client is
+replaced, which a page reload and a transport reconnect both do, so the browser
+tier's `reopen` series re-opens a topic within one live client and a browser
+reconnect is unmeasured. Hold runtime, source package, data, demand, and feature
 flags constant between comparison arms; alternate repeated timing runs and
 report their distribution rather than a single favorable sample.
 
@@ -281,7 +285,10 @@ executions, graph size in nodes and edges, elapsed time, and available storage
 or memory measurements. The browser tier records body reads, graph size, and
 timings; attempt reads come from the headless tier, because the runtime client's
 read-stats request enables body accounting only. Count producer and consumer
-work separately but decide on the complete settled operation. Network claims
+work separately but decide on the complete settled operation. T0 measured the
+browser tier's reopen workload to run none of the pivot, backlink,
+comment-count, or last-activity lifts, so that one has no producer or consumer
+work to separate; its series records the zero rather than omitting it. Network claims
 require bytes/subscription measurements in addition to read accounting.
 
 T0 must set numeric baseline-derived acceptance limits before tuning candidates.

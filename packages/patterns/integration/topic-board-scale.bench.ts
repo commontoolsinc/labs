@@ -36,7 +36,10 @@ import { BoardSession } from "./topic-board-session.ts";
 import { waitForSettledText } from "./cfc-browser-helpers.ts";
 import {
   formatTopicsSample,
+  measureTopicsReads,
+  prepareTopicsProgram,
   timeTopicsOperation,
+  type TopicsProgram,
 } from "./topics-browser-measurement.ts";
 import { waitForPieceView } from "./topics-navigation-helpers.ts";
 
@@ -246,10 +249,55 @@ async function reachReopen(
 }
 
 /**
- * Sizes whose reopen sample has been written to stderr, so that each size
- * reports one and the rest of its iterations report none.
+ * The Topics program a read-accounted sample attributes its runs against,
+ * compiled on first use so a run whose sizes are all skipped compiles nothing.
+ */
+let compiling: Promise<TopicsProgram> | undefined;
+
+function topicsProgram(): Promise<TopicsProgram> {
+  compiling ??= prepareTopicsProgram();
+  return compiling;
+}
+
+/**
+ * Sizes whose reopen samples have been written to stderr, so that each size
+ * reports once and the rest of its iterations report nothing.
  */
 const reported = new Set<number>();
+
+/**
+ * Record a size's reopen with read accounting on, in a browser of its own so
+ * the session about to be timed reaches its starting point untouched.
+ *
+ * A reopen is expected to complete no run carrying a read sample, so the
+ * measurement is declared with `mayRunNothing` and what it records is a zero:
+ * each lift's row reading zero runs is the reading, and a reopen that begins
+ * doing lift work shows up here as rows rather than as an unexplained change in
+ * the timing beside it. The declaration permits that zero without asserting it,
+ * and reaches only that one outcome — runs this sample cannot attribute by
+ * position still fail it, as does a board whose pivot is not running.
+ */
+async function recordReopenReads(
+  topicCount: number,
+  fixture: TopicBoardFixture,
+): Promise<void> {
+  const session = await BoardSession.open({
+    fixture,
+    identity: await seedIdentity(PASSPHRASE),
+  });
+  try {
+    const operation = await reachReopen(session, fixture);
+    const sample = await measureTopicsReads(session.page, {
+      label: `reopen ${topicCount}, reads`,
+      program: await topicsProgram(),
+      operation,
+      mayRunNothing: true,
+    });
+    note(formatTopicsSample(sample).join("\n"));
+  } finally {
+    await session.close();
+  }
+}
 
 for (const topicCount of SIZES) {
   Deno.bench({
@@ -266,14 +314,6 @@ for (const topicCount of SIZES) {
     });
     try {
       const operation = await reachReopen(session, fixture);
-      // Timed rather than read-accounted: a reopen completes no run that
-      // `measureTopicsReads()` can attribute to a lift, so it refuses the
-      // sample. Graph size and timing are what a reopen has to report, and the
-      // sample below carries both; the browser tier's reads come from the
-      // navigation benchmark's `comment` and `backlink` segments. "The board
-      // scaling benchmark" in `docs/development/BENCHMARKS.md` records the
-      // boundaries that were measured to establish it.
-      //
       // A reopen may run nothing in the worker at all: on a 100-topic board
       // one iteration recorded a single `scheduler/run` span and later ones
       // recorded none, and on an eight-topic board a third visit to the same
@@ -288,6 +328,11 @@ for (const topicCount of SIZES) {
       if (!reported.has(topicCount)) {
         reported.add(topicCount);
         note(formatTopicsSample(sample).join("\n"));
+        // Paired with the interval above, and taken after it so the timing the
+        // benchmark reports carries none of the accounting's overhead. The
+        // timed half cannot see reads and, with telemetry off, cannot see a
+        // failed event commit either; this half records both.
+        await recordReopenReads(topicCount, fixture);
       }
     } finally {
       await session.close();

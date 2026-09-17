@@ -120,6 +120,9 @@ const BACKLINKS_HEADING = "Referenced by";
 /** The comment composer's field. A topic page holds one `cf-textarea`. */
 const COMMENT_FIELD = "cf-textarea";
 
+/** The thread's rendered rows, which are what a sent comment has to reach. */
+const COMMENT_ROW = "[data-comment-row]";
+
 /**
  * Text of the composer's send button, which is how the button is addressed: a
  * pattern's non-`data-*` props are assigned as JS properties rather than set as
@@ -375,10 +378,11 @@ const profileSurface = async (
 
 /**
  * Give the page's viewer a Profile, which is what enables the comment
- * composer: its field and its send button are both disabled until `#profile`
- * resolves to a named profile, and the wish renders its own create surface when
- * there is none. A Profile is durable, so a page that already has one is left
- * alone and only the first session of a run does any work here.
+ * composer's send button: it is disabled until `#profile` resolves to a named
+ * profile, and the wish renders its own create surface when there is none. The
+ * field beside it is not gated, so a draft can be typed either way and it is
+ * the send that waits. A Profile is durable, so a page that already has one is
+ * left alone and only the first session of a run does any work here.
  *
  * @throws If the page shows neither surface.
  */
@@ -442,7 +446,11 @@ async function reachComment(
   await waitForRuntimeIdle(navigation.page);
   return async () => {
     await clickButtonWithExactText(navigation.page, SEND_BUTTON);
-    await waitForSettledText(navigation.page, "body", body);
+    // The thread's own rows, because the comment reaching the thread is what
+    // the segment times. Against `body` the wait would answer to the text
+    // being anywhere on the page, and the same text was typed into the
+    // composer before the interval started.
+    await waitForSettledText(navigation.page, COMMENT_ROW, body);
   };
 }
 

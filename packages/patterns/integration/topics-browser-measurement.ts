@@ -224,6 +224,14 @@ export interface TopicsReadSample extends TopicsSampleBase {
 
   /** Successful event-commit markers. */
   readonly eventCommits: number;
+
+  /**
+   * Whether the caller declared that the operation may complete no run
+   * carrying a read sample. A sample with this set and no run recorded is a
+   * measured zero; without it such an operation fails instead, so the two are
+   * never confused for one another.
+   */
+  readonly mayRunNothing: boolean;
 }
 
 /** An operation timed with telemetry and read accounting off. */
@@ -261,6 +269,20 @@ export interface TopicsOperationOptions {
 export interface MeasureTopicsReadsOptions extends TopicsOperationOptions {
   /** The program compiled from the sources the board was seeded from. */
   readonly program: TopicsProgram;
+
+  /**
+   * Declares that the operation may complete no run carrying a read sample.
+   * Without it, such an operation fails; with it, the sample records the zero
+   * and says the caller declared it.
+   *
+   * It permits a zero rather than asserting one: an operation that does
+   * complete runs is attributed as usual, so a zero that stops being one shows
+   * up as rows rather than being suppressed. It also reaches only this one
+   * outcome. A run that carries a read sample but no position to attribute it
+   * by is a sample that cannot be read, not a legitimate zero, and fails
+   * whether or not this is declared.
+   */
+  readonly mayRunNothing?: boolean;
 }
 
 /** The part of a `Deno.bench` context that brackets a timed interval. */
@@ -384,7 +406,8 @@ async function compileTopicsProgram(
  *   decides, each of whose messages names its cause; if the runtime client is
  *   replaced, after read accounting and telemetry are turned off on the client
  *   they were enabled on; or if the operation completes no run with a read
- *   sample, fails an event commit, or raises a page error. When the operation
+ *   sample and the caller did not declare `mayRunNothing`, fails an event
+ *   commit, or raises a page error. When the operation
  *   throws and
  *   disabling accounting or releasing the sample also fails, an
  *   `AggregateError` holds the operation's error first. The sample's hold on
@@ -422,10 +445,11 @@ export async function measureTopicsReads(
       }
       const measuredRuns = Object.values(state.bySrc)
         .reduce((sum, totals) => sum + totals.runs, 0);
-      if (measuredRuns === 0) {
+      const mayRunNothing = options.mayRunNothing ?? false;
+      if (measuredRuns === 0 && !mayRunNothing) {
         throw new Error(
           `${options.label}: the measured operation produced no runs with a ` +
-            `read sample`,
+            "read sample; declare `mayRunNothing` for an operation that may",
         );
       }
 
@@ -469,6 +493,7 @@ export async function measureTopicsReads(
         remaining,
         runsWithoutReads: state.runsWithoutReads,
         eventCommits: state.eventCommits,
+        mayRunNothing,
         notes: [ACCOUNTING_ON_NOTE, ATTEMPT_READS_NOTE, TIMING_NOTE],
       };
     }, () => releaseSample(page, token));
@@ -605,7 +630,9 @@ export function formatTopicsSample(
     lines.push(row("remaining", sample.remaining, ""));
     lines.push(
       `  ${sample.runsWithoutReads} runs without a read sample; ` +
-        `${sample.eventCommits} event commits`,
+        `${sample.eventCommits} event commits${
+          sample.mayRunNothing ? ", declared that it may run nothing" : ""
+        }`,
     );
   } else {
     lines.push(

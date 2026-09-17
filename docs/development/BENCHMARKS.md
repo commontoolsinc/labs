@@ -251,8 +251,9 @@ measurement.
   the middle of the board is on no card or link the page is showing.
 
 The comment segment needs the viewer to have a Profile, since the composer's
-field and its send button are both disabled until `#profile` resolves to a named
-one. The first session of a run creates one through the wish's own create
+send button is disabled until `#profile` resolves to a named one. The field
+beside it is not gated, so the draft is typed either way and it is the send that
+waits. The first session of a run creates one through the wish's own create
 surface; later sessions find it already there. One wait tells those two states
 apart, so nothing races and nothing polls.
 
@@ -316,7 +317,9 @@ thing — a signed-in cold load, timed until every card has rendered — across
 board sizes of 100, 1000, and 10000, in a `topic board scale` group whose
 series are named for the sizes. The boards carry no crossrefs, so the numbers
 describe the cost of the list rather than of the join over it.
-`CF_TOPIC_BOARD_DEMAND=full` selects full-result seeding.
+`CF_TOPIC_BOARD_DEMAND=full` selects full-result seeding. The navigation
+fixture's citations and the scale fixture's lack of citations are distinct
+workloads, so their timings do not form a size-only comparison.
 
 A second series per size, named `reopen <size>`, measures a reopen for the
 browser tier of [the Topics computation
@@ -328,11 +331,13 @@ navigation benchmark's single board cannot answer. Reopening writes nothing, so
 both series of a size share its one seeded board, and a size skipped for one is
 skipped for the other.
 
-It charts a timed interval and writes one timed sample per size to stderr,
-carrying that operation's graph size and timing. Unlike the navigation
-benchmark's two new series it records no reads, and the reason is a measurement
-rather than a preference: **a reopen completes no run that
-`measureTopicsReads()` can attribute to a lift**, so it refuses the sample. On
+It charts a timed interval and writes two samples per size to stderr: the timed
+one, carrying that operation's graph size and timing, and a read-accounted one
+of the same operation, paired with it as the lunch-poll read-scaling benchmark
+pairs its diagnostic vote with its timed vote. What the read-accounted half
+records is a zero, and the zero is the finding: **a reopen completes no run that
+`measureTopicsReads()` can attribute to a lift**, so the sample declares
+`mayRunNothing` and carries a row per lift reading no runs. On
 eight-topic boards, seeded both with and without citations, the reopen completed
 no run carrying a read sample at all, where a first open of the same topic ran
 the pivot, that topic's backlinks and its comment count — about fifty scheduler
@@ -358,10 +363,13 @@ the return to the board on its own records that same single `lastActivityOf`
 run, with the same counters, while the reopen beside it records none. Widening
 the boundary that far would also charge this series for a board render, which
 the `<size>` series above already measures and which at a hundred topics costs
-an order of magnitude more than the reopen. So the reads the browser tier
-records come from `comment` and `backlink`. For this workload there are no
-producer or consumer reads to separate, and the plan's sentence asking for them
-does not hold.
+an order of magnitude more than the reopen. So what this series records is a
+zero, and it records it rather than omitting it: the sample declares
+`mayRunNothing` and carries a row per lift reading no runs, which is why a
+reopen that begins doing lift work shows up here as rows instead of as an
+unexplained shift in the timing beside it. What does not apply to this workload
+is separating producer from consumer work, there being no lift work to
+separate; [the plan](../plans/topics-computation-cost.md) records that.
 
 A reopen may run nothing in the worker at all, and the series declares
 `mayRunNothing` because that was observed rather than to quiet the check in
@@ -381,8 +389,6 @@ realm holding the sample altogether, and a transport-level reconnect needs a
 storage relay the Benchmarks workflow does not run. Cold initialization is
 measured separately, by the navigation benchmark's `load`, `sign in`, `board`
 and `open topic` segments, and a warm update by its `comment` segment.
-The navigation fixture's citations and the scale fixture's lack of citations
-are distinct workloads, so their timings do not form a size-only comparison.
 
 Only the 100-topic board runs today. The other two are declared and skipped,
 because a board of that size cannot be built:
@@ -423,10 +429,12 @@ browser tier of [the Topics computation
 plan](../plans/topics-computation-cost.md). A caller invokes it around the
 operation. Four benchmark series use it: `comment` and `backlink` in the
 navigation benchmark, and `reopen <size>` in the scale benchmark. Each charts
-the interval `timeTopicsOperation()` brackets. The first two additionally write
-one `measureTopicsReads()` sample of the same operation to `diagnostics.log`;
-`reopen` writes its timed sample instead, because a reopen completes no run for
-that call to attribute.
+the interval `timeTopicsOperation()` brackets, and each writes a
+`measureTopicsReads()` sample of the same operation to `diagnostics.log`
+alongside it. `reopen` declares `mayRunNothing` on that sample, because a reopen
+completes no run for the call to attribute and the zero is what it has to
+record; it writes its timed sample as well, for the graph and timing the
+read-accounted half's elapsed time cannot speak for.
 
 `measureTopicsReads()` turns telemetry and body read accounting on in the
 shell's runtime client, runs the operation, waits until the view has settled and
@@ -483,10 +491,16 @@ the module's file under any path. A `src` naming that file under another path,
 or the module itself under another root, fails the measurement instead.
 
 A measured operation fails when it completes no runs with a read sample, when an
-event commit fails, or when the page raises an error. It also fails when its
-runs cannot be attributed by position: when the runs with a read sample carry no
-source location, or when the board's pivot module is not running, since a
-measurement is taken on a page showing the board. A timed operation fails on a
+event commit fails, or when the page raises an error. The first of those is
+waived by declaring `mayRunNothing`, which permits a zero rather than asserting
+one: an operation that does complete runs is attributed as usual, and the sample
+records the declaration, so a measured zero is distinguishable from an operation
+nobody measured. It also fails when its runs cannot be attributed by position:
+when the runs with a read sample carry no source location, or when the board's
+pivot module is not running, since a measurement is taken on a page showing the
+board. Neither of those is waived — a run whose position cannot be read is a
+measurement that cannot be attributed rather than an absence of work, and
+`mayRunNothing` does not reach it. A timed operation fails on a
 page error, and when the worker's `scheduler/run` timing records no run, unless
 the caller declares with `mayRunNothing` that the operation may run nothing; the
 sample records that declaration. The count is of action runs the worker's
