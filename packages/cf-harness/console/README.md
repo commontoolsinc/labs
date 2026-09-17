@@ -727,9 +727,15 @@ principal a run writes with. Four functions are reachable, all of them reads:
 `listPatterns`, `listEvents`, `getPattern` and `searchPatterns`. Anything else —
 a publication, a recorded event — is refused by name before the index is
 touched, and the request the server sends is composed field by field rather than
-forwarded, so nothing extra survives the crossing. `getPattern` is called
-without `includeSource`: this surface shows metadata, schemas, dependencies and
-events, and a pattern's source is read through the CLI.
+forwarded, so nothing extra survives the crossing. `searchPatterns` uses the
+shared client's
+[successor resolution](../README.md#pattern-generations-in-search); the listing
+and exact-ID reads retain their individual generation records. Event badges
+count only that generation's own events. When the index supplies inherited
+evidence, the score separately identifies its inherited portion, predecessor,
+and publication cutoff. `getPattern` is called without `includeSource`: this
+surface shows metadata, schemas, dependencies and events, and a pattern's source
+is read through the CLI.
 
 The route sits under `/api/`, so it is behind the same `Host` gate as the rest.
 

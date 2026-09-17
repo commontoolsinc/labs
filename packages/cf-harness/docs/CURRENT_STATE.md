@@ -1,7 +1,7 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-09-16
+Last verified: 2026-09-17
 
 The [system map](system-map/README.md) moves in lockstep with this current-state
 reference.
@@ -336,15 +336,25 @@ The current package provides:
   space. It adds the `search_patterns` tool, which finds published patterns by
   hashtag or free text and reports each hit's kind, evidence quality,
   description, hashtags, usage signals, declared argument and result shapes, and
-  the `cf:pattern:<patternId>` import specifier that composes it. Free-text
-  search removes stopwords, matches whole words plus light suffix variants, and
-  is disjunctive: one content term may return a hit, so extra terms can admit
-  generic matches. `matchedTerms` and `queryTerms` count the stopword-free
-  terms. It also extends `run_pattern`, which takes exactly one of `sourceText`
-  and `patternId`: with a `patternId` the published program is fetched host-side
-  and compiled down the same path, and neither its source nor a compile
-  diagnostic quoting it reaches model context — the diagnostic is retained in
-  the run artifact instead. The run reports `instantiated` and then
+  the `cf:pattern:<patternId>` import specifier that composes it. The shared
+  client resolves same-owner `priorPatternId` chains from the discoverable
+  catalog and places the final generation once at the earliest matching rank,
+  including replacements outside the original result limit. Penalized final
+  generations are withheld; branches or cycles fail the affected search.
+  Exact-ID reads and existing imports keep their requested generation. Every
+  nonempty search refreshes catalog membership; immutable metadata is cached per
+  client. Index-supplied inherited signals retain their predecessor, publication
+  cutoff, counts, and score, so a proven tier need not mean that the current
+  generation has run. See
+  [Pattern generations in search](../README.md#pattern-generations-in-search).
+  Free-text search removes stopwords, matches whole words plus light suffix
+  variants, and is disjunctive: one content term may return a hit, so extra
+  terms can admit generic matches. `matchedTerms` and `queryTerms` count the
+  stopword-free terms. It also extends `run_pattern`, which takes exactly one of
+  `sourceText` and `patternId`: with a `patternId` the published program is
+  fetched host-side and compiled down the same path, and neither its source nor
+  a compile diagnostic quoting it reaches model context — the diagnostic is
+  retained in the run artifact instead. The run reports `instantiated` and then
   `run_succeeded` or `run_failed` back to the index through the session's
   pattern-index ledger: each write is sent behind the one before it, no tool
   call waits for it, and the session flushes the whole chain before the process

@@ -149,7 +149,11 @@ const stubIndex = (): IndexStub => {
     return Promise.resolve(
       new Response(
         JSON.stringify(
-          fn === "searchPatterns" ? { results: [SEARCH_HIT] } : PATTERN_RECORD,
+          fn === "searchPatterns"
+            ? { results: [SEARCH_HIT] }
+            : fn === "listPatterns"
+            ? { patterns: [], eventTypes: {} }
+            : PATTERN_RECORD,
         ),
         { status: 200 },
       ),
@@ -444,11 +448,14 @@ describe("prompt-loop pattern references", () => {
                 baseUrl: "https://index.test",
                 signer,
                 fetchFn: (input) => {
-                  indexCalls.push(String(input).split("/").pop() ?? "");
+                  const fn = String(input).split("/").pop() ?? "";
+                  indexCalls.push(fn);
                   return Promise.resolve(
                     new Response(
                       JSON.stringify(
-                        inspected
+                        fn === "listPatterns"
+                          ? { patterns: [], eventTypes: {} }
+                          : inspected
                           ? {
                             ...PATTERN_RECORD,
                             patternId,
@@ -572,7 +579,9 @@ describe("prompt-loop pattern references", () => {
         purpose: "orient",
         leads: inspected ? [] : [{ pattern: { patternId } }],
       });
-      expect(indexCalls).toEqual([inspected ? "getPattern" : "searchPatterns"]);
+      expect(indexCalls).toEqual(
+        inspected ? ["getPattern"] : ["searchPatterns", "listPatterns"],
+      );
       expect(researchTurns).toBe(2);
     });
   }
@@ -637,7 +646,11 @@ Use this as available evidence; do not assume it is mandatory.`,
 
     expect(result.subagentRuns).toBe(1);
     expect(result.childPrompt).toContain(SEARCH_HIT.patternId);
-    expect(result.indexCalls).toEqual(["searchPatterns", "getPattern"]);
+    expect(result.indexCalls).toEqual([
+      "searchPatterns",
+      "listPatterns",
+      "getPattern",
+    ]);
   });
 
   it("rehydrates an earlier search after the parent loop resumes", async () => {
@@ -646,7 +659,11 @@ Use this as available evidence; do not assume it is mandatory.`,
     expect(result.subagentRuns).toBe(1);
     expect(result.childPrompt).toContain(SEARCH_HIT.patternId);
     expect(result.delegateOutput.patternRefRefusals).toBeUndefined();
-    expect(result.indexCalls).toEqual(["searchPatterns", "getPattern"]);
+    expect(result.indexCalls).toEqual([
+      "searchPatterns",
+      "listPatterns",
+      "getPattern",
+    ]);
   });
 
   it("ignores malformed persisted search output while restoring later hits", async () => {
@@ -655,7 +672,11 @@ Use this as available evidence; do not assume it is mandatory.`,
     expect(result.subagentRuns).toBe(1);
     expect(result.childPrompt).toContain(SEARCH_HIT.patternId);
     expect(result.delegateOutput.patternRefRefusals).toBeUndefined();
-    expect(result.indexCalls).toEqual(["searchPatterns", "getPattern"]);
+    expect(result.indexCalls).toEqual([
+      "searchPatterns",
+      "listPatterns",
+      "getPattern",
+    ]);
   });
 
   it("rehydrates a pattern the task attached, which no turn searched for", async () => {
