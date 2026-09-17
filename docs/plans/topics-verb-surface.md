@@ -55,9 +55,10 @@ of a stored topic. Nine members, no verbs:
 | `[NAME]` | copied into each topic's mention-universe row, as the display name the editor's autocomplete matches on |
 | `shortName` | the card's badge, and the mention-universe row that `#42` matches |
 
-`[NAME]` is the one no card renders. `mentionableIndex` reads it off each
-topic and copies it into that topic's row of the board's mention universe,
-where it is the display name the editor's autocomplete lists and matches on.
+Neither the card nor the index row carries `[NAME]`. `mentionableIndex` reads
+it off each topic and copies it into that topic's row of the board's mention
+universe, where it is the display name the editor's autocomplete lists and
+matches on.
 
 Seven of the nine carry a default, and the two that do not are safe for
 different reasons rather than by oversight. `createdAt` is required: the topic
