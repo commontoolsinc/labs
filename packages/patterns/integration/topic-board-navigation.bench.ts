@@ -137,6 +137,23 @@ const PROFILE_CREATE_ACTION = "CreateProfile";
 /** The Profile name the comment segment's comments are filed under. */
 const VIEWER = "Topic board benchmark viewer";
 
+/**
+ * Topics the comment segment needs: one for its read-accounted sample, and one
+ * for each iteration including the warm-up.
+ */
+const COMMENT_TOPICS_NEEDED = 1 + WARMUP + ITERATIONS;
+
+// Checked here, above the seeding below, so a board sized through
+// `CF_TOPIC_BOARD_TOPICS` says so at once rather than after minutes of seeding
+// and several browsers, part-way through the segment that runs out.
+if (TOPIC_COUNT < COMMENT_TOPICS_NEEDED) {
+  throw new Error(
+    `The comment segment files one comment per iteration on a topic that has ` +
+      `none, so it needs ${COMMENT_TOPICS_NEEDED} topics and ` +
+      `CF_TOPIC_BOARD_TOPICS is ${TOPIC_COUNT}`,
+  );
+}
+
 const note = (message: string): void => {
   // Module-scope diagnostics reach the workflow's stderr copy directly. Bench
   // bodies do not: the JSON reporter captures their console output, so a body
@@ -255,10 +272,12 @@ function citedBy(index: number): number[] {
 
 /**
  * The topic the backlink segment opens: the one the most siblings cite, so the
- * segment measures the largest set of backlink rows this board produces. The
- * fixture spreads each citing topic's second citation over everything earlier,
- * so the winner is a topic around the middle of the board rather than one of
- * the newest few that cite.
+ * segment measures the largest set of backlink rows this board produces.
+ *
+ * Which topic that is depends on the board's size, because the fixture points
+ * each citing topic's first citation at its immediate predecessor and spreads
+ * the rest back over everything earlier. The check below is what holds it to
+ * the property the segment needs, rather than this comment naming a topic.
  */
 const BACKLINK_TOPIC = (() => {
   let chosen = -1;
@@ -306,23 +325,6 @@ if (crossrefTargets(BACKLINK_TOPIC, { topicCount: TOPIC_COUNT }).length > 0) {
  * comments.
  */
 let commented = 0;
-
-/**
- * Topics the comment segment needs: one for its read-accounted sample, and one
- * for each iteration including the warm-up.
- */
-const COMMENT_TOPICS_NEEDED = 1 + WARMUP + ITERATIONS;
-
-// Said before anything is seeded rather than when the segment runs out
-// part-way through, which a board sized through `CF_TOPIC_BOARD_TOPICS` can do
-// after minutes of seeding and several browsers.
-if (TOPIC_COUNT < COMMENT_TOPICS_NEEDED) {
-  throw new Error(
-    `The comment segment files one comment per iteration on a topic that has ` +
-      `none, so it needs ${COMMENT_TOPICS_NEEDED} topics and ` +
-      `CF_TOPIC_BOARD_TOPICS is ${TOPIC_COUNT}`,
-  );
-}
 
 /** The next uncommented topic of the comment board. */
 function nextCommentTopic(): number {
