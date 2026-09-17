@@ -5,11 +5,18 @@ names and what the deployment carries.
 
 The board gives each Topic a name of its own: a decimal number, dense from `1`,
 allocated when the Topic is filed and never reused. It is not a display name — a
-Topic's display name stays its title, and the number renders as a badge beside
-it. `addTopic` returns the name it allocated as `name` beside the created
-`topic`, and each Topic publishes its own as `shortName`, which the board's
-`index` rows and mention universe carry a copy of. So a survey reads every name
-in one bounded read:
+Topic's display name stays its title.
+
+The board shows no Topic's number for now. `SHOW_TOPIC_NUMBERS` in
+`packages/patterns/topics/topic.tsx` is off while only some Topics have one, so
+no Topic's header or board card shows a number, no mention pill shows one, and
+`#42` in a Topic's body editor offers nothing. The numbers themselves are
+unaffected: allocated, recorded, and resolvable as below. Wherever numbers are
+shown, one renders as a badge beside its Topic's title.
+
+`addTopic` returns the name it allocated as `name` beside the created `topic`,
+and each Topic publishes its own as `shortName`, which the board's `index` rows
+carry. So a survey reads every name in one bounded read:
 
 ```bash
 deno task cf cell get "$TOPICS_BOARD" index --step --select @,title,shortName

@@ -15,8 +15,16 @@ the rendered board read one derivation rather than two.
 The board also **names its members**. It owns a namespace of decimal names,
 dense from `1` and never reused, through the library in
 [`collection-naming/`](../collection-naming/README.md); a topic is cited as
-`top/42`, and the number renders as a badge beside its title rather than in
-place of it.
+`top/42`.
+
+**Topics shows no topic's number for now.** `SHOW_TOPIC_NUMBERS` in `topic.tsx`
+is off while only some topics have a number, so no topic's header or board card
+shows one, no mention pill shows one, and `#42` in a topic's body editor offers
+no topic. Only the showing is off: the board still allocates a number on every
+create and records it in `names`, `top/42` still resolves, and each topic still
+publishes its number as `shortName`, which the board's `index` rows carry.
+Wherever numbers are shown, a number renders as a badge beside its topic's title
+rather than in place of it.
 
 Topics reference each other. A reference is a **cell**, not a string: picking a
 completion in the body editor stores the destination piece itself, and a link
@@ -101,16 +109,19 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   `names: { "42": <topic> }`, written one key at a time and holding each topic
   as an unread reference, so surveying its keys expands no topic. A topic reads
   its own row out of the board's `namesTable` by identity and publishes the
-  result as `shortName` — one derivation — and the survey row, the mention
-  universe row, and a mention's pill all read that one property. `backfillNames`
-  names what the board held before it numbered anything, in filing order,
-  skipping what is already named; it writes the namespace and nothing else, so
-  on a board whose topics were filed past `addTopic` it has to be paired with a
-  one-time link-bind of `namesTable` onto each of them, the same operator step
-  `mentionable` states for itself. Until that bind the topic is named — `names`
-  and `namesTable` carry it — and its row still carries no name. `naming` is
-  what the board declares about those names, so a consumer reads the promise
-  rather than assuming one.
+  result as `shortName` — one derivation — and every reader reaches the number
+  through that one property. The survey row carries it whether or not numbers
+  are shown. The card badge and the mention universe row, which a mention's pill
+  and a `#42` query read, carry it only while `SHOW_TOPIC_NUMBERS` is on; while
+  it is off, the card shows no badge and the universe row carries the empty
+  name. `backfillNames` names what the board held before it numbered anything,
+  in filing order, skipping what is already named; it writes the namespace and
+  nothing else, so on a board whose topics were filed past `addTopic` it has to
+  be paired with a one-time link-bind of `namesTable` onto each of them, the
+  same operator step `mentionable` states for itself. Until that bind the topic
+  is named — `names` and `namesTable` carry it — and its row still carries no
+  name. `naming` is what the board declares about those names, so a consumer
+  reads the promise rather than assuming one.
 
   Every demand for that property is declared OPTIONAL rather than defaulted, and
   the spelling is what lets the whole graft be applied over a board deployed
@@ -131,7 +142,9 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   of every reader paying it on every load. The lift and its row type are shared
   with the collection-naming exemplar (`../collection-naming/mentionable.ts`):
   both boards derive their universe through the one derivation, so a member's
-  number reads the same on either.
+  number reads the same on either wherever it is shown. Topics passes
+  `withShortNames: SHOW_TOPIC_NUMBERS`, so while that is off every Topics row
+  carries the empty name.
 
   The reference is what a picked completion stores, and it is deliberately
   outside the demand a topic declares over the universe: a property that demand

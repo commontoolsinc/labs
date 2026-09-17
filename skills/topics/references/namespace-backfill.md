@@ -68,12 +68,12 @@ that before deciding anything this procedure says needs deciding.
    `deno task cf cell get /top/<n> title`, and reads back as an ordinary `index`
    row with no `shortName` and no damage to the array around it. So naming,
    `/top/<n>` addressing and index membership all survive the step being
-   skipped, and `shortName` — the badge, and the number on the index row — is
-   what is absent. That bounds what skipping costs from BELOW, not from above:
-   no run against a populated board has forced a Topic update, so what else a
-   completed one would change there is not known, and the record says so. Step
-   4's refusal on such a Topic is this state being enforced rather than an
-   error.
+   skipped, and `shortName` — the number on the index row, and the badge
+   wherever Topics shows numbers — is what is absent. That bounds what skipping
+   costs from BELOW, not from above: no run against a populated board has forced
+   a Topic update, so what else a completed one would change there is not known,
+   and the record says so. Step 4's refusal on such a Topic is this state being
+   enforced rather than an error.
 
 3. **`backfillNames` once**, through the board. It returns the names it wrote,
    in filing order, and is idempotent: a second run writes nothing and returns
@@ -82,6 +82,12 @@ that before deciding anything this procedure says needs deciding.
 4. **`deno task cf piece link` once per Topic that `addTopic` did not wire** —
    that is, per Topic that took step 2. A Topic that skipped it has no
    `boardNames` input to bind, and the bind says so.
+
+A finished run shows no number anywhere on the board. `SHOW_TOPIC_NUMBERS` in
+`packages/patterns/topics/topic.tsx` is off until every Topic has a number, and
+turning it on is a pattern update of its own and the team's decision, not an
+agent's. Reading a Topic's `shortName`, as the checks below do, works either
+way: a Topic publishes it whether or not it is shown.
 
 ### The two commands
 
