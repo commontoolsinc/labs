@@ -24,6 +24,7 @@ import {
   cfcSchemaToObject,
   findCfcSchemaRefs,
   hoistCfcSchemaDefs,
+  localDefinitionName,
   resolveCfcSchemaRef,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -832,19 +833,70 @@ export class ContextualFlowControl {
   }
 
   /**
-   * Whether `schema` declares a stream position: its outermost `asCell` entry
-   * is of kind `stream`. Such a position holds no value, and its handle is
-   * minted from the schema alone. A link's schema can ride as a
-   * content-addressed reference, and the declaration then lives on the
-   * document that reference names, so the reference is resolved first.
+   * Whether `schema` declares a stream position: the handle kind it declares
+   * ({@link declaredHandleKind}) is `stream`. Such a position holds no value,
+   * and its handle is minted from the schema alone.
    */
   static declaresStream(schema: JSONSchema | undefined): boolean {
-    const structural = isObjectNotArray(schema)
-      ? resolveExternalRootRefForStructure(schema as JSONSchemaObj)
-      : schema;
-    return ContextualFlowControl.getAsCellKind(
-      ContextualFlowControl.getAsCellValues(structural).at(0),
-    ) === "stream";
+    return ContextualFlowControl.declaredHandleKind(schema) === "stream";
+  }
+
+  /**
+   * The kind of handle `schema` declares at its root, read through a root
+   * `$ref` — external or into the schema's own `$defs` — and through a
+   * composition whose branches agree: `allOf` declares what any of its
+   * branches declares, and `anyOf`/`oneOf` what every branch declares, since
+   * the value may be any of them. `undefined` where nothing is declared, or
+   * where the branches disagree, or where a reference does not resolve.
+   *
+   * `root` is the document local `$ref`s resolve against; it defaults to
+   * `schema`, which a link's schema is self-contained enough for
+   * (`schemaAtPath` keeps the reachable `$defs` closure on it). A reference
+   * into a `$defs` the root does not carry declares nothing, quietly: this is
+   * asked of every position a read passes, and most carry no such closure.
+   */
+  static declaredHandleKind(
+    schema: JSONSchema | undefined,
+    root: JSONSchema | undefined = schema,
+    seen: Set<object> = new Set(),
+  ): CellKind | undefined {
+    if (!isObjectOrArray(schema) || seen.has(schema)) return undefined;
+    seen.add(schema);
+    schema = resolveExternalRootRefForStructure(schema);
+    const direct = ContextualFlowControl.getAsCellKind(
+      ContextualFlowControl.getAsCellValues(schema).at(0),
+    );
+    if (direct !== undefined) return direct;
+    if (typeof schema.$ref === "string") {
+      return ContextualFlowControl.declaredHandleKind(
+        localDefinition(root, schema.$ref),
+        root,
+        seen,
+      );
+    }
+    const agreed = (
+      branches: unknown,
+      every: boolean,
+    ): CellKind | undefined => {
+      if (!Array.isArray(branches) || branches.length === 0) return undefined;
+      let kind: CellKind | undefined;
+      for (const branch of branches) {
+        const declared = ContextualFlowControl.declaredHandleKind(
+          branch as JSONSchema,
+          root,
+          seen,
+        );
+        if (declared === undefined) {
+          if (every) return undefined;
+          continue;
+        }
+        if (kind !== undefined && kind !== declared) return undefined;
+        kind = declared;
+      }
+      return kind;
+    };
+    return agreed(schema.allOf, false) ?? agreed(schema.anyOf, true) ??
+      agreed(schema.oneOf, true);
   }
 
   static getAsCellScope(
@@ -916,6 +968,26 @@ export class ContextualFlowControl {
     }
     return cap;
   }
+}
+
+/**
+ * The definition a `#/$defs/<name>` reference names in `root`, or `undefined`
+ * for any other reference or a name `root` does not define. Looked up
+ * directly rather than through {@link ContextualFlowControl.resolveSchemaRefs}
+ * so that a miss stays silent.
+ */
+function localDefinition(
+  root: JSONSchema | undefined,
+  ref: string,
+): JSONSchema | undefined {
+  const name = localDefinitionName(ref);
+  if (name === undefined || !isObjectOrArray(root)) return undefined;
+  const defs = root.$defs;
+  if (!isObjectOrArray(defs) || !Object.hasOwn(defs, name)) return undefined;
+  const definition = (defs as Record<string, unknown>)[name];
+  return isObjectOrArray(definition) || typeof definition === "boolean"
+    ? definition as JSONSchema
+    : undefined;
 }
 
 /**

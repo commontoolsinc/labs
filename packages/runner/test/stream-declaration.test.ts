@@ -300,6 +300,38 @@ describe("stream declaration", () => {
 
       expect(isStream(view.bump)).toBe(true);
     });
+
+    for (const mode of ["eager", "lazy"] as const) {
+      it(
+        `hands a reader offering both a cell and a stream the stream, on ${
+          mode === "lazy" ? "a lazy" : "an eager"
+        } read`,
+        async () => {
+          // A view node's prop schema is this union. The plain-cell branch is a
+          // mismatch against a stream, which leaves the stream branch to apply;
+          // committing to the first handle branch would drop the handler.
+          const { cell } = await runProgram(COUNTER, `counter-union-${mode}`);
+          const tx = rt.edit();
+          if (mode === "lazy") tx.markLazyMaterialize(true);
+          const view = cell.withTx(tx).asSchema({
+            type: "object",
+            properties: {
+              count: { type: "number" },
+              bump: {
+                anyOf: [
+                  { type: "string" },
+                  { asCell: ["cell"] },
+                  { asCell: ["stream"] },
+                ],
+              },
+            },
+          } as JSONSchema).get() as unknown as { bump: unknown };
+
+          expect(isStream(view.bump)).toBe(true);
+          tx.abort();
+        },
+      );
+    }
   });
 
   describe("a required stream the data does not name", () => {

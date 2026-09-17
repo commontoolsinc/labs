@@ -758,16 +758,9 @@ function propertyDeclaresStream(
   const property = isObjectNotArray(resolved.properties)
     ? resolved.properties[name] as JSONSchema | undefined
     : undefined;
-  if (ContextualFlowControl.declaresStream(property)) return true;
-  // Only a reference can declare more than the property shows by itself.
-  if (!isObjectNotArray(property) || typeof property.$ref !== "string") {
-    return false;
-  }
-  const atPath = ContextualFlowControl.getSchemaAtPath(resolved, [name]);
-  return isObjectOrArray(atPath) &&
-    ContextualFlowControl.declaresStream(
-      ContextualFlowControl.resolveSchemaRefs(atPath),
-    );
+  // `resolved` is the document a `$ref` in the property resolves against.
+  return ContextualFlowControl.declaredHandleKind(property, resolved) ===
+    "stream";
 }
 
 /**
