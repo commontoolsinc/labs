@@ -26,6 +26,7 @@ import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema"
 import {
   formatExternalSchemaRef,
 } from "@commonfabric/data-model-schema/schema-refs";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "../src/builder/types.ts";
 import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
@@ -1003,8 +1004,8 @@ describe("resolveCfcSchemaRef() on a cyclic-group member", () => {
     for (const [hash, document] of documents) {
       registerSchemaDocument(hash, document);
       if (
-        typeof document === "object" && document !== null &&
-        typeof document.$defs === "object" && document.$defs !== null &&
+        isObjectOrArray(document) &&
+        isObjectOrArray(document.$defs) &&
         Object.hasOwn(document.$defs, "Node")
       ) {
         memberRef = formatExternalSchemaRef(hash, "Node");

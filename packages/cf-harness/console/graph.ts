@@ -15,6 +15,7 @@
 
 import type { ConsoleDisclosure, ConsoleHandle, ConsoleStep } from "./steps.ts";
 import { renderCellReference } from "@commonfabric/runner/shared";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { HANDLE_TOKEN_PATTERN } from "../src/contracts/handle-table.ts";
 import { type ConsoleCellLabels, foldCellLabels } from "./cell-labels.ts";
 import { parseConsoleReference } from "./reference.ts";
@@ -130,7 +131,7 @@ const linkDocument = (value: unknown): string | undefined => {
 /** The short name of a CFC atom, which is the last segment of its type URL. */
 const atomNames = (clauses: readonly unknown[] = []): string[] =>
   clauses.flatMap((clause) => {
-    const type = typeof clause === "object" && clause !== null
+    const type = isObjectOrArray(clause)
       ? (clause as { type?: unknown }).type
       : undefined;
     return typeof type === "string" ? [type.split("/").pop() ?? type] : [];
@@ -169,9 +170,7 @@ const allAtoms = (step: ConsoleStep): string[] => {
 };
 
 const asRecord = (value: unknown): Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  isObjectNotArray(value) ? value as Record<string, unknown> : {};
 
 const asString = (value: unknown): string | undefined =>
   typeof value === "string" && value !== "" ? value : undefined;

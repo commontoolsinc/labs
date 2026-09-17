@@ -23,6 +23,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
 import { type AppView, urlToAppView } from "@commonfabric/navigation";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 // The reader `cf cell get` takes an address through, which is what a citation
 // the view offers has to satisfy. The CLI's package exports only its command
@@ -125,7 +126,7 @@ function captureErrors(): { lines: string[]; restore: () => void } {
  * name nothing binds: the first is `[undefined]` and the second is `[]`.
  */
 function templateBindings(value: unknown, name: string): unknown[] {
-  if (value == null || typeof value !== "object") return [];
+  if (!isObjectOrArray(value)) return [];
   if (Array.isArray(value)) {
     return value.flatMap((entry) => templateBindings(entry, name));
   }

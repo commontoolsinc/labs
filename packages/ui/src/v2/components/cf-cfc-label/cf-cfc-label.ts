@@ -1,4 +1,5 @@
 import type { CfcLabelView } from "@commonfabric/runtime-client";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { css, html } from "lit";
 
 import { BaseElement } from "../../core/base-element.ts";
@@ -27,14 +28,14 @@ const LABEL_KEYS = [
 ] as const satisfies readonly LabelKey[];
 
 const hasLabelQuery = (value: unknown): value is CfcLabelQueryableValue =>
-  typeof value === "object" && value !== null &&
+  isObjectOrArray(value) &&
   "getCfcLabel" in value &&
   typeof (value as { getCfcLabel?: unknown }).getCfcLabel === "function";
 
 const hasLabelSubscription = (
   value: unknown,
 ): value is CfcLabelSubscribableValue =>
-  typeof value === "object" && value !== null &&
+  isObjectOrArray(value) &&
   "subscribe" in value &&
   typeof (value as { subscribe?: unknown }).subscribe === "function";
 
@@ -42,7 +43,7 @@ const stableObjectEntries = (value: Record<string, unknown>) =>
   Object.keys(value).sort().map((key) => [key, value[key]] as const);
 
 const atomObjectField = (value: unknown, field: string): string | undefined => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isObjectNotArray(value)) {
     return undefined;
   }
   const candidate = (value as Record<string, unknown>)[field];
@@ -120,7 +121,7 @@ export const formatCfcLabelAtom = (value: unknown): string => {
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+  if (isObjectNotArray(value)) {
     return JSON.stringify(Object.fromEntries(
       stableObjectEntries(value as Record<string, unknown>),
     ));

@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import {
   classifyArrayMethodCall,
@@ -864,8 +865,7 @@ function createCauseExpression(
 function isStreamCause(
   cause: ForCause,
 ): cause is { readonly stream: string | CausePath } {
-  return typeof cause === "object" && cause !== null &&
-    !Array.isArray(cause) && "stream" in cause;
+  return isObjectNotArray(cause) && "stream" in cause;
 }
 
 function shouldUseStreamCause(

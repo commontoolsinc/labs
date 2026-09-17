@@ -12,17 +12,17 @@
  * measured. The gathering and the posting are in
  * `tasks/post-main-report.ts`.
  *
- * Five properties keep this on the right side of the wall's rule that
- * reporting is about the system and never about individuals, and each is
- * a constraint on what is written here rather than an observation about
- * it. The comment's subject is a commit and a test, and no author is
- * named. Nothing is counted per author, per team, or per anything, and
- * no history is kept anywhere. A test the selector declined to run is
- * described as coverage this design traded away, because the author did
- * not miss it. A test the store has seen disagreeing with itself is
- * labelled as one, with the evidence behind the label. And every note
- * says what to do, in a comment that is edited in place rather than
- * repeated.
+ * Five properties keep this on the right side of the dashboard's rule
+ * that reporting is about the system and never about individuals, and
+ * each is a constraint on what is written here rather than an
+ * observation about it. The comment's subject is a commit and a test,
+ * and no author is named. Nothing is counted per author, per team, or
+ * per anything, and no history is kept anywhere. A test the selector
+ * declined to run is described as coverage this design traded away,
+ * because the author did not miss it. A test the store has seen
+ * disagreeing with itself is labelled as one, with the evidence
+ * behind the label. And every note says what to do, in a comment that
+ * is edited in place rather than repeated.
  */
 
 import {
@@ -37,6 +37,7 @@ import {
   coverageMetricGroupName,
   coverageMetricMeasuredSet,
 } from "../ci-check-lib.ts";
+import { isLaneMeasurement } from "../lane-measurement.ts";
 import type { WithheldReason } from "./manifest.ts";
 import {
   COVERAGE_COMMENT_LINES,
@@ -70,12 +71,21 @@ export type RunOutcomes = ReadonlyMap<string, Verdict>;
 /** Uncovered lines per coverage metric, as a run measured them. */
 export type CoverageFigures = ReadonlyMap<string, number>;
 
-/** Folds a run's records into one verdict per identity. */
+/**
+ * Folds a run's records into one verdict per identity, leaving out the
+ * lane's measurements of itself.
+ *
+ * A lane writes what its setup and each of its batches cost through the
+ * record machinery every test uses, and a batch that ended badly is
+ * written as a failure. Those are not tests, and what this feeds is a
+ * comment about tests.
+ */
 export function outcomesOf(
   records: Iterable<TestRecord>,
 ): Map<string, Verdict> {
   const seen = new Map<string, { pass: boolean; fail: boolean }>();
   for (const record of records) {
+    if (isLaneMeasurement(record.test)) continue;
     const key = testIdentityKey(record.test);
     const already = seen.get(key) ?? { pass: false, fail: false };
     if (record.outcome === "pass") already.pass = true;

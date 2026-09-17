@@ -13,6 +13,7 @@ import {
   SCHEMA_META_MEMBER,
   schemaMetaRefHashes,
 } from "@commonfabric/data-model-schema/schema-refs";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
   applySqliteCommitWrite,
@@ -2615,7 +2616,7 @@ WHERE branch = :branch AND id LIKE :prefix AND op != 'delete'
     // must SKIP, never TypeError-wedge activate/park/drain/wave-close.
     const storedEntries = Array.isArray(value.entries) ? value.entries : [];
     const entries = storedEntries.filter((entry) =>
-      entry !== null && typeof entry === "object" &&
+      isObjectOrArray(entry) &&
       typeof entry.eventId === "string" &&
       entry.consequenced !== true &&
       (typeof entry.seq === "number" ? entry.seq > eventWatermark : true)
@@ -2686,12 +2687,11 @@ WHERE branch = :branch AND id = :id AND op != 'delete'
       scopeKey: head.scope_key,
     });
     const value = state?.document?.value as SessionEffectsDocValue | undefined;
-    if (value === null || typeof value !== "object" || value === undefined) {
+    if (!isObjectOrArray(value)) {
       continue;
     }
     const storedEntries = Array.isArray(value.entries) ? value.entries : [];
-    const acks = value.acks !== null && typeof value.acks === "object" &&
-        !Array.isArray(value.acks)
+    const acks = isObjectNotArray(value.acks)
       ? value.acks as Record<string, unknown>
       : {};
     const ackedNonces = new Set(
@@ -2700,7 +2700,7 @@ WHERE branch = :branch AND id = :id AND op != 'delete'
         .map(([nonce]) => nonce),
     );
     const remainingEntries = storedEntries.filter((entry) =>
-      entry !== null && typeof entry === "object" &&
+      isObjectOrArray(entry) &&
       typeof entry.nonce === "string" && !ackedNonces.has(entry.nonce)
     );
     const remainingNonces = new Set(
@@ -2864,7 +2864,7 @@ const refuseMalformedAuthoredStreamWrites = (
     if (operation.op === "set") {
       const value = operation.value?.value;
       if (
-        value !== null && typeof value === "object" &&
+        isObjectOrArray(value) &&
         "entries" in (value as Record<string, unknown>) &&
         !Array.isArray((value as { entries?: unknown }).entries)
       ) {
@@ -3157,7 +3157,7 @@ const validateEventAppends = (
     }
 
     for (const { entry, stamp } of located) {
-      if (entry === null || typeof entry !== "object") {
+      if (!isObjectOrArray(entry)) {
         throw new ProtocolError(
           `stream doc "${operation.id}" appended a non-entry value ` +
             "(events.md §1)",
@@ -3231,7 +3231,7 @@ const validateEventAppends = (
         );
       }
       if (
-        entry.stream === null || typeof entry.stream !== "object" ||
+        !isObjectOrArray(entry.stream) ||
         typeof entry.stream.id !== "string" ||
         !Array.isArray(entry.stream.path)
       ) {
@@ -3435,9 +3435,7 @@ const validateEventAppends = (
  * (payload included) stays SHARED by reference. */
 const spineCloneEntryList = (entries: readonly unknown[]): unknown[] =>
   entries.map((entry) =>
-    entry !== null && typeof entry === "object" && !Array.isArray(entry)
-      ? { ...(entry as Record<string, unknown>) }
-      : entry
+    isObjectNotArray(entry) ? { ...(entry as Record<string, unknown>) } : entry
   );
 
 /** Clone exactly the SPINE the stamping mutates: the operation object,
@@ -3540,7 +3538,7 @@ const stampEventAppendOperation = <
 const isEffectIntentShaped = (
   value: unknown,
 ): value is EffectIntentEntry =>
-  value !== null && typeof value === "object" &&
+  isObjectOrArray(value) &&
   typeof (value as EffectIntentEntry).nonce === "string" &&
   (value as EffectIntentEntry).kind === "navigate";
 
@@ -3588,7 +3586,7 @@ const transformEffectsDocOperation = <
   keys: { branch: BranchName; scopeKey: string | undefined },
 ): Op => {
   const hasIntent = (value: unknown, depth: number): boolean => {
-    if (depth > 8 || value === null || typeof value !== "object") return false;
+    if (depth > 8 || !isObjectOrArray(value)) return false;
     if (isEffectIntentShaped(value)) return true;
     if (Array.isArray(value)) {
       return value.some((item) => hasIntent(item, depth + 1));
@@ -3621,7 +3619,7 @@ const transformEffectsDocOperation = <
     const storedValue = state?.document?.value as
       | SessionEffectsDocValue
       | undefined;
-    if (storedValue !== null && typeof storedValue === "object") {
+    if (isObjectOrArray(storedValue)) {
       const entries = Array.isArray(storedValue?.entries)
         ? storedValue.entries
         : [];
@@ -3635,7 +3633,7 @@ const transformEffectsDocOperation = <
 
   const cloned = structuredClone(operation) as Op;
   const stamp = (value: unknown, depth: number): void => {
-    if (depth > 8 || value === null || typeof value !== "object") return;
+    if (depth > 8 || !isObjectOrArray(value)) return;
     if (isUnstampedEffectIntent(value)) {
       (value as { issuedIn: number | null }).issuedIn = seq;
       return;
@@ -4240,7 +4238,7 @@ const valueAtOperationPath = (
       }
       value = value[index];
     } else if (
-      value !== null && typeof value === "object" &&
+      isObjectOrArray(value) &&
       Object.hasOwn(value, part)
     ) {
       value = (value as Record<string, FabricValue>)[part];
@@ -4327,7 +4325,7 @@ function validateOperationPath(path: unknown): asserts path is ValuePath {
 }
 
 const validateCursor = (cursor: unknown): cursor is OpCursor =>
-  cursor !== null && typeof cursor === "object" &&
+  isObjectOrArray(cursor) &&
   Number.isSafeInteger((cursor as { epoch?: unknown }).epoch) &&
   (cursor as { epoch: number }).epoch > 0 &&
   Number.isSafeInteger((cursor as { version?: unknown }).version) &&
@@ -4362,9 +4360,7 @@ const validateApplyOperation = (operation: ApplyOpOperation): void => {
   ) {
     throw new OpCodecError("operation payload exceeds the byte limit");
   }
-  const updates = operation.payload !== null &&
-      typeof operation.payload === "object" &&
-      !Array.isArray(operation.payload)
+  const updates = isObjectNotArray(operation.payload)
     ? (operation.payload as { updates?: unknown }).updates
     : undefined;
   if (Array.isArray(updates) && updates.length > MAX_OPERATION_BATCH_UPDATES) {
@@ -5340,7 +5336,7 @@ const applyCommitTransaction = (
   // guarantee; readers resolve it through the realm registry and fail
   // closed when they cannot.
   const collectLinkSchemaRefs = (content: unknown): void => {
-    if (content === null || typeof content !== "object") return;
+    if (!isObjectOrArray(content)) return;
     mapLinkSchemas(content as FabricValue, (schema) => {
       for (
         const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
@@ -5373,7 +5369,7 @@ const applyCommitTransaction = (
   // declared above the schema-reference collector so the two stay one
   // scan.
   const collectCfcEnvelopeRef = (metadata: unknown): void => {
-    if (metadata === null || typeof metadata !== "object") return;
+    if (!isObjectOrArray(metadata)) return;
     const schemaHash = (metadata as { schemaHash?: unknown }).schemaHash;
     if (typeof schemaHash === "string" && schemaHash.length > 0) {
       requiredSchemaRefs.add(schemaHash);
@@ -5383,7 +5379,7 @@ const applyCommitTransaction = (
     if (!Array.isArray(entries)) return;
     for (const entry of entries) {
       const label = (entry as { label?: unknown } | null)?.label;
-      if (label === null || typeof label !== "object") continue;
+      if (!isObjectOrArray(label)) continue;
       const keys = Object.keys(label);
       const ref = (label as { $ref?: unknown }).$ref;
       if (keys.length !== 1 || typeof ref !== "string") continue;
@@ -5692,7 +5688,7 @@ const applyCommitTransaction = (
   // resolving a malformed one would fail closed on every read of the
   // envelope, so the shape is refused here, where the writer can act on it.
   const isLabelDocumentShape = (value: unknown): boolean =>
-    value !== null && typeof value === "object" && !Array.isArray(value) &&
+    isObjectNotArray(value) &&
     Object.entries(value).every(([key, member]) =>
       (key === "confidentiality" || key === "integrity") &&
       Array.isArray(member)
@@ -6218,8 +6214,7 @@ const maintainStreamEventWatermarks = (
     // derived commit's apply transaction.
     const entries = (Array.isArray(value.entries) ? value.entries : [])
       .filter(
-        (entry): entry is StreamEventEntry =>
-          entry !== null && typeof entry === "object",
+        (entry): entry is StreamEventEntry => isObjectOrArray(entry),
       );
     const stored = typeof value.eventWatermark === "number"
       ? value.eventWatermark
@@ -6488,10 +6483,7 @@ const validateCommitPreconditions = (
   for (const precondition of commit.preconditions ?? []) {
     // Wire input: validate the shape deterministically so malformed entries
     // surface as ProtocolError instead of a TypeError-turned-TransactionError.
-    if (
-      precondition === null || typeof precondition !== "object" ||
-      Array.isArray(precondition)
-    ) {
+    if (!isObjectNotArray(precondition)) {
       throw new ProtocolError("malformed commit precondition: not an object");
     }
     switch (precondition.kind) {

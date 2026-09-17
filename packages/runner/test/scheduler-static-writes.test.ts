@@ -2,7 +2,6 @@ import {
   getLogger,
   getLoggerCountsBreakdown,
 } from "@commonfabric/utils/logger";
-import { hasDependentPath } from "../src/scheduler/dependency-graph.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import { forEachOverlappingWriter } from "../src/scheduler/scheduling-writes.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
@@ -716,7 +715,7 @@ describe("static write surface demand", () => {
   });
 });
 
-describe("dependency graph reachability", () => {
+describe("overlapping writers", () => {
   it("stops overlapping-writer scans early for recursive and shallow reads", () => {
     const first: Action = function firstOverlappingWriter() {};
     const second: Action = function secondOverlappingWriter() {};
@@ -752,23 +751,5 @@ describe("dependency graph reachability", () => {
       );
       expect(visited).toEqual([first]);
     }
-  });
-
-  it("handles a 20k-deep cyclic graph without recursive stack growth", () => {
-    const depth = 20_000;
-    const actions = Array.from(
-      { length: depth + 1 },
-      () => (() => {}) as Action,
-    );
-    const unreachable = (() => {}) as Action;
-    const dependents = new WeakMap<Action, Set<Action>>();
-
-    for (let index = 0; index < depth; index++) {
-      dependents.set(actions[index], new Set([actions[index + 1]]));
-    }
-    dependents.set(actions[depth], new Set([actions[depth / 2]]));
-
-    expect(hasDependentPath(dependents, actions[0], actions[depth])).toBe(true);
-    expect(hasDependentPath(dependents, actions[0], unreachable)).toBe(false);
   });
 });

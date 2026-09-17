@@ -491,7 +491,7 @@ function storageManagerCloseNow(
   storageManager: unknown,
 ): (() => Promise<unknown>) | undefined {
   if (
-    typeof storageManager === "object" && storageManager !== null &&
+    isObjectOrArray(storageManager) &&
     "closeNow" in storageManager
   ) {
     const closeNow = Reflect.get(storageManager, "closeNow");
@@ -1156,7 +1156,7 @@ async function searchTextMatches(
     }
     const current = next.value.value;
 
-    if (current !== null && typeof current === "object" && isCell(current)) {
+    if (isObjectOrArray(current) && isCell(current)) {
       if (!isReadableCell(current)) continue;
 
       try {
@@ -1202,7 +1202,7 @@ async function searchTextMatches(
       }
     }
 
-    if (current === null || typeof current !== "object") {
+    if (!isObjectOrArray(current)) {
       if (
         typeof current !== "function" &&
         foldedSearchTextContains(String(current), query)
@@ -2189,7 +2189,7 @@ async function tryResolvePieceCallableAt(
  */
 function probeForcedStreamCell(cell: any, name: string): any | null {
   if (
-    typeof cell !== "object" || cell === null ||
+    !isObjectOrArray(cell) ||
     typeof cell.asSchema !== "function"
   ) {
     return null;
@@ -4027,7 +4027,7 @@ export async function linkPieces(
       // Check source path resolves
       let current: any = sourceData;
       for (const segment of resolvedSourcePath) {
-        if (current == null || typeof current !== "object") {
+        if (!isObjectOrArray(current)) {
           errors.push(
             `Source path "${
               resolvedSourcePath.join("/")
@@ -4083,7 +4083,7 @@ export async function linkPieces(
       );
       let current: unknown = targetData;
       for (const segment of resolvedTargetPath) {
-        if (current == null || typeof current !== "object") {
+        if (!isObjectOrArray(current)) {
           current = undefined;
           break;
         }

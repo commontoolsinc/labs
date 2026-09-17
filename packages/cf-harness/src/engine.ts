@@ -20,6 +20,7 @@ import {
   mergeCfcLabelViews,
 } from "@commonfabric/runner/cfc";
 import { mergeLabel } from "@commonfabric/runner/cfc/label-view-core";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
   createFileSystemHarnessArtifactStore,
@@ -464,8 +465,7 @@ export interface BuiltinToolInvocationResult<
 }
 
 const isToolOutputWithId = (value: unknown): value is ToolOutputWithId =>
-  typeof value === "object" &&
-  value !== null &&
+  isObjectOrArray(value) &&
   "outputId" in value &&
   typeof value.outputId === "string";
 
@@ -2609,6 +2609,7 @@ export class CfHarnessEngine {
       researchGoal: this.#runState.researchGoal,
       ...(researchTaskCfcLabel !== undefined ? { researchTaskCfcLabel } : {}),
       patternRefs: this.#runState.patternRefs ?? [],
+      inputCells: this.#runState.inputCells ?? [],
       recordResearchRun: (run: HarnessResearchRunSummary) => {
         this.recordResearchRun(run);
       },

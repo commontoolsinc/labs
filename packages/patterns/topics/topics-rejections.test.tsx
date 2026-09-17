@@ -54,19 +54,12 @@ export default pattern(() => {
     legacyBoard.addTopic.send({ title: "must not land", agentName: " " });
   });
 
-  // One unnamed topic, filed straight into the list past `addTopic` and
-  // link-bound to the board's table — the state an operator leaves behind
-  // before a backfill. Both halves earn their place: without the topic there
-  // is nothing a backfill could name, and without the wiring its row reads no
-  // name whether one was written or not.
+  // One unnamed topic, filed straight into the list past `addTopic` — the
+  // state an operator leaves behind before a backfill. Without it there is
+  // nothing a backfill could name, and the assertion that the namespace stayed
+  // empty would hold however the guard behaved.
   const action_file_an_unnamed_topic = action(() => {
-    legacyTopics.push(
-      Topic({
-        title: "Unnamed",
-        createdAt: 1,
-        boardNames: legacyBoard.namesTable,
-      }),
-    );
+    legacyTopics.push(Topic({ title: "Unnamed", createdAt: 1 }));
   });
 
   // backfillNames: blank agentName. It writes the namespace rather than a
@@ -398,15 +391,15 @@ export default pattern(() => {
 
   // The refused backfill wrote no name, which is the half a throw alone does
   // not prove: the verb rejects before it reaches the namespace. The board
-  // holds one unnamed topic, link-bound to its table, so a backfill that ran
-  // would write `1` and the row would show it. Removing the verb's guard reds
-  // every clause here: the count moves only if the create's rejection also
-  // stopped landing, the namespace gains the key the run wrote, and the row
-  // follows the namespace through the member's own wiring.
+  // holds one unnamed topic, so a backfill that ran would write `1` and the
+  // table would name it. Removing the verb's guard reds every clause here: the
+  // count moves only if the create's rejection also stopped landing, the
+  // namespace gains the key the run wrote, and the table follows the
+  // namespace.
   const assert_unnamed_topic_went_unnamed = assert(() =>
     legacyBoard.topicCount === 1 &&
     Object.keys(legacyNames.get()).length === 0 &&
-    legacyBoard.index?.[0]?.shortName === undefined
+    (legacyBoard.namesTable ?? []).length === 0
   );
 
   return {

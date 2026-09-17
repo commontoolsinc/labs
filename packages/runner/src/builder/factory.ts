@@ -21,6 +21,7 @@ import {
   FabricHash,
   FabricKeyPair,
   FabricRegExp,
+  FabricUnavailable,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
   all as rowLabelAll,
@@ -349,6 +350,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     FabricBytes,
     FabricRegExp,
     FabricKeyPair,
+    FabricUnavailable,
     FabricError,
 
     // Debug stringifiers (helpers exposed for pattern code)

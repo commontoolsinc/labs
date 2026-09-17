@@ -24,6 +24,7 @@ import {
   type OperationFieldSnapshot,
   type RuntimeClient,
 } from "@commonfabric/runtime-client";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 export type CodeMirrorOperationPayload = {
   updates: Array<{
@@ -111,14 +112,14 @@ export function codeMirrorSubmission(
 
 const decodePayload = (payload: unknown): Update[] => {
   if (
-    payload === null || typeof payload !== "object" ||
+    !isObjectOrArray(payload) ||
     !Array.isArray((payload as { updates?: unknown }).updates)
   ) {
     throw new Error("CodeMirror operation payload requires an updates array");
   }
   return (payload as { updates: unknown[] }).updates.map((value) => {
     if (
-      value === null || typeof value !== "object" ||
+      !isObjectOrArray(value) ||
       typeof (value as { clientId?: unknown }).clientId !== "string"
     ) {
       throw new Error("CodeMirror operation update requires a clientId");

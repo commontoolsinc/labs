@@ -12,7 +12,7 @@
  * so the query can tighten the runtime's ceiling and never widen it.
  */
 
-import { isObjectNotArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { CfcConfClause } from "./clause.ts";
 import { isOrClause } from "./clause.ts";
@@ -73,7 +73,7 @@ const isCeilingAtom = (value: unknown): boolean =>
 // runtime's effective ceiling after validation. `structuredClone` drops the
 // aliases; the walk freezes every object and array the clone holds.
 const deepFreeze = <T>(value: T): T => {
-  if (value !== null && typeof value === "object") {
+  if (isObjectOrArray(value)) {
     for (const inner of Object.values(value as Record<string, unknown>)) {
       deepFreeze(inner);
     }

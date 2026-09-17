@@ -22,6 +22,7 @@
 
 import { hashOf } from "@/value-hash.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 // Doc-shaped test data, mirroring the default-app integration:
 // a note doc (~30 nodes) and a home-list doc holding N note entries.
@@ -52,7 +53,7 @@ function makeHomeDoc(noteCount: number): Record<string, unknown> {
 
 /** Recursively Object.freeze without populating the deep-frozen cache. */
 function plainRecursiveFreeze(value: unknown): void {
-  if (value === null || typeof value !== "object") return;
+  if (!isObjectOrArray(value)) return;
   for (const child of Object.values(value as object)) {
     plainRecursiveFreeze(child);
   }

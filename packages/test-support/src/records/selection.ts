@@ -1,6 +1,6 @@
 /**
  * The test-selection manifest: what the publisher writes, what a lane
- * reads to decide what to run, and what the wall reads to show what
+ * reads to decide what to run, and what the dashboard reads to show what
  * selection is doing. It holds every identity the store knows, what each
  * is worth, what each costs, what was withheld and why, and a reference
  * packing into lanes.
@@ -15,6 +15,7 @@
  * artifact.
  */
 
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { type TestIdentity, testIdentityKey } from "./schema.ts";
 
 /** The inputs behind one identity's score, as a manifest records them. */
@@ -80,7 +81,7 @@ export const SELECTION_AREA = "v1";
  * Every reader uses this one figure. A reader looking back further than
  * another would obey a manifest the other passed over, and two readers
  * obeying different manifests is what the whole store is arranged to
- * avoid: a wall would then report a figure no pull request obeys.
+ * avoid: a dashboard would then report a figure no pull request obeys.
  */
 export const MANIFESTS_LOOKED_BACK = 8;
 
@@ -338,7 +339,7 @@ export function digestIdentities(keys: Iterable<string>): string {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return isObjectNotArray(value);
 }
 
 function isFiniteNumber(value: unknown): value is number {

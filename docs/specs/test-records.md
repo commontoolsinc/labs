@@ -103,6 +103,15 @@ every file to the one program that resolved it. The run's program-wide
 parse and bind belongs to no pattern and is in none of them, which is why
 those durations sum to less than the run takes.
 
+A duration says how long the test takes only where the execution passed.
+A failure ended where the failure was reached. Where a wait's safety net
+ended it, the figure is that net's bound rather than anything about the
+test. Every consumer that reports or fits a duration therefore reads
+passing records alone, the selection fold's cost samples, the report's
+over-sixty-seconds list and the dashboard's daily mean among them. Run,
+failure and skip counts read every record, which is what those counters
+are for.
+
 For a suite ingested from a JUnit report, `file` comes from one of two
 places and the second overrides the first. Deno names a case's class after
 the module that registered the test, so the case a `describe` registers
@@ -195,6 +204,30 @@ pull request coverage gate, which reads the coverage artifacts of every
 job in its own run, and the nightly audit over the CFC property corpus,
 which reads what the step before it wrote. A gate resolving a merge base
 against a base ref is not, and records normally.
+
+One thing that is not a test is recorded anyway: a lane measuring
+itself. A lane measures its own setup and each of its batches through
+the record machinery every test uses, so those measurements arrive as
+ordinary records and travel the path a test's records travel. They are
+written on kind `gate`, scope `ci`, with a name opening `ci-lane `, and
+they carry no variant whatever the batch they measure carried. Nothing
+enumerates them, nothing scores them, and no lane can be asked to run
+one.
+
+Their figures are not all durations. A lane writes three measurements
+per batch — what it spent, what it was packed to spend, and how many
+units it opened — and the record format carries one number and calls it
+a duration, so which of the three a record holds is decided by its name.
+A batch that ended badly is written as a failure, and a test in it
+failing is enough to end it badly.
+
+A consumer that builds anything per test excludes them first: pass
+rates, durations, a run's verdict per test, the sixty-second list, and
+the scores a pull request selects from. `isLaneMeasurement` in
+`@commonfabric/test-support/records` is what recognizes one, and it is
+asked of the identity the lane wrote, before any alias is resolved, so
+that a line in the alias file cannot decide whether a measurement enters
+a test's history.
 
 A test another workflow already records against the same commit is not
 recorded a second time. One execution of one test is one record, so a
@@ -483,8 +516,12 @@ which the full run on the default branch catches.
 Every test completes within 60 seconds in CI, not counting setup; most
 take milliseconds. Anything that cannot is a container to split into the
 tests it actually contains. `tasks/test-records-report.ts` lists the
-identities over the rule, and its `--gate` flag is the ratchet, advisory
-until the list is short enough to enforce. A test that wedges rather than
+identities over the rule from their passing executions, and its `--gate`
+flag is the ratchet, advisory until the list is short enough to enforce.
+The list is over tests: a lane's measurement of one of its batches is not
+one, however long that batch ran. A test that wedges rather than
 finishing slowly records no duration; wedges surface through job
 failures, and the incremental producers bound what a wedged job loses to
-its unflushed lines.
+its unflushed lines. An identity with no passing execution in the window
+has no duration either, and is absent from the list for the same reason.
+A test that fails every time it runs surfaces through the job it fails.

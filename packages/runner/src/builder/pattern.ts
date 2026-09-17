@@ -902,7 +902,7 @@ function assignComputedCellKinds(
       out.add(target.export().cell);
       return;
     }
-    if (target === null || typeof target !== "object") return; // Primitives hold no roots.
+    if (!isObjectOrArray(target)) return; // Primitives hold no roots.
     // A shared value can be bound at multiple schema positions with different
     // capabilities. Deduplicate only the same value/schema pair: deduplicating
     // by value alone can let an earlier read-only path suppress a later

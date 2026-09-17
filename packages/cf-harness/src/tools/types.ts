@@ -22,6 +22,7 @@ import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
 import type { HarnessDocsCorpus } from "../docs-corpus/corpus.ts";
 import type { HarnessResearchRunSummary } from "../contracts/research.ts";
 import type { HarnessPatternRef } from "../contracts/pattern-refs.ts";
+import type { HarnessInputCell } from "../contracts/input-cells.ts";
 import type { HarnessResearchRunner } from "../research/runner.ts";
 import type { HarnessHandleTable } from "../contracts/handle-table.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
@@ -117,6 +118,9 @@ export interface HarnessToolContext {
 
   /** Pattern attachments resolved by the host before the first model turn. */
   patternRefs?: readonly HarnessPatternRef[];
+
+  /** Explicit input-cell attachments established for the calling run. */
+  inputCells?: readonly HarnessInputCell[];
 
   /** Adds one admitted kit and its trusted records to durable run state. */
   recordResearchRun?(run: HarnessResearchRunSummary): void | Promise<void>;

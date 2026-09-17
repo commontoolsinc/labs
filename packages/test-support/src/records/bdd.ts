@@ -36,6 +36,7 @@ import {
   describe as realDescribe,
   it as realIt,
 } from "@std/testing/bdd/real";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   activeCapture,
   NAME_SEPARATOR,
@@ -86,7 +87,7 @@ const ROOT_SUITE_NAME = "global";
 export function nameOf(args: readonly unknown[]): string | undefined {
   for (const arg of args) {
     if (typeof arg === "string") return arg;
-    if (typeof arg === "object" && arg !== null) {
+    if (isObjectOrArray(arg)) {
       const named = (arg as { name?: unknown }).name;
       if (typeof named === "string") return named;
       const fn = (arg as { fn?: unknown }).fn;
@@ -109,7 +110,7 @@ export function bodyOf(
     if (typeof arg === "function") {
       return { index, body: arg as AnyFunction };
     }
-    if (typeof arg === "object" && arg !== null) {
+    if (isObjectOrArray(arg)) {
       const fn = (arg as { fn?: unknown }).fn;
       if (typeof fn === "function") {
         return { index: -1, body: fn as AnyFunction };
@@ -131,11 +132,11 @@ type Hook = <T>(fn: (this: T) => void | Promise<void>) => void;
  */
 function namedChain(args: readonly unknown[]): readonly string[] | undefined {
   for (const arg of args) {
-    if (typeof arg !== "object" || arg === null) continue;
+    if (!isObjectOrArray(arg)) continue;
     const own = chains.get(arg);
     if (own !== undefined) return own;
     const suite = (arg as { suite?: unknown }).suite;
-    if (typeof suite !== "object" || suite === null) continue;
+    if (!isObjectOrArray(suite)) continue;
     const named = chains.get(suite);
     if (named !== undefined) return named;
   }
@@ -181,7 +182,7 @@ function withBody(
     return next;
   }
   return args.map((arg) =>
-    typeof arg === "object" && arg !== null &&
+    isObjectOrArray(arg) &&
       typeof (arg as { fn?: unknown }).fn === "function"
       ? { ...arg, fn: body }
       : arg
@@ -210,7 +211,7 @@ export function wrapDescribe(through: AnyFunction): AnyFunction {
     const result = found === undefined
       ? through(...args)
       : through(...withBody(args, found.index, inChain(own, found.body)));
-    if (typeof result === "object" && result !== null) {
+    if (isObjectOrArray(result)) {
       chains.set(result, own);
     }
     return result;

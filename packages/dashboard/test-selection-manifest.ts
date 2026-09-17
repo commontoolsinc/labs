@@ -6,7 +6,7 @@
  * validator whole.
  *
  * A store that cannot be read, and a body that is not a manifest, are
- * faults, and are raised as such: the wall grays a tile whose collection
+ * faults, and are raised as such: the dashboard grays a tile whose collection
  * throws and puts the reason under it. Reporting nothing is reserved for a
  * store that holds no manifest, which is the one case where "none has been
  * published" is true.
@@ -16,13 +16,13 @@
  * reader is settled: the store creates objects and never overwrites one,
  * so that body is what the name holds and a later read gets the same
  * answer. It carries its own type, so a reader can record it and stop
- * fetching the object, and so the wall can say which shape it found
+ * fetching the object, and so the dashboard can say which shape it found
  * rather than the phrase it gives a source that went quiet. Every other
  * refusal stays a plain fault and is read again.
  *
  * `writtenAhead` is what separates the two, and every reader of this
  * store asks it rather than comparing a declared shape against a bound of
- * its own, so a wall passing over a body and a validator refusing one
+ * its own, so a dashboard passing over a body and a validator refusing one
  * cannot come to disagree. A body from a shape this reader does read and
  * still cannot parse is a broken object rather than one from further
  * ahead, and is read again.
@@ -95,7 +95,7 @@ export class ManifestSchemaError extends Error {
 
   constructor(name: string, schema: number) {
     const reason = `store holds schema ${schema}, ` +
-      `this wall reads ${MANIFEST_SCHEMA_VERSION}`;
+      `this dashboard reads ${MANIFEST_SCHEMA_VERSION}`;
     super(`manifest ${name}: ${reason}`);
     this.#reason = reason;
   }

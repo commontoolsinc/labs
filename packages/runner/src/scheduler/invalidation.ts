@@ -258,8 +258,10 @@ export interface MarkInvalidOptions {
    * and an armed debounce or throttle readiness is released (the
    * convergence backoff stays). Held behind its debounce, a retry would run
    * only when a live demander armed the expiry wake, and a one-shot `pull()`
-   * has none once it resolves. A re-queue that waited on nothing — a local
-   * inconsistency, a transport error — keeps its gates: there the debounce
+   * has none once it resolves. An empty reactive rejection also bypasses
+   * gates when the node or instance has no accepted result yet, or has no
+   * live demander to wake it. Live nodes with accepted results, other local
+   * inconsistencies, and transport errors keep their gates: there the debounce
    * is the spacing between the re-run and the local writer it raced.
    *
    * Consumed by the scheduler facade's invalid-setter (`#markActionInvalid`),

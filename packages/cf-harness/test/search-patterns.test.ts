@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { Identity } from "@commonfabric/identity";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../src/pattern-index/client.ts";
@@ -339,15 +340,13 @@ describe("search-patterns", () => {
   it("describes deployed stopword-free disjunctive matching", () => {
     const schema = searchPatternsTool.descriptor.inputSchema;
     if (
-      typeof schema !== "object" || schema === null ||
+      !isObjectOrArray(schema) ||
       schema.type !== "object" || schema.properties === undefined
     ) {
       throw new Error("expected `search_patterns` object input schema");
     }
     const text = schema.properties.text;
-    const description = typeof text === "object" && text !== null
-      ? text.description
-      : undefined;
+    const description = isObjectOrArray(text) ? text.description : undefined;
 
     expect(description).toContain("stopword-free");
     expect(description).toContain("whole words");

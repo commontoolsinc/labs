@@ -12,6 +12,7 @@
  * with 4014.
  */
 
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { Status, Tile, TileView } from "../types.ts";
 import { escapeHtml, multiSparkline, thin } from "../lib.ts";
 import { dashboardCacheFile } from "../history-files.ts";
@@ -22,6 +23,11 @@ const SNAPSHOT_TIMEOUT_MS = 12_000;
 
 // Intents: GUILDS (1) | GUILD_MEMBERS (2) | GUILD_PRESENCES (256).
 const INTENTS = 259;
+
+// What the identify frame calls this client, which Discord records against the
+// connection. It names one client among the several a bot token can carry, and
+// nothing here reads it back.
+const CLIENT_NAME = "commonfabric-dashboard";
 
 // Online members carrying either exact role name are counted as team. "Team
 // Member" is the former name of the "Team" role.
@@ -41,7 +47,7 @@ type Point = { t: number; team: number; visitors: number };
 const history: Point[] = [];
 
 const isPoint = (p: unknown): p is Point =>
-  typeof p === "object" && p !== null &&
+  isObjectOrArray(p) &&
   typeof (p as Point).t === "number" &&
   typeof (p as Point).team === "number" &&
   typeof (p as Point).visitors === "number";
@@ -186,7 +192,11 @@ function takeSnapshot(token: string, guildId: string): Promise<Snapshot | null> 
           d: {
             token,
             intents: INTENTS,
-            properties: { os: "linux", browser: "fabric-wall", device: "fabric-wall" },
+            properties: {
+              os: "linux",
+              browser: CLIENT_NAME,
+              device: CLIENT_NAME,
+            },
           },
         }));
         return;

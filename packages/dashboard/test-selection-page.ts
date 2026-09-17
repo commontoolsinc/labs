@@ -1,9 +1,9 @@
 /**
  * The page behind the two selection tiles. The tiles carry one number each,
- * which is all a wall glanced at from across a room can hold; everything a
- * person wants once that number has caught their eye is here, at full width
- * and with nothing abbreviated: how close each of a pull request's lanes is
- * to its budget, and every test held back from those lanes together with the
+ * which is all a dashboard glanced at from across a room can hold; everything a
+ * person wants once that number has caught their eye is here, at full width and
+ * with nothing abbreviated: how close each of a pull request's lanes is to its
+ * budget, and every test held back from those lanes together with the
  * measurement that held it back.
  *
  * Following the dashboard's values (README.md): it reports on the system. It

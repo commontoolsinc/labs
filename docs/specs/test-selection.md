@@ -237,11 +237,11 @@ the recent part of its counts.
 
 Above `FLAKE_EXCLUSION_RATE` an identity leaves the selectable set
 entirely: it is too noisy to judge a change by. It keeps running on the
-default branch, it appears on the wall, and the exclusion reverses on its
-own as those runs stop disagreeing, which is what makes this better than a
-quarantine list somebody has to remember to empty. Reversing on evidence
-takes one thing of the default branch in return, which [what the default
-branch does with an excluded
+default branch, it appears on the dashboard, and the exclusion reverses
+on its own as those runs stop disagreeing, which is what makes this
+better than a quarantine list somebody has to remember to empty.
+Reversing on evidence takes one thing of the default branch in return,
+which [what the default branch does with an excluded
 identity](#what-the-default-branch-does-with-an-excluded-identity) sets
 out.
 

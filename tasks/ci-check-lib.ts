@@ -10,6 +10,8 @@
 // Config (from environment)
 //
 
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 export const REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "commonfabric/labs";
 
 /** Where the repository is hosted; a workflow run names it. */
@@ -773,7 +775,7 @@ export function parseCacheStateFiles(
 
     const record = parsed as Partial<CacheStateRecord> | null;
     if (
-      record === null || typeof record !== "object" ||
+      !isObjectOrArray(record) ||
       typeof record.family !== "string" ||
       typeof record.shard !== "string" ||
       typeof record.matchedKey !== "string" ||

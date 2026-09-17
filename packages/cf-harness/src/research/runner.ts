@@ -29,6 +29,7 @@ import {
   confidentialityOnlyIfcLabel,
 } from "../contracts/cfc-model-context.ts";
 import type { TrustedPatternRecord } from "../contracts/trusted-pattern.ts";
+import type { HarnessInputCell } from "../contracts/input-cells.ts";
 import type { HarnessModelToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type {
   HarnessAssistantTranscriptMessage,
@@ -41,6 +42,8 @@ import {
 import type { HarnessDocsCorpus } from "../docs-corpus/corpus.ts";
 import { findSectionPassage, rankSections } from "../docs-corpus/sections.ts";
 import { errorMessage } from "../error-message.ts";
+import { inputCellsContextMessage } from "../input-cells.ts";
+import { PIECE_TARGETING_GUIDANCE } from "../piece-targeting.ts";
 import type {
   HarnessModelAttemptDiagnostic,
   HarnessModelClient,
@@ -141,6 +144,9 @@ export interface HarnessResearchRequest {
 
   /** General handles visible to the calling run. */
   handleTokens: readonly string[];
+
+  /** Explicit attachments; only their operator names and tokens reach the model. */
+  inputCells?: readonly HarnessInputCell[];
 
   /** Safe shape-only description of one general handle. */
   describeHandle?: (token: string) => Promise<DescribeHandleResearchResult>;
@@ -511,6 +517,7 @@ const systemPrompt = (purpose?: HarnessResearchPurpose): string =>
       ? "Answer the question in the context of the user goal and prior findings. Read enough to be accurate, then return the explanation, code, or invocation that resolves it. Let the question determine the scope."
       : "Produce the smallest complete recipe for the requested implementation using only the supplied tools.",
     "This is CF documentation, skills, pattern-index, source, dependency, and handle research; it is not web research.",
+    PIECE_TARGETING_GUIDANCE,
     "Search for the next unresolved fact. Search results are leads, not proof of applicability. Read exact evidence only when it changes the decision; do not keep searching after the question is answered.",
     "A long section or source file is never represented by its first chunk alone. Follow nextOffset with another exact read whenever the needed answer could continue later.",
     "Use the pattern index and available data to find a short path to the goal. Prefer composing suitable existing pieces; describe the smallest missing reusable capability when authoring is needed. If the approach becomes large or tangled, reconsider the component boundaries and data contracts before expanding it. One source file per component does not mean one component for the entire goal.",
@@ -578,6 +585,12 @@ const userPrompt = (
     request.handleTokens.length > 0
       ? request.handleTokens.join("\n")
       : "No general handles are available.",
+    ...(request.inputCells === undefined ? [] : [
+      "",
+      "Explicit input-cell attachment context for the calling run:",
+      inputCellsContextMessage(request.inputCells),
+      "An attached piece's token can be passed directly to read_piece_source by the pattern-author; a result-shaped schema does not require finding another identity through the registry.",
+    ]),
     ...(canonicalGuides.length > 0
       ? [
         "Canonical authoring references (use list_doc_sections or search_docs to select useful passages):",

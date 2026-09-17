@@ -29,6 +29,7 @@ import type {
   SpaceAclCapability,
   SpaceAclView,
 } from "@commonfabric/runtime-client";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   css,
   html,
@@ -153,7 +154,7 @@ export function isStreamHandle(value: unknown): value is CellHandle {
 
 /** The raw `{ $stream: true }` marker a schema-less read can surface. */
 function isRawStreamMarker(value: unknown): boolean {
-  return typeof value === "object" && value !== null &&
+  return isObjectOrArray(value) &&
     (value as { $stream?: unknown }).$stream === true;
 }
 
@@ -204,7 +205,7 @@ function toDisplay(
   // `toCompactDebugString()` instead of descended. The value arrives intact --
   // the connection carries it as a `codec-realm` encoding, class and all -- so
   // this walk is the only place it is lost.
-  if (typeof value === "object" && value !== null) {
+  if (isObjectOrArray(value)) {
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
       if (depth === 0 && VIEW_KEYS.has(key)) continue;
@@ -1837,9 +1838,7 @@ export class CFPieceMenu extends BaseElement {
       argument: this.#argumentCell,
     };
     const scan = (value: unknown, source: "result" | "argument") => {
-      if (
-        typeof value !== "object" || value === null || Array.isArray(value)
-      ) return;
+      if (!isObjectNotArray(value)) return;
       const declared = this.#schemaProperties(parents[source]);
       for (const [name, item] of Object.entries(value)) {
         const declaredStream = schemaDeclaresStream(declared[name]);

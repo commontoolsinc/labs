@@ -4,6 +4,11 @@ How the repository's `deno bench` files run in CI, where their results are
 charted, and the constraints a bench file must satisfy for that tracking to
 work.
 
+It also holds the measurement helpers and the demonstration that share those
+files' subject matter without being bench files themselves — the Topics browser
+measurement and the Topics board demo below are both of that kind — so that a
+reader looking for how a workload is measured finds all of it in one place.
+
 ## The pipeline
 
 The Benchmarks workflow (`.github/workflows/benchmarks.yml`) runs every four
@@ -551,6 +556,40 @@ from `runtime.scheduler` without a browser. The instrumented preview is one of
 the same kind, from a board whose runtime collects pattern coverage, which
 writes a `__cfPatternCoverage?.hit(` call before each statement; that call is
 all the cases reading that preview ask of it.
+
+## The Topics board demo
+
+`packages/patterns/integration/topic-board-demo.test.ts` is not a benchmark. It
+is the browser demonstration the [Topics computation
+plan](../plans/topics-computation-cost.md) asks T0 for and T5 records before and
+after a change, so it sits beside that plan's browser tier rather than in the
+testing guide.
+
+It shows four actions on one board, as a single journey: the board listing its
+topics, a topic opened from its own card, the backlink on that topic followed to
+the topic citing it, and a comment added that the thread then shows. Its board
+comes from `seedTopicBoard`, shaped so exactly one topic cites exactly one
+earlier one. That fixture derives every title and body from the topic's index,
+so two runs of the same size build boards holding the same material, and the
+demo seeds into a space of its own so nothing else a shard left in the shared
+space appears on it. `CF_TOPICS_DEMO_TOPICS` sets how many topics that board
+carries; the default is small because CI runs this on every pull request.
+
+Record it with:
+
+```bash
+deno task demo patterns topic-board-demo
+```
+
+which needs FFmpeg, as [the demo
+command](TESTING.md#recording-browser-integration-tests-as-video-demos)
+describes. `deno task integration patterns topic-board-demo` runs the same file
+without recording it.
+
+It asserts what it shows, so a broken behavior fails it rather than producing a
+recording that looks right. The file itself states which of its properties a
+candidate may change without invalidating a before-and-after comparison and
+which it may not; read that before weakening an assertion in it.
 
 ## The multiplayer contention benchmark
 

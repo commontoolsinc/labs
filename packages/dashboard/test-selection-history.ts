@@ -5,7 +5,7 @@
  *
  * An object whose schema this reader does not implement is fetched once
  * and then remembered for as long as the process runs, so a refresh does
- * not pay for it again. A manifest is the largest thing the wall fetches
+ * not pay for it again. A manifest is the largest thing the dashboard fetches
  * and a whole store of them is tens of megabytes, against a refresh every
  * half minute. That opinion is held in memory and never written to the
  * cache file, because what a reader can validate is a property of the
@@ -194,7 +194,7 @@ export function makeTestSelectionSource(options: {
             if (counts === undefined && known !== undefined) {
               // The object is not fetched again, and the refusal is
               // reported on every pass it still applies to, so the warning
-              // the wall carries lasts as long as the condition does.
+              // the dashboard carries lasts as long as the condition does.
               keptRefusals.set(name, known);
               errors.push(`${name}: ${known.message}`);
             } else if (counts === undefined) {
@@ -256,7 +256,7 @@ export function makeTestSelectionSource(options: {
 /**
  * What a tile says under its dash when the latest manifest could not be
  * read. A schema this reader does not implement is a named condition and
- * the wall says it; anything else is a source that did not answer, which
+ * the dashboard says it; anything else is a source that did not answer, which
  * `friendlyError` has the words for.
  */
 export function collectionSub(error: unknown): string {

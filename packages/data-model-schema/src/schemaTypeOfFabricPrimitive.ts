@@ -7,6 +7,7 @@ import {
   FabricHash,
   FabricKeyPair,
   FabricRegExp,
+  FabricUnavailable,
 } from "@commonfabric/data-model/fabric-primitives";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 
@@ -34,6 +35,7 @@ export function schemaTypeOfFabricPrimitive(
   if (value instanceof FabricHash) return "FabricHash";
   if (value instanceof FabricKeyPair) return "FabricKeyPair";
   if (value instanceof FabricRegExp) return "FabricRegExp";
+  if (value instanceof FabricUnavailable) return "FabricUnavailable";
   throw new Error(
     `Shouldn't happen: \`FabricPrimitive\` subclass without a schema type ` +
       `name: ${backtickQuote(value.constructor.name)}. Add it to ` +

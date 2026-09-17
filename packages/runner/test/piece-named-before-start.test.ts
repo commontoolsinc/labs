@@ -10,6 +10,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { getLogger } from "@commonfabric/utils/logger";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { Pattern } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
 import {
@@ -401,7 +402,7 @@ describe("piece-named-before-start", () => {
       const target = linkTargetId(candidate);
       if (target !== undefined) {
         targets.push(target);
-      } else if (candidate !== null && typeof candidate === "object") {
+      } else if (isObjectOrArray(candidate)) {
         for (const field of Object.values(candidate as object)) collect(field);
       }
     };

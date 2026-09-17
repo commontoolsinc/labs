@@ -2165,7 +2165,7 @@ export function normalizeAndDiff(
 function hasPath(value: unknown, path: readonly string[]): boolean {
   if (path.length === 0) return true;
 
-  if (value === null || value === undefined || typeof value !== "object") {
+  if (!isObjectOrArray(value)) {
     return false;
   }
 

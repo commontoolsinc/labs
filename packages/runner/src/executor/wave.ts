@@ -58,6 +58,7 @@ import type {
 } from "../storage/interface.ts";
 import { parsePointer, pathsOverlap } from "../../../memory/v2/path.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { normalizeCellScope, scopeRank } from "../scope.ts";
 import {
   getTransactionReadActivities,
@@ -803,7 +804,7 @@ function seqLessStreamEntryEventIds(operation: Operation): string[] {
     for (const candidate of list) {
       const entry = candidate as { eventId?: unknown; seq?: unknown } | null;
       if (
-        entry !== null && typeof entry === "object" &&
+        isObjectOrArray(entry) &&
         typeof entry.eventId === "string" && entry.seq === undefined
       ) {
         ids.push(entry.eventId);
@@ -2894,7 +2895,7 @@ export class WaveAccumulator
     // value (payload included) stays SHARED by reference.
     const spineCloneEntryList = (entries: readonly unknown[]): unknown[] =>
       entries.map((entry) =>
-        entry !== null && typeof entry === "object" && !Array.isArray(entry)
+        isObjectNotArray(entry)
           ? { ...(entry as Record<string, unknown>) }
           : entry
       );
@@ -2958,7 +2959,7 @@ export class WaveAccumulator
             consequenced?: boolean;
           } | null;
           if (
-            entry === null || typeof entry !== "object" ||
+            !isObjectOrArray(entry) ||
             typeof entry.eventId !== "string" || entry.seq !== undefined
           ) {
             continue;

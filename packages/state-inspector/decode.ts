@@ -19,7 +19,11 @@ import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import { fabricFromJsonValue } from "@commonfabric/data-model/codecs";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { isObjectNotArray, isPlainObject } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  isPlainObject,
+} from "@commonfabric/utils/types";
 
 import { shortDid } from "./did-display.ts";
 
@@ -472,7 +476,7 @@ export function annotate(v: Json, maxDepth = 8): Json {
     }
 
     // A `FabricInstance` has no enumerable state to walk by property name.
-    if (typeof frame.value === "object" && frame.value !== null) {
+    if (isObjectOrArray(frame.value)) {
       assign({ $fabric: toCompactDebugString(frame.value) });
       continue;
     }

@@ -1,5 +1,6 @@
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   markRuntimeInjectedEventKeys,
   sanitizeRuntimeInjectedEventKeys,
@@ -1585,7 +1586,7 @@ describe("scheduler event receipts", () => {
 
     function snapshotEvent(event: unknown): unknown {
       if (event === undefined) return undefined;
-      if (event === null || typeof event !== "object") return event;
+      if (!isObjectOrArray(event)) return event;
       return Object.fromEntries(
         Object.entries(event as Record<string, unknown>),
       );

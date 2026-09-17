@@ -5,6 +5,7 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import { decodeBase64 } from "@std/encoding/base64";
+import { expect } from "@std/expect";
 import { join } from "@std/path";
 
 import type { HarnessRunArtifacts } from "../src/artifacts.ts";
@@ -33,6 +34,7 @@ import {
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { HarnessControlError } from "../src/control-errors.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
+import { REVISION_VERIFICATION_GUIDANCE } from "../src/revision-verification.ts";
 import type { HarnessModelClient } from "../src/model/client.ts";
 import {
   CfHarnessPromptLoop,
@@ -4090,7 +4092,12 @@ Deno.test({
       assertEquals(exitCode, 0);
       assertEquals(stderr, []);
       assertEquals(stdout[0].includes("Done."), true);
-      assertEquals(runPromptOptions?.contextMessages?.length, 1);
+      expect(runPromptOptions?.contextMessages).toEqual([
+        expect.stringContaining('<skill_context name="pattern-dev"'),
+        expect.stringContaining("No input cells are attached for this run"),
+        expect.stringContaining("at most one registry read"),
+        REVISION_VERIFICATION_GUIDANCE,
+      ]);
       assertEquals(
         runPromptOptions?.contextMessages?.[0].includes(
           '<skill_context name="pattern-dev" source="/workspace/labs/skills/pattern-dev/SKILL.md">',

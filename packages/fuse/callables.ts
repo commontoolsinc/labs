@@ -36,10 +36,7 @@ function isPatternSchemaSchema(schema: JSONSchema | undefined): boolean {
   }
 
   const properties = schema.properties;
-  if (
-    typeof properties !== "object" || properties === null ||
-    Array.isArray(properties)
-  ) {
+  if (!isObjectNotArray(properties)) {
     return false;
   }
 
@@ -48,13 +45,13 @@ function isPatternSchemaSchema(schema: JSONSchema | undefined): boolean {
 }
 
 export function isStreamValue(v: unknown): boolean {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  if (!isObjectNotArray(v)) return false;
   const obj = v as Record<string, unknown>;
   return "$stream" in obj && obj.$stream === true;
 }
 
 export function isHandlerCell(v: unknown): boolean {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  if (!isObjectNotArray(v)) return false;
   const cell = v as { isStream?: () => boolean };
   if (typeof cell.isStream === "function") {
     try {
@@ -67,7 +64,7 @@ export function isHandlerCell(v: unknown): boolean {
 }
 
 export function isPatternToolValue(v: unknown): boolean {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  if (!isObjectNotArray(v)) return false;
   const obj = v as Record<string, unknown>;
   return "pattern" in obj && "extraParams" in obj &&
     isPatternSchemaValue(obj.pattern);
@@ -76,10 +73,7 @@ export function isPatternToolValue(v: unknown): boolean {
 export function isPatternToolSchema(schema: JSONSchema | undefined): boolean {
   if (!isSchemaRecord(schema)) return false;
   const properties = schema.properties;
-  if (
-    typeof properties !== "object" || properties === null ||
-    Array.isArray(properties)
-  ) {
+  if (!isObjectNotArray(properties)) {
     return false;
   }
 
@@ -134,7 +128,7 @@ export function transformCallableValues(
     candidate,
   ) => classifyCallableEntry(candidate),
 ): unknown {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isObjectNotArray(value)) {
     return value;
   }
 

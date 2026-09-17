@@ -46,6 +46,7 @@
 
 import * as path from "@std/path";
 import {
+  type AliasResolver,
   loadAliasResolver,
   parseReportGroups,
   type TestIdentity,
@@ -459,11 +460,15 @@ export function checkStore(
   return findings;
 }
 
-/** Reads a run's records out of the files named on the command line. */
+/**
+ * Reads a run's records out of the files named on the command line. With
+ * no resolver given, the repository's alias file is loaded.
+ */
 export async function readRecords(
   paths: readonly string[],
+  aliases?: AliasResolver,
 ): Promise<StoredIdentity[]> {
-  const resolver = await loadAliasResolver();
+  const resolver = aliases ?? await loadAliasResolver();
   const records: StoredIdentity[] = [];
   for (const at of paths) {
     const text = await Deno.readTextFile(at);
@@ -476,7 +481,12 @@ export async function readRecords(
         ? "9999-12-31"
         : dayOf(group.context.startedAt);
       for (const record of group.records) {
-        const resolved = resolver.resolve(record.test, day);
+        // A lane measuring itself is read as the lane wrote it. What
+        // decides that a record is one of those is the written identity,
+        // so a line in the alias file names a test or it names nothing.
+        const resolved = isLaneMeasurement(record.test)
+          ? record.test
+          : resolver.resolve(record.test, day);
         records.push({
           test: resolved,
           ...(record.file === undefined ? {} : { file: record.file }),

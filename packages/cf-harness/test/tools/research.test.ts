@@ -7,6 +7,11 @@ import {
   researchTool,
 } from "../../src/tools/research.ts";
 import type { HarnessToolContext } from "../../src/tools/types.ts";
+import type { HarnessResearchRequest } from "../../src/research/runner.ts";
+import {
+  createHarnessHandleTable,
+  mintAddressHandle,
+} from "../../src/handle-table.ts";
 
 describe("research", () => {
   describe("isResearchToolSuccessOutput()", () => {
@@ -18,6 +23,37 @@ describe("research", () => {
   });
 
   describe("researchTool", () => {
+    it("forwards the established attachment record separately from the general handle inventory", async () => {
+      const attached = await mintAddressHandle(
+        createHarnessHandleTable("attached"),
+        `/of:fid1:${"A".repeat(43)}`,
+      );
+      const registry = await mintAddressHandle(
+        attached.table,
+        `/of:fid1:${"B".repeat(43)}/pieceRegistry`,
+      );
+      const inputCells = [{
+        name: "pattern_1",
+        token: attached.token,
+        ref: `/of:fid1:${"A".repeat(43)}`,
+      }];
+      let request: HarnessResearchRequest | undefined;
+      const context: Partial<HarnessToolContext> = {
+        nextOutputId: () => createToolOutputId("attached", "research", 1),
+        inputCells,
+        handleTable: registry.table,
+        runResearch: (value) => {
+          request = value;
+          return Promise.reject(new Error("stop after capturing the request"));
+        },
+      };
+      await researchTool.invoke(context as HarnessToolContext, {
+        task: "Revise the attached piece",
+      });
+      expect(request?.inputCells).toEqual(inputCells);
+      expect(request?.handleTokens).toEqual([attached.token, registry.token]);
+    });
+
     it("refuses an unknown follow-up before invoking research and retains task influence", async () => {
       let invoked = false;
       const context: Partial<HarnessToolContext> = {

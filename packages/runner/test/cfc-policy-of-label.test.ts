@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { CfcConfClause } from "../src/cfc/clause.ts";
@@ -547,7 +548,7 @@ describe("PolicyOf label-time binding", () => {
       const reference = metadata?.labelMap.entries
         .flatMap((entry) => entry.label.confidentiality ?? [])
         .find((value) =>
-          typeof value === "object" && value !== null &&
+          isObjectOrArray(value) &&
           (value as Record<string, unknown>).policyRefKind === "module"
         );
       expect(reference).toBeDefined();

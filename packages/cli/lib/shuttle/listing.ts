@@ -30,6 +30,7 @@
  */
 
 import { isStreamValue } from "@commonfabric/runner";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { keysOf } from "../cell-listing.ts";
 import {
@@ -432,7 +433,7 @@ function childOf(level: unknown, key: string): unknown {
  */
 function kindOf(value: unknown): RowKind {
   if (isStreamValue(value)) return "callable";
-  return value !== null && typeof value === "object" ? "container" : "value";
+  return isObjectOrArray(value) ? "container" : "value";
 }
 
 /**

@@ -276,20 +276,38 @@ validating reader; `deno task` scripts built on it:
 
 Readers that join history across renames apply the alias file through
 `loadAliasResolver` in `@commonfabric/test-support/records`, which the
-report tool and the dashboard collector already do. Consumers that feed
-decisions read only `submissions/ci/`, whose writer credential never
-exists as key material. The relay's member gate means everything stored
-was authored under the write-access group's trust — `ci.fork` marks a
-team member's fork run — so the only distinction left for a decision
-consumer is code provenance, not author trust: pull-request runs execute
-unmerged code, and failure-rate or duration baselines come from
-`ci.event` `"push"` runs, whose code the tree itself carries. Both
-fields are stamped from the trusted event payload. A fork run and a
-same-repository run of a pull request are therefore read alike, and what
-`ci.fork` keeps a run out of is a baseline rather than the data. It is
-set for a payload that did not name both repositories as well, so a run
-the relay could not place is never taken for one of this repository's
-own pushes.
+report tool and the dashboard collector already do. A duration a consumer
+reports or fits comes from passing records alone, for the reason the
+specification gives; run, failure and skip counts come from every record.
+
+Not every record in the store is a test. A lane measures its own setup
+and each of its batches through the same machinery, so those
+measurements sit alongside the tests, on kind `gate` and scope `ci` with
+a name opening `ci-lane `. A consumer building anything per test leaves
+them out: `isLaneMeasurement` from `@commonfabric/test-support/records`
+recognizes one, and it is asked of `record.test` before any alias is
+resolved. The report tool, the dashboard collector, the test-selection
+fold and the topology check all do this. Leaving them in does more than
+add an identity to the output. The figures are not all durations: of the
+three a lane writes per batch, one says what the batch was packed to
+spend and one counts the units it opened, so a sum over them is a number
+that means nothing. `tasks/lane-measurement.ts` composes the names this
+recognizes. The normative account is
+["Recording" in the specification](../specs/test-records.md#recording).
+
+Consumers that feed decisions read only `submissions/ci/`, whose writer
+credential never exists as key material. The relay's member gate means
+everything stored was authored under the write-access group's trust —
+`ci.fork` marks a team member's fork run — so the only distinction left
+for a decision consumer is code provenance, not author trust:
+pull-request runs execute unmerged code, and failure-rate or duration
+baselines come from `ci.event` `"push"` runs, whose code the tree itself
+carries. Both fields are stamped from the trusted event payload. A fork
+run and a same-repository run of a pull request are therefore read
+alike, and what `ci.fork` keeps a run out of is a baseline rather than
+the data. It is set for a payload that did not name both repositories as
+well, so a run the relay could not place is never taken for one of this
+repository's own pushes.
 
 Two attribution facts worth knowing when reading `local/` prefixes: the
 minting workflow takes a username input, so anyone with repository write
@@ -418,4 +436,6 @@ browser harness over.
 
 Every test must finish within sixty seconds in CI, not counting setup; a
 check that cannot is a container to split, and the report's over-60s list
-is the work queue for that.
+is the work queue for that. The list is built from passing executions, so
+a failure that a wait's safety net ended at its bound does not put a test
+on it.

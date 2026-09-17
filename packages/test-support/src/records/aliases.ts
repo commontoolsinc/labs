@@ -10,6 +10,7 @@
  */
 
 import { join } from "@std/path";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { TestIdentity } from "./schema.ts";
 import { repositoryRoot } from "./paths.ts";
 
@@ -26,7 +27,7 @@ export interface AliasLine {
 }
 
 function isIdentityPart(value: unknown, wholeScope: boolean): boolean {
-  if (typeof value !== "object" || value === null) return false;
+  if (!isObjectOrArray(value)) return false;
   const part = value as Record<string, unknown>;
   const expectedKeys = wholeScope ? ["k", "s"] : ["k", "n", "s"];
   if (Object.keys(part).sort().join(",") !== expectedKeys.join(",")) {

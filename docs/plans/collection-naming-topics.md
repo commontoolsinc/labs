@@ -19,7 +19,7 @@ This block is LIVE: the change that moves a stage updates it here.
 | S2b — assignment refuses by default | on main (#6898) |
 | S3 — the shell opens `/<space>/top/42` | on main (#6896) |
 | S4 — `#42` in text | on main (#6887) |
-| S6 — graft onto Topics | items 1, 2, 3, 5 on main (#6937); item 4 rehearsed twice and held, awaiting a demand for named Topics rather than a technical answer |
+| S6 — graft onto Topics | items 1, 2, 3, 5 on main (#6937), with what items 2 and 3 show hidden on Topics since 2026-09-17 (below); item 4 rehearsed twice and held, awaiting a demand for named Topics rather than a technical answer |
 | S5 — deferred, not scheduled | — |
 
 ### What remains, and none of it is built
@@ -62,6 +62,37 @@ holds the evidence behind the decision: a member reading its name through the
 board's table, and what it took to bind the board onto members filed before the
 namespace.
 
+**Decided 2026-09-17: Topics shows no numbers until every topic has one.** Mike
+ruled it, and ruled the mechanism too. The deployed board numbers each topic it
+creates, while a topic filed before the namespace has no number until the
+production backfill and bind (item 3 below) reach it, so only some topics showed
+a number, and that confused the people reading the board.
+
+`SHOW_TOPIC_NUMBERS` in `packages/patterns/topics/topic.tsx` is off, and a topic
+then publishes no `shortName`. Withholding the publication rather than each
+display is what covers every surface: a topic's header, the board's cards, the
+`index` rows, and the entries of whatever universe a topic's editor completes
+over. That last one is why the choice matters. A topic filed before the board
+derived its universe reads the raw topics list until an operator rewires it, and
+a board cannot rewire it, because a parent writes a member's result and never a
+member's argument. Blanking only the board's derived copies left those topics
+offering `#1` and showing a pill number, measured against the derived-index
+version of this change. So no pill shows a number and `#42` offers no topic
+either way, which is the loss the ruling accepts until every topic has a number.
+
+Addressing is untouched: the board allocates a number on every create, records
+it in `names`, lists it beside its topic in `namesTable`, `addTopic` returns the
+name it allocated, and `top/<n>` resolves. What the hiding costs is the two
+reads that go through a topic — its own `shortName` and its `index` row — so the
+namespace is where a number is read while numbers are hidden, and item 3's bind
+check reads the topic's stored `boardNames` argument instead. The exemplar in
+`packages/patterns/collection-naming/` shows its numbers in the header, on the
+cards, and in the editor, and its tests are unchanged.
+
+Showing numbers on Topics again means turning that one constant on, once every
+topic has a number. Decision 5 still governs how a number renders wherever one
+is shown.
+
 1. **Decision 14 — a member takes one input naming its board.** Ruled, and
    measured buildable in
    [the board-demand measurement](../history/plans/collection-naming-board-demand-measurement-2026-09-07.md):
@@ -85,10 +116,11 @@ namespace.
 
 3. **S6 item 4 — the production backfill.** Held for want of a demand rather
    than a technical answer. Its sequence, and the contract breaks it still
-   needs, are recorded under S6 below. Two things that gated it have since
-   moved. #6969 was closed by #7178, and the patched check accepted the board
-   source retrieved from a local snapshot of the Topics board taken August 31;
-   and an optional `unknown` member demand no longer refuses. The
+   needs, are recorded under S6 below. Finishing it is what lets Topics show
+   numbers again (decided 2026-09-17, above). Two things that gated it have
+   since moved. #6969 was closed by #7178, and the patched check accepted the
+   board source retrieved from a local snapshot of the Topics board taken August
+   31; and an optional `unknown` member demand no longer refuses. The
    [issue 6969 gates record](../history/development/issue-6969-upgrade-gates-2026-09-09.md)
    records both.
 
@@ -98,9 +130,11 @@ namespace.
    extension point with nothing extending through it, recorded in the spec's
    "Deliberately open" rather than claimed as working.
 
-5. **The citation surfaces are partial.** A mention pill shows whatever its
-   destination publishes, whichever collection named it (#6985); a URL naming
-   more than a member is answered as if it named a member (#6993); "Copy
+5. **The citation surfaces are partial.** A mention pill shows the name carried
+   by the universe row standing for its destination, so what it shows means
+   something only through the collection whose universe is being read, and a
+   destination no row stands for shows none whatever it publishes (#6985); a URL
+   naming more than a member is answered as if it named a member (#6993); "Copy
    reference" yields an address that does not resolve outside the fabric
    (#6995).
 

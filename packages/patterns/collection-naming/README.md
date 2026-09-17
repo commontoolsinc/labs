@@ -273,8 +273,12 @@ The Topics board (`../topics/`) is the collection this library exists for, and
 it calls it: `addTopic` allocates in the same transaction as its append,
 `backfillNames` names what the board held before, each topic reads its own name
 out of `boardNames` and publishes it as `shortName`, and both boards derive
-their mention universe through `mentionable.ts`. What is still to come is in
-[the plan](../../../docs/plans/collection-naming-topics.md): the production
-backfill, which needs the one-time link-bind of `namesTable` onto every topic
-filed before the namespace, and the slug that binds the board's `names` cell as
-`top`.
+their mention universe through `mentionable.ts`. Topics shows no numbers for now
+— `SHOW_TOPIC_NUMBERS` in `../topics/topic.tsx` says why — so a topic publishes
+no `shortName`, and every place that would show one reads nothing: the header,
+the cards, the survey rows, and the universe rows the derivation copies from
+each topic. This exemplar shows its numbers in all three places. What is still
+to come is in [the plan](../../../docs/plans/collection-naming-topics.md): the
+production backfill, which needs the one-time link-bind of `namesTable` onto
+every topic filed before the namespace, and the slug that binds the board's
+`names` cell as `top`.

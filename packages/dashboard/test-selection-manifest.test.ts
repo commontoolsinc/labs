@@ -122,8 +122,8 @@ Deno.test("a version ahead is named even where its shape dropped a field", async
 Deno.test("a broken body of a shape this reader does read is a plain fault", async () => {
   // The reader reads earlier shapes, so an earlier one it cannot parse is
   // a broken object rather than one from further ahead. Naming its shape
-  // would say the wall cannot read that shape, which is false, and would
-  // have the wall stop fetching an object it should read again.
+  // would say the dashboard cannot read that shape, which is false, and would
+  // have the dashboard stop fetching an object it should read again.
   const name = `${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`;
   const error = await assertRejects(
     () =>
@@ -178,7 +178,7 @@ Deno.test("newestManifest names a version it cannot read", async () => {
   assertStringIncludes(error.message, name);
   assertEquals(
     error.reason,
-    `store holds schema ${later}, this wall reads ${MANIFEST_SCHEMA_VERSION}`,
+    `store holds schema ${later}, this dashboard reads ${MANIFEST_SCHEMA_VERSION}`,
   );
 });
 
@@ -202,7 +202,7 @@ Deno.test("a tile and the page name a schema rather than saying nothing useful",
     r.path === TEST_SELECTION_PATH
   );
   assertExists(route);
-  const url = new URL(`http://wall${TEST_SELECTION_PATH}`);
+  const url = new URL(`http://dashboard${TEST_SELECTION_PATH}`);
   const body = await (await route.handler(new Request(url), url)).text();
   assertStringIncludes(body, error.reason);
   assertEquals(body.includes("temporarily unavailable"), false);
@@ -516,7 +516,7 @@ Deno.test("the selection tile serves the page both tiles link to", async () => {
   const tile = makeTestSelection({ source: reading(sampleManifest()) });
   const route = tile.routes?.find((r) => r.path === TEST_SELECTION_PATH);
   assertExists(route);
-  const url = new URL(`http://wall${TEST_SELECTION_PATH}`);
+  const url = new URL(`http://dashboard${TEST_SELECTION_PATH}`);
   const response = await route.handler(new Request(url), url);
   assertEquals(
     response.headers.get("content-type"),
@@ -533,8 +533,8 @@ Deno.test("both tiles link into the page the route serves", async () => {
   assertEquals(flakes.href?.split("#")[0], TEST_SELECTION_PATH);
 });
 
-Deno.test("a tile lets a store failure through, for the wall to gray it", async () => {
-  // The wall turns a collection that throws into a gray tile carrying the
+Deno.test("a tile lets a store failure through, for the dashboard to gray it", async () => {
+  // The dashboard turns a collection that throws into a gray tile carrying the
   // reason, which is what separates an unreadable store from an empty one.
   const failing: TestSelectionSource = {
     latest: () => Promise.reject(new Error("no network")),
@@ -559,7 +559,7 @@ Deno.test("the page says a store could not be read, rather than that it is empty
   });
   const route = tile.routes?.find((r) => r.path === TEST_SELECTION_PATH);
   assertExists(route);
-  const url = new URL(`http://wall${TEST_SELECTION_PATH}`);
+  const url = new URL(`http://dashboard${TEST_SELECTION_PATH}`);
   const response = await route.handler(new Request(url), url);
   assertEquals(response.status, 503);
   const body = await response.text();

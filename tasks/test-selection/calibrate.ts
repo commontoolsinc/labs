@@ -28,6 +28,7 @@
  */
 
 import type { TestRecord } from "@commonfabric/test-support/records";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { Calibration } from "./manifest.ts";
 import {
   batchMeasurement,
@@ -64,7 +65,7 @@ function finite(value: unknown): boolean {
  * entry decides what every lane is charged for the suite it names.
  */
 export function isLaneObservation(value: unknown): value is LaneObservation {
-  if (typeof value !== "object" || value === null) return false;
+  if (!isObjectOrArray(value)) return false;
   const one = value as Record<string, unknown>;
   if (typeof one.day !== "string") return false;
   if (typeof one.capability === "string") return finite(one.seconds);

@@ -37,6 +37,7 @@ import {
   parseUnlaunchedMembers,
   UNLAUNCHED_MEMBERS_FILE,
 } from "./unlaunched-members.ts";
+import { appendSummary } from "./step-summary.ts";
 import { readWorkspaceMembers } from "./workspace-tests.ts";
 import { loadTopology } from "./test-topology.ts";
 import {
@@ -385,10 +386,7 @@ export async function main(
   }
   const summary = await report(options);
   console.log(summary);
-  const at = Deno.env.get("GITHUB_STEP_SUMMARY");
-  if (at !== undefined && at.length > 0) {
-    await Deno.writeTextFile(at, summary, { append: true });
-  }
+  appendSummary(summary);
   return 0;
 }
 

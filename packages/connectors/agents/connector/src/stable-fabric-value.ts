@@ -22,9 +22,10 @@ import {
   isCellResultForDereferencing,
 } from "@commonfabric/runner";
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+  if (!isObjectNotArray(value)) {
     return false;
   }
   const prototype = Object.getPrototypeOf(value);
@@ -35,7 +36,7 @@ function hasToJson(
   value: unknown,
 ): value is { toJSON: () => unknown } {
   return (
-    (typeof value === "object" && value !== null) ||
+    isObjectOrArray(value) ||
     typeof value === "function"
   ) &&
     "toJSON" in value &&
@@ -151,7 +152,7 @@ function captureFabricValue(
   seen: WeakMap<object, FabricValue>,
   active: WeakSet<object>,
 ): FabricValue {
-  if (value === null || typeof value !== "object") return value;
+  if (!isObjectOrArray(value)) return value;
   const existing = seen.get(value);
   if (existing !== undefined) return existing;
   if (active.has(value)) {

@@ -35,6 +35,7 @@ import {
 import { resolveSchema } from "../src/schema.ts";
 import { LINK_V1_TAG, type URI } from "../src/sigil-types.ts";
 import { defer } from "@commonfabric/utils/defer";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 describe("schema-doc-sync", () => {
   // Two managers on one shared loopback server model two real sessions: what
@@ -408,7 +409,7 @@ describe("schema-doc-sync", () => {
       sink: (uri: URI, callback: (doc: unknown) => void) => () => void;
     }).sink("of:late-ref-carrier" as URI, (doc: unknown) => {
       if (
-        doc !== undefined && typeof doc === "object" && doc !== null &&
+        isObjectOrArray(doc) &&
         "value" in doc &&
         typeof (doc as { value?: unknown }).value === "object" &&
         (doc as { value: { linked?: unknown } }).value?.linked !== undefined

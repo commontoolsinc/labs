@@ -50,6 +50,7 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { codecClasses } from "@/fabric-primitives/index.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FabricUnavailable } from "@/fabric-primitives/FabricUnavailable.ts";
 import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
 import {
   type FabricConvertibleJsValue,
@@ -810,6 +811,7 @@ describe("convertible-js", () => {
           new Uint8Array([2]),
         ),
         new FabricRegExp(/x/),
+        new FabricUnavailable("pending"),
       ];
 
       it("covers every registered primitive class", () => {

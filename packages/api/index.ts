@@ -1745,6 +1745,7 @@ export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
     "FabricHash",
     "FabricKeyPair",
     "FabricRegExp",
+    "FabricUnavailable",
   ] as const,
 );
 

@@ -244,6 +244,10 @@ describe("well-known-grants", () => {
       }]);
       expect(message).toContain("cfh:a:abcdefgh");
       expect(message).toContain("piece registry");
+      expect(message).toContain("a refused name read leaves the name unknown");
+      expect(message).toContain(
+        "not a fallback for identifying an unspecified target",
+      );
       expect(message).not.toContain(REGISTRY_ID);
     });
 

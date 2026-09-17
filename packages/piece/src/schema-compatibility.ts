@@ -18,7 +18,11 @@ import {
   isFabricPrimitiveSchemaType,
 } from "@commonfabric/api";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "@commonfabric/runner/fabric-special-object-brand";
-import { isPlainObject } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  isPlainObject,
+} from "@commonfabric/utils/types";
 import {
   ARRAY_SUBSCHEMA_KEYS,
   DEFS_KEYS,
@@ -40,6 +44,7 @@ import {
   FabricHash,
   FabricKeyPair,
   FabricRegExp,
+  FabricUnavailable,
 } from "@commonfabric/data-model/fabric-primitives";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
@@ -327,11 +332,11 @@ const WRITER_IDENTITY_VOLATILE_KEYS: ReadonlySet<string> = new Set([
  * the authoring module reads as a contract change in none of them.
  */
 const writerClaimWithoutVolatileIdentity = (claim: unknown): unknown => {
-  if (typeof claim !== "object" || claim === null || Array.isArray(claim)) {
+  if (!isObjectNotArray(claim)) {
     return claim;
   }
   const identity = (claim as Record<string, unknown>).__ctWriterIdentityOf;
-  if (typeof identity !== "object" || identity === null) return claim;
+  if (!isObjectOrArray(identity)) return claim;
   const strippedIdentity: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(identity)) {
     if (WRITER_IDENTITY_VOLATILE_KEYS.has(key)) continue;
@@ -451,7 +456,7 @@ const keep = (
  */
 const representsPrincipalAtoms = (value: unknown): readonly unknown[] => {
   if (Array.isArray(value)) return value.flatMap(representsPrincipalAtoms);
-  if (typeof value !== "object" || value === null) return [];
+  if (!isObjectOrArray(value)) return [];
   const record = value as Record<string, unknown>;
   if (record.kind === "represents-principal") return [value];
   return Object.values(record).flatMap(representsPrincipalAtoms);
@@ -475,7 +480,7 @@ const representsPrincipalAtoms = (value: unknown): readonly unknown[] => {
  * reduction exists to allow.
  */
 const comparableIfc = (ifc: unknown): unknown => {
-  if (typeof ifc !== "object" || ifc === null || Array.isArray(ifc)) return ifc;
+  if (!isObjectNotArray(ifc)) return ifc;
   const source = ifc as Record<string, unknown>;
   // Beside an `ownerPrincipal`, part of the mint is not a derived label at all.
   // `currentPrincipalIntegrityReason` (runner `cfc/prepare.ts`) reads the
@@ -1009,7 +1014,7 @@ const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
 
 /** Whether inserting defaults below this schema leaves its own constraints true. */
 function schemaIsStableUnderDescendantDefaults(schema: JSONSchema): boolean {
-  if (typeof schema !== "object" || schema === null) return true;
+  if (!isObjectOrArray(schema)) return true;
   return Object.keys(schema).every((key) => {
     if (DEFAULT_STABLE_SCHEMA_KEYS.has(key)) return true;
     return (key === "anyOf" || key === "oneOf") &&
@@ -1363,6 +1368,7 @@ const FABRIC_PRIMITIVE_CLASSES: {
   FabricHash,
   FabricKeyPair,
   FabricRegExp,
+  FabricUnavailable,
 };
 
 /**
@@ -1465,7 +1471,7 @@ function matchingPatternPropertySchemas(
 }
 
 function declaresVerbStream(schema: JSONSchema): boolean {
-  if (typeof schema !== "object" || schema === null) return false;
+  if (!isObjectOrArray(schema)) return false;
   const asCell = (schema as SchemaObject).asCell;
   return Array.isArray(asCell) && asCell.includes("stream");
 }
@@ -2097,12 +2103,9 @@ function schemaHasUnsafeMaterializedDefault(
 ): boolean {
   const resolution = resolveSchema(input, root);
   const schema = resolution.schema;
-  if (typeof schema !== "object" || schema === null) return false;
+  if (!isObjectOrArray(schema)) return false;
 
-  const rootKey = typeof resolution.root === "object" &&
-      resolution.root !== null
-    ? resolution.root
-    : schema;
+  const rootKey = isObjectOrArray(resolution.root) ? resolution.root : schema;
   let active = activeByRoot.get(rootKey);
   if (active === undefined) {
     active = { stable: new WeakSet(), unstable: new WeakSet() };
@@ -2146,7 +2149,7 @@ function collectSchemaReferences(
   refs: Set<string>,
   seen: WeakSet<object>,
 ): void {
-  if (value === null || typeof value !== "object" || seen.has(value)) return;
+  if (!isObjectOrArray(value) || seen.has(value)) return;
   seen.add(value);
   const record = value as Record<string, unknown>;
   if (typeof record.$ref === "string") refs.add(record.$ref);
@@ -2182,7 +2185,7 @@ function resolveSchema(
   root: JSONSchema,
 ): { schema: JSONSchema | undefined; root: JSONSchema } {
   const schemaRoot = root;
-  const hasRef = typeof schema === "object" && schema !== null &&
+  const hasRef = isObjectOrArray(schema) &&
     typeof schema.$ref === "string";
   const owningRoot = hasRef
     ? resolveCfcSchemaRefRoot(schema, schemaRoot)
@@ -2249,7 +2252,7 @@ function compatibilityRootKey(
   root: JSONSchema,
   fallback: object,
 ): object {
-  return typeof root === "object" && root !== null ? root : fallback;
+  return isObjectOrArray(root) ? root : fallback;
 }
 
 function unknownKeywordIssue(

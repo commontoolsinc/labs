@@ -35,7 +35,7 @@ import {
 import { publisherRunning } from "../test-selection-activity.ts";
 import type { Status, Tile, TileView } from "../types.ts";
 
-/** How many flaky tests turn the wall amber. */
+/** How many flaky tests turn the dashboard amber. */
 export const FLAKES_WARN = 1;
 
 /** How many turn it red. */

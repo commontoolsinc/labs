@@ -29,6 +29,7 @@ import {
   type RuntimeProgram,
 } from "@commonfabric/runner";
 import { pieceListSchema } from "@commonfabric/runner/schemas";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { pieceId as pieceIdOf } from "../piece-id.ts";
 import { claimSlugInTx, prepareSlugClaim } from "../slugs.ts";
@@ -186,7 +187,7 @@ export interface ServedSetSourceReceipt {
 function messageOf(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (
-    typeof error === "object" && error !== null && "message" in error &&
+    isObjectOrArray(error) && "message" in error &&
     typeof error.message === "string"
   ) {
     return error.message;

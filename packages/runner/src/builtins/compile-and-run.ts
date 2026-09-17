@@ -210,6 +210,16 @@ export function compileAndRun(
       // Each acting instance owns its output binding, even when the node
       // shares initialized cells with another instance of the same scope.
       sendResult(tx, { pending, result, error, errors });
+
+      const announce = (settleTx: IExtendedStorageTransaction) =>
+        sendResult(settleTx, { pending, result, error, errors });
+
+      const reportCreated = (hash: string) => {
+        if (reportedCreatedHash === hash) return;
+        reportedCreatedHash = hash;
+        runtime.pieceCreatedCallback?.(result);
+      };
+
       return compileAndRunServed(
         runtime,
         tx,
@@ -224,12 +234,8 @@ export function compileAndRun(
         },
         program,
         issuedRequests,
-        (settleTx) => sendResult(settleTx, { pending, result, error, errors }),
-        (hash) => {
-          if (reportedCreatedHash === hash) return;
-          reportedCreatedHash = hash;
-          runtime.pieceCreatedCallback?.(result);
-        },
+        announce,
+        reportCreated,
       );
     }
 

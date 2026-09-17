@@ -2,6 +2,9 @@
  * Replaces bare fabric identifiers in model-facing or retrospective text with
  * a fixed placeholder. Schemed links and harness handle tokens remain intact.
  */
+
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 export const scrubBareFabricIdentifiers = (text: string): string =>
   text
     .replaceAll(/\bdata:[^\s"'`)\]}]+/gi, "[fabric-id]")
@@ -49,7 +52,7 @@ export const scrubBareFabricIdentifiersWithPointers = (
         visit(entry, `${at}/${index}`, record)
       );
     }
-    if (typeof current !== "object" || current === null) return current;
+    if (!isObjectOrArray(current)) return current;
     const result: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(current)) {
       const scrubbedKey = scrubBareFabricIdentifiers(key);

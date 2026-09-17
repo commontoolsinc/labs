@@ -24,6 +24,7 @@ import type { SqliteTableSchemas } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { createCell } from "../src/cell.ts";
 import { isSigilLink } from "../src/link-utils.ts";
@@ -146,7 +147,7 @@ function collectSigilLinks(value: unknown, out: unknown[] = []): unknown[] {
     for (const v of value) collectSigilLinks(v, out);
     return out;
   }
-  if (value !== null && typeof value === "object") {
+  if (isObjectOrArray(value)) {
     for (const v of Object.values(value)) collectSigilLinks(v, out);
     return out;
   }
