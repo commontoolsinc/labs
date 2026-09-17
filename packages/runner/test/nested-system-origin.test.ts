@@ -25,7 +25,7 @@ const childSource = [
 // A parent instantiating the child twice over: as a node of its own graph,
 // and from a handler, in a space of the child's own.
 const parentSource = [
-  "import { handler, pattern, Writable } from 'commonfabric';",
+  "import { handler, navigateTo, pattern, Writable } from 'commonfabric';",
   "import Child from './child.tsx';",
   "",
   "const spawn = handler<unknown, { spawned: Writable<unknown[]> }>(",
@@ -34,10 +34,24 @@ const parentSource = [
   "  },",
   ");",
   "",
+  "// The same spawn, with a result the runtime starts only after the",
+  "// handler's commit (a `navigateTo` result is commit-gated).",
+  "const spawnAndGo = handler<unknown, { spawned: Writable<unknown[]> }>(",
+  "  (_, { spawned }) => {",
+  "    const child = Child.inSpace()({});",
+  "    spawned.push(child);",
+  "    return navigateTo(child);",
+  "  },",
+  ");",
+  "",
   "export default pattern(() => {",
   "  const spawned = new Writable<unknown[]>([]).for('spawned');",
   "  const nested = Child({});",
-  "  return { nested, spawned, spawn: spawn({ spawned }) };",
+  "  return {",
+  "    nested, spawned,",
+  "    spawn: spawn({ spawned }),",
+  "    spawnAndGo: spawnAndGo({ spawned }),",
+  "  };",
   "});",
   "",
 ].join("\n");
@@ -64,7 +78,7 @@ describe("a child's origin", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
 
   afterEach(async () => {
-    await runtime?.dispose();
+    await runtime?.dispose({ closeStorage: false });
     await storageManager?.close();
     runtime = undefined;
     storageManager = undefined;
@@ -77,11 +91,14 @@ describe("a child's origin", () => {
   async function childOrigins(
     dir: string,
     origin: string | undefined,
+    verb: "spawn" | "spawnAndGo" = "spawn",
   ): Promise<{ nested: string | undefined; spawned: string | undefined }> {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      // A `navigateTo` result asks the host to navigate; nobody is watching.
+      navigateCallback: () => {},
     });
     const tx = runtime.edit();
     const parent = await runtime.patternManager.compilePattern(
@@ -104,7 +121,7 @@ describe("a child's origin", () => {
     await runtime.idle();
 
     const spawnTx = runtime.edit();
-    run.withTx(spawnTx).key("spawn").send({});
+    run.withTx(spawnTx).key(verb).send({});
     expect((await spawnTx.commit()).error).toBeUndefined();
     await run.pull();
     await runtime.idle();
@@ -128,6 +145,14 @@ describe("a child's origin", () => {
   it("is the child module's `system:` ref under a parent that follows one from the patterns route", async () => {
     const dir = `${PATTERNS_ROUTE_PREFIX}system/`;
     expect(await childOrigins(dir, PARENT_ORIGIN)).toEqual({
+      nested: "system:system/child.tsx",
+      spawned: "system:system/child.tsx",
+    });
+  });
+
+  it("is claimed as well for a child whose handler result the runtime starts after the commit", async () => {
+    const dir = `${PATTERNS_ROUTE_PREFIX}system/`;
+    expect(await childOrigins(dir, PARENT_ORIGIN, "spawnAndGo")).toEqual({
       nested: "system:system/child.tsx",
       spawned: "system:system/child.tsx",
     });
