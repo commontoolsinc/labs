@@ -215,9 +215,10 @@ What works today:
 - package-local operator CLI
 - an Agent Skills registry over `--skills-root`, defaulting to the checkout's
   own `skills/` tree, with repeatable `--skill` preloading by name
-- runtime-generated supporting-resource indexes in `skill-registry.json`
-- text-first supporting-resource reads through `read_skill_resource`, recorded
-  in `skill-resource-reads.json`
+- runtime-generated indexes of `SKILL.md` and supporting resources in
+  `skill-registry.json`
+- text-first skill resource reads through `read_skill_resource`, recorded in
+  `skill-resource-reads.json`
 - skill script execution through `run_skill_script`, where the operator allows
   it — `--allow-skill-scripts` for every skill the run holds, or an exact entry
   for one — for a registry skill's script and for an acquired skill's, recorded

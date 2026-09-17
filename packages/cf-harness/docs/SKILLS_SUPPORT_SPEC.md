@@ -153,10 +153,11 @@ Validation should be lenient where that improves compatibility:
 - Symlinked skill directories are allowed only when the resolved `SKILL.md`
   stays under the configured skill root or another explicitly allowed root.
 
-## Supporting Resource Index
+## Skill Resource Index
 
-Supporting resources are discovered automatically from the filesystem at
-runtime. Normal skills do not need a hand-authored resource manifest.
+`SKILL.md` and supporting resources are discovered automatically from the
+filesystem at runtime. Normal skills do not need a hand-authored resource
+manifest.
 
 At run start, `cf-harness` should snapshot every accepted skill directory and
 record a resource index inside `skill-registry.json`. This index is bounded by
@@ -185,7 +186,7 @@ Each resource record should include:
 
 Resource discovery:
 
-- skip the root `SKILL.md`
+- include the root `SKILL.md` as kind `other`
 - sort paths deterministically
 - reject or skip resources whose resolved paths escape the skill directory or
   configured skills root
@@ -198,12 +199,14 @@ checks the actual file at call time. If the file differs from the run-start
 snapshot, the tool reports the mismatch in its output and artifacts rather than
 silently treating the snapshot as exact.
 
-## Supporting Resource Reads
+## Skill Resource Reads
 
 Status: implemented for indexed skill resources.
 
 `read_skill_resource` is a built-in read tool available to parent runs by
-default. It takes:
+default. A run can read a registered skill's instructions with
+`path: "SKILL.md"` without preloading the skill. Supporting resources use their
+relative paths:
 
 ```json
 {

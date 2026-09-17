@@ -477,7 +477,6 @@ const collectSkillResources = async (
   const visitedDirectories = new Set<string>();
   let directoriesVisited = 0;
   let filesVisited = 0;
-  const rootSkillPath = resolve(options.skillDir, SKILL_FILE_NAME);
 
   const visit = async (dir: string, depth: number): Promise<void> => {
     let resolvedDir: string;
@@ -570,9 +569,6 @@ const collectSkillResources = async (
         continue;
       }
       if (!stat.isFile) {
-        continue;
-      }
-      if (resolve(entryPath) === rootSkillPath) {
         continue;
       }
       filesVisited += 1;
