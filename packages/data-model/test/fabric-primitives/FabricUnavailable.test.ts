@@ -121,7 +121,7 @@ describe("FabricUnavailable", () => {
     it("throws given a reason outside the set", () => {
       expect(() =>
         new FabricUnavailable("gone" as unknown as UnavailableReason)
-      ).toThrow(/Not an `UnavailableReason`: `gone`/);
+      ).toThrow(/Not an `UnavailableReason`: `"gone"`/);
     });
 
     it("throws given a reason that is not a string", () => {
@@ -131,10 +131,11 @@ describe("FabricUnavailable", () => {
 
     it("throws given a non-string reason that coerces to a valid one", () => {
       // An array or an object with a `toString()` reads as a key when looked
-      // up in the table, so the table lookup alone would admit it.
+      // up in the table, so the table lookup alone would admit it. The
+      // message renders the value as it is, not as it coerces.
       expect(() =>
         new FabricUnavailable(["pending"] as unknown as UnavailableReason)
-      ).toThrow(/Not an `UnavailableReason`: `pending`/);
+      ).toThrow(/Not an `UnavailableReason`: `\["pending"\]`/);
     });
 
     it("throws given reason `error` and no kind", () => {
@@ -150,13 +151,13 @@ describe("FabricUnavailable", () => {
           "error",
           "gone" as unknown as UnavailableErrorKind,
         )
-      ).toThrow(/requires an `UnavailableErrorKind`, not `gone`/);
+      ).toThrow(/requires an `UnavailableErrorKind`, not `"gone"`/);
       expect(() =>
         new FabricUnavailable(
           "error",
           ["network"] as unknown as UnavailableErrorKind,
         )
-      ).toThrow(/requires an `UnavailableErrorKind`, not `network`/);
+      ).toThrow(/requires an `UnavailableErrorKind`, not `\["network"\]`/);
     });
 
     it("throws given reason `error` and a message that is not a string", () => {

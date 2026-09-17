@@ -15,7 +15,6 @@ import type {
   UnavailableErrorKind,
   UnavailableReason,
 } from "@/api.ts";
-import { backtickQuote } from "@commonfabric/utils/markdown";
 import type { MustBeTrue, Same } from "@commonfabric/utils/types";
 import { isPlainObject } from "@commonfabric/utils/types";
 
@@ -40,6 +39,7 @@ import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
 } from "@/types";
+import { toCompactDebugString } from "@/value-debug.ts";
 
 /**
  * The reasons a `FabricUnavailable` can give, as a table keyed by itself, so
@@ -242,7 +242,9 @@ export class FabricUnavailable extends BaseFabricPrimitive
       !Object.hasOwn(UNAVAILABLE_REASONS, reason)
     ) {
       throw new Error(
-        `Not an \`UnavailableReason\`: ${backtickQuote(String(reason))}`,
+        `Not an \`UnavailableReason\`: ${
+          toCompactDebugString(reason, { backtickQuote: true })
+        }`,
       );
     }
 
@@ -253,19 +255,21 @@ export class FabricUnavailable extends BaseFabricPrimitive
       ) {
         throw new Error(
           `Reason \`error\` requires an \`UnavailableErrorKind\`, not ${
-            backtickQuote(String(errorKind))
+            toCompactDebugString(errorKind, { backtickQuote: true })
           }.`,
         );
       }
       if ((errorMessage !== null) && (typeof errorMessage !== "string")) {
         throw new Error(
-          `Not an \`errorMessage\`: ${backtickQuote(String(errorMessage))}`,
+          `Not an \`errorMessage\`: ${
+            toCompactDebugString(errorMessage, { backtickQuote: true })
+          }`,
         );
       }
     } else if ((errorKind !== null) || (errorMessage !== null)) {
       throw new Error(
         `Reason ${
-          backtickQuote(reason)
+          toCompactDebugString(reason, { backtickQuote: true })
         } takes neither an \`errorKind\` nor an \`errorMessage\`.`,
       );
     }
