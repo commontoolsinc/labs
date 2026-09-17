@@ -257,7 +257,8 @@ export interface MarkInvalidOptions {
    * output, while a refused run left nothing durable and its wait was its
    * delay — so the retry is queued past both: the debounce is not re-armed,
    * and an armed debounce or throttle readiness is released (the
-   * convergence backoff stays). Held behind its debounce, a retry would run
+   * convergence backoff stays). Further invalidations preserve the release
+   * until the owed run starts. Held behind its debounce, a retry would run
    * only when a live demander armed the expiry wake, and a one-shot `pull()`
    * has none once it resolves. An empty reactive rejection also bypasses
    * gates when the node or instance has no accepted result yet, or has no

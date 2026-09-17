@@ -476,8 +476,9 @@ function subscribeProfileName(cell: Cell<unknown>): void {
  * order. Identity is by the profile's own SPACE — each profile is a distinct
  * `ProfileHome.inSpace()` space, so the `defaultProfile` / `mru` links are
  * matched to candidates by space, not `Cell.equals` (see `sameProfileCell`;
- * CT-1842). Returns [] for an empty roster. Throws `WishProfilePending` while
- * backing documents load, and `WishError` for an absent referenced profile.
+ * CT-1842). Skips confirmed-absent entries when a valid candidate remains.
+ * Throws `WishProfilePending` while backing documents load, and `WishError`
+ * when absent entries leave no valid candidate.
  */
 function getProfileCandidateCells(
   ctx: WishContext,
@@ -495,11 +496,13 @@ function getProfileCandidateCells(
   const length = Array.isArray(rawList) ? rawList.length : 0;
 
   const candidates: Cell<unknown>[] = [];
+  let hasAbsentProfile = false;
   for (let i = 0; i < length; i++) {
     const entry = profilesCell.key(i);
     const cell = entry.resolveAsCell();
     if (!ctx.profileReadiness.requireDocument(cell, ctx.tx)) {
-      throw new WishError("Profile data is unavailable");
+      hasAbsentProfile = true;
+      continue;
     }
     if (
       !profileCellIsValid(
@@ -513,7 +516,10 @@ function getProfileCandidateCells(
     subscribeProfileName(cell);
     candidates.push(cell);
   }
-  if (candidates.length === 0) return { ordered: [], defaultValid: false };
+  if (candidates.length === 0) {
+    if (hasAbsentProfile) throw new WishError("Profile data is unavailable");
+    return { ordered: [], defaultValid: false };
+  }
 
   // Ordering inputs: the default link and the MRU list.
   const defaultEntry = defaultPattern.key("defaultProfile");

@@ -8,7 +8,6 @@ import type {
   IExtendedStorageTransaction,
   IStorageNotification,
 } from "../storage/interface.ts";
-import { linkResolutionProbe } from "../storage/reactivity-log.ts";
 
 /** A profile-resolution read whose backing document is still loading. */
 export class WishProfilePending extends Error {}
@@ -65,7 +64,6 @@ export function createWishProfileReadiness(
       const address = { ...link, path: [] };
       const document = tx.readOrThrow(address, {
         nonRecursive: true,
-        meta: linkResolutionProbe,
       });
       if (document !== undefined) return true;
 

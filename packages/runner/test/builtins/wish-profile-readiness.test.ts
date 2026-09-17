@@ -1,12 +1,12 @@
 /**
- * Delays the profile space while a real wish writes into a labeled state
- * document. The profile and its schema already exist on the loopback server;
- * only their delivery to the consumer is held.
+ * Exercises profile readiness across cold replicas, failed loads,
+ * cancellation, replica reset, and CFC flow-label propagation.
  */
 
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { connect, loopback } from "@commonfabric/memory/v2/client";
@@ -19,6 +19,7 @@ import {
   WishProfilePending,
 } from "../../src/builtins/wish-profile-readiness.ts";
 import type { Cell } from "../../src/cell.ts";
+import { canonicalizeCfcLabel } from "../../src/cfc/canonical.ts";
 import { readStoredCfcMetadata } from "../../src/cfc/metadata.ts";
 import { rawMetaWriteAuthorization } from "../../src/meta-seam.ts";
 import { Runtime } from "../../src/runtime.ts";
@@ -30,6 +31,10 @@ import {
 } from "../../src/storage/v2-emulate.ts";
 import type { SessionFactory } from "../../src/storage/v2.ts";
 import { TestStorageManager } from "../memory-v2-test-utils.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "../cfc-seed-envelope.ts";
 
 const user = await Identity.fromPassphrase("local profile cold-link consumer");
 const board = await Identity.fromPassphrase("local profile cold-link board");
@@ -73,7 +78,67 @@ const makeRuntime = (storageManager: Runtime["storageManager"]) =>
     cfcDeclaredMonotonicity: "off",
   });
 
-describe("wish", () => {
+describe("wish-profile-readiness", () => {
+  it("carries the profile document's existence label into the derived result", async () => {
+    const manager = EmulatedStorageManager.emulate({ as: user });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.invalid"),
+      storageManager: manager,
+      cfcFlowLabels: "persist",
+    });
+    const cancels: (() => void)[] = [];
+    try {
+      const profile = runtime.getCell(user.did(), "labeled-profile");
+      const address = profile.getAsNormalizedFullLink();
+      const confidentiality = [{
+        anyOf: ["profile-presence", cfcAtom.space(user.did())],
+      }];
+      const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, user.did());
+      seed.writeOrThrow({ ...address, path: [] }, {
+        value: { name: "Labeled profile" },
+        cfc: {
+          version: 1,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [{ path: [], label: { confidentiality } }],
+          },
+        },
+      });
+      expect((await seed.commit()).error).toBeUndefined();
+      const readiness = createWishProfileReadiness(
+        runtime,
+        (cancel) => cancels.push(cancel),
+      );
+      const tx = runtime.edit();
+      const output = runtime.getCell(user.did(), "profile-presence-result");
+      const present = readiness.requireDocument(profile, tx);
+      expect(present).toBe(true);
+      output.withTx(tx).set({ present });
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+      const inspect = runtime.edit();
+      try {
+        const metadata = readStoredCfcMetadata(
+          inspect,
+          output.getAsNormalizedFullLink(),
+        );
+        expect(
+          metadata?.labelMap?.entries.find((entry) =>
+            entry.origin === "derived"
+          )?.label.confidentiality,
+        )
+          .toEqual(canonicalizeCfcLabel({ confidentiality }).confidentiality);
+      } finally {
+        inspect.abort();
+      }
+    } finally {
+      cancels.forEach((cancel) => cancel());
+      await runtime.dispose();
+    }
+  });
+
   for (const asCell of [false, true]) {
     it(`waits for a cold profile alias before publishing it (asCell=${asCell})`, async () => {
       const server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });

@@ -83,7 +83,7 @@ const homeSchema: JSONSchema = {
   ifc: { confidentiality: ["local-profile"] },
 };
 
-describe("wish", () => {
+describe("wish-home-readiness", () => {
   for (const profilePresent of [true, false]) {
     for (const delayHome of ["root", "none"] as const) {
       for (const coldHelper of [false, true]) {

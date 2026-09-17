@@ -3428,7 +3428,7 @@ export class Scheduler {
       this.#gates.releaseForRetry(action);
       return;
     }
-    // Trailing computation debounce re-arms on every other invalidation
+    // Trailing computation debounce re-arms when no retry is owed
     // (§8.1: debounceReadyAt resets while gated). Arming here — in the one
     // invalid-setter — covers every path (channel, registration), so gate
     // QUERIES stay side-effect-free.
@@ -3458,7 +3458,7 @@ export class Scheduler {
     this.#markActionInvalid(action, cause, options);
 
     if (
-      !options?.retry && this.#nodes.effects.has(action) &&
+      this.#nodes.effects.has(action) &&
       this.#gates.getDebounce(action)
     ) {
       this.#scheduleWithDebounce(action);
