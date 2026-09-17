@@ -82,23 +82,20 @@ export class AsyncSemaphoreQueue {
       this.#active++;
       const { fn, resolvers } = item;
 
-      let promise: Promise<unknown>;
-      try {
-        promise = fn();
-      } catch (error) {
-        this.#active--;
-        this.#failed++;
-        resolvers.reject(error);
-        this.#drain();
-        continue;
-      }
-
       const settleFailure = (error: unknown) => {
         this.#active--;
         this.#failed++;
         resolvers.reject(error);
         this.#drain();
       };
+
+      let promise: Promise<unknown>;
+      try {
+        promise = fn();
+      } catch (error) {
+        settleFailure(error);
+        continue;
+      }
 
       promise.then((result) => {
         this.#active--;
