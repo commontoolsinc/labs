@@ -600,11 +600,13 @@ slug as the member name and carries it in the view, which serializes back to
 `<space>/<collection>/<member>`. It walks no further: segments past the member
 are carried in the view as written, and the shell refuses such an address by
 naming them, as [Items contain collections](#items-contain-collections) records.
-It reads a leading `@` on the first segment as the mark on the space, so the
-fully qualified reference and the page URL are one address written two ways: the
-mark is what a reference carries and is no part of the space, so the shell opens
-`/@<space>/top/42` and settles on `/<space>/top/42`. Resolution is a separate
-worker round trip, `slug:resolve`
+It reads a path that opens with `//` the way the cell reference grammar writes a
+fully qualified reference, so that reference and the page URL are one address
+written two ways: the second slash is what a reference carries and is no part of
+the space, so the shell opens `//<space>/top/42`, the reference its header
+offers, and settles on `/<space>/top/42`. A leading `@` on the first segment
+marks the space as well, and the shell opens `/@<space>/top/42` the same way.
+Resolution is a separate worker round trip, `slug:resolve`
 (`packages/runtime-client/src/backends/runtime-processor.ts`), which hands the
 reference to the runner's walk and answers with the piece and whatever the walk
 did not spend. A name with no member after it is a different question of the

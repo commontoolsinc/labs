@@ -115,8 +115,9 @@ ruled. A later reversal is a decision recorded here, not a discovery.
    qualified citation is `#//topics-dev/top/42`. The spec's `#@space/...`
    spelling is amended when that grammar lands. Part 1 of the spec, which
    governs addressing, is unaffected. #6814 records that decision and changes
-   no parser, so until one accepts `//<space>/...` the spelling that resolves
-   is `/@<space>/...`, and that is what a stage builds and demonstrates. A
+   no parser. The reference parser reads `//<space>/...` and refuses
+   `/@<space>/...` for a named space, so the spelling that resolves is
+   `//<space>/...`, and that is what a stage builds and demonstrates. A
    criterion's examples mean whichever spelling the reference parser accepts
    when the criterion is checked, so the switch follows that parser rather
    than any pull request.
@@ -275,9 +276,9 @@ Scope: `packages/piece/src/slugs.ts`, `packages/runner/src/slug-resolution.ts`,
    and `cf piece slugs` lists it, naming the containing piece. Both demos run
    on the exemplar board.
 2. A reference that names a collection and then a member resolves to that
-   member: `cf cell get /@<space>/top/42 title`,
-   `cf piece describe --cell /@<space>/top/42`, and
-   `cf piece call --cell /@<space>/top/42 <verb>` all reach it. A reference
+   member: `cf cell get //<space>/top/42 title`,
+   `cf piece describe --cell //<space>/top/42`, and
+   `cf piece call --cell //<space>/top/42 <verb>` all reach it. A reference
    that stops at the collection refuses, naming the piece that holds it. The
    walk lives in `resolvePieceReference`, which takes an address and the path
    written after it; `resolvePieceAddress` is its no-path case and refuses a
@@ -285,10 +286,10 @@ Scope: `packages/piece/src/slugs.ts`, `packages/runner/src/slug-resolution.ts`,
    with.
 3. A slug resolving to a non-piece with no further path fails with a message
    naming the containing piece.
-4. `/@<space>/top/999` fails with "no member 999 in top".
+4. `//<space>/top/999` fails with "no member 999 in top".
 5. Unit tests in `packages/piece/test/slug.test.ts` and `packages/cli/test`.
 
-Demo: `cf cell get /@<space>/top/2 title` on the local exemplar board.
+Demo: `cf cell get //<space>/top/2 title` on the local exemplar board.
 
 ### S2b — Assignment refuses by default
 
@@ -347,7 +348,7 @@ Scope: `packages/navigation` (the member in a view and its URL),
 2. `/<space>/top` opens the board, the piece containing the namespace.
 3. `/<space>/top/999` shows a not-found state naming the collection.
 4. The item's own header shows the number, and the shell's header offers a
-   copyable portable reference `/@<space>/top/42`; board cards show the
+   copyable portable reference `//<space>/top/42`; board cards show the
    number. (Two headers, which is how this was read when the criterion was
    delivered and accepted: the badge is the item pattern's, while only the
    shell knows the space and the collection's name, so only the shell can
@@ -368,7 +369,7 @@ mention).
 3. Autocomplete matches the number as well as the title.
 4. A pasted `#42` stays plain text; the editor's documentation says so and
    why.
-5. Stretch: the pill's plain-text copy is `/@<space>/top/42`.
+5. Stretch: the pill's plain-text copy is `//<space>/top/42`.
 
 ### S6 — Graft onto Topics
 

@@ -266,11 +266,17 @@ export function urlToAppView(url: URL): AppView {
   segments.shift(); // shift off the pathnames' prefix "/";
   const mode = segments[0] === EMBED_PATH_PREFIX ? "embed" : undefined;
   if (mode) segments.shift();
-  // A leading `@` marks the space, which is how a reference that travels is
-  // written: `/@<space>/<collection>/<member>` is the spelling the header
-  // hands out, and it addresses what `/<space>/<collection>/<member>` does.
-  // The mark is the whole difference, so it comes off and the segment reads
-  // as any other space does — which leaves a segment that is nothing but the
+  // A reference that travels carries its space, written as the cell reference
+  // grammar writes a fully qualified one: `//<space>/<collection>/<member>` is
+  // the spelling the header hands out and the one `cf` reads, and it
+  // addresses what `/<space>/<collection>/<member>` does. The second slash is
+  // the whole difference, so the empty segment it leaves ahead of the space
+  // comes off.
+  if (segments[0] === "") segments.shift();
+  // A leading `@` on the space marks it as well. Addresses in circulation
+  // carry that spelling, though the grammar reads it only ahead of a DID. The
+  // mark is no part of the space, so it comes off and the segment reads as
+  // any other space does — which leaves a segment that is nothing but the
   // mark naming no space, the address a bare origin already carries.
   const first = segments[0] === undefined
     ? undefined

@@ -271,26 +271,80 @@ describe("shell collection members", () => {
         "Oven schedule",
       ]);
 
-      // `/@<space>/<collection>/<member>` is what "Copy reference" copies, and
-      // a page served at that URL is the only place its whole trip is
+      // The header copies the reference it holds character for character, so
+      // the one it holds on the member's page is what "Copy reference" copies.
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: { spaceName: SPACE_NAME, pieceSlug: slug, pieceMember: "2" },
+        identity,
+      });
+      const reference = await waitForCondition(shell.page(), (probe) => {
+        const [header] = probe.collect("x-header-view");
+        const held = header && "pieceReference" in header
+          ? header.pieceReference
+          : undefined;
+        return typeof held === "string" && held !== "" ? held : false;
+      });
+      expect(reference).toBe(`//${SPACE_NAME}/${slug}/2`);
+
+      // `cf` reads it and reaches the same member: the second one filed.
+      const title = await cf(identityPath, [
+        "cell",
+        "get",
+        String(reference),
+        "title",
+      ]);
+      expect(JSON.parse(title)).toBe("Oven schedule");
+
+      // A page served at that address is the only place its whole trip is
       // visible: through the server that routes it, the browser that sends
       // it, and the shell that reads it back.
       await shell.goto({
         frontendUrl: FRONTEND_URL,
         view: { spaceName: SPACE_NAME, pieceSlug: slug, pieceMember: "2" },
-        urlPath: `/@${SPACE_NAME}/${slug}/2`,
+        urlPath: reference as `/${string}`,
         identity,
       });
 
       await waitForCondition(shell.page(), memberNameIs, {
         args: ["2"],
       });
+      // The second slash is no part of the space, so the page the shell
+      // settles on is the one it would have written itself.
+      const pathname = await shell.page().evaluate(() =>
+        globalThis.location.pathname
+      );
+      expect(pathname).toBe(`/${SPACE_NAME}/${slug}/2`);
+    });
+
+    it("opens an address that marks its space with a leading `@`", async () => {
+      await using tempIdentity = await writeTempIdentity({
+        implementation: "noble",
+      });
+      const { identity, path: identityPath } = tempIdentity;
+      const slug = `marked-${crypto.randomUUID()}`;
+      await fileBoardWithMembers(identity, identityPath, slug, [
+        "Glaze recipes",
+      ]);
+
+      // Addresses in circulation carry this spelling of a reference, and a
+      // page served at one opens the member it names.
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: { spaceName: SPACE_NAME, pieceSlug: slug, pieceMember: "1" },
+        urlPath: `/@${SPACE_NAME}/${slug}/1`,
+        identity,
+      });
+
+      await waitForCondition(shell.page(), memberNameIs, {
+        args: ["1"],
+      });
       // The mark says which segment is the space and is no part of it, so the
       // page the shell settles on is the one it would have written itself.
       const pathname = await shell.page().evaluate(() =>
         globalThis.location.pathname
       );
-      expect(pathname).toBe(`/${SPACE_NAME}/${slug}/2`);
+      expect(pathname).toBe(`/${SPACE_NAME}/${slug}/1`);
     });
   });
 

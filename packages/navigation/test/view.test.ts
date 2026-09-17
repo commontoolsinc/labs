@@ -55,11 +55,48 @@ describe("view", () => {
     ).toBe(`/${SPACE_DID}/top/42`);
   });
 
-  it("parses a space written with the reference's leading mark", () => {
-    // `/@<space>/<collection>/<member>` is the reference the shell's header
+  it("parses a space written with the reference grammar's leading `//`", () => {
+    // `//<space>/<collection>/<member>` is the reference the shell's header
     // hands out, so the shell reads back what it gives away. A name and a DID
-    // both answer to the mark, and the mark reaches a space naming no piece
-    // as well as one naming a member.
+    // both follow the second slash, which reaches a space naming no piece as
+    // well as one naming a member.
+    expect(urlToAppView(new URL("http://common.test//space/top/42"))).toEqual({
+      spaceName: "space",
+      pieceSlug: "top",
+      pieceMember: "42",
+    });
+    expect(urlToAppView(new URL(`http://common.test//${SPACE_DID}/top/42`)))
+      .toEqual({ spaceDid: SPACE_DID, pieceSlug: "top", pieceMember: "42" });
+    expect(urlToAppView(new URL("http://common.test//space/demo"))).toEqual({
+      spaceName: "space",
+      pieceSlug: "demo",
+    });
+    expect(urlToAppView(new URL("http://common.test//space"))).toEqual({
+      spaceName: "space",
+    });
+    // Embed mode belongs to the route rather than to the space, so the two
+    // prefixes compose.
+    expect(urlToAppView(new URL("http://common.test/.embed//space/top/42")))
+      .toEqual({
+        spaceName: "space",
+        pieceSlug: "top",
+        pieceMember: "42",
+        mode: "embed",
+      });
+    // The second slash is no part of the space, so a page URL built from the
+    // route carries the space in its segments and nothing else.
+    expect(
+      appViewToUrlPath(
+        urlToAppView(new URL("http://common.test//space/top/42")),
+      ),
+    ).toBe("/space/top/42");
+  });
+
+  it("parses a space written with the reference's leading mark", () => {
+    // `/@<space>/<collection>/<member>` is a spelling of the reference that
+    // addresses in circulation carry, so the shell opens it as well. A name
+    // and a DID both answer to the mark, and the mark reaches a space naming
+    // no piece as well as one naming a member.
     expect(urlToAppView(new URL("http://common.test/@space/top/42"))).toEqual({
       spaceName: "space",
       pieceSlug: "top",
