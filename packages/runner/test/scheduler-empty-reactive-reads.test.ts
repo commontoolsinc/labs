@@ -2,17 +2,34 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
+import {
+  acquireExecutionLease,
+  executionLeaseHolder,
+} from "@commonfabric/memory/v2/execution-lease";
 
 import { stampWaveRunContext } from "../src/executor/wave.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import {
+  EmulatedStorageManager,
+  newLoopbackServer,
+} from "../src/storage/v2-emulate.ts";
 
 async function fixture(sealing = false) {
   const signer = await Identity.fromPassphrase("empty reactive reads");
-  const storage = EmulatedStorageManager.emulate({ as: signer });
+  const server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
+  const storage = EmulatedStorageManager.connectTo(server, { as: signer });
+  if (sealing) {
+    const engine = await server.engineForSpace(signer.did());
+    expect(acquireExecutionLease(engine, {
+      space: signer.did(),
+      holder: executionLeaseHolder(signer.did()),
+      now: Date.now(),
+      ttlMs: 600_000,
+    })).toBe(true);
+  }
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
@@ -40,11 +57,95 @@ async function fixture(sealing = false) {
       runtime.clearSealDestination();
       await storage.synced();
       await runtime.dispose();
+      await server.close();
     },
   };
 }
 
 describe("scheduler-empty-reactive-reads", () => {
+  for (const stale of [false, true]) {
+    it(`validates reads after writes cancel out in multiple spaces with stale input ${stale}`, async () => {
+      const { runtime, space, close } = await fixture();
+      const otherSpace = (await Identity.fromPassphrase("other empty space"))
+        .did();
+      const input = runtime.getCell<number>(space, "multi-space-input");
+      const outputs = [space, otherSpace].map((outputSpace) =>
+        runtime.getCell<number>(outputSpace, "multi-space-output")
+      );
+      try {
+        const seed = runtime.edit();
+        seed.tx.enableMultiSpaceWrites!();
+        input.withTx(seed).set(0);
+        for (const output of outputs) output.withTx(seed).set(0);
+        expect((await seed.commit()).error).toBeUndefined();
+
+        const tx = runtime.edit();
+        tx.tx.enableMultiSpaceWrites!();
+        tx.tx.validateReactiveReads = true;
+        expect(input.withTx(tx).get()).toBe(0);
+        for (const output of outputs) {
+          output.withTx(tx).set(1);
+          output.withTx(tx).set(0);
+        }
+        if (stale) {
+          const update = runtime.edit();
+          input.withTx(update).set(1);
+          expect((await update.commit()).error).toBeUndefined();
+        }
+
+        const reads = tx.tx.getReactivityLog!().reads;
+        expect(reads.length).toBeGreaterThan(0);
+        const result = await tx.commit();
+        if (stale) {
+          expect(result.error).toMatchObject({
+            name: "StorageTransactionInconsistent",
+            emptyReactiveCommit: true,
+          });
+          expect(tx.tx.getReactivityLog!().reads).toEqual(reads);
+        } else {
+          expect(result.error).toBeUndefined();
+        }
+        expect(outputs.map((output) => output.get())).toEqual([0, 0]);
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  for (const hasBranch of [false, true]) {
+    it(`aborts an untracked reactive read without throwing with an existing branch ${hasBranch}`, async () => {
+      const { runtime, storage, space, close } = await fixture();
+      try {
+        const address = toMemorySpaceAddress(
+          runtime.getCell(space, "missing-snapshot").getAsNormalizedFullLink(),
+        );
+        const tx = storage.edit();
+        tx.validateReactiveReads = true;
+        if (hasBranch) {
+          expect(
+            tx.read({ ...address, id: "of:other-document", path: [] }).error,
+          )
+            .toBeUndefined();
+        }
+        // Model a future read recorder that appends activity without first
+        // creating its snapshot. Commit must fail closed, not throw TypeError.
+        tx.getReactivityLog = () => ({
+          reads: [address],
+          shallowReads: [],
+          writes: [],
+        });
+        expect((await tx.commit()).error).toMatchObject({
+          name: "StorageTransactionAborted",
+          abortedBeforeStorage: true,
+          reason:
+            `Reactive read has no transaction snapshot: ${space}/${address.id}`,
+        });
+      } finally {
+        await close();
+      }
+    });
+  }
+
   for (const sealing of [false, true]) {
     it(`flushes an effect-only event after its input changes with sealing ${sealing}`, async () => {
       const { runtime, space, destination, close } = await fixture(sealing);
@@ -275,6 +376,46 @@ describe("scheduler-empty-reactive-reads", () => {
       }
     });
   }
+
+  it("keeps a live computation's throttle after a stale empty run", async () => {
+    const { runtime, space, close } = await fixture();
+    const input = runtime.getCell<number>(space, "input");
+    let runs = 0;
+    let seen: number | undefined;
+    let cancel: (() => void) | undefined;
+    try {
+      const seed = runtime.edit();
+      input.withTx(seed).set(0);
+      expect((await seed.commit()).error).toBeUndefined();
+      const action = async (tx: IExtendedStorageTransaction) => {
+        seen = input.withTx(tx).get();
+        if (++runs === 2) {
+          const update = runtime.edit();
+          input.withTx(update).set(2);
+          expect((await update.commit()).error).toBeUndefined();
+        }
+      };
+      cancel = runtime.scheduler.subscribe(action, { isEffect: true });
+      await runtime.settled();
+      expect(runs).toBe(1);
+      runtime.scheduler.setThrottle(action, 1000);
+      const update = runtime.edit();
+      input.withTx(update).set(1);
+      const committed = update.commit();
+      await clock.settle();
+      expect((await committed).error).toBeUndefined();
+      await clock.tick(1000);
+      await clock.settle();
+      expect(runs).toBe(2);
+      await clock.tick(1000);
+      await clock.settle();
+      expect(runs).toBe(3);
+      expect(seen).toBe(2);
+    } finally {
+      cancel?.();
+      await close();
+    }
+  });
 
   it("watches an instance while a later fan-out instance is still running", async () => {
     const { runtime, space, destination, close } = await fixture(true);

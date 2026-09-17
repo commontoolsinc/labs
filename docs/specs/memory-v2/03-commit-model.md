@@ -143,8 +143,9 @@ Changes to unrelated fields do not reject an empty computation. The scheduler
 installs subscriptions in the same synchronous turn, including the union of
 instance reads after each fan-out instance, so changes during later instances
 remain observed. A rejected empty computation (including a replaced replica
-route) carries `emptyReactiveCommit`
-and retries past debounce and throttle to finish a one-shot pull's work.
+route) carries `emptyReactiveCommit`. It retries past debounce and throttle
+when its node or fan-out instance has no accepted result yet, or no live
+demander to wake it. Live nodes with accepted results retain their gates.
 Event handlers also carry `sourceAction`, but do not opt into this check:
 their empty commits retain ordinary completion and post-commit effects.
 

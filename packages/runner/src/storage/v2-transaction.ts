@@ -3354,7 +3354,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   /** Checks exactly the deep and shallow reads that wake a reactive run. */
-  #validateReactiveReads(): Result<Unit, IStorageTransactionInconsistent> {
+  #validateReactiveReads(): Result<Unit, StorageTransactionFailed> {
     for (const [space, branch] of this.#branches) {
       const route = this.#validateReplicaRoute(space, branch, true);
       if (route.error) return route;
@@ -3367,8 +3367,17 @@ export class V2StorageTransaction implements IStorageTransaction {
       ] as const
     ) {
       for (const address of reads) {
-        const branch = this.#branches.get(address.space)!;
-        const doc = branch.docs.get(this.#docKey(address))!;
+        const branch = this.#branches.get(address.space);
+        const doc = branch?.docs.get(this.#docKey(address));
+        // Read recording creates both before adding activity. If a future
+        // read path violates that invariant, fail closed before storage.
+        if (branch === undefined || doc === undefined) {
+          return {
+            error: TransactionAborted(
+              `Reactive read has no transaction snapshot: ${address.space}/${address.id}`,
+            ),
+          };
+        }
         const replica = branch.replica;
         const current = toTransactionDocumentValue(
           isDurableReadTx(this) && replica.getNonSpeculativeDocument

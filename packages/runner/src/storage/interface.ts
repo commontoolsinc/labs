@@ -2573,7 +2573,7 @@ export interface IStorageTransactionInconsistent extends IStorageError {
 
   readonly address: IMemoryAddress;
 
-  /** An empty reactive commit needs a fresh run past debounce and throttle. */
+  /** An empty reactive commit needs a fresh run; first results may bypass gates. */
   readonly emptyReactiveCommit?: true;
 
   from(space: MemorySpace): IStorageTransactionInconsistent;
