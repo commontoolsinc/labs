@@ -9,7 +9,11 @@ export type HarnessTaskOutcome =
   | { outcome: "question"; question: { text: string } }
   | { outcome: "gave-up"; reason: string };
 
-/** Reads a serialized task outcome, defaulting only an absent legacy field. */
+/**
+ * Reads a serialized outcome across console versions. Absent legacy fields
+ * and unfamiliar nonempty outcome words mean completed; malformed known
+ * outcomes remain invalid. Writers use the closed HarnessTaskOutcome union.
+ */
 export const readHarnessTaskOutcome = (
   value: unknown,
 ): HarnessTaskOutcome | undefined => {
@@ -18,6 +22,12 @@ export const readHarnessTaskOutcome = (
     return undefined;
   }
   const record = value as Record<string, unknown>;
+  if (
+    !Object.hasOwn(record, "outcome") || typeof record.outcome !== "string" ||
+    record.outcome.trim() === ""
+  ) {
+    return undefined;
+  }
   switch (record.outcome) {
     case "completed":
       return record.question === undefined && record.reason === undefined
@@ -25,20 +35,26 @@ export const readHarnessTaskOutcome = (
         : undefined;
     case "question": {
       const question = record.question;
-      return typeof question === "object" && question !== null &&
-          !Array.isArray(question) && "text" in question &&
-          typeof question.text === "string" &&
-          question.text.trim().length > 0 &&
+      if (
+        !Object.hasOwn(record, "question") || typeof question !== "object" ||
+        question === null || Array.isArray(question) ||
+        !Object.hasOwn(question, "text")
+      ) {
+        return undefined;
+      }
+      const text = (question as { text: unknown }).text;
+      return typeof text === "string" && text.trim().length > 0 &&
           record.reason === undefined
-        ? { outcome: "question", question: { text: question.text } }
+        ? { outcome: "question", question: { text } }
         : undefined;
     }
     case "gave-up":
-      return typeof record.reason === "string" &&
+      return Object.hasOwn(record, "reason") &&
+          typeof record.reason === "string" &&
           record.reason.trim().length > 0 && record.question === undefined
         ? { outcome: "gave-up", reason: record.reason }
         : undefined;
     default:
-      return undefined;
+      return { outcome: "completed" };
   }
 };

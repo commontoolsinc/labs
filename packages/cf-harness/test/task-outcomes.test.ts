@@ -371,6 +371,24 @@ describe("task-outcomes", () => {
     });
   }
 
+  it("refuses required outcome fields inherited from a prototype", () => {
+    const text = "Which mailbox?";
+    for (
+      const value of [
+        Object.create({ outcome: "question", question: { text } }),
+        Object.assign(Object.create({ question: { text } }), {
+          outcome: "question",
+        }),
+        { outcome: "question", question: Object.create({ text }) },
+        Object.assign(Object.create({ reason: "Not available" }), {
+          outcome: "gave-up",
+        }),
+      ]
+    ) {
+      expect(readHarnessTaskOutcome(value)).toBeUndefined();
+    }
+  });
+
   it("defaults absent legacy outcomes and refuses contradictory or incomplete records", () => {
     expect(readHarnessTaskOutcome(undefined)).toEqual({ outcome: "completed" });
     for (
@@ -378,6 +396,8 @@ describe("task-outcomes", () => {
         null,
         [],
         {},
+        { outcome: 42 },
+        { outcome: " " },
         { outcome: "question" },
         { outcome: "gave-up", reason: " " },
         { outcome: "question", question: { text: "Why?" }, reason: "stopped" },

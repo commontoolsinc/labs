@@ -331,7 +331,11 @@ The completed-turn result is:
 turns and return **200**. A question includes `question: { "text": "…" }`; a
 give-up includes `reason: "…"`. Each field is present only for its matching
 outcome. `finalText` carries the human-readable answer, question, or reason in
-every case. An older result without `outcome` means `completed`.
+every case. An older result without `outcome` means `completed`. When reading
+stored artifacts, an unfamiliar nonempty outcome word also means `completed`, so
+a pin change or rollback does not hide a finished turn's result. Its `finalText`
+remains available. Malformed objects remain invalid; new tool calls and writes
+use the closed three-outcome contract.
 
 `sessionId` identifies the conversation on every result. `continuable` says
 whether it currently accepts another turn: the session must be idle and
