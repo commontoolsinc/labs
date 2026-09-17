@@ -500,9 +500,15 @@ FFmpeg must be installed and available as `ffmpeg`, or its path must be set in
 `--keep-frames`, `--viewport=WIDTHxHEIGHT`, and `--port-offset=N`.
 
 Presentation mode modifies the existing browser interaction paths rather than
-using demo-only clicks or typing. Inputs type with a readable character delay,
-clicks show an injected cursor, and labeled scenario steps appear as captions.
-All presentation behavior is disabled during `deno task integration`.
+using demo-only clicks or typing. `<input>` fields type with a readable
+character delay, clicks show an injected cursor, and labeled scenario steps
+appear as captions. All presentation behavior is disabled during
+`deno task integration`.
+
+A `<textarea>` is the exception: the typing path resolves an `HTMLInputElement`
+and declines anything else, so `fillCfTextarea` sets the field's value and a
+recording shows the text arriving rather than being typed. A demo whose
+composer is a `cf-textarea` reads that way on purpose, not by mistake.
 
 Tests with multiple `ShellIntegration` instances retain their independent
 browsers and identities. Each page is recorded against one shared timeline and
