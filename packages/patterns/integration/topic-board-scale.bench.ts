@@ -36,10 +36,7 @@ import { BoardSession } from "./topic-board-session.ts";
 import { waitForSettledText } from "./cfc-browser-helpers.ts";
 import {
   formatTopicsSample,
-  measureTopicsReads,
-  prepareTopicsProgram,
   timeTopicsOperation,
-  type TopicsProgram,
 } from "./topics-browser-measurement.ts";
 import { waitForPieceView } from "./topics-navigation-helpers.ts";
 
@@ -182,17 +179,6 @@ for (const topicCount of SIZES) {
 }
 
 /**
- * The Topics program a read-accounted sample attributes its runs against,
- * compiled on first use so a run whose sizes are all skipped compiles nothing.
- */
-let compiling: Promise<TopicsProgram> | undefined;
-
-function topicsProgram(): Promise<TopicsProgram> {
-  compiling ??= prepareTopicsProgram();
-  return compiling;
-}
-
-/**
  * The topic a reopen case opens: the newest, which is the board's first card,
  * since a freshly seeded board's last activity is each topic's creation.
  */
@@ -260,41 +246,11 @@ async function reachReopen(
   return () => showTopicPage(session, fixture, index);
 }
 
-/** Sizes whose read-accounted sample has been taken. */
-const sampled = new Set<number>();
-
 /**
- * Take a size's one read-accounted reopen sample and write it to stderr, the
- * first time it is asked for.
- *
- * The sample runs in a browser of its own, so the session about to be timed
- * reaches its starting point having had nothing done to it, and so the sample
- * measures the operation from the state every timed iteration starts in. Its
- * elapsed time carries the accounting's overhead, which is why it is reported
- * as reads rather than charted as a series of its own.
+ * Sizes whose reopen sample has been written to stderr, so that each size
+ * reports one and the rest of its iterations report none.
  */
-async function recordReopenReadsOnce(
-  topicCount: number,
-  fixture: TopicBoardFixture,
-): Promise<void> {
-  if (sampled.has(topicCount)) return;
-  sampled.add(topicCount);
-  const session = await BoardSession.open({
-    fixture,
-    identity: await seedIdentity(PASSPHRASE),
-  });
-  try {
-    const operation = await reachReopen(session, fixture);
-    const sample = await measureTopicsReads(session.page, {
-      label: `reopen ${topicCount}`,
-      program: await topicsProgram(),
-      operation,
-    });
-    note(formatTopicsSample(sample).join("\n"));
-  } finally {
-    await session.close();
-  }
-}
+const reported = new Set<number>();
 
 for (const topicCount of SIZES) {
   Deno.bench({
@@ -305,18 +261,46 @@ for (const topicCount of SIZES) {
     ignore: topicCount > SCALE_LIMIT,
   }, async (b) => {
     const fixture = await board(topicCount);
-    await recordReopenReadsOnce(topicCount, fixture);
     const session = await BoardSession.open({
       fixture,
       identity: await seedIdentity(PASSPHRASE),
     });
     try {
       const operation = await reachReopen(session, fixture);
-      await timeTopicsOperation(session.page, {
+      // Timed rather than read-accounted, and the reason is a measurement
+      // rather than a preference: a reopen completes no run that
+      // `measureTopicsReads()` can attribute to a lift, so it refuses the
+      // sample. Observed against a local toolshed with client execution, and
+      // the two refusals differ. On eight-topic boards, seeded both with and
+      // without citations, the reopen completed no run carrying a read sample
+      // at all, where a first open of the same topic ran the pivot, that
+      // topic's backlinks and its comment count — about fifty scheduler runs
+      // in all. On the hundred-topic board a reopen's runs did carry a read
+      // sample but no source location, which the helper refuses because a
+      // position it cannot parse says nothing about the run. Neither refusal
+      // leaves a named lift unaccounted for: a lift's run marker carries a
+      // source location, and these runs had none. The reads the browser tier
+      // records therefore come from the navigation benchmark's `comment` and
+      // `backlink` segments; graph size and timing are what a reopen has to
+      // report, and the sample below carries both.
+      //
+      // `mayRunNothing` is declared because a reopen was observed running
+      // nothing at all, not to quiet a check in advance: on a 100-topic board
+      // one iteration recorded a single `scheduler/run` span and a later one
+      // recorded none. That the worker may do no work is the substance of this
+      // measurement rather than an obstacle to it — what the interval times is
+      // the shell reaching a topic whose values are already computed — and
+      // each sample records the declaration alongside its run count.
+      const sample = await timeTopicsOperation(session.page, {
         label: `reopen ${topicCount}`,
         operation,
         interval: b,
+        mayRunNothing: true,
       });
+      if (!reported.has(topicCount)) {
+        reported.add(topicCount);
+        note(formatTopicsSample(sample).join("\n"));
+      }
     } finally {
       await session.close();
     }

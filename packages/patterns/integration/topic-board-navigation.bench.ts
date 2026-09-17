@@ -307,12 +307,29 @@ if (crossrefTargets(BACKLINK_TOPIC, { topicCount: TOPIC_COUNT }).length > 0) {
  */
 let commented = 0;
 
+/**
+ * Topics the comment segment needs: one for its read-accounted sample, and one
+ * for each iteration including the warm-up.
+ */
+const COMMENT_TOPICS_NEEDED = 1 + WARMUP + ITERATIONS;
+
+// Said before anything is seeded rather than when the segment runs out
+// part-way through, which a board sized through `CF_TOPIC_BOARD_TOPICS` can do
+// after minutes of seeding and several browsers.
+if (TOPIC_COUNT < COMMENT_TOPICS_NEEDED) {
+  throw new Error(
+    `The comment segment files one comment per iteration on a topic that has ` +
+      `none, so it needs ${COMMENT_TOPICS_NEEDED} topics and ` +
+      `CF_TOPIC_BOARD_TOPICS is ${TOPIC_COUNT}`,
+  );
+}
+
 /** The next uncommented topic of the comment board. */
 function nextCommentTopic(): number {
   if (commented >= TOPIC_COUNT) {
     throw new Error(
       `The comment segment has used all ${TOPIC_COUNT} topics of the comment ` +
-        "board; seed a larger one",
+        "board",
     );
   }
   return commented++;

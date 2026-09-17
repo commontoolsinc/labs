@@ -321,8 +321,31 @@ computing it for the first time. It asks whether that cost grows with the board
 behind the topic, which is the question this file exists for and which the
 navigation benchmark's single board cannot answer. Reopening writes nothing, so
 both series of a size share its one seeded board, and a size skipped for one is
-skipped for the other. Like the navigation benchmark's two new series, this one
-charts a timed interval and writes one read-accounted sample to stderr.
+skipped for the other.
+
+It charts a timed interval and writes one timed sample per size to stderr,
+carrying that operation's graph size and timing. Unlike the navigation
+benchmark's two new series it records no reads, and the reason is a measurement
+rather than a preference: a reopen completes no run that `measureTopicsReads()`
+can attribute to a lift, so it refuses the sample. Observed against a local
+toolshed with client execution, in two forms. On eight-topic boards, seeded both
+with and without citations, the reopen completed no run carrying a read sample
+at all, where a first open of the same topic ran the pivot, that topic's
+backlinks and its comment count — about fifty scheduler runs in all. On the
+hundred-topic board a reopen's runs did carry a read sample but no source
+location, which the helper refuses because a position it cannot parse says
+nothing about the run. Neither refusal hides a named lift: a lift's run marker
+carries a source location, and these runs had none. So the browser tier's reads
+come from `comment` and `backlink`, and what a reopen has to report is its graph
+and its timing.
+
+A reopen may run nothing in the worker at all, and the series declares
+`mayRunNothing` because that was observed rather than to quiet the check in
+advance: on a 100-topic board one iteration recorded a single scheduler run and
+a later one recorded none. What the interval times is the shell reaching a topic
+whose values are already computed, so the worker having nothing to do is the
+substance of the measurement. Each sample records the declaration beside its run
+count, so a reopen that starts doing work again is visible rather than hidden.
 
 What `reopen` does not measure is worth stating, because the plan's phrase is
 "reopen or reconnect" and only the first half of it is measured here. The page,
@@ -375,8 +398,10 @@ browser tier of [the Topics computation
 plan](../plans/topics-computation-cost.md). A caller invokes it around the
 operation. Four benchmark series use it: `comment` and `backlink` in the
 navigation benchmark, and `reopen <size>` in the scale benchmark. Each charts
-the interval `timeTopicsOperation()` brackets and writes one
-`measureTopicsReads()` sample of the same operation to `diagnostics.log`.
+the interval `timeTopicsOperation()` brackets. The first two additionally write
+one `measureTopicsReads()` sample of the same operation to `diagnostics.log`;
+`reopen` writes its timed sample instead, because a reopen completes no run for
+that call to attribute.
 
 `measureTopicsReads()` turns telemetry and body read accounting on in the
 shell's runtime client, runs the operation, waits until the view has settled and
