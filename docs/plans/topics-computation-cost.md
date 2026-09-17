@@ -108,7 +108,11 @@ implementation and prototypes can begin earlier.
         and
         [navigation](../../packages/patterns/integration/topic-board-navigation.bench.ts)
         benchmarks.
-  - [ ] A browser demo with board, topic, backlink, and comment actions.
+  - [x] A browser demo with board, topic, backlink, and comment actions —
+        landed by #7673 as
+        [`topic-board-demo.test.ts`](../../packages/patterns/integration/topic-board-demo.test.ts),
+        which states which of its properties a candidate may change
+        without invalidating T5's comparison.
   - [ ] The baseline report in `docs/history/`, separating pivot production,
         per-topic lookup, activity, and rendering costs, and recording the
         probe's baseline and the environment and source versions.
