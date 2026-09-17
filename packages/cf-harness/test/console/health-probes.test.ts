@@ -61,6 +61,39 @@ describe("health-probes", () => {
   });
 
   describe("consolePatternIndexHealthProbes()", () => {
+    it("returns the observed cause separately from the remedy for negative index responses", async () => {
+      const client = new PatternIndexClient({
+        signer,
+        baseUrl: "https://index.test",
+        fetchFn: () =>
+          Promise.resolve(Response.json({
+            ok: false,
+            did: signer.did(),
+            enrolled: false,
+          })),
+      });
+      const health = new ConsoleHealth(
+        [],
+        consolePatternIndexHealthProbes(
+          "https://index.test",
+          () => Promise.resolve(client),
+        ),
+      );
+      await health.refresh();
+      expect(health.snapshot().rows).toMatchObject([{
+        id: "index.reachable",
+        state: "failed",
+        reason: "The index reports that its health check failed.",
+        remedy: "Check the pattern index deployment.",
+      }, {
+        id: "index.enrolled",
+        state: "failed",
+        reason: "The index reports no enrollment for the console identity.",
+        remedy:
+          "Enroll the console's identity through https://index.test/enroll.",
+      }]);
+    });
+
     for (const suffix of ["", "?token=query-secret#fragment-secret"]) {
       it(`omits URL credentials from diagnostics with suffix ${JSON.stringify(suffix)}`, async () => {
         const baseUrl =

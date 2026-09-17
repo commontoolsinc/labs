@@ -152,6 +152,9 @@ export const consolePatternIndexHealthProbes = (
             ? "console identity enrolled"
             : "console identity not enrolled",
           ...(confirmed ? {} : {
+            reason: index === 0
+              ? "The index reports that its health check failed."
+              : "The index reports no enrollment for the console identity.",
             remedy: index === 0
               ? "Check the pattern index deployment."
               : `Enroll the console's identity through ${
