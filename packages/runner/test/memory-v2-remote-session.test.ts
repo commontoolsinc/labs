@@ -26,7 +26,10 @@ import {
   toWebSocketAddress,
   WebSocketTransport,
 } from "../src/storage/v2-remote-session.ts";
-import { createNativeMemorySocket } from "../src/storage/memory-socket.ts";
+import {
+  createNativeMemorySocket,
+  type MemorySocketFactory,
+} from "../src/storage/memory-socket.ts";
 import { SpaceHostValidationError } from "../src/space-host.ts";
 import { StorageManager } from "../src/storage/v2.ts";
 import { TEST_HELLO_SESSION_OPEN } from "./memory-v2-test-utils.ts";
@@ -553,6 +556,7 @@ describe("WebSocketTransport failure signaling", () => {
       socket: () => DrivableWebSocket,
     ) => Promise<void>,
     write?: (frame: EncodedMemoryMessage) => Promise<void>,
+    createSocket: MemorySocketFactory = createNativeMemorySocket,
   ): Promise<void> {
     const realWebSocket = globalThis.WebSocket;
     DrivableWebSocket.instances.length = 0;
@@ -562,7 +566,7 @@ describe("WebSocketTransport failure signaling", () => {
       true,
       () => {},
       (address) => {
-        const connection = createNativeMemorySocket(address);
+        const connection = createSocket(address);
         return {
           socket: connection.socket,
           send: (frame) => {
@@ -722,6 +726,34 @@ describe("WebSocketTransport failure signaling", () => {
       expect(activeSocket.sent).toEqual(["first", "second"]);
       expect(DrivableWebSocket.instances).toHaveLength(1);
     });
+  });
+
+  it("opens a fresh socket after socket construction fails", async () => {
+    const failure = new Error("Unable to construct memory socket");
+    let attempts = 0;
+    await withTransport(
+      async (transport, socket) => {
+        try {
+          await expect(transport.send("first")).rejects.toBe(failure);
+          expect(attempts).toBe(1);
+          expect(DrivableWebSocket.instances).toHaveLength(0);
+
+          const second = transport.send("second");
+          expect(attempts).toBe(2);
+          expect(DrivableWebSocket.instances).toHaveLength(1);
+          socket().openConnection();
+          await second;
+          expect(socket().sent).toEqual(["second"]);
+        } finally {
+          await transport.close();
+        }
+      },
+      undefined,
+      (address) => {
+        if (++attempts === 1) throw failure;
+        return createNativeMemorySocket(address);
+      },
+    );
   });
 
   it("waits for local write completion before resolving or sending the next frame", async () => {
