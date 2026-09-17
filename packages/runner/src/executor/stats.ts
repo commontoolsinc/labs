@@ -400,7 +400,7 @@ export type ServingLoopStats = {
     /** Deferral backstops scheduled across all transient drain outcomes. */
     deferredRescansArmed: number;
 
-    /** Deferral backstops that fired during an active serving tenure. */
+    /** Deferral backstops that fired, each owing the scan another pass. */
     deferredRescansFired: number;
 
     /** Stage C build W3, (α1) — events.md §4's RULED one-entry-one-
