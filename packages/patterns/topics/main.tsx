@@ -94,9 +94,11 @@ export interface TopicDemand extends TopicSummary {
 
   /** The board's name for the topic, as the topic reads it out of the board's
    * names table and publishes it, which it does only while
-   * `SHOW_TOPIC_NUMBERS` in `./topic.tsx` is on. The card renders it as a
-   * badge and the mention index copies it into the topic's universe row, so
-   * `#42` matches without expanding a topic.
+   * `SHOW_TOPIC_NUMBERS` in `./topic.tsx` is on. Where a topic publishes one,
+   * the card renders it as a badge and the mention index copies it into the
+   * topic's universe row, so `#42` matches without expanding a topic; where
+   * none is published, the card shows no badge and the row carries the empty
+   * string.
    *
    * OPTIONAL rather than defaulted, which is a fact about the compatibility
    * proof: a defaulted property moves the demand's defaults below an array
@@ -165,8 +167,9 @@ export interface AddTopicResult {
 
   /** The name the create allocated, as it was written to the namespace. The
    * topic's own `shortName` is a lookup that may not have produced a value
-   * when this returns, so this is the one to read: a caller must not have to
-   * wait for a derivation to learn the name it just allocated. */
+   * when this returns — and produces none at all while `SHOW_TOPIC_NUMBERS` is
+   * off — so this is the one to read: a caller must not have to wait for a
+   * derivation to learn the name it just allocated. */
   name: string;
 }
 
@@ -203,9 +206,9 @@ export interface TopicIndexRow {
   commentCount: number | Default<0> | undefined;
   lastActivityAt: number | Default<0> | undefined;
 
-  /** The board's name for the topic, as the topic publishes it. Optional
-   * rather than defaulted, unlike the two above, for the reason
-   * `TopicDemand.shortName` states. */
+  /** The board's name for the topic, as the topic publishes it, so absent for
+   * as long as a topic publishes none. Optional rather than defaulted, unlike
+   * the two above, for the reason `TopicDemand.shortName` states. */
   shortName?: string;
 }
 
@@ -444,10 +447,13 @@ export interface TopicsOutput {
   /** The board's mention universe, under the name the topic pattern's editor
    * autocompletes over — what `addTopic` wires into each child. One derived
    * document of copies, each holding its topic as an unread reference and
-   * carrying the name the topic publishes for itself, rather than the topics
-   * themselves, so a reader of the universe expands no topic and `#42` finds a
-   * member without expanding one; see `MentionableRow` in
-   * `../collection-naming/mentionable.ts`. */
+   * carrying what that topic publishes as its name: the number where a topic
+   * publishes one, and the empty string where it publishes none, which is
+   * every topic while `SHOW_TOPIC_NUMBERS` in `./topic.tsx` is off. Copying
+   * rather than listing the topics themselves is what bounds the read: a
+   * reader of the universe expands no topic, and a `#42` query finds a member
+   * — wherever a name is published to find one by — without expanding one; see
+   * `MentionableRow` in `../collection-naming/mentionable.ts`. */
   mentionable: MentionableRow[] | Default<[]>;
 
   /** The namespace itself: each name to the topic it names. A slug pointing

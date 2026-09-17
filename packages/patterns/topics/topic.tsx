@@ -613,9 +613,9 @@ export interface TopicPiece extends TopicSummary {
 
   /** The name the board calls this topic by, read out of the board's names
    * table by identity. The display name stays the title, and this rides
-   * beside it: the topic's header and the board's card render it as a badge,
-   * and a mention universe carries it, which is what a mention pill and a
-   * `#42` query read.
+   * beside it: where a topic publishes one, its header and the board's card
+   * render it as a badge, and a mention universe carries it, which is what a
+   * mention pill and a `#42` query read.
    *
    * Absent while `SHOW_TOPIC_NUMBERS` is off, for a topic no board has named,
    * and for one wired to no board: the property is simply not there. Every
