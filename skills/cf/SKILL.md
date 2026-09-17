@@ -204,6 +204,14 @@ speculatively against a space you do not intend to touch.
 
 ## Quick Command Reference
 
+`cf profile` is a person's profile from the command line:
+`cf profile create
+<name>` is the shell's create form as a command (the profile
+is made by the home pattern's own handler, in a space of its own, and its
+address printed), and `cf profile show` prints the address and name `#profile`
+resolves to. Both take `-i`/`-a` and target the identity's home space; there is
+no `--space`.
+
 | Operation          | Command                                                                                                                     |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
 | Type check         | `deno task cf check pattern.tsx --no-run`                                                                                   |

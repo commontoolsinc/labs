@@ -16,7 +16,11 @@
  * carried on the event and never on a draft cell.
  */
 
-import type { Cell, IExtendedStorageTransaction } from "@commonfabric/runner";
+import {
+  type Cell,
+  getMetaLink,
+  type IExtendedStorageTransaction,
+} from "@commonfabric/runner";
 
 import { canonicalAddress } from "./callable.ts";
 import { loadPieces, type SpaceConfig } from "./piece.ts";
@@ -49,7 +53,11 @@ export interface CreatedProfile {
   /** The profile piece's id within that space. */
   id: string;
 
-  /** The canonical reference, `/@<space>/<id>`, which `--cell` takes whole. */
+  /**
+   * The canonical reference as `canonicalAddress()` renders it —
+   * `//<space>/<id>`, with a `@<scope>` suffix off the space scope — which
+   * `--cell` takes whole.
+   */
   address: string;
 }
 
@@ -74,6 +82,41 @@ function profileSpaces(root: Cell<unknown>): Map<string, Cell<unknown>> {
     .get() ?? []) as Cell<unknown>[];
   return new Map(
     links.map((link) => [link.getAsNormalizedFullLink().space, link]),
+  );
+}
+
+/**
+ * Helper for {@link createProfile}, which picks the profile this call made
+ * out of `candidates`, the profiles that appeared since the call's first
+ * read.
+ *
+ * One candidate is this call's. Two processes creating at once can each
+ * read the list before either append lands, so both then see two; the
+ * one whose `initialName` is this call's name is this call's, and when
+ * that does not settle it either (both named alike) the call refuses to
+ * guess rather than print another process's profile as its own.
+ *
+ * @throws Error when more than one candidate carries `name`.
+ */
+async function createdByThisCall(
+  candidates: [string, Cell<unknown>][],
+  name: string,
+): Promise<[string, Cell<unknown>] | undefined> {
+  if (candidates.length <= 1) return candidates[0];
+  const named: [string, Cell<unknown>][] = [];
+  for (const candidate of candidates) {
+    const argument = getMetaLink(candidate[1], "argument");
+    if (argument === undefined) continue;
+    const initialName = candidate[1].runtime.getCellFromLink(argument)
+      .key("initialName");
+    await initialName.sync();
+    if (String(initialName.get() ?? "") === name) named.push(candidate);
+  }
+  if (named.length === 1) return named[0];
+  throw new Error(
+    `Creating profile "${name}" committed, but ${candidates.length} profiles ` +
+      "appeared at once and more than one carries that name; read the " +
+      "profile list to tell them apart.",
   );
 }
 
@@ -132,6 +175,9 @@ export async function createProfile(
   if (name.length === 0) {
     throw new Error("A profile needs a name.");
   }
+  if (/\p{Cc}/u.test(name)) {
+    throw new Error("A profile name cannot contain control characters.");
+  }
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const home = await pieces.ensureDefaultPattern();
   // Rebound to no transaction: the controller's cell rides a read
@@ -158,8 +204,9 @@ export async function createProfile(
   await pieces.synced();
   await root.sync();
 
-  const created = [...profileSpaces(root)].find(([space]) =>
-    !before.has(space)
+  const created = await createdByThisCall(
+    [...profileSpaces(root)].filter(([space]) => !before.has(space)),
+    name,
   );
   if (created === undefined) {
     throw new Error(

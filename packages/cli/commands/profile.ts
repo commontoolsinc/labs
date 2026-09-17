@@ -71,12 +71,21 @@ export async function profileCreateAction(
   deps: ProfileCommandDeps = defaultDeps,
 ): Promise<void> {
   setQuietMode(!!options.quiet);
-  if (name.trim().length === 0) {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) {
     throw new ValidationError("A profile needs a name.", { exitCode: 1 });
+  }
+  // The name is persisted as the profile's `initialName` and echoed to the
+  // terminal; a control character in it would reach both.
+  if (/\p{Cc}/u.test(trimmed)) {
+    throw new ValidationError(
+      "A profile name cannot contain control characters.",
+      { exitCode: 1 },
+    );
   }
   const created = await deps.createProfile({
     ...(await connection(options)),
-    name,
+    name: trimmed,
     jsonOutput: !!options.json,
   });
   if (options.json) {
