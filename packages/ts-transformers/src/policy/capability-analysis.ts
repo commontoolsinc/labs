@@ -1103,6 +1103,12 @@ function isArrayIsArrayCall(
  * builder call, and the runtime writes its result, storing a proxy in it as a
  * link. A synthesized function with no parent is not taken to be a helper
  * either: only positive evidence makes one.
+ *
+ * The test is the function's own shape, so a function bound to a name and
+ * handed to a builder by that name (`lift(bump)`) reads as a helper too. That
+ * costs such a builder nothing: schema injection does not shrink a callback it
+ * is handed by name, whose schema comes from the builder's type arguments or
+ * is not emitted at all, so this summary never reaches its schema.
  */
 function returnsToACaller(fn: ts.Node): boolean {
   if (ts.isFunctionDeclaration(fn) || ts.isMethodDeclaration(fn)) return true;

@@ -108,17 +108,22 @@ export default { keep };
  * the schema's `$defs`, which this resolves.
  */
 function elementPropertyNames(schema: Record<string, unknown>): string[] {
-  const properties = schema.properties as Record<string, unknown>;
-  const index = properties.index as { properties: Record<string, unknown> };
-  const sources = index.properties.sources as { items: unknown };
-  const branches = (sources.items as { anyOf?: unknown[] }).anyOf ??
-    [sources.items];
   const defs = (schema.$defs ?? {}) as Record<string, unknown>;
-  for (const branch of branches) {
-    const resolved = typeof (branch as { $ref?: string }).$ref === "string"
-      ? defs[(branch as { $ref: string }).$ref.replace("#/$defs/", "")]
-      : branch;
-    const element = resolved as { type?: unknown; properties?: unknown };
+  const resolve = (node: unknown): Record<string, unknown> =>
+    typeof (node as { $ref?: string }).$ref === "string"
+      ? defs[(node as { $ref: string }).$ref.replace("#/$defs/", "")] as Record<
+        string,
+        unknown
+      >
+      : node as Record<string, unknown>;
+  const properties = schema.properties as Record<string, unknown>;
+  const index = resolve(properties.index) as {
+    properties: Record<string, unknown>;
+  };
+  const sources = resolve(index.properties.sources) as { items: unknown };
+  const items = resolve(sources.items) as { anyOf?: unknown[] };
+  for (const branch of items.anyOf ?? [items]) {
+    const element = resolve(branch) as { type?: unknown; properties?: unknown };
     if (element.type === "object" && element.properties !== undefined) {
       return Object.keys(element.properties as Record<string, unknown>).sort();
     }
@@ -376,6 +381,40 @@ describe("capability-analysis-whole-value-escapes", () => {
         `index.sources.flatMap((s) => s?.id ? [driverOf(s)] : [])`,
         "string[]",
       );
+      expect(elementPropertyNames(schema)).toEqual(WHOLE);
+    });
+  });
+
+  describe("a builder handed its callback by name", () => {
+    // A function bound to a name reads as a helper, whose own return is a
+    // value its caller goes on to read. A builder handed that name would have
+    // its input widened by that reading if the analysis shrank it, and it does
+    // not: the schema comes from the builder's type arguments, whole. This
+    // holds that in place, since the helper reading rests on it.
+
+    it("emits the declared element whole, whatever the callback returns", async () => {
+      const output = await transformSource(
+        `import { lift } from "commonfabric";
+
+type Source = { id: string; driver: string };
+type Index = { sources: Array<Source | undefined> };
+type In = { index: Index };
+
+const keepSome = ({ index }: In): Array<Source | undefined> => {
+  const { sources } = index;
+  return sources.some((s) => !!s?.id) ? sources : [];
+};
+
+const byName = lift<In, Array<Source | undefined>>(keepSome);
+
+export default { byName };
+`,
+        { types: COMMONFABRIC_TYPES },
+      );
+      const schema = callSchemas(parseModule(output), "lift")[0];
+      if (!schema) {
+        throw new Error("No emitted `lift(cb, input, result)` schema");
+      }
       expect(elementPropertyNames(schema)).toEqual(WHOLE);
     });
   });
