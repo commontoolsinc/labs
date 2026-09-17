@@ -18,13 +18,16 @@ dense from `1` and never reused, through the library in
 `top/42`.
 
 **Topics shows no topic's number for now.** `SHOW_TOPIC_NUMBERS` in `topic.tsx`
-is off while only some topics have a number, so no topic's header or board card
-shows one, no mention pill shows one, and `#42` in a topic's body editor offers
-no topic. Only the showing is off: the board still allocates a number on every
-create and records it in `names`, `top/42` still resolves, and each topic still
-publishes its number as `shortName`, which the board's `index` rows carry.
-Wherever numbers are shown, a number renders as a badge beside its topic's title
-rather than in place of it.
+is off while only some topics have a number, and a topic then publishes no
+`shortName`. That one absence covers every place a number shows, because every
+one of them reads that property: the topic's header, the board's cards, the
+survey rows, and the entries of whatever mention universe a topic's editor
+completes over — the board's derived copies, or the topics themselves where a
+topic is not yet rewired to that universe. So no pill shows a number and `#42`
+offers no topic either way. The numbers themselves are untouched: the board
+allocates one on every create, records it in `names`, lists it beside its topic
+in `namesTable`, and `top/42` resolves. Wherever numbers are shown, a number
+renders as a badge beside its topic's title rather than in place of it.
 
 Topics reference each other. A reference is a **cell**, not a string: picking a
 completion in the body editor stores the destination piece itself, and a link
@@ -110,12 +113,12 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   as an unread reference, so surveying its keys expands no topic. A topic reads
   its own row out of the board's `namesTable` by identity and publishes the
   result as `shortName` — one derivation — and every reader reaches the number
-  through that one property. The survey row carries it whether or not numbers
-  are shown. The card badge and the mention universe row, which a mention's pill
-  and a `#42` query read, carry it only while `SHOW_TOPIC_NUMBERS` is on; while
-  it is off, the card shows no badge and the universe row carries the empty
-  name. `backfillNames` names what the board held before it numbered anything,
-  in filing order, skipping what is already named; it writes the namespace and
+  through that one property: the survey row, the card badge, and the mention
+  universe row, which a mention's pill and a `#42` query read. A topic publishes
+  it only while `SHOW_TOPIC_NUMBERS` is on, so while that is off none of them
+  carries a number and the name is read from `namesTable` instead.
+  `backfillNames` names what the board held before it numbered anything, in
+  filing order, skipping what is already named; it writes the namespace and
   nothing else, so on a board whose topics were filed past `addTopic` it has to
   be paired with a one-time link-bind of `namesTable` onto each of them, the
   same operator step `mentionable` states for itself. Until that bind the topic
@@ -142,9 +145,9 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   of every reader paying it on every load. The lift and its row type are shared
   with the collection-naming exemplar (`../collection-naming/mentionable.ts`):
   both boards derive their universe through the one derivation, so a member's
-  number reads the same on either wherever it is shown. Topics passes
-  `withShortNames: SHOW_TOPIC_NUMBERS`, so while that is off every Topics row
-  carries the empty name.
+  number reads the same on either. A Topics row carries the empty name while
+  Topics shows no numbers, because the copy is taken off a topic that publishes
+  none.
 
   The reference is what a picked completion stores, and it is deliberately
   outside the demand a topic declares over the universe: a property that demand

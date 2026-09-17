@@ -246,14 +246,15 @@ straight from the create. The board owns a member namespace through
 same transaction as the append, each topic reads its own name out of the board's
 names table and publishes it as `shortName`, and `backfillNames` names what the
 board held before it numbered anything. No topic's number is shown for now:
-`SHOW_TOPIC_NUMBERS` in `topic.tsx` is off while only some topics have one.
-Topics reference each other by CELL: the board derives the whole graph once by
-scanning what each topic points at with `equals`, and each topic reads its own
-inbound edges out of that pivot. Demonstrates: reading-list-style piece-in-list
-composition, profile-native browser authorship on a shared piece, mergeable
-comment appends, session-scoped drafts, bounding a whole-list derivation with a
-narrow declared `lift` parameter, passing topics through a sort so an
-activity-ordered list keeps the identity its elements already have,
+`SHOW_TOPIC_NUMBERS` in `topic.tsx` is off while only some topics have one, so a
+topic publishes no `shortName` and every surface that would show one reads
+nothing. Topics reference each other by CELL: the board derives the whole graph
+once by scanning what each topic points at with `equals`, and each topic reads
+its own inbound edges out of that pivot. Demonstrates: reading-list-style
+piece-in-list composition, profile-native browser authorship on a shared piece,
+mergeable comment appends, session-scoped drafts, bounding a whole-list
+derivation with a narrow declared `lift` parameter, passing topics through a
+sort so an activity-ordered list keeps the identity its elements already have,
 `multiUserTest` coverage.
 
 **Keywords:** topics, issues, tracker, discussion, thread, comments, multi-user,
@@ -308,10 +309,10 @@ A single #topic piece: the durable object the tracker's list holds. Body edits
 go through an explicit Edit→Save toggle (one whole-value `set` per save keeps
 the concurrent-edit window small); comments and links are mergeable appends.
 Reads the board's name for itself out of `boardNames` by identity and publishes
-it as `shortName`. While `SHOW_TOPIC_NUMBERS` is on it renders the name as a
-badge beside the title; the constant is off for now, so no topic shows one. A
-topic wired to no board has no name. Use from `topics/main.tsx` via
-`navigateTo()`, or standalone.
+it as `shortName` while `SHOW_TOPIC_NUMBERS` is on, rendering it as a badge
+beside the title; the constant is off for now, so a topic publishes and shows
+none. A topic wired to no board has no name either way. Use from
+`topics/main.tsx` via `navigateTo()`, or standalone.
 
 **Keywords:** topic, detail, thread, comment, links, body, navigateTo,
 shortName, member name, badge

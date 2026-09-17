@@ -63,21 +63,31 @@ board's table, and what it took to bind the board onto members filed before the
 namespace.
 
 **Decided 2026-09-17: Topics shows no numbers until every topic has one.** Mike
-ruled it. The deployed board numbers each topic it creates, while a topic filed
-before the namespace has no number until the production backfill and bind (item
-3 below) reach it, so only some topics showed a number, and that confused the
-people reading the board. `SHOW_TOPIC_NUMBERS` in
-`packages/patterns/topics/topic.tsx` is off: no topic's header or board card
-shows a badge, and the board's mention universe rows carry the empty name, so no
-mention pill shows a number and `#42` in a Topics editor offers no topic. The
-ruling accepts that last loss until every topic has a number.
+ruled it, and ruled the mechanism too. The deployed board numbers each topic it
+creates, while a topic filed before the namespace has no number until the
+production backfill and bind (item 3 below) reach it, so only some topics showed
+a number, and that confused the people reading the board.
 
-Addressing is untouched. The board allocates a number on every create and
-records it in `names`, `top/<n>` resolves, each topic publishes its number as
-`shortName`, and the board's `index` rows carry it, which is what item 3's
-procedure reads to check a bind. `mentionableIndex` takes `withShortNames`, and
-only Topics passes `false`; the exemplar shows its numbers in the header, on the
-cards, and in the editor.
+`SHOW_TOPIC_NUMBERS` in `packages/patterns/topics/topic.tsx` is off, and a topic
+then publishes no `shortName`. Withholding the publication rather than each
+display is what covers every surface: a topic's header, the board's cards, the
+`index` rows, and the entries of whatever universe a topic's editor completes
+over. That last one is why the choice matters. A topic filed before the board
+derived its universe reads the raw topics list until an operator rewires it, and
+a board cannot rewire it, because a parent writes a member's result and never a
+member's argument. Blanking only the board's derived copies left those topics
+offering `#1` and showing a pill number, measured against the derived-index
+version of this change. So no pill shows a number and `#42` offers no topic
+either way, which is the loss the ruling accepts until every topic has a number.
+
+Addressing is untouched: the board allocates a number on every create, records
+it in `names`, lists it beside its topic in `namesTable`, `addTopic` returns the
+name it allocated, and `top/<n>` resolves. What the hiding costs is the two
+reads that go through a topic — its own `shortName` and its `index` row — so the
+namespace is where a number is read while numbers are hidden, and item 3's bind
+check reads the topic's stored `boardNames` argument instead. The exemplar in
+`packages/patterns/collection-naming/` shows its numbers in the header, on the
+cards, and in the editor, and its tests are unchanged.
 
 Showing numbers on Topics again means turning that one constant on, once every
 topic has a number. Decision 5 still governs how a number renders wherever one
@@ -120,9 +130,11 @@ is shown.
    extension point with nothing extending through it, recorded in the spec's
    "Deliberately open" rather than claimed as working.
 
-5. **The citation surfaces are partial.** A mention pill shows whatever its
-   destination publishes, whichever collection named it (#6985); a URL naming
-   more than a member is answered as if it named a member (#6993); "Copy
+5. **The citation surfaces are partial.** A mention pill shows the name carried
+   by the universe row standing for its destination, so what it shows means
+   something only through the collection whose universe is being read, and a
+   destination no row stands for shows none whatever it publishes (#6985); a URL
+   naming more than a member is answered as if it named a member (#6993); "Copy
    reference" yields an address that does not resolve outside the fabric
    (#6995).
 

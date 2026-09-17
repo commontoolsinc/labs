@@ -90,11 +90,6 @@ reference under the `piece` key;
 what the editors consume it through. `mentionableRowsOf` is the per-member
 projection on its own, over any list of cells.
 
-A collection that numbers its members without showing the numbers passes
-`withShortNames: false`, and every row then carries the empty name: its editors
-offer no member for a `#42` query and show no number on a mention's pill. Left
-out, as this exemplar leaves it, each row carries its member's own name.
-
 Copies rather than the members are what bounds the read, and that is what
 separates a universe from an index: a survey index whose rows ARE the members
 costs nothing extra, because a survey reads those members anyway, while the
@@ -279,10 +274,11 @@ it calls it: `addTopic` allocates in the same transaction as its append,
 `backfillNames` names what the board held before, each topic reads its own name
 out of `boardNames` and publishes it as `shortName`, and both boards derive
 their mention universe through `mentionable.ts`. Topics shows no numbers for now
-— `SHOW_TOPIC_NUMBERS` in `../topics/topic.tsx` says why — so it asks for
-universe rows without them, and its header and cards show no badge; this
-exemplar shows its numbers in all three places. What is still to come is in
-[the plan](../../../docs/plans/collection-naming-topics.md): the production
-backfill, which needs the one-time link-bind of `namesTable` onto every topic
-filed before the namespace, and the slug that binds the board's `names` cell as
-`top`.
+— `SHOW_TOPIC_NUMBERS` in `../topics/topic.tsx` says why — so a topic publishes
+no `shortName`, and every place that would show one reads nothing: the header,
+the cards, the survey rows, and the universe rows the derivation copies from
+each topic. This exemplar shows its numbers in all three places. What is still
+to come is in [the plan](../../../docs/plans/collection-naming-topics.md): the
+production backfill, which needs the one-time link-bind of `namesTable` onto
+every topic filed before the namespace, and the slug that binds the board's
+`names` cell as `top`.

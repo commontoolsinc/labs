@@ -2,14 +2,17 @@
  * What the board and a topic actually RENDER through whatever projection the
  * board declares for its topics: that a card carries its topic's text, that
  * the body editor's completion source reaches it populated, and that no entry
- * of that source carries a topic's number while Topics shows none.
+ * of that source carries a topic's number while Topics shows none — through
+ * the board's derived universe, and through the raw topics list a topic not
+ * yet rewired to that universe reads.
  *
- * Both assertions were validated by mutation — remove the step that files a
- * topic and both go red — so neither is decoration.
+ * The four assertions over the board's card and the two editors were validated
+ * by mutation — remove the step that files a topic and each goes red — so none
+ * of them is decoration.
  *
  * WHAT THIS CANNOT CATCH, stated because the gap is not obvious and I walked
  * into it: narrowing `mentionable` to a projection WITHOUT `[NAME]` leaves
- * both assertions green. `cf-code-editor` declares its entries as
+ * every assertion here green. `cf-code-editor` declares its entries as
  * `Mentionable`, whose schema carries `required: [NAME]`
  * (`packages/ui/src/v2/core/mentionable.ts`), but that filtering happens at
  * the COMPONENT's read in the browser. A pattern test sees the cell, not the
@@ -109,6 +112,20 @@ export default pattern(() => {
     detail.startEditBody.send();
   });
 
+  // A topic whose mention universe is the board's topics themselves, which is
+  // what a topic filed before the board derived its universe reads until an
+  // operator rewires it. Its editor completes over the topics rather than over
+  // the board's copies, so what it could offer for `#1` is what each topic
+  // publishes as its own name.
+  const rawUniverseDetail = Topic({
+    title: "Raw universe topic",
+    mentionable: board.topics,
+  });
+
+  const action_open_the_raw_editor = action(() => {
+    rawUniverseDetail.startEditBody.send();
+  });
+
   // A comment, then the same comment revised. `editComment` is reached on the
   // instance rather than through the board, for the reason the board's own
   // demand gives: it carries no verbs.
@@ -149,18 +166,31 @@ export default pattern(() => {
     });
   });
 
-  // The filed topic has a number, and the entry standing for it in the
-  // editor's completion source carries the empty name, so a `#1` query offers
-  // nothing and a mention of it shows no number.
+  // The board's table names the filed topic `1`, and the entry standing for it
+  // in the editor's completion source carries the empty name, so a `#1` query
+  // offers nothing and a mention of it shows no number.
   const assert_editor_entries_carry_no_number = assert(() => {
     const editors = findAllByTag(detail[UI], "cf-code-editor");
     if (editors.length !== 1) return false;
     const entries = propValue(editors[0].props["$mentionable"]);
     if (!Array.isArray(entries) || entries.length !== 1) return false;
     const entry = entries[0] as Record<string, unknown>;
-    return board.index?.[0]?.shortName === "1" &&
+    return board.namesTable?.[0]?.name === "1" &&
       propValue(entry?.[NAME]) === "Rendered topic" &&
       propValue(entry?.shortName) === "";
+  });
+
+  // The same of the raw list, where an entry IS a topic rather than a copy of
+  // one: the topic named `1` publishes no name, so the entry carries none.
+  const assert_raw_entries_carry_no_number = assert(() => {
+    const editors = findAllByTag(rawUniverseDetail[UI], "cf-code-editor");
+    if (editors.length !== 1) return false;
+    const entries = propValue(editors[0].props["$mentionable"]);
+    if (!Array.isArray(entries) || entries.length !== 1) return false;
+    const entry = entries[0] as Record<string, unknown>;
+    return board.namesTable?.[0]?.name === "1" &&
+      propValue(entry?.[NAME]) === "Rendered topic" &&
+      propValue(entry?.shortName) === undefined;
   });
 
   // An edit is only honest if a reader can see one happened, and `editedAt`
@@ -187,6 +217,9 @@ export default pattern(() => {
       { render: detail[UI] },
       { assertion: assert_editor_receives_mentionables },
       { assertion: assert_editor_entries_carry_no_number },
+      { action: action_open_the_raw_editor },
+      { render: rawUniverseDetail[UI] },
+      { assertion: assert_raw_entries_carry_no_number },
       { action: action_comment_on_detail },
       { render: detail[UI] },
       { assertion: assert_no_edited_marker_before },

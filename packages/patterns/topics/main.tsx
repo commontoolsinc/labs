@@ -30,7 +30,6 @@ import {
 } from "../collection-naming/naming.ts";
 import Topic, {
   rejectMutation,
-  SHOW_TOPIC_NUMBERS,
   snippet,
   TOPIC_STATE_VERSION,
   type TopicAuthor,
@@ -94,9 +93,10 @@ export interface TopicDemand extends TopicSummary {
   mentions: unknown[] | Default<[]>;
 
   /** The board's name for the topic, as the topic reads it out of the board's
-   * names table. While `SHOW_TOPIC_NUMBERS` is on, the card renders it as a
+   * names table and publishes it, which it does only while
+   * `SHOW_TOPIC_NUMBERS` in `./topic.tsx` is on. The card renders it as a
    * badge and the mention index copies it into the topic's universe row, so
-   * `#42` matches without expanding a topic; while it is off, neither does.
+   * `#42` matches without expanding a topic.
    *
    * OPTIONAL rather than defaulted, which is a fact about the compatibility
    * proof: a defaulted property moves the demand's defaults below an array
@@ -203,8 +203,9 @@ export interface TopicIndexRow {
   commentCount: number | Default<0> | undefined;
   lastActivityAt: number | Default<0> | undefined;
 
-  /** The board's name for the topic. Optional rather than defaulted, unlike
-   * the two above, for the reason `TopicDemand.shortName` states. */
+  /** The board's name for the topic, as the topic publishes it. Optional
+   * rather than defaulted, unlike the two above, for the reason
+   * `TopicDemand.shortName` states. */
   shortName?: string;
 }
 
@@ -442,12 +443,11 @@ export interface TopicsOutput {
 
   /** The board's mention universe, under the name the topic pattern's editor
    * autocompletes over — what `addTopic` wires into each child. One derived
-   * document of copies, each holding its topic as an unread reference, rather
-   * than the topics themselves, so a reader of the universe expands no topic;
-   * see `MentionableRow` in `../collection-naming/mentionable.ts`. While
-   * `SHOW_TOPIC_NUMBERS` is on, each copy carries the board's name for its
-   * topic, so `#42` finds a member without expanding one; while it is off,
-   * each carries the empty name, which no `#42` query matches. */
+   * document of copies, each holding its topic as an unread reference and
+   * carrying the name the topic publishes for itself, rather than the topics
+   * themselves, so a reader of the universe expands no topic and `#42` finds a
+   * member without expanding one; see `MentionableRow` in
+   * `../collection-naming/mentionable.ts`. */
   mentionable: MentionableRow[] | Default<[]>;
 
   /** The namespace itself: each name to the topic it names. A slug pointing
@@ -581,10 +581,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, names }) => {
   // Also derived once for the whole board: the mention universe every
   // child's editor autocompletes over, as one document of copies instead of
   // the topics themselves.
-  const mentionable = mentionableIndex({
-    members: topics,
-    withShortNames: SHOW_TOPIC_NUMBERS,
-  });
+  const mentionable = mentionableIndex({ members: topics });
   // Derived once for the whole board too; every topic reads its own row out
   // of it to learn the number the board calls it by.
   const table = namesTable({ names });
@@ -699,7 +696,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, names }) => {
             {cards.map((card) => (
               <cf-card>
                 <cf-hstack gap="3" align="center">
-                  {SHOW_TOPIC_NUMBERS && card.shortName
+                  {card.shortName
                     ? (
                       <cf-badge size="sm" color="primary" data-member-name="">
                         {card.shortName}

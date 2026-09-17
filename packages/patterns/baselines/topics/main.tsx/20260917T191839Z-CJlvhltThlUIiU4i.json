@@ -81,7 +81,7 @@
             "type": "array"
           },
           "shortName": {
-            "description": "The board's name for the topic, as the topic reads it out of the board's\nnames table. While `SHOW_TOPIC_NUMBERS` is on, the card renders it as a\nbadge and the mention index copies it into the topic's universe row, so\n`#42` matches without expanding a topic; while it is off, neither does.\n\nOPTIONAL rather than defaulted, which is a fact about the compatibility\nproof: a defaulted property moves the demand's defaults below an array\nconstraint the proof cannot show stable under default insertion, while an\noptional one simply tolerates a topic that publishes none.\n\nA member's open producer contract allows any value at an undeclared\nproperty. Demanding a string there narrows that contract even when the\nproperty is optional, so `setsrc` requires an accepted compatibility\nbreak until the producer guarantees the string type. An optional\n`unknown` demand imposes no such restriction. A topic whose\nlookup has produced no value — one filed a moment ago, or one from before\nthe board numbered anything — is absent here rather than blank, and every\nconsumer treats the two the same.",
+            "description": "The board's name for the topic, as the topic reads it out of the board's\nnames table and publishes it, which it does only while\n`SHOW_TOPIC_NUMBERS` in `./topic.tsx` is on. The card renders it as a\nbadge and the mention index copies it into the topic's universe row, so\n`#42` matches without expanding a topic.\n\nOPTIONAL rather than defaulted, which is a fact about the compatibility\nproof: a defaulted property moves the demand's defaults below an array\nconstraint the proof cannot show stable under default insertion, while an\noptional one simply tolerates a topic that publishes none.\n\nA member's open producer contract allows any value at an undeclared\nproperty. Demanding a string there narrows that contract even when the\nproperty is optional, so `setsrc` requires an accepted compatibility\nbreak until the producer guarantees the string type. An optional\n`unknown` demand imposes no such restriction. A topic whose\nlookup has produced no value — one filed a moment ago, or one from before\nthe board numbered anything — is absent here rather than blank, and every\nconsumer treats the two the same.",
             "tags": [
               "42"
             ],
@@ -361,7 +361,7 @@
             "type": "array"
           },
           "shortName": {
-            "description": "The board's name for the topic, as the topic reads it out of the board's\nnames table. While `SHOW_TOPIC_NUMBERS` is on, the card renders it as a\nbadge and the mention index copies it into the topic's universe row, so\n`#42` matches without expanding a topic; while it is off, neither does.\n\nOPTIONAL rather than defaulted, which is a fact about the compatibility\nproof: a defaulted property moves the demand's defaults below an array\nconstraint the proof cannot show stable under default insertion, while an\noptional one simply tolerates a topic that publishes none.\n\nA member's open producer contract allows any value at an undeclared\nproperty. Demanding a string there narrows that contract even when the\nproperty is optional, so `setsrc` requires an accepted compatibility\nbreak until the producer guarantees the string type. An optional\n`unknown` demand imposes no such restriction. A topic whose\nlookup has produced no value — one filed a moment ago, or one from before\nthe board numbered anything — is absent here rather than blank, and every\nconsumer treats the two the same.",
+            "description": "The board's name for the topic, as the topic reads it out of the board's\nnames table and publishes it, which it does only while\n`SHOW_TOPIC_NUMBERS` in `./topic.tsx` is on. The card renders it as a\nbadge and the mention index copies it into the topic's universe row, so\n`#42` matches without expanding a topic.\n\nOPTIONAL rather than defaulted, which is a fact about the compatibility\nproof: a defaulted property moves the demand's defaults below an array\nconstraint the proof cannot show stable under default insertion, while an\noptional one simply tolerates a topic that publishes none.\n\nA member's open producer contract allows any value at an undeclared\nproperty. Demanding a string there narrows that contract even when the\nproperty is optional, so `setsrc` requires an accepted compatibility\nbreak until the producer guarantees the string type. An optional\n`unknown` demand imposes no such restriction. A topic whose\nlookup has produced no value — one filed a moment ago, or one from before\nthe board numbered anything — is absent here rather than blank, and every\nconsumer treats the two the same.",
             "tags": [
               "42"
             ],
@@ -420,7 +420,7 @@
             ]
           },
           "shortName": {
-            "description": "The board's name for the topic. Optional rather than defaulted, unlike\nthe two above, for the reason `TopicDemand.shortName` states.",
+            "description": "The board's name for the topic, as the topic publishes it. Optional\nrather than defaulted, unlike the two above, for the reason\n`TopicDemand.shortName` states.",
             "type": "string"
           },
           "title": {
@@ -476,7 +476,7 @@
       },
       "mentionable": {
         "default": [],
-        "description": "The board's mention universe, under the name the topic pattern's editor\nautocompletes over — what `addTopic` wires into each child. One derived\ndocument of copies, each holding its topic as an unread reference, rather\nthan the topics themselves, so a reader of the universe expands no topic;\nsee `MentionableRow` in `../collection-naming/mentionable.ts`. While\n`SHOW_TOPIC_NUMBERS` is on, each copy carries the board's name for its\ntopic, so `#42` finds a member without expanding one; while it is off,\neach carries the empty name, which no `#42` query matches.",
+        "description": "The board's mention universe, under the name the topic pattern's editor\nautocompletes over — what `addTopic` wires into each child. One derived\ndocument of copies, each holding its topic as an unread reference and\ncarrying the name the topic publishes for itself, rather than the topics\nthemselves, so a reader of the universe expands no topic and `#42` finds a\nmember without expanding one; see `MentionableRow` in\n`../collection-naming/mentionable.ts`.",
         "items": {
           "$ref": "#/$defs/MentionableRow"
         },

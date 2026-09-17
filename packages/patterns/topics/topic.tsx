@@ -613,13 +613,12 @@ export interface TopicPiece extends TopicSummary {
 
   /** The name the board calls this topic by, read out of the board's names
    * table by identity. The display name stays the title, and this rides
-   * beside it. Published whether or not Topics shows numbers; while
-   * `SHOW_TOPIC_NUMBERS` is on, the topic's header and the board's card render
-   * it as a badge, and the board's mention universe carries a copy of it,
-   * which is what a mention pill and a `#42` query read.
+   * beside it: the topic's header and the board's card render it as a badge,
+   * and a mention universe carries it, which is what a mention pill and a
+   * `#42` query read.
    *
-   * Absent for a topic no board has named, or one wired to no board: the
-   * lookup produces nothing and the property is simply not there. Every
+   * Absent while `SHOW_TOPIC_NUMBERS` is off, for a topic no board has named,
+   * and for one wired to no board: the property is simply not there. Every
    * consumer treats that as no name — the badge renders nothing, and the
    * topic's universe row carries the empty name, which matches no `#42` query
    * and gives a mention pill no number.
@@ -891,13 +890,17 @@ export const TOPICS_THEME = {
  * anything has no number until `backfillNames` names it and an operator binds
  * the board's `namesTable` onto its `boardNames`.
  *
- * Only the showing is off. The board still allocates a number on every create
- * and records it in `names`, a number still addresses its topic as `top/<n>`,
- * and a topic still publishes its number as `shortName`, so the board's
- * `index` rows carry it and an operator can read it to check a bind.
+ * Off, a topic publishes no `shortName`, and that is the whole mechanism:
+ * every place a number shows reads a topic's `shortName` — its header, the
+ * board's card and `index` row, and each entry of a mention universe, whether
+ * the board's copies or a plain list of topics. The numbers themselves are
+ * untouched. The board still allocates one on every create, records it in
+ * `names`, and lists it beside its topic in `namesTable`, and a number still
+ * addresses its topic as `top/<n>`.
+ *
+ * TODO(mike): Turn this on once every topic on the deployed Topics board has a
+ * number.
  */
-// TODO(mike): Turn this on once every topic on the deployed Topics board has a
-// number.
 export const SHOW_TOPIC_NUMBERS: boolean = false;
 
 // ===== Pure helpers =====
@@ -2202,10 +2205,11 @@ export default pattern<TopicInput, TopicOutput>(
     const createdByView = createdByOf({ createdBy });
     // The board has already derived the table; this is a lookup by identity,
     // and it is written as one.
-    const shortName = ownName({ table: boardNames, self });
-    // The header badge's number. The topic publishes `shortName` whether or
-    // not Topics shows numbers.
-    const shownName = SHOW_TOPIC_NUMBERS ? shortName : undefined;
+    const boardName = ownName({ table: boardNames, self });
+    // The number the topic shows and publishes. Every reader of a topic's
+    // number reads this, so gating it here hides the number from all of them,
+    // whatever the topic's mention universe is wired to.
+    const shortName = SHOW_TOPIC_NUMBERS ? boardName : undefined;
 
     // --- Streams (external API; also usable headlessly via CLI) ---
 
@@ -2418,10 +2422,10 @@ export default pattern<TopicInput, TopicOutput>(
                     align="center"
                     style="flex: 1; min-width: 0;"
                   >
-                    {shownName
+                    {shortName
                       ? (
                         <cf-badge size="sm" color="primary" data-member-name="">
-                          {shownName}
+                          {shortName}
                         </cf-badge>
                       )
                       : null}
