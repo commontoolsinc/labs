@@ -124,14 +124,15 @@ covers one proof against unchanged values.
 `results.json`. One stray line printed by any bench file corrupts the
 artifact for every benchmark in the run, not just the offending file. A
 validation step (`tasks/check-bench-report.ts`) fails the run when stdout
-carried anything besides the report, and when the report is missing what every
-tile needs of it: the processor identity, a product measurement, the machine
-calibration, and each of the two key benchmarks. It is that set rather than
-the whole report — a product benchmark that stopped reporting passes it, and
-shows up as its own series ending on the chart — so each of those shows up as
-a red run in the Actions tab. What keeps a corrupt artifact off the charts is
-the dashboard dropping one it cannot parse, rather than the run's color: a red
-run's measurements are charted like any other run's. This applies to
+carried no report, a report that will not parse, or anything besides the
+report, and when the report is missing what every tile needs of it: the
+processor identity, a product measurement, the machine calibration, and each
+of the two key benchmarks. That last is a set rather than the whole report — a
+product benchmark that stopped reporting passes it, and shows up as its own
+series ending on the chart — and each of these shows up as a red run in the
+Actions tab. What keeps a corrupt artifact off the charts is the dashboard
+dropping one it cannot parse, rather than the run's color: a red run's
+measurements are charted like any other run's. This applies to
 module-scope code as well as bench bodies. Write diagnostics to stderr.
 Module-scope
 diagnostics may use `console.error`. The JSON reporter
