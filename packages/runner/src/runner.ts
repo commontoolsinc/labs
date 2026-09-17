@@ -7473,6 +7473,7 @@ export class Runner {
    * the deployment's patterns route as part of that program — the same
    * ground on which the runtime claims the `system:` ref for the surfaces it
    * instantiates itself (`docs/specs/piece-source-lifecycle.md`, "Origins").
+   * The caller asks only for a child in a space of its own.
    * Both halves are required: the module's name alone is author-controlled
    * (a locally compiled program may call a file anything), and it is the
    * followed parent that says the name was a route the runtime resolved.
@@ -11928,11 +11929,14 @@ export class Runner {
             : undefined,
         );
       }
-      const sourceOrigin = this.#childSystemOrigin(
-        instanceTx,
-        parentResultCell,
-        patternImpl,
-      );
+      // Only a child in a space of its own claims one: an in-space nested
+      // node is part of its parent's graph and is re-instantiated from the
+      // parent's program on each release of the parent, so an origin of its
+      // own would be followed twice; a cross-space child outlives the
+      // program that made it and is what a release has to reach.
+      const sourceOrigin = childResultCell.space === parentResultCell.space
+        ? undefined
+        : this.#childSystemOrigin(instanceTx, parentResultCell, patternImpl);
       const childRun = this.#runWithStartOwnership(
         instanceTx,
         patternImpl,

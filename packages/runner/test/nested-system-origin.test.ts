@@ -142,10 +142,10 @@ describe("a child's origin", () => {
     };
   }
 
-  it("is the child module's `system:` ref under a parent that follows one from the patterns route", async () => {
+  it("is the child module's `system:` ref for a child in a space of its own, under a parent that follows one from the patterns route; an in-space nested node claims none", async () => {
     const dir = `${PATTERNS_ROUTE_PREFIX}system/`;
     expect(await childOrigins(dir, PARENT_ORIGIN)).toEqual({
-      nested: "system:system/child.tsx",
+      nested: undefined,
       spawned: "system:system/child.tsx",
     });
   });
@@ -153,7 +153,7 @@ describe("a child's origin", () => {
   it("is claimed as well for a child whose handler result the runtime starts after the commit", async () => {
     const dir = `${PATTERNS_ROUTE_PREFIX}system/`;
     expect(await childOrigins(dir, PARENT_ORIGIN, "spawnAndGo")).toEqual({
-      nested: "system:system/child.tsx",
+      nested: undefined,
       spawned: "system:system/child.tsx",
     });
   });

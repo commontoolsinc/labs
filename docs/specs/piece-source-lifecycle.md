@@ -296,11 +296,14 @@ surfaces; retained source contains no compiled patterns or schema references.
 A piece that pattern code instantiates — a nested pattern, a piece a handler
 creates with `inSpace` — runs a module of the instantiating program, and what
 it claims follows from what that program claims. Where the instantiating piece
-follows a `system:` origin and the child's module is one the runtime fetched
-from the patterns route as part of that program, the child claims the `system:`
-ref naming its own module: the runtime resolved that module from the
-deployment's route, which is the same ground on which it claims the ref for the
-surfaces it instantiates itself. The profile a person creates from the profile
+follows a `system:` origin, the child lives in a space of its own, and the
+child's module is one the runtime fetched from the patterns route as part of
+that program, the child claims the `system:` ref naming its own module: the
+runtime resolved that module from the deployment's route, which is the same
+ground on which it claims the ref for the surfaces it instantiates itself. A
+nested node in the parent's own space claims nothing — it is part of the
+parent's graph and is re-instantiated from the parent's program on each release
+of the parent, so an origin of its own would be followed twice. The profile a person creates from the profile
 surfaces is such a child, and follows `profile-home.tsx` as the deployment
 ships it. Both halves are required. A module's name alone is author-controlled
 — a locally compiled program may call a file anything — and it is the followed
