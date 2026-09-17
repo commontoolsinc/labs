@@ -233,6 +233,13 @@ The reactivity system is what makes the Runner dynamic:
 
 ### Scheduler
 
+A reactive commit conflict waits for ordered catch-up and scoped recovery pulls
+before the scheduler queues its retry. Output reads excluded from scheduling
+still participate in validation and repair. The pending-commit barrier includes
+recovery; a retired registration or a runtime closing its storage cannot requeue
+the delayed retry. Fresh input changes remain eligible to run while recovery is
+pending.
+
 The scheduler manages the execution order of reactive updates:
 
 - Ensures updates happen in a predictable order
