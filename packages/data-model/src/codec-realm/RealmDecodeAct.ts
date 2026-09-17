@@ -4,7 +4,7 @@ import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
 import { BaseDecodeAct } from "@/codec-common/BaseDecodeAct.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
-import { quotedDebugString } from "@/codec-common/quotedDebugString.ts";
+import { toShortQuotedDebugString } from "@/value-debug.ts";
 import {
   REALM_FORMAT_VERSION,
   type RealmCodecValue,
@@ -130,7 +130,7 @@ export class RealmDecodeAct
         "",
         data,
         `Cannot decode ${
-          quotedDebugString(data)
+          toShortQuotedDebugString(data)
         }: not a form this format emits.`,
       );
     } finally {

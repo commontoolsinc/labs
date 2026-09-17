@@ -14,7 +14,7 @@
 import {
   type FabricValue,
   isValidFabricValue,
-  toCompactDebugString,
+  toShortQuotedDebugString,
 } from "@commonfabric/data-model";
 import {
   fabricFromRealmValue,
@@ -636,9 +636,7 @@ const handlers: Record<
     if (!isValidFabricValue(counts)) {
       throw new Error(
         "Cannot send logger counts across this boundary, not being a " +
-          `\`FabricValue\`: ${
-            toCompactDebugString(counts, { backtickQuote: true })
-          }`,
+          `\`FabricValue\`: ${toShortQuotedDebugString(counts)}`,
       );
     }
     return counts;

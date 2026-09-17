@@ -76,6 +76,9 @@ const ABSOLUTE_MAX_STRING_LINES = 1000;
  */
 const DEFAULT_MAX_STRING_LINES = 5;
 
+/** Length `toShortQuotedDebugString()` cuts a rendering to. */
+const SHORT_MAX_LENGTH = 50;
+
 /** Matches one line break, of any of the three forms a string can hold. */
 const LINE_BREAK_REGEX = /\r\n|[\r\n]/g;
 
@@ -1284,6 +1287,19 @@ export function toCompactDebugString(
   }
 
   return (options?.backtickQuote === true) ? backtickQuote(result) : result;
+}
+
+/**
+ * Renders `value` for an error message: its compact debug string, cut to a
+ * length which keeps a large value from swamping the message it lands in, as
+ * a backtick-quoted code span. `toCompactDebugString()` returns a fixed string
+ * for what it cannot render, so this holds up on the failure path it serves.
+ */
+export function toShortQuotedDebugString(value: unknown): string {
+  return toCompactDebugString(value, {
+    maxLength: SHORT_MAX_LENGTH,
+    backtickQuote: true,
+  });
 }
 
 /**
