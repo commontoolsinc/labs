@@ -378,7 +378,7 @@ schemas need materialization to establish that shape. CFC behavior is the same
 as a computed pattern expression. Source schema metadata is authoritative;
 projection schemas cannot supply `ifc`, `asCell`, `scope`, or `default`. A
 projection marks a position to get that position's address — one string in the
-canonical reference syntax `[//<space>/]<id>[@<scope>][/<path>]`, where the
+canonical reference syntax `[//<space>]/<id>[@<scope>][/<path>]`, where the
 space is written as a DID and rides in front only when it differs from the space
 the command targeted, and the scope follows the id only when it is not the
 default, no schema inlined — instead of what is behind it, or beside a
