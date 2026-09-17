@@ -278,12 +278,12 @@ describe("Topics board demo", () => {
     const authors = thread
       .filter((comment) => comment.body === COMMENT)
       .map((comment) => comment.author?.name);
-    // Stated before the set below, which an empty thread would also satisfy:
-    // without this line a thread that stored nothing would pass.
-    expect(authors.length).toBeGreaterThan(0);
-    // The viewer's Profile, not the agent that seeded the board. A set rather
-    // than `every`, so a wrong author is named in the failure instead of being
-    // reported as `true !== false`.
+    // The viewer's Profile, not the agent that seeded the board. A set names a
+    // wrong author in the failure, and an empty set fails against a populated
+    // one, so this covers both without a separate guard: the wait returns the
+    // value its own predicate accepted, which is what makes the filter above
+    // non-empty, and a thread that stored nothing never reaches here — it ends
+    // in the wait, under the label that names the comment it wanted.
     expect(new Set(authors)).toEqual(new Set([VIEWER]));
 
     // The size is in the label because it is configurable: a timing line
