@@ -184,15 +184,23 @@ const isReadableStoredEntry = (
 
 /**
  * Whether `value` is a stored envelope this build can produce labels from:
- * a version it interprets, a label map of the one version there is, and
- * every entry one {@link isReadableStoredEntry} admits at the envelope's
- * version. The narrowing is to `StoredCfcMetadata`, which declares all
- * three, so checking all three here is what keeps the narrowing honest.
+ * a version it interprets, a `schemaHash` naming the schema its labels were
+ * derived against (spec §4.6.4), a label map of the one map version there
+ * is, and every entry one {@link isReadableStoredEntry} admits at the
+ * envelope's version. The narrowing is to `StoredCfcMetadata`, which
+ * declares every one of those, so checking every one is what keeps the
+ * narrowing honest.
+ *
+ * A member beyond those does not make an envelope unreadable. The version
+ * is how the format announces that it carries something this build does not
+ * read, and the spec leaves a migrating writer free to keep a legacy field
+ * beside the ones it defines (spec §4.6.4, operational guidance).
  */
 const isCfcMetadata = (value: unknown): value is StoredCfcMetadata => {
   if (!isObjectNotArray(value)) return false;
   const version = value.version;
   if (!isKnownCfcMetadataVersion(version)) return false;
+  if (typeof value.schemaHash !== "string") return false;
   const labelMap = value.labelMap;
   if (!isObjectNotArray(labelMap) || labelMap.version !== 1) return false;
   const entries = labelMap.entries;

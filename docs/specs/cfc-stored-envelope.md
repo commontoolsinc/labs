@@ -75,7 +75,21 @@ one is a place a looser reader would read a labeled document as unlabeled:
 - **A label carrying a member this build does not know is not a label.**
   Every label this build writes carries `confidentiality` and `integrity`
   alone, so a third member is a format this build postdates, and reading
-  the two it knows would drop whatever the third carries.
+  the two it knows would drop whatever the third carries. A version-2 label
+  document is held to the same shape for a second reason: its content hash
+  is its identity, so the shape check is what stops a record that merely
+  hashes correctly from registering as a label.
+
+The levels enclosing the label go the other way. An envelope, its label map,
+and an entry may each carry a member this build does not read, and the
+envelope stays readable. The version is how the format announces content
+this build does not interpret, and a member appearing without a version
+change carries nothing this build would have acted on: the CFC
+specification leaves a migrating writer free to keep a legacy field beside
+the ones the profile defines, and gives an entry view-specific refinements
+beside its label (spec §4.6.4). Refusing those would read a labeled document
+as unreadable with its labels sitting right there, which costs availability
+and buys no confidentiality.
 
 ## What each consumer owes the rule
 

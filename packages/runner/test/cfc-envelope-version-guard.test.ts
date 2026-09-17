@@ -560,6 +560,27 @@ describe("CFC envelope version guard", () => {
         path: ["secret"],
         label: { confidentiality: ["vaulted"], secrecy: ["vaulted"] },
       }]),
+      "a label map of a version this build does not know": {
+        version: 1,
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+        labelMap: {
+          version: 2,
+          entries: [{
+            path: ["secret"],
+            label: { confidentiality: ["vaulted"] },
+          }],
+        },
+      },
+      "no schema hash": {
+        version: 1,
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: ["secret"],
+            label: { confidentiality: ["vaulted"] },
+          }],
+        },
+      },
     };
 
     for (const [name, cfc] of Object.entries(uninterpretable)) {
@@ -611,6 +632,57 @@ describe("CFC envelope version guard", () => {
         }
       });
     }
+
+    it("reads an envelope carrying members it does not know", async () => {
+      // The version is how the format announces content this build does not
+      // read, so a member beside the ones it defines is not a reason to
+      // refuse: the spec leaves a migrating writer free to keep a legacy
+      // field, and an entry carries view-specific refinements beside its
+      // label. Refusing those would read a labeled document as unreadable
+      // where its labels are right there.
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      try {
+        const id = parseLink(
+          runtime.getCell(space, "reader-agreement-extra").getAsLink(),
+        ).id!;
+        const seed = runtime.edit();
+        writeSeedEnvelopeDoc(seed, space);
+        seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+          value: { secret: "sealed" },
+          cfc: {
+            version: 1,
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+            provenance: "a field this build does not define",
+            labelMap: {
+              version: 1,
+              ordering: "declared",
+              entries: [{
+                path: ["secret"],
+                label: { confidentiality: ["vaulted"] },
+                views: { ranges: [] },
+              }],
+            },
+          },
+        } as never);
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const tx = runtime.edit();
+        expect(readStoredCfcMetadata(tx, { space, id })?.labelMap.entries[0])
+          .toMatchObject({
+            path: ["secret"],
+            label: { confidentiality: ["vaulted"] },
+          });
+        expect(loadStoredCfcEnvelope(tx, { space, id }).status).toBe("loaded");
+        tx.abort();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
 
     it("throws from an unschema'd write to a document carrying one", async () => {
       // The write gate is what a transaction with no `ifc` schema and no
