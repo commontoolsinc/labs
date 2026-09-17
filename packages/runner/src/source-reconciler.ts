@@ -62,6 +62,7 @@ import {
   samePieceReconciliation,
   setPieceReconciliation,
 } from "./runner.ts";
+import type { PreparedSourceUpdate } from "./pattern-manager.ts";
 import type { Runtime } from "./runtime.ts";
 import { fabricAuthorityMatchesSpaceHost } from "./space-host.ts";
 import type { MemorySpace } from "./storage/interface.ts";
@@ -1083,6 +1084,20 @@ export class SourceReconciler {
       state.snapshot,
       { allowUnavailable: true },
     );
+    // A release re-mints every handler identity in the file, so a field the
+    // running pattern's handler protects would refuse the successor's write
+    // and the update could not commit. For a `system:` origin — a release the
+    // deployment gated — the successor inherits the predecessor's authority
+    // the way an explicit `setsrc` grants it (SC-22, owner decision
+    // 2026-09-17). Every other origin stays as it is: nobody promised
+    // anything about what it ships.
+    const sourceUpdate = origin.kind === "system" && baseline.kind === "retain"
+      ? await runtime.patternManager.prepareSourceUpdate(
+        state.space,
+        state.running.identity,
+        candidateRef.identity,
+      )
+      : undefined;
     const transition: PieceSourceTransition = {
       revisionId: crypto.randomUUID(),
       baseline,
@@ -1106,6 +1121,15 @@ export class SourceReconciler {
     await runtime.runner.syncStoredPieceCells(resultCell, candidate);
     const committed = await this.#commit(resultCell, state, signal, (tx) => {
       if (!argumentUnchanged(resultCell.withTx(tx))) return false;
+      if (sourceUpdate !== undefined) {
+        runtime.patternManager.stageSourceUpdate(
+          sourceUpdate,
+          state.space,
+          state.running.identity,
+          candidateRef.identity,
+          tx,
+        );
+      }
       applyPieceSourceTransition(
         runtime,
         resultCell,
@@ -1123,7 +1147,7 @@ export class SourceReconciler {
         prepareForResume: true,
       });
       return true;
-    });
+    }, sourceUpdate);
     return committed ? "updated" : "unavailable";
   }
 
@@ -1220,33 +1244,42 @@ export class SourceReconciler {
     state: PieceState,
     signal: AbortSignal | undefined,
     write: (tx: Parameters<typeof applyPieceSourceTransition>[2]) => boolean,
+    sourceUpdate?: PreparedSourceUpdate,
   ): Promise<boolean> {
     const runtime = this.#runtime;
-    const result = await runtime.editWithRetry((tx) => {
-      // editWithRetry re-runs this callback after a retryable rejection, and a
-      // stop can abort between attempts, so every attempt re-enters the gate.
-      // Throwing ends the retry loop; aborting the transaction would be
-      // classified as retryable and consume the remaining attempts.
-      signal?.throwIfAborted();
-      const candidate = resultCell.withTx(tx);
-      const currentRef = getPatternIdentityRef(candidate);
-      // The piece must still run what the candidate was compared against, and
-      // still record the origin that was resolved. Nothing else decides this
-      // transition, so nothing else is guarded: the setup marker in
-      // particular is written by setup, which this transition triggers.
-      if (
-        currentRef?.identity !== state.running.identity ||
-        currentRef.symbol !== state.running.symbol ||
-        getPatternSource(candidate) !== state.storedSource
-      ) return false;
-      // The reconciler runs from a raw promise, with no scheduler run to stamp
-      // it — bookkeeping per serving-loop.md §3d, RULED 2026-08-05.
-      runtime.stampServerRun(tx, {
-        actionId: `source-reconcile/${resultCell.sourceURI}`,
-        kind: "bookkeeping",
-      });
-      return write(tx);
-    });
+    const result = await runtime.editWithRetry(
+      (tx) => {
+        // editWithRetry re-runs this callback after a retryable rejection, and a
+        // stop can abort between attempts, so every attempt re-enters the gate.
+        // Throwing ends the retry loop; aborting the transaction would be
+        // classified as retryable and consume the remaining attempts.
+        signal?.throwIfAborted();
+        const candidate = resultCell.withTx(tx);
+        const currentRef = getPatternIdentityRef(candidate);
+        // The piece must still run what the candidate was compared against, and
+        // still record the origin that was resolved. Nothing else decides this
+        // transition, so nothing else is guarded: the setup marker in
+        // particular is written by setup, which this transition triggers.
+        if (
+          currentRef?.identity !== state.running.identity ||
+          currentRef.symbol !== state.running.symbol ||
+          getPatternSource(candidate) !== state.storedSource
+        ) return false;
+        // The reconciler runs from a raw promise, with no scheduler run to stamp
+        // it — bookkeeping per serving-loop.md §3d, RULED 2026-08-05.
+        // An update carrying writer inheritance registers its grant from the
+        // store's verdict, so a serving loop commits it directly rather than
+        // inside a wave it could withdraw.
+        runtime.stampServerRun(tx, {
+          actionId: `source-reconcile/${resultCell.sourceURI}`,
+          kind: "bookkeeping",
+          ...(sourceUpdate === undefined ? {} : { directCommit: true }),
+        });
+        return write(tx);
+      },
+      undefined,
+      { sourceUpdate },
+    );
     if (signal?.aborted) return false;
     if (result.error) {
       logger.warn("reconcile-commit-failed", () => [
