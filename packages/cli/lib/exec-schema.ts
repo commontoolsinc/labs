@@ -1,6 +1,9 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model";
-import { schemaToTypeString } from "@commonfabric/runner";
+import {
+  ContextualFlowControl,
+  schemaToTypeString,
+} from "@commonfabric/runner";
 import {
   isObjectNotArray,
   type ReadonlyRecord,
@@ -736,7 +739,10 @@ function isSchemaLessHandlerInput(schema: JSONSchema): boolean {
   if (typeof schema.$ref === "string" && objectProperties(schema) !== null) {
     return false;
   }
-  return Array.isArray(schema.asCell) && schema.asCell.at(0) === "stream";
+  // A link's schema can be a content-addressed reference, with the stream
+  // declaration on the document it names and nothing at the root;
+  // `declaresStream` reads it there.
+  return ContextualFlowControl.declaresStream(schema);
 }
 
 export function normalizeCallableInputForExecution(
