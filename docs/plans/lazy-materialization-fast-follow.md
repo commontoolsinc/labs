@@ -152,9 +152,9 @@ The
 records revisions, execution postures, observed failures, and coverage limits.
 The
 [integration evidence](../history/development/performance/2026-09-14-lazy-off-integration.md)
-and
+records passing eager-posture suites without qualifying rollback. The
 [reload diagnosis](../history/development/performance/2026-09-15-lazy-reload-diagnosis.md)
-show that eager execution can deliver an unavailable nullable input and fail
+shows that eager execution can deliver an unavailable nullable input and fail
 with browser errors. Rendering the notes alone does not qualify that fallback.
 The
 [navigation-policy diagnosis](../history/development/performance/2026-09-15-notebook-reload-navigation-policy.md)
