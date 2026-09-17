@@ -171,10 +171,11 @@ describe("commonfabric `FabricSpecialObject` classes", () => {
     it("constructs an instance from a reason and a message", () => {
       const BoundFabricUnavailable = commonfabric
         .FabricUnavailable as typeof FabricUnavailable;
-      const instance = new BoundFabricUnavailable("error", "boom");
+      const instance = new BoundFabricUnavailable("error", "network", "boom");
 
       expect(instance).toBeInstanceOf(FabricUnavailable);
       expect(instance.reason).toBe("error");
+      expect(instance.errorKind).toBe("network");
       expect(instance.errorMessage).toBe("boom");
       expect(instance.isError()).toBe(true);
     });

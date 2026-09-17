@@ -27,9 +27,9 @@ export { FabricEpochNsec } from "./FabricEpochNsec.ts";
 export { FabricEpochDay } from "./FabricEpochDay.ts";
 export {
   FabricUnavailable,
+  UNAVAILABLE_ERROR_KINDS,
   UNAVAILABLE_PENDING,
   UNAVAILABLE_REASONS,
-  UNAVAILABLE_SCHEMA_MISMATCH,
   UNAVAILABLE_SYNCING,
 } from "./FabricUnavailable.ts";
 

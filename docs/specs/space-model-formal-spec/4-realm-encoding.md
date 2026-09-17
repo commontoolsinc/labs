@@ -315,7 +315,7 @@ form.
 | `FabricEpochNsec` | `EpochNsec@1` | `bigint` |
 | `FabricKeyPair` | `KeyPair@1` | `{ algorithm: string, publicKey: ArrayBuffer, privateKey: ArrayBuffer }`, or `{ publicKey: CryptoKey, privateKey: CryptoKey }` |
 | `FabricRegExp` | `RegExp@1` | `{ source, flags, flavor }` |
-| `FabricUnavailable` | `Unavailable@1` | `{ reason }`, or `{ reason, errorMessage }` for reason `error` |
+| `FabricUnavailable` | `Unavailable@1` | `{ reason }`, or for reason `error` `{ reason, errorKind }` or `{ reason, errorKind, errorMessage }` |
 | `symbol` | `Symbol@1` | `string` (the registry key) |
 
 Bytes travel as a bare `ArrayBuffer` rather than as a view onto one, that being
@@ -557,7 +557,8 @@ an empty `es2025` pattern. That is what lets a narrower encoder omit what it
 has nothing to say about. `{ source: undefined }` is refused, being a `source`
 that is present and not a string.
 
-`Unavailable@1` has the same distinction on its one optional field. An absent
-`errorMessage` is the state of a message-less reason; `{ reason: "error",
-errorMessage: undefined }` is refused, being a message that is present and not
-a string.
+`Unavailable@1` has the same distinction on its two optional fields. An absent
+`errorKind` is the state of a transient reason and an absent `errorMessage`
+that of an error with no stored message; `{ reason: "error", errorKind:
+undefined }` and `{ reason: "error", errorKind: "sync", errorMessage:
+undefined }` are refused, each being a field that is present and not a string.

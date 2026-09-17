@@ -131,7 +131,7 @@ const SPECIAL_OBJECTS: readonly SpecialObjectKind[] = [
   {
     name: "FabricUnavailable",
     cls: FabricUnavailable,
-    make: () => new FabricUnavailable("error", "boom"),
+    make: () => new FabricUnavailable("error", "general", "boom"),
     storable: true,
     isInstance: false,
   },

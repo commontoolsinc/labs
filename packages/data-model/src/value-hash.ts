@@ -354,7 +354,8 @@ function feedObjectValue(
       const fab = value as FabricUnavailable;
       hasher.update(TAG_UNAVAILABLE_BYTES);
       feedValue(hasher, fab.reason);
-      feedValue(hasher, fab.errorMessage);
+      feedValue(hasher, fab.errorKind);
+      feedValue(hasher, fab.rawErrorMessage);
       return;
     }
 

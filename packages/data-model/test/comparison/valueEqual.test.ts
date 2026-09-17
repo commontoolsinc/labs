@@ -217,7 +217,9 @@ describe("valueEqual()", () => {
         new FabricEpochDay(2n),
         new FabricUnavailable("pending"),
         new FabricUnavailable("syncing"),
-        new FabricUnavailable("error", "boom"),
+        new FabricUnavailable("error", "general", "boom"),
+        new FabricUnavailable("error", "network", "boom"),
+        new FabricUnavailable("error", "network"),
         new UnknownValue("Node@1", { value: 1 }),
         new UnknownValue("Node@2", { value: 1 }),
         new UnknownValue("Node@1", { value: 2 }),
@@ -565,8 +567,8 @@ describe("valueEqual()", () => {
           .toBe(true);
         expect(
           valueEqual(
-            new FabricUnavailable("error", "boom"),
-            new FabricUnavailable("error", "boom"),
+            new FabricUnavailable("error", "general", "boom"),
+            new FabricUnavailable("error", "general", "boom"),
           ),
         ).toBe(true);
         expect(

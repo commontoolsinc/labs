@@ -691,7 +691,7 @@ describe("JsonCodecEngine", () => {
 
     it("round-trips `FabricUnavailable` at top level and in nested structures", () => {
       const top = roundTrip(
-        new FabricUnavailable("error", "boom"),
+        new FabricUnavailable("error", "general", "boom"),
       ) as unknown as FabricUnavailable;
       expect(top).toBeInstanceOf(FabricUnavailable);
       expect(top.reason).toBe("error");

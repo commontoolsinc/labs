@@ -7,7 +7,8 @@
   regexp: new FabricRegExp(/ab+c/gi),
   hash: FabricHash.fromString("fid1:0cBGQ4N2BoCM2jISu3ttc_0Rhu5phgRDnWyvlXWeBq4"),
   unavailable: new FabricUnavailable("pending"),
-  "unavailable, error": new FabricUnavailable("error", "boom"),
+  "unavailable, error": new FabricUnavailable("error", "network", "boom"),
+  "unavailable, error, default message": new FabricUnavailable("error", "decode"),
 }
 
 --
@@ -71,12 +72,25 @@ unavailable:
 )
 
 unavailable, error:
-/Unavailable(reason:"error",errorMessage:"boom")
+/Unavailable(reason:"error",errorKind:"network",errorMessage:"boom")
 /Unavailable(
   reason: "error",
+  errorKind: "network",
   errorMessage: "boom"
 )
 /Unavailable(
   reason: "error",
+  errorKind: "network",
   errorMessage: "boom"
+)
+
+unavailable, error, default message:
+/Unavailable(reason:"error",errorKind:"decode")
+/Unavailable(
+  reason: "error",
+  errorKind: "decode"
+)
+/Unavailable(
+  reason: "error",
+  errorKind: "decode"
 )

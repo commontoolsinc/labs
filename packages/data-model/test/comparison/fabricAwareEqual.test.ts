@@ -81,9 +81,9 @@ const SPECIAL_OBJECT_KINDS: readonly {
   },
   {
     name: "FabricUnavailable",
-    make: () => new FabricUnavailable("error", "boom"),
-    makeEqual: () => new FabricUnavailable("error", "boom"),
-    makeDifferent: () => new FabricUnavailable("error", "bang"),
+    make: () => new FabricUnavailable("error", "general", "boom"),
+    makeEqual: () => new FabricUnavailable("error", "general", "boom"),
+    makeDifferent: () => new FabricUnavailable("error", "general", "bang"),
   },
   {
     // Built from explicit state rather than from a thrown `Error`, whose

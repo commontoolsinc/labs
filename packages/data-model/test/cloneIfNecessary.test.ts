@@ -621,7 +621,7 @@ describe("cloneIfNecessary()", () => {
     },
     {
       name: "FabricUnavailable",
-      factory: () => new FabricUnavailable("error", "boom"),
+      factory: () => new FabricUnavailable("error", "general", "boom"),
       deepCloneImplemented: false,
     },
   ];

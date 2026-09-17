@@ -120,7 +120,7 @@ export const LAYER_CORPUS: ReadonlyArray<[string, unknown]> = [
       new Uint8Array([2]),
     ),
   ],
-  ["a `FabricUnavailable`", new FabricUnavailable("error", "boom")],
+  ["a `FabricUnavailable`", new FabricUnavailable("error", "general", "boom")],
   ["a `FabricError`", FabricError.fromNativeError(new Error("x"))],
   ["a `Date`", new Date(1234)],
   ["a `Uint8Array`", new Uint8Array([1, 2, 3])],

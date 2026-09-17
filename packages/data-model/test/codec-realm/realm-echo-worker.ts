@@ -126,12 +126,17 @@ self.onmessage = (ev: MessageEvent) => {
             : undefined,
           keyPair: keyPairFacts(value.keyPair),
           unavailableParts: (value.unavailable as
-              | { reason: string; errorMessage: string | null }
+              | {
+                reason: string;
+                errorKind: string | null;
+                rawErrorMessage: string | null;
+              }
               | undefined)
             ? [
               (value.unavailable as { reason: string }).reason,
-              (value.unavailable as { errorMessage: string | null })
-                .errorMessage,
+              (value.unavailable as { errorKind: string | null }).errorKind,
+              (value.unavailable as { rawErrorMessage: string | null })
+                .rawErrorMessage,
             ]
             : undefined,
           prefabIsThatRealmsPrefab: value.prefab === UNAVAILABLE_SYNCING,

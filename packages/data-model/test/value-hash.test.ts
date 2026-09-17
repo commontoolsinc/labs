@@ -495,30 +495,49 @@ describe("value-hash", () => {
     describe("FabricUnavailable (dedicated TAG_UNAVAILABLE primitive tag)", () => {
       it('matches a hand-computed byte stream for `FabricUnavailable("pending")`', () => {
         // TAG_UNAVAILABLE (0x2D), the reason as a tagged string, then the
-        // absent message as TAG_NULL (0x20).
+        // absent kind and the absent message each as TAG_NULL (0x20).
         const expected = sha256([
           0x2d,
           0x24,
           0x07,
           ...new TextEncoder().encode("pending"),
           0x20,
+          0x20,
         ]);
         expect(hashBytesOf(new FabricUnavailable("pending"))).toEqual(expected);
       });
 
-      it('matches a hand-computed byte stream for `FabricUnavailable("error", "boom")`', () => {
-        // TAG_UNAVAILABLE (0x2D), then the reason and the message each as a
-        // tagged string.
+      it('matches a hand-computed byte stream for `FabricUnavailable("error", "network", "boom")`', () => {
+        // TAG_UNAVAILABLE (0x2D), then the reason, the kind, and the message
+        // each as a tagged string.
         const expected = sha256([
           0x2d,
           0x24,
           0x05,
           ...new TextEncoder().encode("error"),
           0x24,
+          0x07,
+          ...new TextEncoder().encode("network"),
+          0x24,
           0x04,
           ...new TextEncoder().encode("boom"),
         ]);
-        expect(hashBytesOf(new FabricUnavailable("error", "boom")))
+        expect(hashBytesOf(new FabricUnavailable("error", "network", "boom")))
+          .toEqual(expected);
+      });
+
+      it("feeds `TAG_NULL` for the message of an error given none", () => {
+        const expected = sha256([
+          0x2d,
+          0x24,
+          0x05,
+          ...new TextEncoder().encode("error"),
+          0x24,
+          0x07,
+          ...new TextEncoder().encode("network"),
+          0x20,
+        ]);
+        expect(hashBytesOf(new FabricUnavailable("error", "network")))
           .toEqual(expected);
       });
 
@@ -527,14 +546,28 @@ describe("value-hash", () => {
           .toBe(hex(hashBytesOf(new FabricUnavailable("pending"))));
       });
 
+      it("produces the same hash for an error given its kind's default message and one given none", () => {
+        const given = new FabricUnavailable("error", "network");
+        expect(hex(hashBytesOf(
+          new FabricUnavailable("error", "network", given.errorMessage),
+        ))).toBe(hex(hashBytesOf(given)));
+      });
+
       it("produces different hashes for different reasons", () => {
         expect(hex(hashBytesOf(new FabricUnavailable("pending"))))
           .not.toBe(hex(hashBytesOf(new FabricUnavailable("syncing"))));
       });
 
+      it("produces different hashes for different kinds", () => {
+        expect(hex(hashBytesOf(new FabricUnavailable("error", "network"))))
+          .not.toBe(hex(hashBytesOf(new FabricUnavailable("error", "decode"))));
+      });
+
       it("produces different hashes for different messages", () => {
-        expect(hex(hashBytesOf(new FabricUnavailable("error", "a"))))
-          .not.toBe(hex(hashBytesOf(new FabricUnavailable("error", "b"))));
+        expect(hex(hashBytesOf(new FabricUnavailable("error", "general", "a"))))
+          .not.toBe(
+            hex(hashBytesOf(new FabricUnavailable("error", "general", "b"))),
+          );
       });
     });
     describe("FabricError (FabricInstance via [CODEC])", () => {

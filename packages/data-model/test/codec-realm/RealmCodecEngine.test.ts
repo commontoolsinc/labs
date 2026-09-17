@@ -1114,7 +1114,7 @@ describe("RealmCodecEngine", () => {
         days: new FabricEpochDay(20_000n),
         hash: new FabricHash(new Uint8Array([9, 8, 7]), "fid1"),
         regexp: new FabricRegExp(/ab+c/gi),
-        unavailable: new FabricUnavailable("error", "boom"),
+        unavailable: new FabricUnavailable("error", "general", "boom"),
         prefab: UNAVAILABLE_SYNCING,
       });
 
@@ -1139,7 +1139,8 @@ describe("RealmCodecEngine", () => {
       expect(report.facts?.hashTag).toBe("fid1");
       expect(report.facts?.hashBytes).toEqual([9, 8, 7]);
       expect(report.facts?.regexpParts).toEqual(["es2025", "ab+c", "gi"]);
-      expect(report.facts?.unavailableParts).toEqual(["error", "boom"]);
+      expect(report.facts?.unavailableParts)
+        .toEqual(["error", "general", "boom"]);
       // The far realm has its own prefab, and a message-less reason decodes to
       // it there as it does here.
       expect(report.facts?.prefabIsThatRealmsPrefab).toBe(true);
