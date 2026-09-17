@@ -52,13 +52,13 @@ of a stored topic. Nine members, no verbs:
 | `lastActivityAt` | the card, the index row, and the activity sort |
 | `createdAt` | the index row |
 | `mentions` | the crossref pivot's join |
-| `[NAME]` | copied into each topic's mention-universe row, as the display name the editor's autocomplete matches on |
+| `[NAME]` | the display name of each topic's mention-universe row, which the autocomplete matches on, with the title behind it |
 | `shortName` | the card's badge, and the mention-universe row that `#42` matches |
 
 Neither the card nor the index row carries `[NAME]`. `mentionableIndex` reads
 it off each topic and copies it into that topic's row of the board's mention
-universe, where it is the display name the editor's autocomplete lists and
-matches on.
+universe as the display name the editor's autocomplete lists and matches on,
+with the topic's title standing in where `[NAME]` is absent or blank.
 
 Seven of the nine carry a default, and the two that do not are safe for
 different reasons rather than by oversight. `createdAt` is required: the topic
@@ -72,9 +72,9 @@ to move and tolerates a topic that publishes no name.
 That is the property the demand rests on, and defaults are how it is usually
 bought. A demanded path a stored topic cannot produce makes the whole array
 unreadable — not the one row, the array — while a value the topic always
-produces is simply read. A tenth member is safe when the topic always produces
-its path, and otherwise when the demand grants itself the tolerance: a
-default, or an optional declaration.
+produces is simply read. A tenth member is safe to read when the topic always
+produces its path, and otherwise when the demand grants itself the tolerance:
+a default, or an optional declaration.
 
 ## Stages
 
