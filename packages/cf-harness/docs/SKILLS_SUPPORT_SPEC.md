@@ -41,8 +41,8 @@ and `description`, then point to canonical repo docs. Examples:
 
 `cf-harness` uses `skillsRoot?: string` in `src/config.ts` for explicit skill
 preload. The CLI, prompt loop, and artifact store persist the discovered
-registry and activation artifacts. The registry snapshots supporting resources
-that are present in the configured skill directories at run start.
+registry and activation artifacts. The registry snapshots `SKILL.md` and
+supporting resources present in the configured skill directories at run start.
 
 ## External Models Reviewed
 
@@ -186,7 +186,8 @@ Each resource record should include:
 
 Resource discovery:
 
-- include the root `SKILL.md` as kind `other`
+- include the root `SKILL.md` as kind `other` before scanning supporting files,
+  counting it toward the resource file limit
 - sort paths deterministically
 - reject or skip resources whose resolved paths escape the skill directory or
   configured skills root
@@ -414,8 +415,8 @@ Behavior:
 1. Resolve and validate `skillsRoot`.
 2. Build a registry of `skillsRoot/**/SKILL.md` with bounded traversal.
 3. Validate frontmatter and produce diagnostics.
-4. For each accepted skill, index supporting resources from the runtime
-   filesystem and record them in `skill-registry.json`.
+4. For each accepted skill, index `SKILL.md` and supporting resources from the
+   runtime filesystem and record them in `skill-registry.json`.
 5. For each explicit `--skill`, read the full `SKILL.md`.
 6. Inject a structured skill context block before the user task.
 7. Record skill registry and skill activation artifacts.

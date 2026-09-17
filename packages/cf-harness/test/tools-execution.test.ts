@@ -1839,6 +1839,29 @@ describe("readSkillResourceTool", () => {
     expect(reads[0].digestMatchesRegistry).toBe(false);
   });
 
+  it("returns `SKILL.md` when supporting files exhaust the resource scan budget", async () => {
+    const referencesPath = join(root, "pattern-dev", "references");
+    await Deno.mkdir(referencesPath);
+    for (let index = 0; index < 2000; index += 1) {
+      await Deno.writeTextFile(
+        join(referencesPath, `${index}.md`),
+        "Supporting guidance.",
+      );
+    }
+    const largeRegistry = await discoverHarnessSkills({ skillsRoot: root });
+
+    const output = await readSkillResourceTool.invoke(
+      { ...context, skillRegistry: largeRegistry },
+      { skill: "pattern-dev", path: "SKILL.md" },
+    );
+
+    expect(output.status).toBe("read");
+    expect(output.content).toBe(skillContent);
+    expect(largeRegistry.skills[0].resources).toHaveLength(2000);
+    expect(largeRegistry.skills[0].diagnostics.map(({ code }) => code))
+      .toContain("resource-file-limit-exceeded");
+  });
+
   it("returns `resource_outside_root` when `SKILL.md` becomes a symlink outside its skill directory", async () => {
     const outsidePath = join(root, "outside.md");
     await Deno.writeTextFile(outsidePath, "Outside the registered skill.");

@@ -546,7 +546,14 @@ const collectSkillResources = async (
       return;
     }
 
-    entries.sort((a, b) => a.name.localeCompare(b.name));
+    entries.sort((a, b) => {
+      if (depth === 0) {
+        const aIsSkill = a.name === SKILL_FILE_NAME;
+        const bIsSkill = b.name === SKILL_FILE_NAME;
+        if (aIsSkill !== bIsSkill) return aIsSkill ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
     for (const entry of entries) {
       if (EXCLUDED_SKILL_DIRS.has(entry.name)) {
         continue;
