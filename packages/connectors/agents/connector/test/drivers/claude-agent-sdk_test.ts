@@ -3,6 +3,8 @@ import { isAbsolute, resolve } from "@std/path";
 import {
   ClaudeAgentSdkDriver,
   type ClaudeSdkAdapter,
+  desktopAppInstalled,
+  openWithCommand,
 } from "../../src/drivers/claude-agent-sdk.ts";
 
 function fakeQuery(messages: unknown[]) {
@@ -1347,4 +1349,252 @@ Deno.test("Claude driver applies a start's mode to the first turn, drops it when
   const afterThrow = throwing.filter((call) => call.method === "query").at(-1)
     ?.args[0] as { options: Record<string, unknown> };
   assertEquals(afterThrow.options.permissionMode, "plan");
+});
+
+Deno.test("Claude driver starts a session on the desktop: opens the app's link with the folder and the prompt, runs no query, and pairs the session the app makes", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const listed: Array<Record<string, unknown>> = [];
+  const sdk = {
+    ...sdkWithoutSessions(calls),
+    listSessions: (options?: Record<string, unknown>) => {
+      calls.push({ method: "listSessions", args: [options] });
+      return Promise.resolve(listed as never);
+    },
+  };
+  const opened: string[] = [];
+  let now = 1_000_000;
+  const desktop = {
+    installed: () => Promise.resolve(true),
+    openUrl: (url: string) => {
+      opened.push(url);
+      return Promise.resolve(true);
+    },
+    os: "darwin",
+    now: () => now,
+  };
+  const driver = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    sdk,
+    desktop,
+  );
+  assertEquals(driver.source.capabilities.surfaces, ["headless", "desktop"]);
+
+  // Longer than the 200 characters the SDK lists of a first prompt, with
+  // the cut landing on a space (the SDK trims the cut before its ellipsis).
+  const text = "Work on topic #7\n\nContext: the topic's living document " +
+    "begins: a topic filed on the local board so the topic workbench has " +
+    "something to read, with links to the two pull requests it tracks " +
+    "and the rig\n\nLinks:\n- labs #7383\n- labs #7384";
+  const outcome = await driver.startSession(NEW_SESSION_ID, {
+    text,
+    title: "topic #7: the workbench",
+    surface: "desktop",
+  });
+  assertEquals(outcome.status, "succeeded");
+  // No session exists yet, so there is nothing for the worker to refresh.
+  assertEquals(outcome.affectedSession, null);
+  assertEquals(outcome.result, {
+    nativeSessionId: NEW_SESSION_ID,
+    cwd: "/work/labs",
+    title: "topic #7: the workbench",
+    surface: "desktop",
+  });
+  assertEquals(calls.some((call) => call.method === "query"), false);
+  assertEquals(opened.length, 1);
+  const link = new URL(opened[0]);
+  assertEquals(link.protocol, "claude:");
+  assertEquals(link.host, "code");
+  assertEquals(link.pathname, "/new");
+  assertEquals(link.searchParams.get("folder"), "/work/labs");
+  assertEquals(link.searchParams.get("q"), text);
+
+  // Until the person sends the prompt, nothing pairs.
+  assertEquals((await driver.listSessions()).sessions, []);
+
+  // The app makes the session: the start's directory, after the start,
+  // opening with the start's text. The SDK lists the first prompt with its
+  // newlines as spaces, cut to 200 characters, trimmed, and marked with an
+  // ellipsis that is no part of the prompt (@anthropic-ai/claude-agent-sdk
+  // 0.3.206). Another session made meanwhile stays what it is.
+  now += 30_000;
+  const made = "11111111-1111-4111-8111-111111111111";
+  const other = "22222222-2222-4222-8222-222222222222";
+  assertEquals(text.replace(/\n/g, " ")[199], " ");
+  const listedPrompt = text.replace(/\n/g, " ").slice(0, 200).trim() + "…";
+  assertEquals(listedPrompt.length, 200);
+  listed.push(
+    {
+      sessionId: made,
+      summary: listedPrompt,
+      firstPrompt: listedPrompt,
+      cwd: "/work/labs",
+      lastModified: now,
+      createdAt: now,
+    },
+    {
+      sessionId: other,
+      summary: "Something else",
+      firstPrompt: "Something else",
+      cwd: "/work/labs",
+      lastModified: now,
+      createdAt: now,
+    },
+  );
+  const page = await driver.listSessions();
+  const paired = page.sessions.find((s) => s.nativeSessionId === made);
+  assertEquals(paired?.startedAs, NEW_SESSION_ID);
+  assertEquals(paired?.title, "topic #7: the workbench");
+  const unrelated = page.sessions.find((s) => s.nativeSessionId === other);
+  assertEquals(unrelated?.startedAs, undefined);
+  assertEquals(unrelated?.title, "Something else");
+
+  // The pairing holds on later listings and reads; a title the person gives
+  // the session wins over the start's.
+  listed[0] = { ...listed[0], customTitle: "my own title" };
+  const again = (await driver.listSessions()).sessions.find((s) =>
+    s.nativeSessionId === made
+  );
+  assertEquals(again?.startedAs, NEW_SESSION_ID);
+  assertEquals(again?.title, "my own title");
+
+  // The same start sent again (the person closed the app's New session UI,
+  // or declined its folder, and clicked Start once more): the session the
+  // app then makes pairs with the newest start, not the earlier one the
+  // workbench may have withdrawn since.
+  now += 60_000;
+  const earlier = "44444444-4444-4444-8444-444444444444";
+  const latest = "55555555-5555-4555-8555-555555555555";
+  assertEquals(
+    (await driver.startSession(earlier, {
+      text,
+      surface: "desktop",
+      title: "topic #7: the workbench",
+    })).status,
+    "succeeded",
+  );
+  now += 30_000;
+  assertEquals(
+    (await driver.startSession(latest, {
+      text,
+      surface: "desktop",
+      title: "topic #7: the workbench",
+    })).status,
+    "succeeded",
+  );
+  now += 30_000;
+  const resent = "66666666-6666-4666-8666-666666666666";
+  listed.push({
+    sessionId: resent,
+    summary: listedPrompt,
+    firstPrompt: listedPrompt,
+    cwd: "/work/labs",
+    lastModified: now,
+    createdAt: now,
+  });
+  const afterResend = (await driver.listSessions()).sessions.find((s) =>
+    s.nativeSessionId === resent
+  );
+  assertEquals(afterResend?.startedAs, latest);
+
+  // A start the person never sends is forgotten after a day: a matching
+  // session made later is not paired with it.
+  const stale = "3f1a3c0e-9d2b-4c7a-8e5f-0123456789ab";
+  assertEquals(
+    (await driver.startSession(stale, { text: "Later", surface: "desktop" }))
+      .status,
+    "succeeded",
+  );
+  now += 25 * 60 * 60 * 1000;
+  listed.push({
+    sessionId: "33333333-3333-4333-8333-333333333333",
+    summary: "Later",
+    firstPrompt: "Later",
+    cwd: "/work/labs",
+    lastModified: now,
+    createdAt: now,
+  });
+  const late = (await driver.listSessions()).sessions.find((s) =>
+    s.nativeSessionId === "33333333-3333-4333-8333-333333333333"
+  );
+  assertEquals(late?.startedAs, undefined);
+});
+
+Deno.test("Claude driver refuses a desktop start it cannot make: off macOS, with a mode, a prompt the app would cut, an app that is not installed, a link the app did not open, or a surface it does not offer", async () => {
+  const ok = {
+    installed: () => Promise.resolve(true),
+    openUrl: () => Promise.resolve(true),
+    os: "darwin",
+    now: () => 0,
+  };
+  const make = (desktop: typeof ok) =>
+    new ClaudeAgentSdkDriver(
+      {
+        id: "claude-code:labs",
+        driver: "claude-agent-sdk",
+        enabled: true,
+        cwd: "/work/labs",
+      },
+      sdkWithoutSessions([]),
+      desktop,
+    );
+  const linux = make({ ...ok, os: "linux" });
+  assertEquals(linux.source.capabilities.surfaces, ["headless"]);
+  assertEquals(
+    (await linux.startSession(NEW_SESSION_ID, {
+      text: "Hi",
+      surface: "desktop",
+    }))
+      .status,
+    "unsupported",
+  );
+  assertEquals(
+    (await make(ok).startSession(NEW_SESSION_ID, {
+      text: "Hi",
+      surface: "desktop",
+      mode: "acceptEdits",
+    })).error?.code,
+    "claude-desktop-mode-unsupported",
+  );
+  assertEquals(
+    (await make(ok).startSession(NEW_SESSION_ID, {
+      text: "x".repeat(14337),
+      surface: "desktop",
+    })).error?.code,
+    "claude-desktop-prompt-too-long",
+  );
+  assertEquals(
+    (await make({ ...ok, installed: () => Promise.resolve(false) })
+      .startSession(NEW_SESSION_ID, { text: "Hi", surface: "desktop" })).error
+      ?.code,
+    "claude-desktop-not-installed",
+  );
+  assertEquals(
+    (await make({ ...ok, openUrl: () => Promise.resolve(false) })
+      .startSession(NEW_SESSION_ID, { text: "Hi", surface: "desktop" })).error
+      ?.code,
+    "claude-desktop-open-failed",
+  );
+  assertEquals(
+    (await make(ok).startSession(NEW_SESSION_ID, {
+      text: "Hi",
+      surface: "browser",
+    })).status,
+    "unsupported",
+  );
+});
+
+Deno.test("the desktop helpers answer false for an app that is not there and an opener that is missing or refuses, without opening anything", async () => {
+  assertEquals(await desktopAppInstalled("/nonexistent/Claude.app"), false);
+  assertEquals(await desktopAppInstalled(Deno.cwd()), true);
+  assertEquals(
+    await openWithCommand("/nonexistent/opener", "claude://code/new"),
+    false,
+  );
+  assertEquals(await openWithCommand("false", "claude://code/new"), false);
+  assertEquals(await openWithCommand("true", "claude://code/new"), true);
 });
