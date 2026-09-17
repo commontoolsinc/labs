@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-17", sha: "deb21bd598+review-fixes" };
+    const SNAPSHOT = { date: "2026-09-17", sha: "d2e68e7116" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -1916,7 +1916,7 @@
         kind: "Trusted text",
         band: "agent",
         body:
-          `<p>Skills preloaded from the local registry, digest-pinned, with indexed resource reads and Deno or Bash scripts the operator allows — one run-wide switch (<code>--allow-skill-scripts</code>) covering every skill the run holds, or an exact per-script entry. Host-target execution still takes the exact entry. Skill text is context, not operator instruction. The ruling that operator-provided text is trusted for confidentiality and labeled for integrity (CT-2173) covers operator docs; skills follow by extension, and none of it is implemented yet: workspace reads still release into context with an empty label (CT-2165).</p>`,
+          `<p>Skills registered locally with digest snapshots. Parent runs can read a registered skill's root <code>SKILL.md</code> without preloading it, through the same indexed resource reader as supporting files, with call-time path checks and digest mismatch diagnostics. The root instructions take priority within the resource scan limit. Preloaded bodies are digest-pinned. Deno or Bash scripts need operator permission — one run-wide switch (<code>--allow-skill-scripts</code>) covering every skill the run holds, or an exact per-script entry. Host-target execution still takes the exact entry. Skill text is context, not operator instruction. The ruling that operator-provided text is trusted for confidentiality and labeled for integrity (CT-2173) covers operator docs; skills follow by extension, and none of it is implemented yet: workspace reads still release into context with an empty label (CT-2165).</p>`,
       },
       docs: {
         kind: "Trusted text",
