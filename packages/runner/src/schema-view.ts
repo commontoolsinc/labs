@@ -172,6 +172,20 @@ const isExcluded = (schema: JSONSchema): boolean =>
     schema.$comment === "rejectedProperty");
 
 /**
+ * Whether an excluded property is one the schema turned down on purpose, as
+ * {@link EXCLUDED_REJECTED} describes, and not one it merely leaves unnamed.
+ */
+const isTurnedDown = (schema: JSONSchema): boolean =>
+  isObjectOrArray(schema) && schema.$comment === "rejectedProperty";
+
+/**
+ * Keys JavaScript itself probes on any object it is handed — promise adoption
+ * reads `then`, `JSON.stringify` reads `toJSON` — so a read of one says
+ * nothing about what the reader's body asked for.
+ */
+const MACHINERY_PROBED_KEYS: ReadonlySet<string> = new Set(["then", "toJSON"]);
+
+/**
  * The type name a schema's `type` keyword would use for this value.
  *
  * A `FabricPrimitive` returns its own concrete name (`FabricBytes` and the
@@ -717,7 +731,31 @@ function createObjectView(
   const required = new Set(requiredKeys(schema));
   const resolveChild = (key: string): unknown => {
     const narrowed = childSchema(schema, key);
-    if (isExcluded(narrowed)) return undefined;
+    if (isExcluded(narrowed)) {
+      // The data carries this key and the schema does not select it, so the
+      // reader gets the `undefined` an absent key gives, and nothing at the
+      // read says a field was there. A reader in that position has a schema
+      // that selects less than its body reads: one written by hand narrower
+      // than the code, or an input schema shrunk past a read the capability
+      // analysis did not see. The read is counted under a key of its own; the
+      // pattern test runner fails a test on any warning a run counts, unless
+      // the test allows console warnings. A key the schema turned down on
+      // purpose is a deliberate absence, and is not counted.
+      if (
+        !isTurnedDown(narrowed) && Object.hasOwn(value, key) &&
+        !MACHINERY_PROBED_KEYS.has(key)
+      ) {
+        logger.warn(
+          "unselected-key-read",
+          () => [
+            `Read of \`${key}\` at ${link.id}/${link.path.join("/")}: the ` +
+            "data carries the key and the schema does not select it, so it " +
+            "reads as `undefined`.",
+          ],
+        );
+      }
+      return undefined;
+    }
     if (!Object.hasOwn(value, key)) {
       // Register the read even though there is nothing there. An absent key is
       // usually a computed that has not produced yet, and the reader has to run
