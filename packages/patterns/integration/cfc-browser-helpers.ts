@@ -844,6 +844,62 @@ export async function readCfInputValue(
   return probe.value;
 }
 
+/**
+ * Fill the native `<textarea>` a `cf-textarea` wraps, and commit the edit.
+ *
+ * Separate from {@link fillCfInput} because that one drives an `<input>`: it
+ * resolves `element.shadowRoot?.querySelector("input")` and gives up on a host
+ * that has none. This drives the field as a person does — focus, set the value,
+ * dispatch `input`/`change`/`blur` — and then asks the host to `commit()`, so
+ * the two-way-bound draft cell flushes rather than holding the typed text in
+ * the control alone.
+ *
+ * Presentation mode does not animate this fill. `typeIntoCfInput`, the
+ * presentation path {@link fillCfInput} routes through, resolves an
+ * `HTMLInputElement` and throws for anything else, so a recorded run shows the
+ * text arriving in the field rather than being typed into it.
+ */
+export async function fillCfTextarea(
+  page: Page,
+  selector: string,
+  value: string,
+) {
+  await waitForRuntimeIdle(page);
+  const field = await page.waitForSelector(selector, {
+    strategy: "pierce",
+  });
+  const filled = await field.evaluate(async (element: Element, nextValue) => {
+    const textarea = element instanceof HTMLTextAreaElement
+      ? element
+      : element.shadowRoot?.querySelector("textarea");
+    if (!(textarea instanceof HTMLTextAreaElement)) return false;
+    const root = textarea.getRootNode();
+    const host = root instanceof ShadowRoot ? root.host : element;
+    const hostElement = host as Element & { commit?: () => Promise<void> };
+    textarea.focus();
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )?.set;
+    if (setter) setter.call(textarea, nextValue);
+    else textarea.value = nextValue;
+    textarea.dispatchEvent(
+      new Event("input", { bubbles: true, composed: true }),
+    );
+    textarea.dispatchEvent(
+      new Event("change", { bubbles: true, composed: true }),
+    );
+    textarea.blur();
+    await hostElement.commit?.();
+    return textarea.value === nextValue;
+  }, { args: [value] });
+  if (!filled) {
+    throw new Error(
+      `"${selector}" did not resolve to a fillable textarea`,
+    );
+  }
+}
+
 export async function waitForRuntimeIdle(
   page: Page,
 ) {
