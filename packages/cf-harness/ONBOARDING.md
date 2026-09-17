@@ -326,8 +326,10 @@ The same run is on disk:
 `transcript.json` is the fastest way to see what the model was working with:
 every tool result is a record keyed by `outputId`, and the pattern source the
 model wrote is in `tool-outputs/`, not in the transcript. `run-state.json` reads
-`status: "running"` until one terminal write turns it `completed` or `failed`,
-and that same write records `cell-labels.json`.
+`status: "running"` until one terminal write turns it `completed`, `failed`, or
+`canceled`, and that same write records `cell-labels.json`. Cancellation retains
+the controlling signal's reason in `cancelReason` without adding a failure
+record.
 
 For a retrospective, use the Timeline. It joins `transcript-omissions.json` to
 the full `tool-outputs/*.json` result and places each withheld location beside

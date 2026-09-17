@@ -309,7 +309,7 @@ export type HarnessDelegableSubagentProfile =
 export type HarnessSubagentProfile = HarnessDelegableSubagentProfile;
 export type HarnessSubagentModelSource = "parent" | "profile";
 export type { HarnessNativeModelToolId } from "./native-model-tool.ts";
-export type HarnessSubagentRunStatus = "completed" | "failed";
+export type HarnessSubagentRunStatus = "completed" | "failed" | "canceled";
 export type HarnessSubagentReturnChannel =
   typeof DEFAULT_SUBAGENT_RETURN_CHANNEL;
 

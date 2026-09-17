@@ -44,7 +44,11 @@ export type HarnessToolPolicyDecision =
   | "invalid"
   | "withheld";
 
-export type HarnessToolExecutionStatus = "completed" | "failed" | "not-run";
+export type HarnessToolExecutionStatus =
+  | "completed"
+  | "failed"
+  | "canceled"
+  | "not-run";
 export type HarnessToolInvocationOrigin = "model" | "opening-research";
 export type HarnessRunTimelineKind =
   | "run_started"
@@ -159,6 +163,9 @@ export interface HarnessRunReport {
   terminalReason?: string;
   finalAssistantText?: string;
 
+  /** Reason supplied by the run's controlling abort signal. */
+  cancelReason?: string;
+
   /** User-facing disposition of a normally completed model loop. */
   taskOutcome?: HarnessTaskOutcome;
 
@@ -193,6 +200,10 @@ export interface CreateHarnessRunReportOptions {
     updatedAt: string;
     endedAt?: string;
     terminalReason?: string;
+
+    /** Reason supplied by the run's controlling abort signal. */
+    cancelReason?: string;
+
     cfcEnforcementMode: CfcEnforcementMode;
     fabricSessionCfc?: HarnessFabricSessionCfcPosture;
     artifactRoot?: string;
@@ -389,6 +400,9 @@ export const createHarnessRunReport = (
       : {}),
     ...(options.runState.terminalReason !== undefined
       ? { terminalReason: options.runState.terminalReason }
+      : {}),
+    ...(options.runState.cancelReason !== undefined
+      ? { cancelReason: options.runState.cancelReason }
       : {}),
     ...(options.taskOutcome !== undefined
       ? { taskOutcome: options.taskOutcome }
