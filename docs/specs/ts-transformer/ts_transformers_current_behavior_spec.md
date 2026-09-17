@@ -1637,6 +1637,25 @@ adjustments:
   `table[indexes.findIndex(...)]?.mentionedBy ?? []` — marks the root wildcard,
   which disables shrinking for the whole parameter: its declared shape is
   emitted intact, without the capability wrappers a walked operand would derive
+- a tracked value that leaves the body whole is a full-shape read of its path
+  as well as a plain one: returned from an inline callback, put in an array
+  literal, projected into an object literal alias resolution cannot follow,
+  assigned to something other than a local, or handed to a callee with no
+  summary, it is read wherever it lands by members the analysis never sees, so
+  a member the body did read on the way must not narrow it to that member. A
+  value bound to a local or written into a local collection stays tracked and
+  narrows as its reads say. So does a value handed on by reference, which the
+  runtime stores as a link so that whatever reads through it does so under a
+  schema of its own: an argument to a runtime call (a builder, an applied lift,
+  `ifElse`, a cell factory), the payload of a write through a cell (`set`,
+  `update`, `send`, `push` and the other writer methods), a JSX prop, and what
+  the builder itself, or a builder callback lowered inside it, returns.
+  `Array.isArray` asks a value's shape and reads nothing below it, so it is not
+  an escape either (`wholeValueDestination` / `escapesWhole` in
+  `policy/capability-analysis.ts`;
+  `test/policy/capability-analysis-whole-value-escapes.test.ts`; the by-reference
+  routes are held in place at runtime by
+  `packages/patterns/kept-element-references.test.tsx`)
 - capability analysis reads through the operand recording an `assert(...)` body
   wraps a method call's receiver in. `AssertDiagnosticsTransformer` (stage 11)
   rewrites `event.details.includes(text)` so that `includes` is called on
