@@ -5,7 +5,10 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { type FabricContainerValue, type FabricValue } from "@/interface.ts";
+import {
+  type FabricContainerValuePlus,
+  type FabricValue,
+} from "@/interface.ts";
 import { type PrimitiveValueTag } from "@/types";
 import {
   type DispatchingVisitorResult,
@@ -17,24 +20,11 @@ import {
 } from "@/value-visit";
 import { VisitInProgress } from "@/value-visit/VisitInProgress.ts";
 
-import { chain, mainResult, Recorder, replace } from "./Recorder.ts";
+import { mainResult, Recorder, replace } from "./Recorder.ts";
 
-/** Runs a fresh checking visit of `value` with `vis`. */
-function visit(
-  value: unknown,
-  vis: ValueVisitor<unknown, unknown>,
-  deepTypeCheck = false,
-): unknown {
-  return new VisitInProgress(vis).visit(value, deepTypeCheck);
-}
-
-/** Runs a fresh assume-valid visit of `value` with `vis`. */
-function visitAssumingValid(
-  value: unknown,
-  vis: ValueVisitor<unknown, unknown>,
-): unknown {
-  return new VisitInProgress(vis as ValueVisitor<never, unknown>)
-    .visitFabricValue(value as FabricValue);
+/** Runs a fresh visit of `value` with `vis`. */
+function visit(value: unknown, vis: ValueVisitor<unknown, unknown>): unknown {
+  return new VisitInProgress(vis).visit(value);
 }
 
 describe("VisitInProgress", () => {
@@ -112,7 +102,7 @@ describe("VisitInProgress", () => {
         it("does not call a subtype visitor when `visitFabricContainer()` returns something other than `visitSubtype`", () => {
           class Stopping extends Recorder {
             override visitFabricContainer(
-              value: FabricContainerValue,
+              value: FabricContainerValuePlus<unknown>,
             ): DispatchingVisitorResult<unknown, unknown> {
               this.events.push(["container", value]);
               return mainResult("stopped");
@@ -177,14 +167,14 @@ describe("VisitInProgress", () => {
           ]);
         });
 
-        it("routes a non-fabric replacement under a valid root to `visitNonFabricValue()`", () => {
+        it("routes a non-fabric replacement under a valid root to `visitPlusType()`", () => {
           const rec = new Recorder();
           const date = new Date(0);
           rec.onValue = (v) => (v === "x") ? replace(date) : DO_VISIT_SUBTYPE;
 
           visit(["x"], rec);
-          expect(rec.events.filter((e) => e[0] === "nonFabric")).toEqual([
-            ["nonFabric", date],
+          expect(rec.events.filter((e) => e[0] === "plusType")).toEqual([
+            ["plusType", date],
           ]);
         });
 
@@ -487,9 +477,9 @@ describe("VisitInProgress", () => {
           );
         });
 
-        it("throws for a `recurse` from `visitNonFabricValue()`", () => {
+        it("throws for a `recurse` from `visitPlusType()`", () => {
           const rec = new Recorder();
-          rec.onNonFabric = () => DO_RECURSE_VALUES;
+          rec.onPlusType = () => DO_RECURSE_VALUES;
 
           expect(() => visit(new Date(0), rec)).toThrow(
             /Cannot use `recurse` result with non-container: /,
@@ -649,27 +639,22 @@ describe("VisitInProgress", () => {
             expect(actual).toEqual(expected);
           });
         }
-
-        it("routes an array carrying a named property to `visitNonFabricValue()` under the shallow check", () => {
-          const rec = new Recorder();
-          const array: unknown[] & { extra?: number } = [1];
-          array.extra = 2;
-
-          visit(array, rec);
-          expect(rec.events).toEqual([["value", array], ["nonFabric", array]]);
-        });
       });
 
-      describe("type checking", () => {
-        it("routes a non-fabric root to `visitNonFabricValue()`", () => {
+      describe("the extent of inspection", () => {
+        // These pin the contract `visitValue()` states: dispatch is by shape
+        // alone, and a container which is not inert is walked as its shape
+        // says.
+
+        it("routes a non-fabric root to `visitPlusType()`", () => {
           const rec = new Recorder();
           const date = new Date(0);
 
           visit(date, rec);
-          expect(rec.events).toEqual([["value", date], ["nonFabric", date]]);
+          expect(rec.events).toEqual([["value", date], ["plusType", date]]);
         });
 
-        it("treats an array holding a function as a `FabricArray` under the shallow check, and routes the function to `visitNonFabricValue()`", () => {
+        it("treats an array holding a function as a `FabricArray`, and routes the function to `visitPlusType()`", () => {
           const rec = new Recorder();
           const fn = () => 1;
 
@@ -679,54 +664,117 @@ describe("VisitInProgress", () => {
             "container",
             "array",
             "value",
-            "nonFabric",
+            "plusType",
             "visitedElement",
           ]);
         });
 
-        it("routes an array holding a function to `visitNonFabricValue()` whole under the deep check", () => {
+        it("throws on reaching a named property while iterating an array, after the elements before it", () => {
           const rec = new Recorder();
-          const array = [() => 1];
+          const array: unknown[] & { extra?: number } = [1];
+          array.extra = 2;
 
-          visit(array, rec, true);
-          expect(rec.events).toEqual([["value", array], ["nonFabric", array]]);
+          expect(() => visit(array, rec)).toThrow(
+            /Non-index property in alleged `FabricArray`: `extra`/,
+          );
+          expect(rec.names).toEqual([
+            "value",
+            "container",
+            "array",
+            "value",
+            "primitive",
+            "visitedElement",
+          ]);
         });
 
-        it("visits a deep valid value the same under either check", () => {
-          const shallow = new Recorder();
-          const deep = new Recorder();
-          const value = chain(5, [1, "two", { three: 3n }]);
+        it("walks a plain object with a symbol-keyed property as a plain object, skipping that entry", () => {
+          const rec = new Recorder();
+          const object = { a: 1, [Symbol("s")]: 2 };
 
-          visit(value, shallow);
-          visit(value, deep, true);
-          expect(deep.events).toEqual(shallow.events);
-          expect(deep.names).toContain("primitive");
+          visit(object, rec);
+          expect(rec.plusTypeChecks).toEqual([]);
+          expect(rec.events.map((e) => e[1])).not.toContain(2);
+          expect(
+            rec.events.filter((e) => e[0] === "visitedFabricPlainObjectEntry"),
+          ).toEqual([
+            ["visitedFabricPlainObjectEntry", object, "a", 1],
+          ]);
+        });
+
+        it("skips a non-enumerable property of a plain object", () => {
+          const rec = new Recorder();
+          const object = Object.defineProperty({ a: 1 }, "hidden", {
+            value: 2,
+            enumerable: false,
+          });
+
+          visit(object, rec);
+          expect(rec.events.map((e) => e[1])).not.toContain(2);
+          expect(
+            rec.events.filter((e) => e[0] === "visitedFabricPlainObjectEntry"),
+          ).toEqual([
+            ["visitedFabricPlainObjectEntry", object, "a", 1],
+          ]);
+        });
+
+        it("reads an accessor-backed property of a plain object, running its getter once", () => {
+          const rec = new Recorder();
+          let reads = 0;
+          const object = Object.defineProperty({}, "a", {
+            get: () => {
+              reads++;
+              return 1;
+            },
+            enumerable: true,
+          });
+
+          visit(object, rec);
+          expect(reads).toBe(1);
+          expect(rec.events.filter((e) => e[0] === "primitive")).toEqual([
+            ["primitive", 1, "number"],
+          ]);
+        });
+
+        it("walks a null-prototype object as a plain object", () => {
+          const rec = new Recorder();
+          const object = Object.assign(Object.create(null), { a: 1 });
+
+          visit(object, rec);
+          expect(rec.plusTypeChecks).toEqual([]);
+          expect(rec.names).toEqual([
+            "value",
+            "container",
+            "object",
+            "value",
+            "primitive",
+            "visitedFabricPlainObjectEntry",
+          ]);
         });
       });
 
-      describe("`isDomainExtra()`", () => {
-        it("passes a non-fabric value to `isDomainExtra()` and, on `true`, to `visitNonFabricValue()`", () => {
+      describe("`isPlusType()`", () => {
+        it("passes a non-fabric value to `isPlusType()` and, on `true`, to `visitPlusType()`", () => {
           const rec = new Recorder();
           const date = new Date(0);
 
           visit(date, rec);
-          expect(rec.domainChecks).toEqual([date]);
-          expect(rec.names).toEqual(["value", "nonFabric"]);
+          expect(rec.plusTypeChecks).toEqual([date]);
+          expect(rec.names).toEqual(["value", "plusType"]);
         });
 
-        it("throws for a non-fabric value, without calling `visitNonFabricValue()`, on `false`", () => {
+        it("throws for a non-fabric value, without calling `visitPlusType()`, on `false`", () => {
           const rec = new Recorder();
-          rec.onIsDomainExtra = () => false;
+          rec.onIsPlusType = () => false;
 
           expect(() => visit(new Date(0), rec)).toThrow(
             /Encountered a value outside of the visitor's domain: /,
           );
-          expect(rec.names).not.toContain("nonFabric");
+          expect(rec.names).not.toContain("plusType");
         });
 
         it("throws for a non-fabric replacement under a valid root, on `false`", () => {
           const rec = new Recorder();
-          rec.onIsDomainExtra = () => false;
+          rec.onIsPlusType = () => false;
           rec.onValue = (v) =>
             (v === "x") ? replace(new Date(0)) : DO_VISIT_SUBTYPE;
 
@@ -735,23 +783,19 @@ describe("VisitInProgress", () => {
           );
         });
 
-        it("does not call `isDomainExtra()` for a valid `FabricValue`", () => {
+        it("does not call `isPlusType()` for a valid `FabricValue`", () => {
           const rec = new Recorder();
 
           visit({ a: [1, "two", null] }, rec);
-          expect(rec.domainChecks).toEqual([]);
+          expect(rec.plusTypeChecks).toEqual([]);
         });
 
-        it("passes the value that failed the check: the function under the shallow check, the whole array under the deep check", () => {
-          const shallow = new Recorder();
-          const deep = new Recorder();
+        it("passes the function itself, not the array holding it", () => {
+          const rec = new Recorder();
           const fn = () => 1;
-          const array = [fn];
 
-          visit(array, shallow);
-          visit(array, deep, true);
-          expect(shallow.domainChecks).toEqual([fn]);
-          expect(deep.domainChecks).toEqual([array]);
+          visit([fn], rec);
+          expect(rec.plusTypeChecks).toEqual([fn]);
         });
       });
 
@@ -774,11 +818,11 @@ describe("VisitInProgress", () => {
           const rec = new Recorder();
           const inProgress = new VisitInProgress<unknown, unknown>(rec);
           rec.onPrimitive = () => {
-            inProgress.visit(2, false);
+            inProgress.visit(2);
             return undefined;
           };
 
-          expect(() => inProgress.visit([1], false)).toThrow(
+          expect(() => inProgress.visit([1])).toThrow(
             /multiple concurrent top-level visits/,
           );
         });
@@ -787,8 +831,8 @@ describe("VisitInProgress", () => {
           const rec = new Recorder();
           const inProgress = new VisitInProgress<unknown, unknown>(rec);
 
-          expect(inProgress.visit([1], false)).toBeUndefined();
-          expect(inProgress.visit({ a: 2 }, false)).toBeUndefined();
+          expect(inProgress.visit([1])).toBeUndefined();
+          expect(inProgress.visit({ a: 2 })).toBeUndefined();
           expect(rec.events.filter((e) => e[0] === "primitive")).toEqual([
             ["primitive", 1, "number"],
             ["primitive", 2, "number"],
@@ -800,8 +844,8 @@ describe("VisitInProgress", () => {
           const inProgress = new VisitInProgress<unknown, unknown>(rec);
           rec.onPrimitive = (v) => (v === 1) ? DO_RECURSE_VALUES : undefined;
 
-          expect(() => inProgress.visit([1], false)).toThrow(/non-container/);
-          expect(inProgress.visit([2], false)).toBeUndefined();
+          expect(() => inProgress.visit([1])).toThrow(/non-container/);
+          expect(inProgress.visit([2])).toBeUndefined();
         });
 
         it("throws when a visitor re-enters from the root value, before anything is on the stack", () => {
@@ -809,93 +853,44 @@ describe("VisitInProgress", () => {
           const inProgress = new VisitInProgress<unknown, unknown>(rec);
           rec.onValue = (v) => {
             if (v === "root") {
-              inProgress.visit(2, false);
+              inProgress.visit(2);
             }
             return DO_VISIT_SUBTYPE;
           };
 
-          expect(() => inProgress.visit("root", false)).toThrow(
+          expect(() => inProgress.visit("root")).toThrow(
             /multiple concurrent top-level visits/,
           );
         });
 
-        it("keeps the outer visit's checking mode when a visitor swallows a re-entry error", () => {
-          // The array holding a function is the tell: the outer visit is
-          // shallow and iterates it, whereas the re-entry asked for a deep
-          // check, under which it would go whole to `visitNonFabricValue()`.
+        it("continues the outer visit, and accepts a later one, when a visitor swallows a re-entry error", () => {
           const rec = new Recorder();
           const inProgress = new VisitInProgress<unknown, unknown>(rec);
-          const array = [() => 1];
           rec.onValue = (v) => {
             if (v === "root") {
               try {
-                inProgress.visit(2, true);
+                inProgress.visit(2);
               } catch {
                 // Deliberately swallowed.
               }
-              return replace(array);
+              return replace([1]);
             }
             return DO_VISIT_SUBTYPE;
           };
 
-          inProgress.visit("root", false);
+          inProgress.visit("root");
           expect(rec.names).toEqual([
             "value",
             "value",
             "container",
             "array",
             "value",
-            "nonFabric",
+            "primitive",
             "visitedElement",
           ]);
+          expect(rec.events.map((e) => e[1])).not.toContain(2);
+          expect(inProgress.visit(3)).toBeUndefined();
         });
-      });
-    });
-
-    describe("visitFabricValue()", () => {
-      it("visits a value and returns `undefined` absent a `mainResult`", () => {
-        const rec = new Recorder();
-
-        expect(visitAssumingValid({ a: [1, 2] }, rec)).toBeUndefined();
-        expect(rec.names).toContain("primitive");
-      });
-
-      it("returns a `mainResult` a visitor produces", () => {
-        const rec = new Recorder();
-        rec.onPrimitive = (v) => mainResult(String(v));
-
-        expect(visitAssumingValid(5, rec)).toEqual(mainResult("5"));
-      });
-
-      it("throws on reaching a value that is not a `FabricValue`, without consulting `isDomainExtra()`", () => {
-        const rec = new Recorder();
-
-        expect(() => visitAssumingValid([1, new Date(0)], rec)).toThrow(
-          /assume valid/,
-        );
-        expect(rec.domainChecks).toEqual([]);
-      });
-
-      it("throws for a `recurse` on a value that is not a `FabricValue`", () => {
-        const rec = new Recorder();
-        rec.onValue = () => DO_RECURSE_VALUES;
-
-        expect(() => visitAssumingValid(new Date(0), rec)).toThrow(
-          /Cannot use `recurse` result with non-container: /,
-        );
-      });
-
-      it("throws when an array taken as valid carries a named property", () => {
-        // The shallow check does not take such an array to be a
-        // `FabricArray`, so the only way to reach the iteration with one is
-        // to assert validity.
-        const rec = new Recorder();
-        const array: unknown[] & { extra?: number } = [1];
-        array.extra = 2;
-
-        expect(() => visitAssumingValid(array, rec)).toThrow(
-          /Non-index property in alleged `FabricArray`: `extra`/,
-        );
       });
     });
   });

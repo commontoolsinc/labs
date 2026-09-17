@@ -2,78 +2,39 @@
  * Top-level `export`ed visitor functions.
  */
 
-import { type FabricValue } from "@/interface.ts";
+import type { FabricValuePlus } from "@/interface.ts";
 
-import {
-  type BaselineVisitResult,
-  type DomainFor,
-  type ValueVisitor,
-} from "./interface.ts";
+import type { BaselineVisitResult, ValueVisitor } from "./interface.ts";
 import { VisitInProgress } from "./VisitInProgress.ts";
 
 /**
- * Performs a one-off visit of a value with a visitor, where the value is
- * assumed to be a valid `FabricValue` and where the full domain of the visit is
- * exactly `FabricValue`.
+ * Performs a one-off visit of a value, with the given visitor.
+ *
+ * The engine does not validate `value`; it trusts the static type. Each value
+ * it encounters is dispatched by a shallow inspection of its shape: an array,
+ * a plain object, or a `FabricSpecialObject` is taken to be the fabric
+ * container or primitive its shape indicates, whatever it holds, and only a
+ * value whose shape is none of those is put to the visitor's `isPlusType()`.
+ * So a container which is not inert is walked as its shape says: an array
+ * carrying a named property `throw`s when its elements are iterated, and a
+ * plain object's entries are read the way `Object.entries()` reads them, which
+ * skips a symbol-keyed or non-enumerable property and runs an accessor. A
+ * caller which needs a value validated does that before visiting it.
  */
-export function visitFabricValue<ResultType = FabricValue>(
-  value: FabricValue,
-  visitor: ValueVisitor<never, ResultType>,
+export function visitValue<PlusType, ResultType>(
+  value: NoInfer<FabricValuePlus<PlusType>>,
+  visitor: ValueVisitor<PlusType, ResultType>,
 ): BaselineVisitResult<ResultType> {
-  const inProgress = new VisitInProgress(visitor);
-  return inProgress.visitFabricValue(value);
+  const inProgress = new VisitInProgress<PlusType, ResultType>(visitor);
+  return inProgress.visit(value);
 }
 
 /**
  * Creates a visitor function bound to the given visitor. The result is a
  * single-argument `visit(value)` function.
  */
-export function makeVisitFabricValueFunction<ResultType = FabricValue>(
-  visitor: ValueVisitor<never, ResultType>,
-): (value: FabricValue) => BaselineVisitResult<ResultType> {
-  return (value: FabricValue) => visitFabricValue(value, visitor);
-}
-
-/**
- * Performs a one-off visit of a value with a visitor, using runtime type checks
- * to determine whether or not an encountered value is a `FabricValue`.
- *
- * Type checking can be performed either as a deep-validity check or a shallow
- * "shape of value" check:
- *
- * * The shallow check is a fast single-layer check based on
- *   `isValidFabricValueLayer()`, see which for details.
- *
- * * The deep check performs a full-depth validity check, based on
- *   `isValidFabricValue()`, anywhere an encountered value to be dispatched
- *   might turn out not to be a valid `FabricValue`, resulting in a guarantee
- *   that anything of type `FabricValue` passed to the visitor is in fact a
- *   valid `FabricValue`.
- *
- *   This can incur significant performance overhead. As a worst-case, it can
- *   result in O(N^2) checks on the number of values in the graph of the
- *   top-level value being visited. _If this turns out to be a problem in
- *   practice,_ this will become an active area of optimization.
- */
-export function visitValue<DomainExtra, ResultType>(
-  value: NoInfer<DomainFor<DomainExtra>>,
-  visitor: ValueVisitor<DomainExtra, ResultType>,
-  deepTypeCheck: boolean = false,
-): BaselineVisitResult<ResultType> {
-  const inProgress = new VisitInProgress<DomainExtra, ResultType>(visitor);
-  return inProgress.visit(value, deepTypeCheck);
-}
-
-/**
- * Creates a visitor function bound to the given visitor. The result is a
- * single-argument `visit(value)` function.
- *
- * See `visitValue()` for details on the `deepTypeCheck` argument.
- */
-export function makeVisitValueFunction<DomainExtra, ResultType>(
-  visitor: ValueVisitor<DomainExtra, ResultType>,
-  deepTypeCheck: boolean = false,
-): (value: DomainFor<DomainExtra>) => BaselineVisitResult<ResultType> {
-  return (value: DomainFor<DomainExtra>) =>
-    visitValue(value, visitor, deepTypeCheck);
+export function makeVisitValueFunction<PlusType, ResultType>(
+  visitor: ValueVisitor<PlusType, ResultType>,
+): (value: FabricValuePlus<PlusType>) => BaselineVisitResult<ResultType> {
+  return (value: FabricValuePlus<PlusType>) => visitValue(value, visitor);
 }

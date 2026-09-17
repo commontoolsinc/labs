@@ -1,18 +1,15 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { type FabricPrimitive, type FabricValue } from "@/interface.ts";
 import type { Primitive } from "@commonfabric/utils/types";
+
+import { type FabricPrimitive } from "@/interface.ts";
 import {
   type BaselineVisitResult,
-  type DispatchingVisitorResult,
-  DO_VISIT_SUBTYPE,
+  BaseValueVisitor,
   type LeafVisitorResult,
-  makeVisitFabricValueFunction,
   makeVisitValueFunction,
-  NopValueVisitor,
-  type ValueVisitor,
-  visitFabricValue,
+  RecursiveValueVisitor,
   visitValue,
 } from "@/value-visit";
 
@@ -20,20 +17,18 @@ import { mainResult, Recorder } from "./Recorder.ts";
 
 describe("value-visit/impl", () => {
   describe("visitValue()", () => {
-    it("visits with the shallow check by default", () => {
+    it("visits the value with the given visitor", () => {
       const rec = new Recorder();
-      const array = [() => 1];
 
-      visitValue(array, rec);
-      expect(rec.names).toContain("array");
-    });
-
-    it("visits with the deep check when asked", () => {
-      const rec = new Recorder();
-      const array = [() => 1];
-
-      visitValue(array, rec, true);
-      expect(rec.events).toEqual([["value", array], ["nonFabric", array]]);
+      visitValue([1], rec);
+      expect(rec.names).toEqual([
+        "value",
+        "container",
+        "array",
+        "value",
+        "primitive",
+        "visitedElement",
+      ]);
     });
 
     it("returns `undefined` when no visitor produces a `mainResult`", () => {
@@ -41,19 +36,7 @@ describe("value-visit/impl", () => {
     });
 
     it("returns a `mainResult` typed by the visitor's `ResultType`", () => {
-      class FirstNumber extends NopValueVisitor<never, number> {
-        override visitValue(): DispatchingVisitorResult<never, number> {
-          return DO_VISIT_SUBTYPE;
-        }
-        override visitFabricContainer(): DispatchingVisitorResult<
-          never,
-          number
-        > {
-          return DO_VISIT_SUBTYPE;
-        }
-        override visitFabricArray(): LeafVisitorResult<never, number> {
-          return { type: "recurse", doKeys: false, doValues: true };
-        }
+      class FirstNumber extends RecursiveValueVisitor<never, number> {
         override visitPrimitive(
           value: Primitive | FabricPrimitive,
         ): LeafVisitorResult<never, number> {
@@ -73,17 +56,11 @@ describe("value-visit/impl", () => {
       // The compile-time refusal is half the point of this test: were the
       // call to type-check, the directive would be reported as unused and
       // the file would fail to compile. The line still runs, and the runtime
-      // half is that the engine, told by `isDomainExtra()` that the value is
-      // outside the domain, throws rather than handing it to the non-fabric
-      // hook, whose parameter type is `never`.
-      class Strict extends NopValueVisitor<never, number> {
-        override visitValue(): DispatchingVisitorResult<never, number> {
-          return DO_VISIT_SUBTYPE;
-        }
-        override visitNonFabricValue(): LeafVisitorResult<never, number> {
-          throw new Error("should not be reached");
-        }
-      }
+      // half is that the engine, told by `isPlusType()` that the value is
+      // outside the domain, throws the domain error rather than reaching
+      // `visitPlusType()`, whose base implementation throws a different one.
+
+      class Strict extends BaseValueVisitor<never, number> {}
 
       const vis = new Strict();
       const date = new Date(0);
@@ -95,43 +72,6 @@ describe("value-visit/impl", () => {
     });
   });
 
-  describe("visitFabricValue()", () => {
-    it("visits a value and returns `undefined` absent a `mainResult`", () => {
-      const rec = new Recorder() as unknown as ValueVisitor<never, number>;
-      const value = { a: [1, 2] } as FabricValue;
-
-      expect(visitFabricValue(value, rec)).toBeUndefined();
-      expect((rec as unknown as Recorder).names).toContain("primitive");
-    });
-
-    it("returns a `mainResult` typed by the visitor's `ResultType`", () => {
-      class FirstPrimitive extends NopValueVisitor<never, string> {
-        override visitValue(): DispatchingVisitorResult<never, string> {
-          return DO_VISIT_SUBTYPE;
-        }
-        override visitPrimitive(
-          value: Primitive | FabricPrimitive,
-        ): LeafVisitorResult<never, string> {
-          return mainResult(String(value));
-        }
-      }
-
-      const result: BaselineVisitResult<string> = visitFabricValue(
-        5,
-        new FirstPrimitive(),
-      );
-
-      expect(result).toEqual(mainResult("5"));
-    });
-
-    it("throws on reaching a value that is not a `FabricValue`", () => {
-      const rec = new Recorder() as unknown as ValueVisitor<never, unknown>;
-      const lying = [1, new Date(0)] as unknown as FabricValue;
-
-      expect(() => visitFabricValue(lying, rec)).toThrow(/assume valid/);
-    });
-  });
-
   describe("makeVisitValueFunction()", () => {
     it("returns a function that visits with the bound visitor", () => {
       const rec = new Recorder();
@@ -139,27 +79,6 @@ describe("value-visit/impl", () => {
 
       expect(visit([1])).toBeUndefined();
       expect(rec.names).toContain("primitive");
-    });
-
-    it("honors the `deepTypeCheck` argument it was made with", () => {
-      const shallow = new Recorder();
-      const deep = new Recorder();
-      const array = [() => 1];
-
-      makeVisitValueFunction(shallow)(array);
-      makeVisitValueFunction(deep, true)(array);
-      expect(shallow.names).toContain("array");
-      expect(deep.names).not.toContain("array");
-    });
-  });
-
-  describe("makeVisitFabricValueFunction()", () => {
-    it("returns a function that visits with the bound visitor", () => {
-      const rec = new Recorder() as unknown as ValueVisitor<never, unknown>;
-      const visit = makeVisitFabricValueFunction(rec);
-
-      expect(visit([1])).toBeUndefined();
-      expect((rec as unknown as Recorder).names).toContain("primitive");
     });
   });
 });
