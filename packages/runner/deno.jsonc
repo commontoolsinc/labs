@@ -36,6 +36,7 @@
     "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts",
     "./shared": "./src/shared.ts",
     "./entity-kind": "./src/entity-kind.ts",
+    "./fabric-special-object-brand": "./src/fabric-special-object-brand.ts",
     "./experimental-posture": "./src/experimental-posture.ts",
     "./fabric-url": "./src/fabric-url.ts",
     "./meta-seam": "./src/meta-seam.ts",
