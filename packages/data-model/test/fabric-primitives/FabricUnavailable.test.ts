@@ -460,6 +460,31 @@ describe("FabricUnavailable", () => {
             .toBe(new FabricUnavailable("error", "compile").errorMessage);
         });
 
+        it("ignores an error field that is inherited rather than own", () => {
+          // `canDecode()` treats an inherited field as absent, and the decode
+          // reads the same way, so the two cannot disagree about a state.
+          const polluted = Object.prototype as {
+            errorKind?: unknown;
+            errorMessage?: unknown;
+          };
+          polluted.errorKind = "general";
+          polluted.errorMessage = "boom";
+          try {
+            expect(codec.canDecode({ reason: "pending" })).toBe(true);
+            expect(codec.decode(expectedTag, { reason: "pending" }, env))
+              .toBe(UNAVAILABLE_PENDING);
+            const decoded = codec.decode(
+              expectedTag,
+              { reason: "error", errorKind: "sync" },
+              env,
+            ) as unknown as FabricUnavailable;
+            expect(decoded.rawErrorMessage).toBe(null);
+          } finally {
+            delete polluted.errorKind;
+            delete polluted.errorMessage;
+          }
+        });
+
         it("decodes reason `error` without a kind to a `ProblematicValue`", () => {
           expect(codec.decode(expectedTag, { reason: "error" }, env))
             .toBeInstanceOf(ProblematicValue);

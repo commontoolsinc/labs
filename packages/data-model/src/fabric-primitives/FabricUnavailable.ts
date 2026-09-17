@@ -175,9 +175,17 @@ function isTransientReason(
  * Returns the instance a decoded state stands for: the prefab for a state
  * that is a transient reason alone, and a fresh instance otherwise. Throws as
  * the constructor does when the fields present do not belong with the reason.
+ * The optional fields are read as own properties, as `isUnavailableState()`
+ * tested them, so a field that is only inherited is absent here too.
  */
 function instanceForState(state: FabricUnavailableState): FabricUnavailable {
-  const { reason, errorKind, errorMessage } = state;
+  const { reason } = state;
+  const errorKind = Object.hasOwn(state, "errorKind")
+    ? state.errorKind
+    : undefined;
+  const errorMessage = Object.hasOwn(state, "errorMessage")
+    ? state.errorMessage
+    : undefined;
 
   if (
     isTransientReason(reason) &&
