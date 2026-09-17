@@ -5,14 +5,24 @@ names and what the deployment carries.
 
 The board gives each Topic a name of its own: a decimal number, dense from `1`,
 allocated when the Topic is filed and never reused. It is not a display name — a
-Topic's display name stays its title, and the number renders as a badge beside
-it. `addTopic` returns the name it allocated as `name` beside the created
-`topic`, and each Topic publishes its own as `shortName`, which the board's
-`index` rows and mention universe carry a copy of. So a survey reads every name
-in one bounded read:
+Topic's display name stays its title.
+
+The board shows no Topic's number for now. `SHOW_TOPIC_NUMBERS` in
+`packages/patterns/topics/topic.tsx` is off while only some Topics have one, and
+a Topic then publishes no `shortName` at all — which is what leaves every
+surface reading it blank: no header or board card badge, no number on a mention
+pill, and nothing offered for `#42` in a Topic's body editor. The numbers
+themselves are unaffected: allocated, recorded, and resolvable as below.
+Wherever numbers are shown, one renders as a badge beside its Topic's title, and
+a Topic publishes its own as `shortName`, which the board's `index` rows carry.
+
+`addTopic` returns the name it allocated as `name` beside the created `topic`.
+For the Topics already on the board, the namespace is what to read: the board's
+`namesTable` holds one row per named Topic, carrying `name` and the Topic itself
+as `member`, and `names` holds the same pairing as a map from name to Topic.
 
 ```bash
-deno task cf cell get "$TOPICS_BOARD" index --step --select @,title,shortName
+deno task cf cell get --cell "$TOPICS_BOARD" namesTable --step
 ```
 
 The number is what a short reference is written with. Once the board's `names`
