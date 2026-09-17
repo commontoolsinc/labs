@@ -985,6 +985,39 @@ describe("terminal", () => {
       expect(watched.written()).toContain("a watch said so");
     });
 
+    it("holds the frame's lines back across a suspension it came back from", async () => {
+      // The other side of the two cases above, and the one that says the
+      // flushing is decided by what the frame is rather than by the suspension
+      // ending. A frame that is still up when the program gives the terminal
+      // back is a frame that goes on holding: written then, those lines would
+      // land on an alternate screen the frame repaints over a moment later,
+      // which loses them exactly as dropping them would.
+      //
+      // Which guard holds it is worth naming, because it is not the one the
+      // suspension's own branch looks like it is. Flushing on every way out of
+      // a suspension does not break this: the flush goes back through
+      // {@link StandardTerminal.announce}, which buffers again while a frame
+      // is up, so the lines return to where they were. That buffering is the
+      // guard, and this case fails when it goes — measured both ways.
+
+      const watched = await watching({}, async (terminal) => {
+        terminal.frame(["a"]);
+        terminal.announce("a watch said so");
+        await terminal.suspend(() => Promise.resolve());
+        terminal.unframe();
+        await Promise.resolve();
+      });
+      const written = watched.written();
+      const said = written.indexOf("a watch said so");
+      // The last giving-up of the screen is the frame's own, on the way out.
+      // Held across the suspension, the line lands after it; flushed inside
+      // the suspension, it would land before — on the screen the frame is
+      // about to repaint.
+      const gave = written.lastIndexOf("\x1b[?1049l");
+      expect(said).toBeGreaterThan(-1);
+      expect(said).toBeGreaterThan(gave);
+    });
+
     it("draws nothing again where no frame held the screen", async () => {
       // A `suspend` at the prompt hands over a terminal with nothing on the
       // alternate screen, so there is no screen to give back and none to take.
