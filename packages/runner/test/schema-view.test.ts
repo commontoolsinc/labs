@@ -1202,8 +1202,10 @@ describe("schema-view", () => {
 
       const line = printed.find((args) => args.includes("unselected-key-read"));
       const text = (line ?? []).join(" ");
+      const readAt = runtime.getCell(space, "unselected-printed")
+        .getAsNormalizedFullLink().id;
       expect(text).toContain("`driver`");
-      expect(text).toContain("of:");
+      expect(text).toContain(readAt);
     });
 
     it("counts nothing for a key the schema selects", async () => {
