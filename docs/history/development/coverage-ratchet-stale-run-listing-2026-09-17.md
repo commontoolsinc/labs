@@ -10,7 +10,9 @@ reason: "Investigation record: why the Coverage Check job passed four pull reque
 ## Conclusion
 
 Four Coverage Check jobs, on two days, passed while holding no source group
-against a baseline. Each logged the same thing:
+against a baseline. Each logged the same five lines, shown here as the three
+jobs of 2026-09-17 logged them; the job of 2026-09-15 named `cbeb9d92` in place
+of `c4a5de33`:
 
 ```text
 This run merges the pull request into base-branch commit c4a5de33.

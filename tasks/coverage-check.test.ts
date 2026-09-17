@@ -18,6 +18,7 @@ import {
 } from "./ci-check-lib.ts";
 import {
   appendJobSummary,
+  type BaseAncestry,
   baselineLcovForRun,
   type BaselineRunContext,
   type BaselineRunListing,
@@ -561,7 +562,6 @@ Deno.test("writeCoverageComment writes an ungated payload when a changed group h
       {
         groups: [{ group: "tasks", reason: "no-baseline" }],
         measurement: { baseSha: SHA_C },
-        failed: false,
       },
     )
   );
@@ -586,7 +586,6 @@ Deno.test("writeCoverageComment reports a regression ahead of an ungated group",
       "",
       {
         groups: [{ group: "packages/ui", reason: "no-baseline" }],
-        failed: false,
       },
     )
   );
@@ -602,7 +601,7 @@ Deno.test("writeCoverageComment writes a resolved payload when every changed gro
       [coverageRow("coverage-debt: tasks uncovered lines", 5, 5)],
       [],
       "",
-      { groups: [], failed: false },
+      { groups: [] },
     )
   );
 
@@ -616,7 +615,6 @@ Deno.test("writeCoverageNotGated swallows a payload it cannot write", async () =
       () =>
         writeCoverageNotGated(42, {
           groups: [{ group: "tasks", reason: "no-baseline" }],
-          failed: false,
         }),
     )
   );
@@ -857,6 +855,34 @@ Deno.test("fetchLatestBaselineRunSha reads the newest baseline run's head", asyn
   assertEquals(result, SHA_A);
 });
 
+Deno.test("fetchLatestBaselineRunSha reads past a page that holds no baseline run", async () => {
+  // A stretch of failing `main` runs fills the newest page.
+  const asked: number[] = [];
+  const pages = [listingPage(1300), listingPage(1200, [1150, 1120])];
+  const result = await fetchLatestBaselineRunSha((page) => {
+    asked.push(page);
+    return Promise.resolve(
+      pages[page - 1].map((run) =>
+        run.id === 1150 ? { ...run, head_sha: SHA_B } : run
+      ),
+    );
+  });
+
+  assertEquals(result, SHA_B);
+  assertEquals(asked, [1, 2]);
+});
+
+Deno.test("fetchLatestBaselineRunSha gives up at the listing's page budget", async () => {
+  const asked: number[] = [];
+  const result = await fetchLatestBaselineRunSha((page) => {
+    asked.push(page);
+    return Promise.resolve(listingPage(5000 - page * 100));
+  });
+
+  assertEquals(result, undefined);
+  assertEquals(asked.length, 10);
+});
+
 Deno.test("fetchLatestBaselineRunSha is undefined when no baseline run exists", async () => {
   const result = await withMockFetch(
     () => new Response(JSON.stringify({ workflow_runs: [] })),
@@ -1059,6 +1085,43 @@ Deno.test("readBaselineRunListing hands over older pages one at a time", async (
   assertStringIncludes(logs.join("\n"), "Reading page 2");
 });
 
+Deno.test("readBaselineRunListing accounts for a commit whose push run it has shown", async () => {
+  // A run still going and one that failed are runs the ratchet cannot use, and
+  // having shown them is what says there is nothing further back to find.
+  const page = listingPage(1100, [1090, 1080, 1070]).map((run) =>
+    run.id === 1090
+      ? { ...run, head_sha: SHA_C, conclusion: null as unknown as string }
+      : run.id === 1080
+      ? { ...run, head_sha: SHA_B, conclusion: "failure" }
+      : run
+  );
+  const { listing } = await readListing([page], 1050);
+
+  assertEquals(listing.candidates.map((run) => run.id), [1070]);
+  assertEquals(listing.accountsFor(SHA_C), true);
+  assertEquals(listing.accountsFor(SHA_B), true);
+  assertEquals(listing.accountsFor("d".repeat(40)), false);
+});
+
+Deno.test("readBaselineRunListing accounts for a commit older pages could not hold a run for", async () => {
+  // The page reaches back to run 1001. A commit made after that run was created
+  // has shown no run and can have none further back; one made before it can.
+  const { listing } = await readListing(
+    [listingPage(1100), listingPage(1000)],
+    1050,
+  );
+  const unseen = "d".repeat(40);
+
+  assertEquals(listing.accountsFor(unseen, createdAtFor(1002)), true);
+  assertEquals(listing.accountsFor(unseen, createdAtFor(1001)), false);
+  assertEquals(listing.accountsFor(unseen, createdAtFor(990)), false);
+  assertEquals(listing.accountsFor(unseen), false);
+
+  // Reading the next page moves the point the listing reaches back to.
+  await listing.older();
+  assertEquals(listing.accountsFor(unseen, createdAtFor(990)), true);
+});
+
 Deno.test("reportBaselineRunListing says what a current listing held", () => {
   const logs: string[] = [];
   const warnings: string[] = [];
@@ -1070,6 +1133,7 @@ Deno.test("reportBaselineRunListing says what a current listing held", () => {
       newest: makeRun(1100, SHA_B, "2026-09-17T20:41:15Z"),
       pagesRead: 1,
       older: () => Promise.resolve(null),
+      accountsFor: () => true,
     },
     1050,
     (message) => logs.push(message),
@@ -1095,6 +1159,7 @@ Deno.test("reportBaselineRunListing warns about a run the listing did not reach"
       newest: makeRun(1400),
       pagesRead: 10,
       older: () => Promise.resolve(null),
+      accountsFor: () => true,
     },
     1050,
     () => {},
@@ -1117,6 +1182,7 @@ Deno.test("reportBaselineRunListing names the newest run of a listing that is no
       newest: makeRun(32577018558, SHA_A, "2026-08-22T13:52:12Z"),
       pagesRead: 2,
       older: () => Promise.resolve(null),
+      accountsFor: () => true,
     },
     35254926993,
     (message) => logs.push(message),
@@ -1142,6 +1208,7 @@ Deno.test("reportBaselineRunListing says when a listing named no run at all", ()
       newest: undefined,
       pagesRead: 1,
       older: () => Promise.resolve(null),
+      accountsFor: () => true,
     },
     1050,
     () => {},
@@ -1724,6 +1791,16 @@ function makeBaselineSample(
 /** Ancestry of base-branch commit `SHA_C`, newest first. */
 const RANKS = new Map([[SHA_C, 0], [SHA_B, 1], [SHA_A, 2]]);
 
+/** That ancestry as the commit listing reports it, with each commit's date. */
+const ANCESTRY: BaseAncestry = {
+  rank: RANKS,
+  committedAt: new Map([
+    [SHA_C, "2026-08-04T10:39:57Z"],
+    [SHA_B, "2026-08-04T10:19:57Z"],
+    [SHA_A, "2026-08-04T09:59:57Z"],
+  ]),
+};
+
 const RUNNER_METRIC = "coverage-debt: packages/runner uncovered lines";
 const MEMORY_METRIC = "coverage-debt: packages/memory uncovered lines";
 
@@ -2050,6 +2127,97 @@ Deno.test("walkBaselineRuns carries a cold sample across pages until a warm one 
   assertEquals(baselines.get(RUNNER_METRIC)?.uncoveredLines, 5701);
 });
 
+Deno.test("walkBaselineRuns reads an older page before settling on an ancestor whose nearer commits are unaccounted for", async () => {
+  // Two pushes landed together and their runs were created in the other order,
+  // with a page boundary between them: the base-branch commit's run is on the
+  // older page.
+  const read: number[] = [];
+  const pages = [[RUN_AT_BASE]];
+  const shown = new Set([SHA_B]);
+  const baselines = await walkBaselineRuns({
+    metrics: [RUNNER_METRIC],
+    runs: [RUN_ONE_BACK],
+    olderRuns: () => {
+      const page = pages.shift() ?? null;
+      for (const run of page ?? []) shown.add(run.head_sha);
+      return Promise.resolve(page);
+    },
+    accountedFor: (sha) => shown.has(sha),
+    ancestorRank: RANKS,
+    readRun: (run) => {
+      read.push(run.id);
+      return Promise.resolve(reading(run, { [RUNNER_METRIC]: 5700 + run.id }));
+    },
+  });
+
+  assertEquals(baselines.get(RUNNER_METRIC)?.sha, SHA_C);
+  assertEquals(read, [RUN_AT_BASE.id]);
+});
+
+Deno.test("walkBaselineRuns settles on an ancestor once every nearer commit is accounted for", async () => {
+  // The base-branch commit's run is still going: the listing showed it, so no
+  // older page can hold a better baseline.
+  let asked = 0;
+  const baselines = await walkBaselineRuns({
+    metrics: [RUNNER_METRIC],
+    runs: [RUN_ONE_BACK],
+    olderRuns: () => {
+      asked++;
+      return Promise.resolve([RUN_TWO_BACK]);
+    },
+    accountedFor: (sha) => sha === SHA_C,
+    ancestorRank: RANKS,
+    readRun: (run) => Promise.resolve(reading(run, { [RUNNER_METRIC]: 5746 })),
+  });
+
+  assertEquals(baselines.get(RUNNER_METRIC)?.sha, SHA_B);
+  assertEquals(asked, 0);
+});
+
+Deno.test("walkBaselineRuns takes the ancestor it has once the listing has no older page", async () => {
+  let asked = 0;
+  const baselines = await walkBaselineRuns({
+    metrics: [RUNNER_METRIC],
+    runs: [RUN_ONE_BACK],
+    olderRuns: () => {
+      asked++;
+      return Promise.resolve(null);
+    },
+    accountedFor: () => false,
+    ancestorRank: RANKS,
+    readRun: (run) => Promise.resolve(reading(run, { [RUNNER_METRIC]: 5746 })),
+  });
+
+  assertEquals(baselines.get(RUNNER_METRIC)?.sha, SHA_B);
+  assertEquals(asked, 1);
+});
+
+Deno.test("walkBaselineRuns counts a commit whose run it read as accounted for", async () => {
+  // The base-branch commit's run measured nothing, so the walk moves to the
+  // next ancestor without asking the listing about a commit it already read.
+  let asked = 0;
+  const baselines = await walkBaselineRuns({
+    metrics: [RUNNER_METRIC],
+    runs: [RUN_AT_BASE, RUN_ONE_BACK],
+    olderRuns: () => {
+      asked++;
+      return Promise.resolve(null);
+    },
+    accountedFor: () => false,
+    ancestorRank: RANKS,
+    readRun: (run) =>
+      Promise.resolve(
+        reading(
+          run,
+          run.id === RUN_AT_BASE.id ? {} : { [RUNNER_METRIC]: 5746 },
+        ),
+      ),
+  });
+
+  assertEquals(baselines.get(RUNNER_METRIC)?.sha, SHA_B);
+  assertEquals(asked, 0);
+});
+
 Deno.test("walkBaselineRuns stops reading at its run budget", async () => {
   // No run measured the metric, which is what a group new to `main` looks like.
   const read: number[] = [];
@@ -2098,13 +2266,28 @@ Deno.test("fetchAncestorRanks ranks commits by distance from the base", async ()
     (input) => {
       assertStringIncludes(String(input), `/commits?sha=${SHA_C}`);
       return new Response(
-        JSON.stringify([{ sha: SHA_C }, { sha: SHA_B }, { sha: SHA_A }]),
+        JSON.stringify([
+          {
+            sha: SHA_C,
+            commit: { committer: { date: "2026-08-04T10:39:57Z" } },
+          },
+          {
+            sha: SHA_B,
+            commit: { committer: { date: "2026-08-04T10:19:57Z" } },
+          },
+          { sha: SHA_A },
+        ]),
       );
     },
     () => fetchAncestorRanks(SHA_C),
   );
 
-  assertEquals([...ranks], [[SHA_C, 0], [SHA_B, 1], [SHA_A, 2]]);
+  assertEquals([...ranks.rank], [[SHA_C, 0], [SHA_B, 1], [SHA_A, 2]]);
+  // A commit the listing gives no date for is ranked and left undated.
+  assertEquals([...ranks.committedAt], [
+    [SHA_C, "2026-08-04T10:39:57Z"],
+    [SHA_B, "2026-08-04T10:19:57Z"],
+  ]);
 });
 
 Deno.test("fetchGroupsChangedOnBase reports the groups the base branch moved", async () => {
@@ -2223,7 +2406,7 @@ Deno.test("selectBaselines picks a baseline and its gating for each metric", asy
       Promise.resolve(runs.find(([candidate]) => candidate.id === run.id)![1]),
     isPullRequest: true,
     readBaseSha: () => Promise.resolve(SHA_C),
-    fetchRanks: () => Promise.resolve(RANKS),
+    fetchRanks: () => Promise.resolve(ANCESTRY),
     fetchChangedGroups: (baselineSha) =>
       Promise.resolve(
         baselineSha === SHA_A
@@ -2318,7 +2501,7 @@ Deno.test("selectBaselines chooses each metric's baseline against the base commi
       readBaseSha: () => Promise.resolve(SHA_C),
       fetchRanks: (baseSha) => {
         assertEquals(baseSha, SHA_C);
-        return Promise.resolve(RANKS);
+        return Promise.resolve(ANCESTRY);
       },
       fetchChangedGroups: (baselineSha, baseSha) => {
         compared.push(`${baselineSha}...${baseSha}`);
@@ -2487,7 +2670,7 @@ Deno.test("selectBaselines routes its GitHub calls through the guard", async () 
     readRun: readerFor(readings),
     isPullRequest: true,
     readBaseSha: () => Promise.resolve(SHA_C),
-    fetchRanks: () => Promise.resolve(RANKS),
+    fetchRanks: () => Promise.resolve(ANCESTRY),
     fetchChangedGroups: () => Promise.resolve(new Set<string>()),
     guard: (description, operation) => {
       guarded.push(description);
@@ -3201,7 +3384,6 @@ Deno.test("reportNotGated says loudly which changed groups were held against not
         { group: "packages/shell", reason: "no-baseline" },
       ],
       measurement: { baseSha: SHA_C },
-      failed: false,
     },
     (message) => logs.push(message),
   );
@@ -3225,7 +3407,6 @@ Deno.test("reportNotGated annotates an ungated run that failed as an error", () 
   reportNotGated(
     {
       groups: [{ group: "tasks", reason: "listing-not-current" }],
-      failed: true,
     },
     (message) => logs.push(message),
   );
@@ -3236,7 +3417,7 @@ Deno.test("reportNotGated annotates an ungated run that failed as an error", () 
 Deno.test("reportNotGated says nothing when every changed group was compared", () => {
   const logs: string[] = [];
   reportNotGated(
-    { groups: [], failed: false },
+    { groups: [] },
     (message) => logs.push(message),
   );
 
@@ -3316,7 +3497,6 @@ Deno.test("buildCoverageJobSummary draws no table when nothing was compared", ()
     rows: [],
     failures: [],
     notGated: [{ group: "tasks", reason: "listing-not-current" }],
-    failed: true,
   });
 
   assertStringIncludes(summary, "The **Coverage Check** job failed");
@@ -3335,6 +3515,7 @@ function listingOf(
     newest: runs[0],
     pagesRead: 1,
     older: () => Promise.resolve(null),
+    accountsFor: () => true,
     ...extra,
   };
 }
@@ -3348,6 +3529,9 @@ async function runRatchet(options: {
   listing: BaselineRunListing;
   readings?: [WorkflowRun, BaselineRunReading][];
   current?: number;
+
+  /** Further metrics this run measured, beside the runner's. */
+  alsoMeasured?: Record<string, number>;
   prNumber?: number | null;
   changed?: string[];
   overrides?: CoverageRatchetInput["prOverrides"];
@@ -3387,15 +3571,20 @@ async function runRatchet(options: {
                   : options.prNumber,
                 currentRunId: 1050,
                 perfArtifact: {
-                  metrics: new Map([[
-                    RUNNER_METRIC,
-                    makeBaselineSample(
-                      1050,
-                      SHA_C,
-                      "2026-08-04T11:00:00Z",
-                      options.current ?? 5746,
-                    ),
-                  ]]),
+                  metrics: new Map(
+                    Object.entries({
+                      [RUNNER_METRIC]: options.current ?? 5746,
+                      ...options.alsoMeasured,
+                    }).map(([metric, uncoveredLines]) => [
+                      metric,
+                      makeBaselineSample(
+                        1050,
+                        SHA_C,
+                        "2026-08-04T11:00:00Z",
+                        uncoveredLines,
+                      ),
+                    ]),
+                  ),
                   compileCacheStates: {},
                 },
                 prOverrides: options.overrides ?? NO_OVERRIDES,
@@ -3418,9 +3607,17 @@ async function runRatchet(options: {
                     ),
                 baselineReads: {
                   readBaseSha: () => Promise.resolve(SHA_C),
-                  fetchRanks: () => Promise.resolve(RANKS),
-                  fetchChangedGroups: () =>
-                    Promise.resolve(new Set(options.changedOnBase ?? [])),
+                  fetchRanks: () => Promise.resolve(ANCESTRY),
+                  // Nothing lies between a commit and itself, which is what
+                  // `fetchGroupsChangedOnBase()` reports too.
+                  fetchChangedGroups: (baselineSha, baseSha) =>
+                    Promise.resolve(
+                      new Set(
+                        baselineSha === baseSha
+                          ? []
+                          : options.changedOnBase ?? [],
+                      ),
+                    ),
                 },
               }),
           ),
@@ -3661,20 +3858,87 @@ Deno.test("runCoverageRatchet passes a main run whose run listing is not current
   assertFalse(ran.logs.includes("## Coverage debt metrics"));
 });
 
-Deno.test("runCoverageRatchet passes a pull request it gates nothing for over a listing that is not current", async () => {
+Deno.test("runCoverageRatchet resolves an earlier comment for a pull request it gates nothing for over a listing that is not current", async () => {
   const notCurrent = listingOf([], {
     current: false,
     reachedCurrentRun: false,
   });
 
+  // The pull request no longer changes a source group, so an earlier run's
+  // regression or listing failure is no longer what the comment should say.
   const docsOnly = await runRatchet({ listing: notCurrent, changed: [] });
   assertEquals(docsOnly.code, 0);
-  assertEquals(docsOnly.payload, null);
+  assertEquals(docsOnly.payload?.state, "resolved");
+  assertEquals(docsOnly.payload?.overridden, false);
+  assertEquals(docsOnly.payload?.groups, []);
 
+  // A reset is an acceptance, and no group was compared for it to show.
   const reset = await runRatchet({
     listing: notCurrent,
     overrides: { metrics: new Map(), coverageBaselineReset: true },
   });
   assertEquals(reset.code, 0);
-  assertEquals(reset.payload, null);
+  assertEquals(reset.payload?.state, "resolved");
+  assertEquals(reset.payload?.overridden, true);
+  assertEquals(reset.payload?.groups, []);
+});
+
+Deno.test("runCoverageRatchet finds the base commit's run across a page boundary before settling on an older ancestor", async () => {
+  // The older ancestor's run is on the newest page and the base-branch commit's
+  // own run is on the next, and `main` changed the runner in between. Settling
+  // on the ancestor would leave the runner ungated and pass a regression.
+  const pages = [[RUN_AT_BASE]];
+  const shown = new Set([SHA_B]);
+  const ran = await runRatchet({
+    listing: listingOf([RUN_ONE_BACK], {
+      older: () => {
+        const page = pages.shift() ?? null;
+        for (const run of page ?? []) shown.add(run.head_sha);
+        return Promise.resolve(page);
+      },
+      accountsFor: (sha) => shown.has(sha),
+    }),
+    readings: [
+      [RUN_AT_BASE, reading(RUN_AT_BASE, { [RUNNER_METRIC]: 10 })],
+      [RUN_ONE_BACK, reading(RUN_ONE_BACK, { [RUNNER_METRIC]: 20 })],
+    ],
+    current: 15,
+    changedOnBase: ["packages/runner"],
+  });
+
+  assertEquals(ran.code, 1);
+  assertEquals(ran.payload?.state, "regressed");
+  assertStringIncludes(
+    ran.logs,
+    "Ratchet baseline measured at the base-branch commit: cccccccc.",
+  );
+  assertFalse(ran.logs.includes("NOT GATED"));
+});
+
+Deno.test("runCoverageRatchet does not say the job passed when one group regressed and another went ungated", async () => {
+  const ran = await runRatchet({
+    listing: listingOf([RUN_AT_BASE]),
+    readings: [[RUN_AT_BASE, reading(RUN_AT_BASE, { [RUNNER_METRIC]: 10 })]],
+    current: 15,
+    alsoMeasured: { [MEMORY_METRIC]: 12 },
+    changed: ["packages/runner", "packages/memory"],
+  });
+
+  assertEquals(ran.code, 1);
+  assertEquals(ran.payload?.state, "regressed");
+  assertStringIncludes(
+    ran.summary ?? "",
+    "### Coverage debt regressed in 1 source group(s)",
+  );
+  assertStringIncludes(
+    ran.summary ?? "",
+    "The **Coverage Check** job did not hold `packages/memory` against a " +
+      "baseline",
+  );
+  for (const surface of [ran.logs, ran.summary ?? ""]) {
+    assertFalse(surface.includes("job passed"));
+    assertFalse(surface.includes("job failed because it could not find"));
+  }
+  // The regression is what failed the job, so the ungated group is a warning.
+  assertStringIncludes(ran.logs, "::warning title=Test coverage was NOT gated");
 });

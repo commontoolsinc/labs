@@ -44,6 +44,7 @@ import {
   type CoverageCommentPayload,
   coverageGroupForChangedFile,
   coverageGroupsForChangedFiles,
+  coverageListingNotCurrent,
   type CoverageMeasurement,
   coverageMetricGroupName,
   type CoverageNotGatedGroup,
@@ -223,12 +224,21 @@ export async function fetchWorkflowRunsPage(
 /**
  * The head SHA of the latest prior baseline run — the run whose compile cache
  * the current main push would have restored. Used to fingerprint-classify a
- * main push that carries no recorded cache state. Undefined when the newest
- * page of the run listing holds no baseline run (e.g. an empty run history).
+ * main push that carries no recorded cache state. Reads the run listing a page
+ * at a time until one holds a baseline run, since a stretch of failing `main`
+ * runs can fill the newest page. Undefined when no page within the budget holds
+ * one (e.g. an empty run history).
  */
-export async function fetchLatestBaselineRunSha(): Promise<string | undefined> {
-  const newest = await fetchWorkflowRunsPage(1);
-  return newest.find(isBaselineCandidateRun)?.head_sha;
+export async function fetchLatestBaselineRunSha(
+  fetchPage: (page: number) => Promise<WorkflowRun[]> = fetchWorkflowRunsPage,
+): Promise<string | undefined> {
+  for (let page = 1; page <= RUN_LISTING_MAX_PAGES; page++) {
+    const runs = await fetchPage(page);
+    const latest = runs.find(isBaselineCandidateRun);
+    if (latest !== undefined) return latest.head_sha;
+    if (runs.length < WORKFLOW_RUNS_PAGE_SIZE) break;
+  }
+  return undefined;
 }
 
 /** What reading the workflow's run listing found. */
@@ -262,6 +272,17 @@ export interface BaselineRunListing {
    * Returns null once the listing has ended or the page budget is spent.
    */
   older: () => Promise<WorkflowRun[] | null>;
+
+  /**
+   * Returns whether the pages read so far settle what `main` push run the
+   * commit `sha` has. They do once they have shown one, whatever its
+   * conclusion, since a run still going or one that failed is a run the ratchet
+   * cannot use and need not look further for. They also do once they reach back
+   * before `committedAt`, because a commit's run is created after the commit,
+   * so a commit with no run by then has none. Until then its run may be on a
+   * page not yet read.
+   */
+  accountsFor: (sha: string, committedAt?: string) => boolean;
 }
 
 /** What {@link readBaselineRunListing} reads, and how far it goes. */
@@ -321,8 +342,10 @@ export async function readBaselineRunListing(
 
   for (let attempt = 1;; attempt++) {
     const seen = new Set<number>();
+    const pushShown = new Set<string>();
     const candidates: WorkflowRun[] = [];
     let newest: WorkflowRun | undefined;
+    let oldestCreatedAt: string | undefined;
     let ended = false;
     let pagesRead = 0;
 
@@ -333,7 +356,13 @@ export async function readBaselineRunListing(
       const runs = await fetchPage(++pagesRead);
       ended = runs.length < WORKFLOW_RUNS_PAGE_SIZE;
       const fresh = runs.filter((run) => !seen.has(run.id));
-      for (const run of fresh) seen.add(run.id);
+      for (const run of fresh) {
+        seen.add(run.id);
+        if (run.event === "push" && run.head_branch === "main") {
+          pushShown.add(run.head_sha);
+        }
+      }
+      oldestCreatedAt = runs.at(-1)?.created_at ?? oldestCreatedAt;
       return { runs, fresh: fresh.filter(isBaselineCandidateRun) };
     };
 
@@ -372,6 +401,10 @@ export async function readBaselineRunListing(
         log(`Reading page ${pagesRead + 1} of the workflow's run listing.`);
         return (await readPage()).fresh;
       },
+      accountsFor: (sha, committedAt) =>
+        pushShown.has(sha) ||
+        (committedAt !== undefined && oldestCreatedAt !== undefined &&
+          oldestCreatedAt < committedAt),
     };
   }
 }
@@ -483,9 +516,21 @@ const BASELINE_ANCESTRY_DEPTH = 100;
 /** The compare endpoint returns at most this many files. */
 const COMPARE_FILE_LIMIT = 300;
 
+/** The recent ancestry of the base-branch commit a run merged. */
+export interface BaseAncestry {
+  /**
+   * How far back each commit sits from the base-branch commit, so that `0` is
+   * that commit itself.
+   */
+  rank: Map<string, number>;
+
+  /** When each of those commits was committed, ISO 8601, where GitHub says. */
+  committedAt: Map<string, string>;
+}
+
 /**
  * Reads how far back each recent commit sits from the base-branch commit this
- * run merged, newest first, so that `0` is that commit itself.
+ * run merged, newest first, and when each was committed.
  *
  * Listing commits from the base-branch commit walks its ancestry, so a commit
  * absent from the result is not an ancestor. That is what keeps a `main` run
@@ -495,13 +540,23 @@ const COMPARE_FILE_LIMIT = 300;
 export async function fetchAncestorRanks(
   baseSha: string,
   depth = BASELINE_ANCESTRY_DEPTH,
-): Promise<Map<string, number>> {
-  const commits = await githubGet<{ sha: string }[]>(
+): Promise<BaseAncestry> {
+  const commits = await githubGet<
+    { sha: string; commit?: { committer?: { date?: string } } }[]
+  >(
     `/repos/${REPO}/commits?sha=${
       encodeURIComponent(baseSha)
     }&per_page=${depth}`,
   );
-  return new Map(commits.map((commit, index) => [commit.sha, index]));
+  const committedAt = new Map<string, string>();
+  for (const { sha, commit } of commits) {
+    const date = commit?.committer?.date;
+    if (date !== undefined) committedAt.set(sha, date);
+  }
+  return {
+    rank: new Map(commits.map((commit, index) => [commit.sha, index])),
+    committedAt,
+  };
 }
 
 /** One baseline run, as much of it as choosing a baseline needs. */
@@ -532,6 +587,13 @@ export interface WalkBaselineRunsOptions {
    * has no baseline.
    */
   olderRuns?: () => Promise<WorkflowRun[] | null>;
+
+  /**
+   * Whether the run listing read so far settles what `main` push run a commit
+   * has; see `BaselineRunListing.accountsFor()`. Every commit counts as settled
+   * when this is left out.
+   */
+  accountedFor?: (sha: string) => boolean;
 
   /** The most runs the walk reads; `BASELINE_RUNS` when left out. */
   maxRunsRead?: number;
@@ -577,10 +639,18 @@ export interface WalkBaselineRunsOptions {
  * Runs are read one at a time in the order `baselineWalkOrder()` gives, and the
  * walk stops as soon as every metric has its baseline, so a run that measured
  * every metric is the only one read. When the runs in hand are spent first, the
- * walk asks `olderRuns()` for the next page and carries on through it: a page
- * further back holds runs created earlier, which are the ones for commits
- * further from the base-branch commit. It gives up after `maxRunsRead` runs, so
- * a metric no `main` run has measured costs a bounded number of reads.
+ * walk asks `olderRuns()` for the next page and carries on with those too. It
+ * gives up after `maxRunsRead` runs, so a metric no `main` run has measured
+ * costs a bounded number of reads.
+ *
+ * The order holds across pages, not only within one. A page further back holds
+ * runs created earlier, which are usually the ones for commits further from the
+ * base-branch commit, but two pushes landing together can have their runs
+ * created in the other order, and a page boundary can fall between them. So
+ * before the walk reads the run for an ancestor, every commit nearer the
+ * base-branch commit has to be accounted for: its run already read, or
+ * `accountedFor()` saying the listing has settled what run it has. Until then
+ * the walk asks for older pages, and it takes what it has once there are none.
  */
 export async function walkBaselineRuns(
   options: WalkBaselineRunsOptions,
@@ -589,39 +659,57 @@ export async function walkBaselineRuns(
   const chosen = new Map<string, BaselineSample>();
   const coldFallback = new Map<string, BaselineSample>();
   const maxRunsRead = options.maxRunsRead ?? BASELINE_RUNS;
+  const accountedFor = options.accountedFor ?? (() => true);
+  const ancestorRank = options.ancestorRank;
+
+  const unread = [...options.runs];
+  const readShas = new Set<string>();
+  let olderRuns = options.olderRuns;
   let runsRead = 0;
 
-  let page: WorkflowRun[] | null = options.runs;
-  while (page !== null) {
-    for (const run of baselineWalkOrder(page, options.ancestorRank)) {
-      if (pending.size === 0 || runsRead >= maxRunsRead) break;
-
-      const reading = await options.readRun(run);
-      runsRead++;
-
-      for (const metric of [...pending]) {
-        const sample = reading.samples.get(metric);
-        if (sample === undefined) continue;
-
-        if (!reading.cold) {
-          chosen.set(metric, sample);
-          pending.delete(metric);
-          continue;
-        }
-        if (!coldFallback.has(metric)) coldFallback.set(metric, sample);
-
-        if (
-          reading.overrides && acceptsCoverageDebt(reading.overrides, metric)
-        ) {
-          pending.delete(metric);
-        }
+  // Whether every commit nearer the base-branch commit than `run`'s is
+  // accounted for, so that no run for one of them is still to come.
+  const nearerCommitsSettled = (run: WorkflowRun): boolean => {
+    const rank = ancestorRank?.get(run.head_sha);
+    if (ancestorRank == null || rank === undefined) return true;
+    for (const [sha, nearer] of ancestorRank) {
+      if (nearer < rank && !readShas.has(sha) && !accountedFor(sha)) {
+        return false;
       }
     }
+    return true;
+  };
 
-    const settled = pending.size === 0 || runsRead >= maxRunsRead;
-    page = settled || options.olderRuns === undefined
-      ? null
-      : await options.olderRuns();
+  while (pending.size > 0 && runsRead < maxRunsRead) {
+    const next = baselineWalkOrder(unread, ancestorRank).at(0);
+    if (olderRuns !== undefined && !(next && nearerCommitsSettled(next))) {
+      const older = await olderRuns();
+      if (older === null) olderRuns = undefined;
+      else unread.push(...older);
+      continue;
+    }
+    if (next === undefined) break;
+
+    unread.splice(unread.indexOf(next), 1);
+    const reading = await options.readRun(next);
+    readShas.add(next.head_sha);
+    runsRead++;
+
+    for (const metric of [...pending]) {
+      const sample = reading.samples.get(metric);
+      if (sample === undefined) continue;
+
+      if (!reading.cold) {
+        chosen.set(metric, sample);
+        pending.delete(metric);
+        continue;
+      }
+      if (!coldFallback.has(metric)) coldFallback.set(metric, sample);
+
+      if (reading.overrides && acceptsCoverageDebt(reading.overrides, metric)) {
+        pending.delete(metric);
+      }
+    }
   }
 
   for (const [metric, sample] of coldFallback) {
@@ -631,10 +719,10 @@ export async function walkBaselineRuns(
 }
 
 /**
- * The order the walk reads one page of runs in: the run for the base-branch
- * commit itself first, then its ancestors from nearest to furthest, and runs
- * whose commit is not an ancestor left out entirely. Two runs for one commit
- * read oldest first, matching how a ranked search settles that tie.
+ * The order the walk reads runs in: the run for the base-branch commit itself
+ * first, then its ancestors from nearest to furthest, and runs whose commit is
+ * not an ancestor left out entirely. Two runs for one commit read oldest first,
+ * matching how a ranked search settles that tie.
  *
  * Ranking rather than trusting the order the runs arrive in matters because the
  * walk takes the first answer it finds and stops. Run creation follows the push
@@ -755,12 +843,18 @@ export interface SelectBaselinesOptions {
   /** Reads the next older page of `main` runs; see the walk's option. */
   olderRuns?: () => Promise<WorkflowRun[] | null>;
 
+  /**
+   * Whether the run listing read so far settles what `main` push run a commit
+   * has, given when it was committed; `BaselineRunListing.accountsFor()`.
+   */
+  accountedFor?: (sha: string, committedAt?: string) => boolean;
+
   /** Reads one baseline run; called only for the runs the walk reaches. */
   readRun: (run: WorkflowRun) => Promise<BaselineRunReading>;
 
   isPullRequest: boolean;
   readBaseSha?: () => Promise<string | null>;
-  fetchRanks?: (baseSha: string) => Promise<Map<string, number>>;
+  fetchRanks?: (baseSha: string) => Promise<BaseAncestry>;
   fetchChangedGroups?: (
     baselineSha: string,
     baseSha: string,
@@ -806,17 +900,20 @@ export async function selectBaselines(
     );
   }
 
-  const ancestorRank = baseSha === null ? null : await guard(
+  const ancestry = baseSha === null ? null : await guard(
     "listing the base-branch commit's ancestry",
     () => fetchRanks(baseSha),
   );
+  const ancestorRank = ancestry?.rank ?? null;
 
-  const olderRuns = options.olderRuns;
+  const { olderRuns, accountedFor } = options;
   const baselines = await walkBaselineRuns({
     metrics: options.metrics,
     runs: options.runs,
     olderRuns: olderRuns &&
       (() => guard("reading an older page of the run listing", olderRuns)),
+    accountedFor: accountedFor &&
+      ((sha) => accountedFor(sha, ancestry?.committedAt.get(sha))),
     readRun: options.readRun,
     ancestorRank,
   });
@@ -2019,6 +2116,12 @@ export async function writeCoverageResolved(
   options: {
     rootDir?: string;
     readBaselineLcov?: (runId: number) => Promise<string | null>;
+
+    /**
+     * True when the description reset the baseline and no row is there to say
+     * so, because the run compared nothing.
+     */
+    reset?: boolean;
   } = {},
 ): Promise<void> {
   const improvedLines = coverageRows.reduce((sum, row) => {
@@ -2057,11 +2160,11 @@ export async function writeCoverageResolved(
       .map((row) => coverageMetricGroupName(row.metric))
       .filter((group): group is string => group !== null),
   );
-  const overridden = overriddenGroups.size > 0;
+  const overridden = overriddenGroups.size > 0 || options.reset === true;
 
   try {
     let files: CoverageSuggestionFileLines[] = [];
-    if (overridden) {
+    if (overriddenGroups.size > 0) {
       files = await uncoveredAddedLinesByFile(
         prFiles,
         lcov,
@@ -2173,7 +2276,7 @@ export function reportNotGated(
   for (const line of coverageNotGatedNotice(notGated)) log(line);
   log(
     workflowAnnotation(
-      notGated.failed ? "error" : "warning",
+      coverageListingNotCurrent(notGated.groups) ? "error" : "warning",
       COVERAGE_NOT_GATED_HEADLINE,
       `No baseline was held against: ${groups.join(", ")}. ` +
         "See the Coverage Check job's summary for why.",
@@ -2204,9 +2307,6 @@ export interface CoverageJobSummaryInput {
 
   /** The run that measured the rows, and the base-branch commit it merged. */
   measurement?: CoverageMeasurement;
-
-  /** True when the ungated state failed the job; see the comment's input. */
-  failed?: boolean;
 }
 
 /**
@@ -2224,7 +2324,6 @@ export function buildCoverageJobSummary(
       ...coverageNotGatedNotice({
         groups: input.notGated,
         measurement: input.measurement,
-        failed: input.failed ?? false,
       }),
       "",
     );
@@ -2263,7 +2362,9 @@ export function buildCoverageJobSummary(
  * gate applies to fails, because reading the listing again is the remedy and a
  * pass would say its coverage had been checked. A run the gate compares nothing
  * for passes with the warning: a `main` run, a pull request that changed no
- * source group, and one whose description resets the baseline.
+ * source group, and one whose description resets the baseline. Such a pull
+ * request still gets a resolved comment payload, so that a failure an earlier
+ * run reported does not stay open on it.
  */
 async function reportListingNotCurrent(
   input: CoverageRatchetInput,
@@ -2286,13 +2387,21 @@ async function reportListingNotCurrent(
       "  Warning: skipping the baseline comparison, which this run would " +
         "not have been gated on.",
     );
+    if (input.prNumber !== null) {
+      await writeCoverageResolved(
+        input.prNumber,
+        [],
+        input.prFiles,
+        input.coverageLcov,
+        { reset: input.prOverrides.coverageBaselineReset },
+      );
+    }
     return 0;
   }
 
   const notGated: CoverageNotGatedInput = {
     groups,
     measurement: { runUrl: workflowRunUrl(input.currentRunId) },
-    failed: true,
   };
   reportNotGated(notGated, console.error);
   await writeCoverageNotGated(input.prNumber, notGated);
@@ -2302,7 +2411,6 @@ async function reportListingNotCurrent(
       failures: [],
       notGated: groups,
       measurement: notGated.measurement,
-      failed: true,
     }),
   );
   console.error(
@@ -2666,6 +2774,7 @@ export async function runCoverageRatchet(
     metrics: [...currentMetrics.keys()],
     runs: runsNewestFirst,
     olderRuns: listing.older,
+    accountedFor: listing.accountsFor,
     readRun: readBaselineRun,
     isPullRequest: prNumber !== null,
     guard: (description, operation) =>
@@ -2691,7 +2800,7 @@ export async function runCoverageRatchet(
   const measurement = measurementFromRows(rows);
 
   reportUngatedGroups(ungatedGroups);
-  reportNotGated({ groups: notGated, measurement, failed: false });
+  reportNotGated({ groups: notGated, measurement });
 
   // 6. Report results
 
@@ -2795,7 +2904,7 @@ export async function runCoverageRatchet(
       rows,
       input.prFiles,
       input.coverageLcov,
-      { groups: notGated, measurement, failed: false },
+      { groups: notGated, measurement },
     );
     await appendJobSummary(
       buildCoverageJobSummary({ rows, failures, notGated, measurement }),

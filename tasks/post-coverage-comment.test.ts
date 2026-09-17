@@ -111,7 +111,6 @@ Deno.test("postCoverageComment posts an ungated notice when no marked comment ex
   // does.
   const body = buildCoverageNotGatedComment({
     groups: [{ group: "tasks", reason: "no-baseline" }],
-    failed: false,
   });
   const requests = await runWithPayload(
     { prNumber: 4211, state: "ungated", body },
@@ -129,7 +128,6 @@ Deno.test("postCoverageComment posts an ungated notice when no marked comment ex
 Deno.test("postCoverageComment rewrites an earlier comment with an ungated notice", async () => {
   const body = buildCoverageNotGatedComment({
     groups: [{ group: "tasks", reason: "listing-not-current" }],
-    failed: true,
   });
   const requests = await runWithPayload(
     { prNumber: 4211, state: "ungated", body },
@@ -144,7 +142,6 @@ Deno.test("postCoverageComment rewrites an earlier comment with an ungated notic
 Deno.test("postCoverageComment resolves an ungated notice once a later run is gated", async () => {
   const existing = buildCoverageNotGatedComment({
     groups: [{ group: "tasks", reason: "no-baseline" }],
-    failed: false,
   });
   const requests = await runWithPayload(
     {

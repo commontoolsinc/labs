@@ -1519,20 +1519,29 @@ export interface CoverageNotGatedGroup {
   baselineSha?: string;
 }
 
-/** What a report of an ungated run says: which groups, why, and how it ended. */
+/**
+ * What a report of an ungated run says: which groups, and why. It says nothing
+ * of how the job ended, because a group with no baseline decides that only when
+ * the reason is the run listing: a regression in another group fails the same
+ * job.
+ */
 export interface CoverageNotGatedInput {
   /** The groups the gate applied to and compared against nothing. */
   groups: CoverageNotGatedGroup[];
 
   /** The run that went ungated, and the base-branch commit it merged. */
   measurement?: CoverageMeasurement;
+}
 
-  /**
-   * True when the job failed over it. A listing that is not current fails the
-   * job, because asking again is the remedy; every other reason leaves it
-   * passing.
-   */
-  failed: boolean;
+/**
+ * Returns whether `groups` went ungated because the run listing was not
+ * current. That reason is the one that fails the job by itself, and the one
+ * whose remedy is reading the listing again.
+ */
+export function coverageListingNotCurrent(
+  groups: CoverageNotGatedGroup[],
+): boolean {
+  return groups.some((group) => group.reason === "listing-not-current");
 }
 
 /** The headline every surface reporting an ungated run opens with. */
@@ -1579,15 +1588,16 @@ function coverageNotGatedReasonText(
 export function coverageNotGatedNotice(input: CoverageNotGatedInput): string[] {
   const baseSha = input.measurement?.baseSha;
   const groups = input.groups.map((group) => `\`${group.group}\``).join(", ");
+  const listingNotCurrent = coverageListingNotCurrent(input.groups);
   const out: string[] = [];
 
   out.push(
-    input.failed
+    listingNotCurrent
       ? "The **Coverage Check** job failed because it could not find a " +
         `baseline to hold ${groups} against. Nothing here says this pull ` +
         "request regressed coverage, and nothing says it did not."
-      : `The **Coverage Check** job passed without holding ${groups} against ` +
-        "a baseline, so it would not have caught a coverage regression there.",
+      : `The **Coverage Check** job did not hold ${groups} against a ` +
+        "baseline, so it would not have caught a coverage regression there.",
   );
   out.push("");
   out.push("| Source group | Why it was not gated |");
@@ -1599,7 +1609,7 @@ export function coverageNotGatedNotice(input: CoverageNotGatedInput): string[] {
   }
   out.push("");
   out.push(
-    input.failed
+    listingNotCurrent
       ? "Re-run the **Coverage Check** job to ask GitHub for the listing again."
       : "A later run of this pull request gates these groups, once a `main` " +
         "run has measured the commit it merges. Re-running the **Coverage " +
@@ -1658,7 +1668,9 @@ function coverageChangeText(baseline: number, current: number): string {
  * the count this PR produced, rendered as a before-and-after table. When
  * `overridden` is set the gate passed only because the debt was accepted with an
  * override or the reset marker, so the summary says the metric was overridden
- * rather than implying the new code is covered.
+ * rather than implying the new code is covered. An overridden run with no
+ * `groups` compared nothing, which is a reset whose run listing was not
+ * current, and the comment says that in place of the table.
  *
  * `files` names where those uncovered lines are, and is rendered only under an
  * override. This comment replaces an earlier regression body in place, and that
@@ -1711,8 +1723,11 @@ export function buildCoverageResolvedComment(
     }
   } else {
     out.push(
-      "Every changed source group is at or below its `main` baseline for " +
-        "uncovered lines.",
+      overridden
+        ? "This run compared no source group against a baseline, so there " +
+          "are no counts to show."
+        : "Every changed source group is at or below its `main` baseline " +
+          "for uncovered lines.",
     );
   }
 

@@ -1045,7 +1045,8 @@ reads the listing again, and the job takes about a minute. Nothing in that
 failure says the pull request regressed coverage. A run the gate compares
 nothing for passes with the warning instead: a `main` run, a pull request that
 changed no source group, and one whose description carries
-`NEW_COVERAGE_BASELINE`.
+`NEW_COVERAGE_BASELINE`. Such a pull request still gets its coverage comment
+resolved, so a failure an earlier run reported does not stay open on it.
 
 The listing is read only as far back as the walk needs. The first reading goes
 back to the run asking, which is on the first page for a run whose tests have
@@ -1056,6 +1057,21 @@ as old as the run, and the newest pages hold only runs for commits that landed
 since. Ten pages reach back about three days. A run created longer ago than that
 is out of reach, together with the `main` runs for the commit it merges, and its
 changed groups are reported as not gated.
+
+The nearest ancestor is still the nearest one when the runs span pages. A page
+further back holds runs created earlier, and those are usually the ones for
+commits further from the base-branch commit, but two pushes that land together
+can have their runs created in the other order, with a page boundary between
+them. So before the walk reads the run for an ancestor, every commit nearer the
+base-branch commit has to be accounted for. A commit is accounted for once the
+listing has shown its push run, whatever that run's conclusion: a run still
+going and one that failed are runs the ratchet cannot use, and having seen one
+says there is nothing further back to find. It is also accounted for once the
+pages read reach back before the commit was made, because a commit's run is
+created after the commit, so one with no run by then has none. Until one of
+those holds the walk reads another page, and it takes the ancestor it has when
+there are no more. Every commit on `main` normally has a run, so this costs a
+page only in the case it exists for.
 
 ### When a changed group is not gated
 
@@ -1089,9 +1105,11 @@ newer commit to merge.
 
 The table header in the job's log is the quick check. `excl` beside a group the
 pull request changed means that group was not compared, and a header reading
-`OK: 0` with every group `excl` means nothing was. An `ACCEPT_COVERAGE_DEBT`
-line in the description of such a run has not been exercised: it is read
-against a baseline, and there was none.
+`OK: 0` with every group `excl` means nothing was. `ovrd` is what says an
+`ACCEPT_COVERAGE_DEBT` line took effect. A group with no baseline is held to
+zero, so an accepted rise covers it only when the group's whole count is that
+small; a group carrying any real debt reads `excl` beside its acceptance, and
+the line has accepted nothing on that run.
 
 ## A combined report for IDEs
 

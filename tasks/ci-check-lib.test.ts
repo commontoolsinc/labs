@@ -20,6 +20,7 @@ import {
   COVERAGE_BASELINE_RESET_MARKER,
   COVERAGE_SUGGESTION_MARKER,
   coverageGroupsForChangedFiles,
+  coverageListingNotCurrent,
   coverageMetricForGroup,
   coverageMetricGroupName,
   coverageMetricMeasuredSet,
@@ -795,7 +796,6 @@ Deno.test("buildCoverageNotGatedComment names each ungated group and why", () =>
       runUrl: "https://github.com/commonfabric/labs/actions/runs/7",
       baseSha,
     },
-    failed: false,
   });
 
   // The one coverage comment, left open so the state is read without a click.
@@ -804,7 +804,7 @@ Deno.test("buildCoverageNotGatedComment names each ungated group and why", () =>
   assertStringIncludes(comment, "Test coverage was NOT gated on this run");
   assertStringIncludes(
     comment,
-    "passed without holding `packages/shell`, `tasks` against a baseline",
+    "did not hold `packages/shell`, `tasks` against a baseline",
   );
   assertStringIncludes(
     comment,
@@ -826,7 +826,6 @@ Deno.test("buildCoverageNotGatedComment names each ungated group and why", () =>
 Deno.test("buildCoverageNotGatedComment says a listing that is not current failed the job", () => {
   const comment = buildCoverageNotGatedComment({
     groups: [{ group: "tasks", reason: "listing-not-current" }],
-    failed: true,
   });
 
   assertStringIncludes(
@@ -848,7 +847,6 @@ Deno.test("coverageNotGatedNotice names no commit for a checkout that had none",
       { group: "packages/runner", reason: "no-base-commit" },
       { group: "packages/ui", reason: "no-baseline" },
     ],
-    failed: false,
   }).join("\n");
 
   assertStringIncludes(
@@ -861,6 +859,52 @@ Deno.test("coverageNotGatedNotice names no commit for a checkout that had none",
     "| `packages/ui` | No successful `main` run within reach measured the " +
       "base-branch commit or an ancestor of it. |",
   );
+});
+
+Deno.test("coverageNotGatedNotice does not say how the job ended unless the listing decided it", () => {
+  // A group with no baseline passes on its own, and fails beside a regression
+  // in another group, so the notice claims neither.
+  const notice = coverageNotGatedNotice({
+    groups: [{ group: "tasks", reason: "base-branch-moved" }],
+  }).join("\n");
+
+  assertFalse(notice.includes("passed"));
+  assertFalse(notice.includes("failed"));
+  assertStringIncludes(
+    notice,
+    "The **Coverage Check** job did not hold `tasks` against a baseline",
+  );
+});
+
+Deno.test("coverageListingNotCurrent is true only of a listing that was not current", () => {
+  assertEquals(
+    coverageListingNotCurrent([
+      { group: "tasks", reason: "listing-not-current" },
+    ]),
+    true,
+  );
+  assertEquals(
+    coverageListingNotCurrent([
+      { group: "tasks", reason: "no-baseline" },
+      { group: "packages/ui", reason: "base-branch-moved" },
+    ]),
+    false,
+  );
+  assertEquals(coverageListingNotCurrent([]), false);
+});
+
+Deno.test("buildCoverageResolvedComment claims no comparison for a reset that compared nothing", () => {
+  const resolved = buildCoverageResolvedComment(0, [], true);
+
+  assertStringIncludes(
+    resolved,
+    "Code coverage debt accepted with an override.",
+  );
+  assertStringIncludes(
+    resolved,
+    "This run compared no source group against a baseline",
+  );
+  assertFalse(resolved.includes("at or below its `main` baseline"));
 });
 
 Deno.test("workflowRunsPagePath asks for one unfiltered page of the workflow's runs", () => {
