@@ -18,7 +18,6 @@ import {
 } from "./ci-check-lib.ts";
 import {
   appendJobSummary,
-  type BaseAncestry,
   baselineLcovForRun,
   type BaselineRunContext,
   type BaselineRunListing,
@@ -1103,23 +1102,19 @@ Deno.test("readBaselineRunListing accounts for a commit whose push run it has sh
   assertEquals(listing.accountsFor("d".repeat(40)), false);
 });
 
-Deno.test("readBaselineRunListing accounts for a commit older pages could not hold a run for", async () => {
-  // The page reaches back to run 1001. A commit made after that run was created
-  // has shown no run and can have none further back; one made before it can.
-  const { listing } = await readListing(
-    [listingPage(1100), listingPage(1000)],
-    1050,
+Deno.test("readBaselineRunListing accounts for no commit whose push run it has not shown", async () => {
+  // However far back the pages reach, a commit with no run on them may have
+  // one further back, until a page shows it.
+  const late = "d".repeat(40);
+  const second = listingPage(1000, [950]).map((run) =>
+    run.id === 950 ? { ...run, head_sha: late } : run
   );
-  const unseen = "d".repeat(40);
+  const { listing } = await readListing([listingPage(1100), second], 1050);
 
-  assertEquals(listing.accountsFor(unseen, createdAtFor(1002)), true);
-  assertEquals(listing.accountsFor(unseen, createdAtFor(1001)), false);
-  assertEquals(listing.accountsFor(unseen, createdAtFor(990)), false);
-  assertEquals(listing.accountsFor(unseen), false);
-
-  // Reading the next page moves the point the listing reaches back to.
+  assertEquals(listing.accountsFor(late), false);
   await listing.older();
-  assertEquals(listing.accountsFor(unseen, createdAtFor(990)), true);
+  assertEquals(listing.accountsFor(late), true);
+  assertEquals(listing.accountsFor("e".repeat(40)), false);
 });
 
 Deno.test("reportBaselineRunListing says what a current listing held", () => {
@@ -1791,16 +1786,6 @@ function makeBaselineSample(
 /** Ancestry of base-branch commit `SHA_C`, newest first. */
 const RANKS = new Map([[SHA_C, 0], [SHA_B, 1], [SHA_A, 2]]);
 
-/** That ancestry as the commit listing reports it, with each commit's date. */
-const ANCESTRY: BaseAncestry = {
-  rank: RANKS,
-  committedAt: new Map([
-    [SHA_C, "2026-08-04T10:39:57Z"],
-    [SHA_B, "2026-08-04T10:19:57Z"],
-    [SHA_A, "2026-08-04T09:59:57Z"],
-  ]),
-};
-
 const RUNNER_METRIC = "coverage-debt: packages/runner uncovered lines";
 const MEMORY_METRIC = "coverage-debt: packages/memory uncovered lines";
 
@@ -2266,28 +2251,13 @@ Deno.test("fetchAncestorRanks ranks commits by distance from the base", async ()
     (input) => {
       assertStringIncludes(String(input), `/commits?sha=${SHA_C}`);
       return new Response(
-        JSON.stringify([
-          {
-            sha: SHA_C,
-            commit: { committer: { date: "2026-08-04T10:39:57Z" } },
-          },
-          {
-            sha: SHA_B,
-            commit: { committer: { date: "2026-08-04T10:19:57Z" } },
-          },
-          { sha: SHA_A },
-        ]),
+        JSON.stringify([{ sha: SHA_C }, { sha: SHA_B }, { sha: SHA_A }]),
       );
     },
     () => fetchAncestorRanks(SHA_C),
   );
 
-  assertEquals([...ranks.rank], [[SHA_C, 0], [SHA_B, 1], [SHA_A, 2]]);
-  // A commit the listing gives no date for is ranked and left undated.
-  assertEquals([...ranks.committedAt], [
-    [SHA_C, "2026-08-04T10:39:57Z"],
-    [SHA_B, "2026-08-04T10:19:57Z"],
-  ]);
+  assertEquals([...ranks], [[SHA_C, 0], [SHA_B, 1], [SHA_A, 2]]);
 });
 
 Deno.test("fetchGroupsChangedOnBase reports the groups the base branch moved", async () => {
@@ -2406,7 +2376,7 @@ Deno.test("selectBaselines picks a baseline and its gating for each metric", asy
       Promise.resolve(runs.find(([candidate]) => candidate.id === run.id)![1]),
     isPullRequest: true,
     readBaseSha: () => Promise.resolve(SHA_C),
-    fetchRanks: () => Promise.resolve(ANCESTRY),
+    fetchRanks: () => Promise.resolve(RANKS),
     fetchChangedGroups: (baselineSha) =>
       Promise.resolve(
         baselineSha === SHA_A
@@ -2501,7 +2471,7 @@ Deno.test("selectBaselines chooses each metric's baseline against the base commi
       readBaseSha: () => Promise.resolve(SHA_C),
       fetchRanks: (baseSha) => {
         assertEquals(baseSha, SHA_C);
-        return Promise.resolve(ANCESTRY);
+        return Promise.resolve(RANKS);
       },
       fetchChangedGroups: (baselineSha, baseSha) => {
         compared.push(`${baselineSha}...${baseSha}`);
@@ -2670,7 +2640,7 @@ Deno.test("selectBaselines routes its GitHub calls through the guard", async () 
     readRun: readerFor(readings),
     isPullRequest: true,
     readBaseSha: () => Promise.resolve(SHA_C),
-    fetchRanks: () => Promise.resolve(ANCESTRY),
+    fetchRanks: () => Promise.resolve(RANKS),
     fetchChangedGroups: () => Promise.resolve(new Set<string>()),
     guard: (description, operation) => {
       guarded.push(description);
@@ -3526,7 +3496,9 @@ function listingOf(
  * with everything the stage reported.
  */
 async function runRatchet(options: {
-  listing: BaselineRunListing;
+  listing:
+    | BaselineRunListing
+    | ((currentRunId: number) => Promise<BaselineRunListing>);
   readings?: [WorkflowRun, BaselineRunReading][];
   current?: number;
 
@@ -3537,11 +3509,14 @@ async function runRatchet(options: {
   overrides?: CoverageRatchetInput["prOverrides"];
   changedOnBase?: string[];
 
-  /**
-   * Stands in for GitHub under the stage's own baseline-run reader, which is
-   * used in place of `readings` when this is given.
-   */
+  /** Stands in for GitHub for whatever the stage reads from it. */
   github?: (url: string) => Response;
+
+  /** Reads baseline runs with the stage's own reader, not from `readings`. */
+  ownRunReader?: boolean;
+
+  /** Reads the base-branch commit's ancestry from `github`, not from `RANKS`. */
+  ownAncestry?: boolean;
 }) {
   const dir = await Deno.makeTempDir({ prefix: "coverage-ratchet-" });
   const commentFile = path.join(dir, "coverage-comment.json");
@@ -3595,9 +3570,11 @@ async function runRatchet(options: {
                 coverageLcov: "",
                 readListing: (listingOptions) => {
                   asked.push(listingOptions.currentRunId);
-                  return Promise.resolve(options.listing);
+                  return typeof options.listing === "function"
+                    ? options.listing(listingOptions.currentRunId)
+                    : Promise.resolve(options.listing);
                 },
-                readBaselineRun: options.github
+                readBaselineRun: options.ownRunReader
                   ? undefined
                   : (run) =>
                     Promise.resolve(
@@ -3607,7 +3584,9 @@ async function runRatchet(options: {
                     ),
                 baselineReads: {
                   readBaseSha: () => Promise.resolve(SHA_C),
-                  fetchRanks: () => Promise.resolve(ANCESTRY),
+                  fetchRanks: options.ownAncestry
+                    ? undefined
+                    : () => Promise.resolve(RANKS),
                   // Nothing lies between a commit and itself, which is what
                   // `fetchGroupsChangedOnBase()` reports too.
                   fetchChangedGroups: (baselineSha, baseSha) =>
@@ -3777,6 +3756,7 @@ Deno.test("runCoverageRatchet reads a baseline run's artifacts and merged pull r
   const requests: string[] = [];
   const ran = await runRatchet({
     listing: listingOf([RUN_AT_BASE]),
+    ownRunReader: true,
     github: (url) => {
       requests.push(url);
       if (url.includes(`/actions/runs/${RUN_AT_BASE.id}/artifacts`)) {
@@ -3913,6 +3893,53 @@ Deno.test("runCoverageRatchet finds the base commit's run across a page boundary
     "Ratchet baseline measured at the base-branch commit: cccccccc.",
   );
   assertFalse(ran.logs.includes("NOT GATED"));
+});
+
+Deno.test("runCoverageRatchet reads on for the base commit's run whatever date the commit carries", async () => {
+  // The same boundary, through the real listing reader and the real ancestry
+  // read. The base-branch commit's committer date is a minute after its run was
+  // created: a date is whatever the client that made the commit said it was,
+  // so it says nothing about where in the listing the commit's run sits.
+  const baseRun = makeRun(1000, SHA_C, createdAtFor(1000));
+  const ancestorRun = makeRun(1001, SHA_B, createdAtFor(1001));
+  const pages = [
+    listingPage(1100).map((run) => run.id === 1001 ? ancestorRun : run),
+    listingPage(1000).map((run) => run.id === 1000 ? baseRun : run),
+  ];
+  const pagesAsked: number[] = [];
+  const ran = await runRatchet({
+    listing: (currentRunId) =>
+      readBaselineRunListing({
+        currentRunId,
+        fetchPage: (page) => {
+          pagesAsked.push(page);
+          return Promise.resolve(pages[page - 1] ?? []);
+        },
+        log: () => {},
+      }),
+    ownAncestry: true,
+    github: (url) =>
+      url.includes(`/commits?sha=${SHA_C}`)
+        ? jsonResponse([
+          { sha: SHA_C, commit: { committer: { date: createdAtFor(1060) } } },
+          { sha: SHA_B, commit: { committer: { date: createdAtFor(900) } } },
+        ])
+        : new Response("not found", { status: 404 }),
+    readings: [
+      [baseRun, reading(baseRun, { [RUNNER_METRIC]: 10 })],
+      [ancestorRun, reading(ancestorRun, { [RUNNER_METRIC]: 20 })],
+    ],
+    current: 15,
+    changedOnBase: ["packages/runner"],
+  });
+
+  assertEquals(pagesAsked, [1, 2]);
+  assertEquals(ran.code, 1);
+  assertEquals(ran.payload?.state, "regressed");
+  assertStringIncludes(
+    ran.logs,
+    "Ratchet baseline measured at the base-branch commit: cccccccc.",
+  );
 });
 
 Deno.test("runCoverageRatchet does not say the job passed when one group regressed and another went ungated", async () => {

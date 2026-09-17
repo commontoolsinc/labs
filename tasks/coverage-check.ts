@@ -274,15 +274,14 @@ export interface BaselineRunListing {
   older: () => Promise<WorkflowRun[] | null>;
 
   /**
-   * Returns whether the pages read so far settle what `main` push run the
-   * commit `sha` has. They do once they have shown one, whatever its
-   * conclusion, since a run still going or one that failed is a run the ratchet
-   * cannot use and need not look further for. They also do once they reach back
-   * before `committedAt`, because a commit's run is created after the commit,
-   * so a commit with no run by then has none. Until then its run may be on a
-   * page not yet read.
+   * Returns whether the pages read so far have shown a `main` push run for the
+   * commit `sha`, whatever its conclusion. A run still going or one that failed
+   * is a run the ratchet cannot use, and having seen it says there is none
+   * further back to look for. Until one is shown, the commit's run may be on a
+   * page not yet read, and nothing else says otherwise: the date a commit
+   * carries is its author's word, so it puts no bound on where the run sits.
    */
-  accountsFor: (sha: string, committedAt?: string) => boolean;
+  accountsFor: (sha: string) => boolean;
 }
 
 /** What {@link readBaselineRunListing} reads, and how far it goes. */
@@ -345,7 +344,6 @@ export async function readBaselineRunListing(
     const pushShown = new Set<string>();
     const candidates: WorkflowRun[] = [];
     let newest: WorkflowRun | undefined;
-    let oldestCreatedAt: string | undefined;
     let ended = false;
     let pagesRead = 0;
 
@@ -362,7 +360,6 @@ export async function readBaselineRunListing(
           pushShown.add(run.head_sha);
         }
       }
-      oldestCreatedAt = runs.at(-1)?.created_at ?? oldestCreatedAt;
       return { runs, fresh: fresh.filter(isBaselineCandidateRun) };
     };
 
@@ -401,10 +398,7 @@ export async function readBaselineRunListing(
         log(`Reading page ${pagesRead + 1} of the workflow's run listing.`);
         return (await readPage()).fresh;
       },
-      accountsFor: (sha, committedAt) =>
-        pushShown.has(sha) ||
-        (committedAt !== undefined && oldestCreatedAt !== undefined &&
-          oldestCreatedAt < committedAt),
+      accountsFor: (sha) => pushShown.has(sha),
     };
   }
 }
@@ -516,21 +510,9 @@ const BASELINE_ANCESTRY_DEPTH = 100;
 /** The compare endpoint returns at most this many files. */
 const COMPARE_FILE_LIMIT = 300;
 
-/** The recent ancestry of the base-branch commit a run merged. */
-export interface BaseAncestry {
-  /**
-   * How far back each commit sits from the base-branch commit, so that `0` is
-   * that commit itself.
-   */
-  rank: Map<string, number>;
-
-  /** When each of those commits was committed, ISO 8601, where GitHub says. */
-  committedAt: Map<string, string>;
-}
-
 /**
  * Reads how far back each recent commit sits from the base-branch commit this
- * run merged, newest first, and when each was committed.
+ * run merged, newest first, so that `0` is that commit itself.
  *
  * Listing commits from the base-branch commit walks its ancestry, so a commit
  * absent from the result is not an ancestor. That is what keeps a `main` run
@@ -540,23 +522,13 @@ export interface BaseAncestry {
 export async function fetchAncestorRanks(
   baseSha: string,
   depth = BASELINE_ANCESTRY_DEPTH,
-): Promise<BaseAncestry> {
-  const commits = await githubGet<
-    { sha: string; commit?: { committer?: { date?: string } } }[]
-  >(
+): Promise<Map<string, number>> {
+  const commits = await githubGet<{ sha: string }[]>(
     `/repos/${REPO}/commits?sha=${
       encodeURIComponent(baseSha)
     }&per_page=${depth}`,
   );
-  const committedAt = new Map<string, string>();
-  for (const { sha, commit } of commits) {
-    const date = commit?.committer?.date;
-    if (date !== undefined) committedAt.set(sha, date);
-  }
-  return {
-    rank: new Map(commits.map((commit, index) => [commit.sha, index])),
-    committedAt,
-  };
+  return new Map(commits.map((commit, index) => [commit.sha, index]));
 }
 
 /** One baseline run, as much of it as choosing a baseline needs. */
@@ -583,15 +555,16 @@ export interface WalkBaselineRunsOptions {
 
   /**
    * Reads the next older page of `main` runs, or returns null when there is
-   * none. Asked only once the runs in hand have been walked and a metric still
-   * has no baseline.
+   * none. Asked while a metric still has no baseline, in two cases: the runs in
+   * hand have all been read, or the next one is for an ancestor with a nearer
+   * commit not yet accounted for, whose run an older page may hold.
    */
   olderRuns?: () => Promise<WorkflowRun[] | null>;
 
   /**
-   * Whether the run listing read so far settles what `main` push run a commit
-   * has; see `BaselineRunListing.accountsFor()`. Every commit counts as settled
-   * when this is left out.
+   * Whether the run listing read so far has shown a `main` push run for a
+   * commit; see `BaselineRunListing.accountsFor()`. Every commit counts as
+   * accounted for when this is left out.
    */
   accountedFor?: (sha: string) => boolean;
 
@@ -649,8 +622,10 @@ export interface WalkBaselineRunsOptions {
  * created in the other order, and a page boundary can fall between them. So
  * before the walk reads the run for an ancestor, every commit nearer the
  * base-branch commit has to be accounted for: its run already read, or
- * `accountedFor()` saying the listing has settled what run it has. Until then
- * the walk asks for older pages, and it takes what it has once there are none.
+ * `accountedFor()` saying the listing has shown a run for it. Until then the
+ * walk asks for older pages, and it takes what it has once there are none. A
+ * commit with no run at all therefore costs the rest of the page budget, on the
+ * runs that have to look past it.
  */
 export async function walkBaselineRuns(
   options: WalkBaselineRunsOptions,
@@ -844,17 +819,17 @@ export interface SelectBaselinesOptions {
   olderRuns?: () => Promise<WorkflowRun[] | null>;
 
   /**
-   * Whether the run listing read so far settles what `main` push run a commit
-   * has, given when it was committed; `BaselineRunListing.accountsFor()`.
+   * Whether the run listing read so far has shown a `main` push run for a
+   * commit; `BaselineRunListing.accountsFor()`.
    */
-  accountedFor?: (sha: string, committedAt?: string) => boolean;
+  accountedFor?: (sha: string) => boolean;
 
   /** Reads one baseline run; called only for the runs the walk reaches. */
   readRun: (run: WorkflowRun) => Promise<BaselineRunReading>;
 
   isPullRequest: boolean;
   readBaseSha?: () => Promise<string | null>;
-  fetchRanks?: (baseSha: string) => Promise<BaseAncestry>;
+  fetchRanks?: (baseSha: string) => Promise<Map<string, number>>;
   fetchChangedGroups?: (
     baselineSha: string,
     baseSha: string,
@@ -900,20 +875,18 @@ export async function selectBaselines(
     );
   }
 
-  const ancestry = baseSha === null ? null : await guard(
+  const ancestorRank = baseSha === null ? null : await guard(
     "listing the base-branch commit's ancestry",
     () => fetchRanks(baseSha),
   );
-  const ancestorRank = ancestry?.rank ?? null;
 
-  const { olderRuns, accountedFor } = options;
+  const olderRuns = options.olderRuns;
   const baselines = await walkBaselineRuns({
     metrics: options.metrics,
     runs: options.runs,
     olderRuns: olderRuns &&
       (() => guard("reading an older page of the run listing", olderRuns)),
-    accountedFor: accountedFor &&
-      ((sha) => accountedFor(sha, ancestry?.committedAt.get(sha))),
+    accountedFor: options.accountedFor,
     readRun: options.readRun,
     ancestorRank,
   });

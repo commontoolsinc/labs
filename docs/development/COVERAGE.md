@@ -1066,12 +1066,15 @@ them. So before the walk reads the run for an ancestor, every commit nearer the
 base-branch commit has to be accounted for. A commit is accounted for once the
 listing has shown its push run, whatever that run's conclusion: a run still
 going and one that failed are runs the ratchet cannot use, and having seen one
-says there is nothing further back to find. It is also accounted for once the
-pages read reach back before the commit was made, because a commit's run is
-created after the commit, so one with no run by then has none. Until one of
-those holds the walk reads another page, and it takes the ancestor it has when
-there are no more. Every commit on `main` normally has a run, so this costs a
-page only in the case it exists for.
+says there is nothing further back to find. Until then the walk reads another
+page, and it takes the ancestor it has when there are no more.
+
+Nothing but a shown run accounts for a commit. Its date does not: a commit's
+date is whatever the client that made it said it was, so it puts no bound on
+when the commit's run was created. Every commit on `main` normally has a run, so
+the search costs a page only in the case it exists for. A commit with no run at
+all, such as one pushed together with its descendants, costs the rest of the
+page budget on the runs that have to look past it.
 
 ### When a changed group is not gated
 
