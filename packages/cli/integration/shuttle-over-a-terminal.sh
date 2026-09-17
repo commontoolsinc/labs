@@ -307,6 +307,7 @@ cd ../..
 cd /slugs/first
 watch settings/note
 @frame /written\r
+@drawn / written  1 of 1
 @frame :pwd\r
 @drawn position  //
 @frame e
@@ -876,13 +877,16 @@ step "31. A line typed at a view runs where a typed line runs, and the editor ta
 # view with a line in flight takes no second one, so the `e` would ask for
 # nothing and the `q` would close the view out from under the answer.
 #
-# The `/written` typed ahead of them is asserted by the session finishing at
-# all rather than by a line of its own — where the search stands is drawn on
-# the alternate screen, which no record of this transcript can see. A `/` that
-# left the view in a state where a key is text would have taken the `:`, the
-# `e` and the `q` into a search line, and the view would never have closed:
-# the `q` that ends this record would not have been read as a key, and the
-# session would have run to its deadline with the screen still held.
+# The `/written` before them is waited for by what the search drew, which is
+# the one of the three the transcript cannot carry: where a search stands is
+# drawn on the alternate screen, and `@drawn` is what reads there. `1 of 1` is
+# the whole assertion — the pattern was found, once, in the rendering of a cell
+# holding `"written once and never again"` — and a search that found nothing
+# would draw `no match` and wait out the session instead.
+#
+# It also holds the two after it to their own subject. A `/` that left the view
+# in a state where a key is text would have taken the `:`, the `e` and the `q`
+# into a search line, and the view would never have closed.
 FRAMED=$(said 75 "watch settings/note")
 # Read by position rather than by presence, because the order is half of what
 # is being shown: the listing was written before the view took the screen and

@@ -421,7 +421,7 @@ describe("lens", () => {
           expect(last(driven).at(-2)?.slice(2, 4)).toBe(": ");
           expect(keys(last(driven)))
             .toBe(
-              "└ enter run · ctrl-c cancel ───────────────────────────────┘",
+              "└ enter run · ctrl-c/esc cancel ───────────────────────────┘",
             );
         });
 
@@ -518,9 +518,17 @@ describe("lens", () => {
         });
 
         it("abandons the command line on `escape` as it does on `ctrl-c`", () => {
-          const driven = driving();
+          // And the edge says so: what the frame offers is what it answers to,
+          // so a second key that cancels is a second key the edge names.
+          //
+          // Kills: taking `escape` in the key table and leaving the edge
+          // offering `ctrl-c` alone, which is a frame answering to a key it
+          // does not mention.
+
+          const driven = driving("c", ROWS, 60);
           driven.lens.reads(key(":"));
           types(driven.lens, "get depth");
+          expect(keys(last(driven))).toContain("ctrl-c/esc cancel");
           driven.lens.reads(key("escape"));
           expect(driven.lens.typing).toBe(false);
           expect(driven.lens.asked()).toBeUndefined();

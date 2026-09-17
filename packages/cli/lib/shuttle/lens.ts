@@ -94,8 +94,8 @@ const PHRASE = {
   /** Takes the search that is being typed. */
   find: "enter search",
 
-  /** Abandons whichever line is being typed. */
-  cancel: "ctrl-c cancel",
+  /** Abandons whichever line is being typed, either key. */
+  cancel: "ctrl-c/esc cancel",
 
   /** Not a key: what `q` leaves behind it. */
   armed: "(q leaves the watch armed)",

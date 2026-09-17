@@ -601,7 +601,7 @@ Landed:
   the feature rather than the decision behind it. Reading the value out is
   `get`'s, and watching it move is what the lens is for.
 
-  The value view (`lib/shuttle/lens.ts`) opens as one lens onto that watch,
+  The value view (`packages/cli/lib/shuttle/lens.ts`) opens as one lens onto that watch,
   drawn on the alternate screen so that nothing already written scrolls while
   it is up, and given back on every way out of a run — a signal among them,
   which ends the process without unwinding. It is pure logic plus a frame the
@@ -629,7 +629,7 @@ Landed:
   `:` is the reason this is a slice rather than a handful of key arms. Running
   a line is asynchronous and the prompt loop is what runs one, so the lens
   leaves the line where the loop collects it and the loop hands back what it
-  produced (`asked` and `answered`, `lib/shuttle/lens.ts`). That keeps the lens
+  produced (`asked` and `answered`, `packages/cli/lib/shuttle/lens.ts`). That keeps the lens
   synchronous — a case still drives the whole of it with a key and a value —
   and keeps one line in flight at a time under one cancel, the loop's own. What
   the line produced reaches the transcript the way every line's output does;
@@ -661,7 +661,7 @@ Landed:
   `up` and `down` rather than joining the prompt's history, the prompt's being
   the lines typed at the prompt.
 
-  The line editor is one table both places read (`lib/shuttle/editing.ts`), so
+  The line editor is one table both places read (`packages/cli/lib/shuttle/editing.ts`), so
   a line typed at a frame takes the motions a line typed at the prompt takes,
   and a binding added to either is added to both.
 

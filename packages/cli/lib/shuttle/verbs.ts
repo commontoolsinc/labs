@@ -1647,7 +1647,9 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
       "armed watch writes one line above the prompt per settled\nchange, " +
       "naming the cell that changed rather than what it changed to.\n" +
       "The view scrolls with `j`/`k` and the arrows, `g` and `G` are its " +
-      "ends, and\n`ctrl-c` closes it as `q` does. `/` finds text in the " +
+      "ends, and\n`ctrl-c` closes it as `q` does — where nothing is being " +
+      "typed at the view and no\nline it asked for is running, those being " +
+      "what a `ctrl-c` reaches first. `/`\nfinds text in the " +
       "rendering and `n`/`N`\nmove between the matches; `e` opens the " +
       "watched cell in `$EDITOR`, as\n`edit` does; and `:` runs any shuttle " +
       "line without leaving the view — where\na line typed at the prompt " +
