@@ -140,13 +140,28 @@ jobs:
             tasks/test-selection-publish.ts "${args[@]}" \
             | tee publish.log
 
+      # A job summary is taken whole or not at all: GitHub refuses one
+      # past 1024 KiB, and what it held is lost rather than shortened. So
+      # the log goes through the same cut every task in the tree writes a
+      # summary through, and the rest stays in the job log, which holds
+      # the run's output in full either way. The room asked for leaves
+      # the heading and the fences out of it.
       - name: 📝 Summarize
         if: always()
+        env:
+          SUMMARY_BYTES: 1000000
         run: |
+          set -euo pipefail
+          # A `grep` that matched nothing is a log of only folded lines;
+          # one that could not read the file is the publish step dying
+          # before it wrote one, and says so by failing.
+          grep -v '^test selection: folded [0-9]* of ' publish.log \
+            > summary.log || [ $? -eq 1 ]
           {
             echo "## Test selection"
             echo ""
             echo '```'
-            grep -v '^test selection: folded [0-9]* of ' publish.log || true
+            deno run tasks/step-summary.ts --room "$SUMMARY_BYTES" \
+              < summary.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
