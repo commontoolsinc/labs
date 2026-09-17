@@ -1071,6 +1071,127 @@ describe("schema-view", () => {
       });
     }
 
+    describe("under a schema that names no properties and refuses the rest", () => {
+      // `additionalProperties: false` with no `properties` beside it turns down
+      // every key the data carries. The narrowing reports each one as a bare
+      // `false`, the same return it gives for a shape it cannot read a child out
+      // of, so the view has to tell the two apart from the schema.
+
+      const closed = { type: "object", additionalProperties: false } as const;
+
+      it("leaves out every property, as an eager read does", async () => {
+        const read = await seeded(
+          "turned-down-names-none",
+          { id: "a", driver: "x" },
+          closed,
+        );
+        const eager = read(false);
+        const lazy = read(true);
+        try {
+          expect(Object.keys(eager.get() as object)).toEqual([]);
+          const value = lazy.get() as Record<string, unknown>;
+          expect(Object.keys(value)).toEqual([]);
+          expect("driver" in value).toBe(false);
+          expect(value.driver).toBe(undefined);
+          expect(JSON.parse(JSON.stringify(value))).toEqual(
+            JSON.parse(JSON.stringify(eager.get())),
+          );
+        } finally {
+          await eager.tx.commit();
+          await lazy.tx.commit();
+        }
+      });
+
+      it("leaves out every property of an array element, as an eager read does", async () => {
+        const read = await seeded(
+          "turned-down-names-none-element",
+          { rows: [{ id: "a", driver: "x" }] },
+          {
+            type: "object",
+            properties: { rows: { type: "array", items: closed } },
+          } as const,
+        );
+        const eager = read(false);
+        const lazy = read(true);
+        try {
+          const eagerRow = (eager.get() as { rows: object[] }).rows[0];
+          expect(Object.keys(eagerRow)).toEqual([]);
+          const row = (lazy.get() as { rows: Record<string, unknown>[] })
+            .rows[0];
+          expect(Object.keys(row)).toEqual([]);
+          expect("driver" in row).toBe(false);
+          expect(row.driver).toBe(undefined);
+        } finally {
+          await eager.tx.commit();
+          await lazy.tx.commit();
+        }
+      });
+
+      it("voids the object when the schema requires a property", async () => {
+        const read = await seeded(
+          "turned-down-names-none-required",
+          { id: "a", driver: "x" },
+          { ...closed, required: ["id"] } as const,
+        );
+        const eager = read(false);
+        const lazy = read(true);
+        try {
+          expect(eager.get()).toBe(undefined);
+          expect(lazy.get()).toBe(undefined);
+        } finally {
+          await eager.tx.commit();
+          await lazy.tx.commit();
+        }
+      });
+
+      it("still reads a property that an `allOf` part names", async () => {
+        // An eager read merges the keywords beside an `allOf` into each part
+        // before it looks at a key, so a part can name what the schema itself
+        // does not, and the refusal does not reach that key.
+        const read = await seeded(
+          "turned-down-names-none-allof",
+          { id: "a", driver: "x" },
+          {
+            ...closed,
+            allOf: [{ type: "object", properties: { id: { type: "string" } } }],
+          } as const,
+        );
+        const eager = read(false);
+        const lazy = read(true);
+        try {
+          expect((eager.get() as { id: string }).id).toBe("a");
+          const value = lazy.get() as Record<string, unknown>;
+          expect("id" in value).toBe(true);
+          expect(value.id).toBe("a");
+        } finally {
+          await eager.tx.commit();
+          await lazy.tx.commit();
+        }
+      });
+    });
+
+    it("hands over every property under a schema that names none and refuses none", async () => {
+      // Naming no properties turns nothing down; refusing the unnamed ones is
+      // what does.
+      const read = await seeded(
+        "names-none-refuses-none",
+        { id: "a", driver: "x" },
+        { type: "object" } as const,
+      );
+      const eager = read(false);
+      const lazy = read(true);
+      try {
+        expect(Object.keys(eager.get() as object)).toEqual(["id", "driver"]);
+        const value = lazy.get() as Record<string, unknown>;
+        expect(Object.keys(value)).toEqual(["id", "driver"]);
+        expect("driver" in value).toBe(true);
+        expect(value.driver).toBe("x");
+      } finally {
+        await eager.tx.commit();
+        await lazy.tx.commit();
+      }
+    });
+
     it("voids the object when a required property is one it does not describe", async () => {
       // A schema that names its properties and says nothing about the rest
       // reaches the narrowing as a missing property rather than as `false`, and
