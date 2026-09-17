@@ -459,10 +459,11 @@ transformed and SES-verified on every pull request
 replays each of those patterns against every contract recorded for it
 under `packages/patterns/baselines/`, because the updater performs no
 structural check before swapping a pattern onto a running piece.
-Pattern tests run at `enforce-explicit`, the same mode the servers run,
+Pattern tests run at `enforce-strict`, the same mode the servers run,
 rather than in an observe mode that would let violations pass. That
 is the runtime's default, no flag sets it, and both server hosts are
-pinned to it (`packages/runner/src/runtime.ts`, `runtime-presets.ts`).
+pinned to it (`packages/runner/src/runtime.ts`, `runtime-presets.ts`);
+a test that needs a laxer rung states one.
 The two-readers test at the top of this document runs at that plain
 default. A grep will also turn up
 `DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"` in `cfc/types.ts`, which is

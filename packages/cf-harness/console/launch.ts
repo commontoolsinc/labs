@@ -35,6 +35,7 @@ import { isDID } from "@commonfabric/identity/did";
 import { parseArgs } from "@std/cli/parse-args";
 import { join } from "@std/path";
 
+import { DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE } from "../src/config.ts";
 import type { HarnessConnectorGrantSpec } from "../src/contracts/well-known-grants.ts";
 import {
   DEFAULT_DOCKER_BINARY,
@@ -523,7 +524,8 @@ export const resolveConsoleLaunchPlan = (
       : `.cf-harness-console-${instance.id}-${port}`);
   const posture = options.posture ?? "max-enforcement";
   const flowLabels = options.flowLabels ?? "persist";
-  const enforcementMode = options.enforcementMode ?? "enforce-explicit";
+  const enforcementMode = options.enforcementMode ??
+    DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE;
 
   const deploymentDefault = "labs deployment default";
   const registrationSourceName =

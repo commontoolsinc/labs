@@ -202,6 +202,7 @@ describe("task-outcomes", () => {
       const result = await loop.runPrompt({
         prompt: "Read mail",
         maxModelTurns: 2,
+        promptSlotBinding: directPromptSlotBindingFor("terminal"),
       });
       expect(requests).toHaveLength(2);
       expect(result.taskOutcome).toEqual({ outcome: "completed" });

@@ -303,7 +303,7 @@ describe(
         // `runtimePresets.patternTest`'s pin, so a move there lands as a
         // failure in this test rather than as a quietly different harness.
         expect((await initParticipant(server, {})).cfcEnforcementMode)
-          .toBe("enforce-explicit");
+          .toBe("enforce-strict");
       } finally {
         await server.close().catch(() => {});
       }
@@ -320,7 +320,9 @@ describe(
             .cfcFlowLabels,
         ).toBe(mode);
       }
-      expect((await initParticipant(server, {})).cfcFlowLabels).toBe("off");
+      expect((await initParticipant(server, {})).cfcFlowLabels).toBe(
+        "persist",
+      );
     });
 
     it("rejects an invalid flow-label mode before initializing a participant", async () => {
