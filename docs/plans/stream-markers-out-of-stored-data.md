@@ -457,13 +457,14 @@ than what the list first said, the item says what it does now and why.
 Stage 3 is gated on the compatibility decision above, not on anything the data
 can show, because nothing in the data marks a piece as ready. Setup re-emits
 only manifest links; a running piece reuses its setup without re-emitting them
-(`runner.ts:2838`); the setup marker records pattern identity, not a format
-(`runner.ts:3257`); and links written into data before stage 1 are never
-rewritten. So what lets the value read go is the owner resolution above for
-pieces whose manifests are stamped and the compatibility decision above for
-pieces whose manifests are not; a waiting period settles neither. Documents
-that still hold a sentinel are harmless after stage 3: the value is ignored,
-and nothing reads it.
+(`runner.ts:2840`); the setup marker records pattern identity, not a format
+(written at `runner.ts:3257`, reduced to matches, other or absent by
+`storedSetupMarker` at `:1731`); and links written into data before stage 1
+are never rewritten. So what lets the value read go is the owner resolution
+above for pieces whose manifests are stamped and the compatibility decision
+above for pieces whose manifests are not; a waiting period settles neither.
+Documents that still hold a sentinel are harmless after stage 3: the value is
+ignored, and nothing reads it.
 
 ## Testing
 
