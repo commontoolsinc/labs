@@ -116,11 +116,11 @@ describe("cli piece parsing", () => {
       symbol: "named",
       source: {
         ref: `cf:pattern:${identity}`,
-        repository: "https://github.com/commontoolsinc/labs",
+        repository: "https://github.com/commonfabric/labs",
         entry: "/packages/patterns/notes/note.tsx",
       },
     })).toBe(
-      "https://github.com/commontoolsinc/labs#/packages/patterns/notes/note.tsx",
+      "https://github.com/commonfabric/labs#/packages/patterns/notes/note.tsx",
     );
     expect(formatPatternRef({
       identity,
@@ -2939,7 +2939,7 @@ describe("cli piece parsing", () => {
       "set-home",
       "--reset",
       "--repository",
-      "https://github.com/commontoolsinc/labs",
+      "https://github.com/commonfabric/labs",
     ])).rejects.toThrow("Cannot use --repository with --reset");
   });
 
@@ -2978,14 +2978,14 @@ describe("cli piece parsing", () => {
   it("builds repository-aware entries from deployment flags", () => {
     expect(localPatternEntry("/repo/pattern.tsx", {
       mainExport: "named",
-      repository: "https://github.com/commontoolsinc/labs",
+      repository: "https://github.com/commonfabric/labs",
       root: "/repo",
       test: ["/repo/pattern.test.tsx", "/repo/other.test.tsx"],
       datafile: ["/repo/data/cities.json"],
     })).toEqual({
       mainPath: "/repo/pattern.tsx",
       mainExport: "named",
-      repository: "https://github.com/commontoolsinc/labs",
+      repository: "https://github.com/commonfabric/labs",
       rootPath: "/repo",
       testPaths: ["/repo/pattern.test.tsx", "/repo/other.test.tsx"],
       dataFilePaths: ["/repo/data/cities.json"],
@@ -3010,7 +3010,7 @@ describe("cli piece parsing", () => {
         identity: "/tmp/test.key",
         cell: PIECE,
         mainExport: "named",
-        repository: "https://github.com/commontoolsinc/labs",
+        repository: "https://github.com/commonfabric/labs",
         root: "/repo",
         test: ["/repo/pattern.test.tsx"],
         dangerouslyAllowIncompatibleSchema: true,
@@ -3036,7 +3036,7 @@ describe("cli piece parsing", () => {
       entry: {
         mainPath: "/repo/pattern.tsx",
         mainExport: "named",
-        repository: "https://github.com/commontoolsinc/labs",
+        repository: "https://github.com/commonfabric/labs",
         rootPath: "/repo",
         testPaths: ["/repo/pattern.test.tsx"],
       },
@@ -3304,7 +3304,7 @@ describe("cli piece parsing", () => {
         identity: "/tmp/test.key",
         cell: PIECE,
         mainExport: "named",
-        repository: "https://github.com/commontoolsinc/labs",
+        repository: "https://github.com/commonfabric/labs",
         root: "/repo",
         test: ["/repo/pattern.test.tsx"],
       },
@@ -3328,7 +3328,7 @@ describe("cli piece parsing", () => {
       entry: {
         mainPath: "/repo/pattern.tsx",
         mainExport: "named",
-        repository: "https://github.com/commontoolsinc/labs",
+        repository: "https://github.com/commonfabric/labs",
         rootPath: "/repo",
         testPaths: ["/repo/pattern.test.tsx"],
       },
@@ -3381,7 +3381,7 @@ describe("cli piece parsing", () => {
       symbol: "default",
       source: {
         ref: `cf:pattern:${"A".repeat(43)}`,
-        repository: "https://github.com/commontoolsinc/labs",
+        repository: "https://github.com/commonfabric/labs",
         entry: "/notes/note.tsx",
       },
     };
@@ -4914,7 +4914,7 @@ describe("cli piece parsing", () => {
   });
 
   it("forwards repository metadata through piece creation and updates", async () => {
-    const repository = "https://github.com/commontoolsinc/labs";
+    const repository = "https://github.com/commonfabric/labs";
     const entry = { mainPath: "/repo/main.tsx", repository };
     const program = {} as any;
     let createOptions: unknown;
@@ -5086,7 +5086,7 @@ describe("cli piece parsing", () => {
   });
 
   it("forwards repository metadata when deploying a home pattern", async () => {
-    const repository = "https://github.com/commontoolsinc/labs";
+    const repository = "https://github.com/commonfabric/labs";
     let recreateOptions: unknown;
 
     await setHomePattern(

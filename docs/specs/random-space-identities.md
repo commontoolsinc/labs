@@ -99,15 +99,15 @@ ordinary routed endpoint. It does not allocate another DID.
 ## Deployment mappings
 
 The current Estuary and Rapids
-[process inventory](https://github.com/commontoolsinc/infra/blob/16e48222254059cc9eff53f5064ab696fbd37236/ansible/vars/toolshed-binary.yml)
+[process inventory](https://github.com/commonfabric/infra/blob/16e48222254059cc9eff53f5064ab696fbd37236/ansible/vars/toolshed-binary.yml)
 runs 21 Toolshed processes on one host. The checked-in
-[nginx configuration](https://github.com/commontoolsinc/infra/blob/16e48222254059cc9eff53f5064ab696fbd37236/ansible/roles/nginx/templates/toolshed.conf.j2)
+[nginx configuration](https://github.com/commonfabric/infra/blob/16e48222254059cc9eff53f5064ab696fbd37236/ansible/roles/nginx/templates/toolshed.conf.j2)
 round-robins ordinary API requests across five processes and routes a Memory
 WebSocket carrying `space=<did>` to one of sixteen processes. Every process
 loads the same
-[service environment](https://github.com/commontoolsinc/infra/blob/16e48222254059cc9eff53f5064ab696fbd37236/ansible/roles/toolshed-binary/templates/toolshed-binary%40.service.j2),
+[service environment](https://github.com/commonfabric/infra/blob/16e48222254059cc9eff53f5064ab696fbd37236/ansible/roles/toolshed-binary/templates/toolshed-binary%40.service.j2),
 and the host prepares one
-[data volume](https://github.com/commontoolsinc/infra/blob/16e48222254059cc9eff53f5064ab696fbd37236/ansible/playbooks/toolshed_setup_disk.yml).
+[data volume](https://github.com/commonfabric/infra/blob/16e48222254059cc9eff53f5064ab696fbd37236/ansible/playbooks/toolshed_setup_disk.yml).
 Random-space creation must send control-space and newly allocated space
 connections through that nginx route. In particular, each production
 `MEMORY_URL` must name the host-internal routed endpoint rather than a

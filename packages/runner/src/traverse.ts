@@ -2918,7 +2918,7 @@ function trackMetadataDocument(
 // We could do this by forking our state, then doing an allOf with each
 // schema. That works well for standards, but I'd have to figure out how
 // to combine the resulting objects into one.
-// NOTE: I forgot about https://github.com/commontoolsinc/labs/pull/1868,
+// NOTE: I forgot about https://github.com/commonfabric/labs/pull/1868,
 // which is a more sophisticated approach.
 export function combineOptionalSchema(
   parentSchema: JSONSchema | undefined,

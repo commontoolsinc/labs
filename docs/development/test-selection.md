@@ -436,9 +436,9 @@ A bootstrap or recovery is accepted only after all three of these are true:
 These checks are read-only:
 
 ```bash
-gh run list --repo commontoolsinc/labs \
+gh run list --repo commonfabric/labs \
   --workflow test-selection.yml --branch main --limit 10
-gh run view RUN_ID --repo commontoolsinc/labs --log
+gh run view RUN_ID --repo commonfabric/labs --log
 deno run --allow-net --allow-env - <<'TS'
 import { listObjectTimes } from "@commonfabric/test-support/records";
 import { storeBucket } from "./tasks/test-records-config.ts";

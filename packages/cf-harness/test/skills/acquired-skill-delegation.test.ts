@@ -23,7 +23,7 @@ import {
   responsesBodyFromChatFixture,
 } from "../support/responses-fixture.ts";
 
-const OWNER = "commontoolsinc";
+const OWNER = "commonfabric";
 const REPO = "acquirable";
 const SLUG = "budget";
 const SKILL_ID = `${OWNER}/${REPO}/${SLUG}`;

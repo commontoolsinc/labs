@@ -329,8 +329,8 @@ figure is the age badge in the header.
 
 | tile | source | needs |
 |---|---|---|
-| labs ci, labs ci trust, labs ci duration | GitHub Actions (`deno.yml` on main in `commontoolsinc/labs`), via the REST API | `GH_TOKEN` (or `GITHUB_TOKEN`) |
-| loom ci, loom ci trust, loom ci duration | the same three tiles for `commontoolsinc/loom` (`test-fast.yml` on main) | `GH_TOKEN` (read access to loom); optional `DASHBOARD_LOOM_REPO` |
+| labs ci, labs ci trust, labs ci duration | GitHub Actions (`deno.yml` on main in `commonfabric/labs`), via the REST API | `GH_TOKEN` (or `GITHUB_TOKEN`) |
+| loom ci, loom ci trust, loom ci duration | the same three tiles for `commonfabric/loom` (`test-fast.yml` on main) | `GH_TOKEN` (read access to loom); optional `DASHBOARD_LOOM_REPO` |
 | recent main runs | Labs and Loom main-run snapshots, refreshed independently and merged chronologically whenever either arrives; each row is tagged with its repo | `GH_TOKEN` |
 | commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent main runs | `GH_TOKEN` |
 | CI duration history → `/bench?view=ci` | labs and loom job, shard-group, and end-to-end workflow duration trends. The duration tiles open their matching repository view | `GH_TOKEN` |
@@ -339,7 +339,7 @@ figure is the age badge in the header.
 | test selection | what share of the corpus the newest selection manifest would have a pull request run, read from the same manifest. The manifest's packing is built with nothing mandatory, so the share is the one a pull request touching no test would get; a real one re-packs against its own diff and spends part of the same budget on what that diff makes mandatory. Amber once that manifest is over eight hours old, because selection quality decays with it, and amber too while the corpus holds a test costing more on its own than a whole lane's budget, since no packing can place one and a pull request then runs it only where its own diff makes it mandatory. Red when a lane's projected work is past the budget the manifest was packed to. Both of the last two take the sub line off the corpus count, the red one first. The sparkline plots the selected percentage across every available manifest, using each manifest's own corpus size. Gray on the same conditions as the flaky tests tile, including an empty latest corpus | optional `GH_TOKEN` for publisher activity |
 | test selection detail → `/test-selection` | the manifest behind both test tiles, at full width: every lane against its budget and how many tests it holds, every test held back as flaky with the rate it was measured at, and every test no lane can hold. Both tiles link here, the flaky tests tile straight to its flaky section | none |
 | coverage debt | the repository's whole uncovered-line count and what a median day does to it, read from the `perf-metrics` artifact of each day's newest successful `main` run (`docs/development/COVERAGE.md`). The headline is the count; under it a signed rate gives the median day's move over the last three weeks, and the chart spans eight weeks with those days highlighted. Its vertical scale uses the highlighted days, so older extremes can extend outside the chart. Amber means that median is a rise, which takes more than half the days in the window, so a day that added debt says nothing on its own. It never turns red, and it goes gray rather than stand on a stale number: when five days have passed with nothing measured, and until the window holds a week of days to take a median over. A run whose pattern compile cache missed is passed over, because a cold run reaches branches a warm one does not and reads about a tenth of a percent low. It looks for a landing every five minutes, which costs one request when none has happened; the figure itself cannot exist until a run's Coverage Check uploads it, about twelve minutes after the commit lands | `GH_TOKEN` |
-| production | a direct synthetic HTTP check of the public common.tools site, synthetic HTTP checks of `/_health` on estuary and rapids, plus a name or reachability check for all three and for the bastion, the production and staging shells, the LLM gateway, and the sandbox service. When every host is well the headline counts them up. When a host has nothing behind it at all, the headline names that host, as in `bastion down`, and counts them when there is more than one, as in `2 hosts down`. Otherwise it names the worst condition seen, such as a response time or an HTTP status. Estuary and rapids keep their response times in the body while the tile is green or orange. Common.tools stays out of the body while it is good. Hosts without a health request stay out for as long as they answer, and a red tile drops all the green hosts. Red means the tile found nothing at the other end — a name with no A or AAAA record, a tailnet host the proxy cannot reach, or an HTTP request that never connected — and it also means a server health response other than 200, a health response over 1000 ms, or a common.tools 5xx response. Orange means a health response over 500 ms, a common.tools 4xx response or response over 2500 ms, or a resolver that failed, which leaves the tile unable to say either way. Hosts outside the tailnet are looked up by the dashboard itself. Tailnet hosts go through `PROD_PROXY`, because a dashboard that needs that proxy has no view of Tailscale's MagicDNS. Estuary and rapids are covered there by their health requests. The bastion has no health endpoint, so it gets a SOCKS5 connect that leaves the name for the proxy to resolve. The bastion records that connect in its own logs, so a bastion that answers is left alone for an hour and counts as reachable in between. One that does not answer is asked again on the next refresh, since a connect that reaches nothing leaves nothing behind. With no `PROD_PROXY` set, every host is looked up locally | optional `COMMON_TOOLS_URL`, `ESTUARY_URL`, `RAPIDS_URL`, `BASTION_HOST`, `PROD_PROXY`; `PROD_URL` remains an alias for `ESTUARY_URL` |
+| production | a direct synthetic HTTP check of the public commonfabric.com site, synthetic HTTP checks of `/_health` on estuary and rapids, plus a name or reachability check for all three and for the bastion, the production and staging shells, the LLM gateway, and the sandbox service. When every host is well the headline counts them up. When a host has nothing behind it at all, the headline names that host, as in `bastion down`, and counts them when there is more than one, as in `2 hosts down`. Otherwise it names the worst condition seen, such as a response time or an HTTP status. Estuary and rapids keep their response times in the body while the tile is green or orange. Commonfabric.com stays out of the body while it is good. Hosts without a health request stay out for as long as they answer, and a red tile drops all the green hosts. Red means the tile found nothing at the other end — a name with no A or AAAA record, a tailnet host the proxy cannot reach, or an HTTP request that never connected — and it also means a server health response other than 200, a health response over 1000 ms, or a commonfabric.com 5xx response. Orange means a health response over 500 ms, a commonfabric.com 4xx response or response over 2500 ms, or a resolver that failed, which leaves the tile unable to say either way. Hosts outside the tailnet are looked up by the dashboard itself. Tailnet hosts go through `PROD_PROXY`, because a dashboard that needs that proxy has no view of Tailscale's MagicDNS. Estuary and rapids are covered there by their health requests. The bastion has no health endpoint, so it gets a SOCKS5 connect that leaves the name for the proxy to resolve. The bastion records that connect in its own logs, so a bastion that answers is left alone for an hour and counts as reachable in between. One that does not answer is asked again on the next refresh, since a connect that reaches nothing leaves nothing behind. With no `PROD_PROXY` set, every host is looked up locally | optional `COMMON_FABRIC_URL`, `ESTUARY_URL`, `RAPIDS_URL`, `BASTION_HOST`, `PROD_PROXY`; `PROD_URL` remains an alias for `ESTUARY_URL` |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
 | cloud spend | BigQuery billing export, after credits, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
 | github spend | the organization's whole metered GitHub bill, projected to month-end in USD: every product its billing report carries, added into one figure. The 45-day chart labels the line with MTD spend, and the header shows the same total. A report that stopped being written more than four days ago is unavailable rather than a run of $0 days. A month whose report cannot be read breaks the line across those days rather than charting them as $0. "What the GitHub figure covers" below says which spend reaches the API | `GH_TOKEN` (with org billing read); optional `GH_BILLING_ORG` |
@@ -353,7 +353,7 @@ figure is the age badge in the header.
 | github users | organization members plus outside collaborators, with each roster's size charted over about two months. The headline counts unique users across both rosters | `GH_TOKEN` (with org Members read) |
 
 The **production** tile starts gray and says `waiting for connectivity` until
-its direct **common.tools** check receives an HTTP response. It performs no
+its direct **commonfabric.com** check receives an HTTP response. It performs no
 other host checks before that signal. The confirmation lasts for the process
 lifetime, so an unreachable host is then reported as an outage even when every
 host is unreachable together.
@@ -466,7 +466,7 @@ Every tile that reads a private source is gated on its own env var(s) and grays
 out until they are set. The GitHub tiles need `GH_TOKEN`; every other
 private-source tile is independently optional — set only the ones you want, and
 the rest stay gray without breaking the board. Each key below lists what it
-powers, the rights it needs, and how to mint it. (`common.tools` and
+powers, the rights it needs, and how to mint it. (`commonfabric.com` and
 `production` need no key.)
 
 Almost every credential is shown only once at creation — copy it immediately;
@@ -479,9 +479,9 @@ counterparts, **recent main runs**, **coverage debt**, **github spend**, and
 **github users**. It also powers the optional publisher-activity indicators on
 **flaky tests** and **test selection**; their public measurements need no token.
 Needs
-repo **Actions: read** on both `commontoolsinc/labs` and `commontoolsinc/loom`;
+repo **Actions: read** on both `commonfabric/labs` and `commonfabric/loom`;
 the github-ci-spend tile additionally needs org **Administration: read** on
-`commontoolsinc`. The **github users** tile needs org **Members: read**. One
+`commonfabric`. The **github users** tile needs org **Members: read**. One
 fine-grained token can carry all of these permissions:
 
 The account that owns the token must be a member of the organization. GitHub's
@@ -490,10 +490,10 @@ organization member; other callers see only public memberships.
 
 1. GitHub → your avatar → **Settings** → **Developer settings** → **Personal
    access tokens** → **Fine-grained tokens** → **Generate new token**.
-2. Set **Resource owner** to the **commontoolsinc** organization (not your
+2. Set **Resource owner** to the **commonfabric** organization (not your
    personal account) — org ownership is what unlocks the billing permission.
-3. **Repository access** → **Only select repositories** → `commontoolsinc/labs`
-   and `commontoolsinc/loom`.
+3. **Repository access** → **Only select repositories** → `commonfabric/labs`
+   and `commonfabric/loom`.
 4. **Repository permissions**: set **Actions** and **Contents** to **Read-only**.
 5. **Organization permissions**: set **Members** to **Read-only** for GitHub
    users. Set **Administration** to **Read-only** for github spend. Only an org
@@ -501,8 +501,8 @@ organization member; other callers see only public memberships.
    permission when its tile is not needed.
 6. **Generate token** and copy it (`github_pat_…`, shown once).
 
-If you only need the labs CI tiles, keep `commontoolsinc` as the resource owner,
-select only `commontoolsinc/labs`, and grant Actions/Contents read without any
+If you only need the labs CI tiles, keep `commonfabric` as the resource owner,
+select only `commonfabric/labs`, and grant Actions/Contents read without any
 organization permissions. Classic PATs also work (use `read:org` for GitHub
 users and `admin:org` for github spend). If the org requires approval for
 fine-grained tokens, yours stays pending until an owner approves it.
@@ -736,7 +736,7 @@ it.
 
 | env var | tile | purpose |
 |---|---|---|
-| `GH_BILLING_ORG` | github spend | org login for billing (default: the org from `DASHBOARD_REPO` — `commontoolsinc`). |
+| `GH_BILLING_ORG` | github spend | org login for billing (default: the org from `DASHBOARD_REPO` — `commonfabric`). |
 | `MODEL_MONTHLY_BUDGET` | model spend | combined monthly USD budget across providers. |
 | `GCP_SA_KEY` | cloud spend | a service-account key JSON (the whole file, as the value) for local development; in GKE, Workload Identity supplies the token and this is unset. |
 | `GCP_DAILY_BUDGET` | cloud spend | daily USD budget. The projected month is compared with this daily rate multiplied by the number of days in the month. |
@@ -744,8 +744,8 @@ it.
 | `RAPIDS_URL` | production | the rapids server as an origin. The tile checks `/_health` on it and links to it. Defaults to `https://rapids.saga-castor.ts.net`. |
 | `BASTION_HOST` | production | the deployment bastion's hostname. A URL is also accepted; its hostname is used, along with its port when it carries one, which otherwise is 22. A tailnet name is checked hourly by connecting through `PROD_PROXY`, and any other name by an A and AAAA lookup on every refresh. Defaults to `bastion.saga-castor.ts.net`. |
 | `PROD_PROXY` | production | optional proxy for reaching tailnet hosts. Use `socks5h://127.0.0.1:1055` with the Tailscale userspace proxy. Also accepts `socks5://`, `http://`, and `https://`; invalid values and URLs containing credentials fail closed instead of fetching directly. Setting it also moves the tailnet name checks onto the proxy, since a dashboard that needs a proxy cannot resolve MagicDNS names itself. The bastion check needs a SOCKS5 proxy to do that, and stays gray over an `http://` or `https://` one. |
-| `COMMON_TOOLS_URL` | production | override the public-site URL (e.g. the `www` host if the apex redirects). |
-| `DASHBOARD_REPO` | CI tiles, github users | which repo the CI tiles read. Its owner is the organization the **github users** tile reads (default `commontoolsinc/labs`). |
+| `COMMON_FABRIC_URL` | production | override the public-site URL (e.g. the `www` host if the apex redirects). |
+| `DASHBOARD_REPO` | CI tiles, github users | which repo the CI tiles read. Its owner is the organization the **github users** tile reads (default `commonfabric/labs`). |
 | `DASHBOARD_CACHE_DIR` | server caches | directory for all persistent dashboard cache files (default: the platform temp directory). |
 | `SIGNOZ_UI_URL` | prod errors, dau | browser-facing SigNoz URL for the explorer pop-outs: **prod errors** links to `/logs/logs-explorer` and **dau** to `/traces-explorer` under it. Defaults to `SIGNOZ_URL` when that is a public `https://` URL. An in-cluster `http://` URL, which a browser cannot reach, leaves both tiles with no pop-out at all, so set this whenever the server reaches SigNoz over one. |
 | `PROD_SERVICE` | prod errors, dau | the `service.name` production reports under in SigNoz, which both trace-reading tiles scope to. Defaults to `toolshed-production`. A name outside `[A-Za-z0-9._-]` is ignored, since it lands inside a query expression. |
@@ -1118,7 +1118,7 @@ Env knobs for the dev loop:
   organization for GitHub users.
 - `ESTUARY_URL` and `RAPIDS_URL` — point either production-tile health check at
   a local server. `PROD_URL` remains an alias for `ESTUARY_URL`.
-- `COMMON_TOOLS_URL` — replace the public-site target in the production tile.
+- `COMMON_FABRIC_URL` — replace the public-site target in the production tile.
 - `BASTION_HOST` — replace the default bastion hostname the production tile
   checks.
 - `PROD_PROXY` — route the estuary and rapids health checks through a proxy, for

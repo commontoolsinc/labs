@@ -40,10 +40,10 @@ Driven by `scripts/hostile-skill-demo.sh`.
 
 `acquirable-skills/cf-spend-digest/` is a skill this repository publishes for
 the CT-2091 demo to acquire by pin, rather than one an operator installs under
-`--skills-root`: the demo run names it `commontoolsinc/labs/cf-spend-digest`,
-and `acquire_skill` resolves that against this public repository's default
-branch and reads the pinned commit's bytes. It holds a `SKILL.md` and one script
-under `scripts/` and nothing else, which is the whole of what pinned acquisition
+`--skills-root`: the demo run names it `commonfabric/labs/cf-spend-digest`, and
+`acquire_skill` resolves that against this public repository's default branch
+and reads the pinned commit's bytes. It holds a `SKILL.md` and one script under
+`scripts/` and nothing else, which is the whole of what pinned acquisition
 admits — a reference, an asset, a package file or a nested directory anywhere
 under the skill root refuses the acquisition outright, so the tree is flat on
 purpose. `scripts/category-budgets.sh` prints the skill author's own

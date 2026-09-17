@@ -262,7 +262,7 @@ pieces/.index.json    # {"todo-app": "of:ba4jcbvpq3k5soo...", ...}
   "symbol": "default",
   "source": {
     "ref": "cf:pattern:<content-hash>",
-    "repository": "https://github.com/commontoolsinc/labs",
+    "repository": "https://github.com/commonfabric/labs",
     "entry": "/packages/patterns/todo-app.tsx"
   }
 }

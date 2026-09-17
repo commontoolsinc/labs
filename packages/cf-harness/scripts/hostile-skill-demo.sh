@@ -73,7 +73,7 @@ SKILLS_REGISTRY_URL="${SKILLS_REGISTRY_URL:-https://skills.sh}"
 # public, so a fixture on main is a real pinned acquisition. A third-party skill
 # works here too, but one without a `scripts/` directory gives the run no
 # acquired script to execute and Arm A degrades to instructions only.
-ACQUIRE_SKILL_ID="${ACQUIRE_SKILL_ID:-commontoolsinc/labs/cf-spend-digest}"
+ACQUIRE_SKILL_ID="${ACQUIRE_SKILL_ID:-commonfabric/labs/cf-spend-digest}"
 ACQUIRE_SKILL_SCRIPT="${ACQUIRE_SKILL_SCRIPT:-scripts/category-budgets.sh}"
 ARTIFACT_ROOT="${ARTIFACT_ROOT:-$here/.cf-harness-hostile-demo}"
 WORKSPACE="${WORKSPACE:-$ARTIFACT_ROOT/workspace}"

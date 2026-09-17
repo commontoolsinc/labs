@@ -12,7 +12,7 @@
  *
  * Environment:
  *   GITHUB_TOKEN        - Required.
- *   GITHUB_REPOSITORY   - Optional, defaults to "commontoolsinc/labs".
+ *   GITHUB_REPOSITORY   - Optional, defaults to "commonfabric/labs".
  *   GITHUB_SERVER_URL   - Optional, defaults to "https://github.com".
  *   GITHUB_RUN_ID       - Required. Current workflow run ID.
  *   PR_NUMBER           - Required. Pull request number.

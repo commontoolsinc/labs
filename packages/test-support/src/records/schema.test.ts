@@ -28,7 +28,7 @@ const CONTEXT: RunContext = {
   schema: 1,
   line: "context",
   reportId: "01JEXAMPLEULID0000000000",
-  repo: "commontoolsinc/labs",
+  repo: "commonfabric/labs",
   commit: "0123456789abcdef0123456789abcdef01234567",
   dirty: false,
   branch: "main",

@@ -19,7 +19,7 @@ an explicit component override for local development and integration tests.
 Hosts supply that configuration through the exported `presenceUrlContext`;
 Labs Shell maps the optional build-time `PRESENCE_URL` into that context. The
 Worker and Durable Object live in the independent private
-[`commontoolsinc/cloudflare-copresence`](https://github.com/commontoolsinc/cloudflare-copresence)
+[`commonfabric/cloudflare-copresence`](https://github.com/commonfabric/cloudflare-copresence)
 repository so their deployment and operational access do not become part of a
 Labs or Memory deployment.
 
@@ -303,7 +303,7 @@ Purpose: provide the smallest deployable latest-value relay.
 
 - [x] Add the Worker entry point, Durable Object, protocol module, tests, and
       Wrangler configuration to the independent
-      `commontoolsinc/cloudflare-copresence` repository.
+      `commonfabric/cloudflare-copresence` repository.
 - [x] Route one versioned WebSocket endpoint to a Durable Object named from the
       opaque room id.
 - [x] Assign participant ids server-side, validate every client replacement,

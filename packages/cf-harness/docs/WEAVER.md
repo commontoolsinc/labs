@@ -319,7 +319,7 @@ shows in the pane.
 ### A skill's script, run in the sandbox, folded into a piece
 
 ```text
-/cf-harness Use the skill commontoolsinc/labs/cf-spend-digest: run its budget script and build me a piece showing my actual spending against those budgets from my bank transactions; slug budget-digest-weaver.
+/cf-harness Use the skill commonfabric/labs/cf-spend-digest: run its budget script and build me a piece showing my actual spending against those budgets from my bank transactions; slug budget-digest-weaver.
 ```
 
 Needs the `finance` grant and two more things. The console must run skill

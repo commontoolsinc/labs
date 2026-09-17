@@ -394,7 +394,7 @@ A renderer may prefer the compact form for a collection that offers one. None
 offers it yet, so the flag a collection declares eligibility with — `compact` —
 is reserved: setting it states that this collection's member names hold no
 hyphen, and nothing reads the statement
-([#6986](https://github.com/commontoolsinc/labs/issues/6986)).
+([#6986](https://github.com/commonfabric/labs/issues/6986)).
 
 ## Rendering
 
@@ -737,13 +737,13 @@ resolver reading it could verify that a binding and its target agree and report
 a mismatch. Nothing reads the declaration: no collection sets `name`, no
 resolver compares one, and member resolution
 (`packages/runner/src/slug-resolution.ts`) reads no part of it. Making one
-consumer real is [#6986](https://github.com/commontoolsinc/labs/issues/6986),
+consumer real is [#6986](https://github.com/commonfabric/labs/issues/6986),
 whose natural first consumer is that check, with a name assigned onto a
 collection written into the declaration.
 
 **Whether member resolution applies a collection's grammar.** It applies no
 member-name grammar
-([#6994](https://github.com/commontoolsinc/labs/issues/6994)):
+([#6994](https://github.com/commonfabric/labs/issues/6994)):
 `resolveSlugReference` (`packages/runner/src/slug-resolution.ts`) looks the
 segment after a collection's name up as a key of that collection's map. The
 allocator's grammar lives in the collection's library, as `isMemberName` in
@@ -759,7 +759,7 @@ any collection that names them some other way, such as `docs/getting-started` in
 "Names resolve through collections". Applying each collection's own grammar
 would take reading it from the collection's `naming` declaration. Nothing reads
 that declaration today (the question above,
-[#6986](https://github.com/commontoolsinc/labs/issues/6986)), and it carries no
+[#6986](https://github.com/commonfabric/labs/issues/6986)), and it carries no
 complete grammar predicate to test a key against. Its fields are `name`,
 `policy`, and `compact`, and only the last says anything about a member name at
 all — the eligibility rule in "The compact form" above — which rules one

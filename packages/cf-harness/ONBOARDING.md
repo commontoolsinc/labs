@@ -60,7 +60,7 @@ first run does without.
 
 2. **Docker with the `runsc-cfc` runtime.** Every tool the model runs executes
    in a container under that runtime. On macOS, follow the gVisor
-   [Docker Desktop CFC setup guide](https://github.com/commontoolsinc/gvisor/blob/cfc_v2/g3doc/user_guide/quick_start/docker_desktop_cfc.md);
+   [Docker Desktop CFC setup guide](https://github.com/commonfabric/gvisor/blob/cfc_v2/g3doc/user_guide/quick_start/docker_desktop_cfc.md);
    it owns installation and registration. Confirm the result:
 
    ```sh
@@ -103,7 +103,7 @@ first run does without.
    publishes what a run built. Access is by DID, and getting on the allowlist is
    a manual step an admin performs in the Firebase console, not something you
    can do from here:
-   [pattern-index ONBOARDING §2](https://github.com/commontoolsinc/pattern-index/blob/main/ONBOARDING.md#2-access)
+   [pattern-index ONBOARDING §2](https://github.com/commonfabric/pattern-index/blob/main/ONBOARDING.md#2-access)
    names the collection and the document to add. The repository is private, so
    the link needs GitHub access.
 
@@ -637,7 +637,7 @@ scripts/pattern-index-suite.json --console=<console-url>
 --out=<absolute-measurement-output-directory>`
 from `packages/cf-harness`; success writes `report.md` and `report.json` and
 exits zero only when every task completed. The pattern-index repository's
-[own onboarding](https://github.com/commontoolsinc/pattern-index/blob/main/ONBOARDING.md)
+[own onboarding](https://github.com/commonfabric/pattern-index/blob/main/ONBOARDING.md)
 owns allowlisting, signed direct calls, corpus behavior, and its repo map.
 
 ## 10. What works today and what does not
@@ -735,6 +735,6 @@ not a reason to silently drop to `observe`.
 - [`../../docs/development/CONFIGURATION.md`](../../docs/development/CONFIGURATION.md)
   — environment-variable authority, including toolshed's URL-valued
   `MEMORY_DIR`.
-- [pattern-index `ONBOARDING.md`](https://github.com/commontoolsinc/pattern-index/blob/main/ONBOARDING.md)
+- [pattern-index `ONBOARDING.md`](https://github.com/commonfabric/pattern-index/blob/main/ONBOARDING.md)
   — allowlist, signed API calls, corpus behavior, troubleshooting, and the
   pattern-index repo map.

@@ -10,7 +10,7 @@
 import { type Environment, readEnv } from "@commonfabric/test-support/records";
 
 /** Canonical name of this repository in every record context. */
-export const REPO = "commontoolsinc/labs";
+export const REPO = "commonfabric/labs";
 
 /** GCP project holding the store and the per-person service accounts. */
 export const GCP_PROJECT = "commontools-core";

@@ -386,7 +386,7 @@ Landed:
   reference grammar rather than shuttle's, and it resolves a piece by slug,
   so the reservation is a divergence from what `cf` reads — at two slug
   values and no others. Issue
-  [#6992](https://github.com/commontoolsinc/labs/issues/6992) retires it by
+  [#6992](https://github.com/commonfabric/labs/issues/6992) retires it by
   refusing those two as slugs at `set-slug`.
 
   `get` settles nothing, and that is the same asymmetry `#argument` has.
@@ -597,7 +597,7 @@ Landed:
   The line says *that* the cell changed, which root equality is enough to
   decide. Reporting which leaves moved and what each moved to needs a per-leaf
   diff over arbitrary fabric values, and that is deferred with the transition
-  row it feeds ([#7444](https://github.com/commontoolsinc/labs/issues/7444)) —
+  row it feeds ([#7444](https://github.com/commonfabric/labs/issues/7444)) —
   the feature rather than the decision behind it. Reading the value out is
   `get`'s, and watching it move is what the lens is for.
 
@@ -616,7 +616,7 @@ Landed:
   the relay that would report connection state being B1's and unbuilt
   ([`runtime-integration.md`](runtime-integration.md)). And the transition row,
   which is deferred with the diff it is built on
-  ([#7444](https://github.com/commontoolsinc/labs/issues/7444)) rather than
+  ([#7444](https://github.com/commonfabric/labs/issues/7444)) rather than
   declined: the project owner ruled that such a row **stands until another
   change replaces it rather than expiring**, which is
   [`views.md`](views.md)'s "never a timer" applied to its own sentence, and
@@ -653,7 +653,7 @@ Still to land:
   neither `IStorageProvider` nor `ISpaceReplica`, so the seam question is
   `packages/runner`'s to settle before shuttle reaches it. It opens with the
   two experiments and the raw-document-subscription proving test from issue
-  [#6534](https://github.com/commontoolsinc/labs/issues/6534), falling back to
+  [#6534](https://github.com/commonfabric/labs/issues/6534), falling back to
   the capped deep sink if the seam disappoints.
 - **The structured piece overview** (decision 26): one refreshable frame
   carrying arguments, a result summary, callables and pattern identity.

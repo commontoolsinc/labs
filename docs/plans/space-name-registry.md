@@ -49,12 +49,12 @@ random space identities use existing DID routes without this registry.
 - [Common Fabric URLs](../specs/fabric-urls.md) is the normative contract. This
   plan does not narrow its namespace, redirect, registration, or presentation
   behavior.
-- [CFC space principals](https://github.com/commontoolsinc/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/03-core-concepts.md#361-space-principals)
+- [CFC space principals](https://github.com/commonfabric/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/03-core-concepts.md#361-space-principals)
   and
-  [CFC causal addressing](https://github.com/commontoolsinc/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/17-addressing-and-storage.md#171-causal-id-storage-core-cfc-path)
+  [CFC causal addressing](https://github.com/commonfabric/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/17-addressing-and-storage.md#171-causal-id-storage-core-cfc-path)
   separate stable identifiers from access authority. Registry resolution ends
   in a DID and does not supply `HasRole` or a storage capability.
-- [CFC `HasRole` fact generation](https://github.com/commontoolsinc/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/04-label-representation.md#493-hasrole-fact-generation)
+- [CFC `HasRole` fact generation](https://github.com/commonfabric/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/04-label-representation.md#493-hasrole-fact-generation)
   makes the ACL the membership record. The displayed-URL algorithm reads that
   ownership fact rather than treating registration ownership as space
   ownership.
@@ -82,9 +82,9 @@ random space identities use existing DID routes without this registry.
   database. The registry therefore needs the separate PostgreSQL authority in
   this plan.
 - Earlier `ct-space` work proposed an
-  [address book](https://github.com/commontoolsinc/labs/blob/a81a9009f7adb46eddd96b411e564deba8eaf7d0/docs/acl.md)
+  [address book](https://github.com/commonfabric/labs/blob/a81a9009f7adb46eddd96b411e564deba8eaf7d0/docs/acl.md)
   and
-  [provider-directed petname resolution](https://github.com/commontoolsinc/labs/blob/f5c70f5fca70d80a6a58902ea318f3b65fe97d06/docs/space-petnames.md).
+  [provider-directed petname resolution](https://github.com/commonfabric/labs/blob/f5c70f5fca70d80a6a58902ea318f3b65fe97d06/docs/space-petnames.md).
   Common Fabric URLs now settles the browser-facing contract those documents
   left open.
 

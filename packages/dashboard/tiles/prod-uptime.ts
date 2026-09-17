@@ -1,5 +1,5 @@
 /**
- * Checks that production is up, with synthetic round trips to the common.tools
+ * Checks that production is up, with synthetic round trips to the commonfabric.com
  * site and the estuary and rapids servers, plus a name or reachability check for
  * the company hosts they depend on or run beside. Each server health request
  * goes to /_health on the configured origin. Successful server-check times stay
@@ -7,7 +7,7 @@
  * it is not good. A red state shows only the hosts that are not good, and a
  * host that answers stays out of the body.
  *
- * The common.tools request runs first until it receives an HTTP response. The
+ * The commonfabric.com request runs first until it receives an HTTP response. The
  * tile does not check the other hosts before that independent signal confirms
  * the dashboard's own connectivity.
  *
@@ -551,8 +551,8 @@ export const prodUptime: Tile = {
   intervalMs: 30_000,
   async collect(ctx): Promise<TileView> {
     const commonTools = siteTarget(
-      "common.tools",
-      ctx.env("COMMON_TOOLS_URL") ?? "https://common.tools/",
+      "commonfabric.com",
+      ctx.env("COMMON_FABRIC_URL") ?? "https://commonfabric.com/",
     );
     let commonToolsResult: TargetResult | undefined;
     if (!connectivityConfirmed) {

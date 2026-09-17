@@ -75,7 +75,7 @@ function makeRun(
 ): WorkflowRun {
   return {
     id,
-    html_url: `https://github.com/commontoolsinc/labs/actions/runs/${id}`,
+    html_url: `https://github.com/commonfabric/labs/actions/runs/${id}`,
     head_sha: headSha,
     created_at: createdAt,
     conclusion: "success",
@@ -284,7 +284,7 @@ function makePR(number: number, mergedAt: string | null = null): PRInfo {
   return {
     number,
     title: `PR ${number}`,
-    html_url: `https://github.com/commontoolsinc/labs/pull/${number}`,
+    html_url: `https://github.com/commonfabric/labs/pull/${number}`,
     body: null,
     merged_at: mergedAt,
   };
@@ -748,7 +748,7 @@ Deno.test("fetchMainHeadSha reads the main branch commit", async () => {
     (input) => {
       assertStringIncludes(
         String(input),
-        "/repos/commontoolsinc/labs/branches/main",
+        "/repos/commonfabric/labs/branches/main",
       );
       return new Response(JSON.stringify({ commit: { sha: SHA_A } }));
     },
@@ -2493,13 +2493,13 @@ Deno.test("buildUnattributedRegressionBody names lines the baseline run covered"
     // was held against, so a session picking it up can find both.
     assertStringIncludes(
       body ?? "",
-      "  Measuring run: https://github.com/commontoolsinc/labs/actions/runs/1001",
+      "  Measuring run: https://github.com/commonfabric/labs/actions/runs/1001",
     );
     assertStringIncludes(body ?? "", `  Base commit measured: ${SHA_C}`);
     assertStringIncludes(body ?? "", `  git log ${SHA_C}.. -- `);
     assertStringIncludes(
       body ?? "",
-      `  Baseline for packages/example: run https://github.com/commontoolsinc/labs/actions/runs/900, commit ${SHA_B}`,
+      `  Baseline for packages/example: run https://github.com/commonfabric/labs/actions/runs/900, commit ${SHA_B}`,
     );
   });
 });

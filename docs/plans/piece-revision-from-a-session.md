@@ -46,7 +46,7 @@ what it would buy is a button that already exists.
 The pill already sends the piece. Loom's selected-instance path mints each
 selected pattern instance as an ordinary input cell —
 `{'name': 'pattern_N', 'ref': '/of:' + piece_id}`
-([`src/lib/cf_harness_pattern_inputs.py:148`](https://github.com/commontoolsinc/loom/blob/cb1653bfc/src/lib/cf_harness_pattern_inputs.py#L148),
+([`src/lib/cf_harness_pattern_inputs.py:148`](https://github.com/commonfabric/loom/blob/cb1653bfc/src/lib/cf_harness_pattern_inputs.py#L148),
 loom #5722) — so a handle over the piece's root cell reaches the session
 today, and `describe_handle` answers shape, labels and fill over it.
 

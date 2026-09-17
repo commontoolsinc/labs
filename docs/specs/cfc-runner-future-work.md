@@ -7,10 +7,10 @@ formalization) against the implementation in `packages/runner` (primarily
 needs); this file tracks work the **runner** needs._
 
 > **Spec references.** The CFC prose spec + Lean formalization live in the separate
-> [`commontoolsinc/specs`](https://github.com/commontoolsinc/specs) repo under
+> [`commonfabric/specs`](https://github.com/commonfabric/specs) repo under
 > `cfc/`. References below of the form `§3.1.8`, `04-label-representation.md`,
 > `notes/…`, or `proposals/…` are paths within that repo — e.g.
-> [`cfc/proposals/author-disjunctive-confidentiality.md`](https://github.com/commontoolsinc/specs/blob/main/cfc/proposals/author-disjunctive-confidentiality.md).
+> [`cfc/proposals/author-disjunctive-confidentiality.md`](https://github.com/commonfabric/specs/blob/main/cfc/proposals/author-disjunctive-confidentiality.md).
 > References of the form `packages/…` and `docs/specs/…` are in this repo.
 
 This list is ordered **big chunks first**: close the load-bearing structural
@@ -355,7 +355,7 @@ Each is bounded and mostly independent. Several are fail-safe today.
 # Tier 3 — Spec promotion, not runner code
 
 Shipped, security-conscious runner mechanisms with **no normative home**. These are
-`commontoolsinc/specs` edits (they belong in `cfc/notes/FUTURE-SPEC-WORK.md`), not
+`commonfabric/specs` edits (they belong in `cfc/notes/FUTURE-SPEC-WORK.md`), not
 runner work — but they are load-bearing and an implementer could weaken them with no
 spec test failing.
 
@@ -429,7 +429,7 @@ safety-invariant completeness cross-check, and three focused sweeps
 2026-07-01. Load-bearing claims (vacuous requiredIntegrity gate, flow/enforcement
 defaults, ceiling-fit reader-enumeration hole) were spot-verified against the code.
 Cross-references: [`cfc-spec-changes.md`](./cfc-spec-changes.md) (SC-1..22 + audit
-queue), and in [`commontoolsinc/specs`](https://github.com/commontoolsinc/specs):
+queue), and in [`commonfabric/specs`](https://github.com/commonfabric/specs):
 `cfc/notes/RUNNER_IMPLEMENTATION_PLAN.md` (12 workstreams),
 `cfc/notes/FUTURE-SPEC-WORK.md`, and
 `cfc/proposals/author-disjunctive-confidentiality.md` (Adopted; §9 is Epic A's

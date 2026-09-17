@@ -60,7 +60,7 @@ function context(fields: Partial<RunContext> = {}): RunContext {
     schema: 1,
     line: "context",
     reportId: "01K3",
-    repo: "commontoolsinc/labs",
+    repo: "commonfabric/labs",
     commit: "c1",
     dirty: false,
     branch: "main",

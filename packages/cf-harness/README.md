@@ -476,7 +476,7 @@ stores reject a symlink at the home, target, or lock path but do not claim
 descriptor-relative protection against an attacker who can replace trusted
 ancestors concurrently. `cf-harness` never imports or shares
 `~/.codex/auth.json`. A failed refresh does not fall back to `OPENAI_API_KEY`,
-the Common Tools gateway, or unauthenticated mode.
+the Common Fabric gateway, or unauthenticated mode.
 
 Direct runs resolve a provider from explicit CLI, environment, then persistent
 preference. Every provider is opt-in: a run that names none through

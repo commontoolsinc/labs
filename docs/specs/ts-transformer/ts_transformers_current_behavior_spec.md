@@ -2553,7 +2553,7 @@ The stage extends `HelpersOnlyTransformer` (`src/core/transformers.ts`), so it
 runs when the injected `__cfHelpers` import is present, which §2.1 makes true
 of every source the pipeline compiles. Introduced when SES
 became the default runner sandbox (#3168, originally emitting `__ct_data`;
-renamed with the Common Tools compatibility-layer removal, #3252); the
+renamed with the Common Fabric compatibility-layer removal, #3252); the
 default-export callable rule below was added by the SES default-export
 builder-check fix (#3315).
 

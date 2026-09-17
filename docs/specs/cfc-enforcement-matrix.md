@@ -844,7 +844,7 @@ meaningful once strict carries distinct behavior.
 
 ## 5. Spec-owed
 
-A spec PR to `commontoolsinc/specs` records the §18.6.3 conformance text: the
+A spec PR to `commonfabric/specs` records the §18.6.3 conformance text: the
 four-dial matrix, the "no consuming enforcement ahead of its producing dial"
 ordering constraint, and the `enforce-strict` reject set. File it once H4's code
 step lands and the strict rejects have concrete reason contracts to cite.

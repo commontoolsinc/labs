@@ -55,7 +55,7 @@ version, while a late selection for an already-passed version is discarded
 instead of being guessed into place.
 
 The service implementation and deployment configuration live in the private
-[`commontoolsinc/cloudflare-copresence`](https://github.com/commontoolsinc/cloudflare-copresence).
+[`commonfabric/cloudflare-copresence`](https://github.com/commonfabric/cloudflare-copresence).
 The initial protocol has no authentication. Deployed hosts restrict accepted
 origins and use opaque high-entropy room identifiers, which limit accidental
 access but are not authorization.
