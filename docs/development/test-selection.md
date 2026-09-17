@@ -324,10 +324,10 @@ in one place.
 
 A lane looks past such a body to the newest one behind it, over
 `MANIFESTS_LOOKED_BACK` manifests, because a lane with no manifest runs
-the whole corpus. The dashboard looks past one the same way and over the same
-stretch, so that the figure a person reads is taken from the manifest a
-pull request would obey rather than from an older one the dashboard alone
-settled for.
+the whole corpus. The dashboard looks past one the same way and over the
+same stretch, so that the figure a person reads is taken from the manifest
+a pull request would obey rather than from an older one the dashboard
+alone settled for.
 
 A reader that passed over every body it looked at says so, naming the
 newest shape it passed over. Reporting nothing there would say the store

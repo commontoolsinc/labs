@@ -513,7 +513,7 @@ describe("test-selection-history", () => {
 
     it("ends the search at a body that is no manifest at all", async () => {
       // A corrupt object is not a reader waiting to be deployed, so the
-      // wall reports it rather than answering from an older body.
+      // dashboard reports it rather than answering from an older body.
       const readable = measurement("2026-09-01T00:00:00.000Z", 1, 0);
       const broken = measurement("2026-09-02T00:00:00.000Z");
       const store = storeOf([readable, broken]);
