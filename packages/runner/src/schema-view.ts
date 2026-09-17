@@ -732,7 +732,7 @@ function createObjectView(
   const resolveChild = (key: string): unknown => {
     const narrowed = childSchema(schema, key);
     if (isExcluded(narrowed)) {
-      // The data carries this key and the schema leaves it unnamed, so the
+      // The data carries this key and the schema does not select it, so the
       // reader gets the `undefined` an absent key gives, and nothing at the
       // read says a field was there. A reader in that position has a schema
       // that selects less than its body reads: one written by hand narrower

@@ -1129,7 +1129,7 @@ describe("schema-view", () => {
     });
   });
 
-  describe("a key the data carries and the schema leaves unnamed", () => {
+  describe("a key the data carries and the schema does not select", () => {
     // Such a key reads as `undefined`, which is what a key that is not there
     // reads as, so the view counts the read under a warning key of its own.
     // The pattern test runner fails a test on any warning a run counts, unless
