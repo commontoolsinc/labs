@@ -6,6 +6,7 @@ import { FakeTime } from "@std/testing/time";
 import {
   type Manifest,
   MANIFEST_SCHEMA_VERSION,
+  MANIFESTS_LOOKED_BACK,
   sampleEntry,
   sampleManifest,
   serializeManifest,
@@ -18,6 +19,7 @@ import {
 } from "./test-selection-history.ts";
 import {
   MANIFEST_SHARE_MS,
+  ManifestSchemaError,
   TEST_SELECTION_PREFIX,
 } from "./test-selection-manifest.ts";
 import { makeTestFlakes } from "./tiles/test-flakes.ts";
@@ -440,6 +442,109 @@ describe("test-selection-history", () => {
       }).history();
       expect(later.samples.map((sample) => sample.counts?.known)).toEqual([4]);
       expect(store.reads.filter((n) => !n.startsWith("list:"))).toEqual([name]);
+    });
+
+    it("takes the newest manifest it can read, passing over newer shapes", async () => {
+      const readable = measurement("2026-09-01T00:00:00.000Z", 1, 0);
+      const ahead = measurement("2026-09-02T00:00:00.000Z");
+      const store = storeOf([readable, ahead]);
+      store.objects[objectName(ahead.generatedAt)] = JSON.stringify({
+        ...ahead,
+        schema: MANIFEST_SCHEMA_VERSION + 1,
+      });
+      const source = makeTestSelectionSource({
+        fetchImpl: store.fetchImpl,
+        cacheFile,
+      });
+      expect((await source.latest())?.generatedAt).toBe(readable.generatedAt);
+    });
+
+    it("reports the shape it passed over when it can read none of them", async () => {
+      // Reporting nothing would say the store holds no manifest, and it
+      // holds several. What a person can act on is the shape it found.
+      const ahead = MANIFEST_SCHEMA_VERSION + 1;
+      const manifests = [
+        measurement("2026-09-01T00:00:00.000Z"),
+        measurement("2026-09-02T00:00:00.000Z"),
+      ];
+      const store = storeOf(manifests);
+      for (const manifest of manifests) {
+        store.objects[objectName(manifest.generatedAt)] = JSON.stringify({
+          ...manifest,
+          schema: ahead,
+        });
+      }
+      const source = makeTestSelectionSource({
+        fetchImpl: store.fetchImpl,
+        cacheFile,
+      });
+      const error = await source.latest().then(() => undefined, (e) => e);
+      expect(error).toBeInstanceOf(ManifestSchemaError);
+      expect((error as ManifestSchemaError).reason).toContain(
+        `store holds schema ${ahead}`,
+      );
+    });
+
+    it("looks back no further than every other reader of the store", async () => {
+      const ahead = MANIFEST_SCHEMA_VERSION + 1;
+      // One readable body, then more bodies from a newer shape than the
+      // bound allows this reader to look past.
+      const oldest = measurement("2026-09-01T00:00:00.000Z", 1, 0);
+      const newer = Array.from(
+        { length: MANIFESTS_LOOKED_BACK },
+        (_, i) =>
+          measurement(`2026-09-${String(i + 2).padStart(2, "0")}T00:00:00.000Z`),
+      );
+      const store = storeOf([oldest, ...newer]);
+      for (const manifest of newer) {
+        store.objects[objectName(manifest.generatedAt)] = JSON.stringify({
+          ...manifest,
+          schema: ahead,
+        });
+      }
+      const source = makeTestSelectionSource({
+        fetchImpl: store.fetchImpl,
+        cacheFile,
+      });
+      await expect(source.latest()).rejects.toBeInstanceOf(ManifestSchemaError);
+      // The readable body is one past the bound, so it is never fetched.
+      expect(store.reads).not.toContain(objectName(oldest.generatedAt));
+    });
+
+    it("ends the search at a body that is no manifest at all", async () => {
+      // A corrupt object is not a reader waiting to be deployed, so the
+      // wall reports it rather than answering from an older body.
+      const readable = measurement("2026-09-01T00:00:00.000Z", 1, 0);
+      const broken = measurement("2026-09-02T00:00:00.000Z");
+      const store = storeOf([readable, broken]);
+      store.objects[objectName(broken.generatedAt)] = "{not a manifest";
+      const source = makeTestSelectionSource({
+        fetchImpl: store.fetchImpl,
+        cacheFile,
+      });
+      const error = await source.latest().then(() => undefined, (e) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(ManifestSchemaError);
+      expect(store.reads).not.toContain(objectName(readable.generatedAt));
+    });
+
+    it("walks once, then answers from what it already read", async () => {
+      const readable = measurement("2026-09-01T00:00:00.000Z", 1, 0);
+      const ahead = measurement("2026-09-02T00:00:00.000Z");
+      const store = storeOf([readable, ahead]);
+      store.objects[objectName(ahead.generatedAt)] = JSON.stringify({
+        ...ahead,
+        schema: MANIFEST_SCHEMA_VERSION + 1,
+      });
+      const source = makeTestSelectionSource({
+        fetchImpl: store.fetchImpl,
+        cacheFile,
+      });
+      await source.latest();
+      store.reads.length = 0;
+      time.tick(MANIFEST_SHARE_MS + 1);
+      expect((await source.latest())?.generatedAt).toBe(readable.generatedAt);
+      expect(store.reads.filter((n) => !n.startsWith("list:"))).toEqual([]);
     });
 
     it("retries an object the store could not answer for", async () => {

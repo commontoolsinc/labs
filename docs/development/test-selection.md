@@ -324,8 +324,18 @@ in one place.
 
 A lane looks past such a body to the newest one behind it, over
 `MANIFESTS_LOOKED_BACK` manifests, because a lane with no manifest runs
-the whole corpus. The dashboard reports a fault instead and shows nothing,
-which costs a person a figure rather than costing a run its selection.
+the whole corpus. The dashboard looks past one the same way and over the same
+stretch, so that the figure a person reads is taken from the manifest a
+pull request would obey rather than from an older one the dashboard alone
+settled for.
+
+A reader that can read none of the bodies it looked at says so, naming
+the shape it found. Reporting nothing there would say the store holds no
+manifest, which is the one thing a reader that far behind its publisher
+must not say. Anything else unreadable ends the search where it stands: a
+corrupt object is not a reader waiting to be deployed, and answering from
+an older body would report a figure while passing silently over a store
+that is damaged.
 
 **Nothing gates on it.** When the publisher fails, the previous manifest is
 still the newest one and consumers keep using it. A manifest going stale
