@@ -71,13 +71,18 @@ generations. Preserve linked record identity for editing handlers.
 No stored hoist name on any deployed board or topic generation may resolve to a
 different body. The [pattern update gates](../specs/pattern-update-testing.md)
 do not establish this; T5 establishes how to check it, with evidence from their
-stored data. The transformer numbers a file's hoisted builder calls in the order
-it reaches them, from a counter it keeps per builder kind within that file, so a
-new reactive callback operator renumbers every hoist of its kind after it. A new
-operator therefore lives in a pattern in a module of its own, which numbers its
-own hoists from one and leaves the board's and the topic's as they are;
-instantiating that pattern from `main.tsx` or `topic.tsx` is not itself a
-hoisted call.
+stored data. The transformer hoists a file's `lift`, `handler`, and `pattern`
+calls to module scope, numbering each kind from a counter of its own in the
+order it reaches them. Any edit that adds one renumbers the later hoists of that
+kind, whether what it adds is a callback operator, a handler, or an ordinary
+derived expression that lowers to a lift. One operator can move both sequences:
+a computed expression in its callback body lowers to a lift hoisted beside the
+pattern, so a single new operator shifts the `lift` numbering as well as the
+`pattern` numbering. A new operator therefore lives in a pattern in a module of
+its own, which numbers its own hoists from one and leaves the board's and the
+topic's unchanged, and `main.tsx` or `topic.tsx` instantiates it by a direct
+call — instantiating it inside a reactive `.map` lowers to a hoisted `pattern`
+in the calling file and renumbers there, as any other callback operator does.
 
 ## Execution tracker
 
@@ -121,8 +126,10 @@ implementation and prototypes can begin earlier.
       [reactive collections](../common/concepts/reactive-collections.md#choose-aggregate-semantics-deliberately)
       gives for a computed list, under a schema that carries `topic` as a Cell
       so the index keys by canonical Cell identity. The subpattern lives in a
-      module of its own, which is how a new operator meets the hoist requirement
-      under [compatibility requirements](#compatibility-requirements).
+      module of its own, and the board instantiates it by a direct call rather
+      than inside a reactive `.map`. That is how a new operator leaves the
+      existing hoists' numbers unchanged, which the hoist requirement under
+      [compatibility requirements](#compatibility-requirements) depends on.
       `crossrefTable` is a `lift`, whose result type exposes no index operator,
       and `TopicCrossrefRow.topic` is `unknown` so that reading the table
       expands no topic. Second, the resulting handle reaches topics without
@@ -157,8 +164,9 @@ implementation and prototypes can begin earlier.
       Cell receivers and measure score/predicate production; do not rely on
       unsupported ordinary-array `.map(...).sum()` chains. A maintained count or
       activity maximum carrying a callback is a new operator, so it too lives in
-      a pattern in a module of its own. Exit: adopt only the candidates with
-      justified end-to-end tradeoffs. Depends on T0 and T1.
+      a pattern in a module of its own, instantiated the same way. Exit: adopt
+      only the candidates with justified end-to-end tradeoffs. Depends on T0 and
+      T1.
 - [ ] **T5 — Harden accepted changes and prepare release artifacts.** Add
       regression read budgets, run all relevant authored/package/integration
       tests, preserve compatibility baselines, pass the
@@ -167,8 +175,8 @@ implementation and prototypes can begin earlier.
       and record how to check the hoist requirement under
       [compatibility requirements](#compatibility-requirements), with evidence
       from the stored data of deployed board and topic generations, among them a
-      read-only copy of the primary Topics instances obtained with Gideon. That
-      check depends on acquiring the snapshot
+      read-only copy of the primary Topics instances obtained through Gideon.
+      That check depends on acquiring the snapshot
       [stored-state step 3](#stored-state-and-deployment-procedure) describes,
       which can begin before T6. Each implementation PR needs a review through
       the [`cf-review` skill](../../skills/cf-review/SKILL.md) and a clean Cubic
@@ -244,14 +252,17 @@ and lazy materialization off are not yet measured. T0 measures both before the
 baseline report, in runs labeled by mode; the scheduled Benchmarks workflow runs
 client execution only. Of those three, the headless tier measures the
 board-with-one-topic workload with the demand the browser measured, and the
-all-backlinks workload as a scaling probe rather than normal UI behavior: no
-browser workload measures its demand, which is the pivot and every topic's
-backlinks. The probe records the board-alone workload as not measured, because a
-board loaded before any topic is opened runs none of those four lifts, so there
-is no work of theirs to measure headlessly. Measure cold initialization, warm
-updates, and reopen or reconnect separately. Hold runtime, source package, data,
-demand, and feature flags constant between comparison arms; alternate repeated
-timing runs and report their distribution rather than a single favorable sample.
+all-backlinks workload as a scaling probe rather than normal UI behavior: it
+demands the pivot and every topic's backlinks at once, which no browser workload
+does. The probe records the board-alone workload as not measured, because a
+board loaded before any topic is opened runs none of the pivot, backlinks,
+comment-count, or last-activity lifts, so there is no work of theirs to measure
+headlessly. The tier's thread cases run under a workload of their own,
+`aggregates`, which demands every topic's present comment count and last
+activity and nothing else. Measure cold initialization, warm updates, and reopen
+or reconnect separately. Hold runtime, source package, data, demand, and feature
+flags constant between comparison arms; alternate repeated timing runs and
+report their distribution rather than a single favorable sample.
 
 Test mention insertion/removal, same-count destination retargeting, duplicate
 and self-mentions, aliases/scoped references, topic reorder/removal, rename-only
