@@ -134,7 +134,29 @@ Every environment variable has a flag, and the flag wins:
 | `--space-db`            | `CF_HARNESS_SPACE_DB`                | the space's own database, discovered  |
 | `--max-model-turns`     | `CF_HARNESS_CONSOLE_MAX_MODEL_TURNS` | the prompt loop's default             |
 | `--skills-root`         | `CF_HARNESS_CONSOLE_SKILLS_ROOT`     | the repository's `skills/` tree       |
+| `--allow-skill-scripts` | `CF_HARNESS_ALLOW_SKILL_SCRIPTS=1`   | off; scripts do not run               |
 | `--host-mount`          | —                                    | none; repeatable                      |
+
+### Skill scripts
+
+Whether a skill this console holds may have its scripts run in the sandbox is
+the operator's decision, and the console takes it at launch rather than per
+task, since it is about the server rather than about the work:
+
+```sh
+./scripts/start-local-dev.sh --cf-harness --allow-skill-scripts
+```
+
+Off unless named, and naming it once covers every skill the run holds — a
+registry skill and an acquired one alike, because what a script is trusted with
+is the sandbox it runs in, which does not vary with where the skill came from.
+The value is printed beside the record that decided it, with the rest of what
+the launch resolved, so what a console will run is on screen before it binds.
+
+The switch decides whether scripts run and nothing about which bytes. A registry
+script is still checked against the run-start registry snapshot, and an acquired
+one against the digest taken when it was acquired, so a file changed on the host
+after either still refuses.
 
 Publishing to the index is configured the way the CLI configures it, by the same
 names:
@@ -234,6 +256,40 @@ a 400 before any turn starts: a `ref` has to be a link naming an entity
 grammar and still cannot be minted — one in another space, say — fails the turn
 rather than starting it without what the caller attached, and that turn is
 terminal like any other failed one.
+
+A `ref` may also name a piece the way a person sees it named, which is what a
+caller showing a rendered piece has to work with:
+
+```json
+{
+  "text": "make the headings readable",
+  "inputCells": [
+    { "name": "pattern_1", "ref": "pattern:my-space/reading-list" }
+  ]
+}
+```
+
+`pattern:<space>/<slug>`, or the bare `<slug>` meaning a piece in this console's
+own space. The session resolves the name to the piece's address before it mints
+a handle, so what the handle table holds is the address either way and the model
+is told no more than it is told for any other cell. The alternative is every
+surface holding a piece deriving fabric ids of its own, which is one copy of the
+runtime's addressing rules per client — and a client is exactly where that copy
+goes stale.
+
+Which side answers which mistake follows from what each side can know. A slug
+the runtime's own rule refuses, an address carrying a path under the piece
+rather than the piece, and an address naming a space that is not this console's
+are decidable from the text, so the route answers **400** naming which — the
+caller cannot see the space this console runs against, so a mismatch is this
+side's to explain. Whether the space HOLDS that slug is not a fact about the
+text; the turn finds it out and fails naming the slug, under the rule above that
+governs every reference which parses and still cannot mint.
+
+The address is scoped to pieces. A pane may show any cell in a space, and the
+general case is CT-2319's; a slug names a piece or it names nothing, which is
+what lets this resolve with no vocabulary the space does not already have. The
+retired `piece:` spelling is not read as an address — one name for one thing.
 
 A pattern reference names a published pattern by the index's own id, which is
 the content-addressed identity of its source: it names an entry the index holds
@@ -409,8 +465,11 @@ opens it.
 
 An open session takes another turn: the box sends a follow-up into the session
 being shown rather than starting a new one, and the feed continues rather than
-clearing. **New session** goes back to an empty page and the list. A session
-that cannot take another turn — closed, or left with a transcript that did not
+clearing. A follow-up carries its own `inputCells`, named per task like any
+other turn — so continuing a session and attaching the piece being looked at are
+two independent halves of one request, and a caller may send either without the
+other. **New session** goes back to an empty page and the list. A session that
+cannot take another turn — closed, or left with a transcript that did not
 survive a restart — says so in the feed when the follow-up is refused.
 
 ### Status route
@@ -705,9 +764,15 @@ principal a run writes with. Four functions are reachable, all of them reads:
 `listPatterns`, `listEvents`, `getPattern` and `searchPatterns`. Anything else —
 a publication, a recorded event — is refused by name before the index is
 touched, and the request the server sends is composed field by field rather than
-forwarded, so nothing extra survives the crossing. `getPattern` is called
-without `includeSource`: this surface shows metadata, schemas, dependencies and
-events, and a pattern's source is read through the CLI.
+forwarded, so nothing extra survives the crossing. `searchPatterns` uses the
+shared client's
+[successor resolution](../README.md#pattern-generations-in-search); the listing
+and exact-ID reads retain their individual generation records. Event badges
+count only that generation's own events. When the index supplies inherited
+evidence, the score separately identifies its inherited portion, predecessor,
+and publication cutoff. `getPattern` is called without `includeSource`: this
+surface shows metadata, schemas, dependencies and events, and a pattern's source
+is read through the CLI.
 
 The route sits under `/api/`, so it is behind the same `Host` gate as the rest.
 

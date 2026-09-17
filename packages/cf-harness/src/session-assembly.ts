@@ -101,6 +101,9 @@ export interface HarnessSessionConfig {
   /** Reference trees `research` may inspect, and where they came from. */
   docsCorpus?: HarnessDocsCorpusRecord;
 
+  /** Whether a skill this run holds may have its scripts run in the sandbox. */
+  allowSkillScripts?: boolean;
+
   allowedSkillScripts: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
 
@@ -190,14 +193,41 @@ export const harnessSessionChatPolicy = (
 ): HarnessChatPolicy => ({
   type: "cf-harness.chat-policy",
   toolMode: "workspace-write",
-  allowedToolIds: config.allowedToolIds ??
-    parentToolIdsForBacking(harnessSessionToolBacking(config)),
+  allowedToolIds: config.allowedToolIds ?? sessionParentToolIds(config),
   allowedSubagentProfiles: config.allowedSubagentProfiles,
   ...(config.cfcEnforcementModeOverride !== undefined
     ? { cfcEnforcementMode: config.cfcEnforcementModeOverride }
     : {}),
   ...(promptSlot !== undefined ? { promptSlot } : {}),
 });
+
+/**
+ * The parent tool surface a session offers when nothing narrows it: what its
+ * backings support, plus `run_skill_script` where the operator allows a skill
+ * script and a registry backs one.
+ *
+ * Backing and authorization are different questions, and
+ * {@link parentToolIdsForBacking} answers only the first: `run_skill_script`
+ * appears in its withheld set and never in the list it builds, so a backing
+ * alone never offers the tool. What offers it is the operator allowing a
+ * script to run — the run-wide switch, or an exact entry — and offering it
+ * here is what makes that decision reach the run holding the registry, rather
+ * than only a child holding an acquisition, which gets it from its own
+ * surface. The gate at the call still decides which script, and whether a
+ * host target needs an exact name.
+ */
+const sessionParentToolIds = (
+  config: HarnessSessionConfig,
+): readonly BuiltinToolId[] => {
+  const backing = harnessSessionToolBacking(config);
+  const backed = parentToolIdsForBacking(backing);
+  const allowsAScript = config.allowSkillScripts === true ||
+    (config.allowedSkillScripts?.length ?? 0) > 0;
+  return allowsAScript && backing.skillRegistryAvailable &&
+      !backed.includes("run_skill_script")
+    ? [...backed, "run_skill_script"]
+    : backed;
+};
 
 /** The sandbox bind mounts this session provisions, in one list. */
 export const harnessSessionAdditionalMounts = (
@@ -255,6 +285,7 @@ export const harnessSessionEngineOptions = (
     ...(config.docsCorpus !== undefined
       ? { docsCorpus: config.docsCorpus }
       : {}),
+    ...(config.allowSkillScripts === true ? { allowSkillScripts: true } : {}),
     ...(config.allowedSkillScripts.length > 0
       ? { allowedSkillScripts: config.allowedSkillScripts }
       : {}),

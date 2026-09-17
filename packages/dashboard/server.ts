@@ -28,7 +28,7 @@
 import { CI_WORKFLOW, PORT, REPO } from "./config.ts";
 import { TILES } from "./registry.ts";
 import { makeCtx } from "./ctx.ts";
-import { friendlyError, githubOperationsInProgress } from "./lib.ts";
+import { escapeHtml, friendlyError, githubOperationsInProgress } from "./lib.ts";
 import { faviconPng, faviconStatus } from "./favicon.ts";
 import type { FaviconStatus } from "./favicon.ts";
 import { renderTile, shell } from "./render.ts";
@@ -43,6 +43,9 @@ import {
 const ctx = makeCtx();
 const views = new Map<string, TileView>();
 const lastRun = new Map<string, number>();
+const activityBadges = new Map<string, string>();
+const lastActivityRun = new Map<string, number>();
+const activeActivityUpdates = new Set<string>();
 const runSnapshots = new Map<string, Run[]>();
 const runSourceErrors = new Map<string, string>();
 const lastSourceTileRun = new Map<string, number>();
@@ -193,6 +196,8 @@ const STALE_UPDATE_MS = 60_000;
 const STALE_UPDATE_SUB = "refresh still pending";
 
 function activeTileView(tile: Tile, view: TileView): TileView {
+  const badge = activityBadges.get(tile.id);
+  if (badge) view = { ...view, aside: badge + (view.aside ?? "") };
   if (!activeTileUpdates.get(tile.id)?.stale) return view;
   return tile.showOnlyCompletedViews
     ? { ...view, sub: STALE_UPDATE_SUB }
@@ -355,9 +360,14 @@ export async function tick(tiles: Tile[] = TILES, sourceCtx: Ctx = ctx) {
     );
     return due.length ? [{ source: group.source, tiles: due }] : [];
   });
-  if (!dueTiles.length && !dueSources.length) return;
+  const dueActivity = tiles.filter((tile) =>
+    tile.collectActivity && !activeActivityUpdates.has(tile.id) &&
+    now - (lastActivityRun.get(tile.id) ?? 0) >= tile.intervalMs
+  );
+  if (!dueTiles.length && !dueSources.length && !dueActivity.length) return;
 
   for (const tile of dueTiles) beginTileUpdate(tile, now);
+  for (const tile of dueActivity) activeActivityUpdates.add(tile.id);
   for (const group of dueSources) {
     activeRunSourceUpdates.add(runSourceKey(group.source));
     for (const tile of group.tiles) beginTileUpdate(tile, now);
@@ -377,6 +387,26 @@ export async function tick(tiles: Tile[] = TILES, sourceCtx: Ctx = ctx) {
     } finally {
       if (!released) finishTileUpdate(tile);
     }
+  };
+
+  const refreshActivity = async (tile: Tile) => {
+    let badge = "";
+    try {
+      if (await tile.collectActivity!(sourceCtx)) {
+        badge =
+          '<span class="running" title="Workflow queued or running"><span class="rdot"></span>running</span>';
+      }
+    } catch (error) {
+      badge = `<span class="hfacet" title="Workflow activity: ${
+        escapeHtml(friendlyError(String(error)))
+      }">activity unknown</span>`;
+    } finally {
+      activeActivityUpdates.delete(tile.id);
+      lastActivityRun.set(tile.id, Date.now());
+    }
+    activityBadges.set(tile.id, badge);
+    lastChange = Date.now();
+    broadcast(dashboardUpdate());
   };
 
   // Source fetches and dependent collections run independently. Each tile
@@ -458,6 +488,7 @@ export async function tick(tiles: Tile[] = TILES, sourceCtx: Ctx = ctx) {
   await Promise.all([
     ...dueTiles.map(refreshTile),
     ...dueSources.map(refreshSource),
+    ...dueActivity.map(refreshActivity),
   ]);
 }
 

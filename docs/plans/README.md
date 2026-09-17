@@ -14,6 +14,13 @@ a record: archive it to `docs/history/plans/` following the procedure in
   publishing existing database and companion-cell references once per Loom
   environment, with a staged person-inbox migration and compiled integration
   acceptance gates.
+- [Revising a piece's source from an agent session](piece-revision-from-a-session.md)
+  covers the two `pattern-author` tools that revise a piece someone already
+  has — a handle-addressed read of its current source, and a direct edit
+  through the runtime's own compatibility check and setup transaction — what
+  they lean on rather than rebuild, and the two questions left open: whether
+  revising is really `run_pattern` with a target, and what to do about an
+  agent retyping a whole pattern for a one-character mistake.
 - [View-scoped client replication](view-scoped-client-replication.md) tracks
   rollout, recovery, and adversarial verification of active-view delivery and
   guarded speculative computation. It separates execution demand from delivery
@@ -89,6 +96,11 @@ a record: archive it to `docs/history/plans/` following the procedure in
   schema-observing lazy view over a cell, a transaction mode that hands one back
   from every read, and the runner disposition for a reader that touches data the
   schema no longer describes.
+- [Stream markers out of stored data](stream-markers-out-of-stored-data.md)
+  moves stream-ness out of the stored `{ "$stream": true }` value and into the
+  link schema and the module wrapper, and triggers the cold-start repairs on a
+  structural mismatch instead of the missing marker. It names putting the
+  owner into a stream's address as the follow-up it is written toward.
 - [Pre-syncing from node plans](presync-from-node-plans.md) makes one
   derivation per pattern node serve both instantiation and the pre-sync, so a
   resume and a fresh start name exactly what each lift, handler, builtin, and
@@ -231,6 +243,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
   the verb flags and result shapes that offer none, the source `--space` needs
   before any of it is reachable by name, and the gate that keeps completion
   from falling behind the command tree again.
+- [Handler-callable egress](handler-callable-egress.md) records the capability
+  a pattern does not have: a network request a handler can issue and await,
+  which the runtime records and gates the way it records and gates a node
+  factory's request. It carries the shape of program that has no home without
+  one, the two routes a design could take and what each gives up, and the
+  provider-side stack left standing in the meantime.
 
 ## Concepts not planned for deployment
 

@@ -806,6 +806,9 @@ Deno.test("CfHarnessEngine mints operator input cells once and replays the recor
               spaceReads += 1;
               return cellSpace;
             },
+            // This double names no space: the cells here are plain
+            // references, which resolve without one.
+            getSpaceName: () => undefined,
           },
           // deno-lint-ignore no-explicit-any
         } as any,
@@ -859,6 +862,7 @@ Deno.test("CfHarnessEngine refuses an operator input cell into another space, re
           pieces: {
             getSpace: () =>
               "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+            getSpaceName: () => undefined,
           },
           // deno-lint-ignore no-explicit-any
         } as any,
@@ -871,6 +875,73 @@ Deno.test("CfHarnessEngine refuses an operator input cell into another space, re
   );
   assertEquals(engine.getRunState().inputCells, undefined);
   assertEquals(engine.handleTable, undefined);
+});
+
+Deno.test("CfHarnessEngine resolves a named piece address through the session's own space", async () => {
+  // The engine hands the mint the LIVE session's space name and the live
+  // session's resolver. Both are read here: a slug is resolved against
+  // this session and nothing else, so the resolution the engine wires up
+  // is the one whose space the name was checked against.
+  const asked: string[] = [];
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    inputCells: [{ name: "pattern_1", ref: "pattern:demo-space/reading-list" }],
+    fabricSessionFactory: () =>
+      Promise.resolve(
+        {
+          pieces: {
+            getSpace: () =>
+              "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+            getSpaceName: () => "demo-space",
+            // What `resolvePieceAddress` reaches for first. A runtime this
+            // double does not have is a slug this space cannot resolve,
+            // which is the failure the run has to report as its own.
+            get runtime(): never {
+              asked.push("reading-list");
+              throw new Error("no runtime in this session");
+            },
+          },
+          // deno-lint-ignore no-explicit-any
+        } as any,
+      ),
+  });
+  await assertRejects(
+    () => engine.establishInputCells(),
+    Error,
+    "names the piece `reading-list`, which this space does not hold",
+  );
+  // The resolver the engine wired was the session's own, and it was asked
+  // for the slug rather than for the address the caller wrote.
+  assertEquals(asked, ["reading-list"]);
+  assertEquals(engine.getRunState().inputCells, undefined);
+  assertEquals(engine.handleTable, undefined);
+});
+
+Deno.test("CfHarnessEngine refuses a piece address naming a space that is not the session's", async () => {
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    inputCells: [{
+      name: "pattern_1",
+      ref: "pattern:other-space/reading-list",
+    }],
+    fabricSessionFactory: () =>
+      Promise.resolve(
+        {
+          pieces: {
+            getSpace: () =>
+              "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+            getSpaceName: () => "demo-space",
+          },
+          // deno-lint-ignore no-explicit-any
+        } as any,
+      ),
+  });
+  await assertRejects(
+    () => engine.establishInputCells(),
+    Error,
+    "this session runs in `demo-space`",
+  );
+  assertEquals(engine.getRunState().inputCells, undefined);
 });
 
 Deno.test("CfHarnessEngine rejects only cross-model Codex resume", () => {

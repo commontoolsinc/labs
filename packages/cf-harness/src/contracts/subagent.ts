@@ -83,6 +83,15 @@ export const WEB_SEARCH_SUBAGENT_ALLOWED_TOOL_IDS =
  * the job should compose it rather than write one, and say how the one it ran
  * turned out.
  *
+ * `read_piece_source` and `revise_piece` are how it changes a piece someone
+ * already has rather than building a new one: the read is addressed by handle
+ * and answers that piece's current authored files, and the revision replaces
+ * them through the runtime's own compatibility check. They are on this surface
+ * and on no parent's — see `SUBAGENT_ONLY_TOOL_IDS` — because the return
+ * contract below has no field for source in any encoding, so program text a
+ * third party authored reaches the context that has to edit it and stops
+ * there.
+ *
  * `research` is how an author reaches documentation, indexed source, and
  * implementation guidance it has no path to. A child cannot delegate, so the
  * bounded private research loop is a tool on this surface rather than another
@@ -94,6 +103,8 @@ export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
   "read_skill_resource",
   "describe_handle",
   "run_pattern",
+  "read_piece_source",
+  "revise_piece",
   "search_patterns",
   "record_feedback",
   "research",
@@ -238,8 +249,8 @@ export type HarnessSubagentReturnContractAuthority = "caller" | "profile";
  * the space, no partial result dressed as a whole one.
  *
  * The success branch is a RUNNING pattern's result cell and nothing else: a
- * reference, a line of prose about what it computes, and the hashtags it was
- * recorded in the index under. There is no field for source, in any
+ * reference, a line of prose about what it computes, and the hashtags supplied
+ * for publication to the index. There is no field for source, in any
  * encoding, because a parent has no use for source it should not be
  * compiling — the child ran the pattern, and reuse travels through the index,
  * where a searcher finds an atom by its hashtags and composes it by its
@@ -270,7 +281,7 @@ export const PATTERN_AUTHOR_RETURN_SCHEMA: JSONSchema = {
           type: "array",
           items: { type: "string" },
           description:
-            "The hashtags the pattern was recorded in the index under: the words a later search finds it by if evidence earns discoverability. Omitted by a run with no pattern index, which publishes nothing.",
+            "The hashtags supplied for publication to the index: the words a later search finds it by if publication succeeds and evidence earns discoverability. Omitted by a run with no pattern index, which publishes nothing.",
         },
       },
       required: ["ok", "resultRef", "describes"],

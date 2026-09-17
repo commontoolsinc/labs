@@ -25,13 +25,13 @@ import {
   type JSONSchema,
   type JSONValue,
 } from "./builder/types.ts";
-import { type AnyCell, markCellDocumentSynced } from "./cell.ts";
+import { type AnyCell, internCellLinkSchema } from "./cell.ts";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
 } from "./cfc.ts";
 import { diffAndUpdate } from "./data-updating.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { toMemorySpaceAddress } from "./link-types.ts";
 import {
   areNormalizedLinksSame,
@@ -44,7 +44,7 @@ import {
   KeepAsCell,
   type NormalizedFullLink,
   parseLink,
-  sanitizeSchemaForLinks,
+  sanitizeAndInternSchemaForLinks,
   sigilLinkAddressOnly,
 } from "./link-utils.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
@@ -192,7 +192,7 @@ const sanitizeAliasSchemaForBinding = (schema: JSONSchema): JSONSchema =>
   // Compiled aliases retain asCell for schema fidelity. Live redirects use link
   // schemas without cell wrappers so scoped asCell entries do not stamp the
   // redirect link's own scope and bypass stored argument links.
-  sanitizeSchemaForLinks(schema, KeepAsCell.OnlyStream);
+  sanitizeAndInternSchemaForLinks(schema, KeepAsCell.OnlyStream);
 
 /**
  * Returns a link with a canonical schema without freezing the caller's input.
@@ -201,9 +201,7 @@ const canonicalSchemaLink = (
   link: NormalizedFullLink | undefined,
 ): NormalizedFullLink | undefined => {
   if (link === undefined || !isObjectOrArray(link.schema)) return link;
-  const schema = deepFrozenCloneAndInternSchema(
-    sanitizeSchemaForLinks(link.schema, KeepAsCell.All),
-  );
+  const schema = sanitizeAndInternSchemaForLinks(link.schema, KeepAsCell.All);
   return schema === link.schema ? link : { ...link, schema };
 };
 
@@ -844,11 +842,7 @@ export function findAllWriteRedirectCells<T>(
 ): NormalizedFullLink[] {
   const skipTopLevelKeys = options?.skipTopLevelKeys;
   const seen: NormalizedFullLink[] = [];
-  // `baseCell` is only used for link resolution (runtime/tx/parseLink), which
-  // does not depend on the cell's value type, so accept any cell. This lets the
-  // redirect-chain recursion re-base onto the resolved `linkCell` (a
-  // `Cell<unknown>`) rather than the original typed base.
-  function find(binding: unknown, baseCell: AnyCell<unknown>): void {
+  function find(binding: unknown): void {
     if (isAliasBinding(binding)) {
       // Callers unwrap bindings (unwrapOneLevelAndBindToDoc) before walking,
       // so a surviving `$alias` belongs to a nested level — it just crossed
@@ -860,35 +854,44 @@ export function findAllWriteRedirectCells<T>(
       // target value is ITSELF a write redirect, follow that too (one string of
       // redirects). We stop as soon as the target is a non-redirect value — we
       // do NOT recurse into it looking for further nested redirects.
-      //
-      // (Previously this recursed via `find(linkCell.getRaw(...))`, which walked
-      // the whole target value structurally — the transitive closure across
-      // documents — and was the dominant reload instantiation cost: resolving a
-      // cell + walking its entire value per link. Following only direct redirect
-      // chains keeps the cases that matter without the deep dive.)
-      const link = parseLink(binding, baseCell.getAsNormalizedFullLink());
-      if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
-      seen.push(link);
-      if (options?.followRedirectChains === false) return;
-      // The probe reads the target's raw value to see whether it is itself a
-      // redirect. The cell keeps the link's schema, which carries the scope
-      // caps resolution honors along the path, but a raw read of a cold
-      // document would kick a sync under that schema, pulling everything the
-      // schema reaches for a read that wants one document, so the probe
-      // reads the replica as it stands and kicks nothing: what a run reads
-      // is named by the pre-sync, not by this walk.
-      const linkCell = baseCell.runtime.getCellFromLink(
-        link,
-        undefined,
-        baseCell.tx,
-      );
-      if (!linkCell) throw new Error("Link cell not found");
-      markCellDocumentSynced(linkCell);
-      const target = linkCell.getRaw({ meta: ignoreReadForScheduling });
-      // Resolve the next redirect relative to `linkCell` (the cell the chained
-      // redirect lives in), not the original `baseCell`: a relative redirect in
-      // a cross-document target must resolve against its own document.
-      if (isWriteRedirectLink(target)) find(target, linkCell);
+      let link = parseLink(binding, baseCell.getAsNormalizedFullLink());
+      // One transaction for the whole chain, so every hop shares a resolution
+      // memo, and none at all for a walk that stops at the first redirect.
+      let chainTx: IExtendedStorageTransaction | undefined;
+      while (true) {
+        if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
+        seen.push(link);
+        if (options?.followRedirectChains === false) return;
+        const tx = (chainTx ??= baseCell.runtime.readTx(baseCell.tx));
+        // Whether the target holds a further redirect is a question about
+        // which reference sits there, so the probe stops at the reference and
+        // leaves the target's content unread: it consumes the pointer's own
+        // label and none of the content labels at that position. The walk
+        // builds no cell, so it kicks no sync of its own; resolution kicks a
+        // document's pull where it follows a hop the replica cannot serve, as
+        // it does for every reader. The link's schema carries the scope caps
+        // resolution honors along the path, interned so that the schema-keyed
+        // caches downstream of the walk stay warm.
+        const target = resolveLink(
+          baseCell.runtime,
+          tx,
+          link.schema === undefined
+            ? link
+            : { ...link, schema: internCellLinkSchema(link.schema) },
+          "top",
+          { markIfcCrossings: true },
+        );
+        // A chained redirect resolves against the document it is stored in —
+        // where resolution landed — rather than against the original
+        // `baseCell`: a relative redirect in a cross-document target must
+        // resolve against its own document.
+        const next = tx.runWithAmbientReadMeta(
+          ignoreReadForScheduling,
+          () => readMaybeLink(tx, target, true),
+        );
+        if (next === undefined) return;
+        link = next;
+      }
     } else if (isCellLink(binding)) {
       // Links that are not write redirects: Ignore them.
       return;
@@ -901,7 +904,7 @@ export function findAllWriteRedirectCells<T>(
       return;
     } else if (Array.isArray(binding)) {
       // If the binding is an array, recurse into each element.
-      for (const value of binding) find(value, baseCell);
+      for (const value of binding) find(value);
       // A special object ends the walk. A `FabricPrimitive` is an opaque
       // scalar and can contain no redirect. An instance ends it here too; the
       // link arm above has already returned for every link, so this arm sees
@@ -912,7 +915,7 @@ export function findAllWriteRedirectCells<T>(
       // nested inside is missed here.
     } else if (isKeyableObjectOrArray(binding)) {
       // If the binding is an object, recurse into each value.
-      for (const value of Object.values(binding)) find(value, baseCell);
+      for (const value of Object.values(binding)) find(value);
     }
   }
   if (
@@ -923,10 +926,10 @@ export function findAllWriteRedirectCells<T>(
     // before traversing — they must not contribute to declared reads.
     for (const [key, value] of Object.entries(binding)) {
       if (skipTopLevelKeys.has(key)) continue;
-      find(value, baseCell);
+      find(value);
     }
   } else {
-    find(binding, baseCell);
+    find(binding);
   }
   return seen;
 }

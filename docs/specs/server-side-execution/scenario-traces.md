@@ -507,9 +507,12 @@ these.
   reload × optimistic window MAY re-enact — the record is the
   reload-wiped overlay — accepted for reversible effects, which
   every shipped kind is.) [protocol §5; speculation §1, §2]
-- Q7: allowed; overlay records the nonce under `origin:
-  intent(eventId)`; retires on the consequenced push; divergence =
-  silent value replacement. [protocol §5; speculation §1, §2, §4]
+- Q7: allowed; the overlay enacts through the channel, which records
+  the nonce under `origin: intent(eventId)` — and which stands the
+  overlay down when the authoritative intent arrived and enacted
+  first, so the journey navigates once in either order; retires on the
+  consequenced push; divergence = silent value replacement.
+  [protocol §5; speculation §1, §2, §4]
 
 ### T3 (GAPS(3))
 - Q1: `firedAt = {user:U1, session:S1}` INHERITED from H1's acting

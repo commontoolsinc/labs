@@ -1252,3 +1252,30 @@ Deno.test("both server-execution pattern roles upload failure logs", async () =>
     "name: toolshed-log-pattern-integration-${{ matrix.shard }}",
   );
 });
+
+Deno.test("both package integration roles upload failure logs", async () => {
+  const contents = await workflow("deno.yml");
+  // Named for the JUnit name rather than the suite, which is what keeps the
+  // two roles' artifacts apart: both carry the same three suite names, and
+  // only the JUnit name says which arm a log came off.
+  for (
+    const job of [
+      "package-integration-test",
+      "package-integration-test-server-execution-opposite",
+    ]
+  ) {
+    const upload = stepBlock(
+      jobBlock(contents, job),
+      "📋 Upload toolshed log on failure",
+    );
+    assertStringIncludes(upload, "if: failure()");
+    assertStringIncludes(upload, "uses: actions/upload-artifact@");
+    assertStringIncludes(
+      upload,
+      "name: toolshed-log-package-integration-${{ matrix.junit_name }}",
+    );
+    assertStringIncludes(upload, "path: ${{ runner.temp }}/toolshed.log");
+    assertStringIncludes(upload, "retention-days: 14");
+    assertStringIncludes(upload, "if-no-files-found: ignore");
+  }
+});

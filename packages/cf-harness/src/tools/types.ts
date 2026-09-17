@@ -41,6 +41,7 @@ export interface HarnessToolContext {
   cfcEnforcementMode: CfcEnforcementMode;
   skillRegistry?: HarnessSkillRegistry;
   skillActivations?: HarnessSkillActivations;
+  allowSkillScripts?: boolean;
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
@@ -107,6 +108,9 @@ export interface HarnessToolContext {
 
   /** Prior admitted kits retained by this run for follow-up and delegation. */
   researchRuns?: readonly HarnessResearchRunSummary[];
+
+  /** Current user goal supplied by the host, independent of the research question. */
+  researchGoal?: string;
 
   /** Existing CFC label on a research task and its accumulated model context. */
   researchTaskCfcLabel?: IFCLabel;

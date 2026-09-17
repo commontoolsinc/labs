@@ -398,10 +398,11 @@ PR):
   (`executor-outbox.test.ts`), and the E2E's exactly-once
   external-call pins under repeated load runs; (ii) the sqliteQuery
   memo decision distinguishes a SETTLED result (a hit) from a bare
-  claim marker — an orphaned claim re-issues under the serving
-  posture only (`sqliteQueryMemoDecision`, unit-pinned), restoring
-  §6 step 3's re-miss premise for the one builtin whose key commits
-  ahead of its result; (iii) userless/grantless outbound appends
+  claim marker — a pending claim with no local in-flight read re-issues
+  in serving and direct execution, while speculative execution continues
+  to dedupe the effect it cannot enact (`sqliteQueryMemoDecision`, unit- and
+  multi-runtime-pinned), restoring §6 step 3's re-miss premise for the one
+  builtin whose key commits ahead of its result; (iii) userless/grantless outbound appends
   are refused at the SOURCE (`enqueueOutboundAppend`), fail-closed
   ahead of the delegated floor that would deterministically destroy
   them at delivery — the Phase-3 floor carve-out for sessionless
@@ -1351,8 +1352,10 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   server's root-existence coverage are recorded by OW18 below.
   The `executor/space-server-terminal-structure.test.ts` controls observe the
   real engine's durable result at every covering commit for creation during
-  confirmation, across a flush deadline, through an owning backlink, and with
-  sealed writes pending. `executor/space-server-terminal-confirmation.test.ts`
+  confirmation, across a flush deadline, at each deadline check the settle
+  loop makes once its input barrier has passed — the re-armed structure retry
+  and the scheduler probe — through an owning backlink, and with sealed
+  writes pending. `executor/space-server-terminal-confirmation.test.ts`
   covers traversed-address demand, departure and return, sync failure, and
   teardown. `ensure-piece-running-scope.test.ts` distinguishes same-ID links
   across scopes from true cycles under both execution postures.
@@ -3816,6 +3819,60 @@ Delta 2026-09-03 — post-flip toggle hygiene:
 - The locally persistent opposite-binary cache includes its baked `true` or
   `false` posture in the filename, so a default flip cannot restore a shell
   compiled for the former opposite arm.
+
+Delta 2026-09-15 — nonce reconciliation in either order:
+
+- protocol §5's "Reconciliation holds in either order" and speculation
+  §2's "stands aside when that nonce is already recorded" ELABORATE the
+  exactly-once MUST already counted under protocol; they add no rule to
+  §1's map. The exactly-once duty was previously kept in one direction
+  only — the overlay recorded its optimistic nonce so a later intent
+  converged, and nothing converged the optimistic enactment on an
+  intent that had already arrived and enacted, so one fire navigated
+  twice whenever the served round trip beat the client's speculative
+  run. The nonce is now arbitrated by the effects channel, against one
+  record both arms meet: `EffectsChannel.enactOnce` is the optimistic
+  arm's entry point, and the channel's own delivery arm converges on
+  that record inline before it takes the nonce. The record is
+  installed before an enactment's callback runs, so a callback that
+  enacts synchronously meets it rather than a gap.
+- Instrument: `packages/runner/test/speculation-overlay.test.ts` — the
+  already-enacted nonce is not flushed while a fresh one is, and an
+  in-flight enactment is awaited rather than assumed, so its FAILURE
+  (which retracts the record) enacts the optimistic flush instead of
+  losing the navigation.
+
+Delta 2026-09-16 — the deferred start of a piece a speculative run
+created:
+
+- protocol §1's scheduler-tell rule and speculation §2's
+  no-creation-carve-out corollary add no sentence to the map; what
+  changes is which instrument covers the corollary, and which normative
+  sections describe the site. The 2026-08-07 batch recorded the
+  corollary as riding the stamping-boundary pins, because a run that
+  instantiates a pattern is stamped by construction. A run does not
+  always set the piece up in its own transaction: when the piece's
+  execution family is not in this replica yet,
+  `Runner.runAfterNamedFamilyLands` names that family, waits for it,
+  and sets the piece up in a transaction it mints itself. That
+  transaction was stamped bookkeeping whatever ran it, so a flag-ON
+  client committed the argument its speculative run computed over the
+  argument the served run wrote — a client path from a scheduler run to
+  the wire, which the wrappers around a transaction hid a second way by
+  hiding the stamp the lookup went after. The durable-read mark was
+  lost across the same wait.
+- serving-loop.md §3d sanctioned the speculative-consequence stamp for
+  the start a commit callback mints and listed every deferred start
+  under bookkeeping; it now says the stamp follows the run a start came
+  from, and names the third start and the derivation kind.
+  speculation.md's durable-read paragraph said the mark covers only the
+  transaction the runner mints for itself; it now says what a start
+  that waits for a family carries into the second one.
+- Instrument: `packages/runner/test/cold-speculative-child.test.ts` —
+  a child left cold and then run from a speculative transaction,
+  direct and through the real and nested transaction wrappers, with
+  authored and serving-runtime controls that still persist, and a pair
+  covering the durable-read mark either side of the wait.
 
 Delta 2026-08-16 — fan-out stage A (OW17 leg 1: the instance-keyed
 serving replica + wire; the client arrival gate):

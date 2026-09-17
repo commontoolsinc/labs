@@ -14,6 +14,9 @@ export const HARNESS_RESEARCH_RUN_TYPE = "cf-harness.research-run" as const;
 /** Whether the evidence was sufficient to hand the caller an actionable kit. */
 export type HarnessResearchStatus = "complete" | "incomplete";
 
+/** Scope of one research call, independent of the implementation direction. */
+export type HarnessResearchPurpose = "orient" | "answer";
+
 /** The implementation direction supported by the inspected evidence. */
 export type HarnessResearchRecommendationKind =
   | "direct-run"
@@ -31,6 +34,12 @@ export interface HarnessResearchSourceRead {
 
   /** Human-readable address of the document, record, or program file. */
   location: string;
+
+  /** Document context supplied beside the exact text window. */
+  documentTitle?: string;
+
+  /** Ancestor headings that determine which environment the snippet describes. */
+  headingPath?: readonly string[];
 
   /** First character included in this read. */
   offset: number;
@@ -224,6 +233,9 @@ export type HarnessResearchExample =
 
 /** Structured implementation guidance returned by the `research` tool. */
 export interface HarnessResearchKit {
+  /** Unscoped saved format, interpreted by the research read boundary. */
+  purpose?: never;
+
   /** Whether all required contracts and inputs were found. */
   status: HarnessResearchStatus;
 
@@ -267,6 +279,72 @@ export interface HarnessResearchKit {
   missing: readonly string[];
 }
 
+/** Indexed candidate whose applicability still requires inspection. */
+export interface HarnessResearchLead {
+  /** Exact host-returned metadata, without source verification. */
+  pattern: HarnessResearchPatternRecord;
+
+  /** Specific applicability question a subsequent call should resolve. */
+  question: string;
+}
+
+/** Findings shared by orientation and a focused answer. */
+interface HarnessResearchFindings {
+  /** Whether this call established the facts its scope asks for. */
+  status: HarnessResearchStatus;
+
+  /** Task or decision investigated by this call. */
+  task: string;
+
+  /** Short answer bounded by the cited evidence and observed inventory. */
+  summary: string;
+
+  /** Current external handles successfully described in this call. */
+  inputs: readonly HarnessResearchInputBinding[];
+
+  /** Selected records that passed host inspection. */
+  patterns: readonly HarnessResearchPatternRecord[];
+
+  /** Claims supported by exact current reads. */
+  rules: readonly HarnessResearchRule[];
+
+  /** Exact evidence supporting these findings. */
+  sources: readonly HarnessResearchSourceRead[];
+
+  /** Unresolved facts needed to answer this call's question. */
+  missing: readonly string[];
+
+  /** Optional code or invocation illustrating the supported findings. */
+  example?: HarnessResearchExample;
+}
+
+/** Starting guidance grounded in available data, inspected pieces, and documentation. */
+export interface HarnessResearchOrientation extends HarnessResearchFindings {
+  /** Orientation establishes a useful approach to the user goal. */
+  purpose: "orient";
+
+  /** Host-returned candidates, explicitly separate from confirmed patterns. */
+  leads: readonly HarnessResearchLead[];
+
+  /** Current general handle inventory, independent of which handles were described. */
+  availableHandleTokens: readonly string[];
+
+  /** Decision-specific follow-ups worth asking only if needed. */
+  questions: readonly string[];
+}
+
+/** Cited response to a question within the user goal. */
+export interface HarnessResearchAnswer extends HarnessResearchFindings {
+  /** Answer scope establishes a decision rather than implementing a task. */
+  purpose: "answer";
+}
+
+/** Admitted research result, including the saved implementation-kit format. */
+export type HarnessResearchResult =
+  | HarnessResearchOrientation
+  | HarnessResearchAnswer
+  | HarnessResearchKit;
+
 /** Durable summary retained for resume, delegation, and authored provenance. */
 export interface HarnessResearchRunSummary {
   /** Research-run discriminator. */
@@ -278,8 +356,8 @@ export interface HarnessResearchRunSummary {
   /** Tool output that owns the full artifact record. */
   outputId: string;
 
-  /** Structured implementation kit handed to the caller. */
-  kit: HarnessResearchKit;
+  /** Orientation, answer, or saved implementation kit handed to the caller. */
+  kit: HarnessResearchResult;
 
   /** Every pattern whose record the host confirmed during the run. */
   confirmedPatterns: readonly HarnessResearchPatternRecord[];
@@ -295,4 +373,7 @@ export interface HarnessResearchRunSummary {
 
   /** Time the host completed the research run. */
   completedAt: string;
+
+  /** Findings from an earlier root task; its handle bindings are historical. */
+  historical?: true;
 }

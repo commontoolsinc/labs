@@ -20,6 +20,7 @@ import {
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
   getValueAtPath,
+  type IExtendedStorageTransaction,
   isCell,
   isCellResultForDereferencing,
   isLink,
@@ -54,12 +55,12 @@ import {
 } from "@commonfabric/runner";
 import { storedArgumentRefusalDetail } from "@commonfabric/runner/shared";
 import {
-  cfcSchemaMergeIssue,
   cfcSchemaResolvedRoot,
   loadStoredCfcEnvelope,
+  type MergeCfcSchemaEnvelopeOptions,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
-  storedSchemaCoversCandidateEnvelope,
+  storedCfcEnvelopeMergeIssue,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
 import { nameSchema } from "@commonfabric/runner/schemas";
@@ -490,9 +491,10 @@ export interface PieceSourceCompatibilityIssues {
 
   /**
    * The CFC schema envelope stored on the piece's argument document cannot
-   * merge with the candidate's argument schema — or cannot be read at all.
-   * Distinct from `schema` and `argument`, which reason about DECLARED types:
-   * this one reasons about what is physically at rest.
+   * merge with the candidate's argument schema, or the one stored on the
+   * piece's own document cannot merge with its result schema — or either
+   * cannot be read at all. Distinct from `schema` and `argument`, which reason
+   * about DECLARED types: this one reasons about what is physically at rest.
    */
   cfc?: string;
 }
@@ -5229,7 +5231,12 @@ async function pieceSourceCompatibilityReview(
       : String(error);
   }
 
-  const cfc = pieceSourceCfcEnvelopeIssue(argumentCell, candidate, pieces);
+  const cfc = pieceSourceCfcEnvelopeIssue(
+    piece,
+    argumentCell,
+    candidate,
+    pieces,
+  );
   if (cfc !== undefined) issues.cfc = cfc;
 
   return {
@@ -5239,8 +5246,8 @@ async function pieceSourceCompatibilityReview(
 }
 
 /**
- * Would the setup commit's CFC schema-envelope merge accept this candidate
- * over what the piece's argument document already stores?
+ * Would the setup commit's CFC schema-envelope merges accept this candidate
+ * over what the piece's documents already store?
  *
  * Why this is its own rule rather than a case of the three above: those all
  * reason about DECLARED types — the previous and candidate patterns' argument
@@ -5248,34 +5255,79 @@ async function pieceSourceCompatibilityReview(
  * envelope is neither. It is the schema the document was last committed under,
  * accumulated across every write that ever touched it, and it can carry claims
  * no pattern declares (a later write that strengthened a confidentiality label
- * widens it in place). So a piece whose pattern pointer has run ahead of its
- * stored envelope — the partially-migrated case this command exists to catch —
- * passes all three type-level checks and still takes `CFC enforcement rejected
- * commit` at the setup boundary. Reporting `compatible: true` there is worse
- * than having no preflight at all, because the verdict is what gates a deploy.
+ * widens it in place; a handler's write stamps its module identity onto the
+ * `writeAuthorizedBy` claim of the field it wrote). So a piece whose pattern
+ * pointer has run ahead of its stored envelope — the partially-migrated case
+ * this command exists to catch — passes all three type-level checks and still
+ * takes `CFC enforcement rejected commit` at the setup boundary. Reporting
+ * `compatible: true` there is worse than having no preflight at all, because
+ * the verdict is what gates a deploy.
  *
- * The merge is driven for real, in dry-run, through the same
- * `mergeCfcSchemaEnvelopes` (and the same stored-covers-candidate fast path)
- * the commit runs, so the two cannot disagree about what merges.
+ * Two documents take that merge at commit, and both are reviewed here. The
+ * argument document merges under the candidate's argument schema. The piece's
+ * own document — the result, where a profile's owner-protected fields live —
+ * merges under the candidate's result schema, and only when setup rewrites
+ * the result projection at all, which `setupRewritesResultProjection` decides
+ * for the review as it does for setup. Setup rewrites the projection in full,
+ * so its schema input covers the whole document as generated output and every
+ * path of it is exempt from the additive-required rule; the review passes the
+ * same exemption, or a candidate that adds a generated result field would be
+ * refused here and accepted by the deploy. An argument is an input: nothing
+ * generates it, so its merge takes no exemption.
  *
- * Scope, deliberately: the ARGUMENT document only. The piece's own document —
- * the result — merges at commit time under `generatedOutputPaths`, the set of
- * paths the running module materializes in that same transaction, which
- * exempts them from the additive-required rule. Those paths are a property of
- * the module's actual output bindings and are not knowable without executing
- * it, so a preflight that merged the result envelope without them would refuse
- * the ordinary, accepted case of a candidate that adds a generated result field
- * (see `packages/piece/test/state-continuity.test.ts`). An argument is an
- * input: nothing generates it, so its merge is faithful here.
+ * Each merge is driven for real, in dry run, through
+ * `storedCfcEnvelopeMergeIssue` — the fast paths the commit takes before it
+ * merges and then the merge itself — so the two cannot disagree about what
+ * merges.
  */
 function pieceSourceCfcEnvelopeIssue(
+  piece: Cell<unknown>,
   argumentCell: Cell<unknown>,
   candidate: Pattern,
   pieces: PiecesController,
 ): string | undefined {
-  const link = argumentCell.getAsNormalizedFullLink();
-  // `readTx()` cannot write, so the dry run stays a dry run.
-  const stored = loadStoredCfcEnvelope(pieces.runtime.readTx(), {
+  // `readTx()` cannot write, so the two dry runs stay dry runs.
+  const tx = pieces.runtime.readTx();
+  const issues = [
+    pieceDocumentCfcEnvelopeIssue(
+      "argument",
+      argumentCell,
+      candidate.argumentSchema,
+      {},
+      tx,
+    ),
+    // Setup writes the result projection, and with it the schema input the
+    // commit merges, only where the candidate's projection differs from the
+    // stored one. A candidate that changes nothing the projection carries
+    // takes no merge at commit, so the review asks setup's own question
+    // first rather than refusing over an envelope the commit never touches.
+    pieces.runtime.runner.setupRewritesResultProjection(tx, candidate, piece)
+      ? pieceDocumentCfcEnvelopeIssue(
+        "result",
+        piece,
+        candidate.resultSchema,
+        { generatedOutputPaths: [[]] },
+        tx,
+      )
+      : undefined,
+  ].filter((issue): issue is string => issue !== undefined);
+  return issues.length === 0 ? undefined : issues.join("\n");
+}
+
+/**
+ * The issue one of the piece's documents raises against the candidate schema
+ * the setup commit would write it under, or `undefined` where the commit's
+ * merge accepts it. `document` names the document in the message.
+ */
+function pieceDocumentCfcEnvelopeIssue(
+  document: "argument" | "result",
+  cell: Cell<unknown>,
+  candidateSchema: JSONSchema,
+  options: MergeCfcSchemaEnvelopeOptions,
+  tx: IExtendedStorageTransaction,
+): string | undefined {
+  const link = cell.getAsNormalizedFullLink();
+  const stored = loadStoredCfcEnvelope(tx, {
     space: link.space,
     id: link.id,
     scope: link.scope,
@@ -5291,25 +5343,22 @@ function pieceSourceCfcEnvelopeIssue(
     // refuses the write. Skipping it here — the tempting reading, since we
     // cannot evaluate the merge — is precisely how a check green-lights an
     // update the deploy then refuses, so it is a blocker instead.
-    return `the CFC schema envelope stored for this piece's argument ` +
+    return `the CFC schema envelope stored for this piece's ${document} ` +
       `document could not be read (${stored.reason}); applying a source ` +
       `would be rejected over the same failure`;
   }
-  // The commit takes the stored envelope unchanged when it already covers the
-  // candidate's, so a preflight that skipped this fast path would manufacture
-  // rejections the real update does not make.
-  if (
-    storedSchemaCoversCandidateEnvelope(stored.schema, candidate.argumentSchema)
-  ) {
-    return undefined;
-  }
-  const issue = cfcSchemaMergeIssue(stored.schema, candidate.argumentSchema);
+  const issue = storedCfcEnvelopeMergeIssue(
+    stored.schema,
+    candidateSchema,
+    options,
+  );
   if (issue === undefined) return undefined;
   return issue.migration
-    ? `the argument document stored for this piece predates the candidate's ` +
-      `schema and cannot migrate to it: ${issue.message}`
-    : `the candidate's argument schema does not merge with the CFC schema ` +
-      `envelope stored for this piece: ${issue.message}`;
+    ? `the ${document} document stored for this piece predates the ` +
+      `candidate's schema and cannot migrate to it: ${issue.message}`
+    : `the candidate's ${document} schema does not merge with the CFC ` +
+      `schema envelope stored for this piece's ${document} document: ` +
+      `${issue.message}`;
 }
 
 function hasPieceSourceCompatibilityIssues(

@@ -61,13 +61,12 @@
     // DOM. The `*.browser.test.ts` name is what routes a file there: the same
     // glob keeps it out of the Deno-only pass, so only executed tests count.
     "test:browser": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts **/*.browser.test.ts",
-    "test": "deno test -A --import-map ./test-import-map.json --ignore='**/*.test.tsx' --ignore='integration' --ignore='google/core/integration' --ignore='auth' --ignore='test/source-coverage' --ignore='**/*.browser.test.ts' . && deno test -A test/source-coverage/ && deno task test:browser"
+    "test": "deno test -A --import-map ./test-import-map.json --ignore='**/*.test.tsx' --ignore='integration' --ignore='test/source-coverage' --ignore='**/*.browser.test.ts' . && deno test -A test/source-coverage/ && deno task test:browser"
   },
   // File discovery for the first pass of the `test` task (lane 1). `include` keeps only
   // `.test.ts`, so pattern tests (`.test.tsx`, lane 2) are never collected;
-  // `exclude` drops every `integration/` directory (lane 3, including nested
-  // ones such as google/core/integration), which the `integration` task runs
-  // instead. These globs apply only to bare `deno test` (the `test` task);
+  // `exclude` drops every `integration/` directory (lane 3), which the
+  // `integration` task runs instead. These globs apply only to bare `deno test` (the `test` task);
   // the `integration*` tasks pass explicit paths, which Deno does not filter
   // through `exclude`. The `test` task runs with -A because some unit tests
   // spawn a hermetic deno/cf subprocess (for example a compiler check).
@@ -83,6 +82,11 @@
     // Interface-only and side-effect free. The multi-runtime harness worker
     // uses this to hand the runtime→OTel bridge the ambient tracer and meter.
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1",
-    "@xyflow/react": "npm:@xyflow/react@^12.11.5"
+    "@xyflow/react": "npm:@xyflow/react@^12.11.5",
+    // The browser-measurement helper parses authored and compiled Topics
+    // sources with it, so no hand-written scanner decides what is code. Lane 1
+    // resolves it through `test-import-map.json`, which pins it a second time
+    // and, being JSON, carries no note of its own; roll both together.
+    "typescript": "npm:typescript@6.0.3"
   }
 }

@@ -22,7 +22,6 @@ import { cfcLabelViewForDereference } from "../src/cfc/label-view-state.ts";
 import type { IFCLabel } from "../src/cfc/label-view-core.ts";
 import {
   readStoredCfcMetadata,
-  resolveStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
   StoredCfcMetadataError,
   UnreadableCfcMetadataError,
@@ -697,16 +696,21 @@ describe("CFC content-addressed labels", () => {
           schemaHash: "fid1:second",
           labelMap,
         };
-        const meta = { meta: {} };
-        expect(resolveStoredCfcMetadata(tx, space, "of:memo", first, meta))
+        // Both envelopes are read through the same transaction, the
+        // reserved position serving one and then the other.
+        const stored: StoredCfcMetadata[] = [first, second];
+        const reader = {
+          readOrThrow: (address: { id: string }) =>
+            // The registered label backs the `cid:` read; the reserved
+            // position serves the envelopes in turn.
+            address.id.startsWith("cid:") ? {} : stored.shift(),
+        } as unknown as IExtendedStorageTransaction;
+        expect(readStoredCfcMetadata(reader, { space, id: "of:memo" }))
           .toMatchObject({ schemaHash: "fid1:first" });
-        const resolved = resolveStoredCfcMetadata(
-          tx,
+        const resolved = readStoredCfcMetadata(reader, {
           space,
-          "of:memo",
-          second,
-          meta,
-        );
+          id: "of:memo",
+        })!;
         expect(resolved.schemaHash).toBe("fid1:second");
         expect(resolved.labelMap.entries[0].label).toEqual(content);
         tx.abort();
@@ -803,11 +807,6 @@ describe("CFC content-addressed labels", () => {
       // A transaction whose read of the document throws — a refusal, a
       // closed transaction — surfaces as the fail-closed error, not as the
       // read's own class, which consumers would swallow.
-      const tx = {
-        readOrThrow: () => {
-          throw new Error("refused by the store");
-        },
-      } as unknown as Parameters<typeof resolveStoredCfcMetadata>[0];
       const stored: StoredCfcMetadata = {
         version: 2,
         schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
@@ -816,14 +815,23 @@ describe("CFC content-addressed labels", () => {
           entries: [{ path: ["secret"], label: { $ref: `cid:${absentHash}` } }],
         },
       };
-      expect(() =>
-        resolveStoredCfcMetadata(tx, space, "of:unreadable", stored, {
-          meta: {},
-        })
-      ).toThrow("could not be read: refused by the store");
+      const tx = {
+        readOrThrow: (address: { id: string }) => {
+          if (address.id.startsWith("cid:")) {
+            throw new Error("refused by the store");
+          }
+          return stored;
+        },
+      } as unknown as IExtendedStorageTransaction;
+      expect(() => readStoredCfcMetadata(tx, { space, id: "of:unreadable" }))
+        .toThrow("could not be read: refused by the store");
     });
 
-    it("reports that policy applies for an unknown version at the fallback position", () => {
+    it("reports that policy applies for a record that is not an envelope", () => {
+      // `["cfc"]` is the one metadata position: a record standing there
+      // that is not an envelope this build interprets fails closed, so the
+      // probe reports that policy applies rather than reading the document
+      // as unlabeled.
       const tx = {
         readOrThrow: () => ({
           cfc: {

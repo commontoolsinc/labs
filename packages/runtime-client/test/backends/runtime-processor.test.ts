@@ -53,7 +53,6 @@ import {
   setLinkCfcLabelView,
 } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { StorageManager as WorkerStorageManager } from "@commonfabric/runner/storage/cache";
 import * as V2Storage from "@commonfabric/runner/storage/v2";
 
 import {
@@ -84,6 +83,7 @@ import {
 } from "@/backends/utils.ts";
 import type { WorkerClient } from "@/backends/worker-client.ts";
 import { buildProcessor } from "./build-processor.ts";
+import { stubWorkerBoot } from "./stub-worker-boot.ts";
 
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",
@@ -2704,18 +2704,17 @@ describe("runtime-processor", () => {
           getCellFromLink: () => ({
             runtime: {
               readTx: () => ({
+                // The read is at the reserved `["cfc"]` position, so it
+                // returns the envelope rather than the whole document.
                 readOrThrow: () => ({
-                  value: "labeled data",
-                  cfc: {
+                  version: 1,
+                  schemaHash: "test-schema",
+                  labelMap: {
                     version: 1,
-                    schemaHash: "test-schema",
-                    labelMap: {
-                      version: 1,
-                      entries: [{
-                        path: [],
-                        label: { confidentiality: ["prompt-risk"] },
-                      }],
-                    },
+                    entries: [{
+                      path: [],
+                      label: { confidentiality: ["prompt-risk"] },
+                    }],
                   },
                 }),
               }),
@@ -2755,23 +2754,20 @@ describe("runtime-processor", () => {
             runtime: {
               readTx: () => ({
                 readOrThrow: () => ({
-                  value: "labeled data",
-                  cfc: {
+                  version: 1,
+                  schemaHash: "test-schema",
+                  labelMap: {
                     version: 1,
-                    schemaHash: "test-schema",
-                    labelMap: {
-                      version: 1,
-                      entries: [{
-                        path: [],
-                        label: {
-                          confidentiality: [{
-                            type: CFC_ATOM_TYPE.Caveat,
-                            kind: "derived-from",
-                            source: "did:key:alice",
-                          }],
-                        },
-                      }],
-                    },
+                    entries: [{
+                      path: [],
+                      label: {
+                        confidentiality: [{
+                          type: CFC_ATOM_TYPE.Caveat,
+                          kind: "derived-from",
+                          source: "did:key:alice",
+                        }],
+                      },
+                    }],
                   },
                 }),
               }),
@@ -2899,7 +2895,9 @@ describe("runtime-processor", () => {
             }),
             runtime: {
               readTx: () => ({
-                readOrThrow: () => ({ value: "plain value" }),
+                // Nothing at the reserved position: the cell carries no
+                // stored label.
+                readOrThrow: () => undefined,
               }),
             },
             getAsNormalizedFullLink: () => ref,
@@ -3060,23 +3058,20 @@ describe("runtime-processor", () => {
         runtime: {
           readTx: () => ({
             readOrThrow: () => ({
-              value: "resolved value",
-              cfc: {
+              version: 1,
+              schemaHash: "test-schema",
+              labelMap: {
                 version: 1,
-                schemaHash: "test-schema",
-                labelMap: {
-                  version: 1,
-                  entries: [{
-                    path: [],
-                    label: {
-                      confidentiality: [{
-                        type: CFC_ATOM_TYPE.Caveat,
-                        kind: "derived-from",
-                        source: "did:key:alice",
-                      }],
-                    },
-                  }],
-                },
+                entries: [{
+                  path: [],
+                  label: {
+                    confidentiality: [{
+                      type: CFC_ATOM_TYPE.Caveat,
+                      kind: "derived-from",
+                      source: "did:key:alice",
+                    }],
+                  },
+                }],
               },
             }),
           }),
@@ -3121,17 +3116,14 @@ describe("runtime-processor", () => {
         runtime: {
           readTx: () => ({
             readOrThrow: () => ({
-              value: "resolved value",
-              cfc: {
+              version: 1,
+              schemaHash: "test-schema",
+              labelMap: {
                 version: 1,
-                schemaHash: "test-schema",
-                labelMap: {
-                  version: 1,
-                  entries: [{
-                    path: [],
-                    label: { integrity: ["authored-by-bob"] },
-                  }],
-                },
+                entries: [{
+                  path: [],
+                  label: { integrity: ["authored-by-bob"] },
+                }],
               },
             }),
           }),
@@ -3189,7 +3181,7 @@ describe("runtime-processor", () => {
         }),
         runtime: {
           readTx: () => ({
-            readOrThrow: () => ({ value: { id: "fid1:sqlite-database" } }),
+            readOrThrow: () => undefined,
           }),
         },
       };
@@ -3234,20 +3226,18 @@ describe("runtime-processor", () => {
           readOrThrow: (address: { id: string }) =>
             address.id === sourceRef.id
               ? {
-                value: "metadata cell",
-                cfc: {
+                version: 1,
+                schemaHash: "test-schema",
+                labelMap: {
                   version: 1,
-                  schemaHash: "test-schema",
-                  labelMap: {
-                    version: 1,
-                    entries: [{
-                      path: [],
-                      label: { confidentiality: ["source-label"] },
-                    }],
-                  },
+                  entries: [{
+                    path: [],
+                    label: { confidentiality: ["source-label"] },
+                  }],
                 },
               }
-              : { value: "result cell" },
+              // The result cell stores no envelope.
+              : undefined,
         }),
         getCellFromLink: (link: { id?: string }) =>
           link.id === sourceRef.id ? sourceCell : resultCell,
@@ -3303,17 +3293,14 @@ describe("runtime-processor", () => {
         runtime: {
           readTx: () => ({
             readOrThrow: () => ({
-              value: "labeled data",
-              cfc: {
+              version: 1,
+              schemaHash: "test-schema",
+              labelMap: {
                 version: 1,
-                schemaHash: "test-schema",
-                labelMap: {
-                  version: 1,
-                  entries: [{
-                    path: [],
-                    label: { confidentiality: ["result-label"] },
-                  }],
-                },
+                entries: [{
+                  path: [],
+                  label: { confidentiality: ["result-label"] },
+                }],
               },
             }),
           }),
@@ -4814,15 +4801,10 @@ describe("runtime-processor", () => {
         as: cfcSigner,
         memoryHost: new URL("memory://"),
       }, server);
-      const originalOpen = WorkerStorageManager.open;
-      const originalHealthCheck = Runtime.prototype.healthCheck;
-      const originalWatchSiteTable = RuntimeProcessor.prototype.watchSiteTable;
+      const restoreBoot = stubWorkerBoot(() => storageManager);
       const originalSubscribe = Runtime.prototype.subscribeEventIntentOutcomes;
       let subscribed = false;
       let cancelled = 0;
-      WorkerStorageManager.open = () => storageManager;
-      Runtime.prototype.healthCheck = () => Promise.resolve(true);
-      RuntimeProcessor.prototype.watchSiteTable = () => {};
       Runtime.prototype.subscribeEventIntentOutcomes = () => {
         subscribed = true;
         return () => cancelled++;
@@ -4837,9 +4819,7 @@ describe("runtime-processor", () => {
         await processor.dispose();
         expect(cancelled).toBe(1);
       } finally {
-        WorkerStorageManager.open = originalOpen;
-        Runtime.prototype.healthCheck = originalHealthCheck;
-        RuntimeProcessor.prototype.watchSiteTable = originalWatchSiteTable;
+        restoreBoot();
         Runtime.prototype.subscribeEventIntentOutcomes = originalSubscribe;
         await storageManager.close();
         await server.close();

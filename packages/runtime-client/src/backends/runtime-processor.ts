@@ -21,6 +21,7 @@ import {
   WorkerReconciler,
 } from "@commonfabric/html/worker";
 import { DID, Identity, type Session } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import type { Program } from "@commonfabric/js-compiler";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { setLLMUrl } from "@commonfabric/llm";
@@ -248,6 +249,7 @@ import {
 } from "@/protocol/mod.ts";
 import type { RemoteResponse, VDomOp } from "@/protocol/types.ts";
 import {
+  type EveryFieldOf,
   normalizeOrigin,
   normalizeSpaceHostMap,
   securityContextDifferences,
@@ -679,6 +681,18 @@ export function mountErrorSink(
   };
 }
 
+/**
+ * The security posture a worker's runtime runs under, read off the payload it
+ * was initialized from. The backend and the per-space host map are normalized
+ * here, so an attach that spells the same backend another way agrees. The
+ * render policy and the render ceiling are recorded as the payload spelled
+ * them, while the processor applies a normalized form of each, so two
+ * spellings of one render posture refuse each other.
+ *
+ * Every field the context declares is named, held by the `satisfies` clause.
+ * What is recorded here is what an attach is compared against, so a field this
+ * one drops is a value the runtime applies and no client can assert.
+ */
 export function securityContextFrom(
   data: InitializationData,
   identity: DID,
@@ -696,7 +710,7 @@ export function securityContextFrom(
     renderDeclassificationPolicy: data.renderDeclassificationPolicy,
     renderConfidentialityCeiling: data.renderConfidentialityCeiling,
     trustSnapshot: data.trustSnapshot,
-  };
+  } satisfies EveryFieldOf<RuntimeSecurityContext>;
 }
 
 type RuntimeOperationTarget = {
@@ -832,8 +846,8 @@ export class RuntimeProcessor {
   /**
    * The runtime and home context this processor was built over, the tables
    * it keeps by space, by client, and by session, the disposed flag, the
-   * render ceiling a mount inherits, and the per-space context step, which a
-   * test drives directly.
+   * render policy and ceiling a mount inherits, and the per-space context
+   * step, which a test drives directly.
    */
   get accessForTestingOnly(): {
     runtime: Runtime;
@@ -860,6 +874,7 @@ export class RuntimeProcessor {
       { reconciler: WorkerReconciler; cancel: Cancel; client: WorkerClient }
     >;
     renderConfidentialityCeiling: RenderConfidentialityCeiling | undefined;
+    readonly renderDeclassificationPolicy: RenderDeclassificationPolicy;
     getSpaceCtx(space: DID): PiecesController;
   } {
     // deno-lint-ignore no-this-alias
@@ -915,6 +930,9 @@ export class RuntimeProcessor {
       set renderConfidentialityCeiling(value) {
         outerThis.#renderConfidentialityCeiling = value;
       },
+      get renderDeclassificationPolicy() {
+        return outerThis.#renderDeclassificationPolicy;
+      },
       getSpaceCtx: (space) => this.#getSpaceCtx(space),
     };
   }
@@ -962,10 +980,9 @@ export class RuntimeProcessor {
             >();
             for (const entry of entries ?? []) {
               if (
-                typeof entry?.did !== "string" ||
+                !isDID(entry?.did) ||
                 typeof entry.host !== "string" ||
-                entry.host.length === 0 ||
-                !entry.did.startsWith("did:")
+                entry.host.length === 0
               ) {
                 continue;
               }
@@ -2743,7 +2760,7 @@ export class RuntimeProcessor {
     // Guard for untyped callers: the request must name the blob's space
     // (required since the federation work) — fail with a named error
     // rather than a confusing server 404 on /undefined/blobs/….
-    if (!request.space || !String(request.space).startsWith("did:")) {
+    if (!isDID(request.space)) {
       throw new Error("uploadBlob requires a space DID");
     }
     const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";

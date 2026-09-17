@@ -1,7 +1,7 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model";
 import { getLogger } from "@commonfabric/utils/logger";
-import { unsafeObjectKeyIn } from "@commonfabric/utils/types";
+import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 import {
   type ClientCommit,
@@ -2424,42 +2424,30 @@ const parseHelloOk = (
   flags: MemoryProtocolFlags;
   sessionOpen?: unknown;
 } | null => {
-  if (typeof message !== "object" || message === null) {
+  if (!isPlainObject(message)) {
     return null;
   }
-  const obj = message as {
-    type?: unknown;
-    protocol?: unknown;
-    flags?: unknown;
-    sessionOpen?: unknown;
-  };
-  if (obj.type !== "hello.ok" || obj.protocol !== MEMORY_PROTOCOL) {
+  if (message.type !== "hello.ok" || message.protocol !== MEMORY_PROTOCOL) {
     return null;
   }
-  const parsed = parseMemoryProtocolFlags(obj.flags);
+  const parsed = parseMemoryProtocolFlags(message.flags);
   if (parsed === null) {
     return null;
   }
-  return { flags: parsed, sessionOpen: obj.sessionOpen };
+  return { flags: parsed, sessionOpen: message.sessionOpen };
 };
 
 const isSessionEffect = (
   message: unknown,
 ): message is SessionEffectMessage => {
-  return typeof message === "object" && message !== null &&
-    (message as { type?: string }).type === "session/effect";
+  return isPlainObject(message) && message.type === "session/effect";
 };
 
 const isSessionRevoked = (
   message: unknown,
 ): message is SessionRevokedMessage => {
-  if (typeof message !== "object" || message === null) return false;
-  const { type, space, sessionId, reason } = message as {
-    type?: string;
-    space?: string;
-    sessionId?: string;
-    reason?: string;
-  };
+  if (!isPlainObject(message)) return false;
+  const { type, space, sessionId, reason } = message;
   return type === "session/revoked" &&
     typeof space === "string" &&
     typeof sessionId === "string" &&
@@ -2467,9 +2455,8 @@ const isSessionRevoked = (
 };
 
 const isResponse = (message: unknown): message is ResponseMessage<unknown> => {
-  return typeof message === "object" && message !== null &&
-    (message as { type?: string }).type === "response" &&
-    typeof (message as { requestId?: string }).requestId === "string";
+  return isPlainObject(message) && message.type === "response" &&
+    typeof message.requestId === "string";
 };
 
 const isEmptySync = (sync: SessionSync): boolean =>

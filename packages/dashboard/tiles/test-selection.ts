@@ -19,55 +19,69 @@
  * Following the dashboard's values (README.md): it reports on the system.
  */
 
-import type { Status, Tile, TileView } from "../types.ts";
+import type { Manifest } from "@commonfabric/test-support/records";
+
 import { compactSpan, groupDigits } from "../lib.ts";
+import {
+  collectSelectionTile,
+  sharedTestSelection,
+  type TestSelectionSource,
+} from "../test-selection-history.ts";
 import {
   laneBudgetOf,
   MANIFEST_SHARE_MS,
-  type ManifestReader,
   selectedCount,
-  sharedManifest,
 } from "../test-selection-manifest.ts";
 import {
   TEST_SELECTION_PATH,
   testSelectionResponse,
 } from "../test-selection-page.ts";
+import { publisherRunning } from "../test-selection-activity.ts";
+import type { Status, Tile, TileView } from "../types.ts";
 
 /** Hours before a manifest is stale enough to say so. */
 export const MANIFEST_STALE_HOURS = 8;
 
-/** Builds the tile against a reader and a clock, so a test can supply both. */
+/** Builds the tile against a data source and a clock. */
 export function makeTestSelection(
-  options: { read?: ManifestReader; now?: () => number } = {},
+  options: { source?: TestSelectionSource; now?: () => number } = {},
 ): Tile {
-  const read = options.read ?? sharedManifest;
+  const source = options.source ?? sharedTestSelection;
   return {
     id: "test-selection",
     intervalMs: MANIFEST_SHARE_MS,
     routes: [{
       path: TEST_SELECTION_PATH,
-      handler: () => testSelectionResponse(read, options.now),
+      handler: () => testSelectionResponse(source.latest, options.now),
     }],
-    collect: () => selectionView(read, options.now),
+    collectActivity: publisherRunning,
+    collect: (_ctx, publish) =>
+      collectSelectionTile(
+        source,
+        "selected",
+        (manifest) => selectionView(manifest, options.now),
+        publish,
+      ),
   };
 }
 
-async function selectionView(
-  read: ManifestReader,
+function selectionView(
+  manifest: Manifest | undefined,
   clock?: () => number,
-): Promise<TileView> {
-  const manifest = await read();
-  if (manifest === undefined) {
+): TileView {
+  if (manifest === undefined || manifest.entries.length === 0) {
     return {
       label: "test selection",
       status: "unknown",
       value: "—",
-      sub: "no selection manifest yet",
+      sub: manifest === undefined
+        ? "no selection manifest yet"
+        : "selection manifest has no tests",
     };
   }
   const selected = selectedCount(manifest);
   const known = manifest.entries.length;
-  const share = known === 0 ? 0 : (selected / known) * 100;
+  const share = (selected / known) * 100;
   const age = (clock?.() ?? Date.now()) - Date.parse(manifest.generatedAt);
   const ageHours = age / 3_600_000;
   const budget = laneBudgetOf(manifest.dials);

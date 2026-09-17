@@ -156,7 +156,7 @@ export class ProblematicValue extends BaseFabricInstance {
 
   static #codec = Object.freeze(
     new (class ProblematicValueCodec
-      extends BaseNonterminalCodec<ProblematicValueState> {
+      extends BaseNonterminalCodec<never, ProblematicValueState> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Problematic, ProblematicValue);

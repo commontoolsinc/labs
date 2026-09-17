@@ -737,7 +737,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
             tx,
           );
           expect(source.key("secret").get()).toBe("rosebud");
-          const forgedId = `${CFC_GRANT_ID_PREFIX}forged-stash`;
+          const forgedId = `${CFC_GRANT_ID_PREFIX}forged/stash/nested`;
           tx.writeOrThrow({
             space: signer.did(),
             id: forgedId as URI,

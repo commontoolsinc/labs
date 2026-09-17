@@ -39,6 +39,7 @@ import {
 } from "@commonfabric/test-support/records";
 import {
   type CapabilityId,
+  logTail,
   openCapabilities,
   takeGithubToken,
 } from "./ci-capabilities.ts";
@@ -442,14 +443,23 @@ export async function runInvocation(
 }
 
 /**
- * A record measuring the lane machinery rather than a test. The publisher
- * fits `setupCost`, `suiteOverhead` and `correction` from these, so they
+ * One figure a lane measured about itself, as a record measuring the lane
+ * machinery rather than a test. The publisher fits `setupCost`,
+ * `suiteOverhead`, `correction` and `unitOverhead` from these, so they
  * travel as ordinary records through the machinery that already exists
  * and need no pipeline of their own. They stay unmarked whatever variant
  * the batch they measure carried: they measure the lane, not an alternate
  * execution of one test.
+ *
+ * The record format carries one number and calls it a duration, so which
+ * of the lane's figures this is and what it counts are decided by the
+ * name.
  */
-function timingRecord(name: string, seconds: number, ok: boolean): TestRecord {
+function measurementRecord(
+  name: string,
+  figure: number,
+  ok: boolean,
+): TestRecord {
   return {
     line: "record",
     test: {
@@ -458,8 +468,13 @@ function timingRecord(name: string, seconds: number, ok: boolean): TestRecord {
       n: name,
     },
     outcome: ok ? "pass" : "fail",
-    durationMs: Math.round(seconds * 1000),
+    durationMs: Math.round(figure),
   };
+}
+
+/** One span of time a lane measured about itself, in seconds. */
+function timingRecord(name: string, seconds: number, ok: boolean): TestRecord {
+  return measurementRecord(name, seconds * 1000, ok);
 }
 
 /** Appends records to the lane's own spool. */
@@ -614,6 +629,7 @@ export async function runBatch(
   spool: string | undefined,
   env: Record<string, string>,
   coverage?: BatchCoverage,
+  plannedSeconds = 0,
 ): Promise<{
   ok: boolean;
   records: TestRecord[];
@@ -710,9 +726,34 @@ export async function runBatch(
   if (spool !== undefined) {
     spoolRecords(spool, [
       ...records,
+      // What the batch spent, what it was packed to spend, and how many
+      // units it opened. All three are known only here: what the packer
+      // expected the tests to take cannot be recovered from the records
+      // the batch produced, because those say what the tests took, and a
+      // unit that recorded nothing at all leaves no trace of having been
+      // opened. The publisher fits a suite's cost beyond its tests from
+      // the three together.
       timingRecord(
         batchMeasurementName(batch.suite.id, coverage !== undefined),
         seconds,
+        ok,
+      ),
+      timingRecord(
+        batchMeasurementName(
+          batch.suite.id,
+          coverage !== undefined,
+          "planned",
+        ),
+        plannedSeconds,
+        ok,
+      ),
+      measurementRecord(
+        batchMeasurementName(
+          batch.suite.id,
+          coverage !== undefined,
+          "units",
+        ),
+        batch.units.length,
         ok,
       ),
     ]);
@@ -849,6 +890,30 @@ export function describeAccounting(
     silent,
   );
   if (lines.length > 0) say(lines);
+}
+
+/**
+ * Prints the end of every log the opened capabilities named.
+ *
+ * A capability runs outside the test process, so a failure on its side is
+ * the half no test record describes, and the directory it wrote to goes
+ * when the lane ends. The lane's own output is what survives that — a
+ * continuous-integration job keeps it, and a person running a lane is
+ * reading it already — so the evidence goes there rather than into an
+ * artifact the lane would have to invent a way to upload.
+ *
+ * Not through `say`: the job summary is rendered prose with a size of its
+ * own to keep, and this is a log.
+ */
+export async function describeCapabilityLogs(
+  logs: readonly { capability: string; path: string }[],
+  read: (path: string) => Promise<string> = Deno.readTextFile,
+): Promise<void> {
+  for (const { capability, path: at } of logs) {
+    console.log(`\n--- ${capability} log ---`);
+    console.log(await logTail(at, read));
+    console.log(`--- end of ${capability} log ---`);
+  }
 }
 
 /** Says something both on the lane's output and in the job summary. */
@@ -1268,6 +1333,7 @@ export async function runLane(
         // lane.
         opened.envFor(batch.suite.needs),
         batchCoverage(options, batch.suite.id, seen.coverage),
+        chosenFor(batch.suite.id, mine.selections).seconds,
       );
       conflicts.push(...result.conflicts);
       // The records decide, rather than the command's exit status: a
@@ -1300,7 +1366,18 @@ export async function runLane(
         failedUnits.add(`${batch.suite.id}\t${unit}`);
       }
     }
+  } catch (error) {
+    // A lane whose loop threw has failed, whatever the batches it got
+    // through said, and it is the one that most needs what the server
+    // wrote. Recorded before the finally below reads it.
+    ok = false;
+    throw error;
   } finally {
+    // Read while the servers are still up: closing one signals it and
+    // returns, so a read after that races a shutdown still writing.
+    // Only for a lane that failed -- a green run has nothing to explain,
+    // and the logs are large.
+    if (!ok) await describeCapabilityLogs(opened.logs);
     await opened.close();
     // The lane owns this directory and nothing outside the lane reads
     // it, so it goes whether the batches passed, failed, or never ran.

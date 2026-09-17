@@ -2,11 +2,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  declaredSchema,
   digestIdentities,
   type Manifest,
   MANIFEST_SCHEMA_VERSION,
   parseManifest,
   serializeManifest,
+  writtenAhead,
 } from "./selection.ts";
 import { sampleManifest } from "./selection-testing.ts";
 
@@ -14,7 +16,6 @@ const TEST = { k: "unit", s: "memory", n: "space > writes" };
 const CALIBRATION = {
   setupCost: {},
   suites: {},
-  unitOverhead: {},
   prologue: 0,
 };
 
@@ -60,6 +61,56 @@ describe("selection", () => {
         schema: MANIFEST_SCHEMA_VERSION + 1,
       };
       expect(parseManifest(JSON.stringify(ahead))).toBeUndefined();
+    });
+
+    it("refuses a body that does not say which shape it is", () => {
+      // The shapes differ in what a field means, so a body that names
+      // none is one no reader can say it understands. Reading it as the
+      // current shape would obey a body nobody claimed was current.
+      for (const schema of [undefined, "1", 1.5, 0, -1, null]) {
+        const object = JSON.parse(serializeManifest(sampleManifest()));
+        if (schema === undefined) delete object.schema;
+        else object.schema = schema;
+        expect(parseManifest(JSON.stringify(object))).toBeUndefined();
+      }
+    });
+
+    it("refuses a suite of this shape carrying no unit overhead", () => {
+      // Absent from the shape that introduced it is a body this reader
+      // cannot read. Reading it as charging nothing would hide the
+      // fault while the packer under-charged every unit a lane opens.
+      const object = JSON.parse(serializeManifest(sampleManifest()));
+      object.calibration.suites = { unit: { overhead: 3, correction: 1 } };
+      expect(parseManifest(JSON.stringify(object))).toBeUndefined();
+    });
+
+    it("reads a manifest written in an earlier shape forward", () => {
+      // Every manifest in the store was written in the shape of its own
+      // day. Refusing the ones behind this reader would leave it with
+      // none the moment a shape changed, and a consumer with no manifest
+      // runs the whole corpus.
+      const older = JSON.parse(serializeManifest(sampleManifest()));
+      older.schema = MANIFEST_SCHEMA_VERSION - 1;
+      older.calibration.suites = { unit: { overhead: 3, correction: 1 } };
+      const parsed = parseManifest(JSON.stringify(older));
+      expect(parsed?.calibration.suites.unit)
+        .toEqual({ overhead: 3, correction: 1, unitOverhead: 0 });
+    });
+
+    it("refuses a unit overhead an earlier shape carries unreadably", () => {
+      // Absent and unreadable are different, and the difference only
+      // arises in a shape whose absent figure has a reading: a fit made
+      // before it existed charged nothing per unit, where a figure that
+      // will not read as one is a body this reader cannot read, and
+      // charging nothing for that would hide it.
+      for (const unitOverhead of ["free", null, -1]) {
+        const older = JSON.parse(serializeManifest(sampleManifest()));
+        older.schema = MANIFEST_SCHEMA_VERSION - 1;
+        older.calibration.suites = {
+          unit: { overhead: 3, correction: 1, unitOverhead },
+        };
+        expect(parseManifest(JSON.stringify(older))).toBeUndefined();
+      }
     });
 
     it("returns undefined rather than obeying part of a manifest", () => {
@@ -159,6 +210,7 @@ describe("selection", () => {
       manifest.calibration.suites["workspace-unit"] = {
         overhead: 0,
         correction: 0,
+        unitOverhead: 0,
       };
       expect(parseManifest(JSON.stringify(manifest))).toBeUndefined();
     });
@@ -256,7 +308,6 @@ describe("selection", () => {
         withField("calibration", {
           setupCost: { a: -1 },
           suites: {},
-          unitOverhead: {},
           prologue: 0,
         }),
       ],
@@ -265,7 +316,6 @@ describe("selection", () => {
         withField("calibration", {
           setupCost: {},
           suites: {},
-          unitOverhead: {},
           prologue: -1,
         }),
       ],
@@ -273,8 +323,7 @@ describe("selection", () => {
         "a suite overhead below zero",
         withField("calibration", {
           setupCost: {},
-          suites: { s: { overhead: -1, correction: 1 } },
-          unitOverhead: {},
+          suites: { s: { overhead: -1, correction: 1, unitOverhead: 0 } },
           prologue: 0,
         }),
       ],
@@ -428,19 +477,24 @@ describe("selection", () => {
         "a suite overhead that is not a number",
         withField("calibration", {
           ...CALIBRATION,
-          suites: { unit: { overhead: "some", correction: 1 } },
+          suites: {
+            unit: { overhead: "some", correction: 1, unitOverhead: 0 },
+          },
         }),
       ],
       [
         "a suite correction that is not a number",
         withField("calibration", {
           ...CALIBRATION,
-          suites: { unit: { overhead: 0, correction: null } },
+          suites: { unit: { overhead: 0, correction: null, unitOverhead: 0 } },
         }),
       ],
       [
-        "a unit overhead that is not a record",
-        withField("calibration", { ...CALIBRATION, unitOverhead: 7 }),
+        "a suite unit overhead below zero",
+        withField("calibration", {
+          ...CALIBRATION,
+          suites: { unit: { overhead: 0, correction: 1, unitOverhead: -1 } },
+        }),
       ],
       [
         "a prologue that is not a number",
@@ -526,8 +580,13 @@ describe("selection", () => {
         }],
         calibration: {
           setupCost: { toolshed: 60 },
-          suites: { "pattern-integration": { overhead: 50, correction: 1.2 } },
-          unitOverhead: { "packages/patterns/one.test.ts": 10 },
+          suites: {
+            "pattern-integration": {
+              overhead: 50,
+              correction: 1.2,
+              unitOverhead: 10,
+            },
+          },
           prologue: 3,
         },
         lanes: [{
@@ -543,6 +602,43 @@ describe("selection", () => {
       manifest.entries[0]!.lastRun = "2026-08-20";
       manifest.entries[0]!.inputs.lastCatch = "2026-08-20";
       expect(parseManifest(serializeManifest(manifest))).toEqual(manifest);
+    });
+  });
+
+  describe("declaredSchema()", () => {
+    it("reads the shape a body declares in its own field", () => {
+      expect(declaredSchema({ schema: 3 })).toBe(3);
+      expect(declaredSchema({ schema: 0 })).toBeUndefined();
+      expect(declaredSchema({ schema: 1.5 })).toBeUndefined();
+      expect(declaredSchema({ schema: "2" })).toBeUndefined();
+      expect(declaredSchema({})).toBeUndefined();
+      expect(declaredSchema(null)).toBeUndefined();
+      expect(declaredSchema([])).toBeUndefined();
+    });
+
+    it("reads nothing from a shape a body only inherits", () => {
+      // A body declares a shape in its own field or not at all. Taking an
+      // inherited one would have every reader pass over an object that is
+      // not a manifest, and a reader that passes over its whole store
+      // reports nothing where it should report a fault.
+      const polluted = Object.prototype as unknown as { schema?: number };
+      polluted.schema = MANIFEST_SCHEMA_VERSION + 1;
+      try {
+        expect(declaredSchema(JSON.parse('{"not":"a manifest"}')))
+          .toBeUndefined();
+        expect(writtenAhead(JSON.parse('{"not":"a manifest"}'))).toBe(false);
+      } finally {
+        delete polluted.schema;
+      }
+    });
+  });
+
+  describe("writtenAhead()", () => {
+    it("is true only of a shape past the one this reader is built for", () => {
+      expect(writtenAhead({ schema: MANIFEST_SCHEMA_VERSION + 1 })).toBe(true);
+      expect(writtenAhead({ schema: MANIFEST_SCHEMA_VERSION })).toBe(false);
+      expect(writtenAhead({ schema: MANIFEST_SCHEMA_VERSION - 1 })).toBe(false);
+      expect(writtenAhead({})).toBe(false);
     });
   });
 

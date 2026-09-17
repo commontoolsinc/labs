@@ -1,7 +1,7 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-09-14
+Last verified: 2026-09-17
 
 The [system map](system-map/README.md) moves in lockstep with this current-state
 reference.
@@ -61,68 +61,79 @@ The current package provides:
   no delegation may name;
 - Common Fabric implementation research over the operator-provisioned docs and
   skills corpus, published pattern metadata and complete multi-file source,
-  dependencies, and safe handle shapes. Fresh CLI root tasks and each
-  interactive turn start with research before the first parent model turn,
-  subject to the ordinary tool policy. A durable checkpoint retains its
-  host-supplied handoff immediately before the task and recovers it without
-  another private call on resume. The handoff carries the research result
-  identity, so the sibling omission record retains a proven `/researchRecord`
-  join to the raw artifact while recording no location for a source-free error;
-  no private record enters parent context. Delegated children consume the
-  inherited kit and start no opening pass. Private tools support search followed
-  by exact bounded reads with continuation, and cannot execute, write, browse,
-  delegate, or mutate Fabric. The host verifies indexed source identities,
-  admits citations and successfully described handle bindings, and returns a
-  structured complete or incomplete kit with a full invocation or source recipe
-  when one is required. Section selectors and citation ids are distinct; a
+  dependencies, and safe handle shapes. Fresh CLI root tasks and interactive
+  sessions without retained research start with an `orient` pass before the
+  first parent model turn, subject to the ordinary tool policy. Later chat turns
+  reuse the findings and let the parent request targeted follow-ups. A durable
+  checkpoint retains its host-supplied handoff immediately before the task and
+  recovers it without another private call on resume. The handoff carries the
+  research result identity, so the sibling omission record retains a proven
+  `/researchRecord` join to the raw artifact while recording no location for a
+  source-free error; no private record enters parent context. Delegated children
+  consume the inherited findings and start no opening pass. `orient` establishes
+  a useful approach from available data and composable pieces; `answer` resolves
+  a follow-up question in the context of the current user goal. Both can inspect
+  indexed source and return optional examples within eight model turns,
+  twenty-four calls, and 96,000 read characters. Private tools return matching
+  passages, paginated document outlines, and batch section reads with exact
+  continuation. They cannot execute, write, browse, delegate, or mutate Fabric.
+  The host verifies indexed source identities, admits citations and successfully
+  described handle bindings, and returns a structured complete or incomplete kit
+  with a full invocation or source recipe when one is required. Docs retain
+  document titles and ancestor headings; search supports a path prefix to focus
+  on the relevant guide. Section selectors and citation ids are distinct; a
   current-read catalog supports synthesis and at most one tool-free citation
   repair within the existing model-turn budget. Unread ids remain inadmissible.
-  Invocation examples must match the shared `run_pattern` input contract and
-  select an inspected identity. Rule and example citations close over the kit's
-  exact source catalog. Every metadata or source read respects the
-  8,000-character read limit; oversized metadata is refused before pattern
-  admission. Complete pattern-source examples receive a host-side syntax-only
-  parser check; exact parser diagnostics keep a claimed-complete kit incomplete
-  while preserving its full source and citations for local correction. Parser
-  success does not establish imports, types, compilation, or runtime behavior.
-  Each result separately carries a CFC projection: its full known source label,
-  a confidentiality-only output label for later model context, and explicit
-  missing-label coverage for unclassified pattern-index metadata/source,
-  unavailable handle-label metadata, or legacy research summaries. Documentation
-  search accounts for unselected leads that influenced ranking. Publication
-  never promotes private indexed source to public, and retained source integrity
-  does not endorse a model rewrite. Opening handoff, resume, and delegated-child
-  paths preserve the confidentiality influence and diagnostic projection. Exact
-  handle-label acquisition returns availability independently of its fail-closed
-  restriction. Model projection has one owner across tool, reconstructed
-  opening, and child handoffs: free text is scrubbed, raw schemas stay in
-  artifacts, and exact import identities and source/CFC records remain usable.
-  The audit and omission writer share the same tool-or-host result provenance
-  reader. Exact reads and the complete private transcript remain in the tool
-  artifact; the caller receives the derived kit plus explicit incomplete-kit
-  guidance. Partial evidence survives malformed output, provider failure, budget
-  exhaustion, and cancellation, with private usage and failure counts included
-  in the parent record. Delegation and focused research retain the latest
-  implementation kit plus two focused answers. Child handle transfer reads only
-  those kits' declared bindings; its inherited CFC context retains the full
-  parent influence even when no kit is selected. Kits and confirmed records
-  persist through delegation, while local authored-source artifacts record the
-  research ids that shaped them. `query_docs` is accepted only as a legacy CLI
-  or persisted-policy alias and is normalized without rewriting old transcript
-  or run-state evidence;
+  Invocation objects are host-serialized to JSON, match the shared `run_pattern`
+  input contract, and select an inspected identity. Rule and example citations
+  close over the kit's exact source catalog. Every metadata or source read
+  respects the 32,000-character read limit; oversized metadata is refused before
+  pattern admission. Complete pattern-source examples receive a host-side
+  syntax-only parser check; exact parser diagnostics keep a claimed-complete kit
+  incomplete while preserving its full source and citations for local
+  correction. Parser success does not establish imports, types, compilation, or
+  runtime behavior. Each result separately carries a CFC projection: its full
+  known source label, a confidentiality-only output label for later model
+  context, and explicit missing-label coverage for unclassified pattern-index
+  metadata/source, unavailable handle-label metadata, or legacy research
+  summaries. Documentation search accounts for unselected leads that influenced
+  ranking. Publication never promotes private indexed source to public, and
+  retained source integrity does not endorse a model rewrite. Opening handoff,
+  resume, and delegated-child paths preserve the confidentiality influence and
+  diagnostic projection. Exact handle-label acquisition returns availability
+  independently of its fail-closed restriction. Model projection has one owner
+  across tool, reconstructed opening, and child handoffs: free text is scrubbed,
+  raw schemas stay in artifacts, and exact import identities and source/CFC
+  records remain usable. The audit and omission writer share the same
+  tool-or-host result provenance reader. Exact reads and the complete private
+  transcript remain in the tool artifact; the caller receives the derived kit
+  plus explicit incomplete-kit guidance. Partial evidence survives malformed
+  output, provider failure, budget exhaustion, and cancellation, with private
+  usage and failure counts included in the parent record. Context selection
+  retains the latest orientation and two answers. Private follow-ups receive
+  selected findings and source locations without copying prior examples or
+  bindings. Interactive sessions persist that context, the original user goal,
+  and full CFC influence with completed history. Follow-ups retain that goal
+  alongside the current request; old bindings remain historical. Child handle
+  transfer reads only selected current bindings; its inherited CFC context
+  retains the full parent influence even when no kit is selected. Kits and
+  confirmed records persist through delegation, while local authored-source
+  artifacts record the research ids that shaped them. `query_docs` is accepted
+  only as a legacy CLI or persisted-policy alias and is normalized without
+  rewriting old transcript or run-state evidence;
 - schema-validated, sanitized child returns with raw child evidence retained
   outside the ordinary parent return channel;
 - image inputs and structured top-level batch results;
 - a skills registry over `--skills-root`, defaulting for a run out of a labs
   checkout to that checkout's own `skills/` tree, with the resolved tree and its
   source recorded in run state and printed in operator output; skill preload by
-  name, indexed supporting-resource reads, and exact allowlisted Deno/Bash skill
-  scripts (which run in the sandbox, and so still ask for the flag). The same
-  allowlist and the same execution path take an acquired skill's script, keyed
-  by the pin its bytes were read at and checked against the digest taken at
-  acquisition; the tool output and the execution record carry that acquisition
-  in place of the registry digest fields, and the invocation is labeled with
-  confidentiality alone, because a non-empty `integrity` array in
+  name, indexed supporting-resource reads, and Deno/Bash skill scripts run in
+  the sandbox where the operator allows them — `--allow-skill-scripts` for every
+  skill the run holds, registry and acquired alike, or an exact entry for one.
+  The same execution path takes an acquired skill's script, checked against the
+  digest taken at acquisition; the tool output and the execution record carry
+  that acquisition in place of the registry digest fields, and the invocation is
+  labeled with confidentiality alone, because a non-empty `integrity` array in
   `cfcInputLabels` makes the sandbox fail to start (CT-2302);
 - recoverable rejection of a malformed tool call: a name no tool answers to,
   arguments that are not a JSON object, or a `delegate_task` argument of the
@@ -268,46 +279,56 @@ The current package provides:
   settle window observed a cause — an action error attributed to the piece, or a
   convergence-budget episode whose deferred actions name this pattern — and
   otherwise still reports ok, since an empty result with no observed cause is
-  not evidence of failure; returns the result cell's canonical reference plus an
-  optionally schema-sanitized value, and leaves the piece detached (no recorded
-  origin) and out of the space's registered piece list, with run→piece
-  provenance carried by the run's persisted artifacts. `assign_slug` names a
-  piece afterwards, from any handle token referring to one: it validates the
-  slug, fails closed on an availability question the space cannot answer,
-  refuses a slug already naming another piece (one already naming the same piece
-  answers ok), refuses a token that names a position inside a piece, another
-  space, or a document with no pattern identity, and otherwise registers the
-  piece in the space's piece list and points the slug at it, returning the slug
-  and, when composable without a bare fabric identifier, an openable URL.
-  Without the session configuration both tools are absent from the tool surface,
-  for a `default`- or `pattern-author`-profile subagent as much as for the
-  parent — a child shares the one session the parent built;
-  `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
-  `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
-  set the session runtime's CFC dials, so with labels persisted a
-  confidentiality-tainted pattern write is refused at commit under strict, and
-  `--fabric-cfc-posture max-enforcement` opts the session runtime into the
-  runner's named posture bundle (every staged enforcement dial on, the standard
-  prompt-caveat policy loaded, public-only ceilings on the network-fetch sinks),
-  with the two per-dial flags applying over it — these are the fabric session's
-  dials, independent of the harness's own `--cfc-enforcement-mode` up to one tie
-  — under a session raised to `enforce-strict` a harness dial nobody set follows
-  the session, and one stated weaker refuses startup naming both flags — and the
-  resolved posture (each dial's value and whether the operator, the named
-  bundle, or the default supplied it) is recorded as `fabricSessionCfc` in run
-  state and the run report, and printed in the operator summary — the whole
-  posture record with it, which a delegated child carries from its parent
-  stamped `inherited` because it runs on that parent's session; the session
-  runtime can further run under a read ceiling — the `--max-confidentiality`
-  flag, or `cfc.maxConfidentiality` (with `cfc.onExceed`) in the run manifest,
-  met when both are given — that bounds every `db.query` the run issues, a
-  query's own declaration met with it rather than replacing it; the ceiling
-  governs only query results declared per session (`PerSession<>`,
-  `scope: "session"`, `.asScope("session")`, or a session-scoped db) and the
-  runtime refuses any other query under it, so a pattern authored for a bounded
-  run declares its results per session; it is refused without a fabric session,
-  recorded with its source as `readMaxConfidentiality` in `fabricSessionCfc`,
-  printed in the operator summary, and inherited unchanged by a delegated child;
+  not evidence of failure; discloses beside a successful result, as
+  `outputConcerns`, declared top-level outputs of the patterns the run
+  materialized — composed ones included, so a reader whose failure the composing
+  source passed on nowhere is still named — that reports a failure or, on a
+  result declaring a read, holds no rows, naming the output and the pattern
+  under the identity a `cf:pattern:` import addresses while the failure's own
+  text stays in the artifact, and under-reporting rather than over-reporting
+  wherever it cannot read — an output reached through a `$ref` or a combinator,
+  a nested one, an instance the recorder's bounded buffer evicted, and an
+  instance that will not read back are each passed over; returns the result
+  cell's canonical reference plus an optionally schema-sanitized value, and
+  leaves the piece detached (no recorded origin) and out of the space's
+  registered piece list, with run→piece provenance carried by the run's
+  persisted artifacts. `assign_slug` names a piece afterwards, from any handle
+  token referring to one: it validates the slug, fails closed on an availability
+  question the space cannot answer, refuses a slug already naming another piece
+  (one already naming the same piece answers ok), refuses a token that names a
+  position inside a piece, another space, or a document with no pattern
+  identity, and otherwise registers the piece in the space's piece list and
+  points the slug at it, returning the slug and, when composable without a bare
+  fabric identifier, an openable URL. Without the session configuration both
+  tools are absent from the tool surface, for a `default`- or
+  `pattern-author`-profile subagent as much as for the parent — a child shares
+  the one session the parent built; `--fabric-cfc-enforcement-mode` (raise-only:
+  `enforce-explicit` or `enforce-strict`) and `--fabric-cfc-flow-labels`
+  (`off`/`observe`/`persist`) set the session runtime's CFC dials, so with
+  labels persisted a confidentiality-tainted pattern write is refused at commit
+  under strict, and `--fabric-cfc-posture max-enforcement` opts the session
+  runtime into the runner's named posture bundle (every staged enforcement dial
+  on, the standard prompt-caveat policy loaded, public-only ceilings on the
+  network-fetch sinks), with the two per-dial flags applying over it — these are
+  the fabric session's dials, independent of the harness's own
+  `--cfc-enforcement-mode` up to one tie — under a session raised to
+  `enforce-strict` a harness dial nobody set follows the session, and one stated
+  weaker refuses startup naming both flags — and the resolved posture (each
+  dial's value and whether the operator, the named bundle, or the default
+  supplied it) is recorded as `fabricSessionCfc` in run state and the run
+  report, and printed in the operator summary — the whole posture record with
+  it, which a delegated child carries from its parent stamped `inherited`
+  because it runs on that parent's session; the session runtime can further run
+  under a read ceiling — the `--max-confidentiality` flag, or
+  `cfc.maxConfidentiality` (with `cfc.onExceed`) in the run manifest, met when
+  both are given — that bounds every `db.query` the run issues, a query's own
+  declaration met with it rather than replacing it; the ceiling governs only
+  query results declared per session (`PerSession<>`, `scope: "session"`,
+  `.asScope("session")`, or a session-scoped db) and the runtime refuses any
+  other query under it, so a pattern authored for a bounded run declares its
+  results per session; it is refused without a fabric session, recorded with its
+  source as `readMaxConfidentiality` in `fabricSessionCfc`, printed in the
+  operator summary, and inherited unchanged by a delegated child;
 - an opt-in pattern index (`--pattern-index-url`, or its
   `CF_HARNESS_PATTERN_INDEX_URL` environment fallback), which needs the fabric
   session configuration: index requests are signed with the session identity
@@ -315,15 +336,25 @@ The current package provides:
   space. It adds the `search_patterns` tool, which finds published patterns by
   hashtag or free text and reports each hit's kind, evidence quality,
   description, hashtags, usage signals, declared argument and result shapes, and
-  the `cf:pattern:<patternId>` import specifier that composes it. Free-text
-  search removes stopwords, matches whole words plus light suffix variants, and
-  is disjunctive: one content term may return a hit, so extra terms can admit
-  generic matches. `matchedTerms` and `queryTerms` count the stopword-free
-  terms. It also extends `run_pattern`, which takes exactly one of `sourceText`
-  and `patternId`: with a `patternId` the published program is fetched host-side
-  and compiled down the same path, and neither its source nor a compile
-  diagnostic quoting it reaches model context — the diagnostic is retained in
-  the run artifact instead. The run reports `instantiated` and then
+  the `cf:pattern:<patternId>` import specifier that composes it. The shared
+  client resolves same-owner `priorPatternId` chains from the discoverable
+  catalog and places the final generation once at the earliest matching rank,
+  including replacements outside the original result limit. Penalized final
+  generations are withheld; branches or cycles fail the affected search.
+  Exact-ID reads and existing imports keep their requested generation. Every
+  nonempty search refreshes catalog membership; immutable metadata is cached per
+  client. Index-supplied inherited signals retain their predecessor, publication
+  cutoff, counts, and score, so a proven tier need not mean that the current
+  generation has run. See
+  [Pattern generations in search](../README.md#pattern-generations-in-search).
+  Free-text search removes stopwords, matches whole words plus light suffix
+  variants, and is disjunctive: one content term may return a hit, so extra
+  terms can admit generic matches. `matchedTerms` and `queryTerms` count the
+  stopword-free terms. It also extends `run_pattern`, which takes exactly one of
+  `sourceText` and `patternId`: with a `patternId` the published program is
+  fetched host-side and compiled down the same path, and neither its source nor
+  a compile diagnostic quoting it reaches model context — the diagnostic is
+  retained in the run artifact instead. The run reports `instantiated` and then
   `run_succeeded` or `run_failed` back to the index through the session's
   pattern-index ledger: each write is sent behind the one before it, no tool
   call waits for it, and the session flushes the whole chain before the process
@@ -331,20 +362,24 @@ The current package provides:
   never cut off in flight. It adds the `record_feedback` tool, which votes a
   pattern up or down with an optional note, so the index learns which of the
   patterns it holds were worth offering. And it closes the loop the other way:
-  source the model authored and ran successfully is recorded under the identity
-  the compile recorded for it, carrying the `description` and `hashtags` the
-  call named, the run's own task as the request the pattern answers, the
-  compiled argument and result schemas, and the published patterns the source
-  imports. Automatic publication records the entry without offering it to
-  search; discoverability is earned from later evidence. Curated seeding may
-  offer a passing run immediately by setting
-  `CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE=1`, while a render-gate failure
-  remains recorded and non-discoverable with the gate's reason. Publication
-  travels the same ledger — sent in order, waited for only at the session's
-  final flush, never a failure of a run that worked — and a run that names no
-  `description` publishes nothing, since its purpose could not be evaluated
-  later. `--no-pattern-index-publish`, or `CF_HARNESS_PATTERN_INDEX_PUBLISH=0`,
-  makes the run a reader and voter only. Without the index configuration
+  source the model authored and ran successfully with a non-empty `description`
+  and a durable content-addressed identity is queued under that identity,
+  carrying the `description` and `hashtags` the call named, the run's own task
+  as the request the pattern answers, the compiled argument and result schemas,
+  and the published patterns the source imports. The tool's
+  `patternPublication.status` is `queued`: the index has not confirmed
+  publication at tool return. Saved tool results remain snapshots of what was
+  known at return. The session's final ledger flush sends retained
+  contributions; index refusals and other publication failures are logged
+  without failing the pattern run. Automatic publication requests a record
+  without search visibility; discoverability is earned from later evidence.
+  Curated seeding may request immediate search visibility for a passing run by
+  setting `CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE=1`, while a render-gate
+  failure requests a non-discoverable record with the gate's reason. Neither
+  request confirms that the index accepted the entry. A run with an empty
+  description or no durable identity queues nothing.
+  `--no-pattern-index-publish`, or `CF_HARNESS_PATTERN_INDEX_PUBLISH=0`, makes
+  the run a reader and voter only. Without the index configuration
   `search_patterns` and `record_feedback` are absent from the tool surface, for
   a `pattern-author`-profile subagent as much as for the parent — a child
   searches through the one client the parent built — and `run_pattern` refuses a

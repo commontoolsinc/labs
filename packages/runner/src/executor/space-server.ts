@@ -345,6 +345,31 @@ export type SpaceServerOptions = {
    * failure-streak reset signal (real served progress, as opposed to an
    * activation that merely got as far as building a runtime). */
   onWaveCommitted?: () => void;
+
+  /** DIAGNOSTIC (tests): called as each wave cycle ends — committed or
+   * not, and thrown or not. Most of the loop's counters — coverage
+   * accounting, the demand pass's structure loads, the watermark clamp
+   * — move inside a cycle and are visible only as numbers afterwards.
+   * See `docs/development/waiting-in-tests.md`. */
+  onWaveCycle?: () => void;
+
+  /** DIAGNOSTIC (tests): called as each drain pass ends, with the
+   * number of events it queued — `stats.events.processed` moves here.
+   * A pass ends before the settle that follows it, so this is earlier
+   * than the cycle edge above by as much as a flush deadline. */
+  onEventDrainPass?: (queued: number) => void;
+
+  /** DIAGNOSTIC (tests): called beside each deferral counter as a
+   * served dispatch defers. A dispatch defers from the scheduler, which
+   * runs free while a drain pass waits on a sidecar's sync, so this
+   * fires inside a pass rather than at its end. */
+  onEventDeferred?: () => void;
+
+  /** DIAGNOSTIC (tests): called beside each `drainInFlightSkips`
+   * increment, naming the event whose re-drain the in-flight guard
+   * turned away. The check happens inside a drain pass, and so does
+   * this. */
+  onDrainInFlightSkip?: (eventId: string) => void;
 };
 
 const DEFAULT_FLUSH_DEADLINE_MS = 100;
@@ -2933,8 +2958,15 @@ export class SpaceServer implements TransactionSealDestination {
         // duration is the time to a failure rather than the time to serve
         // a wave. Averaging the two would be worse than missing one.
         const cycleStart = performance.now();
-        await this.#waveCycle();
-        timing.time(cycleStart, "executor", "wave", "cycle");
+        try {
+          await this.#waveCycle();
+          timing.time(cycleStart, "executor", "wave", "cycle");
+        } finally {
+          // Reported on both paths: the edge says a cycle ENDED, which
+          // is what a waiter needs, while the span above deliberately
+          // skips a cycle that threw.
+          this.#options.onWaveCycle?.();
+        }
         if (!this.#active || this.#parkRequested) break;
         if (!this.#hasWork()) {
           const idleParkMs = this.#options.policy?.idleParkMs ??
@@ -3052,11 +3084,16 @@ export class SpaceServer implements TransactionSealDestination {
    * tick here (so a permanently unrunnable event still hardens into
    * the events.md §5 DROP and clears the park criterion). */
   #armDeferredRescan(): void {
+    // Only a serving tenure arms a backstop. A drain pass runs on through
+    // the awaits a park makes — the seal chain, the runtime's disposal —
+    // and its deferrals land after the park has cleared this timer, which
+    // the park clears once. The entries such a pass leaves pending are
+    // scanned by the next activation.
+    if (!this.#active) return;
     if (this.#deferredRescanTimer !== undefined) return;
     this.#options.stats.events.deferredRescansArmed += 1;
     this.#deferredRescanTimer = setTimeout(() => {
       this.#deferredRescanTimer = undefined;
-      if (!this.#active) return;
       this.#options.stats.events.deferredRescansFired += 1;
       this.#eventScanOwed = true;
       this.#feedArrived?.resolve();
@@ -3636,7 +3673,14 @@ export class SpaceServer implements TransactionSealDestination {
     this.#eventVisibilityFloor = undefined;
     const { engine, space } = this.#options;
     const pendingDocs = Engine.selectPendingStreamEventDocs(engine);
-    if (pendingDocs.length === 0) return 0;
+    if (pendingDocs.length === 0) {
+      // A scan was owed and this is it: the pass ended, having queued
+      // nothing. Reported here as anywhere else, so that a waiter on
+      // the pass boundary sees every pass rather than only the ones
+      // with work in them.
+      this.#options.onEventDrainPass?.(0);
+      return 0;
+    }
     let queued = 0;
     // The load-park barrier's mid-pass half (see #loadParkDeferredInPass).
     // Cleared here so each pass judges its own deferrals.
@@ -3895,6 +3939,7 @@ export class SpaceServer implements TransactionSealDestination {
           if (attention !== undefined) {
             if (this.#drainInFlight.has(entry.eventId)) {
               this.#options.stats.events.drainInFlightSkips += 1;
+              this.#options.onDrainInFlightSkip?.(entry.eventId);
               this.#loadParkDeferredInPass = true;
               break;
             }
@@ -3943,6 +3988,7 @@ export class SpaceServer implements TransactionSealDestination {
         // before — the requeue and deferral retries are untouched.
         if (this.#drainInFlight.has(entry.eventId)) {
           this.#options.stats.events.drainInFlightSkips += 1;
+          this.#options.onDrainInFlightSkip?.(entry.eventId);
           continue;
         }
         const link: NormalizedFullLink = {
@@ -4077,6 +4123,7 @@ export class SpaceServer implements TransactionSealDestination {
                     // same-space follower is only arrival-barrier work and
                     // must never inherit the head's failure age or class.
                     this.#options.stats.events.loadParkDeferrals += 1;
+                    this.#options.onEventDeferred?.();
                     this.#loadParkDeferredInPass = true;
                     if (
                       outcome.cause === "load-park" ||
@@ -4107,6 +4154,7 @@ export class SpaceServer implements TransactionSealDestination {
                       // takes the same plain-deferral pending path
                       // below (threshold backstop included).
                       this.#options.stats.events.handlerNotRunDeferrals += 1;
+                      this.#options.onEventDeferred?.();
                     }
                     const deferrals =
                       (this.#eventDeferrals.get(entry.eventId) ?? 0) + 1;
@@ -4211,6 +4259,7 @@ export class SpaceServer implements TransactionSealDestination {
       }
     }
     this.#options.stats.events.processed += queued;
+    this.#options.onEventDrainPass?.(queued);
     if (queued > this.#options.stats.events.coalescedPerWaveMax) {
       this.#options.stats.events.coalescedPerWaveMax = queued;
     }

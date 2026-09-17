@@ -52,7 +52,6 @@ const FIXTURE = TIER_MARKERS.fixture;
 describe("tierOf", () => {
   it("tiers a file by the directory holding it", () => {
     expect(tierOf("factory-outputs/lot-watch/main.tsx")).toBe("legacy");
-    expect(tierOf("google/WIP/google-docs-importer.tsx")).toBe("legacy");
     expect(tierOf("gideon-tests/test-cell-equals.tsx")).toBe("fixture");
     expect(tierOf("test/non-idempotent/shuffle.tsx")).toBe("fixture");
   });
@@ -218,7 +217,6 @@ describe("staleTableEntries", () => {
     expect(
       staleTableEntries([
         "factory-outputs/lot-watch/main.tsx",
-        "google/WIP/a.tsx",
         "gideon-tests/a.tsx",
         "plain-array-callback-locals/main.tsx",
         "scope-bug-computed-vnode-blank/main.tsx",

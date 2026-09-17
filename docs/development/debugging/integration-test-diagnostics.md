@@ -7,6 +7,13 @@ output before adding any instrumentation of your own.
 
 What the failure probe contains, and where each piece lives:
 
+- **The wait's own report** (`describeConditionWaitFailure`, in
+  [`utils.ts`](../../../packages/integration/utils.ts)) — the source the page
+  ran, the arguments it was given one to a line, the last throw the predicate
+  itself made, and the page it ran out against: document URL and title,
+  response status, the view and identity `globalThis.app` holds, and the
+  browser console tail. Every `waitForCondition` renders this, in every suite;
+  the rest of this list is what the patterns suite adds on top of it.
 - **Fill phase ledger** (`__cfFillDiag`, in
   [`cfc-browser-helpers.ts`](../../../packages/patterns/integration/cfc-browser-helpers.ts))
   — per-selector progress through the fill (settled → found → visible → filled
@@ -28,6 +35,14 @@ What the failure probe contains, and where each piece lives:
   in-page console output, completed-IPC timing table, worker
   scheduler/runner/storage timings, and churn/conflict counters. Printed as
   post-test output on failures and by tests that opt in.
+
+Everything above is the test process's account. The server's own is the
+Toolshed log, and which half of the machinery ran the suite decides where it
+comes from. A lane (`tasks/ci-lane.ts`) opens the server as a capability and
+prints the end of that capability's log on its own output when the lane
+fails; the work directory it was written in goes when the lane ends, so
+nothing else would keep it. The workflow jobs that predate the lanes upload
+the same file as an artifact instead, named for the job that wrote it.
 
 Local full-stack repro for CI-only integration failures (see
 [LOCAL_DEV_SERVERS](../LOCAL_DEV_SERVERS.md) for the dev-server details):

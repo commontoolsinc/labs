@@ -262,8 +262,13 @@ export const cellAddressOfRef = (ref: string): CellAddress | undefined => {
   }
 };
 
-/** A space DID, as a store file is named after one and a reference spells one. */
-const SPACE_DID = /^did:[a-z0-9]+:[A-Za-z0-9._%-]+$/;
+/**
+ * A space DID pinned tightly enough to be read as a store's own identity.
+ * `isDID` answers only whether a string is a DID, so it admits `did:` and a
+ * method-specific identifier of any shape; a name that proves nothing about
+ * which space a file holds must not be read as proving one.
+ */
+const STORE_FILENAME_SPACE_DID = /^did:[^:]+:[^:]+$/;
 
 /**
  * The DID of the space a database file holds, from the file's own name: a
@@ -275,7 +280,7 @@ const SPACE_DID = /^did:[a-z0-9]+:[A-Za-z0-9._%-]+$/;
  */
 const spaceDidOfDbPath = (dbPath: string): string | undefined => {
   const name = (dbPath.split("/").pop() ?? dbPath).replace(/\.sqlite$/, "");
-  return SPACE_DID.test(name) ? name : undefined;
+  return STORE_FILENAME_SPACE_DID.test(name) ? name : undefined;
 };
 
 /**

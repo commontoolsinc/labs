@@ -93,6 +93,7 @@ import {
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+  type CfcPreparationWork,
   POST_COMMIT_RELEASE_REJECTED,
   runtimeWritePolicyAuthorized,
 } from "../cfc/types.ts";
@@ -210,6 +211,18 @@ type CfcInstrumentationHooks = {
   onFlowLabelProbe?(outcome: "computed" | "memo"): void;
 
   onPreparedTx?(): void;
+
+  /** Whether the prepared digest was computed or reused at the activity epoch. */
+  onPreparedDigest?(outcome: "computed" | "memo"): void;
+
+  /** One structured refusal detail was recorded. Measurement only. */
+  onRefusalDetail?(): void;
+
+  /** One full consumed-label collection was started. Measurement only. */
+  onConsumedLabelWalk?(): void;
+
+  /** Work performed by preparation, including label lookup and stamping. */
+  onPreparationWork?(kind: CfcPreparationWork, count: number): void;
 
   /** One dereference trace was recorded, and how many the transaction holds
    * after it. `probeBelongsToDereference` scans this set once per read
@@ -624,9 +637,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   /**
    * The activity epoch (see
    * `IExtendedStorageTransaction.probeFlowLabelWork()`), which counts every
-   * journaled read, write, dereference trace, and trigger read.
+   * journaled read, write, and change to prepared-digest decision inputs.
    */
   #cfcActivityEpoch = 0;
+
+  /** Digest and input bound to one immutable activity snapshot. */
+  #preparedDigestMemo: {
+    epoch: number;
+    input: PreparedDigestInput;
+    digest: string;
+  } | undefined;
 
   /**
    * The last _negative_ flow-label probe verdict, with the activity epoch it
@@ -646,19 +666,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   /**
-   * The prepared-digest input this transaction would hand to verification,
-   * which a test reads directly to pin what it carries.
+   * The prepared-digest input and epoch-bound computation, which tests and
+   * benchmarks drive directly to check binding and cache reuse.
    */
   get accessForTestingOnly(): {
     buildPreparedDigestInput(): PreparedDigestInput;
+    preparedDigest(): string;
   } {
     return {
       buildPreparedDigestInput: () => this.#buildPreparedDigestInput(),
+      preparedDigest: () => this.#preparedDigest(),
     };
   }
 
-  /** Stage C tuning T1: any transaction activity that could change the
-   * flow-label probe's answer moves the epoch. */
+  /** Retires activity-bound flow-label and prepared-digest memos. */
   #noteCfcActivity(): void {
     this.#cfcActivityEpoch += 1;
   }
@@ -1074,6 +1095,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    */
   setCfcPolicySnapshot(snapshot: PolicySnapshot | undefined): void {
     if (this.#cfcPolicySnapshotPinned) return;
+    this.#noteCfcActivity();
     this.#cfcPolicySnapshotPinned = true;
     this.#cfcState.policySnapshot = snapshot === undefined
       ? undefined
@@ -1109,6 +1131,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     >,
   ): void {
     if (this.#cfcModuleDelegationsPinned) return;
+    this.#noteCfcActivity();
     this.#cfcModuleDelegationsPinned = true;
     const snapshot = new Map<
       MemorySpace,
@@ -1408,6 +1431,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   invalidateCfc(reason: string): void {
+    this.#preparedDigestMemo = undefined;
     const wasPrepared = this.#cfcState.prepare.status === "prepared";
     const previousDigest = this.#cfcState.prepare.status === "prepared"
       ? this.#cfcState.prepare.digest
@@ -1676,17 +1700,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #hasWrites = false;
 
   /**
-   * Record that this transaction has written.
+   * Record that a storage write succeeded.
    *
-   * Called from every write path rather than inferred from one of their side
+   * Called after each successful write rather than inferred from one of its side
    * effects: a mergeable op and a folded SQLite write are both writes, and
    * neither drops the read-result cache — the value write a mergeable op
    * annotates has already done that, and a SQLite op changes no cell value
    * locally. Deriving "has written" from cache invalidation would miss both.
+   * Activity is recorded separately because a failed attempt can enter the
+   * journal without changing a value.
    */
   #noteWrite(): void {
     this.#hasWrites = true;
-    this.#noteCfcActivity();
   }
 
   #invalidateReadResultCache(): void {
@@ -1745,7 +1770,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void {
-    this.#cfcState.trustSnapshot = snapshot;
+    this.#noteCfcActivity();
+    this.#cfcState.trustSnapshot = deepFreeze(snapshot);
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("trust-snapshot-changed");
     }
@@ -1754,7 +1780,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   setCfcImplementationIdentity(
     identity: ImplementationIdentity | undefined,
   ): void {
-    this.#cfcState.implementationIdentity = identity;
+    this.#noteCfcActivity();
+    this.#cfcState.implementationIdentity = deepFreeze(identity);
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("implementation-identity-changed");
     }
@@ -1769,6 +1796,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // existing WeakMap. The within-sort tiebreaker in
     // `compareWritePolicyInput` then re-hashes each element via the cache.
     const frozen = deepFreeze(input);
+    this.#noteCfcActivity();
     this.#cfcState.writePolicyInputs.push(frozen);
     if (frozen.kind === "schema") {
       let documents = this.#schemaPolicyInputs.get(frozen.target.space);
@@ -1931,12 +1959,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       if (this.#cfcState.consultedGrants[index].digest === consulted.digest) {
         return;
       }
+      this.#noteCfcActivity();
       this.#cfcState.consultedGrants[index] = deepFreeze(consulted);
       if (this.#cfcState.prepare.status === "prepared") {
         this.invalidateCfc("consulted-grant-changed");
       }
       return;
     }
+    this.#noteCfcActivity();
     this.#cfcState.consultedGrants.push(deepFreeze(consulted));
     // Grants are consulted DURING prepare (the boundary gates); recording
     // after a prepare stamped its digest means the decision inputs grew —
@@ -1958,12 +1988,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       ) {
         return;
       }
+      this.#noteCfcActivity();
       this.#cfcState.consultedPolicyManifests[index] = deepFreeze(consulted);
       if (this.#cfcState.prepare.status === "prepared") {
         this.invalidateCfc("consulted-policy-manifest-changed");
       }
       return;
     }
+    this.#noteCfcActivity();
     this.#cfcState.consultedPolicyManifests.push(deepFreeze(consulted));
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("consulted-policy-manifest-added");
@@ -1981,6 +2013,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (observation.confidentiality.length === 0) {
       return;
     }
+    this.#noteCfcActivity();
     this.#cfcState.labelMetadataObservations.push(deepFreeze(observation));
     // A labeled metadata observation makes the transaction CFC-relevant
     // directly (like noteSystemWrite): its taint must reach the flow
@@ -1999,6 +2032,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // this transaction already made; letting it move the enforcement state
     // would make the description part of the decision.
     this.#cfcState.refusalDetails.push(deepFreeze(detail));
+    this.#cfcInstrumentation.onRefusalDetail?.();
+  }
+
+  /** @inheritDoc */
+  noteCfcConsumedLabelWalk(): void {
+    this.#cfcInstrumentation.onConsumedLabelWalk?.();
+  }
+
+  /** @inheritDoc */
+  noteCfcPreparationWork(kind: CfcPreparationWork, count = 1): void {
+    this.#cfcInstrumentation.onPreparationWork?.(kind, count);
   }
 
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
@@ -2134,6 +2178,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   commitVerdict(): Promise<Result<Unit, CommitError>> {
     return this.#verdict.promise;
+  }
+
+  #preparedDigest(): string {
+    if (this.#preparedDigestMemo?.epoch === this.#cfcActivityEpoch) {
+      this.#cfcInstrumentation.onPreparedDigest?.("memo");
+      return this.#preparedDigestMemo.digest;
+    }
+    const input = this.#buildPreparedDigestInput();
+    const digest = preparedDigestFor(input);
+    this.#preparedDigestMemo = { epoch: this.#cfcActivityEpoch, input, digest };
+    this.#cfcInstrumentation.onPreparedDigest?.("computed");
+    return digest;
   }
 
   #buildPreparedDigestInput(): PreparedDigestInput {
@@ -2602,7 +2658,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  /** Evaluates CFC gates and records the complete preparation interval. */
   prepareCfc(): string {
+    const started = performance.now();
+    try {
+      return this.#prepareCfc();
+    } finally {
+      logger.time(started, "prepareCfc");
+    }
+  }
+
+  /** Evaluates gates and seals preparation inputs for this transaction. */
+  #prepareCfc(): string {
     // Verification always runs. There is deliberately no caller-supplied input
     // override: the commit-time digest recheck only confirms the prepared input
     // matches real activity, so accepting an external input here would let a
@@ -2724,8 +2791,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.#cfcState.diagnostics.push(...reasons.map(plainReason));
       return "";
     }
-    const preparedInput = this.#buildPreparedDigestInput();
-    const digest = preparedDigestFor(preparedInput);
+    const digest = this.#preparedDigest();
+    const preparedInput = this.#preparedDigestMemo!.input;
     this.#cfcState.prepare = {
       status: "prepared",
       digest,
@@ -2843,8 +2910,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // later reshape or mixed-op leave a stale tail op in the commit — silent
     // corruption. When poison is unavailable the intent is simply not recorded,
     // so the commit falls back to the plain whole-array diff already written.
-    if (this.tx.poisonMergeableOp) {
-      this.tx.recordMergeableOp?.(address, delta);
+    if (this.tx.poisonMergeableOp && this.tx.recordMergeableOp) {
+      this.#noteCfcActivity();
+      this.tx.recordMergeableOp(address, delta);
+      this.#noteWrite();
     }
   }
 
@@ -2862,7 +2931,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         "storage transaction does not support recordSqliteWrite()",
       );
     }
+    this.#noteCfcActivity();
     this.tx.recordSqliteWrite(space, op);
+    this.#noteWrite();
   }
 
   getReadActivities(): Iterable<IReadActivity> {
@@ -2890,6 +2961,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     space: MemorySpace,
   ): Iterable<TransactionWriteDetail> {
     return getTransactionWriteDetails(this.tx, space);
+  }
+
+  getWriteDetailsForTarget(target: {
+    space: MemorySpace;
+    id: URI;
+    scope?: CellScope;
+    path?: readonly PropertyKey[];
+  }): Iterable<TransactionWriteDetail> {
+    return this.tx.getWriteDetailsForTarget?.(target) ??
+      this.getWriteDetails(target.space);
   }
 
   status(): StorageTransactionStatus {
@@ -2968,6 +3049,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
     this.#assertWritable("write()");
+    this.#noteCfcActivity();
     this.#noteSystemWrite(address, value, options);
     this.#noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -2979,6 +3061,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
     const result = this.tx.write(address, value, options);
     if (result.ok) {
+      this.#noteWrite();
       this.#stageSchemaDocsForValue(address.space, address, value);
     }
     return result;
@@ -2990,6 +3073,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): void {
     this.#assertWritable("writeOrThrow()");
+    this.#noteCfcActivity();
     this.#noteSystemWrite(address, value, options);
     this.#noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -3070,6 +3154,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     } else if (writeResult.error) {
       throw toThrowable(writeResult.error);
     }
+    this.#noteWrite();
     // The staged value may carry link schemas — or be, or carry, a
     // `schema` metadata member — with external refs; stage their closure
     // with it (the write-side delivery guarantee, and what makes a
@@ -3127,7 +3212,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // Capture the identity per yielded write, not once up front: an empty
       // batch authored nothing, so it must not record a write for the
       // transaction's write-identity summary.
-      const noteWriteIdentity = () => this.#noteWriteIdentity();
+      const noteWriteIdentity = () => {
+        this.#noteCfcActivity();
+        this.#noteWriteIdentity();
+      };
       const refuseMalformedSchemaMeta = (
         address: IMemorySpaceAddress,
         value: FabricValue | undefined,
@@ -3172,6 +3260,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       if (result.error) {
         throw toThrowable(result.error);
       }
+      if (cachesInvalidated) this.#noteWrite();
       for (const write of staged) {
         this.#stageSchemaDocsForValue(
           write.address.space,
@@ -3196,6 +3285,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#statusOverride = undefined;
     this.#clearPostCommitOutbox();
     this.#cfcState.prepare = { status: "unprepared" };
+    this.#preparedDigestMemo = undefined;
     this.#cfcState.dereferenceTraces = [];
     this.#cfcState.structureContainers = [];
     const result = this.tx.abort(reason);
@@ -3409,9 +3499,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
 
       if (this.#cfcState.prepare.status === "prepared") {
-        const currentDigest = preparedDigestFor(
-          this.#buildPreparedDigestInput(),
-        );
+        const currentDigest = this.#preparedDigest();
         if (currentDigest !== this.#cfcState.prepare.digest) {
           this.invalidateCfc("prepared-digest-mismatch");
           if (this.#cfcState.enforcementMode !== "observe") {
@@ -3946,6 +4034,16 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.#wrapped.recordCfcRefusalDetail(detail);
   }
 
+  /** @inheritDoc */
+  noteCfcConsumedLabelWalk(): void {
+    this.#wrapped.noteCfcConsumedLabelWalk();
+  }
+
+  /** @inheritDoc */
+  noteCfcPreparationWork(kind: CfcPreparationWork, count = 1): void {
+    this.#wrapped.noteCfcPreparationWork(kind, count);
+  }
+
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
     return this.#wrapped.writeCfcGrant(input);
   }
@@ -4064,6 +4162,16 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   ): Iterable<TransactionWriteDetail> {
     return this.#wrapped.getWriteDetails?.(space) ??
       getTransactionWriteDetails(this.#wrapped.tx, space);
+  }
+
+  getWriteDetailsForTarget(target: {
+    space: MemorySpace;
+    id: URI;
+    scope?: CellScope;
+    path?: readonly PropertyKey[];
+  }): Iterable<TransactionWriteDetail> {
+    return this.#wrapped.getWriteDetailsForTarget?.(target) ??
+      this.getWriteDetails(target.space);
   }
 
   status(): StorageTransactionStatus {

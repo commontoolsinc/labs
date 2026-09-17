@@ -177,6 +177,14 @@ Description strings may run past the 80-column line width the rest of the
 repository holds to. A description that reads well is worth more than a
 description that wraps well.
 
+Changing a description renames the test. The description string, together with
+the `describe()` chain above it, is the test's identity in the run-record
+store, so a reworded description starts a fresh identity and leaves the old
+one's history where it was. Append a line to
+`tasks/test-identity-aliases.jsonl` to join the two halves, as described in
+[test records](test-records.md). No gate reports a rename that was never
+bridged.
+
 ### Commenting a block
 
 A comment about a test, or about a group of tests, goes inside the block it

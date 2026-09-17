@@ -2,10 +2,13 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 
 import type { FabricValue } from "@commonfabric/api";
-import { cloneIfNecessary, valueEqual } from "@commonfabric/data-model";
+import {
+  cloneIfNecessary,
+  isFabricPlainObject,
+  valueEqual,
+} from "@commonfabric/data-model";
 import { getLogger } from "@commonfabric/utils/logger";
 import { StagedMap } from "@commonfabric/utils/staged-map";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { metrics, SpanStatusCode, trace } from "@opentelemetry/api";
 
 import {
@@ -175,6 +178,15 @@ import {
 } from "./view-interest.ts";
 
 export { SessionRegistry } from "./session-registry.ts";
+
+/**
+ * A space DID pinned tightly enough to name a store. `isDID`
+ * (`@commonfabric/identity/did`) answers only whether a string is a DID, so it
+ * admits a method-specific identifier of any shape, and this string goes on to
+ * name a file on disk. The narrower question is the one
+ * `foreignWriteAuthorityFor` has to ask.
+ */
+const WELL_FORMED_SPACE_DID = /^did:[^:]+:[^:]+$/;
 
 // Global OTel API tracer. Interface-only and inert when no provider is
 // registered, so this is a no-op unless the host process (toolshed) has an
@@ -901,7 +913,7 @@ class Connection {
 
   sessionOpenAuthContext(message: SessionOpenRequest): SessionOpenAuthContext {
     const audience = this.#server.sessionOpenAudience();
-    const invocation = isObjectNotArray(message.invocation)
+    const invocation = isFabricPlainObject(message.invocation)
       ? message.invocation
       : null;
     if (invocation === null || typeof invocation.aud !== "string") {
@@ -1548,6 +1560,12 @@ export class Server {
    * host per process.
    */
   #serverExecutionObserver: ServerExecutionObserver | undefined;
+
+  /**
+   * Additive watchers of the same admission hook, independent of the host's
+   * observer above: any number attach, and each sees every notice.
+   */
+  #admittedCommitWatchers = new Set<(notice: AdmittedCommitNotice) => void>();
 
   /**
    * Per-frame delivery record: the wire strips instance keys (frames carry
@@ -6807,18 +6825,51 @@ export class Server {
     this.#serverExecutionObserver = observer;
   }
 
+  /**
+   * Watch every commit this server admits: a session transact, a
+   * delegated append, the server's own direct write, and the serving
+   * loop's wave commits, each reported after the engine has applied it.
+   * Any number of watchers attach — the host's own observer above is
+   * separate and unaffected — and the returned function detaches one.
+   *
+   * This is the store's "something landed" edge, and it reports the
+   * commits a client's own subscription does not: a doc outside every
+   * replica's watch set, and the serving loop's own bookkeeping.
+   * `docs/development/waiting-in-tests.md` covers what a test does
+   * with it.
+   */
+  watchAdmittedCommits(
+    watcher: (notice: AdmittedCommitNotice) => void,
+  ): () => void {
+    this.#admittedCommitWatchers.add(watcher);
+    return () => {
+      this.#admittedCommitWatchers.delete(watcher);
+    };
+  }
+
   #notifyCommitAdmitted(notice: AdmittedCommitNotice): void {
     const observer = this.#serverExecutionObserver;
-    if (observer?.commitAdmitted === undefined) return;
-    try {
-      observer.commitAdmitted(notice);
-    } catch (error) {
-      // Admission never fails because the observer threw; the host's
-      // catch-up scan (selectCommitsSince) covers a dropped notice.
-      console.warn(
-        "memory v2: server-execution observer threw on commitAdmitted",
-        error,
-      );
+    if (observer?.commitAdmitted !== undefined) {
+      try {
+        observer.commitAdmitted(notice);
+      } catch (error) {
+        // Admission never fails because the observer threw; the host's
+        // catch-up scan (selectCommitsSince) covers a dropped notice.
+        console.warn(
+          "memory v2: server-execution observer threw on commitAdmitted",
+          error,
+        );
+      }
+    }
+    for (const watcher of this.#admittedCommitWatchers) {
+      try {
+        watcher(notice);
+      } catch (error) {
+        console.warn(
+          "memory v2: admitted-commit watcher threw",
+          error,
+        );
+      }
     }
   }
 
@@ -7623,7 +7674,7 @@ export class Server {
     | { granted: true; via: "owner" | "creation" | "acl" }
     | { granted: false; reason: string }
   > {
-    if (!/^did:[^:]+:[^:]+$/.test(space)) {
+    if (!WELL_FORMED_SPACE_DID.test(space)) {
       return {
         granted: false,
         reason: `"${space}" is not a space DID — refusing to resolve (or ` +
@@ -7799,14 +7850,14 @@ export class Server {
  * declares holdings it cannot spell is not silently delivered in full.
  */
 const parseHoldings = (
-  value: unknown,
+  value: FabricValue,
 ): SessionHolding[] | undefined | null => {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) return null;
   const holdings: SessionHolding[] = [];
   for (const entry of value) {
     if (
-      !isObjectNotArray(entry) ||
+      !isFabricPlainObject(entry) ||
       typeof entry.id !== "string" ||
       !isNonNegativeInteger(entry.seq) ||
       (entry.scope !== undefined && !isCellScope(entry.scope)) ||
@@ -7841,14 +7892,14 @@ function isSqliteNamedParamEntries(
 export const parseClientMessage = (
   payload: string,
 ): ClientMessage | null => {
-  let parsed: unknown;
+  let parsed: FabricValue;
   try {
     parsed = decodeMemoryBoundary(payload);
   } catch {
     return null;
   }
 
-  if (!isObjectNotArray(parsed)) {
+  if (!isFabricPlainObject(parsed)) {
     return null;
   }
 
@@ -7870,7 +7921,7 @@ export const parseClientMessage = (
     parsed.type === "session.open" &&
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
-    isObjectNotArray(parsed.session)
+    isFabricPlainObject(parsed.session)
   ) {
     const holdings = parseHoldings(parsed.holdings);
     if (holdings === null) return null;
@@ -7898,7 +7949,7 @@ export const parseClientMessage = (
           ? (parsed.session.actingAs as "space-owner")
           : undefined,
       },
-      invocation: isObjectNotArray(parsed.invocation)
+      invocation: isFabricPlainObject(parsed.invocation)
         ? parsed.invocation
         : undefined,
       authorization: parsed
@@ -7911,7 +7962,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isObjectNotArray(parsed.commit)
+    isFabricPlainObject(parsed.commit)
   ) {
     return {
       type: "transact",
@@ -7927,7 +7978,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isObjectNotArray(parsed.query) &&
+    isFabricPlainObject(parsed.query) &&
     Array.isArray(parsed.query.roots)
   ) {
     return {
@@ -7944,7 +7995,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isObjectNotArray(parsed.query) &&
+    isFabricPlainObject(parsed.query) &&
     typeof parsed.query.id === "string" &&
     Array.isArray(parsed.query.path)
   ) {
@@ -8002,7 +8053,7 @@ export const parseClientMessage = (
   if (
     parsed.type === "sqlite.query" &&
     (parsed.reader === undefined ||
-      (isObjectNotArray(parsed.reader) &&
+      (isFabricPlainObject(parsed.reader) &&
         typeof parsed.reader.principal === "string" &&
         parsed.reader.principal.length > 0 &&
         (parsed.reader.sessionId === undefined ||
@@ -8013,11 +8064,11 @@ export const parseClientMessage = (
     typeof parsed.sessionId === "string" &&
     typeof parsed.sql === "string" &&
     parsed.sql.length <= 100_000 &&
-    isObjectNotArray(parsed.db) &&
+    isFabricPlainObject(parsed.db) &&
     typeof parsed.db.id === "string" &&
     parsed.db.id.length > 0 && parsed.db.id.length <= 256 &&
     (parsed.db.tables === undefined ||
-      (isObjectNotArray(parsed.db.tables) &&
+      (isFabricPlainObject(parsed.db.tables) &&
         Object.keys(parsed.db.tables).length <= 256)) &&
     (parsed.db.scope === undefined || parsed.db.scope === "space" ||
       parsed.db.scope === "user" || parsed.db.scope === "session") &&
@@ -8027,12 +8078,14 @@ export const parseClientMessage = (
   ) {
     const db = {
       id: parsed.db.id,
-      tables: isObjectNotArray(parsed.db.tables) ? parsed.db.tables : undefined,
+      tables: isFabricPlainObject(parsed.db.tables)
+        ? parsed.db.tables
+        : undefined,
       scope: parsed.db.scope as CellScope | undefined,
     };
     const params = isSqliteNamedParamEntries(parsed.namedParams)
       ? Object.fromEntries(parsed.namedParams)
-      : isObjectOrArray(parsed.params)
+      : Array.isArray(parsed.params) || isFabricPlainObject(parsed.params)
       ? parsed.params as SqliteParamsWire
       : undefined;
     return {

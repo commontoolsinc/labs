@@ -117,11 +117,11 @@ async function excludedByManifest(
 /**
  * The declared members, less any that another member already contains.
  *
- * The workspace nests: `packages/patterns/auth` is a member and so is the
- * tree above it. Walking both reaches the inner modules twice, and while a
- * set of paths absorbs that, a count of them does not — which is how two
- * honest censuses of this repository come to disagree. Reducing the forest
- * first makes the population walked the same thing as the population counted.
+ * A member lying inside another member's tree is dropped, keeping the one that
+ * contains it. Walking both reaches the inner modules twice, and while a set of
+ * paths absorbs that, a count of them does not — which is how two honest
+ * censuses of this repository come to disagree. Reducing the forest first makes
+ * the population walked the same thing as the population counted.
  */
 function outermost(members: readonly string[]): string[] {
   const paths = members.map((member) => member.replace(/^\.\//, ""));
@@ -153,7 +153,7 @@ describe("typecheck", () => {
     it("returns the workspace member owning a path", () => {
       expect(scopeOfPath("packages/runner")).toBe("runner");
       expect(scopeOfPath("packages/cli/lib")).toBe("cli");
-      expect(scopeOfPath("packages/patterns/google/core/util")).toBe(
+      expect(scopeOfPath("packages/patterns/catalog/ui/controls")).toBe(
         "patterns",
       );
       expect(scopeOfPath("packages/connectors/agents/connector")).toBe(
@@ -639,7 +639,7 @@ describe("typecheck", () => {
 
       expect(outermost([
         "./packages/patterns",
-        "./packages/patterns/auth",
+        "./packages/patterns/nested",
         "./packages/patterns-adjacent",
         "./packages/runner",
         "./tasks",

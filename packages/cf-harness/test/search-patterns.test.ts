@@ -101,6 +101,13 @@ const stubIndex = (
   patterns: Record<string, unknown> = {},
 ): IndexStub => {
   const calls: { fn: string; body: unknown }[] = [];
+  const catalogRecords = new Map(results.map((result) => {
+    const record = result as Record<string, unknown>;
+    return [record.patternId as string, record];
+  }));
+  for (const [id, record] of Object.entries(patterns)) {
+    catalogRecords.set(id, record as Record<string, unknown>);
+  }
   const fetchFn: HarnessFetch = (input, init) => {
     const fn = String(input).split("/").pop() ?? "";
     const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
@@ -110,7 +117,19 @@ const stubIndex = (
         new Response(JSON.stringify({ results }), { status: 200 }),
       );
     }
-    const pattern = patterns[(body as { patternId: string }).patternId];
+    if (fn === "listPatterns") {
+      return Promise.resolve(Response.json({
+        patterns: [...catalogRecords.values()].map((record) => ({
+          ...record,
+          events: { created: 1 },
+          score: 0,
+          quality: "unproven",
+        })),
+        eventTypes: {},
+      }));
+    }
+    const id = (body as { patternId: string }).patternId;
+    const pattern = patterns[id];
     return Promise.resolve(
       pattern === undefined
         ? new Response(JSON.stringify({ error: "unknown pattern" }), {
@@ -139,6 +158,66 @@ const createEngine = (index?: IndexStub): CfHarnessEngine =>
   });
 
 describe("search-patterns", () => {
+  it("keeps inherited evidence attributed in the model's search result", async () => {
+    const signals = {
+      uses: 10,
+      score: 4,
+      inherited: {
+        priorPatternId: "pat-older",
+        asOf: "2026-09-17T00:00:00Z",
+        events: { run_succeeded: 4 },
+        score: 4,
+      },
+    };
+    const index = stubIndex([{ ...SEARCH_HIT, signals }], {
+      "pat-expenses": PATTERN_RECORD,
+    });
+    const result = await createEngine(index).invokeBuiltinTool(
+      "search_patterns",
+      { text: "expenses" },
+    );
+    const output = result.output as SearchPatternsToolSuccessOutput;
+    expect(output.results[0].signals).toEqual(signals);
+  });
+
+  it("offers only the successor's identity, import, and declared shapes", async () => {
+    const successor = {
+      ...PATTERN_RECORD,
+      patternId: "pat-fresh",
+      priorPatternId: SEARCH_HIT.patternId,
+      description: "Returns a donut count",
+      argumentSchema: {
+        type: "object",
+        properties: { donuts: { type: "number" } },
+        required: ["donuts"],
+      },
+    };
+    const index = stubIndex([SEARCH_HIT], {
+      "pat-expenses": PATTERN_RECORD,
+      "pat-fresh": successor,
+    });
+    const result = await createEngine(index).invokeBuiltinTool(
+      "search_patterns",
+      { text: "expenses" },
+    );
+    const output = result.output as SearchPatternsToolSuccessOutput;
+    expect(output.status).toBe("ok");
+    expect(output.results.map((hit) => hit.patternId)).toEqual(["pat-fresh"]);
+    expect(output.results[0].importHint).toBe(
+      'import X from "cf:pattern:pat-fresh"',
+    );
+    expect(output.results[0].argumentType).toContain("donuts: number");
+    expect(output.results[0].argumentType).not.toContain("amounts");
+    expect(
+      index.calls.filter((call) => call.fn === "getPattern").map((call) =>
+        call.body
+      ),
+    ).toEqual([
+      { patternId: "pat-expenses", includeSource: false },
+      { patternId: "pat-fresh", includeSource: false },
+      { patternId: "pat-fresh", includeSource: false },
+    ]);
+  });
   it("reports each hit with the import specifier that composes it", async () => {
     const index = stubIndex([SEARCH_HIT], { "pat-expenses": PATTERN_RECORD });
     const result = await createEngine(index).invokeBuiltinTool(
@@ -183,8 +262,28 @@ describe("search-patterns", () => {
     });
   });
 
-  it("still reports a hit whose record could not be read", async () => {
+  it("reports a discovery error when catalog metadata cannot be read", async () => {
     const index = stubIndex([SEARCH_HIT]);
+    const result = await createEngine(index).invokeBuiltinTool(
+      "search_patterns",
+      { tags: ["expenses"] },
+    );
+    const output = result.output as SearchPatternsToolErrorOutput;
+    expect(output.status).toBe("error");
+    expect(output.message).toContain("getPattern failed (404)");
+    expect(output).not.toHaveProperty("results");
+  });
+
+  it("keeps a discovered hit when the later shape request loses service", async () => {
+    const index = stubIndex([SEARCH_HIT], { "pat-expenses": PATTERN_RECORD });
+    const available = index.fetchFn;
+    let reads = 0;
+    index.fetchFn = (input, init) => {
+      if (String(input).endsWith("/getPattern") && ++reads === 2) {
+        return Promise.resolve(new Response("unavailable", { status: 503 }));
+      }
+      return available(input, init);
+    };
     const result = await createEngine(index).invokeBuiltinTool(
       "search_patterns",
       { tags: ["expenses"] },

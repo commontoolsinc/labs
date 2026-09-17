@@ -5,12 +5,8 @@ import {
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
 import { homeSchema } from "@commonfabric/home-schemas";
-import {
-  createSession,
-  Identity,
-  isDID,
-  type Session,
-} from "@commonfabric/identity";
+import { createSession, Identity, type Session } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { setLLMUrl } from "@commonfabric/llm";
 import type { CfcPosture } from "@commonfabric/runner";

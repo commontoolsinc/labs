@@ -93,7 +93,8 @@ export function runFactsOfPayload(payload: unknown): RunFacts {
     headSha,
     runStartedAt,
     // Fork when the repositories provably differ; a payload without both
-    // names reads as a fork, so decision consumers err toward exclusion.
+    // names reads as a fork, so a run this repository cannot place never
+    // stands as a baseline.
     fork: typeof headRepository === "string" &&
         typeof baseRepository === "string"
       ? headRepository !== baseRepository

@@ -7,6 +7,7 @@ import {
 } from "@commonfabric/data-model";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import {
+  deepFrozenCloneAndInternSchema,
   internSchema,
   isNontrivialSchema,
 } from "@commonfabric/data-model-schema";
@@ -22,6 +23,7 @@ import {
 } from "./schema-decompose.ts";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import {
+  externalResolutionMissCount,
   lookupSchemaDocument,
   onSchemaRegistryClear,
   registerSchemaDocument,
@@ -487,6 +489,34 @@ export function sanitizeSchemaForLinks(
   schema: JSONSchema | undefined,
   keepAsCell: KeepAsCell = KeepAsCell.None,
 ): JSONSchema | undefined {
+  return sanitizeSchemaForLinksInternal(schema, keepAsCell, false);
+}
+
+/**
+ * Sanitize a link schema and return its canonical frozen instance. Binding
+ * callers already intern their result; reuse the cached frozen strip instead
+ * of cloning its root and hashing that clone on every binding.
+ */
+export function sanitizeAndInternSchemaForLinks(
+  schema: JSONSchema,
+  keepAsCell?: KeepAsCell,
+): JSONSchema;
+export function sanitizeAndInternSchemaForLinks(
+  schema: JSONSchema | undefined,
+  keepAsCell?: KeepAsCell,
+): JSONSchema | undefined;
+export function sanitizeAndInternSchemaForLinks(
+  schema: JSONSchema | undefined,
+  keepAsCell: KeepAsCell = KeepAsCell.None,
+): JSONSchema | undefined {
+  return sanitizeSchemaForLinksInternal(schema, keepAsCell, true);
+}
+
+function sanitizeSchemaForLinksInternal(
+  schema: JSONSchema | undefined,
+  keepAsCell: KeepAsCell,
+  canonical: boolean,
+): JSONSchema | undefined {
   if (schema === undefined || typeof schema === "boolean") {
     return schema;
   }
@@ -497,24 +527,25 @@ export function sanitizeSchemaForLinks(
   // expected. The sanitized (inline) result re-externalizes at the emission
   // site as usual; an unresolvable reference passes through unchanged (the
   // helper returns it as it is, and a reference has nothing to strip).
+  const missesBefore = externalResolutionMissCount();
   schema = resolveExternalRootRefForStructure(schema);
 
-  // Memoize by input identity: sanitize is a pure function of
-  // `(schema, keepAsCell)`, and at pattern-build time the same interned/frozen
+  // Memoize complete resolutions by input identity and stripping mode within
+  // a registry epoch. At pattern-build time the same interned/frozen
   // schema is sanitized repeatedly — measured ~46% of calls repeat a frozen
   // input, carrying ~half of the total strip time. Only deep-frozen inputs are
   // memoized (a mutable input's identity could go stale), matching the
   // identity-keyed-memo guard `traverse.ts` uses; `isDeepFrozen` is O(1) for the
-  // already-frozen/cached inputs we hit here. The cache holds the canonical strip
-  // result, DEEP-FROZEN for share-safety (see the store site below); every call
-  // returns a fresh SHALLOW CLONE of it. The clone matters:
-  // the reactive graph keys on the sanitized schema's top-level object identity
-  // (returning a shared object changes recomputation), so each call needs its own
-  // top — while still reusing the (expensive) stripped sub-tree from the cache.
+  // already-frozen/cached inputs we hit here. The cache holds a deep-frozen
+  // result. The mutable API returns a fresh shallow clone because reactive
+  // callers can depend on its top-level identity. Binding callers request the
+  // canonical result and can reuse both its identity and its cached hash.
+  // A missing external document can change the result when it arrives, so
+  // only complete resolutions enter the cache.
   const memoizable = isDeepFrozen(schema);
   if (memoizable) {
     const hit = _sanitizeCache.get(schema)?.get(keepAsCell);
-    if (hit !== undefined) return { ...hit };
+    if (hit !== undefined) return canonical ? internSchema(hit) : { ...hit };
   }
 
   // Collect existing $defs names to avoid collisions
@@ -548,24 +579,24 @@ export function sanitizeSchemaForLinks(
     }
     : stripped;
 
-  if (memoizable) {
+  if (memoizable && externalResolutionMissCount() === missesBefore) {
     let byMode = _sanitizeCache.get(schema);
     if (byMode === undefined) {
       byMode = new Map();
       _sanitizeCache.set(schema, byMode);
     }
-    // Deep-freeze the cached result: every memo hit hands out a fresh top that
-    // SHARES this sub-tree across callers, so a consumer mutating a nested node
+    // Deep-freeze the cached result: both APIs share this sub-tree across
+    // callers, so a consumer mutating a nested node
     // would otherwise silently poison every later same-schema build — frozen,
     // such a mutation throws loudly instead. Freezing only touches objects this
     // call built: the strip rebuilds every node, and its depth-capped bail
     // returns sub-trees of the input, which is deep-frozen on this path.
     const frozen = deepFreeze(output) as JSONSchema & object;
     byMode.set(keepAsCell, frozen);
-    return { ...frozen };
+    return canonical ? internSchema(frozen) : { ...frozen };
   }
 
-  return output;
+  return canonical ? deepFrozenCloneAndInternSchema(output) : output;
 }
 
 /** Sanitizes and externalizes a link schema, memoizing frozen inputs. */
@@ -578,13 +609,15 @@ function externalizeLinkSchema(
     ? externalizedLinkSchemaCache.get(schema)?.get(keepAsCell)
     : undefined;
   if (cached !== undefined) return cached;
+  const missesBefore = externalResolutionMissCount();
   const sanitized = sanitizeSchemaForLinks(schema, keepAsCell);
   if (!isObjectNotArray(sanitized) || !isNontrivialSchema(sanitized)) {
     return sanitized;
   }
   const externalized = externalizeSchema(sanitized);
   if (
-    cacheable && isObjectNotArray(externalized) &&
+    cacheable && externalResolutionMissCount() === missesBefore &&
+    isObjectNotArray(externalized) &&
     typeof externalized.$ref === "string" &&
     isExternalSchemaRef(externalized.$ref)
   ) {

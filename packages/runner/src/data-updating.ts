@@ -90,6 +90,7 @@ import type {
 import {
   ignoreReadForScheduling,
   linkResolutionProbe,
+  writeDestinationRead,
 } from "./storage/reactivity-log.ts";
 import { resolveSchemaRefsCanonical, schemaAcceptsType } from "./traverse.ts";
 import { toURI } from "./uri-utils.ts";
@@ -903,6 +904,21 @@ function anchorValueAsEntity(
 }
 
 /**
+ * Reads the slot again, without the write-destination exclusion, at the
+ * points where what is stored there decides where the write lands rather
+ * than only whether it happens. The comparison read this repeats leaves the
+ * transaction's flow join; this one joins it, so the slot's own label gates
+ * every write the redirect carries the walk to.
+ */
+function consumeSteeringSlot(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  options: DiffAndUpdateOptions | undefined,
+): void {
+  tx.readValueOrThrow(link, options);
+}
+
+/**
  * Traverses objects and returns an array of changes that should be written. An
  * empty array means no changes.
  *
@@ -1336,9 +1352,16 @@ export function normalizeAndDiff(
     return [];
   }
 
-  // Get current value to compare against (use precomputed if available)
+  // Get current value to compare against (use precomputed if available).
+  // `writeDestinationRead` says what this read is for: the comparison
+  // decides whether the walk writes here, and what it returns reaches no
+  // written value. The two branches below where a stored link sends the
+  // write elsewhere read the slot again through `consumeSteeringSlot`.
   let currentValue = precomputedCurrent === NO_PRECOMPUTED
-    ? tx.readValueOrThrow(link, options)
+    ? tx.readValueOrThrow(link, {
+      ...options,
+      meta: { ...options?.meta, ...writeDestinationRead },
+    })
     : precomputedCurrent;
 
   // A new alias can overwrite a previous alias. No-op if the same.
@@ -1378,6 +1401,7 @@ export function normalizeAndDiff(
 
   // Handle alias in current value (at this point: if newValue is not an alias)
   if (isWriteRedirectLink(currentValue)) {
+    consumeSteeringSlot(tx, link, options);
     diffLogger.debug(
       "diff",
       () =>
@@ -1417,6 +1441,7 @@ export function normalizeAndDiff(
   if (isPrimitiveCellLink(currentValue) && !isCellLink(newValue)) {
     const storedLink = parseLink(currentValue, link);
     if (scopeRank(storedLink.scope) > scopeRank(link.scope)) {
+      consumeSteeringSlot(tx, link, options);
       diffLogger.debug(
         "diff",
         () =>

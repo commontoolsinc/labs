@@ -151,6 +151,7 @@ import type {
   HarnessInputCellSpec,
 } from "./contracts/input-cells.ts";
 import { mintInputCellHandles } from "./input-cells.ts";
+import { resolvePieceAddress } from "@commonfabric/piece";
 import type {
   HarnessPatternRef,
   HarnessPatternRefSpec,
@@ -222,6 +223,12 @@ import type {
   RecordFeedbackToolOutput,
 } from "./tools/record-feedback.ts";
 import { getBuiltinTool } from "./tools/registry.ts";
+import type {
+  ReadPieceSourceToolInput,
+  ReadPieceSourceToolOutput,
+  RevisePieceToolInput,
+  RevisePieceToolOutput,
+} from "./tools/piece-source.ts";
 import {
   type RunPatternToolInput,
   type RunPatternToolOutput,
@@ -271,6 +278,8 @@ export interface BuiltinToolInputMap {
   write_file: WriteFileToolInput;
   delegate_task: DelegateTaskToolInput;
   run_pattern: RunPatternToolInput;
+  read_piece_source: ReadPieceSourceToolInput;
+  revise_piece: RevisePieceToolInput;
   assign_slug: AssignSlugToolInput;
   describe_handle: DescribeHandleToolInput;
   search_patterns: SearchPatternsToolInput;
@@ -295,6 +304,8 @@ export interface BuiltinToolOutputMap {
   write_file: WriteFileToolOutput;
   delegate_task: DelegateTaskToolOutput;
   run_pattern: RunPatternToolOutput;
+  read_piece_source: ReadPieceSourceToolOutput;
+  revise_piece: RevisePieceToolOutput;
   assign_slug: AssignSlugToolOutput;
   describe_handle: DescribeHandleToolOutput;
   search_patterns: SearchPatternsToolOutput;
@@ -362,6 +373,9 @@ export interface CreateHarnessEngineOptions
    * admitted kits and host-confirmed records, not the private read transcript.
    */
   inheritedResearchRuns?: readonly HarnessResearchRunSummary[];
+
+  /** Root user goal retained across follow-up questions and delegated tasks. */
+  researchGoal?: string;
 
   /** Parent model-context labels retained by a newly delegated child. */
   inheritedCfcModelContext?: HarnessCfcModelContext;
@@ -1023,6 +1037,7 @@ export class CfHarnessEngine {
         runManifest: this.config.runManifest,
         runManifestPath: this.config.runManifestPath,
         docsCorpus: this.config.docsCorpus,
+        researchGoal: options.researchGoal ?? options.taskText,
         ...(options.inheritedResearchRuns !== undefined
           ? { researchRuns: [...options.inheritedResearchRuns] }
           : {}),
@@ -1566,8 +1581,9 @@ export class CfHarnessEngine {
    *
    * Unlike a grant, an input cell is explicit operator configuration, so
    * failure is closed and loud rather than tolerated: cells configured on a
-   * run with no fabric session, a reference that does not parse, and a
-   * reference targeting another space all throw before anything is recorded.
+   * run with no fabric session, a reference that does not parse, a reference
+   * targeting another space, and a named piece address whose slug this space
+   * does not hold all throw before anything is recorded.
    */
   async establishInputCells(): Promise<HarnessInputCell[]> {
     if (this.#runState.inputCells !== undefined) {
@@ -1587,6 +1603,16 @@ export class CfHarnessEngine {
       this.#runState.runId,
       this.#inputCells,
       session.pieces.getSpace(),
+      {
+        // The space by NAME, which is the vocabulary a named address speaks;
+        // the mint checks references against the DID beside it. A space
+        // configured by `did:key` has no name, and an address naming a space
+        // is then refused rather than assumed to mean this one.
+        ...(session.pieces.getSpaceName() !== undefined
+          ? { spaceName: session.pieces.getSpaceName() }
+          : {}),
+        resolvePiece: (slug) => resolvePieceAddress(session.pieces, slug),
+      },
     );
     await this.recordHandleTable(minted.table);
     this.#runState = patchHarnessRunState(
@@ -2516,6 +2542,7 @@ export class CfHarnessEngine {
       ...(signal !== undefined ? { signal } : {}),
       skillRegistry: this.#runState.skillRegistry,
       skillActivations: this.#runState.skillActivations,
+      allowSkillScripts: this.config.allowSkillScripts,
       allowedSkillScripts: this.config.allowedSkillScripts,
       skillScriptExecutionTarget: this.config.skillScriptExecutionTarget,
       browserAccess: this.config.browserAccess,
@@ -2550,6 +2577,7 @@ export class CfHarnessEngine {
         ? { runResearch: this.#researchRunner }
         : {}),
       researchRuns: this.#runState.researchRuns ?? [],
+      researchGoal: this.#runState.researchGoal,
       ...(researchTaskCfcLabel !== undefined ? { researchTaskCfcLabel } : {}),
       patternRefs: this.#runState.patternRefs ?? [],
       recordResearchRun: (run: HarnessResearchRunSummary) => {

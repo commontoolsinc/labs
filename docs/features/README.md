@@ -63,6 +63,9 @@ Add a line for each new document to the index below.
 
 ## Identity and people
 
+- [`did-identifiers.md`](did-identifiers.md) — what makes a string a DID, the
+  one module that decides it, and the guard for an argument that takes a space
+  name rather than a DID
 - [`shared-identity.md`](shared-identity.md) — using one identity across the
   browser, the `cf` command-line tool, the FUSE mount, and browser-driving
   agents when testing behavior that depends on who is acting

@@ -110,6 +110,7 @@ import type {
 } from "./contracts/tool-descriptor.ts";
 import {
   type HarnessToolBackingAvailability,
+  isSubagentOnlyToolId,
   parentToolIdsForBacking,
   withheldToolIds,
 } from "./contracts/tool-descriptor.ts";
@@ -184,7 +185,10 @@ import {
   validateAndSanitizeSubagentReturn,
 } from "./subagent-return.ts";
 import { createResearchRunner } from "./research/runner.ts";
-import { selectResearchContext } from "./research/context.ts";
+import {
+  researchPatternRecords,
+  selectResearchContext,
+} from "./research/context.ts";
 import { projectHarnessResearchKitForModel } from "./research/model-projection.ts";
 import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
@@ -1384,15 +1388,15 @@ const buildSubagentSystemPrompt = (
         "A task larger than one atom is a task to decompose: name the atoms, run each one, and compose them last. Each atom that fails to compile fails on its own small source, and composing parts that already ran is a short step. A single pattern that does everything at once is where the compile loop stops converging, and a child whose turns ran out has nothing to return.",
         ...(options.hasInheritedResearchKit
           ? [
-            `Start from the Common Fabric implementation kit inherited from the parent. ${
+            `Start from the Common Fabric research findings inherited from the parent. The orientation establishes an approach using available data and reusable pieces; follow-ups resolve what remains unclear. ${
               profileConfig.allowedToolIds.includes("research")
-                ? "Call research only for an unresolved item or a focused follow-up; do not repeat the whole initial pass."
+                ? "Ask research a useful follow-up question, including a code or invocation example when needed. Use followUpTo to select relevant prior findings and build on them."
                 : "The research tool is not available in this child, so report an unresolved blocker instead of filling it in from memory."
             } Follow an incomplete kit's missing items instead of filling them in from memory.`,
           ]
           : profileConfig.allowedToolIds.includes("research")
           ? [
-            "Use research on the whole task before you author anything. Its private loop can inspect CF documentation, available handle contracts, and complete indexed source and dependencies, then returns a cited implementation kit. Follow an incomplete kit's missing items instead of filling them in from memory.",
+            "Use research for the CF contracts and examples needed to achieve the user goal. Ask what remains unclear rather than commissioning another whole app. Reuse existing data and pieces, and author the smallest missing reusable capability.",
           ]
           : []),
         ...(profileConfig.allowedToolIds.includes("search_patterns")
@@ -1413,7 +1417,7 @@ const buildSubagentSystemPrompt = (
                 "A search hit is a component to wire, not a specification to rebuild. When a result's description says it does something one of your atoms needs, import and call it. Rewriting it from its description is the one move that makes the index worth nothing: it publishes a second pattern doing the same job under a different id, and the next searcher has two things to choose between and no reason to prefer either.",
               ]
               : []),
-            "A pattern you author and run successfully is recorded in the index for later evaluation, so pass run_pattern a `description` saying in one line what it does and `hashtags` naming the words someone should find it under if evidence earns discoverability. Write them for the next person, not for this task: a pattern recorded without a description is not published at all.",
+            "When pattern-index publication is enabled, a pattern you author and run successfully with a non-empty `description` and a durable content-addressed pattern identity is queued for the index for later evaluation. No contribution is queued when no index is configured, publication is disabled, the description is empty, or the pattern has no durable identity. The tool result does not confirm publication; the session flush sends retained contributions when it ends, and index failures are logged. Pass run_pattern a `description` saying in one line what it does and `hashtags` naming the words someone should find it under if publication succeeds and evidence earns discoverability. Write them for the next person, not for this task. The run-created piece persists independently of index publication; `assign_slug` separately names and lists it in the space.",
             "Give every atom its own description and hashtags, not just the composition on top of them. The atom is the part someone else can reuse; the composition is usually specific to the task that asked for it.",
             'Tag at two levels: the domain (what it is about — "grocery", "budget") AND the capabilities (what interactions it embodies — "crud-list", "form-input", "counter", "toggle"). Searchers hunting a scaffold for a different domain find your pattern only through its capability tags. The description should name the interactions too: "add items, toggle done, count remaining" finds readers that "a handy list app" never will.',
           ]
@@ -1523,15 +1527,30 @@ const PATTERN_REFS_CHILD_CONTEXT = (
  */
 const RESEARCH_KITS_CHILD_CONTEXT = (
   runs: readonly HarnessResearchRunSummary[],
+  availableHandleTokens: readonly string[],
 ): string =>
   [
-    "Common Fabric implementation kits established by the parent:",
-    "These kits contain host-admitted citations, pattern records, and handle bindings. Use them as implementation context; honor incomplete kits' missing items.",
+    "Common Fabric research findings established by the parent:",
+    "Use the orientation and follow-up findings to achieve the user goal. Inspected patterns and cited examples can be used directly; leads remain unverified. Honor missing items and ask useful follow-up questions when needed.",
     JSON.stringify(
-      runs.map((run) => ({
-        researchRunId: run.researchRunId,
-        kit: projectHarnessResearchKitForModel(run.kit).kit,
-      })),
+      runs.map((run) => {
+        const { kit } = projectHarnessResearchKitForModel(run.kit);
+        if (kit.purpose === "orient") {
+          kit.availableHandleTokens = kit.availableHandleTokens.filter((
+            token,
+          ) => availableHandleTokens.includes(token));
+        }
+        return {
+          researchRunId: run.researchRunId,
+          ...(run.historical
+            ? {
+              bindingNotice:
+                "These bindings belong to an earlier task. Only current granted tokens may be used; describe them before rebinding.",
+            }
+            : {}),
+          kit,
+        };
+      }),
       null,
       2,
     ),
@@ -1541,8 +1560,11 @@ const buildSubagentUserPrompt = (
   input: DelegateTaskToolInput,
   patternRefs: readonly RehydratedDelegatePatternRef[] = [],
   researchRuns: readonly HarnessResearchRunSummary[] = [],
+  availableHandleTokens: readonly string[] = [],
+  userGoal?: string,
 ): string =>
   [
+    ...(userGoal === undefined ? [] : ["Current user goal:", userGoal, ""]),
     "Task:",
     input.goal,
     ...(input.context !== undefined ? ["", "Context:", input.context] : []),
@@ -1550,7 +1572,7 @@ const buildSubagentUserPrompt = (
       ? ["", PATTERN_REFS_CHILD_CONTEXT(patternRefs)]
       : []),
     ...(researchRuns.length > 0
-      ? ["", RESEARCH_KITS_CHILD_CONTEXT(researchRuns)]
+      ? ["", RESEARCH_KITS_CHILD_CONTEXT(researchRuns, availableHandleTokens)]
       : []),
     ...(input.returnSchema !== undefined
       ? [
@@ -2877,8 +2899,19 @@ export class CfHarnessPromptLoop {
     const requestedToolIds = options.allowedToolIds ??
       parentToolIdsForBacking(availability);
     const withheld = withheldToolIds(availability);
+    // A subagent-only tool never reaches a parent, however it was asked for.
+    // `parentToolIdsForBacking` already omits them, but an explicit
+    // `allowedToolIds` arrives here from a CLI flag, an interactive client's
+    // chat policy, and any library caller, and each of those validates against
+    // the tools this build defines. This is the one boundary all of them pass
+    // through, so it is where the rule is enforced rather than restated; a
+    // run with a lineage is a subagent, and only a subagent may hold them.
+    const isSubagent = this.engine.getRunState().lineage !== undefined;
     this.#allowedToolIds = new Set(
-      requestedToolIds.filter((toolId) => !withheld.has(toolId)),
+      requestedToolIds.filter((toolId) =>
+        !withheld.has(toolId) &&
+        (isSubagent || !isSubagentOnlyToolId(toolId))
+      ),
     );
     this.#nativeModelToolIds = options.nativeModelToolIds ?? [];
     this.#allowedSubagentProfiles = new Set(
@@ -2966,6 +2999,7 @@ export class CfHarnessPromptLoop {
         promptSlotBindingSource,
         parentToolAllowance: this.#parentToolAllowance(),
         allowedToolIds: this.#allowedToolIdsForSnapshot(),
+        allowSkillScripts: this.engine.config.allowSkillScripts === true,
         allowedSkillScripts: this.engine.config.allowedSkillScripts ?? [],
         allowedSubagentProfiles,
         subagentProfileConfigs: allowedSubagentProfiles.map((profile) =>
@@ -3256,7 +3290,10 @@ export class CfHarnessPromptLoop {
           type: "function",
           function: {
             name: "research",
-            arguments: JSON.stringify({ task: options.task }),
+            arguments: JSON.stringify({
+              task: options.task,
+              purpose: "orient",
+            }),
           },
         },
         options.model,
@@ -3905,12 +3942,14 @@ export class CfHarnessPromptLoop {
     }
   }
 
-  /** Retains every index record a prior host-side research run confirmed. */
+  /** Retains host-observed index records from prior research, including leads. */
   #seedResearchPatternRecords(
     runs: readonly HarnessResearchRunSummary[],
   ): void {
     for (const run of runs) {
-      for (const record of run.confirmedPatterns) {
+      for (
+        const record of researchPatternRecords(run.kit, run.confirmedPatterns)
+      ) {
         this.#trustedPatternRecords.set(
           record.patternId,
           structuredClone(record),
@@ -3935,12 +3974,17 @@ export class CfHarnessPromptLoop {
     }
   }
 
-  /** Retains the pattern records confirmed inside a successful research run. */
+  /** Retains host-observed patterns without promoting leads to verified source. */
   #recordResearchResult(toolId: BuiltinToolId, output: unknown): void {
     if (toolId !== "research" || !isResearchToolSuccessOutput(output)) {
       return;
     }
-    for (const record of output.researchRecord.confirmedPatterns) {
+    for (
+      const record of researchPatternRecords(
+        output.kit,
+        output.researchRecord.confirmedPatterns,
+      )
+    ) {
       this.#trustedPatternRecords.set(
         record.patternId,
         structuredClone(record),
@@ -5132,12 +5176,13 @@ export class CfHarnessPromptLoop {
       parentAcquiredSkills?.skills,
       options.resolvedSkill?.acquisition,
     );
-    // The operator's allowlist is the run's and the tool surface is the
-    // profile's, so a child given an acquired skill needs both brought to it or
-    // it holds a mounted skill it cannot run a script of.
+    // Whether skill scripts run is the run's decision and the tool surface is
+    // the profile's, so a child given an acquired skill needs both brought to
+    // it or it holds a mounted skill it cannot run a script of.
     const acquiredScripts = acquiredSkillScriptSurface(
       this.engine.config.allowedSkillScripts,
       childAcquiredSkill,
+      this.engine.config.allowSkillScripts === true,
     );
     const childAllowedSkillScripts = [
       ...(profileConfig.allowedSkillScripts ?? []),
@@ -5218,11 +5263,16 @@ export class CfHarnessPromptLoop {
         ? { docsCorpus: this.engine.docsCorpus }
         : {}),
       ...(inheritedResearchRuns.length > 0 ? { inheritedResearchRuns } : {}),
+      researchGoal: parentRunState.researchGoal,
       ...(parentRunState.cfcModelContext !== undefined
         ? { inheritedCfcModelContext: parentRunState.cfcModelContext }
         : {}),
       ...(childAllowedSkillScripts.length > 0
         ? { allowedSkillScripts: childAllowedSkillScripts }
+        : {}),
+      // The run's decision, not the profile's, so it reaches every child.
+      ...(this.engine.config.allowSkillScripts === true
+        ? { allowSkillScripts: true }
         : {}),
       ...(profileConfig.skillScriptExecutionTarget !== undefined
         ? {
@@ -5299,7 +5349,7 @@ export class CfHarnessPromptLoop {
       this.engine.handleTable,
       childRunId,
       delegateInput,
-      inheritedResearchRuns.flatMap((run) =>
+      inheritedResearchRuns.filter((run) => !run.historical).flatMap((run) =>
         run.kit.inputs.map((input) => input.token)
       ),
     );
@@ -5480,6 +5530,8 @@ export class CfHarnessPromptLoop {
           delegateInput,
           patternRefResolution.records,
           inheritedResearchRuns,
+          childEngine.handleTable?.entries.map((entry) => entry.token) ?? [],
+          parentRunState.researchGoal,
         ),
         contextMessages: childSkillContextMessages,
         model: childModel.model,

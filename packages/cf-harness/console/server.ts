@@ -33,6 +33,7 @@
 
 import { readLoomAuthoringConfig } from "../src/loom-authoring.ts";
 import { parseArgs } from "@std/cli/parse-args";
+import { isDID } from "@commonfabric/identity/did";
 import {
   dirname,
   extname,
@@ -79,7 +80,10 @@ import {
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
 } from "../src/contracts/subagent.ts";
 import { parseHostMountSpecs } from "../src/host-mounts.ts";
-import { parseInputCellArgument } from "../src/input-cells.ts";
+import {
+  checkInputCellSpec,
+  parseInputCellArgument,
+} from "../src/input-cells.ts";
 import type { HarnessPatternRefSpec } from "../src/contracts/pattern-refs.ts";
 import {
   checkPatternRefSpec,
@@ -317,10 +321,19 @@ const callPatternIndex = (
  * the CLI refuses is refused here too. A body that names no cells yields
  * none, which is the ordinary task.
  *
+ * A reference may also be a piece's NAME — `pattern:<space>/<slug>`, or a bare
+ * slug meaning this console's own space — which is what a surface showing a
+ * rendered piece holds. `spaceName` is this console's space, and an address
+ * naming another one is refused here: the caller cannot see which space this
+ * console runs against, so a mismatch is this side's to explain. Whether the
+ * space holds the slug is the turn's to find out, like every other reference
+ * that parses and may still not mint.
+ *
  * @throws Error naming the defect, which the route answers 400 with.
  */
 const parseTaskInputCells = (
   value: unknown,
+  spaceName: string,
 ): readonly HarnessInputCellSpec[] => {
   if (value === undefined || value === null) {
     return [];
@@ -341,6 +354,12 @@ const parseTaskInputCells = (
     // Checked through the flag's own parser, so the two surfaces cannot come
     // to accept different references under the same name.
     const spec = parseInputCellArgument(`${name}=${ref}`);
+    // And then once more against this console's own space, which the flag's
+    // parser cannot know. A named piece address spelling another space is a
+    // caller mistake decidable from the text alone, so it is answered now
+    // rather than spent on a turn; whether this space HOLDS the slug is not
+    // decidable from the text, and the turn answers that one.
+    checkInputCellSpec(spec, undefined, spaceName);
     if (names.has(spec.name)) {
       throw new Error(`inputCells names \`${spec.name}\` twice`);
     }
@@ -539,6 +558,7 @@ export const resolveConsoleConfig = async (
       "no-child-composition-guidance",
       "no-pattern-index-publish",
       "pattern-index-publish-discoverable",
+      "allow-skill-scripts",
     ],
     collect: ["host-mount"],
   });
@@ -595,7 +615,7 @@ export const resolveConsoleConfig = async (
       "a fabric session is required: set --fabric-identity/CF_HARNESS_FABRIC_IDENTITY and --fabric-space/CF_HARNESS_FABRIC_SPACE",
     );
   }
-  if (space.startsWith("did:")) {
+  if (isDID(space)) {
     throw new Error(
       `--fabric-space must be a space name rather than a DID: assign_slug composes a URL from the name, and offers none for ${space}`,
     );
@@ -732,9 +752,14 @@ export const resolveConsoleConfig = async (
       parsed["host-mount"] as string[] | undefined,
       cwd,
     ),
+    // Whether a skill this console holds may have its scripts run in the
+    // sandbox: the operator's one decision, taken at launch rather than per
+    // task, since it is about the server rather than about the work.
+    allowSkillScripts: parsed["allow-skill-scripts"] === true ||
+      nonEmpty(env.CF_HARNESS_ALLOW_SKILL_SCRIPTS) === "1",
     // The rest of the session description this surface does not vary. Skills
-    // are scanned rather than preloaded by name, scripts are not allowlisted,
-    // handles materialize nowhere, and a task's input cells and pattern
+    // are scanned rather than preloaded by name, no individual script is
+    // named, handles materialize nowhere, and a task's input cells and pattern
     // references arrive per task on `/api/task` rather than at startup.
     skillNames: [],
     allowedSkillScripts: [],
@@ -1368,7 +1393,10 @@ export class ConsoleServer {
     let inputCells: readonly HarnessInputCellSpec[];
     let patternRefs: readonly HarnessPatternRefSpec[];
     try {
-      inputCells = parseTaskInputCells(body.inputCells);
+      inputCells = parseTaskInputCells(
+        body.inputCells,
+        this.#config.fabricSession.space,
+      );
       checkTaskInputCellNames(inputCells, this.#config.connectorGrants);
       patternRefs = parseTaskPatternRefs(body.patternRefs);
     } catch (error) {

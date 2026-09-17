@@ -30,7 +30,7 @@ describe("PatternManager cross-space source policy", () => {
   ) =>
     ({
       version: 1,
-      labelMap: { entries: [{ path, label, origin: "declared" }] },
+      labelMap: { version: 1, entries: [{ path, label, origin: "declared" }] },
     }) as never;
 
   it("rejects confidentiality and non-compiler integrity labels", () => {

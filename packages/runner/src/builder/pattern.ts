@@ -13,6 +13,7 @@ import {
   UNUSED_RECORD_SUBSCHEMA_KEYS,
   UNUSED_SINGLE_SUBSCHEMA_KEYS,
 } from "@commonfabric/data-model-schema/schema-walk";
+import { isDID } from "@commonfabric/identity/did";
 
 import { type AliasBinding } from "../alias-binding.ts";
 import { isCell, schemaCellScope, setCellUnlinkedSpace } from "../cell.ts";
@@ -1084,8 +1085,8 @@ function resolveInSpaceTargetSpace(
   space: unknown,
   frame: Frame | undefined,
 ): MemorySpace | undefined {
-  if (typeof space === "string" && /^did:[^:]+:.+/.test(space)) {
-    return optIntoInSpaceMultiSpaceCommit(frame, space as MemorySpace);
+  if (isDID(space)) {
+    return optIntoInSpaceMultiSpaceCommit(frame, space);
   }
   if (isCell(space)) {
     return optIntoInSpaceMultiSpaceCommit(

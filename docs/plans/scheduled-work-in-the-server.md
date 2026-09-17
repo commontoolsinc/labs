@@ -313,15 +313,14 @@ the registered set "is not derivable from this repo (it accrues as users
 connect accounts)". Nothing has accrued, so the set is empty and the concern is
 moot.
 
-What remains is source-level. Five patterns on main declare a `bgUpdater`
-stream: the Gmail importer, the Google calendar importer, Google auth, Airtable
-auth, and a test pattern. They are code referring to a mechanism being removed,
-not users depending on it.
+What remains is source-level. One pattern on main declares a `bgUpdater`
+stream, a test pattern that exists to exercise the service. It is code
+referring to a mechanism being removed, not users depending on it.
 
-Note also that a `bgUpdater` stream is not only a polling target. The Gmail
-extractor wires the importer's `bgUpdater` to a button's `onClick`, so the same
-stream serves as the manual refresh path. Deleting the service does not require
-deleting the streams, and v1 did not delete them.
+Note also that a `bgUpdater` stream is not only a polling target. A pattern can
+wire its own `bgUpdater` to a button's `onClick`, so the same stream serves as
+the manual refresh path. Deleting the service does not require deleting the
+streams, and v1 did not delete them.
 
 ### 2.3 The servability oracle is empty
 
@@ -332,14 +331,14 @@ workload would be a ready-made coverage list for the serving gap.
 That instruction assumes a running deployment with a workload. There is none,
 so the oracle has nothing in it and this step cannot be performed as written.
 
-The five patterns in §2.2 are the repository's own statement of what wanted
-background execution, so they are the coverage list by default, and a weaker
-one. What they cannot tell you is which of them anyone
-actually ran, or which ran successfully — a question the service could not have
-answered reliably either, since its README records that an updater doing
-asynchronous work returns while that work is still in flight, so failures go
-unobserved. The oracle was going to over-report even when it had something in
-it.
+The pattern in §2.2 is the repository's own statement of what wanted background
+execution, so it is the coverage list by default, and a weaker one — it is the
+test pattern that exists to exercise the service. What it cannot tell you is
+whether anyone actually ran it, or whether it ran successfully — a question the
+service could not have answered reliably either, since its README records that
+an updater doing asynchronous work returns while that work is still in flight,
+so failures go unobserved. The oracle was going to over-report even when it had
+something in it.
 
 ### 2.4 Inventory
 
@@ -353,10 +352,6 @@ sections of the local development documentation, and the package's entry in
 
 The `gideon-tests/test-background-manual-trigger.tsx` pattern, which exists to
 exercise the service.
-
-Docstrings in the Google and Airtable auth patterns claiming that tokens
-auto-refresh in the background. v1 corrected rather than removed these, since
-the manual refresh button becomes the effective path.
 
 **v1 kept two things this deletion can take.** Both were kept for reasons that
 depended on a running deployment, and neither reason survives without one.

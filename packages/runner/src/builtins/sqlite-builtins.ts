@@ -20,8 +20,8 @@
 // this read path.
 
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { parseLink } from "../link-utils.ts";
 import { settleAbandonedRequest } from "./abandoned-request.ts";
+import { resultRowKeys } from "./sqlite/row-identity.ts";
 import {
   computeRowLabelRead,
   resolveCeilingPlaceholders,
@@ -44,6 +44,7 @@ import {
   waveRunContextOf,
   waveSettlementOf,
 } from "../executor/wave.ts";
+import { speculationRunContextOf } from "../speculation/overlay-destination.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { meetCfcObservationCeilings } from "../cfc/observation.ts";
@@ -756,19 +757,13 @@ type QueryState = {
  * - `"hit"`: the stored key matches AND a result/error landed — the
  *   stored result IS the value (§4's hit rule; a bare claim is NOT a
  *   hit).
- * - `"dedupe"`: a pending claim for this key stands and either this
- *   node instance has the RPC in flight, or the run is NOT a served
- *   (stamped) run — the OFF arm keeps today's committed-state dedupe
- *   byte for byte (its inline flush leaves no routine dropped-effect
- *   path; the reload-orphaned-claim residue there is a pre-existing
- *   main behavior, out of stage-G scope).
- * - `"issue"`: no stored key for this hash — or, under the SERVING
- *   posture, an ORPHANED claim: a pending marker with no in-flight
- *   work in this process means the effect was dropped after its wave
- *   committed (park, crash, discarded batch) and nothing else will
- *   ever re-issue it — §6 step 3's re-miss premise, restored for the
- *   one builtin whose key alone cannot carry it. Re-issuing a READ is
- *   side-effect-free.
+ * - `"dedupe"`: a pending claim for this key stands and either this node
+ *   instance has the RPC in flight or the run is speculative. A speculative
+ *   derivation drops SQLite effects, so it cannot own or recover a query.
+ * - `"issue"`: no stored key for this hash — or a pending claim with no
+ *   in-flight work in this process. Another runtime may still own the claim,
+ *   but re-issuing a read is side-effect-free and hash-guarded completion
+ *   makes the overlap safe.
  *
  * Exported for unit testing only — not part of the builtin surface.
  */
@@ -779,15 +774,13 @@ export function sqliteQueryMemoDecision(options: {
   /** This node instance holds the RPC in flight right now. */
   inFlightHere: boolean;
 
-  /** The evaluation runs as a stamped serving run (a wave run context
-   * is present — the serving loop's signature; ON-arm client
-   * speculation and the OFF arm are unstamped). */
-  servedRun: boolean;
+  /** The evaluation belongs to a client speculation overlay. */
+  speculativeRun: boolean;
 }): "hit" | "dedupe" | "issue" {
   if (options.stored?.requestHash !== options.hash) return "issue";
   if (options.stored.pending !== true) return "hit";
-  if (options.inFlightHere) return "dedupe";
-  return options.servedRun ? "issue" : "dedupe";
+  if (options.inFlightHere || options.speculativeRun) return "dedupe";
+  return "issue";
 }
 
 /** sqliteQuery: reactive server-side read. */
@@ -1089,7 +1082,7 @@ export function sqliteQuery(
       stored: storedBeforeClaim,
       hash,
       inFlightHere: inFlightIssues.has(effectKey),
-      servedRun,
+      speculativeRun: speculationRunContextOf(tx) !== undefined,
     });
     if (decision === "hit") {
       // The §4 memo hit (server-execution v2): the committed result records
@@ -1400,6 +1393,25 @@ export function sqliteQuery(
                 },
               }
               : labelSchema;
+            // Every row is an entity document of its own under the result
+            // cell, keyed as `resultRowKeys()` decides: a key stands still
+            // across runs for a row that did not change, so the diff finds
+            // nothing to write for it, and a key is drawn only from what a
+            // reader of the unlabeled row links may already see. The
+            // selected database and the handle's `tables` declaration are
+            // namespaces the keys carry on purpose, so a query whose `db`
+            // input moves to another database, or whose handle is
+            // re-declared, lands its rows on documents of their own. Nothing
+            // else that varies between runs may reach a key, or an
+            // unchanged result would mint a document per row per run.
+            const rowKeys = resultRowKeys({
+              rows: resultRows,
+              columns: res.columns,
+              tables: db.tables,
+              database: { space: databaseSpace, id: db.id },
+              columnLabeled: labelSchema !== undefined,
+              rowLabel: (i) => perRow[i],
+            });
             const wrote = await runtime.editWithRetry((wtx) => {
               markEffectCompletion(wtx, effectKey);
               applyRunIdentity(wtx);
@@ -1410,30 +1422,35 @@ export function sqliteQuery(
                 return;
               }
               const base = result.getAsNormalizedFullLink();
+              // The stored link is bare. The row's schema, per-column labels
+              // and row label included, goes on the write alone, whose policy
+              // input is what carries the labels to the row document. A link
+              // carrying a schema would install that schema as a
+              // content-addressed document, and two scoped instances of one
+              // result settling in separate waves would both write it, which
+              // the second wave refuses.
               const storedRows = resultRows.map((row, i) => {
-                if (
-                  !Array.isArray(row) ||
-                  (labelSchema === undefined && perRow[i] === undefined)
-                ) {
-                  return row;
-                }
-                const rowLink = {
-                  ...base,
-                  id: toURI(createRef({ id: i }, {
-                    parent: { id: base.id, space: base.space },
-                    path: [...base.path, "result"],
-                    context: "sqlite-entry-row",
-                  })),
-                  path: [],
-                  schema: {
-                    ...rowSchemas[i],
-                    ...(perRow[i] !== undefined && { ifc: perRow[i] }),
-                  },
+                const schema = {
+                  ...rowSchemas[i],
+                  ...(perRow[i] !== undefined && { ifc: perRow[i] }),
                 };
-                const rowCell = createCell(runtime, rowLink, wtx).asSchema(
-                  rowLink.schema as Parameters<Cell<unknown>["asSchema"]>[0],
-                ).withTx(wtx);
-                rowCell.set(row);
+                const rowCell = createCell(
+                  runtime,
+                  {
+                    ...base,
+                    id: toURI(createRef(rowKeys[i], {
+                      parent: { id: base.id, space: base.space },
+                      path: [...base.path, "result"],
+                      context: "sqlite-result-row",
+                    })),
+                    path: [],
+                    schema: undefined,
+                  },
+                  wtx,
+                );
+                rowCell.asSchema(
+                  schema as Parameters<Cell<unknown>["asSchema"]>[0],
+                ).set(row);
                 return rowCell;
               });
               const target = writeSchema
@@ -1445,46 +1462,6 @@ export function sqliteQuery(
                 requestHash: hash,
                 ...(withheld !== undefined ? { withheld } : {}),
               });
-              // Per-row label attachment (CFC Phase 3): object rows split into
-              // entity docs. Labeled entry-list rows are anchored explicitly
-              // because arrays otherwise remain inline. Both forms attach the
-              // row label at the entity root and retain the per-column labels
-              // in `rowSchemas`.
-              if (anyPerRow) {
-                for (let i = 0; i < resultRows.length; i++) {
-                  const ifc = perRow[i];
-                  if (!ifc) {
-                    continue;
-                  }
-                  const rowCell = result.key("result").key(i).withTx(wtx);
-                  const raw = rowCell.getRaw();
-                  const link = parseLink(raw);
-                  if (!link?.id) {
-                    // Fail closed: a labeled row MUST carry its label; aborting
-                    // the tx surfaces as wrote.error -> q.error below.
-                    throw new Error(
-                      `sqlite: result row ${i} did not split into its own ` +
-                        "entity doc — cannot attach its per-row label",
-                    );
-                  }
-                  createCell(
-                    runtime,
-                    {
-                      ...link,
-                      space: link.space ?? base.space,
-                      scope: link.scope ?? base.scope,
-                      path: [],
-                    },
-                    wtx,
-                  ).asSchema(
-                    {
-                      ...rowSchemas[i],
-                      ifc,
-                    } as Parameters<Cell<unknown>["asSchema"]>[0],
-                  ).withTx(wtx)
-                    .set(resultRows[i]);
-                }
-              }
             });
             // Surface a write-back failure as `q.error` rather than leaving the
             // query stuck `pending` (editWithRetry returns the error, not throws).

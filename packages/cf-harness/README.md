@@ -136,7 +136,9 @@ What works today:
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
     reports each one's kind, evidence quality, declared shapes, and import
-    specifier, never its source)
+    specifier, never its source; discovery follows published successors as
+    described in
+    [Pattern generations in search](#pattern-generations-in-search))
   - `record_feedback` (under the same pattern-index gate; votes a pattern up or
     down so the index learns which ones were worth offering)
   - `search_skills` (present only on the parent surface when the run configures
@@ -154,18 +156,25 @@ What works today:
   - `research` (present when the run resolves a documentation corpus or pattern
     index; performs bounded, iterative Common Fabric research over exact docs,
     skills, published pattern source and dependencies, and safe handle shapes,
-    then returns a host-admitted implementation kit; see
-    [Researching Common Fabric](#researching-common-fabric))
+    then returns host-admitted orientation or answers with optional examples;
+    see [Researching Common Fabric](#researching-common-fabric))
 - composing published patterns: source the model authors may
   `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` fetches and
   compiles each named pattern into the space before compiling the source that
   imports it, so composition costs the import line and nothing else — and no
   part of an imported pattern's source reaches the conversation
-- publishing back to that index: a pattern the model authored and ran
-  successfully is recorded under the identity its compile recorded, with the
-  `description` and `hashtags` the `run_pattern` call named, unless the run was
-  started with `--no-pattern-index-publish`; it is not offered to search until
-  evidence earns discoverability. Curated seeding may opt in with
+- publishing back to that index: when publication is enabled, a pattern the
+  model authored and ran successfully with a non-empty `description` and a
+  durable content-addressed identity is queued under that identity, with the
+  `description` and `hashtags` the `run_pattern` call named. A run with no
+  index, disabled publication (`--no-pattern-index-publish`), an empty
+  description, or no durable pattern identity queues nothing. The tool's
+  `patternPublication` reports `status: "queued"`: the index has not confirmed
+  publication at tool return. The session flush sends its retained contributions
+  when it ends; index refusals and other publication failures are logged without
+  failing the pattern run. Saved tool results remain a record of what was known
+  at tool return. Accepted entries stay out of search until evidence earns
+  discoverability. Curated seeding may opt in with
   `CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE=1`
 - targeted exact-string edits plus whole-file replace/create and append writes
 - initial and in-run image attachments for model vision-capable flows
@@ -209,9 +218,10 @@ What works today:
 - runtime-generated supporting-resource indexes in `skill-registry.json`
 - text-first supporting-resource reads through `read_skill_resource`, recorded
   in `skill-resource-reads.json`
-- exact-allowlisted skill script execution through `run_skill_script`, for a
-  registry skill's script and for an acquired skill's, recorded in
-  `skill-script-executions.json`
+- skill script execution through `run_skill_script`, where the operator allows
+  it — `--allow-skill-scripts` for every skill the run holds, or an exact entry
+  for one — for a registry skill's script and for an acquired skill's, recorded
+  in `skill-script-executions.json`
 
 The sandbox `bash` tool has a provisional direct-`curl` guard while sandbox
 networking is enabled: explicit `curl` invocations may target loopback HTTP(S)
@@ -900,12 +910,28 @@ live — and `describe_handle` answers from that declaration, so there is one
 source of truth and nothing an operator-written view could drift from or quietly
 claim.
 
+A `<link>` may also be a piece's NAME: `pattern:<space>/<slug>`, or the bare
+`<slug>` meaning a piece in the session's own space. That is what a surface
+holding a rendered piece has — the id a piece sits at does not cross to a client
+— so the session resolves the name to the piece's address before it mints, and
+what the handle table holds is the address either way. The model is told no more
+than it is told for a reference. It names a piece, not a cell inside one: a path
+after the slug is refused, and the general cell case is CT-2319's. The retired
+`piece:` spelling is not read as an address.
+
+A qualified name is resolved in the session's own space or not at all. A space
+the session cannot check the name of — one configured by `did:key`, which
+carries no name — refuses the qualified form rather than answering with this
+space's same-slug piece, because the same slug in another space is a different
+piece. A bare slug is unaffected: it names no space to disagree about.
+
 Unlike a grant, an input cell is explicit configuration, so failure is closed
 and loud rather than tolerated: a malformed argument is a usage error, and a
-reference that does not parse, targets another space, or arrives on a run
-without a fabric session fails the run before the model is involved. The cells
-are recorded in run state (`inputCells`), replayed rather than re-minted on
-resume, and reported in the operator summary as `inputCells:`.
+reference that does not parse, targets another space, names a piece the space
+does not hold, or arrives on a run without a fabric session fails the run before
+the model is involved. The cells are recorded in run state (`inputCells`),
+replayed rather than re-minted on resume, and reported in the operator summary
+as `inputCells:`.
 
 #### Inspecting a handle's shape
 
@@ -1198,13 +1224,13 @@ and being allowed to run one stay separate decisions, and the second is the
 operator's.
 
 What backs the tool is the mount rather than a skills root, so a run given no
-`--skills-root` still offers it to such a child, and `--allow-skill-script`
-takes an acquired pin without one. Being backed is necessary and not sufficient:
-the child receives `run_skill_script` only where the operator allowlisted at
-least one script at that exact pin, so a child holding the handle and the mount
-and nothing else has no tool to invoke. A run that holds an acquired skill
-without mounting it is not backed at all: that is the acquiring parent, which
-deliberately mounts nothing, and a child that shares a handed-in runtime.
+`--skills-root` still offers it to such a child. Being backed is necessary and
+not sufficient: the child receives `run_skill_script` only where the operator
+allows skill scripts — `--allow-skill-scripts`, or an entry at that exact pin —
+so a child holding the handle and the mount and nothing else has no tool to
+invoke. A run that holds an acquired skill without mounting it is not backed at
+all: that is the acquiring parent, which deliberately mounts nothing, and a
+child that shares a handed-in runtime.
 
 Absence of the mount is not by itself absence of the tool, so the refusal says
 so rather than the tool merely not being there. A skills root backs
@@ -1220,14 +1246,14 @@ its mount puts it at, so without the mount there is nothing to run.
 no resource index.
 
 It runs a script there through the same `run_skill_script` a registry skill's
-goes through: `--allow-skill-script` keys on the pin,
-`owner/repo/slug@<commit sha>`, in place of a registry name, and every other
-gate is the same call. Activation is by the acquisition rather than by a name —
-a handle activates under `handle:<token>`, so what says the run was given this
-skill is an activation whose acquisition records that pin. The digest the file
-is re-checked against is the one taken at acquisition, over the bytes the pinned
-commit served, so a file changed on the host between acquisition and execution
-refuses.
+goes through, under the same `--allow-skill-scripts` switch; an entry naming one
+individually keys on the pin, `owner/repo/slug@<commit sha>`, in place of a
+registry name, and every other gate is the same call. Activation is by the
+acquisition rather than by a name — a handle activates under `handle:<token>`,
+so what says the run was given this skill is an activation whose acquisition
+records that pin. The digest the file is re-checked against is the one taken at
+acquisition, over the bytes the pinned commit served, so a file changed on the
+host between acquisition and execution refuses.
 
 The invocation is labeled with confidentiality alone. The acquisition's
 `ExternalIngest` provenance belongs on it and cannot go there: a non-empty
@@ -1278,8 +1304,8 @@ state from a cell, the untrusted-acquisition complement to the trusted operator
 name-squat surface — in favor of an unforgeable table entry. It carries no
 directory, so it has no supporting-resource index, and the skill-context
 preamble that keeps a skill from authorizing tools applies to it unchanged. A
-handle an acquisition minted is the one that can carry scripts, and the
-operator's allowlist names them by the pin rather than by a registry name — the
+handle an acquisition minted is the one that can carry scripts, and whether they
+run is the operator's switch — the
 [acquired-script section below](#running-an-acquired-skills-script) has the
 whole of it. The child's activation record carries `source: "skill-handle"`, the
 token, and the digest of the exact text injected, so the artifacts say which
@@ -1305,23 +1331,71 @@ somewhere, attached metadata accompanies it, and trusted-side code resolves it.
 They deliberately remain separate until experience supplies a concrete reason to
 unify them.
 
+### Pattern generations in search
+
+The shared index client resolves discovery for `search_patterns`, private
+research, and the console's Index search. It reads the discoverable catalog and
+follows each entry's `priorPatternId` to find replacements, including a
+successor outside the original query's result limit. Only same-owner links
+participate. An unambiguous chain contributes its final generation once, at the
+earliest matching position. A penalized final generation removes that chain from
+the answer; a branch or cycle fails the affected search instead of choosing a
+generation arbitrarily.
+
+Replacement metadata, schemas, quality, and signals describe the successor.
+Where the index supports generation evidence, its combined signal summary
+includes an attributed `inherited` portion: predecessor ID, publication cutoff,
+event counts, and score. The harness preserves that attribution; a proven tier
+can come entirely from predecessor evidence before the successor has run. Older
+deployments supply only that generation's own event counts and score. Query-term
+counts are omitted on a replacement because the index measured them against the
+predecessor. The catalog is refreshed for every nonempty search; create-only
+metadata is cached by identity within the client, and failed reads are not
+cached. This requires one metadata read per catalog entry on the first search
+and for each newly discovered identity thereafter. No source is requested. An
+unavailable catalog or metadata read fails discovery explicitly.
+
+`getPattern`, attached pattern references, and `cf:pattern:` imports continue to
+resolve the exact requested identity. Search resolution changes recommendations,
+not existing compositions or the index's stored event history.
+
 ### Researching Common Fabric
 
-`research` takes a whole Common Fabric task or a focused follow-up and returns a
-structured implementation kit. It is on the parent surface and the
-`pattern-author` child's surface whenever the run can supply a documentation
-corpus or pattern index. This is a private tool loop, not web research and not a
-delegable child profile. The gateway transport uses `gemini-3.5-flash`; the
-owner-authenticated Codex transport uses `gpt-5.6-luna`.
+`research` takes a `task`, a `purpose`, and an optional `followUpTo` naming an
+available research run or output. Both purposes have the same tools and limits;
+the question determines how much research is useful:
 
-The CLI and each interactive `start_turn` mark the current user task for an
-opening research call. A fresh root run executes that call through the ordinary
-tool-policy, artifact, provenance, cancellation, and usage-accounting path
-before its first parent model turn. Its admitted kit, including an incomplete
-kit and its missing items, becomes a host-supplied user-context message directly
-before the task rather than a fabricated assistant/tool exchange. Attached
-pattern references enter the private loop as trusted index leads, but the loop
-still has to inspect their exact published source before selecting them.
+| Purpose            | Result                                                                                                                                    | Model turns / tool calls / read characters |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `orient`           | An approach to the user goal using available data and composable pieces, supported contracts, optional examples, and unresolved questions | 8 / 24 / 96,000                            |
+| `answer` (default) | A cited answer to a follow-up question, with a code or invocation example when useful                                                     | 8 / 24 / 96,000                            |
+
+The tool is available to the parent and `pattern-author` whenever the run can
+supply a documentation corpus or pattern index. The gateway transport uses
+`gemini-3.5-flash`; the owner-authenticated Codex transport uses `gpt-5.6-luna`.
+Research is a private tool loop, not web search or a delegable child profile.
+
+Fresh CLI tasks and interactive sessions without retained research request an
+opening `orient` pass. Subsequent chat turns reuse the retained findings and let
+the parent request targeted answers; they do not repeat orientation. It runs
+through the ordinary policy, artifacts, provenance, cancellation, and usage path
+before the first parent turn. A host-supplied user message puts the result
+immediately before the task. The result's `purpose` limits what `complete`
+means: a complete orientation establishes a supported approach; it does not
+claim that the application has been built. Both purposes can inspect pattern
+source, describe handles, and return examples. Orientation's `leads` are
+host-observed metadata, usable as search references for delegation, and remain
+separate from inspected `patterns`. The current user goal accompanies narrower
+research questions and delegated tasks so they retain the original context.
+
+The parent uses findings that settle a decision directly. It requests `answer`
+for a specific remaining uncertainty, with `followUpTo` selecting the relevant
+prior result. Code is optional in either purpose and may demonstrate a small
+idiom or a composable piece without expanding into a complete application. The
+private follow-up receives selected findings and reopenable source locations,
+with old examples and handle bindings omitted. Citations still require exact
+reads in the current call; a prior citation is a lead to reopen, not fresh
+proof. Attached pattern references are also leads until inspected.
 
 Opening research has a durable `openingResearch` checkpoint in `run-state.json`.
 The driver records pending intent before invocation, then records whether a kit
@@ -1340,13 +1414,23 @@ carry `origin: "opening-research"`; its private model usage is descendant usage
 included in the root's total rather than in the parent's direct usage.
 
 The private model can search the operator-provisioned docs and skills corpus,
-open exact section windows, search the published pattern index, inspect a
-pattern with its complete multi-file program and dependencies, open bounded
-source-file windows, and inspect the shape of general handles available to the
-calling run. It cannot delegate, execute commands, write files, browse the web,
-or mutate Fabric. Documentation sections remain complete at ingestion; an exact
-read returns `nextOffset` until the section is finished, so an example after the
-first 4,000 characters is reachable rather than silently lost.
+read matching passages, list document outlines, open selected sections together,
+search the published pattern index, inspect a pattern with its complete
+multi-file program and dependencies, open bounded source-file windows, and
+inspect the shape of general handles available to the calling run. It cannot
+delegate, execute commands, write files, browse the web, or mutate Fabric.
+Documentation sections remain complete at ingestion; an exact read returns
+`nextOffset` until the section is finished. Search and reads carry the document
+title and full ancestor heading path, keeping iframe guest guidance
+distinguishable from ordinary compiled pattern guidance. Search can be narrowed
+by a corpus-relative `pathPrefix` matching an exact document or a directory and
+its slash-delimited descendants. An empty prefix selects the whole corpus.
+Search returns up to ten matches with exact passages, favoring complete
+paragraphs and fenced examples. `list_doc_sections` returns a paginated outline
+with ids and section sizes. `open_doc_section` accepts one `sectionId` or up to
+eight `sectionIds`; each read defaults to 32,000 characters and accepts a
+smaller `maxChars`. A batch is admitted only if all its reads fit the remaining
+total budget. Neither purpose is required to spend its full budget.
 
 The documentation corpus is Markdown split at headings and read on the host from
 the roots the run resolved, never through the sandbox mount. Configure it with
@@ -1358,16 +1442,17 @@ a `Resource` integrity atom of class
 `CommonFabricHarnessOperatorProvisionedReference` naming its root. Workspace
 text cannot enter this corpus.
 
-Search results are leads, not citations. The private loop must open the exact
-material it relies on. Each admitted read records its source kind, exact
-location and range, total length, content digest, and a source id derived from
-that identity. Repeated headings remain distinct. An inspected pattern is
-confirmed only after its indexed source computes to the requested pattern id;
-the narrowly identified compiler case unsupported by the light identity path is
-recorded as deferred rather than misreported as verified. An identity mismatch
-is always refused.
+Document search passages are exact reads and may be cited; headings and pattern
+search metadata alone remain leads. The private loop opens wider sections or
+source files when the passage lacks the needed context. Each admitted read
+records its source kind, exact location and range, total length, content digest,
+and a source id derived from that identity. Repeated headings remain distinct.
+An inspected pattern is confirmed only after its indexed source computes to the
+requested pattern id; the narrowly identified compiler case unsupported by the
+light identity path is recorded as deferred rather than misreported as verified.
+An identity mismatch is always refused.
 
-Each exact documentation, source-file, or metadata read is limited to 8,000
+Each exact documentation, source-file, or metadata read is limited to 32,000
 characters. Metadata uses the rendered argument and result types; redundant raw
 schemas remain in the retained pattern record. Metadata larger than the limit is
 refused before its pattern is admitted; documentation and source-file reads
@@ -1377,27 +1462,35 @@ Documentation reads return both the exact `section-N` selector used to reopen a
 section and the distinct `documentation:*` source id used to cite that read.
 Before tool-free synthesis the private loop receives a concise catalog of the
 exact source ids read in the current call. If a draft claiming completeness
-still cites an unread id and one of the eight model turns remains, the loop
+still cites an unread id and one of the scope's model turns remains, the loop
 allows one tool-free citation-only repair against that same catalog. It never
 fuzzily accepts, completes, or reopens an invented id, and the repair adds no
-research-tool calls to the 24-call bound.
+private tool calls or extends the scope's budget.
 
-The returned kit distinguishes `complete` from `incomplete`, recommends direct
-run, composition, authoring, or a focused API answer, and carries admitted
-patterns, described external-handle bindings, ordered steps, rules,
-verification, exact citations, and explicit blockers. Direct-run and composition
-kits require verified published source and a complete invocation or source
-recipe. A direct-run example must parse as JSON matching the shared
-`run_pattern` input schema, name a selected inspected pattern, and omit inline
-source. An invalid invocation remains in an incomplete kit for local correction.
-Authoring kits require complete source. Focused API answers may consist only of
-cited rules. `inputs` contains only existing general handles that the loop
-successfully inspected; types, defaults, literals, and new local state belong in
-the recipe, and `[]` is correct when no external data is required. Every API
-shown by an example, comments included, must cite an exact opened read. Every
-source cited by a rule or example appears in the kit's source catalog, including
-sources not repeated in the model's top-level citation list. Routine reversible
-choices are stated as assumptions; only real blockers belong in `missing`.
+The `kit` result envelope carries the scoped findings and distinguishes
+`complete` from `incomplete`. Selected patterns require verified published
+identities. The private model supplies a direct-run example as an `invocation`
+object matching the canonical `run_pattern` input schema; the host serializes it
+into copyable JSON. It must name a selected inspected pattern and omit
+`sourceText`. An optional `pattern-source` example carries an intact
+TypeScript/TSX example. The private synthesis schema keeps invocation objects
+and TypeScript content in distinct variants, and admission validates the chosen
+scope's shape.
+
+`inputs` contains only current general handles successfully described in the
+call. Orientation's `availableHandleTokens` separately records the entire
+current inventory, including handles that were not described. An empty binding
+list is correct for a local-only app. Types, defaults, literals, and new state
+belong in an explanation or example. A candidate's input requirements apply to
+that candidate: for example, one renderer requiring SQLite does not establish a
+database requirement for every mailbox renderer. Routine choices are
+assumptions; only facts needed to settle this call belong in `missing`.
+
+Every API shown in an example, comments included, must cite an exact opened
+read. Every source cited by a rule or example appears in the result's source
+catalog. The private prompt directs authors to canonical pattern guidance and to
+the snippet's document and heading context before copying code. An iframe React
+pragma is not ordinary compiled pattern scaffolding.
 
 A complete `pattern-source` example also receives a host-side TypeScript parser
 check. The kit retains the complete source, citations, and exact diagnostic
@@ -1439,9 +1532,9 @@ exhaustion, and malformed synthesis retain the same partial record and increment
 `researchFailures`. Private token use is included in total run usage.
 
 Admission, retained evidence, and model projection have distinct owners.
-`research/admission.ts` checks recipes and citations using the shared tool
-contracts; `research/runner.ts` owns private search, reads, budgets, and
-retained failure evidence. `research/model-projection.ts` projects a kit at
+`research/admission.ts` checks findings, examples, and citations using the
+shared tool contracts; `research/runner.ts` owns private search, reads, budgets,
+and retained failure evidence. `research/model-projection.ts` projects a kit at
 ordinary tool handoff, opening-handoff reconstruction, and child context. It
 uses the existing identifier scrub for free text, preserves confirmed import
 identities and exact source/CFC records, and leaves unused raw argument/result
@@ -1451,19 +1544,41 @@ host-supplied results. Recorded handoff history stays authoritative during
 replay; reconstructed handoffs use the current projection. Pattern-search result
 rendering remains a separate surface from the derived research kit.
 
-Successful kits and their host-confirmed records remain intact in durable run
-state. Private follow-ups and delegated children receive the latest
-implementation kit and the two latest focused API answers in chronological
-order, with whole examples. A child retains those selected raw summaries in its
-own run state and receives projected kits in context, joined by research run id.
-It has no research tool call to own a separate omission entry for inherited
-context. Only handles in the selected kits' `inputs[].token` bindings transfer
-automatically; mentions in prose, blockers, or superseded kits transfer nothing.
-A pattern author starts from an inherited kit and uses `research` only for
-unresolved follow-ups rather than repeating the initial pass. Locally authored
-source artifacts record the research run ids that shaped them. The current
-pattern-index publication API has no research-association field, so that
-provenance remains local instead of being sent as an ignored index property.
+Successful results and host-observed records remain intact in durable run state.
+Context selection keeps the latest orientation and two latest answers in
+chronological order. Saved unscoped kits are interpreted in one read boundary:
+`focused-api` denotes an answer and implementation directions denote
+orientation. Stored transcripts are not rewritten. Saved unscoped kits retain
+their implementation admission contract; new calls use the two purposes above.
+
+Interactive sessions commit the original user goal, selected research, and the
+full model-context CFC record atomically with resumable history. A later root
+task retains that goal alongside its current request and inherits those findings
+as historical context, including after SQLite restart. It receives current
+grants independently; earlier bindings are not automatically transferred to a
+child. A failed or canceled turn cannot replace the research checkpoint of the
+last completed turn.
+
+SQLite checkpoints also retain the existing transcript-omissions record.
+Restoration verifies every recorded result's unique identity before attaching
+any host-only annotations; serialized model messages contain none of that
+metadata. Results without a legacy omission record retain unknown omission
+status, distinguishable from results known to have no omissions. SQLite schema
+inspection and migration share an immediate transaction, so concurrent openers
+cannot both migrate the same missing column.
+
+Children receive projected findings and retain the selected raw summaries in run
+state, joined by research run id. An inherited orientation lists only handles
+available in the child's own table. They have no research tool call to own a
+separate omission entry for inherited context. Only selected, current
+`inputs[].token` bindings transfer automatically. Prose mentions, superseded
+bindings, and historical bindings transfer nothing. The parent's full CFC
+context carries forward even when selection omits a result. Pattern authors
+start from these findings and ask only unresolved questions.
+
+Locally authored source artifacts record the research run ids that shaped them.
+The pattern-index publication API has no research-association field, so this
+provenance remains local.
 
 `query_docs` remains accepted only as a CLI or persisted-policy input alias and
 is normalized to `research` at the use boundary. Existing transcript and run
@@ -1697,6 +1812,66 @@ carries no handle code. The persisted tool-output artifact keeps the raw
 reference, the raw result value, and the `pieceId` — a bare fabric identifier
 the handle boundary never swaps, so it stays out of the model-facing rendering.
 
+`outputConcerns` is what the run's own outputs say about the reads behind them,
+and it is a DISCLOSURE rather than a refusal: the run succeeded, the piece
+stands, and this is the reason to look at it. A composed reader exposes its
+failure and its emptiness as outputs — an `errorMessage` beside its `rows` — and
+a pattern composing it is free to pass neither on, which is how a run answers
+`ok` over a result whose every figure is zero. So every pattern the run
+materialized is read where it stands, the run's own root included, and each
+output reporting a failure (a non-empty `error` or `errorMessage`, or any string
+carrying the `sqlite:` prefix the runtime writes its own SQLite failures under)
+or holding no rows (an empty list) is named: the output's key, the identity of
+the pattern that produced it — which for a composed one is the id its own
+`cf:pattern:` import addresses — and fixed text saying what to do about it.
+Absent when there is nothing to say, and one entry per pattern, output and kind
+however many times a pattern was materialized.
+
+Two bounds decide what a concern may be read from, and both fail closed. Only an
+output the pattern's own schema DECLARES at its top level is read: a property
+name is a channel, a name computed from what a pattern read would publish that
+data through the name, and nothing here goes through a release measurement,
+while a declared name is a constant of the source the model composed. And an
+emptiness is read only off a result that reports a read — one declaring an error
+branch or a `pending` flag — because an empty list is an ordinary shape for a
+result to hold, and calling every one of them a read that returned nothing would
+say "no rows" about a selection nobody has made yet. A failure is read off any
+result, since a string reporting one is not an ordinary shape.
+
+So the report UNDER-reports rather than over-reports, and is best-effort by
+construction. An output reached through a `$ref` or a combinator is not read, a
+nested one is not read, an instance the recorder's bounded buffer has evicted is
+not read, and an instance that will not read back is dropped while the rest of
+the report stands. Each of those costs a reason to look at something; none of
+them reports something that is not there, which is the direction to fail in for
+a disclosure sitting beside a result the run already returned.
+
+A result reporting itself `pending` has its emptiness passed over, and only its
+emptiness. A read still in flight is empty because it has not landed, and a
+query over a served store is in flight for the whole of the run that issued it —
+so an empty output read then is a fact about the clock rather than about the
+data, while a failure read then is a failure either way. That the rows land on
+the PIECE rather than in this call's answer is the same fact from the other
+side: a reader composed here reports no error and no rows in one breath, and it
+is the absent error that says the read is sound.
+
+The failure's own TEXT does not travel in the result. A concern names what the
+model already holds: it wrote the composition, and a composed instance's outputs
+went through no release measurement, so the text is treated as every other
+thrown message this tool withholds is. What a model does with a named output is
+expose it under its own result schema and render it, where the release boundary
+measures it like any other value.
+
+The text is kept in the artifact's `rawCauseMessage`, on the terms that field
+already states for thrown text: a composed instance is not something the model
+can address, so an operator reading the run back has nothing else to debug from,
+and the text cannot be recovered any other way. Each line names the same
+position the model was told about, so the two reports line up. That artifact is
+no stronger a boundary than the field it rides in — its root is readable through
+`bash`, as that field's own documentation records, and CT-2117 carries the
+structural fix — so what the sentence above claims is about the result rather
+than about the machine.
+
 What the answer's values may carry is measured against the ceiling a model's
 context has, which admits nothing: a model's context is outside every space, so
 no confidentiality clause names an audience it belongs to. The reference is not
@@ -1841,10 +2016,16 @@ deno run -A src/interactive-chat-stdio.ts \
 The stdio transport reads one interactive chat request envelope per line from
 stdin and writes response/event envelopes as newline-delimited JSON. Pass
 `--chat-session-db` or set `CF_HARNESS_CHAT_SESSION_DB` to persist sessions,
-turn records, and replayable events across process restarts. Pass
-`--chat-max-in-memory-events` or set `CF_HARNESS_CHAT_MAX_IN_MEMORY_EVENTS` to
-bound the transport's in-memory event cache while keeping durable replay
-available through SQLite.
+turn records, and replayable events across process restarts. One process holds a
+session database for as long as it runs: a second process pointed at the same
+database is refused at startup rather than recovering over the turns the first
+is still running. The refusal is one JSON line on stderr —
+`{"kind":"cf-harness.store-held","version":1,"store":<resolved path>,"holder":{"instanceId","pid","heldSince"}|null}`
+— followed by the error's message, with nothing written to stdout and exit
+status 1. A database whose holder has exited is taken over, and the turns it
+left unfinished are settled as interrupted. Pass `--chat-max-in-memory-events`
+or set `CF_HARNESS_CHAT_MAX_IN_MEMORY_EVENTS` to bound the transport's in-memory
+event cache while keeping durable replay available through SQLite.
 
 Both this entrypoint and the strict Loom host's `interactive` subcommand accept
 `--fabric-api-url`, `--fabric-identity`, and `--fabric-space`, with defaults

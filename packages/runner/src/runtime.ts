@@ -7,6 +7,7 @@ import {
 import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import { sameAcl } from "@commonfabric/memory/acl";
 import {
   acquireServerExecutionEnabler,
@@ -830,6 +831,28 @@ export interface CfcRuntimeStats {
   dereferenceTracesRecorded: number;
 
   dereferenceTracesMax: number;
+
+  /** Structured refusal details recorded across transaction prepares. */
+  refusalDetailsRecorded: number;
+
+  /** Full consumed-label collections, including sink and host release checks. */
+  consumedLabelWalks: number;
+
+  /** Overlap queries containing a wildcard segment. */
+  overlapWildcardQueries: number;
+
+  /** Overlap queries containing only concrete segments. */
+  overlapConcreteQueries: number;
+
+  /** Authoritative cover lookups for carried link-view entries. */
+  authoritativeCoverCalls: number;
+
+  /** Child templates minted by flow persistence. */
+  flowTemplateEntriesMinted: number;
+
+  /** Containers receiving child templates from flow persistence. */
+  flowTemplateContainers: number;
+
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
   cfcDigestInvalidations: number;
@@ -875,6 +898,13 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   flowLabelProbeMemoHits: 0,
   dereferenceTracesRecorded: 0,
   dereferenceTracesMax: 0,
+  refusalDetailsRecorded: 0,
+  consumedLabelWalks: 0,
+  overlapWildcardQueries: 0,
+  overlapConcreteQueries: 0,
+  authoritativeCoverCalls: 0,
+  flowTemplateEntriesMinted: 0,
+  flowTemplateContainers: 0,
   cfcPreparedTx: 0,
   cfcPrepareRejects: 0,
   cfcDigestInvalidations: 0,
@@ -950,10 +980,6 @@ type RuntimeSetupOptions = {
   reapplyStoredSetup?: boolean;
   prepareForResume?: boolean;
 };
-
-function isMemorySpaceDID(value: string): boolean {
-  return /^did:[^:]+:.+/.test(value);
-}
 
 /**
  * Helper for `Runtime.getImmutableCell()`, which tells the storage preflight
@@ -2312,6 +2338,15 @@ export class Runtime {
       onPreparedTx: () => {
         this.#cfcStats.cfcPreparedTx += 1;
       },
+      onRefusalDetail: () => {
+        this.#cfcStats.refusalDetailsRecorded += 1;
+      },
+      onPreparationWork: (kind, count) => {
+        this.#cfcStats[kind] += count;
+      },
+      onConsumedLabelWalk: () => {
+        this.#cfcStats.consumedLabelWalks += 1;
+      },
       onPrepareReject: (refusal) => {
         this.#cfcStats.cfcPrepareRejects += 1;
         // Every refusal is reported here, terminal or not. The scheduler's
@@ -2986,33 +3021,15 @@ export class Runtime {
   }
 
   /**
-   * Wait until a retry of a rejected commit would run against FRESH state.
-   * The protocol every conflict retrier shares — `editWithRetry` above, and
-   * the runner's commit-gated piece start (runner.ts):
-   *
-   * A CONFLICT means this replica is behind the authoritative version:
-   * re-running immediately re-reads the same stale local state and fails
-   * identically, so without waiting the retries all burn on one
-   * deterministic conflict (CT-1824 — the compile-cache write-back looped
-   * this way and stale-version pieces recompiled on every cold boot). The
-   * conflict carries the catch-up gate; await it so the retry runs against
-   * fresh state — the same protocol as the scheduler's conflict handling
-   * (scheduler/action-run.ts). A readiness gate that REJECTS (session closed
-   * or replaced while waiting) is control flow, not an error: return anyway
-   * and let the retry's own commit produce the definitive outcome.
-   *
-   * The gate advances the session past the conflicting commit, but a doc
-   * this replica never READ does not arrive with it — and a conflicted blind
-   * WRITE means exactly that (the compile-cache write-back rewrites derived
-   * docs a cold replica has never seen; a piece start's basis names computed
-   * docs the serving side was materializing). So every document named by the
-   * rejection is pulled concurrently in its scope, and the retry's writes
-   * carry their true versions instead of re-asserting seq 0. Entries without
-   * scope use the default space instance. If no array entry names a usable
+   * Waits for a rejection's catch-up gate and pulls its conflicting documents
+   * concurrently in their declared scopes. The gate covers the watched view;
+   * a validation dependency outside that view needs its own pull. Entries
+   * without scope use the space instance. If no array entry names a usable
    * address, the singular conflict supplies the recovery target.
    *
-   * Every step is best-effort by design: this resolves rather than throws,
-   * because the retry's commit — not this readiness — is what decides.
+   * Recovery is best-effort: failed waits and pulls leave the fresh retry's
+   * commit to decide whether its basis is valid. Aborting `teardownSignal`
+   * ends the wait; callers must check their lifetime before requeueing work.
    */
   async awaitCommitRetryReadiness(
     error: unknown,
@@ -3616,7 +3633,7 @@ export class Runtime {
    * re-running the handler/action (see RetryImmediately).
    */
   resolveSpaceNameSync(name: string): MemorySpace | undefined {
-    if (isMemorySpaceDID(name)) return name as MemorySpace;
+    if (isDID(name)) return name;
     return this.#spaceNameToDid.get(name);
   }
 
@@ -3696,7 +3713,7 @@ export class Runtime {
     if (options?.genesisAcl !== undefined) {
       // A document the resolution cannot honor is refused, never dropped:
       // the caller asked for a space born closed.
-      if (isMemorySpaceDID(name)) {
+      if (isDID(name)) {
         throw new Error(
           `space-name resolution for the DID ${name} cannot register a ` +
             "genesisAcl: the runtime derives no space key for a bare DID, " +

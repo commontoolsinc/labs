@@ -16,10 +16,14 @@ import {
 } from "@commonfabric/test-support/records";
 
 export {
+  declaredSchema,
   digestIdentities,
   MANIFEST_SCHEMA_VERSION,
+  MANIFESTS_LOOKED_BACK,
   parseManifest,
+  SELECTION_AREA,
   serializeManifest,
+  writtenAhead,
 } from "@commonfabric/test-support/records";
 export type {
   Calibration,
@@ -61,7 +65,7 @@ export function emptyManifest(): Manifest {
     commit: "",
     runs: 0,
     dials: dialSnapshot(),
-    calibration: { setupCost: {}, suites: {}, unitOverhead: {}, prologue: 0 },
+    calibration: { setupCost: {}, suites: {}, prologue: 0 },
     entries: [],
     withheld: [],
     unavailable: [],

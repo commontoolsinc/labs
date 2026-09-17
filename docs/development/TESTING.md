@@ -49,6 +49,10 @@ The package's `test` task in its `deno.jsonc` says which kind it is.
 `deno task test` also prints the command line it runs, which shows where the
 flag was appended.
 
+A test's name is also its identity in the run-record store, so a renamed test
+must be listed in `tasks/test-identity-aliases.jsonl` to keep its recorded
+history joined to its new name.
+
 ### Browser tests in agent sandboxes
 
 Headless Chrome registers with AppKit and needs Launch Services and
@@ -357,8 +361,8 @@ nested `describe()` per function, and an `it()` reading as a verb phrase that
 completes the word "it".
 [Unit test coding style](unit-test-coding-style.md) covers that shape in full:
 where a test file goes, what it is called, how class and function tests nest,
-which assertions to reach for, and the matcher traps that produce a green test
-proving nothing.
+which assertions to reach for, the matcher traps that produce a green test
+proving nothing, and what rewording a description costs in recorded history.
 
 **Integration test example:**
 
@@ -541,8 +545,9 @@ files, and why `deno task check-local-program` refuses a
 
 - [test-records.md](test-records.md) — the record of every test execution:
   every suite here reports one record per test to a public store, and that
-  document covers what gets recorded, opting a workstation in, and reading
-  the data.
+  document covers what gets recorded, opting a workstation in, reading the
+  data, and the alias line that keeps a renamed test's history joined to its
+  new name.
 - [unit-test-coding-style.md](unit-test-coding-style.md) — how a unit test file
   is shaped: where it lives and what it is called, the single top-level
   `describe()` and the blocks nested under it, how an `it()` description is
