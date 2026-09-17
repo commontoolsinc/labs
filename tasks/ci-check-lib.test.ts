@@ -14,14 +14,17 @@ import {
   type BaselineSample,
   buildCoverageDebtSuggestionComment,
   buildCoverageDebtUnattributedComment,
+  buildCoverageNotGatedComment,
   buildCoverageResolvedComment,
   type CompileCacheStates,
   COVERAGE_BASELINE_RESET_MARKER,
   COVERAGE_SUGGESTION_MARKER,
   coverageGroupsForChangedFiles,
+  coverageListingNotCurrent,
   coverageMetricForGroup,
   coverageMetricGroupName,
   coverageMetricMeasuredSet,
+  coverageNotGatedNotice,
   downloadAndExtractArtifact,
   fetchArtifactsForRun,
   fetchCurrentPRBody,
@@ -32,6 +35,7 @@ import {
   githubGet,
   githubPatch,
   githubPost,
+  isBaselineCandidateRun,
   isNotFound,
   measuredSetCoverageMetric,
   newestArtifactsByName,
@@ -43,6 +47,8 @@ import {
   serializeCoverageBaseline,
   shouldGateCoverageDebtMetric,
   unknownAcceptedMetrics,
+  WORKFLOW_RUNS_PAGE_SIZE,
+  workflowRunsPagePath,
 } from "./ci-check-lib.ts";
 
 Deno.test("coverage baseline files round-trip stable metric samples", () => {
@@ -770,9 +776,167 @@ Deno.test("buildCoverageResolvedComment notes resolution when there is no net re
   assertFalse(resolved.includes("<details open>"));
   assertStringIncludes(
     resolved,
-    "<summary><strong>🕵🏻‍♀️ Code coverage regression resolved.</strong></summary>",
+    "<summary><strong>🕵🏻‍♀️ Code coverage debt is within the ratchet.</strong></summary>",
   );
   assertStringIncludes(resolved, "| `tasks` | 8 | 8 | no change |");
+});
+
+Deno.test("buildCoverageNotGatedComment names each ungated group and why", () => {
+  const baseSha = "c4a5de3346126594d6b9f1ea5cdace119a302a52";
+  const comment = buildCoverageNotGatedComment({
+    groups: [
+      { group: "packages/shell", reason: "no-baseline" },
+      {
+        group: "tasks",
+        reason: "base-branch-moved",
+        baselineSha: "ec849c4c00000000000000000000000000000000",
+      },
+    ],
+    measurement: {
+      runUrl: "https://github.com/commonfabric/labs/actions/runs/7",
+      baseSha,
+    },
+  });
+
+  // The one coverage comment, left open so the state is read without a click.
+  assertEquals(comment.split("\n")[0], COVERAGE_SUGGESTION_MARKER);
+  assertStringIncludes(comment, "<details open>");
+  assertStringIncludes(comment, "Test coverage was NOT gated on this run");
+  assertStringIncludes(
+    comment,
+    "did not hold `packages/shell`, `tasks` against a baseline",
+  );
+  assertStringIncludes(
+    comment,
+    "| `packages/shell` | No successful `main` run within reach measured " +
+      "base-branch commit `c4a5de33` or an ancestor of it. |",
+  );
+  assertStringIncludes(
+    comment,
+    "| `tasks` | `main` changed this group between the nearest measured " +
+      "ancestor (`ec849c4c`) and base-branch commit `c4a5de33`. |",
+  );
+  assertStringIncludes(comment, "A later run of this pull request gates");
+  assertStringIncludes(
+    comment,
+    "Measured by https://github.com/commonfabric/labs/actions/runs/7.",
+  );
+});
+
+Deno.test("buildCoverageNotGatedComment says a listing that is not current failed the job", () => {
+  const comment = buildCoverageNotGatedComment({
+    groups: [{ group: "tasks", reason: "listing-not-current" }],
+  });
+
+  assertStringIncludes(
+    comment,
+    "The **Coverage Check** job failed because it could not find a baseline " +
+      "to hold `tasks` against.",
+  );
+  assertStringIncludes(
+    comment,
+    "| `tasks` | GitHub's listing of this workflow's runs left out this run",
+  );
+  assertStringIncludes(comment, "Re-run the **Coverage Check** job");
+  assertFalse(comment.includes("Measured by"));
+});
+
+Deno.test("coverageNotGatedNotice names no commit for a checkout that had none", () => {
+  const notice = coverageNotGatedNotice({
+    groups: [
+      { group: "packages/runner", reason: "no-base-commit" },
+      { group: "packages/ui", reason: "no-baseline" },
+    ],
+  }).join("\n");
+
+  assertStringIncludes(
+    notice,
+    "| `packages/runner` | The base-branch commit this run merges into could " +
+      "not be read from the checkout. |",
+  );
+  assertStringIncludes(
+    notice,
+    "| `packages/ui` | No successful `main` run within reach measured the " +
+      "base-branch commit or an ancestor of it. |",
+  );
+});
+
+Deno.test("coverageNotGatedNotice does not say how the job ended unless the listing decided it", () => {
+  // A group with no baseline passes on its own, and fails beside a regression
+  // in another group, so the notice claims neither.
+  const notice = coverageNotGatedNotice({
+    groups: [{ group: "tasks", reason: "base-branch-moved" }],
+  }).join("\n");
+
+  assertFalse(notice.includes("passed"));
+  assertFalse(notice.includes("failed"));
+  assertStringIncludes(
+    notice,
+    "The **Coverage Check** job did not hold `tasks` against a baseline",
+  );
+});
+
+Deno.test("coverageListingNotCurrent is true only of a listing that was not current", () => {
+  assertEquals(
+    coverageListingNotCurrent([
+      { group: "tasks", reason: "listing-not-current" },
+    ]),
+    true,
+  );
+  assertEquals(
+    coverageListingNotCurrent([
+      { group: "tasks", reason: "no-baseline" },
+      { group: "packages/ui", reason: "base-branch-moved" },
+    ]),
+    false,
+  );
+  assertEquals(coverageListingNotCurrent([]), false);
+});
+
+Deno.test("buildCoverageResolvedComment claims no comparison for a reset that compared nothing", () => {
+  const resolved = buildCoverageResolvedComment(0, [], true);
+
+  assertStringIncludes(
+    resolved,
+    "Code coverage debt accepted with an override.",
+  );
+  assertStringIncludes(
+    resolved,
+    "This run compared no source group against a baseline",
+  );
+  assertFalse(resolved.includes("at or below its `main` baseline"));
+});
+
+Deno.test("workflowRunsPagePath asks for one unfiltered page of the workflow's runs", () => {
+  const path = workflowRunsPagePath(3);
+  const query = new URLSearchParams(path.split("?")[1]);
+
+  assertStringIncludes(path, "/actions/workflows/deno.yml/runs?");
+  assertEquals(query.get("page"), "3");
+  assertEquals(query.get("per_page"), String(WORKFLOW_RUNS_PAGE_SIZE));
+  // Any of these sends the request to the search index that returns old runs.
+  for (const filter of ["branch", "status", "event", "created", "head_sha"]) {
+    assertEquals(query.get(filter), null);
+  }
+});
+
+Deno.test("isBaselineCandidateRun admits only a successful push to main", () => {
+  const push = { event: "push", head_branch: "main", conclusion: "success" };
+
+  assertEquals(isBaselineCandidateRun(push), true);
+  assertEquals(
+    isBaselineCandidateRun({ ...push, event: "pull_request" }),
+    false,
+  );
+  assertEquals(isBaselineCandidateRun({ ...push, head_branch: "fix" }), false);
+  assertEquals(
+    isBaselineCandidateRun({ ...push, conclusion: "failure" }),
+    false,
+  );
+  assertEquals(
+    isBaselineCandidateRun({ ...push, head_branch: undefined }),
+    false,
+  );
 });
 
 Deno.test("buildCoverageResolvedComment uses a single line of one uncovered line", () => {
