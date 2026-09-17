@@ -1335,8 +1335,18 @@ describe("the lane's own housekeeping", () => {
       expect(await main(["--shard", "1/5"], REPOSITORY)).toBe(2);
       expect(
         await main(
-          ["--lane", "9999", "--of", "10000", "--full", "--dry-run"],
+          ["--lane", "1", "--of", "1", "--full", "--dry-run"],
           REPOSITORY,
+          {
+            topology: () =>
+              Promise.resolve([
+                suite({
+                  id: "workspace-unit",
+                  units: ["packages/bakery/glaze.test.ts"],
+                }),
+              ]),
+            manifest: () => Promise.resolve({ manifest: manifestOf([{}]) }),
+          },
         ),
       ).toBe(0);
     } finally {
@@ -1527,17 +1537,25 @@ describe("the lane's own housekeeping", () => {
     let ok: boolean;
     try {
       ok = await runLane({
-        lane: 9999,
-        of: 10000,
+        lane: 2,
+        of: 2,
         full: true,
         dryRun: false,
         laneCount: false,
         root,
+        coverageDir: `${spool}/coverage`,
       }, {
-        // What this pins is the path with nothing in it, so the store's
-        // manifest is held out: with one, even a lane this far down the
-        // count draws a few unmeasured tests, and the lane then opens
-        // their capabilities and runs them.
+        // One unit fills the first lane, leaving this lane empty.
+        topology: () =>
+          Promise.resolve([
+            suite({
+              id: "workspace-unit",
+              units: ["packages/bakery/glaze.test.ts"],
+              command: () => {
+                throw new Error("an empty lane must run no batch");
+              },
+            }),
+          ]),
         manifest: (at) =>
           Promise.resolve({ absent: `no manifest at ${at}: held out here` }),
       });
@@ -2242,10 +2260,12 @@ describe("what a lane does with the batches it was given", () => {
   }
 
   /**
-   * Runs a lane over that suite, and answers with its verdict beside the
+   * Runs a lane over that suite, and returns its verdict beside the
    * measurements it wrote. The spool is the lane's own, so what it
    * records about itself stays here rather than reaching the spool of
-   * the run testing it.
+   * the run testing it. Its coverage directory is private too: the lane
+   * converts every profile it finds there, including an enclosing CI
+   * run's profiles if it shares that run's directory.
    */
   async function run(
     command: readonly string[],
@@ -2264,6 +2284,7 @@ describe("what a lane does with the batches it was given", () => {
           laneCount: false,
           root: REPOSITORY,
           at: "2026-09-01T00:00:00Z",
+          coverageDir: `${spool}/coverage`,
         },
         {
           manifest: selecting(over.manifest),
@@ -2340,6 +2361,7 @@ describe("what a lane does with the batches it was given", () => {
           laneCount: false,
           root: REPOSITORY,
           at: "2026-09-01T00:00:00Z",
+          coverageDir: `${dir}/coverage`,
         },
         {
           manifest: () =>
@@ -3005,6 +3027,7 @@ describe("what a lane hands the children it spawns", () => {
         laneCount: false,
         root: REPOSITORY,
         at: "2026-09-01T00:00:00Z",
+        coverageDir: `${at}/coverage`,
       }, {
         manifest: () =>
           Promise.resolve({
