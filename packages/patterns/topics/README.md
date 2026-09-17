@@ -400,15 +400,16 @@ readback, and every name a verb's result publishes is permanent, so the create
 hands back the survey row plus the write-time facts only the pattern could
 resolve (`createdAt`, `createdBy`). `name` rides beside it — the name the create
 allocated, as written to the namespace — because the topic's own `shortName` is
-a lookup that may not have produced a value when the call returns, and a caller
-must not have to wait for a derivation to learn what it just allocated.
-`backfillNames` returns the names it wrote, in filing order, and `[]` on a
-second run. `addComment` and `addLink` return the appended record, `setBody` the
-persisted body plus the attribution it wrote, `setTitle` the persisted title
-plus its attribution; each carries fields the pattern resolved that a caller
-cannot compute for itself. Counts are deliberately not returned: these appends
-are mergeable ops, so a length observed inside one handling is not a fact about
-the resulting list — read `commentCount` when you want the count.
+a lookup that may not have produced a value when the call returns — and produces
+none at all while numbers are hidden — and a caller must not have to wait for a
+derivation to learn what it just allocated. `backfillNames` returns the names it
+wrote, in filing order, and `[]` on a second run. `addComment` and `addLink`
+return the appended record, `setBody` the persisted body plus the attribution it
+wrote, `setTitle` the persisted title plus its attribution; each carries fields
+the pattern resolved that a caller cannot compute for itself. Counts are
+deliberately not returned: these appends are mergeable ops, so a length observed
+inside one handling is not a fact about the resulting list — read `commentCount`
+when you want the count.
 
 A returned value reaches the caller through the handling's receipt. A result
 carrying a piece (`addTopic`) travels the result-pattern projection path; the

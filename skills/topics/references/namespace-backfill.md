@@ -68,12 +68,12 @@ that before deciding anything this procedure says needs deciding.
    `deno task cf cell get /top/<n> title`, and reads back as an ordinary `index`
    row with no `shortName` and no damage to the array around it. So naming,
    `/top/<n>` addressing and index membership all survive the step being
-   skipped, and `shortName` — the number on the index row, and the badge
-   wherever Topics shows numbers — is what is absent. That bounds what skipping
-   costs from BELOW, not from above: no run against a populated board has forced
-   a Topic update, so what else a completed one would change there is not known,
-   and the record says so. Step 4's refusal on such a Topic is this state being
-   enforced rather than an error.
+   skipped, and `shortName` — the badge and the number on the index row, both of
+   which appear only once Topics shows numbers at all — is what is absent. That
+   bounds what skipping costs from BELOW, not from above: no run against a
+   populated board has forced a Topic update, so what else a completed one would
+   change there is not known, and the record says so. Step 4's refusal on such a
+   Topic is this state being enforced rather than an error.
 
 3. **`backfillNames` once**, through the board. It returns the names it wrote,
    in filing order, and is idempotent: a second run writes nothing and returns
