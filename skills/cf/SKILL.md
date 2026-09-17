@@ -136,12 +136,18 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 Every read and every call names a target, and the spelling decides whether the
 answer composes into the next command.
 
-- `/[@<space>/]<piece>[@<scope>][/<path>]` — the reference, the one syntax the
-  whole fabric shares. `<space>` is a name or a DID and `<piece>` is a slug or a
-  handle, so `/@my-space/tracker/items` and `/@did:key:.../of:fid1:.../items`
+- `//<space>/<piece>[@<scope>][/<path>]`, and `/<piece>[@<scope>][/<path>]`
+  where `--space` names the space — the reference, the one syntax the whole
+  fabric shares. `<space>` is a name or a DID and `<piece>` is a slug or a
+  handle, so `//my-space/tracker/items` and `//did:key:.../of:fid1:.../items`
   are the same shape. A space embedded in it supplies `--space` when the flag is
   absent, and must agree with it when both are given. **An address printed by
   one command is accepted by the next with no flag beside it.**
+- `//` is the space prefix to write, for a name and for a DID alike. `/@` is
+  accepted before a DID, so `/@did:key:.../of:fid1:.../items` still reads;
+  before a name it is refused, and `/@my-space/tracker/items` reports the
+  `/@my-space/` prefix retired and names `//my-space/` to write instead.
+  `packages/cli/README.md` carries the whole grammar.
 - On `cf cell get`, `cf cell set` and `cf piece call`, write the reference in
   the first positional — `cf cell get /tracker items/0/title`. A reference
   begins with `/` and a relative path never does, so the two cannot collide.
@@ -372,30 +378,31 @@ schemas need materialization to establish that shape. CFC behavior is the same
 as a computed pattern expression. Source schema metadata is authoritative;
 projection schemas cannot supply `ifc`, `asCell`, `scope`, or `default`. A
 projection marks a position to get that position's address — one string in the
-canonical reference syntax `/[@did/]<id>[@scope][/path]`, where the space rides
-in front only when it differs from the space the command targeted and the scope
-follows the id only when it is not the default, no schema inlined — instead of
-what is behind it, or beside a projection to get both. A JSON `--schema` marks
-with `"$link": true`; a field list marks with a trailing `@`, so
-`--select 'topic@,topic.title'` returns one `topic` carrying its address and its
-title. A path that is only `@` marks the position the read is already at, so
-`--select '@'` returns the source's own address and `--select '@,title'` returns
-it beside the title. `@` is otherwise special only at the end of a segment and
-`\@` writes a literal one, which keeps a field named `user@home` reachable; a
-leading `@` followed by anything else is the `@file` only `--schema` reads. A
-field list applies to each element wherever it crosses an array, an address
-included, so `--select 'notes@'` returns one address per note and is the concise
-spelling of `--schema '{"type":"array","items":{"$link":true}}'`; a marked
-position holding anything else returns its own address. That address is the
-deepest stored link crossed on the way to the marked position plus the segments
-below it, so marking a field under a linked element names that element's own
-document rather than a slot in the collection above it; a position with no link
-above it keeps the source document's own address. A marked position is never
-fetched, so a marked collection costs one document read rather than one per
-element; the rendered address is what `--cell` accepts, scheme included, so an
-emitted address composes into the next command unchanged, without being
-reassembled. Neither spelling composes with `--filter`. See
-`packages/cli/README.md` for the exact syntax and supported schema subset.
+canonical reference syntax `[//<space>]/<id>[@<scope>][/<path>]`, where the
+space is written as a DID and rides in front only when it differs from the space
+the command targeted, and the scope follows the id only when it is not the
+default, no schema inlined — instead of what is behind it, or beside a
+projection to get both. A JSON `--schema` marks with `"$link": true`; a field
+list marks with a trailing `@`, so `--select 'topic@,topic.title'` returns one
+`topic` carrying its address and its title. A path that is only `@` marks the
+position the read is already at, so `--select '@'` returns the source's own
+address and `--select '@,title'` returns it beside the title. `@` is otherwise
+special only at the end of a segment and `\@` writes a literal one, which keeps
+a field named `user@home` reachable; a leading `@` followed by anything else is
+the `@file` only `--schema` reads. A field list applies to each element wherever
+it crosses an array, an address included, so `--select 'notes@'` returns one
+address per note and is the concise spelling of
+`--schema '{"type":"array","items":{"$link":true}}'`; a marked position holding
+anything else returns its own address. That address is the deepest stored link
+crossed on the way to the marked position plus the segments below it, so marking
+a field under a linked element names that element's own document rather than a
+slot in the collection above it; a position with no link above it keeps the
+source document's own address. A marked position is never fetched, so a marked
+collection costs one document read rather than one per element; the rendered
+address is what `--cell` accepts, scheme included, so an emitted address
+composes into the next command unchanged, without being reassembled. Neither
+spelling composes with `--filter`. See `packages/cli/README.md` for the exact
+syntax and supported schema subset.
 
 A field list is held to the source's own vocabulary, and a position states that
 vocabulary by carrying a `properties` map: one declaring no fields
