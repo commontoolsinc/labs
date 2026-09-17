@@ -174,6 +174,37 @@ describe("Phase 6 outbox budgets (serving-loop.md §5)", () => {
     await outbox.settle();
   });
 
+  it("retires an effect even when the retirement observer throws: settle() returns and the counts still move", async () => {
+    // The observer is a test diagnostic, and the caller resolves the
+    // entry's retirement promise only after the retirement returns, so a
+    // throw that escaped would leave `settle()` waiting forever.
+    const stats = emptyServingLoopStats();
+    const outbox = new SpaceOutbox({
+      stats,
+      server,
+      engine,
+      space,
+      sessionId: holder,
+      localSeqRef,
+      onEffectRetired: () => {
+        throw new Error("retirement observer failure (test-injected)");
+      },
+    });
+    const started = new ArrivalLog<string>();
+    const entry = heldEffect("llmTest:throwing", "llmTest-start", started);
+    outbox.admitSealedEffects([{
+      tx: {} as IExtendedStorageTransaction,
+      effects: [entry.effect],
+      context: undefined,
+    }]);
+    await started.reached(1);
+    entry.release();
+    await outbox.settle();
+    expect(outbox.inflightCount).toBe(0);
+    expect(stats.outbox.completed).toBe(1);
+    expect(stats.memo.inflight).toBe(0);
+  });
+
   it("publishes distinct local runner callbacks while network dispatch is blocked", async () => {
     const { outbox, stats } = newBudgetOutbox({ maxOutstandingEffects: 0 });
     const started = new ArrivalLog<string>();

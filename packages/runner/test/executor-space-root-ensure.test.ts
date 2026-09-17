@@ -64,6 +64,7 @@ import {
   settleServing,
 } from "./support/serving-waits.ts";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import { withStuckNet } from "@commonfabric/test-support/stuck-net";
 import {
   emptyServingLoopStats,
   type ServingLoopStats,
@@ -588,7 +589,10 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     // Pre-containment the violating push frame's throw ended the
     // consume loop (the unhandled rejection is retained by the test
     // harness, so death is otherwise silent here — the round-3
-    // review's R2), and this wait times out: the discriminator.
+    // review's R2), and this wait never returns: the discriminator.
+    // Each step is netted, because a stalled watch path stalls the
+    // writer's own round trips too, and the live server keeps the
+    // process alive.
     {
       const writer = clientRuntime(spaceSigner);
       const writerLiveness = writer.getCell<{ n?: number }>(
@@ -596,11 +600,19 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
         "ow61-containment-liveness",
         undefined,
       );
-      await writerLiveness.sync();
+      await withStuckNet(
+        writerLiveness.sync(),
+        "the writer's liveness-cell sync",
+      );
       const tx = writer.edit();
       writerLiveness.withTx(tx).set({ n: 2 });
-      expect((await tx.commit()).error).toBeUndefined();
-      await writer.storageManager.synced();
+      expect(
+        (await withStuckNet(tx.commit(), "the writer's liveness commit")).error,
+      ).toBeUndefined();
+      await withStuckNet(
+        writer.storageManager.synced(),
+        "the writer's flush after its liveness commit",
+      );
     }
     await waitForCellValue(
       reader,

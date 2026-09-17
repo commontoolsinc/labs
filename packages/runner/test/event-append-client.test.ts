@@ -515,6 +515,35 @@ describe("OW27 event-flood shaping — per-stream pacing, pace-never-drop (READM
     ]);
   });
 
+  it("holds and then sends even when the paced-hold observer throws: the hold's own release still runs", async () => {
+    // The observer is a test diagnostic, reported from inside the hold's
+    // promise executor, so a throw that escaped would reject the drain
+    // and strand the held send.
+    const store = memoryEventAppendQueueStore();
+    const queue = new EventAppendQueue({
+      space,
+      transact: () => Promise.resolve(),
+      nextLocalSeq: (() => {
+        let seq = 1;
+        return () => seq++;
+      })(),
+      store,
+      // One send per second, burst 1: the second send is HELD.
+      pacing: { ratePerSecond: 1, burst: 1 },
+      onPacedHold: () => {
+        throw new Error("paced-hold observer failure (test-injected)");
+      },
+    });
+    const [holdOne, holdTwo] = floodOf(2, "throwing-hold");
+    const first = queue.enqueue(holdOne);
+    const second = queue.enqueue(holdTwo);
+    expect(await first).toEqual({ delivered: true });
+    expect(await second).toEqual({ delivered: true });
+    expect(queue.pacedHoldCount).toBeGreaterThanOrEqual(1);
+    queue.close();
+    await queue.persisted;
+  });
+
   it("streams are INDEPENDENT: a paced head on stream A does not hold stream B (no cross-stream head-of-line hold), and each stream's own fired order stays exact", async () => {
     // Adopted from the P7 independent review's cross-stream probe
     // (finding 5) with the ruled semantics: pacing is PER STREAM (the
