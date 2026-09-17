@@ -80,6 +80,7 @@ decision is reversed or superseded).
 - [Range-scoped integrity](cfc-range-scoped-integrity.md)
 - [Render-boundary composition](cfc-render-boundary-composition.md)
 - [Runner future work](cfc-runner-future-work.md)
+- [The stored CFC envelope](cfc-stored-envelope.md)
 - [Template population](cfc-template-population.md)
 - [Value-level provenance](cfc-value-level-provenance.md)
 - [Per-write read-prefix provenance](cfc-write-prefix-provenance.md)

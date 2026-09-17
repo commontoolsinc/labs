@@ -54,14 +54,7 @@ import {
   registerSchemaDocument,
 } from "../schema-registry.ts";
 import { storedLabelMapEntries } from "./label-documents.ts";
-import {
-  isCfcMetadata,
-  isKnownCfcMetadataVersion,
-  resolveStoredCfcMetadata,
-  StoredCfcMetadataError,
-  UnknownCfcMetadataVersionError,
-  UnreadableCfcMetadataError,
-} from "./metadata.ts";
+import { readStoredCfcMetadata, StoredCfcMetadataError } from "./metadata.ts";
 import {
   isPrimitiveCellLink,
   isWriteRedirectLink,
@@ -1092,89 +1085,30 @@ const writeIsPatternSetupInitialization = (
   );
 };
 
-// What reading a label needs of a stored envelope beyond its being one:
-// entries it can iterate, each carrying the path a resolution matches
-// against and the label a consumer reads clauses out of. `isCfcMetadata`
-// settles the envelope, this settles its entries. Records, not arrays: an
-// array carries neither clause field, so one standing where an entry or a
-// label belongs reads as an entry that labels nothing rather than as the
-// unreadable envelope it is. Both clause arrays are optional, and an entry
-// that omits one carries none of that kind; one that holds something other
-// than an array is an entry no consumer can read.
-const isWalkableLabelMap = (metadata: CfcMetadata): boolean =>
-  metadata.labelMap.entries.every((entry) =>
-    isObjectNotArray(entry) && Array.isArray(entry.path) &&
-    isObjectNotArray(entry.label) &&
-    (entry.label.confidentiality === undefined ||
-      Array.isArray(entry.label.confidentiality)) &&
-    (entry.label.integrity === undefined ||
-      Array.isArray(entry.label.integrity))
-  );
-
+// The prepare pass's reader of a stored envelope. `cfc/metadata.ts` owns
+// what an envelope is and how its labels resolve; this settles only how the
+// reads are marked.
+//
+// The read is marked as a runtime-internal verifier read, so the commit's
+// conflict set drops it (spec §18.6.2, §8.9.4); it carries
+// `ignoreReadForScheduling` besides, so reactivity skips it like every other
+// read this pass makes. A writer that depends on the envelope reads it
+// through `readStoredCfcMetadata`'s own policy, which omits that marker.
+//
+// An envelope this build cannot interpret throws a `StoredCfcMetadataError`.
+// Callers on the commit path turn that into an unreadable envelope (rejected
+// in enforcing modes) or abort loudly; none of them reads the document as an
+// unlabeled one.
 const storedMetadataFor = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
   id: URI,
   scope: ReturnType<typeof normalizeCellScope>,
   type: MediaType,
-): CfcMetadata | undefined => {
-  // Read AT ["cfc"], never the whole document: the read is scoped to what
-  // the verifier CONSUMES, and it is what reactivity re-runs on. A
-  // path-[] recursive read made the whole document a value dependency, so
-  // a concurrent, metadata-irrelevant value write between the reader's
-  // confirmed basis and the server head conflicted the commit — for a
-  // blind UI-input fill during its own echo's arrival window (the
-  // client's confirmed basis lags exactly then), that killed the user's
-  // typed input as a stale-confirmed-read conflict the moment the §6
-  // layer-naming half was fixed (verification-coverage.md OW47's
-  // re-close; the name-draft triage's arm (c), the path half of the
-  // ruled arm (b)). The read is marked as a runtime-internal verifier
-  // read, so the commit's conflict set drops it (spec §18.6.2, §8.9.4);
-  // it carries `ignoreReadForScheduling` besides, so reactivity skips it
-  // like every other read this pass makes. A writer that depends on the
-  // envelope reads it through `readStoredCfcMetadata` (cfc/metadata.ts),
-  // whose meta omits that marker.
-  const metadata = tx.readOrThrow({
-    space,
-    id,
-    scope,
-    type,
-    path: ["cfc"],
-  }, {
+): CfcMetadata | undefined =>
+  readStoredCfcMetadata(tx, { space, id, scope, type }, {
     meta: INTERNAL_VERIFIER_META,
   });
-  if (!isObjectOrArray(metadata)) {
-    return undefined;
-  }
-  const version = (metadata as { version?: unknown }).version;
-  if (version !== undefined && !isKnownCfcMetadataVersion(version)) {
-    // Fail closed on a format this build postdates: reading the envelope
-    // as a version it knows would walk labels it cannot interpret and
-    // silently under-label. Callers on the commit path turn this into an
-    // unreadable envelope (rejected in enforcing modes) or abort loudly.
-    throw new UnknownCfcMetadataVersionError(version);
-  }
-  if (!isCfcMetadata(metadata)) {
-    throw new UnreadableCfcMetadataError(id);
-  }
-  // A version-2 envelope names labels by document; every consumer below
-  // walks labels inline, so they resolve here — through this transaction,
-  // under the same read policy — and a reference nothing backs throws the
-  // fail-closed resolution error, which the commit path records as an
-  // unreadable envelope.
-  const resolved = resolveStoredCfcMetadata(tx, space, id, metadata, {
-    meta: INTERNAL_VERIFIER_META,
-  });
-  if (!isWalkableLabelMap(resolved)) {
-    // A record at the reserved position naming a version this build
-    // interprets, carrying a label map it cannot walk. Every resolution
-    // reads `labelMap.entries` and matches each entry's `path`, so the
-    // refusal belongs where the value is read rather than wherever a walk
-    // first reaches the part that is missing.
-    throw new UnreadableCfcMetadataError(id);
-  }
-  return resolved;
-};
 
 /**
  * Resolves input envelopes during one synchronous boundary preparation.

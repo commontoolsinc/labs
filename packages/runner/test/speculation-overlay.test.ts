@@ -1345,6 +1345,7 @@ describe("Phase 2 speculation overlay", () => {
         cfc: {
           version: 1,
           labelMap: {
+            version: 1,
             entries: [{ path: [], label: {}, origin: "declared" }],
           },
           schemaHash: stagedHash,
@@ -1529,6 +1530,7 @@ describe("Phase 2 speculation overlay", () => {
         cfc: {
           version: 1,
           labelMap: {
+            version: 1,
             entries: [{ path: [], label: {}, origin: "declared" }],
           },
           schemaHash: registryOnlyHash,
@@ -1705,6 +1707,7 @@ describe("Phase 2 speculation overlay", () => {
         cfc: {
           version: 1,
           labelMap: {
+            version: 1,
             entries: [{ path: [], label: {}, origin: "declared" }],
           },
           schemaHash: installedHash,
@@ -1881,6 +1884,7 @@ describe("Phase 2 speculation overlay", () => {
           cfc: {
             version: 1,
             labelMap: {
+              version: 1,
               entries: [{ path: [], label: {}, origin: "declared" }],
             },
             schemaHash: lateHash,
@@ -2049,7 +2053,10 @@ describe("Phase 2 speculation overlay", () => {
     const pairHash = internSchemaAsTaggedHashString(pairSchema);
     const pairCfc = {
       version: 1,
-      labelMap: { entries: [{ path: [], label: {}, origin: "declared" }] },
+      labelMap: {
+        version: 1,
+        entries: [{ path: [], label: {}, origin: "declared" }],
+      },
       schemaHash: pairHash,
     };
     const docBValue = replica.getDocument(
@@ -2084,7 +2091,10 @@ describe("Phase 2 speculation overlay", () => {
         value: { name: "fourth-frame" },
         cfc: {
           version: 1,
-          labelMap: { entries: [{ path: [], label: {}, origin: "declared" }] },
+          labelMap: {
+            version: 1,
+            entries: [{ path: [], label: {}, origin: "declared" }],
+          },
         },
       },
     }]);
@@ -2666,6 +2676,7 @@ describe("Phase 2 speculation overlay", () => {
     const overlayCfc = {
       version: 1,
       labelMap: {
+        version: 1,
         entries: [{ path: ["total"], label: {}, origin: "declared" }],
       },
     };
