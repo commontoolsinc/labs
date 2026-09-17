@@ -151,6 +151,7 @@ import type {
   HarnessInputCellSpec,
 } from "./contracts/input-cells.ts";
 import { mintInputCellHandles } from "./input-cells.ts";
+import { resolvePieceAddress } from "@commonfabric/piece";
 import type {
   HarnessPatternRef,
   HarnessPatternRefSpec,
@@ -1580,8 +1581,9 @@ export class CfHarnessEngine {
    *
    * Unlike a grant, an input cell is explicit operator configuration, so
    * failure is closed and loud rather than tolerated: cells configured on a
-   * run with no fabric session, a reference that does not parse, and a
-   * reference targeting another space all throw before anything is recorded.
+   * run with no fabric session, a reference that does not parse, a reference
+   * targeting another space, and a named piece address whose slug this space
+   * does not hold all throw before anything is recorded.
    */
   async establishInputCells(): Promise<HarnessInputCell[]> {
     if (this.#runState.inputCells !== undefined) {
@@ -1601,6 +1603,16 @@ export class CfHarnessEngine {
       this.#runState.runId,
       this.#inputCells,
       session.pieces.getSpace(),
+      {
+        // The space by NAME, which is the vocabulary a named address speaks;
+        // the mint checks references against the DID beside it. A space
+        // configured by `did:key` has no name, and an address naming a space
+        // is then refused rather than assumed to mean this one.
+        ...(session.pieces.getSpaceName() !== undefined
+          ? { spaceName: session.pieces.getSpaceName() }
+          : {}),
+        resolvePiece: (slug) => resolvePieceAddress(session.pieces, slug),
+      },
     );
     await this.recordHandleTable(minted.table);
     this.#runState = patchHarnessRunState(

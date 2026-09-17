@@ -80,7 +80,10 @@ import {
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
 } from "../src/contracts/subagent.ts";
 import { parseHostMountSpecs } from "../src/host-mounts.ts";
-import { parseInputCellArgument } from "../src/input-cells.ts";
+import {
+  checkInputCellSpec,
+  parseInputCellArgument,
+} from "../src/input-cells.ts";
 import type { HarnessPatternRefSpec } from "../src/contracts/pattern-refs.ts";
 import {
   checkPatternRefSpec,
@@ -318,10 +321,19 @@ const callPatternIndex = (
  * the CLI refuses is refused here too. A body that names no cells yields
  * none, which is the ordinary task.
  *
+ * A reference may also be a piece's NAME — `pattern:<space>/<slug>`, or a bare
+ * slug meaning this console's own space — which is what a surface showing a
+ * rendered piece holds. `spaceName` is this console's space, and an address
+ * naming another one is refused here: the caller cannot see which space this
+ * console runs against, so a mismatch is this side's to explain. Whether the
+ * space holds the slug is the turn's to find out, like every other reference
+ * that parses and may still not mint.
+ *
  * @throws Error naming the defect, which the route answers 400 with.
  */
 const parseTaskInputCells = (
   value: unknown,
+  spaceName: string,
 ): readonly HarnessInputCellSpec[] => {
   if (value === undefined || value === null) {
     return [];
@@ -342,6 +354,12 @@ const parseTaskInputCells = (
     // Checked through the flag's own parser, so the two surfaces cannot come
     // to accept different references under the same name.
     const spec = parseInputCellArgument(`${name}=${ref}`);
+    // And then once more against this console's own space, which the flag's
+    // parser cannot know. A named piece address spelling another space is a
+    // caller mistake decidable from the text alone, so it is answered now
+    // rather than spent on a turn; whether this space HOLDS the slug is not
+    // decidable from the text, and the turn answers that one.
+    checkInputCellSpec(spec, undefined, spaceName);
     if (names.has(spec.name)) {
       throw new Error(`inputCells names \`${spec.name}\` twice`);
     }
@@ -1375,7 +1393,10 @@ export class ConsoleServer {
     let inputCells: readonly HarnessInputCellSpec[];
     let patternRefs: readonly HarnessPatternRefSpec[];
     try {
-      inputCells = parseTaskInputCells(body.inputCells);
+      inputCells = parseTaskInputCells(
+        body.inputCells,
+        this.#config.fabricSession.space,
+      );
       checkTaskInputCellNames(inputCells, this.#config.connectorGrants);
       patternRefs = parseTaskPatternRefs(body.patternRefs);
     } catch (error) {
