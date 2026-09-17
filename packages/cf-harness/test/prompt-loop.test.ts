@@ -33,6 +33,8 @@ import type {
   HarnessResearchRunSummary,
 } from "../src/contracts/research.ts";
 import type { HarnessSkillActivations } from "../src/contracts/skill.ts";
+import type { HarnessRunReport } from "../src/contracts/run-report.ts";
+import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import {
   createToolOutputId,
   createToolResultRef,
@@ -6916,6 +6918,218 @@ Deno.test("CfHarnessPromptLoop completes a direct assistant response without too
   assertEquals(result.runState.status, "completed");
   assertEquals(result.runState.policyEvents, []);
   assertEquals(result.runState.toolOutputs, []);
+});
+
+describe("CfHarnessPromptLoop terminal responses", () => {
+  for (const model of ["claude-sonnet-5", "gpt-5.6"]) {
+    for (const content of ["", " \n\t"]) {
+      it(`fails a blank ${model} reply and retains its diagnostics (${JSON.stringify(content)})`, async () => {
+        const artifactRoot = await Deno.makeTempDir({
+          dir: "/tmp",
+          prefix: "cf-harness-empty-response-",
+        });
+        const runId = "run-empty-response";
+        const artifactStore = createFileSystemHarnessArtifactStore({
+          artifactRoot,
+          runId,
+        });
+        let requests = 0;
+        try {
+          const loop = new CfHarnessPromptLoop({
+            apiKey: "test-key",
+            engine: new CfHarnessEngine({
+              sandboxRuntime: new FakeSandboxRuntime(),
+              runId,
+              model,
+              artifactStore,
+            }),
+            fetchFn: (_input, init) => {
+              requests += 1;
+              return Promise.resolve(
+                new Response(
+                  JSON.stringify(responsesBodyFromChatFixture({
+                    choices: [{
+                      index: 0,
+                      message: { role: "assistant", content, tool_calls: [] },
+                      finish_reason: "stop",
+                    }],
+                    usage: {
+                      prompt_tokens: 100,
+                      completion_tokens: 0,
+                      total_tokens: 100,
+                    },
+                  }, init?.body)),
+                  { status: 200, headers: { "x-request-id": "empty-reply" } },
+                ),
+              );
+            },
+          });
+
+          await expect(loop.runPrompt({ prompt: "Read the notes." }))
+            .rejects.toMatchObject({
+              name: "HarnessControlError",
+              code: "provider-unavailable",
+              message:
+                "The model returned an empty assistant response with no tool calls",
+            });
+
+          const state = JSON.parse(
+            await Deno.readTextFile(
+              join(artifactStore.runRoot, "run-state.json"),
+            ),
+          ) as HarnessRunState;
+          const report = JSON.parse(
+            await Deno.readTextFile(
+              join(artifactStore.runRoot, "run-report.json"),
+            ),
+          ) as HarnessRunReport;
+          const transcript = JSON.parse(
+            await Deno.readTextFile(
+              join(artifactStore.runRoot, "transcript.json"),
+            ),
+          ) as HarnessTranscriptMessage[];
+          expect(requests).toBe(1);
+          expect(state.status).toBe("failed");
+          expect(state.terminalReason).toBe("prompt_loop_error");
+          expect(state.primaryFailure?.detail).toBe(
+            "The model returned an empty assistant response with no tool calls",
+          );
+          expect(report.status).toBe("failed");
+          expect(report.modelTurns).toBe(1);
+          expect(report.finalAssistantText).toBeUndefined();
+          expect(report.taskOutcome).toBeUndefined();
+          expect(report.modelAttempts).toHaveLength(1);
+          expect(report.modelAttempts?.[0]).toMatchObject({
+            outcome: "http_response",
+            httpStatus: 200,
+            requestId: "empty-reply",
+            request: { model },
+          });
+          expect(report.modelAttempts?.[0].request.toolCount).toBeGreaterThan(
+            0,
+          );
+          expect(report.modelAttempts?.[0].retry).toBeUndefined();
+          expect(report.usage?.totalTokens).toBe(100);
+          expect(report.toolActivity).toEqual([]);
+          expect(transcript.at(-1)).toMatchObject({
+            role: "assistant",
+            content,
+          });
+        } finally {
+          await Deno.remove(artifactRoot, { recursive: true });
+        }
+      });
+    }
+
+    it(`preserves a nonblank ${model} answer verbatim`, async () => {
+      const content = "  Here are the notes.\n";
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId: "run-nonblank-response",
+          model,
+        }),
+        fetchFn: (_input, init) =>
+          Promise.resolve(
+            new Response(JSON.stringify(
+              responsesBodyFromChatFixture({
+                choices: [{ message: { role: "assistant", content } }],
+              }, init?.body),
+            )),
+          ),
+      });
+
+      const result = await loop.runPrompt({ prompt: "Summarize the notes." });
+
+      expect(result.finalAssistantText).toBe(content);
+      expect(result.runState.status).toBe("completed");
+      expect(result.modelTurns).toBe(1);
+    });
+  }
+
+  for (const content of [null, undefined, []]) {
+    it(`fails a chat reply with no text or tool calls (${JSON.stringify(content)})`, async () => {
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId: "run-absent-response",
+          model: "claude-sonnet-5",
+        }),
+        fetchFn: () =>
+          Promise.resolve(
+            new Response(JSON.stringify({
+              choices: [{ message: { role: "assistant", content } }],
+            })),
+          ),
+      });
+
+      await expect(loop.runPrompt({ prompt: "Read the notes." }))
+        .rejects.toMatchObject({ code: "provider-unavailable" });
+      expect(loop.engine.getRunState().status).toBe("failed");
+    });
+  }
+
+  it("executes a chat tool-only reply before requesting the final answer", async () => {
+    let requests = 0;
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime([{
+          stdout: "The notes.",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("The notes."),
+        }]),
+        runId: "run-tool-only-response",
+        model: "claude-sonnet-5",
+      }),
+      fetchFn: (_input, init) => {
+        requests += 1;
+        if (requests === 2) {
+          const body = JSON.parse(String(init?.body)) as {
+            messages: Array<{ role: string; tool_call_id?: string }>;
+          };
+          expect(body.messages.at(-1)).toMatchObject({
+            role: "tool",
+            tool_call_id: "read-notes",
+          });
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({
+            choices: [{
+              message: requests === 1
+                ? {
+                  role: "assistant",
+                  content: null,
+                  tool_calls: [{
+                    id: "read-notes",
+                    type: "function",
+                    function: {
+                      name: "read_file",
+                      arguments: JSON.stringify({ path: "notes.txt" }),
+                    },
+                  }],
+                }
+                : { role: "assistant", content: "Read the notes." },
+            }],
+          })),
+        );
+      },
+    });
+
+    const result = await loop.runPrompt({
+      prompt: "Read the notes.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
+
+    expect(requests).toBe(2);
+    expect(result.modelTurns).toBe(2);
+    expect(result.runState.status).toBe("completed");
+    expect(result.finalAssistantText).toBe("Read the notes.");
+    expect(result.runState.toolOutputs).toHaveLength(1);
+  });
 });
 
 Deno.test("CfHarnessPromptLoop fails when the model exceeds the configured turn cap", async () => {
