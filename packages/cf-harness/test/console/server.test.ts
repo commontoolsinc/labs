@@ -759,6 +759,35 @@ describe("console/server", () => {
   });
 
   describe("consoleHealthRows()", () => {
+    it("keeps index URL credentials out of the configured value and retained launch evidence", async () => {
+      const indexUrl =
+        "https://user-secret:password-secret@index.test/api/?token=query-secret#fragment-secret";
+      const configured = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+        ],
+        { CF_HARNESS_PATTERN_INDEX_URL: indexUrl },
+        "/console",
+      );
+      const rows = consoleHealthRows(configured, {
+        checkedAt: "2026-09-17T00:00:00.000Z",
+        connectors: [],
+        resolved: [{ name: "index", value: indexUrl, source: "launch flag" }],
+      });
+      expect(rows.find((row) => row.id === "config.index")).toMatchObject({
+        value: "https://index.test/api/",
+        source: "console launch record",
+        detail: "launch flag",
+      });
+      expect(JSON.stringify(rows)).not.toContain("-secret");
+      expect(configured.patternIndex?.baseUrl).toBe(indexUrl);
+    });
+
     it("retains the launch record only for inherited active values, including an equal explicit override", async () => {
       const configured = await resolveConsoleConfig([
         "--fabric-identity",
@@ -780,7 +809,8 @@ describe("console/server", () => {
         group: "connectors",
         label: "gmail",
         value: "not granted",
-        source: "/loom/handles.json; /loom/pieces.json",
+        source: "loom connector receipt + pieces.json (gmail)",
+        detail: "/loom/handles.json; /loom/pieces.json",
         state: "degraded" as const,
         reason: "Class already claimed.",
         remedy: "Select a connection.",
@@ -799,22 +829,28 @@ describe("console/server", () => {
         ],
       });
       expect(rows.find((row) => row.id === "config.port")).toMatchObject({
+        label: "Port",
         value: "8123",
-        source: "--port",
+        source: "console launch flag",
+        detail: "--port",
       });
       expect(rows.find((row) => row.id === "config.store")).toMatchObject({
         value: "/data/selected",
-        source: "loom toolshed-store-dir",
+        source: "console launch record",
+        detail: "loom toolshed-store-dir",
         checkedAt,
       });
       expect(rows.find((row) => row.id === "config.model")).toMatchObject({
         value: "test-model",
-        source: "CF_HARNESS_MODEL",
+        source: "console configuration",
+        detail: "CF_HARNESS_MODEL",
       });
       expect(rows.find((row) => row.id === "config.skill-scripts"))
         .toMatchObject({
+          label: "Skill Scripts",
           value: "run in the sandbox",
-          source: "CF_HARNESS_ALLOW_SKILL_SCRIPTS",
+          source: "console configuration",
+          detail: "CF_HARNESS_ALLOW_SKILL_SCRIPTS",
         });
       expect(rows.find((row) => row.id === connector.id)).toEqual({
         ...connector,
@@ -869,8 +905,12 @@ describe("console/server", () => {
           CF_HARNESS_API_KEY: mode === "key" ? "secret-test-value" : undefined,
         });
         expect(rows.find((row) => row.id === "model.auth")).toMatchObject({
+          label: "Model Authentication",
           state: mode === "missing" ? "failed" : "ok",
           source: mode === "codex"
+            ? "harness credential store"
+            : "console environment",
+          detail: mode === "codex"
             ? "/console/.cf-harness/auth.json"
             : mode === "none"
             ? "CF_HARNESS_GATEWAY_AUTH_MODE"

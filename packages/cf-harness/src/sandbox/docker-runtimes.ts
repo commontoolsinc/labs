@@ -1,3 +1,12 @@
+/** Shared acquisition of the running daemon's runtime registration table. */
+
+import { errorMessage } from "../error-message.ts";
+import {
+  DenoProcessRunner,
+  type ProcessRunner,
+  type ProcessRunResult,
+} from "./process-runner.ts";
+
 /**
  * The runtime table `docker info` reports, or the reason it could not be read.
  * The running daemon's table rather than `daemon.json`: a configuration file
@@ -5,36 +14,33 @@
  */
 export const readDockerRuntimes = async (
   dockerBinary: string,
+  runner: ProcessRunner = new DenoProcessRunner(),
 ): Promise<{ runtimes?: unknown; unreadable?: string }> => {
-  let output: Deno.CommandOutput;
+  let output: ProcessRunResult;
   try {
-    output = await new Deno.Command(dockerBinary, {
+    output = await runner.run({
+      command: dockerBinary,
       args: ["info", "--format", "{{json .Runtimes}}"],
-      stdout: "piped",
-      stderr: "piped",
-    }).output();
+    });
   } catch (error) {
     return {
       unreadable: `\`${dockerBinary} info\` could not be run: ${
-        error instanceof Error ? error.message : String(error)
+        errorMessage(error)
       }`,
     };
   }
-  if (!output.success) {
+  if (output.exitCode !== 0) {
     return {
-      unreadable: `\`${dockerBinary} info\` exited ${output.code}: ${
-        new TextDecoder().decode(output.stderr).trim()
-      }`,
+      unreadable:
+        `\`${dockerBinary} info\` exited ${output.exitCode}: ${output.stderr.trim()}`,
     };
   }
   try {
-    return { runtimes: JSON.parse(new TextDecoder().decode(output.stdout)) };
+    return { runtimes: JSON.parse(output.stdout) };
   } catch (error) {
     return {
       unreadable: `\`${dockerBinary} info\` reported a runtime table that ` +
-        `does not parse: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `does not parse: ${errorMessage(error)}`,
     };
   }
 };

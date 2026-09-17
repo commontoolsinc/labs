@@ -231,13 +231,17 @@ liveness must perform a separate probe.
 
 `GET /api/health/detail` returns `{version: 1, generatedAt, rows}` for an
 operator status panel. Each flat row carries `id`, `group`, `label`, `state`,
-`value`, `source`, and `checkedAt`. `reason`, when present, explains the cause;
-`remedy` names the operator action that can change it. Groups are open strings
-so clients can render new checks without learning new fields. `generatedAt`
-timestamps the snapshot; `checkedAt` timestamps each deciding observation.
-States are `ok`, `degraded`, `failed`, or `unknown`. Only an unknown row can
-have a null timestamp. An unavailable observation stays unknown rather than
-claiming a failure.
+`value`, `source`, and `checkedAt`. `source` is always a short human label;
+optional `detail` is one opaque string retaining the exact deciding paths,
+command, or endpoint for a selectable disclosure. URL credentials, query values,
+fragments, and connector references are omitted. Fixed labels use Title Case;
+connection names retain their recorded spelling. `reason`, when present,
+explains the cause; `remedy` names the operator action that can change it.
+Groups are open strings so clients can render new checks without learning new
+fields. `generatedAt` timestamps the snapshot; `checkedAt` timestamps each
+deciding observation. States are `ok`, `degraded`, `failed`, or `unknown`. Only
+an unknown row can have a null timestamp. An unavailable observation stays
+unknown rather than claiming a failure.
 
 Configuration rows name the active console address, port, space, store, model,
 and skill-script switch. The launcher passes its decision report directly into

@@ -8,30 +8,34 @@ import {
   PatternIndexError,
 } from "../src/pattern-index/client.ts";
 import { DEFAULT_DOCKER_BINARY } from "../src/sandbox/docker-runsc.ts";
-import { readDockerRuntimes } from "./docker-runtimes.ts";
-import type {
-  ConsoleHealthFact,
-  ConsoleHealthProbe,
-  ConsoleHealthRow,
+import { readDockerRuntimes } from "../src/sandbox/docker-runtimes.ts";
+import {
+  type ConsoleHealthFact,
+  type ConsoleHealthProbe,
+  type ConsoleHealthRow,
+  consoleHealthUrl,
 } from "./health.ts";
 
 /** Checks the running daemon's registration without starting a sandbox. */
 export const consoleSandboxHealthProbe = (
   readRuntimes = () => readDockerRuntimes(DEFAULT_DOCKER_BINARY),
 ): ConsoleHealthProbe => {
-  const source = "docker info --format '{{json .Runtimes}}'";
+  const source = "docker info";
+  const detail = "docker info --format '{{json .Runtimes}}'";
   const initial: ConsoleHealthFact[] = [{
     id: "sandbox.docker",
     group: "sandbox",
-    label: "Docker daemon",
+    label: "Docker Daemon",
     value: "not checked",
     source,
+    detail,
   }, {
     id: "sandbox.runtime",
     group: "sandbox",
-    label: "runsc-cfc runtime",
+    label: "Sandbox Runtime",
     value: "not checked",
     source,
+    detail,
   }];
   const unavailable = (checkedAt: string): ConsoleHealthRow[] =>
     initial.map((row) => ({
@@ -69,7 +73,7 @@ export const consoleSandboxHealthProbe = (
         ...initial[1],
         state: registered ? "ok" : "failed",
         checkedAt,
-        value: registered ? "registered" : "not registered",
+        value: registered ? "runsc-cfc registered" : "runsc-cfc not registered",
         ...(registered ? {} : {
           reason: "The running daemon has no runsc-cfc entry.",
           remedy:
@@ -85,18 +89,21 @@ export const consolePatternIndexHealthProbes = (
   baseUrl: string,
   clientFactory: HarnessPatternIndexClientFactory,
 ): readonly ConsoleHealthProbe[] => {
+  const displayUrl = consoleHealthUrl(baseUrl);
   const facts: ConsoleHealthFact[] = [{
     id: "index.reachable",
     group: "index",
-    label: "Pattern index reachability",
+    label: "Pattern Index Reachability",
     value: "not checked",
-    source: `GET health at ${baseUrl}`,
+    source: "index /health",
+    detail: `GET health at ${displayUrl}`,
   }, {
     id: "index.enrolled",
     group: "index",
-    label: "Pattern index enrollment",
+    label: "Pattern Index Enrollment",
     value: "not checked",
-    source: `GET enrollmentStatus at ${baseUrl}, for the console identity`,
+    source: "index /enrollmentStatus",
+    detail: `GET enrollmentStatus at ${displayUrl}, for the console identity`,
   }];
   return facts.map((fact, index) => {
     const unavailable = (
@@ -148,7 +155,7 @@ export const consolePatternIndexHealthProbes = (
             remedy: index === 0
               ? "Check the pattern index deployment."
               : `Enroll the console's identity through ${
-                baseUrl.replace(/\/+$/, "")
+                displayUrl.replace(/\/+$/, "")
               }/enroll.`,
           }),
         }];

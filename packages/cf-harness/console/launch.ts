@@ -40,8 +40,8 @@ import {
   DEFAULT_DOCKER_BINARY,
   registeredCfcSidecarHostDirs,
 } from "../src/sandbox/docker-runsc.ts";
+import { readDockerRuntimes } from "../src/sandbox/docker-runtimes.ts";
 import { resolveConnectorGrants } from "./connector-grants.ts";
-import { readDockerRuntimes } from "./docker-runtimes.ts";
 import type {
   ConsoleHealthFactWithState,
   ConsoleLaunchHealth,
@@ -50,7 +50,7 @@ import type {
 } from "./health.ts";
 import { startConsoleServer } from "./server.ts";
 
-export { readDockerRuntimes } from "./docker-runtimes.ts";
+export { readDockerRuntimes } from "../src/sandbox/docker-runtimes.ts";
 
 /** The port Weaver's harness-console setting and loom's proxy both address. */
 export const WEAVER_PAIRING_PORT = 8135;
@@ -404,16 +404,18 @@ export const resolveConsoleLaunchPlan = (
       piecesJsonPath: instance.piecesJsonPath,
     });
     connectorGrants.push(...resolvedConnectors.grants);
-    const source = `${instance.handlesJsonPath}; ${instance.piecesJsonPath}`;
+    const source = "loom connector receipt + pieces.json";
+    const detail = `${instance.handlesJsonPath}; ${instance.piecesJsonPath}`;
     connectorHealth.push({
       id: "connectors.inventory",
       group: "connectors",
-      label: "Connector inventory",
+      label: "Connector Inventory",
       state: instance.handlesJson === undefined ? "unknown" : "ok",
       value: instance.handlesJson === undefined
         ? "No injection receipt has been recorded"
         : `${resolvedConnectors.grants.length} granted; ${resolvedConnectors.unnamed.length} not granted`,
       source,
+      detail,
       ...(instance.handlesJson === undefined
         ? {
           remedy:
@@ -434,7 +436,8 @@ export const resolveConsoleLaunchPlan = (
         label: grant.source.connection,
         state: "ok",
         value: `granted as ${grant.name}`,
-        source: `${source}; piece ${grant.source.piece}`,
+        source: `${source} (${grant.source.piece})`,
+        detail,
       });
     }
     for (const [index, handle] of resolvedConnectors.unnamed.entries()) {
@@ -449,7 +452,8 @@ export const resolveConsoleLaunchPlan = (
         label: handle.connection,
         state: handle.state,
         value: "not granted",
-        source: `${source}; piece ${handle.piece}`,
+        source: `${source} (${handle.piece})`,
+        detail,
         reason: handle.reason,
         remedy: handle.remedy,
       });

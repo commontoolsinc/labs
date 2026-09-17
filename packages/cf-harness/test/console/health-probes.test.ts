@@ -26,11 +26,18 @@ describe("health-probes", () => {
             {
               id: "sandbox.runtime",
               state: registered ? "ok" : "failed",
-              value: registered ? "registered" : "not registered",
+              value: registered
+                ? "runsc-cfc registered"
+                : "runsc-cfc not registered",
             },
           ]);
         expect(rows.every((row) => Number.isFinite(Date.parse(row.checkedAt!))))
           .toBe(true);
+        expect(rows[1]).toMatchObject({
+          label: "Sandbox Runtime",
+          source: "docker info",
+          detail: "docker info --format '{{json .Runtimes}}'",
+        });
         expect(rows[1].remedy).toBe(
           registered
             ? undefined
@@ -54,6 +61,44 @@ describe("health-probes", () => {
   });
 
   describe("consolePatternIndexHealthProbes()", () => {
+    for (const suffix of ["", "?token=query-secret#fragment-secret"]) {
+      it(`omits URL credentials from diagnostics with suffix ${JSON.stringify(suffix)}`, async () => {
+        const baseUrl =
+          `https://user-secret:password-secret@index.test/api/${suffix}`;
+        const health = new ConsoleHealth(
+          [],
+          consolePatternIndexHealthProbes(
+            baseUrl,
+            () =>
+              Promise.resolve(
+                new PatternIndexClient({
+                  signer,
+                  baseUrl,
+                  fetchFn: () =>
+                    Promise.resolve(Response.json({
+                      ok: false,
+                      did: signer.did(),
+                      enrolled: false,
+                    })),
+                }),
+              ),
+          ),
+        );
+        expect(JSON.stringify(health.snapshot())).not.toContain("-secret");
+        await health.refresh();
+        const rows = health.snapshot().rows;
+        expect(rows[1]).toMatchObject({
+          state: suffix === "" ? "failed" : "unknown",
+          detail:
+            "GET enrollmentStatus at https://index.test/api/, for the console identity",
+          remedy: suffix === ""
+            ? "Enroll the console's identity through https://index.test/api/enroll."
+            : "Check the configured index URL, network access, and console identity file.",
+        });
+        expect(JSON.stringify(rows)).not.toContain("-secret");
+      });
+    }
+
     it("uses independent read-only endpoints and the console identity under the configured prefix", async () => {
       const requests: Request[] = [];
       const client = new PatternIndexClient({
@@ -95,6 +140,11 @@ describe("health-probes", () => {
         ["index.reachable", "ok", "responding"],
         ["index.enrolled", "ok", "console identity enrolled"],
       ]);
+      expect(health.snapshot().rows[0]).toMatchObject({
+        label: "Pattern Index Reachability",
+        source: "index /health",
+        detail: "GET health at https://index.test/api/",
+      });
     });
 
     for (

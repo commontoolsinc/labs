@@ -231,11 +231,9 @@ export const resolveConnectorGrants = (
     let link;
     try {
       link = parseHandleRef(ref);
-    } catch (error) {
+    } catch {
       skip(
-        `its \`handle_ref\` does not parse: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        "its `handle_ref` does not parse",
         "Repair this connector's injection receipt in Loom, then restart the console.",
         "unknown",
       );

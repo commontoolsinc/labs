@@ -124,6 +124,7 @@ import { parseConnectorGrants } from "./connector-grants.ts";
 import {
   ConsoleHealth,
   type ConsoleHealthRow,
+  consoleHealthUrl,
   type ConsoleObservedLaunchHealth,
   type ConsoleResolvedValue,
 } from "./health.ts";
@@ -955,9 +956,18 @@ export const consoleHealthRows = (
     return {
       id: `config.${fact.name.replaceAll(" ", "-")}`,
       group: groups[fact.name] ?? "console",
-      label: fact.name,
-      value: fact.value,
-      source: original?.source ?? fact.source,
+      label: fact.name.split(" ").map((word) =>
+        word.charAt(0).toUpperCase() + word.slice(1)
+      ).join(" "),
+      value: fact.name === "index" && config.patternIndex !== undefined
+        ? consoleHealthUrl(fact.value)
+        : fact.value,
+      source: original !== undefined
+        ? "console launch record"
+        : fact.source.startsWith("--")
+        ? "console launch flag"
+        : "console configuration",
+      detail: original?.source ?? fact.source,
       state: fact.name === "store" && fact.value === "automatic discovery"
         ? "unknown"
         : fact.name === "index" && config.patternIndex === undefined
@@ -977,7 +987,7 @@ export const consoleHealthRows = (
   rows.unshift({
     id: "console.base",
     group: "console",
-    label: "Console address",
+    label: "Console Address",
     value: `http://${HOSTNAME}:${config.port}`,
     source: "console listen configuration",
     state: "ok",
@@ -988,7 +998,9 @@ export const consoleHealthRows = (
       rows.push({
         id: `index.${name}`,
         group: "index",
-        label: `Pattern index ${name}`,
+        label: name === "reachable"
+          ? "Pattern Index Reachability"
+          : "Pattern Index Enrollment",
         value: "not verified",
         source: "console index configuration",
         state: "unknown",
@@ -1006,11 +1018,12 @@ export const consoleHealthRows = (
     rows.push({
       id: "connectors.inventory",
       group: "connectors",
-      label: "Connector inventory",
+      label: "Connector Inventory",
       state: "unknown",
       checkedAt,
       value: `${config.connectorGrants.length} explicit grants configured`,
-      source: "CF_HARNESS_CONNECTOR_GRANTS; no Loom launch decision record",
+      source: "console connector configuration",
+      detail: "CF_HARNESS_CONNECTOR_GRANTS; no Loom launch decision record",
       reason:
         "Refused or uninjected connectors cannot be enumerated from the accepted grants alone.",
       remedy:
@@ -1021,7 +1034,8 @@ export const consoleHealthRows = (
       group: "connectors",
       label: grant.source.connection,
       value: `granted as ${grant.name}`,
-      source: "CF_HARNESS_CONNECTOR_GRANTS",
+      source: "console connector configuration",
+      detail: "CF_HARNESS_CONNECTOR_GRANTS",
       state: "ok",
       checkedAt,
     })));
@@ -1030,7 +1044,7 @@ export const consoleHealthRows = (
     rows.push({
       id: "model.auth",
       group: "model",
-      label: "Model authentication",
+      label: "Model Authentication",
       value: "not checked",
       source: "model credential preflight",
       state: "unknown",
@@ -1044,15 +1058,16 @@ export const consoleHealthRows = (
     rows.push({
       id: "model.provider",
       group: "model",
-      label: "Model provider",
+      label: "Model Provider",
       value: provider,
-      source: defaultHarnessProviderSettingsPath(config.harnessHome),
+      source: "harness provider settings",
+      detail: defaultHarnessProviderSettingsPath(config.harnessHome),
       state: "ok",
       checkedAt,
     }, {
       id: "model.auth",
       group: "model",
-      label: "Model authentication",
+      label: "Model Authentication",
       value: missingKey
         ? "bearer API key not configured"
         : provider === "openai-codex"
@@ -1061,6 +1076,9 @@ export const consoleHealthRows = (
         ? "gateway authentication disabled"
         : "API key configured; provider acceptance not checked",
       source: provider === "openai-codex"
+        ? "harness credential store"
+        : "console environment",
+      detail: provider === "openai-codex"
         ? defaultHarnessCredentialStorePath(config.harnessHome)
         : modelOptions.gatewayAuthMode === "none"
         ? "CF_HARNESS_GATEWAY_AUTH_MODE"

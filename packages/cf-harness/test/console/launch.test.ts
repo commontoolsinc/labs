@@ -150,6 +150,7 @@ describe("launch", () => {
         sqlite_sources: [{ connection_id: "no-class", tables: {} }],
       });
       const handles = JSON.parse(HANDLES_JSON);
+      const invalidRef = "private-malformed-reference";
       handles.handles.push(
         {
           connection_id: "gmail-other",
@@ -157,7 +158,7 @@ describe("launch", () => {
           handle_ref: MAIL_REF,
         },
         { connection_id: "no-class", piece: "unlabeled", handle_ref: MAIL_REF },
-        { connection_id: "broken", piece: "broken", handle_ref: "invalid" },
+        { connection_id: "broken", piece: "broken", handle_ref: invalidRef },
       );
       const plan = resolveConsoleLaunchPlan({
         ...WITH_CONNECTOR,
@@ -176,7 +177,7 @@ describe("launch", () => {
         })),
       ).toEqual([
         {
-          label: "Connector inventory",
+          label: "Connector Inventory",
           value: "1 granted; 3 not granted",
           state: "ok",
         },
@@ -187,11 +188,12 @@ describe("launch", () => {
       ]);
       expect(
         plan.health.connectors.every((row) =>
-          row.source.includes(HANDLES_JSON_PATH) &&
-          row.source.includes(RECORDS.instance!.piecesJsonPath)
+          row.detail?.includes(HANDLES_JSON_PATH) &&
+          row.detail?.includes(RECORDS.instance!.piecesJsonPath)
         ),
       ).toBe(true);
       expect(plan.health.connectors[2]).toMatchObject({
+        source: "loom connector receipt + pieces.json (duplicate)",
         reason:
           "its declared CFC class `email` is already the grant connection `gmail-work` was named by",
         remedy:
@@ -203,6 +205,11 @@ describe("launch", () => {
           "Declare the per-column ifc.confidentiality Resource class in this connector's sqlite_sources, then restart the console.",
       });
       expect(JSON.stringify(plan.health.connectors)).not.toContain(MAIL_REF);
+      expect(plan.health.connectors[4]).toMatchObject({
+        state: "unknown",
+        reason: "its `handle_ref` does not parse",
+      });
+      expect(JSON.stringify(plan.health.connectors)).not.toContain(invalidRef);
     });
 
     it("returns the identity, space and toolshed the instance records", () => {

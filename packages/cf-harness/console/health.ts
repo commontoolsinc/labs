@@ -12,14 +12,17 @@ export interface ConsoleHealthFact {
   /** Open grouping key a consumer can render without a new decoder. */
   group: string;
 
-  /** Operator-facing name of the observed fact. */
+  /** Fixed names use Title Case; connection names retain their recorded spelling. */
   label: string;
 
   /** Present state in words. */
   value: string;
 
-  /** Record or host observation that decided the value. */
+  /** Short human label for the record or observation that decided the value. */
   source: string;
+
+  /** Opaque selectable evidence: exact deciding paths, command, or endpoint. */
+  detail?: string;
 
   /** Why the observed state holds. */
   reason?: string;
@@ -27,6 +30,16 @@ export interface ConsoleHealthFact {
   /** The operator action that can change the state. */
   remedy?: string;
 }
+
+/** Removes URL credentials, query values, and fragments from operator diagnostics. */
+export const consoleHealthUrl = (value: string): string => {
+  const url = new URL(value);
+  url.username = "";
+  url.password = "";
+  url.search = "";
+  url.hash = "";
+  return url.href;
+};
 
 /** A state is established only when an observation supplies its timestamp. */
 export type ConsoleHealthRow =

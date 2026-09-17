@@ -5,9 +5,10 @@ import { ConsoleHealth, type ConsoleHealthRow } from "../../console/health.ts";
 const fact = {
   id: "index.reachable",
   group: "index",
-  label: "Pattern index reachability",
+  label: "Pattern Index Reachability",
   value: "not checked",
-  source: "GET health at https://index.test",
+  source: "index /health",
+  detail: "GET health at https://index.test",
 };
 
 describe("ConsoleHealth", () => {
