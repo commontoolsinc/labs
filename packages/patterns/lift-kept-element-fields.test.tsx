@@ -1,10 +1,12 @@
-import { assert, lift, pattern, TESTS, Writable } from "commonfabric";
+/**
+ * Four lifts over one input array, each reading `id` and `driver` off the
+ * elements that carry an `id`. They differ only in where the read happens: at
+ * the element inside the callback, on a spread copy, through a helper, or on
+ * the element itself after it was returned whole from `flatMap`. All four must
+ * see both fields of both rows.
+ */
 
-// Four lifts over one input array, each reading `id` and `driver` off the
-// elements that carry an `id`. They differ only in where the read happens:
-// at the element inside the callback, on a spread copy, through a helper,
-// or on the element itself after it was returned whole from `flatMap`. All
-// four must see the same rows.
+import { assert, lift, pattern, TESTS, Writable } from "commonfabric";
 
 type Source = { id: string; driver: string };
 type Index = { sources: Array<Source | undefined> };
@@ -30,15 +32,18 @@ const keepThenRead = lift(({ index }: { index: Index }): string[] => {
   return kept.map((s) => `${s.id}:${s.driver}`);
 });
 
-const allAgree = (
+const EXPECTED = JSON.stringify(["a:x", "b:y"]);
+
+const allSeeBothFields = (
   atElement: string[],
   spread: string[],
   helper: string[],
   kept: string[],
 ): boolean =>
-  JSON.stringify(atElement) === JSON.stringify(spread) &&
-  JSON.stringify(atElement) === JSON.stringify(helper) &&
-  JSON.stringify(atElement) === JSON.stringify(kept);
+  JSON.stringify(atElement) === EXPECTED &&
+  JSON.stringify(spread) === EXPECTED &&
+  JSON.stringify(helper) === EXPECTED &&
+  JSON.stringify(kept) === EXPECTED;
 
 export default pattern(() => {
   const index = new Writable<Index>({
@@ -49,12 +54,12 @@ export default pattern(() => {
   const helper = readViaHelper({ index });
   const kept = keepThenRead({ index });
 
-  const assert_all_four_agree = assert(() =>
-    allAgree(atElement, spread, helper, kept)
+  const assert_all_four_see_both_fields = assert(() =>
+    allSeeBothFields(atElement, spread, helper, kept)
   );
 
   return {
-    [TESTS]: [{ assertion: assert_all_four_agree }],
+    [TESTS]: [{ assertion: assert_all_four_see_both_fields }],
     atElement,
     spread,
     helper,

@@ -1637,12 +1637,14 @@ adjustments:
   `table[indexes.findIndex(...)]?.mentionedBy ?? []` — marks the root wildcard,
   which disables shrinking for the whole parameter: its declared shape is
   emitted intact, without the capability wrappers a walked operand would derive
-- a tracked value that leaves the body whole is a full-shape read of its path
+- a tracked value that leaves the body whole, whether named by an identifier
+  or by a member expression such as `w.row`, is a full-shape read of its path
   as well as a plain one: returned from an inline callback, put in an array
   literal, projected into an object literal alias resolution cannot follow,
-  assigned to something other than a local, or handed to a callee with no
-  summary, it is read wherever it lands by members the analysis never sees, so
-  a member the body did read on the way must not narrow it to that member. A
+  assigned to anything but a local its own function declares, or handed to a
+  callee with no summary, it is read wherever it lands by members the analysis
+  never sees, so a member the body did read on the way must not narrow it to
+  that member. A primitive has nothing below it to keep and is left alone. A
   value bound to a local or written into a local collection stays tracked and
   narrows as its reads say. So does a value handed on by reference, which the
   runtime stores as a link so that whatever reads through it does so under a

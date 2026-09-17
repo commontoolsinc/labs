@@ -1,3 +1,12 @@
+/**
+ * A builder's input schema is narrowed to the members its body reads. Each
+ * builder here reads only `id` off an element and then hands the element on
+ * whole — out of its result, through a cell write, on a stream, as a prop of a
+ * node it returns. Every one of those stores the element as a link, so the
+ * reader on the other side sees the whole row however narrow the sender's
+ * schema was. The narrowing leans on that; these cases hold it in place.
+ */
+
 import {
   action,
   assert,
@@ -9,13 +18,6 @@ import {
   Writable,
 } from "commonfabric";
 import { propValue, readValue } from "./test/vnode-helpers.ts";
-
-// A builder's input schema is narrowed to the members its body reads. Each
-// builder here reads only `id` off an element and then hands the element on
-// whole — out of its result, through a cell write, on a stream, as a prop of
-// a node it returns. Every one of those stores the element as a link, so the
-// reader on the other side sees the whole row however narrow the sender's
-// schema was. The narrowing leans on that; these cases hold it in place.
 
 type Source = { id: string; driver: string };
 type Index = { sources: Array<Source | undefined> };

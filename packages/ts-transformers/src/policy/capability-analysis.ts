@@ -876,6 +876,50 @@ function isAliasableObjectLiteral(
 }
 
 /**
+ * Whether the function directly enclosing `from` declares `name`, as one of
+ * its parameters or as a variable in its body outside any nested function.
+ *
+ * An alias set by an assignment lives as long as the scope that made it, and
+ * a nested callback's aliases are dropped when the callback ends. So an
+ * assignment follows a value only into a variable its own function declares;
+ * assigned to a variable of an enclosing function, the value outlives the
+ * alias that tracked it. A node with no function above it — synthesized, with
+ * parent links that stop short — returns `true`: what cannot be placed is not
+ * widened.
+ */
+function isDeclaredByEnclosingFunction(name: string, from: ts.Node): boolean {
+  let enclosing: ts.Node | undefined = from.parent;
+  while (enclosing && !ts.isFunctionLike(enclosing)) {
+    enclosing = enclosing.parent;
+  }
+  if (!enclosing || !ts.isFunctionLike(enclosing)) return true;
+
+  const declares = (binding: ts.BindingName): boolean =>
+    ts.isIdentifier(binding)
+      ? binding.text === name
+      : binding.elements.some((element) =>
+        !ts.isOmittedExpression(element) && declares(element.name)
+      );
+
+  if (enclosing.parameters.some((parameter) => declares(parameter.name))) {
+    return true;
+  }
+  const body = (enclosing as { body?: ts.Node }).body;
+  if (!body) return false;
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found || (node !== body && ts.isFunctionLike(node))) return;
+    if (ts.isVariableDeclaration(node) && declares(node.name)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(body);
+  return found;
+}
+
+/**
  * Where a value used whole ends up, once every value-forwarding parent and
  * every enclosing object literal that alias resolution models has been
  * climbed. A parent link that stops short — a synthesized node — answers
@@ -892,12 +936,12 @@ function isAliasableObjectLiteral(
  * goes on to read. `escaped` is a position the analysis stops following the
  * value at, where every member it declares may be read: an array literal, an
  * object literal alias resolution cannot model, an assignment to anything but
- * a local. `consumed` is every other position — a member access, an operand,
- * a condition — which reads through the value where it stands and is charged
- * by the handler for that position.
+ * a local its own function declares. `consumed` is every other position — a
+ * member access, an operand, a condition — which reads through the value
+ * where it stands and is charged by the handler for that position.
  */
 function wholeValueDestination(
-  node: ts.Identifier,
+  node: ts.Expression,
 ):
   | { kind: "tracked" }
   | { kind: "consumed" }
@@ -935,9 +979,10 @@ function wholeValueDestination(
       isAssignmentOperator(parent.operatorToken.kind)
     ) {
       const local = parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-        (ts.isIdentifier(parent.left) ||
-          ts.isObjectLiteralExpression(parent.left) ||
-          ts.isArrayLiteralExpression(parent.left));
+        (ts.isIdentifier(parent.left)
+          ? isDeclaredByEnclosingFunction(parent.left.text, parent)
+          : ts.isObjectLiteralExpression(parent.left) ||
+            ts.isArrayLiteralExpression(parent.left));
       return { kind: local ? "tracked" : "escaped" };
     }
     if (
@@ -2005,7 +2050,7 @@ export function analyzeFunctionCapabilities(
     // write through a cell — or when the callee only asks its shape. A value
     // this function or a builder callback returns is handed on by reference,
     // and a value read where it stands is charged there.
-    const escapesWhole = (node: ts.Identifier): boolean => {
+    const escapesWhole = (node: ts.Expression): boolean => {
       const destination = wholeValueDestination(node);
       switch (destination.kind) {
         case "tracked":
@@ -3261,6 +3306,16 @@ export function analyzeFunctionCapabilities(
             const ref = resolveSourceRef(node);
             if (ref) {
               trackReadRef(ref);
+              // A member that leaves the analysis whole is read in full
+              // wherever it lands, exactly as an identifier is; the identifier
+              // handler above states the reason. A primitive has nothing
+              // below it to keep whole.
+              if (
+                !ref.dynamic && !isPrimitiveLikeExpression(node) &&
+                escapesWhole(node)
+              ) {
+                trackFullShapeReadRef(ref);
+              }
               // If this resolution went through a .get() call, record the
               // alias name so the identifier handler can skip redundant
               // blanket reads.  Only suppress for actual .get() bases —

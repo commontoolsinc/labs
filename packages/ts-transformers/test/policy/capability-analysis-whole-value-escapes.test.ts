@@ -1,23 +1,25 @@
+/**
+ * A builder's input schema is shrunk to the paths the capability analysis
+ * observes the body reading. A value the body hands on whole — returned
+ * inside a fresh array, projected into an object literal, passed to a callee
+ * the analysis has no summary for — is read wherever it lands, by members the
+ * analysis never sees. Such a value keeps its declared shape, and a member the
+ * body did read on the way must not narrow it to that member. A value the
+ * analysis keeps following — through a local alias, a local object literal,
+ * or a runtime call that binds its arguments by reference — narrows as its
+ * reads say.
+ *
+ * The whole pipeline is the harness, because a dropped member is invisible
+ * before schema injection writes the shrunk schema into the emitted
+ * `lift(...)` call, and it is that emitted schema the runtime reads by.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { COMMONFABRIC_TYPES } from "../commonfabric-test-types.ts";
 import { callSchemas, parseModule } from "../transformed-ast.ts";
 import { transformSource } from "../utils.ts";
-
-// A builder's input schema is shrunk to the paths the capability analysis
-// observes the body reading. A value the body hands on whole — returned
-// inside a fresh array, projected into an object literal, passed to a callee
-// the analysis has no summary for — is read wherever it lands, by members the
-// analysis never sees. Such a value keeps its declared shape, and a member the
-// body did read on the way must not narrow it to that member. A value the
-// analysis keeps following — through a local alias, a local object literal,
-// or a runtime call that binds its arguments by reference — narrows as its
-// reads say.
-//
-// The whole pipeline is the harness, because a dropped member is invisible
-// before schema injection writes the shrunk schema into the emitted
-// `lift(...)` call, and it is that emitted schema the runtime reads by.
 
 /**
  * The input schema emitted for a `lift` reading `{ index }`, where `body` is
@@ -31,7 +33,10 @@ async function liftInputSchema(
     `import { lift } from "commonfabric";
 
 type Source = { id: string; driver: string };
-type Index = { sources: Array<Source | undefined> };
+type Index = {
+  sources: Array<Source | undefined>;
+  wrapped: Array<{ row?: Source }>;
+};
 
 declare function driverOf(s: Source): string;
 
@@ -108,6 +113,41 @@ function elementPropertyNames(schema: Record<string, unknown>): string[] {
     }
   }
   throw new Error("No object branch in the element schema");
+}
+
+/**
+ * The property names of the `Source` schema under `index.wrapped[].row`,
+ * sorted, resolving a whole row's `$ref` the way
+ * {@link elementPropertyNames} does.
+ */
+function wrappedRowPropertyNames(schema: Record<string, unknown>): string[] {
+  const defs = (schema.$defs ?? {}) as Record<string, unknown>;
+  const resolve = (node: unknown): Record<string, unknown> =>
+    typeof (node as { $ref?: string }).$ref === "string"
+      ? defs[(node as { $ref: string }).$ref.replace("#/$defs/", "")] as Record<
+        string,
+        unknown
+      >
+      : node as Record<string, unknown>;
+  const properties = schema.properties as Record<string, unknown>;
+  const index = resolve(properties.index) as {
+    properties: Record<string, unknown>;
+  };
+  const wrapped = index.properties.wrapped as { items: unknown };
+  const item = resolve(wrapped.items) as {
+    properties: Record<string, unknown>;
+  };
+  const row = item.properties.row as { anyOf?: unknown[] };
+  for (const branch of row.anyOf ?? [row]) {
+    const resolved = resolve(branch) as {
+      type?: unknown;
+      properties?: unknown;
+    };
+    if (resolved.type === "object" && resolved.properties !== undefined) {
+      return Object.keys(resolved.properties as Record<string, unknown>).sort();
+    }
+  }
+  throw new Error("No object branch in the wrapped row schema");
 }
 
 const WHOLE = ["driver", "id"];
@@ -208,6 +248,46 @@ describe("capability-analysis-whole-value-escapes", () => {
       expect(elementPropertyNames(schema)).toEqual(WHOLE);
     });
 
+    it("keeps every element property when the element is assigned to a variable the callback does not declare", async () => {
+      // An alias set inside a callback ends with the callback, so the read
+      // through `last` afterwards is charged to nothing.
+      const schema = await liftInputSchema(
+        `{
+          let last: Source | undefined;
+          index.sources.forEach((s) => {
+            if (s?.id) last = s;
+          });
+          return last ? last.driver : "";
+        }`,
+        "string",
+      );
+      expect(elementPropertyNames(schema)).toEqual(WHOLE);
+    });
+
+    it("keeps every property of a member that leaves the callback in an array", async () => {
+      const schema = await liftInputSchema(
+        `index.wrapped.flatMap((w) => w.row?.id ? [w.row] : []).map((r) => r.driver)`,
+        "string[]",
+      );
+      expect(wrappedRowPropertyNames(schema)).toEqual(WHOLE);
+    });
+
+    it("keeps every property of a member the callback returns through a conditional", async () => {
+      const schema = await liftInputSchema(
+        `index.wrapped.map((w) => w.row?.id ? w.row : undefined).map((r) => r?.driver ?? "")`,
+        "string[]",
+      );
+      expect(wrappedRowPropertyNames(schema)).toEqual(WHOLE);
+    });
+
+    it("keeps every property of a member that reaches a function with no body to analyze", async () => {
+      const schema = await liftInputSchema(
+        `index.wrapped.flatMap((w) => w.row?.id ? [driverOf(w.row)] : [])`,
+        "string[]",
+      );
+      expect(wrappedRowPropertyNames(schema)).toEqual(WHOLE);
+    });
+
     it("keeps every element property when the element reaches a function with no body to analyze", async () => {
       const schema = await liftInputSchema(
         `index.sources.flatMap((s) => s?.id ? [driverOf(s)] : [])`,
@@ -239,6 +319,14 @@ describe("capability-analysis-whole-value-escapes", () => {
         "string[]",
       );
       expect(elementPropertyNames(schema)).toEqual(["id"]);
+    });
+
+    it("narrows to the member read when a primitive member leaves the callback", async () => {
+      const schema = await liftInputSchema(
+        `index.wrapped.flatMap((w) => w.row?.id ? [w.row.id] : [])`,
+        "string[]",
+      );
+      expect(wrappedRowPropertyNames(schema)).toEqual(["id"]);
     });
 
     it("narrows to the member read through a local object literal", async () => {
