@@ -6,6 +6,7 @@ import {
   updatePageTitle,
 } from "@commonfabric/navigation";
 import { type NameSchema, stringSchema } from "@commonfabric/runner/schemas";
+import { renderReferenceContext } from "@commonfabric/runner/shared";
 import { slugIdForSpace, validateSlug } from "@commonfabric/runner/slugs";
 import {
   type Cancel,
@@ -218,6 +219,21 @@ interface ShownResolution {
 
   /** What that run reached, or `undefined` where it reached nothing. */
   readonly answer: SlugReferenceTarget | SlugReferenceRefusal | undefined;
+}
+
+/**
+ * Whether the cell reference grammar can write `name` as a space. The grammar
+ * reserves characters a space name may otherwise hold, and a name holding one
+ * has no spelling there.
+ */
+function isWritableSpaceName(name: string): boolean {
+  // The grammar's own writer decides, so its reserved set is stated once.
+  try {
+    renderReferenceContext({ space: name });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export class XAppView extends BaseView {
@@ -974,17 +990,19 @@ export class XAppView extends BaseView {
 
   /**
    * How the piece this view addresses is cited from anywhere:
-   * `/@<space>/<collection>/<member>`, the spelling this shell's own URLs and
-   * `cf` both read and which depends on no binding of the reader's; a
-   * pattern's `cellFromUrl` does not read it. Only a
-   * member of a named collection has one — a piece
-   * reached by identity carries its own, a collection's name with no member
-   * after it names no piece at all, and a segment the walk did not spend
-   * named nothing to cite.
+   * `//<space>/<collection>/<member>`, the cell reference grammar's fully
+   * qualified form, which depends on no binding of the reader's. `cf` reads
+   * it, and so does this shell's `urlToAppView`, which opens it as the page
+   * `/<space>/<collection>/<member>`. A pattern's `cellFromUrl` does not: it
+   * wants an entity id where the collection's name sits. Only a member of a
+   * named collection has one — a piece reached by identity carries its own, a
+   * collection's name with no member after it names no piece at all, and a
+   * segment the walk did not spend named nothing to cite.
    *
-   * The space is taken from the view rather than from the resolved DID: a
-   * space name derives that DID for everyone, so a name travels as far as the
-   * DID does and reads better where it lands.
+   * The space is written as the view names it: a space name derives its DID
+   * for everyone, so a name travels as far as the DID does and reads better
+   * where it lands. A name holding a character the grammar reserves has no
+   * spelling in it, so that space is written as the DID the name resolved to.
    */
   #getPieceReference(): string | undefined {
     if (!this.#namedAMember) return;
@@ -993,12 +1011,12 @@ export class XAppView extends BaseView {
     const member = "pieceMember" in view ? view.pieceMember : undefined;
     if (!member) return;
     const space = "spaceName" in view
-      ? view.spaceName
+      ? isWritableSpaceName(view.spaceName) ? view.spaceName : this.space
       : "spaceDid" in view
       ? view.spaceDid
       : undefined;
     if (!space) return;
-    return `/@${space}/${view.pieceSlug}/${member}`;
+    return `//${space}/${view.pieceSlug}/${member}`;
   }
 
   #getRuntimeLoadError(): LoadError | undefined {

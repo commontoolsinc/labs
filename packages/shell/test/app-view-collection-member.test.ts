@@ -24,6 +24,11 @@ import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
 import type { AppView } from "@commonfabric/navigation";
 
+// The reader `cf cell get` takes an address through, which is what a citation
+// the view offers has to satisfy. The CLI's package exports only its command
+// tree, so the module is reached by path.
+import { normalizeLLMFriendlyRef } from "../../cli/lib/llm-friendly-ref.ts";
+
 function installBrowserGlobals(): () => void {
   const originals = new Map<string, PropertyDescriptor | undefined>();
   function setGlobal(name: string, value: unknown): void {
@@ -106,26 +111,6 @@ function captureErrors(): { lines: string[]; restore: () => void } {
       console.error = real;
     },
   };
-}
-
-/** Return the rendered text of nested Lit template results. */
-function templateText(value: unknown): string {
-  if (value == null) return "";
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.map(templateText).join("");
-  if (typeof value !== "object") return String(value);
-  const template = value as {
-    strings?: readonly string[];
-    values?: readonly unknown[];
-  };
-  const strings = template.strings ?? [];
-  const values = template.values ?? [];
-  let text = "";
-  for (let index = 0; index < strings.length; index++) {
-    text += strings[index];
-    if (index < values.length) text += templateText(values[index]);
-  }
-  return text;
 }
 
 /**
@@ -454,6 +439,19 @@ function appViewOver(
 }
 
 /**
+ * The reference `view` hands its header to copy, or `undefined` where it
+ * offers none. Read off the binding rather than out of the rendered text, so
+ * an offer is found whatever it is spelled as.
+ */
+function citedReference(view: AppViewLike): string | undefined {
+  const bound = templateBindings(view.render(), "pieceReference");
+  // One header, so one binding: none would mean the header is gone, which
+  // this would otherwise read as a view offering nothing.
+  expect(bound).toHaveLength(1);
+  return bound[0] as string | undefined;
+}
+
+/**
  * Drive `view` into the state the cases below turn on: the watch it was
  * running has been replaced, that watch's resolution is still out, and the
  * watch that replaced it is the one now resolving.
@@ -527,7 +525,73 @@ describe("AppView collection members", () => {
       view._selectedPattern.run();
       await view._selectedPattern.taskComplete;
 
-      expect(templateText(view.render())).toContain("/@naming-demo/top/42");
+      const reference = citedReference(view);
+      expect(reference).toBe("//naming-demo/top/42");
+      // `cf` reads it as the collection, the member that collection selects,
+      // and the space both are read in, with no binding of its own supplied.
+      expect(normalizeLLMFriendlyRef(String(reference))).toEqual({
+        pieceId: "top",
+        embeddedSpace: "naming-demo",
+        path: [42],
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it("cites a member of a space opened by DID by a reference carrying that DID", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(XAppView as never, stub, {
+        spaceDid: SPACE,
+        pieceSlug: "top",
+        pieceMember: "42",
+      });
+
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      const reference = citedReference(view);
+      expect(reference).toBe(`//${SPACE}/top/42`);
+      expect(normalizeLLMFriendlyRef(String(reference))).toEqual({
+        pieceId: "top",
+        embeddedSpace: SPACE,
+        path: [42],
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it("cites a member of a space whose name the reference grammar cannot write by the DID the name resolved to", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      // `@` opens a qualifier in the grammar, so no reference can carry this
+      // name as its space. The shell resolves it all the same.
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({
+          spaceName: "naming@demo",
+          pieceSlug: "top",
+          pieceMember: "42",
+        }),
+      );
+
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      const reference = citedReference(view);
+      expect(reference).toBe(`//${SPACE}/top/42`);
+      expect(normalizeLLMFriendlyRef(String(reference))).toEqual({
+        pieceId: "top",
+        embeddedSpace: SPACE,
+        path: [42],
+      });
     } finally {
       restore();
     }
@@ -549,7 +613,7 @@ describe("AppView collection members", () => {
 
       // A collection's name with no member after it names no member, so
       // there is nothing for a citation to resolve to.
-      expect(templateText(view.render())).not.toContain("/@naming-demo/top");
+      expect(citedReference(view)).toBeUndefined();
     } finally {
       restore();
     }
@@ -592,9 +656,9 @@ describe("AppView collection members", () => {
       expect(loadError.error.message).toBe(
         "no member 42 in plain, which names a piece rather than a collection",
       );
-      // Nothing offers `/@naming-demo/plain/42`, which would cite a cell
+      // Nothing offers `//naming-demo/plain/42`, which would cite a cell
       // inside the piece rather than anything the reader is looking at.
-      expect(templateText(view.render())).not.toContain("/@naming-demo/plain");
+      expect(citedReference(view)).toBeUndefined();
 
       // The same answer again is the refusal already on screen, so nothing
       // reloads.
@@ -712,7 +776,7 @@ describe("AppView collection members", () => {
       expect(loadError.error.message).toBe(
         "no piece at comments/7 after member 42 in top, since nothing past a member resolves",
       );
-      expect(templateText(view.render())).not.toContain("/@naming-demo/top/42");
+      expect(citedReference(view)).toBeUndefined();
     } finally {
       errors.restore();
       restore();
@@ -843,7 +907,7 @@ describe("AppView collection members", () => {
       await view._selectedPattern.taskComplete;
       view.updated(new Map([["app", undefined]]));
       await stub.poll();
-      expect(templateText(view.render())).toContain("/@naming-demo/top/42");
+      expect(citedReference(view)).toBe("//naming-demo/top/42");
 
       // `top` is repointed at that very piece's own root. The reference now
       // reaches the SAME piece and spends nothing, so member 42 names nothing
@@ -875,7 +939,7 @@ describe("AppView collection members", () => {
       expect(loadError.error.message).toBe(
         "no member 42 in top, which names a piece rather than a collection",
       );
-      expect(templateText(view.render())).not.toContain("/@naming-demo/top/42");
+      expect(citedReference(view)).toBeUndefined();
     } finally {
       globalThis.removeEventListener("cf-replace-navigation", listener);
       restore();
