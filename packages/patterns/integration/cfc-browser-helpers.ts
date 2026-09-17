@@ -862,9 +862,7 @@ export async function readCfInputValue(
  * wait for.
  *
  * There is no `commit()` to call on this host: `cf-input` declares one and
- * `cf-textarea` does not. A `commit?.()` here would resolve to `undefined`, and
- * would read as the thing that flushes the draft while the blur above it did
- * that work.
+ * `cf-textarea` does not.
  *
  * Presentation mode does not animate this fill. `typeIntoCfInput`, the
  * presentation path {@link fillCfInput} routes through, resolves an

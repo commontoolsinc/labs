@@ -210,10 +210,8 @@ export function clickCellLink(page: Page, label: string): Promise<string> {
  * Click the `Open` link on the board card titled `title`, and return the id of
  * the cell it resolved.
  *
- * Addressing the card by its title is what keeps a caller independent of the
- * order the board lists its cards in: the board sorts by last activity, and a
- * caller that took the first `Open` link would be asserting that ordering
- * whether it meant to or not.
+ * Addressing a card by its title makes the click independent of the order the
+ * board lists its cards in, which is by last activity.
  */
 export function clickCardOpenLink(
   page: Page,
