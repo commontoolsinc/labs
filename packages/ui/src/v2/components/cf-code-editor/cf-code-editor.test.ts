@@ -706,6 +706,16 @@ describe("CFCodeEditor short-name completion", () => {
   // name for each member. A row's piece is stored as a LINK, as the
   // resolution block above explains, so the fixtures hold raw `$link` sigils
   // and the mock network follows them exactly as the runtime does.
+  //
+  // The cases over a blank or absent name guard THIS component's handling of
+  // one, not any collection's choice to show its names: a collection that
+  // numbers its members and shows none of the numbers hands rows whose name is
+  // the empty string, and a universe listing pieces that publish none hands
+  // entries with no name at all. A collection that starts showing its numbers
+  // again leaves those cases green by construction. What reds them is this
+  // component finding a name where there is none — reading the display name
+  // when the collection's name is blank, which is what the `42 apples`
+  // fixtures are shaped to catch.
 
   type ShortNameInternals = {
     mentionable: CellHandle<MentionableArray> | null;
@@ -784,11 +794,15 @@ describe("CFCodeEditor short-name completion", () => {
    * what an editor reads before its collection's derived universe is wired
    * onto it. An entry carries no `piece`, so the entry IS the piece, and
    * `shortName` here is what that piece publishes for itself.
+   *
+   * The display name opens with the digits a query types, as the fourth row of
+   * `UNIVERSE` does, so that an entry publishing no name is offered only if
+   * this component asks the query of something other than `shortName`.
    */
   const direct = (shortName?: string) => [
     {
-      [NAME]: "Second item",
-      title: "Second item",
+      [NAME]: "42 apples",
+      title: "42 apples",
       ...(shortName === undefined ? {} : { shortName }),
     },
   ];
@@ -1084,6 +1098,13 @@ describe("CFCodeEditor mention short names", () => {
   // and every destination publishes a `shortName` of its own, so an editor
   // reading the destination instead announces a different name, or one where
   // none belongs.
+  //
+  // The two cases over a name that is not there — a row carrying the empty
+  // name, and a universe listing a piece that publishes none — guard THIS
+  // component's handling of one, the way the completion block above does. A
+  // collection that starts showing its numbers again leaves them green; what
+  // reds them is a pill taking a blank name as a name, or taking the
+  // destination's name when the row carries none.
 
   type PillInternals = {
     mentionable: CellHandle<MentionableArray> | null;
