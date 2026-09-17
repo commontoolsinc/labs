@@ -421,6 +421,19 @@ describe("wish-profile-readiness", () => {
         await manager.synced();
         await runtime.idle();
         if (outcome === "cancelled") {
+          const arrived = runtime.edit();
+          profile.withTx(arrived).set({
+            name: "Profile arriving after cancel",
+          });
+          runtime.prepareTxForCommit(arrived);
+          expect((await arrived.commit()).error).toBeUndefined();
+          const lateAttempt = runtime.edit();
+          try {
+            result.action(lateAttempt);
+            expect(lateAttempt.getCfcState().writePolicyInputs).toEqual([]);
+          } finally {
+            lateAttempt.abort();
+          }
           expect(publications).toBe(0);
         } else {
           expect(output).toBeDefined();
@@ -609,6 +622,16 @@ describe("wish-profile-readiness", () => {
         runtime,
         (cancel) => cancels.push(cancel),
       );
+      let runs = 0;
+      const registered = () => {
+        runs++;
+      };
+      readiness.onActionRegistered(registered);
+      cancels.push(
+        runtime.scheduler.subscribe(registered, { isEffect: true }),
+      );
+      await runtime.scheduler.idleWithPendingCommits();
+      expect(runs).toBe(1);
       const requireDocument = () => {
         const tx = runtime.edit();
         try {
@@ -622,6 +645,8 @@ describe("wish-profile-readiness", () => {
       subscriptions.forEach((subscription) =>
         subscription.next({ type: "reset", space: user.did() })
       );
+      await runtime.scheduler.idleWithPendingCommits();
+      expect(runs).toBe(2);
       loads[0].resolve();
       await manager.crossSpaceSettled();
       // The old epoch's completion must not confirm the new replica.
