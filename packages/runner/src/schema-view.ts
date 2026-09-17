@@ -410,12 +410,18 @@ const childSchema = (
   if (isArrayIndexPropertyName(key) && schema.items !== undefined) {
     return schema.items as JSONSchema;
   }
-  // A schema that names its properties and refuses the ones it does not name
-  // has turned this key down. Without `additionalProperties` the same shape
-  // reaches `schemaAtPath` as a missing property rather than as `false`, and an
-  // eager read drops the property either way.
+  // A schema that refuses the properties it does not name has turned this key
+  // down, whether it names some or none. Without `additionalProperties`, one
+  // that names some reaches `schemaAtPath` as a missing property rather than as
+  // `false`, and an eager read drops the property either way.
+  //
+  // One that names none and carries `allOf` parts has not: an eager read merges
+  // the keywords beside an `allOf` into each part before it looks at a key, so
+  // a part can name this one, and it is left to the read below. An `allOf`
+  // holding no parts names nothing, and an eager read passes over it.
   if (
-    isObjectOrArray(schema.properties) && schema.additionalProperties === false
+    schema.additionalProperties === false &&
+    (isObjectOrArray(schema.properties) || !schema.allOf?.length)
   ) {
     return EXCLUDED_REJECTED;
   }
