@@ -853,6 +853,77 @@ describe("piece source lifecycle", () => {
     }
   });
 
+  it("applies argument widening through a nested union retaining its default", async () => {
+    const program = (stateType: string): RuntimeProgram => ({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+          import { type Cell, type Default, pattern } from "commonfabric";
+          export default pattern<{ state?: ${stateType} }, { active: boolean }>(
+            ({ state }) => ({ active: state !== undefined }),
+          );
+        `,
+      }],
+    });
+    const narrower = program(
+      'Cell<Default<"open" | "closed" | null, "open"> | number> | string',
+    );
+    for (
+      const stateType of [
+        'Cell<Default<"open" | "closed" | null, "open"> | number> | string | boolean',
+        'Cell<Default<"open" | "closed" | "archived" | null, "open"> | number> | string',
+      ]
+    ) {
+      const piece = await pieces.create(narrower, {
+        input: { state: "ready" },
+      });
+      await piece.setPattern(program(stateType));
+      expect(await piece.input.get(["state"])).toBe("ready");
+      expect(await piece.result.get(["active"])).toBe(true);
+      const state = await readPieceSourceState(runtime, piece.getCell());
+      expect(state.history.at(-1)?.operation).toBe("edit");
+      await expect(piece.setPattern(narrower)).rejects.toThrow(
+        "Pattern schemas are not backward compatible",
+      );
+    }
+  });
+
+  it("applies result narrowing through a nested union retaining its default", async () => {
+    const program = (stateType: string): RuntimeProgram => ({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+          import { type Cell, type Default, pattern } from "commonfabric";
+          export default pattern<{ seed: number }, { state: ${stateType} }>(
+            () => ({ state: "ready" }),
+          );
+        `,
+      }],
+    });
+    const narrower = program(
+      'Cell<Default<"open" | "closed" | null, "open"> | number> | string',
+    );
+    for (
+      const stateType of [
+        'Cell<Default<"open" | "closed" | null, "open"> | number> | string | boolean',
+        'Cell<Default<"open" | "closed" | "archived" | null, "open"> | number> | string',
+      ]
+    ) {
+      const wider = program(stateType);
+      const piece = await pieces.create(wider, { input: { seed: 42 } });
+      await piece.setPattern(narrower);
+      expect(await piece.input.get(["seed"])).toBe(42);
+      expect(await piece.result.get(["state"])).toBe("ready");
+      const state = await readPieceSourceState(runtime, piece.getCell());
+      expect(state.history.at(-1)?.operation).toBe("edit");
+      await expect(piece.setPattern(wider)).rejects.toThrow(
+        "Pattern schemas are not backward compatible",
+      );
+    }
+  });
+
   it("rejects an edit when recorded source is unavailable", async () => {
     const piece = await pieces.create(versionProgram("current"), { input: {} });
     const before = await readPieceSourceState(runtime, piece.getCell());

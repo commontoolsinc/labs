@@ -676,9 +676,13 @@ several JSON value types are partitioned by type, including beside a type list
 or within nested `anyOf` branches, with sibling constraints and branch metadata
 retained. Each partition must satisfy a target alternative. Target enums remain
 whole, and an enum containing a value outside the JSON type vocabulary, such as
-a `FabricPrimitive`, remains subject to the conservative object proof. These
-rules permit adding an option to a nullable literal argument while still
-refusing to remove an admitted option or widen a result contract.
+a `FabricPrimitive`, remains subject to the conservative object proof. During
+pattern evolution, a branch stays whole if partitioning would change the
+effective default it supplies, including defaults inherited from a child branch
+or a reference. Link proofs compare target defaults only, so source defaults do
+not limit partitioning there. These rules permit adding an option to a nullable
+literal argument while still refusing to remove an admitted option or widen a
+result contract.
 
 An incompatible pattern contract or retained link becomes an
 actionable warning. The UI requires explicit confirmation, and command-line

@@ -3243,6 +3243,109 @@ describe("piece schema compatibility", () => {
       });
     }
 
+    for (
+      const [name, nested, definitions] of [
+        ["on the union", {
+          anyOf: [
+            { type: "number" },
+            { enum: ["open", "closed", null] },
+          ],
+          default: "open",
+        }, {}],
+        ["on a child branch", {
+          anyOf: [
+            { type: "number" },
+            { enum: ["open", "closed", null], default: "open" },
+          ],
+        }, {}],
+        ["in a referenced child branch", {
+          anyOf: [
+            { $ref: "#/$defs/state" },
+            { enum: [1, true] },
+          ],
+        }, {
+          state: { enum: ["open", "closed", null], default: "open" },
+        }],
+        ["when child defaults conflict", {
+          anyOf: [
+            { type: "number", default: 1 },
+            { enum: ["open", "closed", null], default: "open" },
+          ],
+        }, {}],
+      ] satisfies [
+        string,
+        Exclude<JSONSchema, boolean>,
+        Record<string, JSONSchema>,
+      ][]
+    ) {
+      it(`preserves defaults in an unchanged nested union ${name}`, () => {
+        const branch = { ...nested, asCell: ["cell"] } as const;
+        const narrower: JSONSchema = {
+          anyOf: [{ type: "string" }, branch],
+          $defs: definitions,
+        };
+        const wider: JSONSchema = {
+          anyOf: [{ type: "string" }, { type: "boolean" }, branch],
+          $defs: definitions,
+        };
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(narrower, wider),
+            pattern(wider, narrower),
+          )
+        ).not.toThrow();
+      });
+    }
+
+    it("refuses changed effective defaults in a nested union", () => {
+      const withDefault = (fallback: string): JSONSchema => ({
+        anyOf: [{
+          anyOf: [
+            { type: "number" },
+            { enum: ["open", "closed", null] },
+          ],
+          default: fallback,
+          asCell: ["cell"],
+        }],
+      });
+      const previous = withDefault("open");
+      const candidate = withDefault("closed");
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(previous, true),
+          pattern(candidate, true),
+        )
+      ).toThrow(/argument: defaults changed/);
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(true, previous),
+          pattern(true, candidate),
+        )
+      ).toThrow(/result: defaults changed/);
+    });
+
+    it("partitions a defaulted source union for a link without migrating its default", () => {
+      const source: JSONSchema = {
+        anyOf: [{
+          anyOf: [{ type: "number" }, { enum: ["open", "closed", null] }],
+          default: "open",
+        }],
+      };
+      const target: JSONSchema = {
+        anyOf: [
+          { type: ["null", "number"] },
+          { type: "string", enum: ["closed", "open"] },
+        ],
+      };
+      expect(() => assertSchemaSubset(source, target)).not.toThrow();
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(source, true),
+          pattern(target, true),
+        )
+      ).toThrow(/argument: defaults changed/);
+    });
+
     it("accepts an unchanged type-list sibling while widening a mixed enum", () => {
       const withValues = (values: string[]): JSONSchema => ({
         anyOf: [

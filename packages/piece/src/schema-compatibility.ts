@@ -877,8 +877,8 @@ function schemaSubsetIssue(
       source.anyOf || target.anyOf ||
       Array.isArray(source.type) || Array.isArray(target.type)
     ) {
-      const sources = schemaAlternatives(source, "source");
-      const targets = schemaAlternatives(target, "target");
+      const sources = schemaAlternatives(source, "source", context);
+      const targets = schemaAlternatives(target, "target", context);
       for (const sourceAlternative of sources) {
         const accepted = targets.some((targetAlternative) =>
           schemaConjunctionSubsetIssue(
@@ -1747,6 +1747,7 @@ function schemaMayProduceType(
 function schemaAlternatives(
   schema: SchemaObject,
   side: "source" | "target",
+  context: CompatibilityContext,
 ): JSONSchema[][] {
   const whole = withoutNodeLevelKeywords(schema);
   const fragments = side === "source" ? ownEnumPartitions(whole) : [whole];
@@ -1754,7 +1755,7 @@ function schemaAlternatives(
     if (fragment.anyOf) {
       const { anyOf, ...base } = fragment;
       const branches = side === "source"
-        ? anyOf.flatMap(sourceEnumAlternatives)
+        ? anyOf.flatMap((branch) => sourceEnumAlternatives(branch, context))
         : anyOf;
       return branches.map((alternative) => [base, alternative]);
     }
@@ -1781,19 +1782,38 @@ function schemaAlternatives(
  * their admitted literal types, retaining sibling constraints and branch-level
  * defaults and extensions. Distributes partitions inside `anyOf` through its
  * enclosing nodes. Enums containing an unclassified value stay whole, and
- * references remain for the scoped proof to resolve.
+ * references remain for the scoped proof to resolve. During evolution, a branch
+ * stays whole if any partition changes the effective default it supplies. Link
+ * proofs compare target defaults only, so source defaults do not limit splitting.
  */
 function sourceEnumAlternatives(
   schema: JSONSchema,
+  context: CompatibilityContext,
 ): JSONSchema[] {
   if (typeof schema === "boolean") return [schema];
+  let narrowed: JSONSchema[] | undefined;
   if (schema.anyOf !== undefined) {
-    const branches = schema.anyOf.flatMap(sourceEnumAlternatives);
+    const branches = schema.anyOf.flatMap((branch) =>
+      sourceEnumAlternatives(branch, context)
+    );
     if (branches.length > schema.anyOf.length) {
-      return branches.map((branch) => ({ ...schema, anyOf: [branch] }));
+      narrowed = branches.map((branch) => ({ ...schema, anyOf: [branch] }));
     }
   }
-  return ownEnumPartitions(schema);
+  narrowed ??= ownEnumPartitions(schema);
+  if (
+    context.defaultComparison === "evolution" &&
+    narrowed.length > 1 &&
+    narrowed.some((fragment) =>
+      !schemaDefaultsResolveEqually(schema, fragment, {
+        sourceRoot: context.sourceRoot,
+        targetRoot: context.sourceRoot,
+      })
+    )
+  ) {
+    return [schema];
+  }
+  return narrowed;
 }
 
 /**
@@ -2053,10 +2073,14 @@ function schemasResolveEqually(
   return true;
 }
 
+/**
+ * Helper for evolution proofs, which compares the defaults two schemas supply
+ * in their own reference scopes.
+ */
 function schemaDefaultsResolveEqually(
   source: JSONSchema,
   target: JSONSchema,
-  context: CompatibilityContext,
+  context: Pick<CompatibilityContext, "sourceRoot" | "targetRoot">,
 ): boolean {
   const sourceHasDefault = schemaHasDefaultValue(source, context.sourceRoot);
   const targetHasDefault = schemaHasDefaultValue(target, context.targetRoot);
