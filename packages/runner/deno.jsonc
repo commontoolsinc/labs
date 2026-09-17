@@ -25,8 +25,10 @@
     // injected (03.3) source reads what the server attaches.
     "@db/sqlite": "jsr:@db/sqlite@0.13.0",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1",
+    "@types/ws": "npm:@types/ws@^8.18.1",
     "ses": "npm:ses@^2.2.0",
-    "typescript": "npm:typescript@6.0.3"
+    "typescript": "npm:typescript@6.0.3",
+    "ws": "npm:ws@^8.21.3"
   },
   "exports": {
     ".": "./src/index.ts",
@@ -34,6 +36,7 @@
     "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts",
     "./shared": "./src/shared.ts",
     "./entity-kind": "./src/entity-kind.ts",
+    "./fabric-special-object-brand": "./src/fabric-special-object-brand.ts",
     "./experimental-posture": "./src/experimental-posture.ts",
     "./fabric-url": "./src/fabric-url.ts",
     "./meta-seam": "./src/meta-seam.ts",

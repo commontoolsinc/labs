@@ -160,6 +160,34 @@ describe("computed cell kinds", () => {
       expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
     });
 
+    it("collects no root from a primitive bound where the subschema could grant a handle deeper", () => {
+      const double = lift((x: number) => x * 2);
+      const bumpNested = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            outer: {
+              type: "object",
+              properties: { inner: { type: "number", asCell: ["cell"] } },
+            },
+            other: { type: "number" },
+          },
+        } as const,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, onBump: bumpNested({ outer: 5, other: doubled }) };
+      });
+      // `outer`'s subschema grants a writable handle one level down, so the
+      // walk does not stop at it, and the value bound there is a number. A
+      // primitive holds no cell roots, so nothing under `outer` is collected
+      // and the capture at `other` — covered by a subschema that grants
+      // nothing — leaves `doubled` computed.
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBe("computed");
+    });
+
     it("tags a capture of a handler whose `$ctx` schema is `true` as computed", () => {
       const double = lift((x: number) => x * 2);
       const bump = handler(

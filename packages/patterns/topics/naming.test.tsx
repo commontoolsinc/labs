@@ -1,31 +1,29 @@
 /**
  * Pattern tests for the member namespace the Topics board owns: allocation in
  * the same transaction as the create, the names table that gives a topic its
- * name by identity, a topic reading its own name out of that table and
- * rendering it beside its title, the survey rows and the mention universe that
- * carry the copy, the backfill over topics filed before the board numbered
+ * name by identity, the backfill over topics filed before the board numbered
  * anything, and the bound on what any of those reads expands.
+ *
+ * Topics shows none of those numbers while `SHOW_TOPIC_NUMBERS` in
+ * `topic.tsx` is off, and this file holds that as well. A topic publishes no
+ * `shortName` then, so its header, the board's cards, the survey rows and the
+ * mention universe's rows all carry none, while the namespace and the names
+ * table carry every one. A case reading an absence for a topic the board has
+ * named states that number in the table beside it, so the absence stands
+ * against a number that exists; the two over a topic nothing has named have no
+ * number to stand against and read the table as empty.
  *
  * Separate from topics.test.tsx for the reason render-shape.test.tsx is
  * separate from it: this file drives one surface end to end and keeps
  * compiling while a change to the board's other demands is in flight.
  *
- * ONE CLAIM HAS NO COVERAGE ANYWHERE, and it is stated rather than left
- * implicit: the POSITIVE case of a topic's own header badge. Deleting that
- * JSX reds no test in any lane. Reading a topic's `[UI]` needs a handle the
- * pattern body holds, and naming that topic needs a verb — but a body-held
- * piece captured by a verb is materialized through the verb's state schema,
- * whatever the target's own demand narrows to, so any step that would name a
- * topic this file could read the header of does not run (`TopicOutput`'s
- * `editingBody` says why, and what it would cost to change). The shell lane
- * asserts the equivalent badge for the collection-naming EXEMPLAR's item, in
- * the exemplar's own space; nothing asserts it for a Topic. Restoring it means
- * a Topics browser test under `packages/patterns/integration/`, driving the
- * board's create and opening the created topic.
- *
- * What is covered instead: the board's own card badge, the index and universe
- * rows carrying the name, the negative header case on a topic wired to no
- * board, and the lookup itself through `ownName`.
+ * A named topic's header and its published name are read off a topic this file
+ * composes and lists in a board's input, which the board's `backfillNames`
+ * then names. A verb that captured the
+ * body-held topic could not name it: a verb receives a captured topic through
+ * its own state schema, which does not materialize one (`TopicOutput`'s
+ * `editingBody` says why). `backfillNames` reaches the topic through the
+ * board's list instead.
  *
  * The mixed-vintage case — a topic deployed before `shortName` existed, read
  * beside one that has it — is NOT here, and deliberately. A fixture of that
@@ -60,14 +58,19 @@ import {
   backfillNames,
   nameOf,
   type NamesMap,
+  namesTable,
 } from "../collection-naming/naming.ts";
-import {
-  findElement,
-  findElementByExactText,
-  hasText,
-} from "../test/vnode-helpers.ts";
+import { findNodeByProp, hasText } from "../test/vnode-helpers.ts";
 import Topics, { type TopicDemand } from "./main.tsx";
 import Topic from "./topic.tsx";
+
+/**
+ * The number badge under `node`, if one is rendered. A topic's number rides in
+ * the one badge carrying `data-member-name`, so this says nothing about the
+ * other badges a topic renders — a link's kind, for one.
+ */
+const numberBadge = (node: unknown): unknown =>
+  findNodeByProp(node, "data-member-name", "");
 
 export default pattern(() => {
   const names = new Writable<NamesMap>({});
@@ -134,30 +137,37 @@ export default pattern(() => {
       board.topics?.[1] as object,
     )
   );
-  // A survey row IS its topic, and the name reaches it through the topic's own
-  // `shortName` — the lookup `addTopic`'s `boardNames` wiring makes possible.
-  const assert_index_rows_carry_the_name = assert(() =>
+  // A survey row IS its topic, so it carries what the topic publishes: the
+  // titles, and no number, although the table names both.
+  const assert_index_rows_carry_no_name = assert(() =>
     (board.index ?? []).length === 2 &&
     board.index?.[0]?.title === "First topic" &&
-    board.index?.[0]?.shortName === "1" &&
-    board.index?.[1]?.shortName === "2"
+    board.index?.[0]?.shortName === undefined &&
+    board.index?.[1]?.shortName === undefined &&
+    board.namesTable?.[0]?.name === "1" &&
+    board.namesTable?.[1]?.name === "2"
   );
-  // The board's cards render the number beside the title, never in place of
-  // it: both are on screen.
-  const assert_cards_show_the_badge = assert(() =>
-    findElementByExactText(board[UI], "cf-badge", "1") !== undefined &&
-    findElementByExactText(board[UI], "cf-badge", "2") !== undefined &&
+  // The board's cards show the titles and no number, although the table names
+  // both topics: the badge is the only `cf-badge` a card renders.
+  const assert_cards_show_no_number = assert(() =>
+    numberBadge(board[UI]) === undefined &&
     hasText(board[UI], "First topic") &&
-    hasText(board[UI], "Second topic")
+    hasText(board[UI], "Second topic") &&
+    board.namesTable?.[0]?.name === "1" &&
+    board.namesTable?.[1]?.name === "2"
   );
-  // The mention universe: one row per topic carrying the board's copy of its
-  // name, which is what a `#42` completion matches without reading a topic.
-  const assert_universe_rows_carry_the_name = assert(() =>
+  // The mention universe: one row per topic, each copying its topic's absent
+  // name as the empty one, although the table names both. A `#42` completion
+  // matches a row's name and a mention's pill shows it, so a row without one
+  // is offered for no number and gives a pill none.
+  const assert_universe_rows_carry_no_name = assert(() =>
     (board.mentionable ?? []).length === 2 &&
     board.mentionable?.[0]?.[NAME] === "First topic" &&
     board.mentionable?.[0]?.title === "First topic" &&
-    board.mentionable?.[0]?.shortName === "1" &&
-    board.mentionable?.[1]?.shortName === "2" &&
+    board.mentionable?.[0]?.shortName === "" &&
+    board.mentionable?.[1]?.shortName === "" &&
+    board.namesTable?.[0]?.name === "1" &&
+    board.namesTable?.[1]?.name === "2" &&
     equals(
       board.mentionable?.[0]?.piece as object,
       board.topics?.[0] as object,
@@ -191,8 +201,35 @@ export default pattern(() => {
     solo[NAME] === "Solo topic"
   );
   const assert_solo_topic_renders_no_badge = assert(() =>
-    findElement(solo[UI], "cf-badge") === undefined &&
+    numberBadge(solo[UI]) === undefined &&
     hasText(solo[UI], "Solo topic")
+  );
+
+  // A named topic shows and publishes no number. The topic is listed in the
+  // board's input and named by the board's backfill, and it reads that name
+  // out of a names table over the board's namespace, as a topic `addTopic`
+  // creates does; the table is derived here rather than taken off the board,
+  // which is built after the topic. The table naming the topic is what makes
+  // the two absences below absences of a number the topic has.
+  const heldNames = new Writable<NamesMap>({});
+  const held = Topic({
+    title: "Held topic",
+    boardNames: namesTable({ names: heldNames }),
+  });
+  const heldBoard = Topics({ topics: [held], names: heldNames });
+  const action_name_the_held_topic = action(() => {
+    heldBoard.backfillNames.send({ agentName: "Sol" });
+  });
+  const assert_named_topic_shows_no_number = assert(() =>
+    Object.keys((heldBoard.names ?? {}) as NamesMap).join(",") === "1" &&
+    heldBoard.namesTable?.[0]?.name === "1" &&
+    equals(
+      heldBoard.namesTable?.[0]?.member as object,
+      heldBoard.topics?.[0] as object,
+    ) &&
+    held.shortName === undefined &&
+    numberBadge(held[UI]) === undefined &&
+    hasText(held[UI], "Held topic")
   );
 
   // The backfill, on a board that held topics before it numbered anything. The
@@ -216,6 +253,7 @@ export default pattern(() => {
   });
   // An unnamed member's row reads the default, so the board reads whole before
   // anything names it, and its universe row is one no `#42` query matches.
+  // Here the table names nothing either, which is the state a backfill ends.
   const assert_unnamed_rows_carry_no_name = assert(() =>
     older.topicCount === 2 &&
     (older.index ?? []).length === 2 &&
@@ -223,7 +261,7 @@ export default pattern(() => {
     older.index?.[1]?.shortName === undefined &&
     (older.namesTable ?? []).length === 0 &&
     older.mentionable?.[0]?.shortName === "" &&
-    findElement(older[UI], "cf-badge") === undefined
+    numberBadge(older[UI]) === undefined
   );
   // The library call the verb makes, so its return is observable here: exactly
   // the names it wrote, in filing order. The VERB's own result is not
@@ -235,12 +273,16 @@ export default pattern(() => {
   const action_backfill = action(() => {
     assigned.push(backfillNames(olderTopics, olderNames));
   });
+  // The backfill names both topics in the table, and neither the survey rows
+  // nor the universe rows carry a number.
   const assert_backfilled_in_filing_order = assert(() =>
     Object.keys((older.names ?? {}) as NamesMap).join(",") === "1,2" &&
-    older.index?.[0]?.shortName === "1" &&
-    older.index?.[1]?.shortName === "2" &&
-    older.mentionable?.[0]?.shortName === "1" &&
-    older.mentionable?.[1]?.shortName === "2" &&
+    nameOf(olderTopics.key(0), older.namesTable ?? []) === "1" &&
+    nameOf(olderTopics.key(1), older.namesTable ?? []) === "2" &&
+    older.index?.[0]?.shortName === undefined &&
+    older.index?.[1]?.shortName === undefined &&
+    older.mentionable?.[0]?.shortName === "" &&
+    older.mentionable?.[1]?.shortName === "" &&
     equals(
       ((older.names ?? {}) as NamesMap)["1"] as object,
       older.topics?.[0] as object,
@@ -248,9 +290,8 @@ export default pattern(() => {
   );
 
   // A create after the backfill continues the sequence rather than restarting
-  // it, and a member filed past the create keeps reading the default until an
-  // operator link-binds the table onto it — while the name itself is real, and
-  // `namesTable` is where it is.
+  // it. The name a create allocates is as real as a backfilled one, and
+  // `namesTable` is where both are read while no topic publishes one.
   const action_add_after_backfill = action(() => {
     older.addTopic.send({ title: "Newer one", agentName: "Sol" });
   });
@@ -264,9 +305,10 @@ export default pattern(() => {
     older.topicCount === 4 &&
     Object.keys((older.names ?? {}) as NamesMap).join(",") === "1,2,3,4" &&
     older.index?.[2]?.title === "Newer one" &&
-    older.index?.[2]?.shortName === "3" &&
+    older.index?.[2]?.shortName === undefined &&
     older.index?.[3]?.title === "Older three" &&
     older.index?.[3]?.shortName === undefined &&
+    nameOf(olderTopics.key(2), older.namesTable ?? []) === "3" &&
     nameOf(olderTopics.key(3), older.namesTable ?? []) === "4"
   );
   // Idempotent: a run over a fully named list writes nothing, so the map holds
@@ -298,12 +340,14 @@ export default pattern(() => {
       { action: action_add_second },
       { assertion: assert_allocated_on_create },
       { assertion: assert_table_names_each_topic },
-      { assertion: assert_index_rows_carry_the_name },
-      { assertion: assert_cards_show_the_badge },
-      { assertion: assert_universe_rows_carry_the_name },
+      { assertion: assert_index_rows_carry_no_name },
+      { assertion: assert_cards_show_no_number },
+      { assertion: assert_universe_rows_carry_no_name },
       { assertion: assert_reads_expand_no_topic },
       { assertion: assert_solo_topic_has_no_name },
       { assertion: assert_solo_topic_renders_no_badge },
+      { action: action_name_the_held_topic },
+      { assertion: assert_named_topic_shows_no_number },
       { action: action_file_two_unnamed },
       { assertion: assert_unnamed_rows_carry_no_name },
       { action: action_backfill },

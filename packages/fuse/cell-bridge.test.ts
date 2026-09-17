@@ -20,6 +20,7 @@ import {
   PiecesController,
 } from "@commonfabric/piece/ops";
 import { decomposeSchema, Runtime } from "@commonfabric/runner";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import { registerSchemaDocument } from "../runner/src/schema-registry.ts";
 import {
@@ -153,10 +154,7 @@ class SinkableCell {
   get() {
     let current = this.#root._value;
     for (const segment of this.#path) {
-      if (
-        typeof current !== "object" || current === null ||
-        Array.isArray(current)
-      ) {
+      if (!isObjectNotArray(current)) {
         return undefined;
       }
       current = (current as Record<string, unknown>)[segment];
@@ -2000,10 +1998,7 @@ describe("cell-bridge", () => {
               set: (value: unknown, path?: (string | number)[]) => {
                 if (path?.length === 1 && typeof path[0] === "string") {
                   resultValue = { ...resultValue, [path[0]]: value };
-                } else if (
-                  typeof value === "object" && value !== null &&
-                  !Array.isArray(value)
-                ) {
+                } else if (isObjectNotArray(value)) {
                   resultValue = value as Record<string, unknown>;
                 }
                 return Promise.resolve();
@@ -2087,10 +2082,7 @@ describe("cell-bridge", () => {
           const getAtPath = (path?: (string | number)[]) => {
             let current: unknown = resultValue;
             for (const segment of path ?? []) {
-              if (
-                typeof current !== "object" || current === null ||
-                Array.isArray(current)
-              ) {
+              if (!isObjectNotArray(current)) {
                 return undefined;
               }
               current = (current as Record<string, unknown>)[String(segment)];
@@ -2107,8 +2099,7 @@ describe("cell-bridge", () => {
             for (const segment of path.slice(0, -1)) {
               const key = String(segment);
               const child = current[key];
-              const cloned = typeof child === "object" && child !== null &&
-                  !Array.isArray(child)
+              const cloned = isObjectNotArray(child)
                 ? { ...(child as Record<string, unknown>) }
                 : {};
               current[key] = cloned;
@@ -3112,7 +3103,7 @@ describe("cell-bridge", () => {
                 symbol: "default",
                 source: {
                   ref: `cf:pattern:${"A".repeat(43)}`,
-                  repository: "https://github.com/commontoolsinc/labs",
+                  repository: "https://github.com/commonfabric/labs",
                   entry: "/notes/note.tsx",
                 },
               }),
@@ -3144,7 +3135,7 @@ describe("cell-bridge", () => {
             symbol: "default",
             source: {
               ref: `cf:pattern:${"A".repeat(43)}`,
-              repository: "https://github.com/commontoolsinc/labs",
+              repository: "https://github.com/commonfabric/labs",
               entry: "/notes/note.tsx",
             },
           });
@@ -5103,7 +5094,7 @@ describe("cell-bridge", () => {
             symbol: "default",
             source: {
               ref: `cf:pattern:${"A".repeat(43)}`,
-              repository: "https://github.com/commontoolsinc/labs",
+              repository: "https://github.com/commonfabric/labs",
               entry: "/notes/note.tsx",
             },
           };
@@ -5142,7 +5133,7 @@ describe("cell-bridge", () => {
             symbol: "default",
             source: {
               ref: `cf:pattern:${"B".repeat(43)}`,
-              repository: "https://github.com/commontoolsinc/labs",
+              repository: "https://github.com/commonfabric/labs",
               entry: "/notes/note.tsx",
             },
           };
@@ -5171,7 +5162,7 @@ describe("cell-bridge", () => {
             ...patternRef,
             source: {
               ...patternRef.source,
-              repository: "https://github.com/commontoolsinc/another-repo",
+              repository: "https://github.com/commonfabric/another-repo",
             },
           };
           const repositoryRefreshed = defer();

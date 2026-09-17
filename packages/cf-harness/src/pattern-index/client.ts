@@ -1,9 +1,9 @@
 /**
  * The typed client for the deployed pattern index: a small JSON-over-HTTP
  * surface for searching published patterns, reading one back, recording what
- * a run did with it, and publishing a new one. Every call is a POST to
- * `{baseUrl}/{function}` signed with the CF1 first-party scheme, so the index
- * sees the run's own identity rather than a shared secret.
+ * a run did with it, and publishing a new one. Pattern calls are POSTs to
+ * `{baseUrl}/{function}` signed with the CF1 first-party scheme. Public health
+ * and enrollment observations use GET; enrollment names the same principal.
  *
  * Everything here runs on the trusted host side. A pattern's source reaches
  * this module, the `run_pattern` compile path, and the private research loop.
@@ -17,6 +17,7 @@ import {
   type FirstPartyHttpSigner,
   signFirstPartyHttpRequest,
 } from "@commonfabric/runner/toolshed-http-auth";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { HarnessPatternIndexConfig } from "../config.ts";
 import {
   defaultHarnessFetch,
@@ -349,6 +350,11 @@ export class PatternIndexClient {
       headers,
       body,
     });
+    return await this.#readResponse<T>(fn, response);
+  }
+
+  /** Parses a service response while keeping its failure detail artifact-only. */
+  async #readResponse<T>(fn: string, response: Response): Promise<T> {
     const text = await response.text();
     let parsed: unknown;
     try {
@@ -357,7 +363,7 @@ export class PatternIndexClient {
       parsed = undefined;
     }
     if (!response.ok) {
-      const error = typeof parsed === "object" && parsed !== null &&
+      const error = isObjectOrArray(parsed) &&
           typeof (parsed as { error?: unknown }).error === "string"
         ? (parsed as { error: string }).error
         : text.slice(0, 200);
@@ -371,6 +377,20 @@ export class PatternIndexClient {
       );
     }
     return parsed as T;
+  }
+
+  /** Reads the index's public health response. */
+  async health(): Promise<unknown> {
+    const response = await this.#fetchFn(functionUrl(this.#baseUrl, "health"));
+    return await this.#readResponse("health", response);
+  }
+
+  /** Reads public membership for the principal this client signs as. */
+  async enrollmentStatus(): Promise<unknown> {
+    const url = functionUrl(this.#baseUrl, "enrollmentStatus");
+    url.searchParams.set("did", this.did);
+    const response = await this.#fetchFn(url);
+    return await this.#readResponse("enrollmentStatus", response);
   }
 
   /**

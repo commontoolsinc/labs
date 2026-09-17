@@ -160,7 +160,7 @@ invisible, the prompt renders the whole ambient record — place and scope
     current state and it is what decision 11 costs: a piece slugged
     `slugs` or `pieces` has no rooted slug spelling in shuttle, and is
     reached by handle or by a complete reference carrying its space.
-    Issue [#6992](https://github.com/commontoolsinc/labs/issues/6992)
+    Issue [#6992](https://github.com/commonfabric/labs/issues/6992)
     retires the divergence by having `set-slug` refuse those two values,
     after which no piece can carry them and the two grammars agree
     everywhere.
@@ -283,7 +283,7 @@ invisible, the prompt renders the whole ambient record — place and scope
     cost bounded by the visible page in element documents; membership is
     one document whose size grows with the collection's link array — linear
     in links, not in element closures. The seam and solution lanes are
-    issue [#6534](https://github.com/commontoolsinc/labs/issues/6534); B3
+    issue [#6534](https://github.com/commonfabric/labs/issues/6534); B3
     opens by proving the seam, and falls back to a capped deep sink with
     an honest label if it disappoints. The raw subscription serves the
     base scope only — `SpaceReplica.sinkDocument` keys on the base
@@ -459,7 +459,7 @@ way.
 
 None blocking v1. The B3 seam-proving gate and its two preparatory
 experiments are recorded in decision 25 and issue
-[#6534](https://github.com/commontoolsinc/labs/issues/6534); the piece
+[#6534](https://github.com/commonfabric/labs/issues/6534); the piece
 overview's liveness is deferred with the live piece watch
 ([`views.md`](views.md)).
 

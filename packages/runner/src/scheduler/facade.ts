@@ -2,6 +2,7 @@ import type { CellScope, ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { getTopFrame } from "../builder/pattern.ts";
 import type { Cancel } from "../cancel.ts";
@@ -230,8 +231,7 @@ type SchedulerRegisterOptions = {
 
 function isReactivityLog(value: unknown): value is ReactivityLog {
   const candidate = value as Partial<ReactivityLog> | null;
-  return candidate !== null &&
-    typeof candidate === "object" &&
+  return isObjectOrArray(candidate) &&
     Array.isArray(candidate.reads) &&
     Array.isArray(candidate.shallowReads) &&
     Array.isArray(candidate.writes);
@@ -3308,6 +3308,7 @@ export class Scheduler {
       resubscribe: (target, log) => this.resubscribe(target, log),
       markInvalid: (target, options) =>
         this.#markActionInvalid(target, undefined, options),
+      isLiveAction: (target) => this.#isLiveAction(target),
       isDisposed: () => this.#disposed,
       parkLocalRead: (target, log) => this.#parkLocalRead(target, log),
       queueExecution: () => this.queueExecution(),
@@ -3415,7 +3416,8 @@ export class Scheduler {
     if (!record) return;
     markInvalidRecord(this.#nodes, action, cause, options);
     // A scheduler-owed retry (`options.retry`: a refused run re-queued after
-    // its catch-up) is not an input change — it runs past the node's
+    // its catch-up, or an empty rejection without an accepted result or live
+    // demander) is not an input change — it runs past the node's
     // freshness gates, and any armed readiness is released (§8.3).
     if (options?.retry) {
       this.#gates.releaseForRetry(action);

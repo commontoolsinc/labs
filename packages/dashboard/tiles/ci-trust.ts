@@ -1,8 +1,8 @@
 /**
  * Reports the share of recent completed runs that passed on the first attempt,
- * which is the wall's signal for flakiness, with a history strip carrying the
- * newest runs in the trust window. One factory builds both the labs and loom
- * instances against their own repository and workflow.
+ * which is the dashboard's signal for flakiness, with a history strip carrying
+ * the newest runs in the trust window. One factory builds both the labs and
+ * loom instances against their own repository and workflow.
  */
 
 import {

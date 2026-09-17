@@ -28,6 +28,7 @@
  */
 
 import {
+  isObjectOrArray,
   isPlainContainer,
   isPlainObject,
   type ReadonlyRecord,
@@ -88,7 +89,7 @@ export function isKeyableObjectOrArray(
   value: unknown,
 ): value is ReadonlyRecord;
 export function isKeyableObjectOrArray(value: unknown): boolean {
-  return typeof value === "object" && value !== null &&
+  return isObjectOrArray(value) &&
     !(value instanceof BaseFabricSpecialObject);
 }
 
@@ -257,7 +258,7 @@ export function isFabricArray(value: FabricValue): value is FabricArray {
 export function isFabricObjectOrArray(
   value: FabricValue,
 ): value is FabricValue & object {
-  return typeof value === "object" && value !== null;
+  return isObjectOrArray(value);
 }
 
 /**

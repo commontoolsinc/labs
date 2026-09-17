@@ -496,6 +496,19 @@ export type ServingLoopStats = {
     /** The greatest failed-state time any one active checkpoint has accrued. */
     maxAccumulatedDeliveryFailureMs: number;
 
+    /** Delivery-failure backstops scheduled at a failed checkpoint's budget
+     * boundary. One wake stands per event at a time: re-deriving a
+     * checkpoint cancels the wake it replaces and arms another, so this
+     * counts arming passes and runs above the wakes standing. Its sibling
+     * `deferredRescansArmed` counts distinct backstops, since a deferred
+     * rescan with a timer standing arms nothing further. */
+    deliveryFailureWakesArmed: number;
+
+    /** Delivery-failure backstops that fired during an active serving
+     * tenure. An armed wake can be unnecessary if recovery, input, or a
+     * commit retires its checkpoint first. */
+    deliveryFailureWakesFired: number;
+
     /** Durable terminal covers, counted only after the carrying wave commits. */
     needsAttention: {
       total: number;
@@ -659,6 +672,8 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     deliveryDeferralsActive: 0,
     deliveryFailuresActive: 0,
     maxAccumulatedDeliveryFailureMs: 0,
+    deliveryFailureWakesArmed: 0,
+    deliveryFailureWakesFired: 0,
     needsAttention: {
       total: 0,
       byPhase: {

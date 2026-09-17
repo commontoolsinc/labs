@@ -1,6 +1,7 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import * as path from "@std/path";
 import {
+  buildCoverageNotGatedComment,
   buildCoverageResolvedComment,
   COVERAGE_SUGGESTION_MARKER,
 } from "./ci-check-lib.ts";
@@ -83,7 +84,7 @@ Deno.test("postCoverageComment posts when no marked comment exists", async () =>
   assertEquals(requests[0].method, "POST");
   assertEquals(
     requests[0].url,
-    "https://api.github.com/repos/commontoolsinc/labs/issues/4211/comments",
+    "https://api.github.com/repos/commonfabric/labs/issues/4211/comments",
   );
   assertEquals(requests[0].body, body);
 });
@@ -99,9 +100,67 @@ Deno.test("postCoverageComment updates the existing comment in place", async () 
   assertEquals(requests[0].method, "PATCH");
   assertEquals(
     requests[0].url,
-    "https://api.github.com/repos/commontoolsinc/labs/issues/comments/1",
+    "https://api.github.com/repos/commonfabric/labs/issues/comments/1",
   );
   assertEquals(requests[0].body, body);
+});
+
+Deno.test("postCoverageComment posts an ungated notice when no marked comment exists", async () => {
+  // A run that went ungated is reported on a pull request that never had a
+  // coverage comment, because saying nothing is what a run that found nothing
+  // does.
+  const body = buildCoverageNotGatedComment({
+    groups: [{ group: "tasks", reason: "no-baseline" }],
+  });
+  const requests = await runWithPayload(
+    { prNumber: 4211, state: "ungated", body },
+    ["a normal review comment"],
+  );
+
+  assertEquals(requests.length, 1);
+  assertEquals(requests[0].method, "POST");
+  assertStringIncludes(
+    requests[0].body,
+    "Test coverage was NOT gated on this run",
+  );
+});
+
+Deno.test("postCoverageComment rewrites an earlier comment with an ungated notice", async () => {
+  const body = buildCoverageNotGatedComment({
+    groups: [{ group: "tasks", reason: "listing-not-current" }],
+  });
+  const requests = await runWithPayload(
+    { prNumber: 4211, state: "ungated", body },
+    [buildCoverageResolvedComment(3, [])],
+  );
+
+  assertEquals(requests.length, 1);
+  assertEquals(requests[0].method, "PATCH");
+  assertEquals(requests[0].body, body);
+});
+
+Deno.test("postCoverageComment resolves an ungated notice once a later run is gated", async () => {
+  const existing = buildCoverageNotGatedComment({
+    groups: [{ group: "tasks", reason: "no-baseline" }],
+  });
+  const requests = await runWithPayload(
+    {
+      prNumber: 4211,
+      state: "resolved",
+      improvedLines: 0,
+      groups: [{ group: "tasks", baseline: 8, current: 8 }],
+    },
+    [existing],
+  );
+
+  assertEquals(requests.length, 1);
+  assertEquals(requests[0].method, "PATCH");
+  // The summary is true of a pull request that never regressed.
+  assertStringIncludes(
+    requests[0].body,
+    "Code coverage debt is within the ratchet.",
+  );
+  assertEquals(requests[0].body.includes("NOT gated"), false);
 });
 
 Deno.test("postCoverageComment leaves an up-to-date comment untouched", async () => {
@@ -141,7 +200,7 @@ Deno.test("postCoverageComment resolves an existing comment when coverage is acc
   assertEquals(requests[0].method, "PATCH");
   assertEquals(
     requests[0].url,
-    "https://api.github.com/repos/commontoolsinc/labs/issues/comments/1",
+    "https://api.github.com/repos/commonfabric/labs/issues/comments/1",
   );
   assertStringIncludes(requests[0].body, "<details>");
   assertStringIncludes(

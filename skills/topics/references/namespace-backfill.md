@@ -68,12 +68,12 @@ that before deciding anything this procedure says needs deciding.
    `deno task cf cell get /top/<n> title`, and reads back as an ordinary `index`
    row with no `shortName` and no damage to the array around it. So naming,
    `/top/<n>` addressing and index membership all survive the step being
-   skipped, and `shortName` — the badge, and the number on the index row — is
-   what is absent. That bounds what skipping costs from BELOW, not from above:
-   no run against a populated board has forced a Topic update, so what else a
-   completed one would change there is not known, and the record says so. Step
-   4's refusal on such a Topic is this state being enforced rather than an
-   error.
+   skipped, and `shortName` — the badge and the number on the index row, both of
+   which appear only once Topics shows numbers at all — is what is absent. That
+   bounds what skipping costs from BELOW, not from above: no run against a
+   populated board has forced a Topic update, so what else a completed one would
+   change there is not known, and the record says so. Step 4's refusal on such a
+   Topic is this state being enforced rather than an error.
 
 3. **`backfillNames` once**, through the board. It returns the names it wrote,
    in filing order, and is idempotent: a second run writes nothing and returns
@@ -82,6 +82,17 @@ that before deciding anything this procedure says needs deciding.
 4. **`deno task cf piece link` once per Topic that `addTopic` did not wire** —
    that is, per Topic that took step 2. A Topic that skipped it has no
    `boardNames` input to bind, and the bind says so.
+
+A finished run shows no number anywhere on the board, and a Topic publishes none
+either. `SHOW_TOPIC_NUMBERS` in `packages/patterns/topics/topic.tsx` is off
+until every Topic has a number, and while it is off a Topic's `shortName` is
+absent whether or not the bind reached it. Turning the constant on is a pattern
+update of its own and the team's decision, not an agent's.
+
+So the `shortName` reads below are what this procedure looks like once numbers
+are shown. Until then, two reads answer the same questions: the audit's read of
+the Topic's stored `boardNames` argument says whether the bind landed, and the
+board's `namesTable` says which Topics have a number and what it is.
 
 ### The two commands
 
@@ -98,7 +109,9 @@ target present for the link command's value-presence check even before a link is
 stored.
 
 Between them is the gap this procedure exists for: the board's `names` map and
-`namesTable` hold the name, and the Topic does not.
+`namesTable` hold the name, and the Topic does not. While numbers are hidden
+that gap is invisible from the Topic's side, because a bound Topic publishes no
+number either; the reads that show it are the two named above.
 
 ```
 $ deno task cf cell get --cell "$TOPIC" shortName --step
@@ -107,12 +120,14 @@ could not resolve all required values. The piece was stepped, but the required
 value still did not materialize.
 ```
 
-After the bind that read answers with the number, the board's `index` row for
-that Topic carries it as `shortName`, and `deno task cf cell get /top/<n> title`
-returns its title. A Topic left unbound keeps reporting the message above, which
-is what a half-finished run looks like: the board serves every Topic either way,
-named beside unnamed, and the repair is to bind the rest. Nothing has to be
-undone.
+Once numbers are shown, the bind makes that read answer with the number and the
+board's `index` row carry it as `shortName`.
+`deno task cf cell get /top/<n>
+title` returns the Topic's title whether they
+are shown or not, because a member's address is the namespace's and not the
+Topic's. A Topic left unbound keeps reporting the message above, which is what a
+half-finished run looks like: the board serves every Topic either way, named
+beside unnamed, and the repair is to bind the rest. Nothing has to be undone.
 
 The bind is idempotent — repeating it with the same two endpoints changes
 nothing and commits nothing. Note that `wrote to space` prints either way, so it
@@ -145,8 +160,9 @@ Audit only Topics whose source has already been migrated. Input reads use the
 current pattern's projection: if it does not declare `boardNames`, this targeted
 read refuses the path, including when the raw argument document holds a legacy
 link there. Updating the pattern to select the input exposes that retained link
-without rewriting it. Check the Topic's published `shortName` after the bind to
-verify that the pattern consumes its row.
+without rewriting it. Whether the pattern then consumes its row is what a
+Topic's published `shortName` shows, so that check waits for numbers to be
+shown; the bind itself is what the read above settles.
 
 ### Traps
 

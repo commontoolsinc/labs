@@ -233,7 +233,7 @@ Deno.test("every standard tile shares text baselines and fits under benchmarks",
   const tiles = standard.map(({ id, view }) => renderTile(view, id)).join("");
   const fixture = document.createElement("div");
   fixture.innerHTML = `<style>
-    .layout-wall{width:1100px;--surface:#111;font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
+    .layout-dashboard{width:1100px;--surface:#111;font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
     .layout-intermediate{width:451px;--surface:#111;font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
     .layout-minimum{width:220px;--surface:#111;font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
     ${DASHBOARD_GRID_RULE}
@@ -241,22 +241,22 @@ Deno.test("every standard tile shares text baselines and fits under benchmarks",
     ${BOTTOM_CHART_RULES}
     ${tileContentRules(SPARKLINE_HEIGHT)}
     .cells.labeled .cell{display:block}
-  </style><div class="grid layout-wall">${tiles}</div>
+  </style><div class="grid layout-dashboard">${tiles}</div>
   <div class="grid layout-intermediate">${tiles}</div>
   <div class="grid layout-minimum">${tiles}</div>`;
   document.body.append(fixture);
 
   try {
     await new Promise(requestAnimationFrame);
-    const wall = fixture.querySelector<HTMLElement>(".layout-wall");
+    const dashboard = fixture.querySelector<HTMLElement>(".layout-dashboard");
     const intermediate = fixture.querySelector<HTMLElement>(
       ".layout-intermediate",
     );
     const minimum = fixture.querySelector<HTMLElement>(".layout-minimum");
-    assertExists(wall);
+    assertExists(dashboard);
     assertExists(intermediate);
     assertExists(minimum);
-    assertStandardTileLayout(wall, standard);
+    assertStandardTileLayout(dashboard, standard);
     assertStandardTileLayout(intermediate, standard);
     assertStandardTileLayout(minimum, standard);
   } finally {

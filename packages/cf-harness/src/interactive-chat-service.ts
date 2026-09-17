@@ -11,6 +11,8 @@ import {
   type RunHarnessTranscriptOptions,
 } from "./prompt-loop.ts";
 import { establishHarnessSessionContext } from "./session-assembly.ts";
+import { pieceTargetingContextMessages } from "./piece-targeting.ts";
+import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
 import type { HarnessInputCellSpec } from "./contracts/input-cells.ts";
 import type { HarnessPatternRefSpec } from "./contracts/pattern-refs.ts";
 import {
@@ -1627,6 +1629,7 @@ export class HarnessInteractiveChatService {
       await this.#emit(session.sessionId, turnId, {
         kind: "turn_completed",
         turnId,
+        ...(result.taskOutcome ?? { outcome: "completed" as const }),
         finalText: result.finalAssistantText,
         ...((result.totalUsage ?? result.usage) !== undefined
           ? { usage: result.totalUsage ?? result.usage }
@@ -1693,12 +1696,19 @@ export class HarnessInteractiveChatService {
     if (
       options.engine === undefined && skillsRoot === undefined &&
       fabricSession === undefined &&
+      (options.inputCells?.length ?? 0) === 0 &&
       (options.patternRefs?.length ?? 0) === 0
     ) {
       // Nothing configured needs a run to be brought up before its first model
       // turn, and constructing an engine to discover that would build a
       // sandbox runtime for a turn that has no use for one.
-      return { loop: this.#createPromptLoop(options), contextMessages: [] };
+      return {
+        loop: this.#createPromptLoop(options),
+        contextMessages: [
+          ...pieceTargetingContextMessages([]),
+          REVISION_VERIFICATION_GUIDANCE,
+        ],
+      };
     }
     const engine = options.engine ?? new CfHarnessEngine(options);
     const contextMessages = await establishHarnessSessionContext({

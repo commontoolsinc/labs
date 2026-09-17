@@ -1,6 +1,7 @@
 /**
  * What a caller can observe about a topic it filed through the board, when the
- * board demands only the fields it renders.
+ * board demands only what its card, its index row, its activity sort, its
+ * crossref pivot, and its mention universe use, and names no verb.
  *
  * These cases make the move the design says a caller makes: survey the board,
  * resolve the row to the topic's own address, and read or call the topic

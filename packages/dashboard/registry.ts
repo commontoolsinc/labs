@@ -1,5 +1,5 @@
 /**
- * Names every tile the wall runs, and is the only place any of them is
+ * Names every tile the dashboard runs, and is the only place any of them is
  * registered. A tile is added by importing it here and listing it below, and
  * removed by deleting its line.
  */

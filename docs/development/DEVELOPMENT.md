@@ -561,6 +561,54 @@ function processData(data: Data) {
 }
 ```
 
+### Ask the object-shape question through the shared predicates
+
+`typeof value === "object"` is true of `null` and true of an array, so the test
+for "may I read this by property name?" is never one comparison. Where those
+conjuncts open a longer structural check, write the shape question as a call to
+the predicate named for it and let the rest of the check follow.
+
+> **❌ Avoid**
+
+```ts
+export function isEvent(value: unknown): boolean {
+  return typeof value === "object" && value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as { type?: unknown }).type === "string";
+}
+```
+
+> **✅ Prefer**
+
+```ts
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
+export function isEvent(value: unknown): boolean {
+  return isObjectNotArray(value) && typeof value.type === "string";
+}
+```
+
+The predicates live in `@commonfabric/utils/types`, and each name settles the
+array question in its own final word. `isObjectOrArray()` admits any non-`null`
+value whose `typeof` is `"object"`, arrays included. `isObjectNotArray()` asks
+the same question with arrays removed. `isPlainObject()` additionally requires
+the prototype to be `Object.prototype` or `null`, so a class instance does not
+pass. Choose by what the check needs rather than by what the surrounding code is
+named after, because the three differ on which values reach the branch that
+follows. The module header describes the rest of the family, what each one
+narrows to, and why the narrowed types are read-only.
+
+Two situations keep the conjuncts written out. Pattern source may import only
+the specifiers `isAllowedAuthoredImportSpecifier` admits, which do not include
+this module, so a pattern spells the test out. And a check whose value the
+surrounding code goes on to assert as an interface type will not compile through
+the call, because `Record<string, unknown>` does not overlap an interface: read
+the fields off the narrowed record instead of asserting, or leave the test
+inline.
+
+A walk that can reach a stored value needs more than the shape question, and
+which predicate it needs is the next section.
+
 ### Walking or comparing a value
 
 A value the runtime holds may be a `FabricSpecialObject` — a byte sequence, a

@@ -22,12 +22,9 @@ import {
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { HarnessCfcInvocationContext } from "../contracts/cfc-invocation-context.ts";
+import { readDockerRuntimes } from "./docker-runtimes.ts";
 import { SandboxPathEscapeError } from "./errors.ts";
-import {
-  DenoProcessRunner,
-  type ProcessRunner,
-  type ProcessRunResult,
-} from "./process-runner.ts";
+import { DenoProcessRunner, type ProcessRunner } from "./process-runner.ts";
 import type {
   CfcSidecarTransportKind,
   CfcSidecarTransportReading,
@@ -880,35 +877,11 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
         ...this.#configuredTransportDirs(),
         reason,
       });
-    let result: ProcessRunResult;
-    try {
-      result = await this.#runner.run({
-        command: this.#dockerBinary,
-        args: ["info", "--format", "{{json .Runtimes}}"],
-      });
-    } catch (error) {
-      return unreadable(
-        `docker info could not be run: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-    if (result.exitCode !== 0) {
-      return unreadable(`docker info exited ${result.exitCode}`);
-    }
-    let runtimes: unknown;
-    try {
-      runtimes = JSON.parse(result.stdout);
-    } catch (error) {
-      return unreadable(
-        `docker info runtime table could not be parsed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
+    const result = await readDockerRuntimes(this.#dockerBinary, this.#runner);
+    if (result.unreadable !== undefined) return unreadable(result.unreadable);
     return cfcTransportReadinessFromDockerRuntimes({
       runtimeName: this.#runtimeName,
-      runtimes,
+      runtimes: result.runtimes,
       ...this.#configuredTransportDirs(),
     });
   }

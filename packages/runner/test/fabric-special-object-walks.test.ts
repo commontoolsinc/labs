@@ -47,6 +47,7 @@ import {
   FabricEpochNsec,
   FabricHash,
   FabricRegExp,
+  FabricUnavailable,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
   fabricAwareEqual,
@@ -124,6 +125,13 @@ const SPECIAL_OBJECTS: readonly SpecialObjectKind[] = [
     name: "FabricHash",
     cls: FabricHash,
     make: () => new FabricHash(new Uint8Array([9, 9]), "fid1"),
+    storable: true,
+    isInstance: false,
+  },
+  {
+    name: "FabricUnavailable",
+    cls: FabricUnavailable,
+    make: () => new FabricUnavailable("error", "general", "boom"),
     storable: true,
     isInstance: false,
   },

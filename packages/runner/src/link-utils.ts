@@ -679,8 +679,7 @@ function recursiveStripAsCellFromSchema(
 ): any {
   // Handle null/undefined/boolean schemas
   if (
-    schema === null ||
-    typeof schema !== "object" ||
+    !isObjectOrArray(schema) ||
     typeof schema === "boolean"
   ) {
     return schema;

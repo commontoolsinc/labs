@@ -43,7 +43,7 @@ not hold it, so a key that went reads as though it held the inherited member.
 Comparing the leaves themselves needs fabric-aware equality, a special value
 keeping its state in private fields. It returns when that diff has a test
 surface of its own
-([#7444](https://github.com/commontoolsinc/labs/issues/7444)).
+([#7444](https://github.com/commonfabric/labs/issues/7444)).
 Until then the frame shows the value and the event line above the prompt says
 which cell changed.
 
@@ -139,7 +139,7 @@ overview included.
   delivers every element's root document, so this is the one place shuttle
   reads below `Cell.sink`; the seam
   (`SpaceReplica.sinkDocument`) exists but is unexercised. Issue
-  [#6534](https://github.com/commontoolsinc/labs/issues/6534) carries the
+  [#6534](https://github.com/commonfabric/labs/issues/6534) carries the
   problem and the solution lanes. B3 opens by proving that seam on the
   remote path; if it disappoints, the fallback is a capped deep sink with
   an honest "watching first N" label.
@@ -169,6 +169,6 @@ overview included.
 1. When the piece overview gains liveness — deferred with the live piece
    watch. (The shallow-sink question is settled above: not expressible
    through `Cell.sink`; the raw-document seam and its proving gate are
-   issue [#6534](https://github.com/commontoolsinc/labs/issues/6534).)
+   issue [#6534](https://github.com/commonfabric/labs/issues/6534).)
 2. The pinned strip's layout — deferred with the strip itself
    ([`futures.md`](futures.md)).

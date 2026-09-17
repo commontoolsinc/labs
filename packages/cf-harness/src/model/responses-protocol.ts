@@ -1,6 +1,7 @@
 import { encodeHex } from "@std/encoding/hex";
 
 import { sha256 } from "@commonfabric/content-hash";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { OPENAI_WEB_SEARCH_NATIVE_MODEL_TOOL } from "../contracts/native-model-tool.ts";
 import type { HarnessModelToolDescriptor } from "../contracts/tool-descriptor.ts";
@@ -83,7 +84,7 @@ export type ContinuationModelMismatch = "throw" | "drop";
 const REPLAYABLE_ITEM_TYPES = ["reasoning", "compaction"] as const;
 
 const isReplayableItem = (item: unknown): item is ResponsesInputItem => {
-  if (typeof item !== "object" || item === null) return false;
+  if (!isObjectOrArray(item)) return false;
   const record = item as Record<string, unknown>;
   return (REPLAYABLE_ITEM_TYPES as readonly string[]).includes(
     record.type as string,
@@ -106,7 +107,7 @@ export const continuationOutput = (
 ): ResponsesInputItem[] => {
   if (continuation?.providerId !== providerId) return [];
   const state = continuation.state;
-  if (typeof state !== "object" || state === null || Array.isArray(state)) {
+  if (!isObjectNotArray(state)) {
     return [];
   }
   const record = state as Record<string, unknown>;
@@ -155,8 +156,7 @@ export const continuationFunctionCallItemId = (
 ): string | undefined => {
   if (
     continuation?.providerId !== providerId ||
-    typeof continuation.state !== "object" || continuation.state === null ||
-    Array.isArray(continuation.state)
+    !isObjectNotArray(continuation.state)
   ) return undefined;
   const record = continuation.state as Record<string, unknown>;
   if (
@@ -164,7 +164,7 @@ export const continuationFunctionCallItemId = (
     record.sourceModel !== model
   ) return undefined;
   const ids = record.functionCallItemIds;
-  if (typeof ids !== "object" || ids === null || Array.isArray(ids)) {
+  if (!isObjectNotArray(ids)) {
     return undefined;
   }
   const itemId = (ids as Record<string, unknown>)[callId];
@@ -186,7 +186,7 @@ const unchangedSearchOutput = (
     providerId !== "openai-codex" || continuation?.providerId !== providerId
   ) return undefined;
   const state = continuation.state;
-  if (typeof state !== "object" || state === null || Array.isArray(state)) {
+  if (!isObjectNotArray(state)) {
     return undefined;
   }
   const record = state as Record<string, unknown>;
@@ -242,10 +242,9 @@ export const materializeUserContent = async (
   for (const attachment of message.imageAttachments ?? []) {
     const part = await materializeImageAttachmentContentPart(attachment);
     const partRecord = part as Record<string, unknown>;
-    const imageUrl =
-      typeof partRecord.image_url === "object" && partRecord.image_url !== null
-        ? (partRecord.image_url as Record<string, unknown>).url
-        : undefined;
+    const imageUrl = isObjectOrArray(partRecord.image_url)
+      ? (partRecord.image_url as Record<string, unknown>).url
+      : undefined;
     if (typeof imageUrl !== "string") {
       throw new Error(
         `failed to materialize image attachment for ${label}`,
@@ -400,7 +399,7 @@ export const addFirstUserPromptCacheBreakpoint = (
     const content = item.content;
     for (let index = content.length - 1; index >= 0; index -= 1) {
       const block = content[index];
-      if (typeof block !== "object" || block === null) continue;
+      if (!isObjectOrArray(block)) continue;
       if (
         !("type" in block) ||
         (block.type !== "input_text" && block.type !== "input_image" &&
@@ -467,14 +466,12 @@ export const normalizeTerminalResponse = (
   const orderedOutput: ResponsesInputItem[] = [];
   const searchCalls: ResponsesInputItem[] = [];
   for (const rawItem of output) {
-    if (
-      typeof rawItem !== "object" || rawItem === null || Array.isArray(rawItem)
-    ) continue;
+    if (!isObjectNotArray(rawItem)) continue;
     const item = rawItem as Record<string, unknown>;
     if (item.type === "message" && Array.isArray(item.content)) {
       orderedOutput.push(structuredClone(item));
       for (const rawContent of item.content) {
-        if (typeof rawContent !== "object" || rawContent === null) continue;
+        if (!isObjectOrArray(rawContent)) continue;
         const content = rawContent as Record<string, unknown>;
         if (
           content.type === "output_text" && typeof content.text === "string"

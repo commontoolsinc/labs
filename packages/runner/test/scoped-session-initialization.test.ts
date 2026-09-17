@@ -17,6 +17,7 @@ import {
   resetServerExecutionConfig,
   setServerExecutionConfig,
 } from "@commonfabric/memory/v2";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 
@@ -585,7 +586,7 @@ describe("scoped-session-initialization", () => {
     expect(
       metadata!.labelMap.entries.flatMap((entry) => entry.label.integrity ?? [])
         .some((atom) =>
-          typeof atom === "object" && atom !== null &&
+          isObjectOrArray(atom) &&
           "type" in atom &&
           atom.type === "https://commonfabric.org/cfc/atom/InjectionSafe"
         ),

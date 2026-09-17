@@ -1,6 +1,7 @@
 import { fromFileUrl } from "@std/path";
 
 import { Database } from "@db/sqlite";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
   type HarnessChatBrowserAccessLease,
@@ -168,7 +169,7 @@ const resolvedDatabasePath = (url: URL): Promise<string> =>
   Deno.realPath(fromFileUrl(databaseAddress(url)));
 
 const isStoreHolder = (value: unknown): value is HarnessChatStoreHolder => {
-  if (typeof value !== "object" || value === null) {
+  if (!isObjectOrArray(value)) {
     return false;
   }
   const holder = value as Record<string, unknown>;

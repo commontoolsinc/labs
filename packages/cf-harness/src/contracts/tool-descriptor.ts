@@ -16,6 +16,7 @@ export type BuiltinToolId =
   | "read_piece_source"
   | "assign_slug"
   | "describe_handle"
+  | "finish_task"
   | "search_patterns"
   | "record_feedback"
   | "search_skills"
@@ -34,6 +35,7 @@ export const DEFAULT_PARENT_TOOL_IDS = [
   "write_file",
   "delegate_task",
   "describe_handle",
+  "finish_task",
 ] as const satisfies readonly BuiltinToolId[];
 
 /**

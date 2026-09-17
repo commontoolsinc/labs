@@ -6,6 +6,7 @@
  */
 
 import { html, LitElement, nothing, type TemplateResult } from "lit";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   type ConsoleArgumentRef,
   type ConsoleHandle,
@@ -43,7 +44,7 @@ const WIDE_NUMERIC_RUN = 32;
  */
 const atomNames = (clauses: readonly unknown[] = []): string[] =>
   clauses.map((clause) => {
-    const type = typeof clause === "object" && clause !== null
+    const type = isObjectOrArray(clause)
       ? (clause as { type?: unknown }).type
       : undefined;
     return typeof type === "string"

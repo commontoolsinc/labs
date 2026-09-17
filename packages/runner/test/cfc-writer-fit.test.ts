@@ -4,6 +4,7 @@ import type { FabricValue } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { cfcAtom } from "@commonfabric/api/cfc";
 import { streamEntriesDocId } from "@commonfabric/memory/v2";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
@@ -2758,7 +2759,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         // it changes — and the second clause stands beside it.
         expect(clauses.length).toBe(2);
         const orClause = clauses.find((clause) =>
-          typeof clause === "object" && clause !== null && "anyOf" in clause
+          isObjectOrArray(clause) && "anyOf" in clause
         ) as { anyOf: unknown[] } | undefined;
         expect(orClause).toBeDefined();
         expect(orClause!.anyOf.length).toBe(2);

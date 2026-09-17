@@ -10,14 +10,16 @@
  * write token to actually post it.
  *
  * No-ops when the file is absent. Keeps a single comment per PR: posts when none
- * exists, otherwise updates the existing one in place. When the payload says
- * coverage is resolved, it rewrites the existing comment into a collapsed
- * summary of where the PR left coverage (and does nothing if there is none).
+ * exists, otherwise updates the existing one in place. A payload carrying a
+ * body is posted that way whether it reports a regression or a run that went
+ * ungated. When the payload says coverage is resolved, it rewrites the existing
+ * comment into a collapsed summary of where the PR left coverage (and does
+ * nothing if there is none).
  * Best-effort: a failure is logged, not fatal, so the workflow stays green.
  *
  * Environment:
  *   GITHUB_TOKEN           - Required.
- *   GITHUB_REPOSITORY      - Optional, defaults to "commontoolsinc/labs".
+ *   GITHUB_REPOSITORY      - Optional, defaults to "commonfabric/labs".
  *   COVERAGE_COMMENT_FILE  - Optional, path to the payload file.
  */
 
@@ -113,12 +115,12 @@ export async function postCoverageComment(): Promise<void> {
       await githubPatch(`/repos/${REPO}/issues/comments/${marked.id}`, {
         body,
       });
-      console.log(`Updated coverage suggestion comment on PR #${prNumber}.`);
+      console.log(`Updated coverage comment on PR #${prNumber}.`);
       return;
     }
 
     await githubPost(`/repos/${REPO}/issues/${prNumber}/comments`, { body });
-    console.log(`Posted coverage suggestion comment to PR #${prNumber}.`);
+    console.log(`Posted coverage comment to PR #${prNumber}.`);
   } catch (error) {
     console.warn(
       `  Warning: could not post or update coverage comment on PR #${prNumber}: ${error}`,

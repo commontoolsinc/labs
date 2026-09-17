@@ -8,7 +8,7 @@
 export { TRUST_RUNS_MAX } from "./ci-trust-layout.ts";
 
 export const PORT = Number(Deno.env.get("DASHBOARD_PORT") ?? "8731");
-export const REPO = Deno.env.get("DASHBOARD_REPO") ?? "commontoolsinc/labs";
+export const REPO = Deno.env.get("DASHBOARD_REPO") ?? "commonfabric/labs";
 export const CI_WORKFLOW = "deno.yml";
 export const TEST_SELECTION_WORKFLOW = "test-selection.yml";
 
@@ -20,7 +20,7 @@ export const PROD_SERVICE = "toolshed-production";
 
 // The loom repo and its main CI workflow ("Tests (fast)"), for the loom-repo CI
 // tiles and the combined recent-runs stream.
-export const LOOM_REPO = Deno.env.get("DASHBOARD_LOOM_REPO") ?? "commontoolsinc/loom";
+export const LOOM_REPO = Deno.env.get("DASHBOARD_LOOM_REPO") ?? "commonfabric/loom";
 export const LOOM_CI_WORKFLOW = "test-fast.yml";
 
 // Shared fetch window: the fetch stops at whichever of these two yields fewer

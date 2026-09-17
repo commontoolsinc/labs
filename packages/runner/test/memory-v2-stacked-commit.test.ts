@@ -41,6 +41,7 @@ import {
   getLogger,
   getLoggerCountsBreakdown,
 } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { applyPatch } from "../../memory/v2/patch.ts";
 import {
@@ -852,7 +853,7 @@ const applyOperation = (
 };
 
 const isEntityDocumentValue = (value: unknown): value is { value: RootValue } =>
-  typeof value === "object" && value !== null && "value" in value;
+  isObjectOrArray(value) && "value" in value;
 
 const createLocalModel = (): Map<URI, LocalDocModel> =>
   new Map(

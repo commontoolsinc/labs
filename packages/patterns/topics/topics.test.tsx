@@ -377,7 +377,7 @@ export default pattern(() => {
   const action_link_valid_unlabeled = action(() => {
     boardVerbTopic.addLink.send({
       kind: "pr",
-      url: "https://github.com/commontoolsinc/labs/pull/4643",
+      url: "https://github.com/commonfabric/labs/pull/4643",
       label: "  ",
       agentName: "Sol",
     });
@@ -478,7 +478,7 @@ export default pattern(() => {
     (boardVerbTopic.links ?? []).length === 1 &&
     boardVerbTopic.links?.[0]?.kind === "pr" &&
     boardVerbTopic.links?.[0]?.label ===
-      "https://github.com/commontoolsinc/labs/pull/4643" &&
+      "https://github.com/commonfabric/labs/pull/4643" &&
     boardVerbTopic.links?.[0]?.addedBy?.name === "Sol" &&
     (boardVerbTopic.links?.[0]?.addedAt ?? 0) > 0
   );
@@ -603,10 +603,11 @@ export default pattern(() => {
     return inbound.length === 1 && equals(inbound[0], twinB);
   });
 
-  // `mentionedBy` lists a source once for each entry of the list it is handed
-  // whose mentions name the topic, so `twinA` at two entries is listed twice.
-  // The board's backlinks count a duplicated source once because the pivot
-  // hands `mentionedBy` the list `distinctByIdentity` returns.
+  // `mentionedBy()` lists a source once for each entry of the list it is
+  // handed whose mentions name the topic and which is not the topic itself,
+  // so `twinA` at two entries is listed twice. The board's backlinks count a
+  // duplicated source once because the pivot hands `mentionedBy()` the list
+  // `distinctByIdentity()` returns.
   const assert_mentioned_by_counts_each_matching_entry = assert(() => {
     const inbound = mentionedBy(
       twinB,
@@ -755,7 +756,8 @@ export default pattern(() => {
       // What the link points at is half the contract, and the half a rendered
       // card still looks right without. A binding to anything but the topic —
       // a view built for the card, a step into the board's own list — renders
-      // the same chip, and only a browser following it finds it leads nowhere.
+      // the same chip, so the comparison below is what separates them: the
+      // bound cell has to resolve to a topic the board holds.
       topics.some((topic) => equals(topic, link.props["$cell"]))
     );
   });
@@ -885,8 +887,9 @@ export default pattern(() => {
   //
   // A retraction stamps the record and leaves it in place. Driven on a
   // directly held topic that owns its own cells, for the reason the mention
-  // cases below are: these verbs write the topic's OWN lists, and the caller
-  // hands each one a REFERENCE to a stored element.
+  // cases below are: these verbs write the topic's OWN lists. The comment
+  // verbs are handed a REFERENCE to a stored element; the link retraction
+  // below names its record by `url`.
   const retractionComments = new Writable<TopicComment[]>([]);
   const retractionLinks = new Writable<TopicLink[]>([]);
   const retractionSubject = Topic({

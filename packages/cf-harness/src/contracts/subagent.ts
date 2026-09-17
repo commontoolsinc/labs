@@ -1,6 +1,7 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { JSONSchema } from "@commonfabric/api";
 import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL } from "@commonfabric/llm/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   type HarnessNativeModelToolId,
   type HarnessOpenAIWebSearchResult,
@@ -209,7 +210,7 @@ export const asHarnessSubagentFailureReport = (
   value: unknown,
 ): { code: HarnessSubagentFailureReasonCode } | undefined => {
   if (
-    typeof value !== "object" || value === null || Array.isArray(value) ||
+    !isObjectNotArray(value) ||
     (value as Record<string, unknown>).ok !== false
   ) {
     return undefined;
@@ -235,6 +236,12 @@ export const asHarnessSubagentFailureReport = (
  */
 export type HarnessSubagentReturnContractAuthority = "caller" | "profile";
 
+const VERIFICATION_REF_SCHEMA: JSONSchema = {
+  type: "string",
+  description:
+    "Optional reference to a run_pattern result comparing the old and new rule on the piece's actual inputs. Read its fields through run_pattern; this reference is separate from the revised piece's resultRef.",
+};
+
 /**
  * Return contract of the `pattern-author` profile: a discriminated union, so
  * a success and a failure are different SHAPES rather than different prose.
@@ -248,17 +255,18 @@ export type HarnessSubagentReturnContractAuthority = "caller" | "profile";
  * names what stopped it from the fixed inert vocabulary — no data read out of
  * the space, no partial result dressed as a whole one.
  *
- * The success branch is a RUNNING pattern's result cell and nothing else: a
- * reference, a line of prose about what it computes, and the hashtags supplied
- * for publication to the index. There is no field for source, in any
- * encoding, because a parent has no use for source it should not be
+ * The success branch names the running pattern's result cell, with a line of
+ * prose about what it computes and its publication hashtags. Either branch
+ * can name a separate verification result; reading its comparison goes
+ * through run_pattern's ordinary release rules. There is no field for source,
+ * in any encoding, because a parent has no use for source it should not be
  * compiling — the child ran the pattern, and reuse travels through the index,
  * where a searcher finds an atom by its hashtags and composes it by its
  * import specifier without the source passing through anyone's context.
  *
  * The free-form strings arrive at the parent as opaque links, the ordinary
  * treatment of unconstrained strings in a sanitized child return; `ok`, the
- * failure `code`, and the minted `resultRef` token are what the parent acts
+ * failure `code`, and the minted reference tokens are what the parent acts
  * on.
  */
 export const PATTERN_AUTHOR_RETURN_SCHEMA: JSONSchema = {
@@ -270,8 +278,9 @@ export const PATTERN_AUTHOR_RETURN_SCHEMA: JSONSchema = {
         resultRef: {
           type: "string",
           description:
-            "The reference run_pattern returned for the working pattern's result cell.",
+            "The working piece's result reference from run_pattern or revise_piece, never the verification probe's reference.",
         },
+        verificationRef: VERIFICATION_REF_SCHEMA,
         describes: {
           type: "string",
           description:
@@ -287,7 +296,13 @@ export const PATTERN_AUTHOR_RETURN_SCHEMA: JSONSchema = {
       required: ["ok", "resultRef", "describes"],
       additionalProperties: false,
     },
-    SUBAGENT_FAILURE_RETURN_SCHEMA,
+    {
+      ...SUBAGENT_FAILURE_RETURN_SCHEMA,
+      properties: {
+        ...SUBAGENT_FAILURE_RETURN_SCHEMA.properties,
+        verificationRef: VERIFICATION_REF_SCHEMA,
+      },
+    },
   ],
 };
 
@@ -309,7 +324,7 @@ export type HarnessDelegableSubagentProfile =
 export type HarnessSubagentProfile = HarnessDelegableSubagentProfile;
 export type HarnessSubagentModelSource = "parent" | "profile";
 export type { HarnessNativeModelToolId } from "./native-model-tool.ts";
-export type HarnessSubagentRunStatus = "completed" | "failed";
+export type HarnessSubagentRunStatus = "completed" | "failed" | "canceled";
 export type HarnessSubagentReturnChannel =
   typeof DEFAULT_SUBAGENT_RETURN_CHANNEL;
 

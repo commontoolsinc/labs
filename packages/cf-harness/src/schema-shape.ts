@@ -32,6 +32,7 @@
 
 import type { JSONSchema, JSONSchemaTypes } from "@commonfabric/api";
 import { FABRIC_PRIMITIVE_SCHEMA_TYPES } from "@commonfabric/api";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 /**
  * The `type` vocabulary passed through. A closed set, so a `type` cannot be
@@ -105,8 +106,7 @@ const referenceTokenName = (token: string): string | undefined =>
 
 const isSchemaRecord = (
   schema: JSONSchema,
-): schema is Exclude<JSONSchema, boolean> =>
-  typeof schema === "object" && schema !== null && !Array.isArray(schema);
+): schema is Exclude<JSONSchema, boolean> => isObjectNotArray(schema);
 
 /** Structural keywords whose value is a single subschema. */
 const SUBSCHEMA_KEYS = [

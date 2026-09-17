@@ -135,7 +135,7 @@ separate fields:
   "symbol": "default",
   "source": {
     "ref": "cf:pattern:<prefix-free-entry-module-hash>",
-    "repository": "https://github.com/commontoolsinc/labs",
+    "repository": "https://github.com/commonfabric/labs",
     "entry": "/packages/patterns/annotation.tsx",
     "origin": "cf:/did:key:z6Mk.../annotation"
   }

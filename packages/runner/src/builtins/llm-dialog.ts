@@ -331,7 +331,7 @@ function resolveRefsForLLM(
  * 2. Inlining all $ref references
  */
 function prepareSchemaForLLM(schema: JSONSchema): JSONSchema {
-  if (typeof schema !== "object" || schema === null) return schema;
+  if (!isObjectOrArray(schema)) return schema;
   const sanitized = sanitizeSchemaForLinks(schema);
   return resolveRefsForLLM(sanitized);
 }
@@ -494,8 +494,7 @@ function simplifySchemaForContext(
     // Preserve semantic markers and other primitive values, but skip complex
     // objects not handled above
     if (
-      PRESERVE_KEYS.includes(key) || typeof value !== "object" ||
-      value === null
+      PRESERVE_KEYS.includes(key) || !isObjectOrArray(value)
     ) {
       simplified[key] = value;
     }

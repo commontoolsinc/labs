@@ -7,6 +7,7 @@ import {
   undeclaredVerbFieldError,
 } from "../lib/callable.ts";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   type ExecCommandSpec,
   normalizeCallableInputForExecution,
@@ -2324,7 +2325,7 @@ describe("mounted callable resolution and execution", () => {
         symbol: "default",
         source: {
           ref: `cf:pattern:${"A".repeat(43)}`,
-          repository: "https://github.com/commontoolsinc/labs",
+          repository: "https://github.com/commonfabric/labs",
           entry: "/notes/note.tsx",
           origin: "file:///repo/notes/note.tsx",
         },
@@ -2366,7 +2367,7 @@ describe("mounted callable resolution and execution", () => {
       symbol: "default",
       source: {
         ref: `cf:pattern:${"A".repeat(43)}`,
-        repository: "https://github.com/commontoolsinc/labs",
+        repository: "https://github.com/commonfabric/labs",
         entry: "/notes/note.tsx",
         origin: "file:///repo/notes/note.tsx",
       },
@@ -3890,10 +3891,9 @@ function createMockCell(
       if (options?.childOverrides?.[key]) {
         return options.childOverrides[key];
       }
-      const nextValue =
-        typeof value === "object" && value !== null && !Array.isArray(value)
-          ? (value as Record<string, unknown>)[key]
-          : undefined;
+      const nextValue = isObjectNotArray(value)
+        ? (value as Record<string, unknown>)[key]
+        : undefined;
       const nextSchema = getChildSchema(schema, key);
       return createMockCell(nextValue, nextSchema);
     },
@@ -3907,17 +3907,13 @@ function getChildSchema(
   key: string,
 ): JSONSchema | undefined {
   if (
-    !schema || typeof schema !== "object" || schema === null ||
-    Array.isArray(schema)
+    !schema || !isObjectNotArray(schema)
   ) {
     return undefined;
   }
 
   const properties = schema.properties;
-  if (
-    typeof properties !== "object" || properties === null ||
-    Array.isArray(properties)
-  ) {
+  if (!isObjectNotArray(properties)) {
     return undefined;
   }
 

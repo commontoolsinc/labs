@@ -178,52 +178,57 @@ Deno.test({
       const patternDev = registry.skills.find((skill) =>
         skill.name === "pattern-dev"
       );
-      assertEquals(
+      expect(
         patternDev?.resources.map((resource) => [
           resource.path,
           resource.kind,
           resource.contentKind,
           resource.sandboxResourcePath,
         ]),
+      ).toEqual([
         [
-          [
-            "assets/logo.bin",
-            "asset",
-            "binary",
-            "/workspace/labs/skills/pattern-dev/assets/logo.bin",
-          ],
-          [
-            "notes.txt",
-            "other",
-            "text",
-            "/workspace/labs/skills/pattern-dev/notes.txt",
-          ],
-          [
-            "references/guide.md",
-            "reference",
-            "text",
-            "/workspace/labs/skills/pattern-dev/references/guide.md",
-          ],
-          [
-            "scripts/check.ts",
-            "script",
-            "text",
-            "/workspace/labs/skills/pattern-dev/scripts/check.ts",
-          ],
-          [
-            "scripts/not-deno.sh",
-            "script",
-            "text",
-            "/workspace/labs/skills/pattern-dev/scripts/not-deno.sh",
-          ],
-          [
-            "templates/scaffold.sh",
-            "template",
-            "text",
-            "/workspace/labs/skills/pattern-dev/templates/scaffold.sh",
-          ],
+          "assets/logo.bin",
+          "asset",
+          "binary",
+          "/workspace/labs/skills/pattern-dev/assets/logo.bin",
         ],
-      );
+        [
+          "notes.txt",
+          "other",
+          "text",
+          "/workspace/labs/skills/pattern-dev/notes.txt",
+        ],
+        [
+          "references/guide.md",
+          "reference",
+          "text",
+          "/workspace/labs/skills/pattern-dev/references/guide.md",
+        ],
+        [
+          "scripts/check.ts",
+          "script",
+          "text",
+          "/workspace/labs/skills/pattern-dev/scripts/check.ts",
+        ],
+        [
+          "scripts/not-deno.sh",
+          "script",
+          "text",
+          "/workspace/labs/skills/pattern-dev/scripts/not-deno.sh",
+        ],
+        [
+          "SKILL.md",
+          "other",
+          "text",
+          "/workspace/labs/skills/pattern-dev/SKILL.md",
+        ],
+        [
+          "templates/scaffold.sh",
+          "template",
+          "text",
+          "/workspace/labs/skills/pattern-dev/templates/scaffold.sh",
+        ],
+      ]);
       assertEquals(patternDev?.resources[0].sizeBytes, 4);
       assertEquals(patternDev?.resources[0].digest.startsWith("sha256:"), true);
       const script = patternDev?.resources.find((resource) =>
@@ -333,7 +338,8 @@ Deno.test({
 
       const registry = await discoverHarnessSkills({ skillsRoot: root });
 
-      assertEquals(registry.skills[0].resources, []);
+      expect(registry.skills[0].resources.map((resource) => resource.path))
+        .toEqual(["SKILL.md"]);
       assertEquals(
         registry.skills[0].diagnostics.map((diagnostic) => diagnostic.code),
         ["skill-resource-outside-root"],

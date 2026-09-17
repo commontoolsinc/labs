@@ -1433,10 +1433,6 @@ export class SpaceServer implements TransactionSealDestination {
           entry.eventId,
           entry.deliveryDeferral,
         );
-        this.#scheduleDeliveryFailureWake(
-          entry.eventId,
-          entry.deliveryDeferral,
-        );
       }
     }
     if (pendingEventDocs.length > 0) {
@@ -1507,6 +1503,11 @@ export class SpaceServer implements TransactionSealDestination {
 
     this.#active = true;
     this.#options.stats.activeSpaces += 1;
+    // The wakes for the checkpoints §6 step 4 replayed above: a wake is the
+    // active tenure's to hold.
+    for (const [eventId, checkpoint] of this.#deliveryCheckpoints) {
+      this.#scheduleDeliveryFailureWake(eventId, checkpoint);
+    }
     void this.#loop();
     return true;
   }
@@ -3144,6 +3145,12 @@ export class SpaceServer implements TransactionSealDestination {
     eventId: string,
     checkpoint: DeliveryDeferral,
   ): void {
+    // A wake belongs to the active tenure. #parkResources clears every one
+    // of these timers in the same synchronous run that clears #active, and
+    // the next activation arms afresh from the checkpoints it replays. A
+    // drain pass or a delivery callback that resumes during the park's
+    // awaits reaches this site with its own checks behind it.
+    if (!this.#active) return;
     this.#cancelDeliveryFailureWake(eventId);
     if (checkpoint.state !== "failed") return;
     const remaining = Math.max(
@@ -3157,9 +3164,10 @@ export class SpaceServer implements TransactionSealDestination {
     // This is the ratified timeout-policy exception: one wake at the
     // cumulative failed-state boundary. It neither cancels storage work nor
     // creates a retry cadence.
+    this.#options.stats.events.deliveryFailureWakesArmed += 1;
     const timer = setTimeout(() => {
       this.#deliveryFailureWakeTimers.delete(eventId);
-      if (!this.#active) return;
+      this.#options.stats.events.deliveryFailureWakesFired += 1;
       this.#eventScanOwed = true;
       this.#feedArrived?.resolve();
     }, remaining);
@@ -3665,7 +3673,9 @@ export class SpaceServer implements TransactionSealDestination {
    *   consequenced.
    *
    * Returns the number of events queued (the re-arm belt keys on it), or
-   * undefined when the serving tenure ends during a visibility wait.
+   * undefined when the serving tenure ends during any of the pass's own
+   * waits: a sidecar load, the visibility barrier's publication and
+   * response, or the stream document's load.
    */
   async #drainStreamEvents(runtime: Runtime): Promise<number | undefined> {
     if (!this.#eventScanOwed) return 0;
@@ -4007,6 +4017,7 @@ export class SpaceServer implements TransactionSealDestination {
         } catch {
           // A cold stream doc defers like a cold piece load below.
         }
+        if (!this.#active || this.#runtime !== runtime) return undefined;
         // The load-park barrier's OTHER half, and it sits HERE — past
         // every await in the iteration, immediately before the queue —
         // on purpose. The scheduler-side barrier

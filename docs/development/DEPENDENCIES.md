@@ -522,16 +522,16 @@ and CI can disagree about what type checks.
 
 ### Astral
 
-Common Tools uses the published `@astral/astral` package. The root import map
+Common Fabric uses the published `@astral/astral` package. The root import map
 pins version 0.5.6. The repository does not carry a copy of Astral's source
 (it previously did).
 
 #### Local compatibility code
 
-Common Tools keeps its application-specific browser behavior at the integration
+Common Fabric keeps its application-specific browser behavior at the integration
 boundary:
 
-| Behavior | Common Tools owner | Published Astral surface |
+| Behavior | Common Fabric owner | Published Astral surface |
 | --- | --- | --- |
 | Query open shadow roots with `strategy: "pierce"` | `packages/integration/astral-adapter.ts` | Raw page protocol bindings and the public `ElementHandle` constructor |
 | Wait for a matching shadow element | `packages/integration/astral-adapter.ts` | Raw page protocol bindings |
@@ -589,7 +589,7 @@ The pull request's macOS check passed. Its Linux and Windows checks ended after
 ten minutes in tests that depended on `example.com`. The proposed local test
 server was split into
 [Astral pull request 167](https://github.com/lino-levan/astral/pull/167),
-which also remained open. Common Tools does not depend on either pull request.
+which also remained open. Common Fabric does not depend on either pull request.
 
 ## Debugging dependency problems
 

@@ -208,6 +208,7 @@ one.
 | Method | Route                        | Result                                                                                  |
 | ------ | ---------------------------- | --------------------------------------------------------------------------------------- |
 | `GET`  | `/api/health`                | Console health, configured Fabric API URL, and honestly limited Fabric-session liveness |
+| `GET`  | `/api/health/detail`         | Cached operator observations with deciding records, times, causes, and remedies         |
 | `POST` | `/api/task`                  | Starts a session or a follow-up turn                                                    |
 | `POST` | `/api/cancel`                | Cancels the active turn                                                                 |
 | `GET`  | `/api/sessions`              | Durable session summaries                                                               |
@@ -227,6 +228,42 @@ and HTTP reachability, configuration, or factory existence says nothing about
 whether a retained session can complete an operation. The field does not spend a
 provider turn or make a Fabric round trip. A caller needing proven substrate
 liveness must perform a separate probe.
+
+`GET /api/health/detail` returns `{version: 1, generatedAt, rows}` for an
+operator status panel. Each flat row carries `id`, `group`, `label`, `state`,
+`value`, `source`, and `checkedAt`. `source` is always a short human label;
+optional `detail` is one opaque string retaining the exact deciding paths,
+command, or endpoint for a selectable disclosure. URL credentials, query values,
+fragments, and connector references are omitted. Fixed labels use Title Case;
+connection names retain their recorded spelling. `reason`, when present,
+explains the cause; `remedy` names the operator action that can change it.
+Groups are open strings so clients can render new checks without learning new
+fields. `generatedAt` timestamps the snapshot; `checkedAt` timestamps each
+deciding observation. States are `ok`, `degraded`, `failed`, or `unknown`. Only
+an unknown row can have a null timestamp. An unavailable observation stays
+unknown rather than claiming a failure.
+
+Configuration rows name the active console address, port, space, store, model,
+and skill-script switch. The launcher passes its decision report directly into
+the server: connector rows retain every accepted or refused grant, its CFC class
+or refusal reason, and the injection receipt and piece declaration that decided
+it. Changing those files requires a console restart to establish new grants. A
+server flag takes precedence over the inherited launch value and its source. A
+directly configured server reports its explicit grants and marks the full
+connector inventory unknown. An absent injection receipt is also unknown; an
+observed empty receipt establishes an empty inventory.
+
+External rows check the running Docker daemon's `runsc-cfc` registration and the
+configured index's health and enrollment for the console identity. Each probe
+caches independently for 30 seconds. Reading the route returns the current
+snapshot immediately and schedules stale checks in the background, sharing any
+in-flight check. No probe is awaited by the route. The timestamp remains visible
+while an observation is being refreshed. Model rows describe the startup
+provider and credential source without exposing credentials or making a model
+request; a configured API key does not prove provider acceptance. Docker
+registration does not prove a sandbox can execute a task. Fabric-session
+liveness remains unverified, and Loom, toolshed, and application pin status
+belong to the application that observes them directly.
 
 A task body carries the text, optionally the session to continue, and optionally
 the cells the task is to be computed over, published patterns, and the
@@ -312,6 +349,9 @@ The completed-turn result is:
 
 ```json
 {
+  "outcome": "completed",
+  "sessionId": "…",
+  "continuable": true,
   "looms": [],
   "pieces": [
     {
@@ -323,6 +363,24 @@ The completed-turn result is:
   "finalText": "Your reading list is ready."
 }
 ```
+
+`outcome` is `completed`, `question`, or `gave-up`. All three are normally ended
+turns and return **200**. A question includes `question: { "text": "…" }`; a
+give-up includes `reason: "…"`. Each field is present only for its matching
+outcome. `finalText` carries the human-readable answer, question, or reason in
+every case. An older result without `outcome` means `completed`. When reading
+stored artifacts, an unfamiliar nonempty outcome word also means `completed`, so
+a pin change or rollback does not hide a finished turn's result. Its `finalText`
+remains available. Malformed objects remain invalid; new tool calls and writes
+use the closed three-outcome contract.
+
+`sessionId` identifies the conversation on every result. `continuable` says
+whether it currently accepts another turn: the session must be idle and
+reusable. A reply uses the existing task route with that `sessionId`, so the
+question and its tool context remain in the conversation after a restart too.
+Clients retain the piece-to-session association for questions and give-ups as
+well as completed tasks. A closed or busy session reports `continuable: false`;
+this preflight value can change before the next request arrives.
 
 `pieces` is always present, including as `[]` when the run assigned no slug.
 `looms` is also always present: it contains verified current-turn composition
@@ -361,10 +419,18 @@ every way it can fail, not only after the model has been asked.
 
 The same holds for the run behind the turn. Its `run-state.json` under the
 artifact root reads `status: "running"` from the moment the turn takes it,
-through every tool call, until the turn ends; `completed` or `failed`, with
-`endedAt` and `terminalReason`, appear once and only when it is over. A `failed`
-run carries the failure under `failureRecords` and `primaryFailure`, and
-`terminalReason: "setup_error"` names the run that never reached a model turn.
+through every tool call, until the turn ends; `completed`, `failed`, or
+`canceled`, with `endedAt` and `terminalReason`, appear once and only when it is
+over. A `failed` run carries the failure under `failureRecords` and
+`primaryFailure`, and `terminalReason: "setup_error"` names the run that never
+reached a model turn. The run's controlling abort signal records
+`status: "canceled"`, `terminalReason: "canceled"`, and `cancelReason` in both
+state and report. Cancellation adds no failure record. Active delegated children
+unwind with the same outcome; children that already completed keep their
+outcome. A tool output returned during cancellation remains in the artifacts and
+is linked from the canceled tool activity. An unrelated provider `AbortError` is
+a failure unless the run's own signal was aborted. Resuming a run clears its
+prior terminal status and cancellation reason.
 
 ## What you'll see
 
@@ -379,10 +445,17 @@ Start. The feed then shows, in the order the harness produces them:
   assistant lines as they happen and closing with the child's status.
 - **the final text** of the turn, in a boxed entry, when it completes.
 
-The `turn_completed` event also carries the same structured object under
-`result`. Live streams and replayed durable events have the same shape, so a
-caller can open `result.pieces[0].url` without parsing assistant prose. Pollers
-read the same object from `GET /api/turns/<turnId>/result`.
+The `turn_completed` event carries the same `outcome` and its matching question
+or reason at the event level, and the structured object under `result`. Its turn
+attribution is unchanged. Live streams and replayed durable events have the same
+shape, so a caller can open `result.pieces[0].url` without parsing assistant
+prose. Pollers read the same object from `GET /api/turns/<turnId>/result`.
+
+The parent calls `finish_task` alone to ask a question or explain why it cannot
+proceed. This uses the ordinary tool policy and artifact path, then ends the
+turn without another model request. The live pane shows the sentence as "waiting
+for your answer" or "stopped", without a failure badge. Child agents report
+blockers to their parent; they cannot end the user's task themselves.
 
 When the run names a piece, the `assign_slug` result carries a `slug` and a
 `url`, and the page raises an **Open your piece** link above the feed. That link
@@ -527,14 +600,14 @@ gating on, installs the standard prompt-caveat policy, and gives the
 network-fetch sinks public-only confidentiality ceilings. The server prints the
 posture it resolved at startup, so what a run ran under is never a guess.
 
-The bundle leaves the enforcement pin at `enforce-explicit`; `enforce-strict`
-stays a deliberate per-session raise. Each dial has a flag, and the flag wins:
+The bundle names no enforcement mode, so the session keeps the core's
+`enforce-strict` pin. Each dial has a flag, and the flag wins:
 
 | Flag                            | Environment                              | Default                            |
 | ------------------------------- | ---------------------------------------- | ---------------------------------- |
 | `--fabric-cfc-posture`          | `CF_HARNESS_FABRIC_CFC_POSTURE`          | `max-enforcement` (`none` to drop) |
 | `--fabric-cfc-flow-labels`      | `CF_HARNESS_FABRIC_CFC_FLOW_LABELS`      | the posture's `persist`            |
-| `--fabric-cfc-enforcement-mode` | `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE` | `enforce-explicit`                 |
+| `--fabric-cfc-enforcement-mode` | `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE` | `enforce-strict`                   |
 
 These govern the runtime `run_pattern` deploys patterns into. The harness's own
 `cfcEnforcementMode`, which governs tool policy and the sandbox, is a separate

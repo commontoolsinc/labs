@@ -72,7 +72,7 @@ describe("test-cfc-posture", () => {
     );
     expect(code).toBe(0);
     expect(stdout.join("\n")).toContain(
-      "enforcement=enforce-explicit flowLabels=observe",
+      "enforcement=enforce-strict flowLabels=observe",
     );
   });
 

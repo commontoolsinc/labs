@@ -22,6 +22,7 @@
  * establishes nothing and is left for the next collection.
  */
 
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { REPO } from "./config.ts";
 import { dashboardCacheFile } from "./history-files.ts";
 import { type GitHubDownload, jsonFromZip } from "./lib.ts";
@@ -118,7 +119,7 @@ const isMeasurement = (value: unknown): value is DayMeasurement => {
 };
 
 const isStoredDay = (value: unknown): value is StoredDay => {
-  if (typeof value !== "object" || value === null) return false;
+  if (!isObjectOrArray(value)) return false;
   const day = value as StoredDay;
   if (day.newestRun !== undefined && !isRunId(day.newestRun)) return false;
   return day.measured === undefined || isMeasurement(day.measured);
@@ -156,18 +157,18 @@ export function workspaceDebtOf(content: string): number | undefined {
   } catch {
     return undefined;
   }
-  if (typeof parsed !== "object" || parsed === null) return undefined;
+  if (!isObjectOrArray(parsed)) return undefined;
   const file = parsed as {
     metrics?: unknown;
     compileCacheStates?: Record<string, unknown>;
   };
   const states = file.compileCacheStates;
-  if (typeof states === "object" && states !== null) {
+  if (isObjectOrArray(states)) {
     if (Object.values(states).includes("cold")) return undefined;
   }
   if (!Array.isArray(file.metrics)) return undefined;
   for (const metric of file.metrics) {
-    if (typeof metric !== "object" || metric === null) continue;
+    if (!isObjectOrArray(metric)) continue;
     const record = metric as { name?: unknown; durationSeconds?: unknown };
     if (record.name !== WORKSPACE_METRIC) continue;
     const lines = record.durationSeconds;
@@ -203,7 +204,7 @@ export class CoverageDebtStore {
       return;
     }
     if (stored?.version !== STORE_VERSION) return;
-    if (typeof stored.days !== "object" || stored.days === null) return;
+    if (!isObjectOrArray(stored.days)) return;
     for (const [day, value] of Object.entries(stored.days)) {
       if (isStoredDay(value)) this.#days.set(day, value);
     }

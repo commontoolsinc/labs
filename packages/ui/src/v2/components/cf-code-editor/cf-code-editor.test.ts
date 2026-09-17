@@ -706,6 +706,16 @@ describe("CFCodeEditor short-name completion", () => {
   // name for each member. A row's piece is stored as a LINK, as the
   // resolution block above explains, so the fixtures hold raw `$link` sigils
   // and the mock network follows them exactly as the runtime does.
+  //
+  // The cases over a blank or absent name guard THIS component's handling of
+  // one, not any collection's choice to show its names: a collection that
+  // numbers its members and shows none of the numbers hands rows whose name is
+  // the empty string, and a universe listing pieces that publish none hands
+  // entries with no name at all. A collection that starts showing its numbers
+  // again leaves those cases green by construction. What reds them is this
+  // component finding a name where there is none — reading the display name
+  // when the collection's name is blank, which is what the `42 apples`
+  // fixtures are shaped to catch.
 
   type ShortNameInternals = {
     mentionable: CellHandle<MentionableArray> | null;
@@ -772,14 +782,40 @@ describe("CFCodeEditor short-name completion", () => {
     };
   }
 
-  /** An editor bound to `UNIVERSE`, with every row's piece resolved. */
+  /**
+   * The same universe with every name blanked, which is what a collection that
+   * numbers its members and shows none of the numbers hands its editors: a row
+   * is a copy, and a copy of an absent name is the empty string.
+   */
+  const BLANKED = UNIVERSE.map((entry) => ({ ...entry, shortName: "" }));
+
+  /**
+   * A universe that is the pieces themselves rather than copies of them —
+   * what an editor reads before its collection's derived universe is wired
+   * onto it. An entry carries no `piece`, so the entry IS the piece, and
+   * `shortName` here is what that piece publishes for itself.
+   *
+   * The display name opens with the digits a query types, as the fourth row of
+   * `UNIVERSE` does, so that an entry publishing no name is offered only if
+   * this component asks the query of something other than `shortName`.
+   */
+  const direct = (shortName?: string) => [
+    {
+      [NAME]: "42 apples",
+      title: "42 apples",
+      ...(shortName === undefined ? {} : { shortName }),
+    },
+  ];
+
+  /** An editor bound to `rows`, with every row's piece resolved. */
   async function editorOver(
     doc: string,
     references?: CellHandle<MentionRefMap>,
+    rows: unknown[] = UNIVERSE,
   ) {
     const element = new CFCodeEditor() as unknown as ShortNameInternals;
     element.mentionable = createMockCellHandle(
-      UNIVERSE,
+      rows,
     ) as unknown as CellHandle<MentionableArray>;
     if (references) {
       // Defined rather than assigned, so Lit's reactive property setter does
@@ -817,6 +853,34 @@ describe("CFCodeEditor short-name completion", () => {
 
   it("offers no row whose name the query does not begin", async () => {
     const { source, view } = await editorOver("see #9");
+    expect(source(new CompletionContext(view.state, 6, true))?.options)
+      .toEqual([]);
+  });
+
+  it("offers no row where every row's name is blank", async () => {
+    const { source, view } = await editorOver("see #4", undefined, BLANKED);
+    expect(source(new CompletionContext(view.state, 6, true))?.options)
+      .toEqual([]);
+  });
+
+  it("offers a piece the universe lists directly by the name it publishes", async () => {
+    // The control for the case below, and the state it pins: where the
+    // universe is the pieces themselves, the name a piece publishes is the one
+    // this query offers.
+    const { source, view } = await editorOver(
+      "see #4",
+      undefined,
+      direct("42"),
+    );
+    expect(
+      source(new CompletionContext(view.state, 6, true))?.options.map((
+        option,
+      ) => option.label),
+    ).toEqual(["#42"]);
+  });
+
+  it("offers no piece the universe lists directly where it publishes no name", async () => {
+    const { source, view } = await editorOver("see #4", undefined, direct());
     expect(source(new CompletionContext(view.state, 6, true))?.options)
       .toEqual([]);
   });
@@ -1034,6 +1098,13 @@ describe("CFCodeEditor mention short names", () => {
   // and every destination publishes a `shortName` of its own, so an editor
   // reading the destination instead announces a different name, or one where
   // none belongs.
+  //
+  // The two cases over a name that is not there — a row carrying the empty
+  // name, and a universe listing a piece that publishes none — guard THIS
+  // component's handling of one, the way the completion block above does. A
+  // collection that starts showing its numbers again leaves them green; what
+  // reds them is a pill taking a blank name as a name, or taking the
+  // destination's name when the row carries none.
 
   type PillInternals = {
     mentionable: CellHandle<MentionableArray> | null;
@@ -1197,6 +1268,73 @@ describe("CFCodeEditor mention short names", () => {
     await publication();
 
     expect(refShortNames(view.state)).toEqual({ [OTHER_KEY]: "43" });
+  });
+
+  it("announces no name where the row standing for the destination carries a blank one", async () => {
+    // A universe whose collection numbers its members and shows none of the
+    // numbers carries the empty name on every row. The other mention's row
+    // carries a name and one publication decides both, so this absence is
+    // decided rather than not yet reached — and its destination publishes a
+    // name, so a pill reading the destination would show one here.
+
+    const { element, view } = editorOver(
+      `See [Second item][${KEY}] and [Third item][${OTHER_KEY}].`,
+      {
+        [KEY]: destination("of:item-42", "Second item", "42"),
+        [OTHER_KEY]: destination("of:item-43", "Third item", "43"),
+      },
+      [
+        row("of:item-42", "Second item", ""),
+        row("of:item-43", "Third item", "43"),
+      ],
+    );
+
+    await element._resolvePieceIds();
+    element._setupRefDestinationSubscriptions();
+    await publication();
+
+    expect(refShortNames(view.state)).toEqual({ [OTHER_KEY]: "43" });
+  });
+
+  describe("a universe that lists the pieces themselves", () => {
+    // What an editor reads before its collection's derived universe is wired
+    // onto it. An entry carries no `piece`, so the entry IS the piece, and the
+    // name a pill can show is the one that piece publishes.
+
+    /**
+     * The names announced over a universe holding one piece, which publishes
+     * `shortName` when it is given one, and is the destination of the
+     * document's one mention.
+     */
+    async function namesUnderDirect(shortName?: string) {
+      const { element, view } = editorOver(
+        `See [Second item][${KEY}].`,
+        {
+          [KEY]: destination("of:universe", "Second item", shortName ?? "", {
+            path: ["0"],
+          }),
+        },
+        [{
+          [NAME]: "Second item",
+          title: "Second item",
+          ...(shortName === undefined ? {} : { shortName }),
+        }],
+      );
+
+      await element._resolvePieceIds();
+      element._setupRefDestinationSubscriptions();
+      await publication();
+
+      return refShortNames(view.state);
+    }
+
+    it("announces the name the listed piece publishes", async () => {
+      expect(await namesUnderDirect("42")).toEqual({ [KEY]: "42" });
+    });
+
+    it("announces no name where the listed piece publishes none", async () => {
+      expect(await namesUnderDirect()).toEqual({});
+    });
   });
 
   describe("a row sharing the destination's document id", () => {

@@ -12,6 +12,7 @@ import type { JSONSchema } from "@commonfabric/runner/shared";
 import { CellHandle, PieceHandle, VNode } from "@commonfabric/runtime-client";
 import type { DID } from "@commonfabric/identity";
 import { openPieceMenu } from "@commonfabric/ui";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 type SubPages = {
   sidebarUI?: VNode;
@@ -274,7 +275,7 @@ function loadErrorMessage(error: unknown): string {
     if (error instanceof Error) {
       message = error.message;
     } else if (
-      typeof error === "object" && error !== null && "message" in error &&
+      isObjectOrArray(error) && "message" in error &&
       typeof error.message === "string"
     ) {
       message = error.message;

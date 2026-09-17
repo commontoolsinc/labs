@@ -21,7 +21,11 @@ import {
   constructorOfObject,
   isInertPlainObject,
 } from "@commonfabric/utils/objects";
-import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";
+import {
+  isObjectOrArray,
+  isPlainObject,
+  unsafeObjectKeyIn,
+} from "@commonfabric/utils/types";
 
 import { BaseFabricInstance } from "@/fabric-bases/BaseFabricInstance.ts";
 import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
@@ -166,7 +170,7 @@ export function assertValidFabricValueLayer(
   // Read once, and let every arm below share it. A `constructor` accessor is
   // ordinary code and may answer differently each time it is asked, so asking
   // it repeatedly would let one refusal name two different classes.
-  const ctor = ((value !== null) && (typeof value === "object"))
+  const ctor = isObjectOrArray(value)
     ? constructorElseUndefined(value)
     : undefined;
   // Compared with `Array` itself rather than asked of the tag lookup, which
@@ -306,7 +310,7 @@ export function isValidFabricValue(value: unknown): value is FabricValue {
     // symbols are not portable across realms and are rejected, matching
     // `isValidFabricValueLayer()`.
     return Symbol.keyFor(value) !== undefined;
-  } else if (value === null || typeof value !== "object") {
+  } else if (!isObjectOrArray(value)) {
     // A non-function, non-symbol primitive -- a direct `FabricValue` member.
     return true;
   }
@@ -317,7 +321,7 @@ export function isValidFabricValue(value: unknown): value is FabricValue {
   const check = (item: unknown): boolean => {
     if (typeof item === "function") return false;
     if (typeof item === "symbol") return Symbol.keyFor(item) !== undefined;
-    if (item === null || typeof item !== "object") {
+    if (!isObjectOrArray(item)) {
       // A non-function, non-symbol primitive.
       return true;
     } else if (seen.has(item)) {

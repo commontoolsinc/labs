@@ -194,7 +194,8 @@ The hashed form applies everywhere this spec encodes a string via the
 `TAG_STRING` layout: standalone strings (this section), `symbol` keys (Section
 4.6), object keys (Section 4.13), `FabricInstance` type tags (Section 4.14),
 `FabricHash` algorithm tags (Section 4.11), `FabricRegExp` source/flags/flavor
-strings (Section 4.16), and `FabricKeyPair` algorithm names (Section 4.17).
+strings (Section 4.16), `FabricKeyPair` algorithm names (Section 4.17), and
+`FabricUnavailable` reasons, kinds, and messages (Section 4.18).
 
 ### 4.5 `bigint`
 
@@ -397,11 +398,12 @@ Bytes: TAG_INSTANCE  TYPE_TAG_STRING  STATE
   recursively as a complete tagged value.
 
 > **Note on types with dedicated tags.** `FabricBytes`, `FabricEpochNsec`,
-> `FabricEpochDay`, `FabricHash`, `FabricRegExp`, and `FabricKeyPair` are
-> **not** hashed via `TAG_INSTANCE`. Each has a dedicated type tag and is
-> encoded directly (see Sections 4.8, 4.9, 4.10, 4.11, 4.16 and 4.17
-> respectively). These are all `FabricPrimitive` subclasses — at this layer they
-> are hashed from their own stored values, not via their wire codecs.
+> `FabricEpochDay`, `FabricHash`, `FabricRegExp`, `FabricKeyPair`, and
+> `FabricUnavailable` are **not** hashed via `TAG_INSTANCE`. Each has a
+> dedicated type tag and is encoded directly (see Sections 4.8, 4.9, 4.10,
+> 4.11, 4.16, 4.17 and 4.18 respectively). These are all `FabricPrimitive`
+> subclasses — at this layer they are hashed from their own stored values, not
+> via their wire codecs.
 
 ### 4.15 Holes (sparse array elements)
 
@@ -480,6 +482,39 @@ differently.
 is by construction unreachable, and its algorithm name alone is shared by every
 key of that algorithm, so hashing that would give distinct keys one identity.
 See `1-fabric-values.md` Section 1.4.11.
+
+### 4.18 `FabricUnavailable`
+
+```
+Bytes: TAG_UNAVAILABLE  REASON_STRING   ERROR_KIND       ERROR_MESSAGE
+       0x2D             <string, §4.4>  <string or null>  <string or null>
+```
+
+A string field is a complete tagged string value per Section 4.4; a `null`
+field is a complete tagged `null` per Section 4.1, the single byte `TAG_NULL`.
+
+`FabricUnavailable` represents a marker for data that is not available. It is
+a `FabricPrimitive` subclass and has a dedicated type tag; it is hashed from
+its own stored values (below) and is **not** hashed via `TAG_INSTANCE`.
+
+- **Reason**: The reason string (`pending`, `syncing`, or `error`), encoded as
+  a complete tagged string value per Section 4.4.
+- **Error kind**: For reason `error`, the kind string (`general`,
+  `schemaMismatch`, `invalidInput`, `network`, `decode`, `compile`,
+  `provider`, or `sync`), encoded as a complete tagged string value per
+  Section 4.4. For a transient reason, a complete tagged `null` per Section
+  4.1 — the single byte `TAG_NULL` — standing where the kind would be.
+- **Error message**: The message as stored (`rawErrorMessage`), encoded as a
+  complete tagged string value per Section 4.4, when there is one. When there
+  is none — for a transient reason, and for an `error` whose message was never
+  given or was given as its kind's default — a complete tagged `null`.
+
+The three fields are fed in order — reason, kind, message — with no enclosing
+container and no `TAG_END` terminator, since the field count is fixed. Every
+position is always fed, so the stream for a transient reason is the reason
+followed by two `TAG_NULL` bytes. The default message a kind supplies is not
+hashed: an `error` whose message is its kind's default hashes as one with no
+message. See `1-fabric-values.md` Section 1.4.12.
 
 ---
 
@@ -772,10 +807,52 @@ hashed form.
 This rule applies to every string the hasher feeds, including standalone strings
 (Section 4.4), `symbol` keys (Section 4.6), object keys (Section 4.13),
 `FabricInstance` type tags (Section 4.14), `FabricHash` algorithm tags (Section
-4.11), `FabricRegExp` source/flags/flavor strings (Section 4.16), and
-`FabricKeyPair` algorithm names (Section 4.17). The threshold is evaluated
+4.11), `FabricRegExp` source/flags/flavor strings (Section 4.16),
+`FabricKeyPair` algorithm names (Section 4.17), and `FabricUnavailable`
+reasons, kinds, and messages (Section 4.18). The threshold is evaluated
 per-string independently: an object may mix short keys (direct form) and long
 keys (hashed form) in the same key-value sequence.
+
+### 7.20 `FabricUnavailable("error", "network", "boom")` and `FabricUnavailable("pending")`
+
+`FabricUnavailable` is a `FabricPrimitive` with the dedicated tag
+`TAG_UNAVAILABLE` (`0x2D`); it is hashed by feeding its reason, its kind, and
+its stored message, the last two as tagged strings when present and as
+`TAG_NULL` when absent (Section 4.18). All strings here are under the 64-byte
+threshold, so each uses the direct string form.
+
+For `FabricUnavailable("error", "network", "boom")`:
+
+- Unavailable tag: `2D`
+- Reason `"error"` (5 bytes UTF-8): `24 05 65 72 72 6F 72`
+- Kind `"network"` (7 bytes UTF-8): `24 07 6E 65 74 77 6F 72 6B`
+- Message `"boom"` (4 bytes UTF-8): `24 04 62 6F 6F 6D`
+
+Full byte stream:
+```
+2D
+24 05 65 72 72 6F 72
+24 07 6E 65 74 77 6F 72 6B
+24 04 62 6F 6F 6D
+```
+
+For `FabricUnavailable("pending")`, which carries neither kind nor message:
+
+- Unavailable tag: `2D`
+- Reason `"pending"` (7 bytes UTF-8): `24 07 70 65 6E 64 69 6E 67`
+- Kind, absent: `20`
+- Message, absent: `20`
+
+Full byte stream:
+```
+2D
+24 07 70 65 6E 64 69 6E 67
+20
+20
+```
+
+There is no enclosing object and no `TAG_END` terminator — the three fields are
+fed positionally.
 
 ---
 

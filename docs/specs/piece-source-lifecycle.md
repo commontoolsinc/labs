@@ -650,19 +650,39 @@ while adding an optional typed read requires the producer to guarantee that
 type whenever the property is present.
 
 Link materialization fills valid target defaults before validating the consumer
-view. Its subset proof can therefore accept an unconstrained producer (`true`)
+view. Its subset proof can therefore accept a producer `{ required: ["title"] }`
 against `{ required: ["count"], properties: { count: { default: 1 } } }`:
 the member accepts any present value, and materialization fills an absent one.
-This allowance requires every ancestor constraint to remain valid under default
-insertion. Pattern evolution judges defaults as a migration; it does not use
-this link-materialization allowance. Its policy permitting new optional or
-defaulted fields on open argument objects is disabled inside the unconstrained
-schema proof and conjunction proofs.
+A `FabricPrimitive` is frozen and receives no default, so the allowance also
+requires every `FabricPrimitive` class the producer admits to have the field
+already. An unconstrained producer (`true`), or `{ type: "object" }` with no
+`required`, admits every class and cannot use it. This allowance requires every
+ancestor constraint to remain valid under default insertion. Pattern evolution
+judges defaults as a migration; it does not use this link-materialization
+allowance. Its policy permitting new optional or defaulted fields on open
+argument objects is disabled inside the unconstrained schema proof and
+conjunction proofs. A stored `FabricPrimitive` that lacks a newly defaulted
+field passes that policy, and setup's stored-argument validation refuses it.
 
 Union comparisons check defaults on the complete schemas before comparing
 alternatives, then omit the root default from both sides of each alternative
 comparison. Descendant defaults remain checked. This applies to both pattern
 evolution and link proofs, under their respective default policies.
+
+Literal comparisons intersect `const` and `enum` with the declared `type`, so
+values that the type excludes do not restrict a widening. A `null` type proves
+membership in an enum or const containing `null`. Source enums containing
+several JSON value types are partitioned by type, including beside a type list
+or within nested `anyOf` branches, with sibling constraints and branch metadata
+retained. Each partition must satisfy a target alternative. Target enums remain
+whole, and an enum containing a value outside the JSON type vocabulary, such as
+a `FabricPrimitive`, remains subject to the conservative object proof. During
+pattern evolution, a branch stays whole if partitioning would change the
+effective default it supplies, including defaults inherited from a child branch
+or a reference. Link proofs compare target defaults only, so source defaults do
+not limit partitioning there. These rules permit adding an option to a nullable
+literal argument while still refusing to remove an admitted option or widen a
+result contract.
 
 An incompatible pattern contract or retained link becomes an
 actionable warning. The UI requires explicit confirmation, and command-line

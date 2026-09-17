@@ -11,6 +11,7 @@ import {
   type PresenceCursor,
 } from "./codemirror-presence.ts";
 import { hashStringOf } from "@commonfabric/data-model";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 const protocolVersion = 1;
 const roomPattern = /^[A-Za-z0-9_-]{22,128}$/;
@@ -142,7 +143,7 @@ export function copresenceRoomForField(
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return isObjectNotArray(value);
 }
 
 function hasExactKeys(

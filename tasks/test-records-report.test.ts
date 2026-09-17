@@ -46,7 +46,7 @@ function contextOn(startedAt: string): RunContext {
     schema: 1,
     line: "context",
     reportId: "01REPORTTEST000000000000",
-    repo: "commontoolsinc/labs",
+    repo: "commonfabric/labs",
     commit: "c".repeat(40),
     dirty: false,
     env: "local",
@@ -62,7 +62,7 @@ describe("test-records-report", () => {
     it("returns runs, failures, and the worst duration per identity", () => {
       const byIdentity = aggregate([
         report("a", [record("glaze", "pass", 10), record("glaze", "fail", 90)]),
-        report("b", [record("glaze", "pass", 40)]),
+        report("b", [record("glaze", "pass", 5)]),
       ]);
       const entry = byIdentity.get(identityKey({
         k: "unit",
@@ -74,8 +74,34 @@ describe("test-records-report", () => {
         runs: 3,
         failures: 1,
         skips: 0,
-        maxDurationMs: 90,
+        maxDurationMs: 10,
       });
+    });
+
+    it("takes the duration from passing records alone", () => {
+      // A failure ended by a wait's safety net reports that net's bound,
+      // so a duration read from one describes the net rather than the
+      // test.
+
+      const byIdentity = aggregate([
+        report("a", [
+          record("glaze", "fail", 300_000),
+          record("glaze", "pass", 40),
+        ]),
+      ]);
+      const entry = byIdentity.get(identityKey({
+        k: "unit",
+        s: "bakery",
+        n: "glaze",
+      }));
+      expect(entry).toEqual({
+        key: '["unit","bakery","glaze"]',
+        runs: 2,
+        failures: 1,
+        skips: 0,
+        maxDurationMs: 40,
+      });
+      expect(overSixtySeconds(byIdentity)).toEqual([]);
     });
 
     it("leaves out a lane's measurements of itself", () => {
@@ -271,7 +297,7 @@ describe("test-records-report", () => {
         now: NOW,
         fetchImpl: reportFetch({
           "same-repository.ndjson": ciBody(false, [record("fast", "pass", 5)]),
-          "forked.ndjson": ciBody(true, [record("slow", "fail", 90_000)]),
+          "forked.ndjson": ciBody(true, [record("slow", "pass", 90_000)]),
         }),
       });
       expect(gateFailed).toBe(true);

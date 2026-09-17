@@ -41,7 +41,7 @@ function contextOn(day: string): RunContext {
     schema: 1,
     line: "context",
     reportId: "01COMPACT000000000000000",
-    repo: "commontoolsinc/labs",
+    repo: "commonfabric/labs",
     commit: "e".repeat(40),
     dirty: false,
     env: "ci",

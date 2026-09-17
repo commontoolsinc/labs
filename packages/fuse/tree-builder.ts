@@ -1,6 +1,7 @@
 // tree-builder.ts — Convert JSON values to FsTree nodes
 
 import { isLinkRef, type SigilLink } from "@commonfabric/runner/shared";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { CfcJsonAnnotationContext } from "./annotations.ts";
 import {
@@ -105,7 +106,7 @@ export function safeStringify(value: unknown, indent = 2): string {
   return JSON.stringify(
     value,
     function (this: unknown, _key, val) {
-      if (val !== null && typeof val === "object") {
+      if (isObjectOrArray(val)) {
         while (
           ancestors.length > 0 &&
           ancestors[ancestors.length - 1] !== this
@@ -182,8 +183,7 @@ export { isHandlerCell, isStreamValue } from "./callables.ts";
 
 /** Returns true if the value is a VNode (virtual DOM element). */
 export function isVNode(value: unknown): boolean {
-  return typeof value === "object" && value !== null &&
-    !Array.isArray(value) &&
+  return isObjectNotArray(value) &&
     (value as Record<string, unknown>).type === "vnode";
 }
 
@@ -480,7 +480,7 @@ function buildJsonTreeNode(
   // twin `buildJsonTreeAsync` below shares the shape. Wants a
   // `FabricSpecialObject` test taking the scalar-entry arm with a rendered
   // form of the value.
-  if (value === null || value === undefined || typeof value !== "object") {
+  if (!isObjectOrArray(value)) {
     return addJsonScalarEntry(tree, parentIno, fsName, value, annotation);
   }
 

@@ -20,6 +20,7 @@ import {
   mergeCfcLabelViews,
 } from "@commonfabric/runner/cfc";
 import { mergeLabel } from "@commonfabric/runner/cfc/label-view-core";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
   createFileSystemHarnessArtifactStore,
@@ -210,6 +211,7 @@ import {
   type EditFileToolInput,
   type EditFileToolOutput,
 } from "./tools/edit-file.ts";
+import type { FinishTaskInput, FinishTaskOutput } from "./tools/finish-task.ts";
 import {
   type ReadFileToolInput,
   type ReadFileToolOutput,
@@ -282,6 +284,7 @@ export interface BuiltinToolInputMap {
   revise_piece: RevisePieceToolInput;
   assign_slug: AssignSlugToolInput;
   describe_handle: DescribeHandleToolInput;
+  finish_task: FinishTaskInput;
   search_patterns: SearchPatternsToolInput;
   record_feedback: RecordFeedbackToolInput;
   search_skills: SearchSkillsToolInput;
@@ -308,6 +311,7 @@ export interface BuiltinToolOutputMap {
   revise_piece: RevisePieceToolOutput;
   assign_slug: AssignSlugToolOutput;
   describe_handle: DescribeHandleToolOutput;
+  finish_task: FinishTaskOutput;
   search_patterns: SearchPatternsToolOutput;
   record_feedback: RecordFeedbackToolOutput;
   search_skills: SearchSkillsToolOutput;
@@ -461,8 +465,7 @@ export interface BuiltinToolInvocationResult<
 }
 
 const isToolOutputWithId = (value: unknown): value is ToolOutputWithId =>
-  typeof value === "object" &&
-  value !== null &&
+  isObjectOrArray(value) &&
   "outputId" in value &&
   typeof value.outputId === "string";
 
@@ -925,12 +928,10 @@ export class CfHarnessEngine {
     // either record win silently. A run resumed without a session keeps its
     // record as history (no runtime exists for it to contradict). A LEGACY
     // record — one that never captured a posture — stays absent rather than
-    // being backfilled, and stays frozen as history: resuming such a run
-    // with plain session dials is allowed (the flags may simply restate the
-    // original invocation, which the record predates), but resuming it under
-    // the named posture bundle is refused — no legacy run can have run the
-    // bundle, so that resume would execute enforcement the artifacts cannot
-    // attest.
+    // being backfilled. Resuming one under the named posture bundle is
+    // refused, because no legacy run can have run the bundle and that resume
+    // would execute enforcement the artifacts cannot attest. Resuming one
+    // under a session that names no bundle proceeds.
     if (options.runState !== undefined && fabricSessionCfc !== undefined) {
       const recorded = options.runState.fabricSessionCfc;
       if (recorded === undefined) {
@@ -1385,6 +1386,26 @@ export class CfHarnessEngine {
     }
     this.#runState = await this.#withCellLabels(
       setHarnessRunStatus(this.#runState, "failed", now, terminalReason),
+      now,
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
+  /**
+   * Ends the run as `canceled`, retaining the driver's reason and the labels
+   * of the cells it touched. Cancellation adds no failure record.
+   *
+   * @throws Error when the run already has its outcome.
+   */
+  async cancelRun(reason: string): Promise<HarnessRunState> {
+    const now = this.#now();
+    this.#runState = await this.#withCellLabels(
+      patchHarnessRunState(
+        setHarnessRunStatus(this.#runState, "canceled", now, "canceled"),
+        { cancelReason: reason },
+        now,
+      ),
       now,
     );
     await this.persistRunState();
@@ -1980,7 +2001,7 @@ export class CfHarnessEngine {
   }
 
   /**
-   * Helper for `completeRun()` and `failRun()`, which reads the run's space
+   * Helper for the terminal run transitions, which reads the run's space
    * for what it holds about the cells the run touched and returns `state`
    * with the answer recorded on it and written beside the run.
    *
@@ -2126,9 +2147,11 @@ export class CfHarnessEngine {
    * Runs one builtin tool and records its output on the run. A tool call is
    * one step of a run, not the run: the run's status is the driver's to
    * write, and this touches neither it nor `endedAt`. A tool that throws is
-   * recorded as a failure and rethrown for the driver to end the run on.
+   * recorded as a failure and rethrown for the driver to end the run on, unless
+   * the owning run was aborted. Cancellation retains any returned output but
+   * adds no failure record.
    *
-   * @throws Error from the tool, after the failure is recorded.
+   * @throws Error from the tool.
    */
   async invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
@@ -2146,8 +2169,11 @@ export class CfHarnessEngine {
         this.#createToolContext(options.signal),
         input,
       ) as BuiltinToolOutputMap[TToolId];
-      return await this.recordBuiltinToolOutput(toolId, input, output);
+      return await this.recordBuiltinToolOutput(toolId, input, output, options);
     } catch (error) {
+      if (options.signal?.aborted) {
+        throw error;
+      }
       const failureTime = this.#now();
       this.#runState = appendHarnessFailureRecord(
         this.#runState,
@@ -2167,6 +2193,7 @@ export class CfHarnessEngine {
     toolId: TToolId,
     input: BuiltinToolInputMap[TToolId],
     output: BuiltinToolOutputMap[TToolId],
+    options: { signal?: AbortSignal } = {},
   ): Promise<BuiltinToolInvocationResult<TToolId>> {
     if (!isToolOutputWithId(output)) {
       throw new Error(`builtin tool did not return an outputId: ${toolId}`);
@@ -2189,13 +2216,15 @@ export class CfHarnessEngine {
       resultRef,
       completionTime,
     );
-    const failure = classifyBuiltinToolFailure(
-      toolId,
-      input,
-      output,
-      completionTime,
-      this.#runState.capabilitySnapshot,
-    );
+    const failure = options.signal?.aborted
+      ? undefined
+      : classifyBuiltinToolFailure(
+        toolId,
+        input,
+        output,
+        completionTime,
+        this.#runState.capabilitySnapshot,
+      );
     if (failure !== undefined) {
       this.#runState = appendHarnessFailureRecord(
         this.#runState,
@@ -2580,6 +2609,7 @@ export class CfHarnessEngine {
       researchGoal: this.#runState.researchGoal,
       ...(researchTaskCfcLabel !== undefined ? { researchTaskCfcLabel } : {}),
       patternRefs: this.#runState.patternRefs ?? [],
+      inputCells: this.#runState.inputCells ?? [],
       recordResearchRun: (run: HarnessResearchRunSummary) => {
         this.recordResearchRun(run);
       },

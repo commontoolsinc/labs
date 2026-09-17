@@ -1,5 +1,9 @@
 import { backtickQuote } from "@commonfabric/utils/markdown";
-import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
+import {
+  isObjectOrArray,
+  isPlainObject,
+  isUnsafeObjectKey,
+} from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
 import { isFabricSpecialObject } from "@/types";
@@ -149,7 +153,7 @@ export abstract class BaseEncodeAct<Encoded, SerializedForm = Encoded>
 
   /** Encodes one value through the codec the registry matched to it. */
   #encodeTagged(value: FabricValue, matched: CodecForFormat<Encoded>): Encoded {
-    const isObject = (value !== null) && (typeof value === "object");
+    const isObject = isObjectOrArray(value);
 
     if (isObject) {
       this.enter(value as object);

@@ -65,6 +65,7 @@ import type {
   HarnessModelProviderId,
 } from "../src/config.ts";
 import type { CfcPosture } from "@commonfabric/runner";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   type HarnessChatError,
   type HarnessChatEventEnvelope,
@@ -79,6 +80,7 @@ import {
   DEFAULT_SUBAGENT_PROFILE,
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
 } from "../src/contracts/subagent.ts";
+import { readHarnessTaskOutcome } from "../src/contracts/task-outcome.ts";
 import { parseHostMountSpecs } from "../src/host-mounts.ts";
 import {
   checkInputCellSpec,
@@ -120,6 +122,17 @@ import {
 import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
 import { parseConnectorGrants } from "./connector-grants.ts";
+import {
+  ConsoleHealth,
+  type ConsoleHealthRow,
+  consoleHealthUrl,
+  type ConsoleObservedLaunchHealth,
+  type ConsoleResolvedValue,
+} from "./health.ts";
+import {
+  consolePatternIndexHealthProbes,
+  consoleSandboxHealthProbe,
+} from "./health-probes.ts";
 import { type ConsolePolicyReport, consolePolicyReport } from "./policy.ts";
 import { liveCanonicalRedirect } from "./src/mount.ts";
 import {
@@ -219,9 +232,9 @@ const DEFAULT_FABRIC_API_URL = "http://localhost:8000";
  * sinks. `--fabric-cfc-posture none` turns it off for a run that wants the
  * first-party default instead.
  *
- * The bundle leaves the enforcement pin at `enforce-explicit`; raising to
- * `enforce-strict` stays a deliberate per-session move, so it has its own flag
- * and no default here.
+ * The bundle names no enforcement mode, so the session keeps the core's
+ * `enforce-strict` pin. Lowering to `enforce-explicit` is a deliberate
+ * per-session move, so it has its own flag and no default here.
  */
 const DEFAULT_FABRIC_CFC_POSTURE: CfcPosture = "max-enforcement";
 
@@ -344,7 +357,7 @@ const parseTaskInputCells = (
   const specs: HarnessInputCellSpec[] = [];
   const names = new Set<string>();
   for (const entry of value) {
-    if (typeof entry !== "object" || entry === null) {
+    if (!isObjectOrArray(entry)) {
       throw new Error("each input cell must be an object");
     }
     const { name, ref } = entry as { name?: unknown; ref?: unknown };
@@ -423,7 +436,7 @@ const parseTaskPatternRefs = (
   const specs: HarnessPatternRefSpec[] = [];
   const ids = new Set<string>();
   for (const entry of value) {
-    if (typeof entry !== "object" || entry === null) {
+    if (!isObjectOrArray(entry)) {
       throw new Error("each pattern reference must be an object");
     }
     const { patternId } = entry as { patternId?: unknown };
@@ -454,6 +467,9 @@ const parseTaskPatternRefs = (
 interface ConsoleConfig extends HarnessSessionConfig {
   port: number;
   harnessHome: string;
+
+  /** Active configuration values and the source selected by this resolver. */
+  healthFacts: readonly ConsoleResolvedValue[];
 
   /** A fabric session is required here; see `resolveConsoleConfig`. */
   fabricSession: HarnessFabricSessionConfig;
@@ -702,7 +718,7 @@ export const resolveConsoleConfig = async (
   const spaceDb = flag("space-db") ?? nonEmpty(env.CF_HARNESS_SPACE_DB);
   const spaceDbPath = spaceDb === undefined ? undefined : resolve(cwd, spaceDb);
 
-  return {
+  const config: Omit<ConsoleConfig, "healthFacts"> = {
     port,
     workspace: workspacePath,
     artifactRoot,
@@ -784,6 +800,48 @@ export const resolveConsoleConfig = async (
     ...(parsed["no-child-composition-guidance"] === true
       ? { subagentCompositionGuidance: false }
       : {}),
+  };
+  const source = (name: string, variable: string): string =>
+    flag(name) !== undefined
+      ? `--${name}`
+      : nonEmpty(env[variable]) !== undefined
+      ? variable
+      : "console default";
+  return {
+    ...config,
+    healthFacts: [{
+      name: "port",
+      value: String(port),
+      source: source("port", "CF_HARNESS_CONSOLE_PORT"),
+    }, {
+      name: "space",
+      value: space,
+      source: source("fabric-space", "CF_HARNESS_FABRIC_SPACE"),
+    }, {
+      name: "store",
+      value: spaceDbPath ?? nonEmpty(env.MEMORY_DIR) ?? "automatic discovery",
+      source: spaceDbPath !== undefined
+        ? source("space-db", "CF_HARNESS_SPACE_DB")
+        : nonEmpty(env.MEMORY_DIR) !== undefined
+        ? "MEMORY_DIR"
+        : "space database discovery at read time",
+    }, {
+      name: "skill scripts",
+      value: config.allowSkillScripts ? "run in the sandbox" : "not run",
+      source: parsed["allow-skill-scripts"] === true
+        ? "--allow-skill-scripts"
+        : nonEmpty(env.CF_HARNESS_ALLOW_SKILL_SCRIPTS) === "1"
+        ? "CF_HARNESS_ALLOW_SKILL_SCRIPTS"
+        : "console default",
+    }, {
+      name: "index",
+      value: patternIndexUrl ?? "not configured",
+      source: source("pattern-index-url", "CF_HARNESS_PATTERN_INDEX_URL"),
+    }, {
+      name: "model",
+      value: config.model ?? DEFAULT_MODEL,
+      source: source("model", "CF_HARNESS_MODEL"),
+    }],
   };
 };
 
@@ -875,6 +933,192 @@ const openSessionStore = async (
   });
 };
 
+/** Projects the active configuration and retained launch decisions for operators. */
+export const consoleHealthRows = (
+  config: ConsoleConfig,
+  launch?: ConsoleObservedLaunchHealth,
+  modelOptions?: CreateHarnessPromptLoopOptions,
+  env: Record<string, string | undefined> = {},
+): readonly ConsoleHealthRow[] => {
+  const checkedAt = new Date().toISOString();
+  const groups: Readonly<Record<string, string>> = {
+    "skill scripts": "skills",
+    index: "index",
+    model: "model",
+  };
+  const rows: ConsoleHealthRow[] = config.healthFacts.map((fact) => {
+    // A server flag can override a launch value. Only an equal active value
+    // retains the launch record as its source.
+    const original = fact.source.startsWith("--")
+      ? undefined
+      : launch?.resolved.find((entry) =>
+        entry.name === fact.name && entry.value === fact.value
+      );
+    return {
+      id: `config.${fact.name.replaceAll(" ", "-")}`,
+      group: groups[fact.name] ?? "console",
+      label: fact.name.split(" ").map((word) =>
+        word.charAt(0).toUpperCase() + word.slice(1)
+      ).join(" "),
+      value: fact.name === "index" && config.patternIndex !== undefined
+        ? consoleHealthUrl(fact.value)
+        : fact.value,
+      source: original !== undefined
+        ? "console launch record"
+        : fact.source.startsWith("--")
+        ? "console launch flag"
+        : "console configuration",
+      detail: original?.source ?? fact.source,
+      state: fact.name === "store" && fact.value === "automatic discovery"
+        ? "unknown"
+        : fact.name === "index" && config.patternIndex === undefined
+        ? "degraded"
+        : "ok",
+      checkedAt: original === undefined
+        ? checkedAt
+        : launch?.checkedAt ?? checkedAt,
+      ...(fact.name === "index" && config.patternIndex === undefined
+        ? {
+          remedy:
+            "Start the console with --pattern-index-url or CF_HARNESS_PATTERN_INDEX_URL.",
+        }
+        : {}),
+    };
+  });
+  rows.unshift({
+    id: "console.base",
+    group: "console",
+    label: "Console Address",
+    value: `http://${HOSTNAME}:${config.port}`,
+    source: "console listen configuration",
+    state: "ok",
+    checkedAt,
+  });
+  if (config.patternIndex === undefined) {
+    for (const name of ["reachable", "enrolled"]) {
+      rows.push({
+        id: `index.${name}`,
+        group: "index",
+        label: name === "reachable"
+          ? "Pattern Index Reachability"
+          : "Pattern Index Enrollment",
+        value: "not verified",
+        source: "console index configuration",
+        state: "unknown",
+        checkedAt,
+        reason: "No pattern index URL is configured.",
+      });
+    }
+  }
+  if (launch !== undefined && launch.connectors.length > 0) {
+    rows.push(...launch.connectors.map((row): ConsoleHealthRow => ({
+      ...row,
+      checkedAt: launch.checkedAt,
+    })));
+  } else {
+    rows.push({
+      id: "connectors.inventory",
+      group: "connectors",
+      label: "Connector Inventory",
+      state: "unknown",
+      checkedAt,
+      value: `${config.connectorGrants.length} explicit grants configured`,
+      source: "console connector configuration",
+      detail: "CF_HARNESS_CONNECTOR_GRANTS; no Loom launch decision record",
+      reason:
+        "Refused or uninjected connectors cannot be enumerated from the accepted grants alone.",
+      remedy:
+        "Launch the console for its Loom instance to retain the full connector decision report.",
+    });
+    rows.push(...config.connectorGrants.map((grant): ConsoleHealthRow => ({
+      id: `connector.granted.${grant.name}`,
+      group: "connectors",
+      label: grant.source.connection,
+      value: `granted as ${grant.name}`,
+      source: "console connector configuration",
+      detail: "CF_HARNESS_CONNECTOR_GRANTS",
+      state: "ok",
+      checkedAt,
+    })));
+  }
+  if (modelOptions === undefined) {
+    rows.push({
+      id: "model.auth",
+      group: "model",
+      label: "Model Authentication",
+      value: "not checked",
+      source: "model credential preflight",
+      state: "unknown",
+      checkedAt: null,
+    });
+  } else {
+    const provider = modelOptions.modelProvider ?? "openai-compatible-gateway";
+    const missingKey = provider === "openai-compatible-gateway" &&
+      modelOptions.gatewayAuthMode !== "none" &&
+      modelOptions.apiKey === undefined;
+    rows.push({
+      id: "model.provider",
+      group: "model",
+      label: "Model Provider",
+      value: provider,
+      source: "harness provider settings",
+      detail: defaultHarnessProviderSettingsPath(config.harnessHome),
+      state: "ok",
+      checkedAt,
+    }, {
+      id: "model.auth",
+      group: "model",
+      label: "Model Authentication",
+      value: missingKey
+        ? "bearer API key not configured"
+        : provider === "openai-codex"
+        ? "cf-harness-local-store connected"
+        : modelOptions.gatewayAuthMode === "none"
+        ? "gateway authentication disabled"
+        : "API key configured; provider acceptance not checked",
+      source: provider === "openai-codex"
+        ? "harness credential store"
+        : "console environment",
+      detail: provider === "openai-codex"
+        ? defaultHarnessCredentialStorePath(config.harnessHome)
+        : modelOptions.gatewayAuthMode === "none"
+        ? "CF_HARNESS_GATEWAY_AUTH_MODE"
+        : missingKey
+        ? "CF_HARNESS_API_KEY / OPENAI_API_KEY"
+        : nonEmpty(env.CF_HARNESS_API_KEY) !== undefined
+        ? "CF_HARNESS_API_KEY"
+        : "OPENAI_API_KEY",
+      state: missingKey ? "failed" : "ok",
+      checkedAt,
+      ...(missingKey
+        ? {
+          remedy:
+            "Set CF_HARNESS_API_KEY for the configured model gateway, then restart the console.",
+        }
+        : {}),
+    });
+  }
+  return rows;
+};
+
+/** Combines retained decisions with independently cached host probes. */
+const createConsoleHealth = (
+  config: ConsoleConfig,
+  launch?: ConsoleObservedLaunchHealth,
+  modelOptions?: CreateHarnessPromptLoopOptions,
+  env?: Record<string, string | undefined>,
+  indexFactory?: HarnessPatternIndexClientFactory,
+): ConsoleHealth =>
+  new ConsoleHealth(consoleHealthRows(config, launch, modelOptions, env), [
+    consoleSandboxHealthProbe(),
+    ...(indexFactory !== undefined && config.patternIndex !== undefined
+      ? consolePatternIndexHealthProbes(
+        config.patternIndex.baseUrl,
+        indexFactory,
+      )
+      : []),
+  ]);
+
 /**
  * One connected browser. `deliveredSequence` is what it has been written so
  * far, and `pending` holds envelopes that arrived while its backfill was still
@@ -907,6 +1151,7 @@ export class ConsoleServer {
   readonly #clients = new Set<StreamClient>();
   readonly #config: ConsoleConfig;
   readonly #service: HarnessInteractiveChatService;
+  readonly #health: ConsoleHealth;
   readonly #patternIndexClientFactory:
     | HarnessPatternIndexClientFactory
     | undefined;
@@ -937,6 +1182,7 @@ export class ConsoleServer {
       onEvent: HarnessInteractiveChatEventListener,
     ) => HarnessInteractiveChatService,
     patternIndexClientFactory?: HarnessPatternIndexClientFactory,
+    health?: ConsoleHealth,
   ) {
     this.#config = config;
     this.#service = createService((envelope) => this.broadcast(envelope));
@@ -950,6 +1196,13 @@ export class ConsoleServer {
     this.#patternIndexClientFactory = factory === undefined
       ? undefined
       : cacheHarnessPatternIndexClientFactory(factory);
+    this.#health = health ?? createConsoleHealth(
+      config,
+      undefined,
+      undefined,
+      undefined,
+      this.#patternIndexClientFactory,
+    );
   }
 
   /** The chat service this server fronts, for startup and shutdown. */
@@ -996,19 +1249,36 @@ export class ConsoleServer {
       envelope.sessionId,
       envelope.event.turnId,
     ) ?? {
+      ...(envelope.event.outcome === "question"
+        ? { outcome: "question" as const, question: envelope.event.question }
+        : envelope.event.outcome === "gave-up"
+        ? { outcome: "gave-up" as const, reason: envelope.event.reason }
+        : { outcome: "completed" as const }),
+      sessionId: envelope.sessionId,
+      continuable: this.#sessionContinuable(envelope.sessionId),
       pieces: [],
       looms: [],
       spaceName: this.#config.fabricSession.space,
       finalText: envelope.event.finalText ?? "",
     };
+    const taskOutcome = readHarnessTaskOutcome(result);
+    if (taskOutcome === undefined) {
+      throw new Error("console result contains an invalid task outcome");
+    }
     const event: ConsoleTurnCompletedEvent = {
       ...envelope.event,
+      ...taskOutcome,
       result,
     };
     return {
       ...envelope,
       event,
     };
+  }
+
+  #sessionContinuable(sessionId: string): boolean {
+    const [session] = this.#service.status(sessionId).sessions;
+    return session?.status === "idle" && session.reusable;
   }
 
   async #readTurnResult(
@@ -1021,6 +1291,8 @@ export class ConsoleServer {
       entry.turn.turnId === turnId
     )?.input.loomId;
     return await readConsoleTurnResult({
+      sessionId,
+      continuable: this.#sessionContinuable(sessionId),
       ...(originLoomId !== undefined ? { originLoomId } : {}),
       artifactRoot: session?.artifactRoot ?? this.#config.artifactRoot,
       turnId,
@@ -1078,6 +1350,9 @@ export class ConsoleServer {
         fabricApiUrl: this.#config.fabricSession.apiUrl,
         fabricSession: "unverified",
       });
+    }
+    if (request.method === "GET" && url.pathname === "/api/health/detail") {
+      return Response.json(this.#health.snapshot());
     }
     if (
       request.method === "GET" &&
@@ -1371,7 +1646,7 @@ export class ConsoleServer {
       inputCells?: unknown;
       patternRefs?: unknown;
       loomId?: unknown;
-    } = typeof parsed === "object" && parsed !== null ? parsed : {};
+    } = isObjectOrArray(parsed) ? parsed : {};
     if (
       body.loomId !== undefined &&
       (typeof body.loomId !== "string" ||
@@ -1476,17 +1751,17 @@ export class ConsoleServer {
         status: 400,
       });
     }
-    const envelope: { fn?: unknown; body?: unknown } =
-      typeof parsed === "object" && parsed !== null ? parsed : {};
+    const envelope: { fn?: unknown; body?: unknown } = isObjectOrArray(parsed)
+      ? parsed
+      : {};
     if (!isIndexFunction(envelope.fn)) {
       return Response.json({
         error: `fn must be one of ${INDEX_FUNCTIONS.join(", ")}`,
       }, { status: 400 });
     }
-    const body: Record<string, unknown> =
-      typeof envelope.body === "object" && envelope.body !== null
-        ? envelope.body as Record<string, unknown>
-        : {};
+    const body: Record<string, unknown> = isObjectOrArray(envelope.body)
+      ? envelope.body as Record<string, unknown>
+      : {};
     if (envelope.fn === "getPattern" && typeof body.patternId !== "string") {
       return Response.json({ error: "patternId is required" }, { status: 400 });
     }
@@ -1523,11 +1798,10 @@ export class ConsoleServer {
         status: 400,
       });
     }
-    const { patternId, verdict } =
-      (typeof parsed === "object" && parsed !== null ? parsed : {}) as {
-        patternId?: unknown;
-        verdict?: unknown;
-      };
+    const { patternId, verdict } = (isObjectOrArray(parsed) ? parsed : {}) as {
+      patternId?: unknown;
+      verdict?: unknown;
+    };
     if (typeof patternId !== "string" || patternId === "") {
       return Response.json({ error: "patternId is required" }, { status: 400 });
     }
@@ -1736,6 +2010,7 @@ export const startConsoleServer = async (
   args: readonly string[] = Deno.args,
   env: Record<string, string | undefined> = Deno.env.toObject(),
   cwd: string = Deno.cwd(),
+  launchHealth?: ConsoleObservedLaunchHealth,
 ): Promise<void> => {
   const config = await resolveConsoleConfig(args, env, cwd);
   for (
@@ -1753,6 +2028,15 @@ export const startConsoleServer = async (
     ? undefined
     : await openSessionStore(config.sessionDbPath);
 
+  const indexFactory = config.patternIndex === undefined
+    ? undefined
+    : cacheHarnessPatternIndexClientFactory(
+      createHarnessPatternIndexClientFactory(
+        config.patternIndex,
+        config.fabricSession.identityKeyPath,
+      ),
+    );
+
   const server = new ConsoleServer(
     config,
     (onEvent) =>
@@ -1764,6 +2048,8 @@ export const startConsoleServer = async (
           sessionStore,
         ),
       ),
+    indexFactory,
+    createConsoleHealth(config, launchHealth, modelOptions, env, indexFactory),
   );
   await server.service.initializeFromStore();
 

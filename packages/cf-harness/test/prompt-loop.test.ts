@@ -16,6 +16,7 @@ import { normalize } from "@std/path/posix";
 import { CFC_ENFORCEMENT_MODES } from "@commonfabric/runner/cfc";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
   createFileSystemHarnessArtifactStore,
@@ -1283,6 +1284,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       "write_file",
       "delegate_task",
       "describe_handle",
+      "finish_task",
       "research",
     ],
   );
@@ -3739,6 +3741,7 @@ Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surfac
       "run_pattern",
       "assign_slug",
       "describe_handle",
+      "finish_task",
       "research",
     ],
   );
@@ -3939,6 +3942,7 @@ Deno.test("CfHarnessPromptLoop advertises the pattern-index tools in the default
       "run_pattern",
       "assign_slug",
       "describe_handle",
+      "finish_task",
       "search_patterns",
       "record_feedback",
       "research",
@@ -4398,6 +4402,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
       "write_file",
       "delegate_task",
       "describe_handle",
+      "finish_task",
       "research",
     ],
   );
@@ -5282,6 +5287,7 @@ Deno.test("CfHarnessPromptLoop keeps browser unavailable to the parent by defaul
       "write_file",
       "delegate_task",
       "describe_handle",
+      "finish_task",
       "research",
     ],
   );
@@ -7998,8 +8004,7 @@ const labelHasConfidentialityValue = (
   label: unknown,
   value: unknown,
 ): boolean =>
-  typeof label === "object" &&
-  label !== null &&
+  isObjectOrArray(label) &&
   "confidentiality" in label &&
   Array.isArray(label.confidentiality) &&
   label.confidentiality.some((entry) =>

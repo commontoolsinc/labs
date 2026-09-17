@@ -270,6 +270,41 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
     destination.close();
   });
 
+  it("skips a stream entry that is not an object and retires the tracked intent from a later well-formed one (mutation: drop the shape guard \u2014 the check reads `eventId` off a primitive and the whole check throws, stranding the intent)", async () => {
+    // The sidecar's entries are stored data, so their shape is not
+    // guaranteed by the type the check reads them through. A malformed
+    // entry is skipped rather than fatal: the entries after it are still
+    // considered, and the intent still retires.
+
+    const { scripted, destination } = scriptedDestination();
+    const outcomes: string[] = [];
+    destination.subscribeIntentOutcomes((outcome) => {
+      outcomes.push(`${outcome.kind}:${outcome.eventId}`);
+    });
+    scripted.seed(SPACE, SIDECAR, {
+      entries: [
+        null,
+        "not-an-entry",
+        7,
+        { eventId: "mine", stream: { id: "s", path: [] }, seq: 4 },
+      ] as unknown as StreamEventsDocValue["entries"],
+    });
+    destination.trackIntent(SPACE, SIDECAR, "mine");
+    expect(destination.pendingIntentCount).toBe(1);
+
+    scripted.deliver(SPACE, SIDECAR, (value) => {
+      value.entries![3].status = "dropped";
+      value.entries![3].reason = "gone";
+    }, [
+      ["value", "entries", "3", "status"],
+      ["value", "entries", "3", "reason"],
+    ]);
+    await flushMicrotasks();
+    expect(outcomes).toEqual(["dropped:mine"]);
+    expect(destination.pendingIntentCount).toBe(0);
+    destination.close();
+  });
+
   it("pin 5: per-check cost is O(outstanding), never O(history): a sidecar with 1000 consequenced entries and ONE outstanding intent — the mark's check visits ≤ 2 entries and mints zero transactions (mutation witness: a full scan visits 1001)", async () => {
     const { scripted, destination, edits } = scriptedDestination();
     const history = Array.from({ length: 1000 }, (_, index) => ({

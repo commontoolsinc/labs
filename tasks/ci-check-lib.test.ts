@@ -14,14 +14,17 @@ import {
   type BaselineSample,
   buildCoverageDebtSuggestionComment,
   buildCoverageDebtUnattributedComment,
+  buildCoverageNotGatedComment,
   buildCoverageResolvedComment,
   type CompileCacheStates,
   COVERAGE_BASELINE_RESET_MARKER,
   COVERAGE_SUGGESTION_MARKER,
   coverageGroupsForChangedFiles,
+  coverageListingNotCurrent,
   coverageMetricForGroup,
   coverageMetricGroupName,
   coverageMetricMeasuredSet,
+  coverageNotGatedNotice,
   downloadAndExtractArtifact,
   fetchArtifactsForRun,
   fetchCurrentPRBody,
@@ -32,6 +35,7 @@ import {
   githubGet,
   githubPatch,
   githubPost,
+  isBaselineCandidateRun,
   isNotFound,
   measuredSetCoverageMetric,
   newestArtifactsByName,
@@ -43,6 +47,8 @@ import {
   serializeCoverageBaseline,
   shouldGateCoverageDebtMetric,
   unknownAcceptedMetrics,
+  WORKFLOW_RUNS_PAGE_SIZE,
+  workflowRunsPagePath,
 } from "./ci-check-lib.ts";
 
 Deno.test("coverage baseline files round-trip stable metric samples", () => {
@@ -770,9 +776,167 @@ Deno.test("buildCoverageResolvedComment notes resolution when there is no net re
   assertFalse(resolved.includes("<details open>"));
   assertStringIncludes(
     resolved,
-    "<summary><strong>🕵🏻‍♀️ Code coverage regression resolved.</strong></summary>",
+    "<summary><strong>🕵🏻‍♀️ Code coverage debt is within the ratchet.</strong></summary>",
   );
   assertStringIncludes(resolved, "| `tasks` | 8 | 8 | no change |");
+});
+
+Deno.test("buildCoverageNotGatedComment names each ungated group and why", () => {
+  const baseSha = "c4a5de3346126594d6b9f1ea5cdace119a302a52";
+  const comment = buildCoverageNotGatedComment({
+    groups: [
+      { group: "packages/shell", reason: "no-baseline" },
+      {
+        group: "tasks",
+        reason: "base-branch-moved",
+        baselineSha: "ec849c4c00000000000000000000000000000000",
+      },
+    ],
+    measurement: {
+      runUrl: "https://github.com/commonfabric/labs/actions/runs/7",
+      baseSha,
+    },
+  });
+
+  // The one coverage comment, left open so the state is read without a click.
+  assertEquals(comment.split("\n")[0], COVERAGE_SUGGESTION_MARKER);
+  assertStringIncludes(comment, "<details open>");
+  assertStringIncludes(comment, "Test coverage was NOT gated on this run");
+  assertStringIncludes(
+    comment,
+    "did not hold `packages/shell`, `tasks` against a baseline",
+  );
+  assertStringIncludes(
+    comment,
+    "| `packages/shell` | No successful `main` run within reach measured " +
+      "base-branch commit `c4a5de33` or an ancestor of it. |",
+  );
+  assertStringIncludes(
+    comment,
+    "| `tasks` | `main` changed this group between the nearest measured " +
+      "ancestor (`ec849c4c`) and base-branch commit `c4a5de33`. |",
+  );
+  assertStringIncludes(comment, "A later run of this pull request gates");
+  assertStringIncludes(
+    comment,
+    "Measured by https://github.com/commonfabric/labs/actions/runs/7.",
+  );
+});
+
+Deno.test("buildCoverageNotGatedComment says a listing that is not current failed the job", () => {
+  const comment = buildCoverageNotGatedComment({
+    groups: [{ group: "tasks", reason: "listing-not-current" }],
+  });
+
+  assertStringIncludes(
+    comment,
+    "The **Coverage Check** job failed because it could not find a baseline " +
+      "to hold `tasks` against.",
+  );
+  assertStringIncludes(
+    comment,
+    "| `tasks` | GitHub's listing of this workflow's runs left out this run",
+  );
+  assertStringIncludes(comment, "Re-run the **Coverage Check** job");
+  assertFalse(comment.includes("Measured by"));
+});
+
+Deno.test("coverageNotGatedNotice names no commit for a checkout that had none", () => {
+  const notice = coverageNotGatedNotice({
+    groups: [
+      { group: "packages/runner", reason: "no-base-commit" },
+      { group: "packages/ui", reason: "no-baseline" },
+    ],
+  }).join("\n");
+
+  assertStringIncludes(
+    notice,
+    "| `packages/runner` | The base-branch commit this run merges into could " +
+      "not be read from the checkout. |",
+  );
+  assertStringIncludes(
+    notice,
+    "| `packages/ui` | No successful `main` run within reach measured the " +
+      "base-branch commit or an ancestor of it. |",
+  );
+});
+
+Deno.test("coverageNotGatedNotice does not say how the job ended unless the listing decided it", () => {
+  // A group with no baseline passes on its own, and fails beside a regression
+  // in another group, so the notice claims neither.
+  const notice = coverageNotGatedNotice({
+    groups: [{ group: "tasks", reason: "base-branch-moved" }],
+  }).join("\n");
+
+  assertFalse(notice.includes("passed"));
+  assertFalse(notice.includes("failed"));
+  assertStringIncludes(
+    notice,
+    "The **Coverage Check** job did not hold `tasks` against a baseline",
+  );
+});
+
+Deno.test("coverageListingNotCurrent is true only of a listing that was not current", () => {
+  assertEquals(
+    coverageListingNotCurrent([
+      { group: "tasks", reason: "listing-not-current" },
+    ]),
+    true,
+  );
+  assertEquals(
+    coverageListingNotCurrent([
+      { group: "tasks", reason: "no-baseline" },
+      { group: "packages/ui", reason: "base-branch-moved" },
+    ]),
+    false,
+  );
+  assertEquals(coverageListingNotCurrent([]), false);
+});
+
+Deno.test("buildCoverageResolvedComment claims no comparison for a reset that compared nothing", () => {
+  const resolved = buildCoverageResolvedComment(0, [], true);
+
+  assertStringIncludes(
+    resolved,
+    "Code coverage debt accepted with an override.",
+  );
+  assertStringIncludes(
+    resolved,
+    "This run compared no source group against a baseline",
+  );
+  assertFalse(resolved.includes("at or below its `main` baseline"));
+});
+
+Deno.test("workflowRunsPagePath asks for one unfiltered page of the workflow's runs", () => {
+  const path = workflowRunsPagePath(3);
+  const query = new URLSearchParams(path.split("?")[1]);
+
+  assertStringIncludes(path, "/actions/workflows/deno.yml/runs?");
+  assertEquals(query.get("page"), "3");
+  assertEquals(query.get("per_page"), String(WORKFLOW_RUNS_PAGE_SIZE));
+  // Any of these sends the request to the search index that returns old runs.
+  for (const filter of ["branch", "status", "event", "created", "head_sha"]) {
+    assertEquals(query.get(filter), null);
+  }
+});
+
+Deno.test("isBaselineCandidateRun admits only a successful push to main", () => {
+  const push = { event: "push", head_branch: "main", conclusion: "success" };
+
+  assertEquals(isBaselineCandidateRun(push), true);
+  assertEquals(
+    isBaselineCandidateRun({ ...push, event: "pull_request" }),
+    false,
+  );
+  assertEquals(isBaselineCandidateRun({ ...push, head_branch: "fix" }), false);
+  assertEquals(
+    isBaselineCandidateRun({ ...push, conclusion: "failure" }),
+    false,
+  );
+  assertEquals(
+    isBaselineCandidateRun({ ...push, head_branch: undefined }),
+    false,
+  );
 });
 
 Deno.test("buildCoverageResolvedComment uses a single line of one uncovered line", () => {
@@ -892,7 +1056,7 @@ Deno.test("fetchPRBody reads the live pull request body from the GitHub API", as
     assertEquals(await fetchPRBody(3427), "LIVE PR BODY");
     assertEquals(
       requestedUrl,
-      "https://api.github.com/repos/commontoolsinc/labs/pulls/3427",
+      "https://api.github.com/repos/commonfabric/labs/pulls/3427",
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -933,8 +1097,8 @@ Deno.test("fetchIssueComments reads every page of a pull request's comments", as
     assertEquals(comments[0], { id: 1, body: "comment 1" });
     assertEquals(comments[100], { id: 101, body: "" });
     assertEquals(requestedUrls, [
-      "https://api.github.com/repos/commontoolsinc/labs/issues/5727/comments?per_page=100&page=1",
-      "https://api.github.com/repos/commontoolsinc/labs/issues/5727/comments?per_page=100&page=2",
+      "https://api.github.com/repos/commonfabric/labs/issues/5727/comments?per_page=100&page=1",
+      "https://api.github.com/repos/commonfabric/labs/issues/5727/comments?per_page=100&page=2",
     ]);
   } finally {
     globalThis.fetch = originalFetch;
@@ -1010,8 +1174,8 @@ Deno.test("githubGet retries transient GitHub responses", async () => {
     }) as typeof fetch;
 
     assertEquals(
-      await githubGet<{ ok: string }>("/repos/commontoolsinc/labs/actions"),
-      { ok: "https://api.github.com/repos/commontoolsinc/labs/actions" },
+      await githubGet<{ ok: string }>("/repos/commonfabric/labs/actions"),
+      { ok: "https://api.github.com/repos/commonfabric/labs/actions" },
     );
     assertEquals(calls, 3);
   } finally {
@@ -1030,7 +1194,7 @@ Deno.test("githubGet does not retry non-transient GitHub responses", async () =>
 
     let rejected = false;
     try {
-      await githubGet("/repos/commontoolsinc/labs/missing");
+      await githubGet("/repos/commonfabric/labs/missing");
     } catch {
       rejected = true;
     }
@@ -1057,18 +1221,18 @@ Deno.test("GitHub REST errors include status text and omit response bodies", asy
       status: 503,
       statusText: "Service Unavailable",
       expectedMessage:
-        "GitHub API GET 503 Service Unavailable: /repos/commontoolsinc/labs/actions/runs/123/jobs",
+        "GitHub API GET 503 Service Unavailable: /repos/commonfabric/labs/actions/runs/123/jobs",
       request: () =>
-        githubGet("/repos/commontoolsinc/labs/actions/runs/123/jobs"),
+        githubGet("/repos/commonfabric/labs/actions/runs/123/jobs"),
     },
     {
       name: "POST 422",
       status: 422,
       statusText: "Unprocessable Content",
       expectedMessage:
-        "GitHub API POST 422 Unprocessable Content: /repos/commontoolsinc/labs/issues/123/comments",
+        "GitHub API POST 422 Unprocessable Content: /repos/commonfabric/labs/issues/123/comments",
       request: () =>
-        githubPost("/repos/commontoolsinc/labs/issues/123/comments", {
+        githubPost("/repos/commonfabric/labs/issues/123/comments", {
           body: "comment",
         }),
     },
@@ -1077,9 +1241,9 @@ Deno.test("GitHub REST errors include status text and omit response bodies", asy
       status: 500,
       statusText: "Internal Server Error",
       expectedMessage:
-        "GitHub API PATCH 500 Internal Server Error: /repos/commontoolsinc/labs/issues/comments/456",
+        "GitHub API PATCH 500 Internal Server Error: /repos/commonfabric/labs/issues/comments/456",
       request: () =>
-        githubPatch("/repos/commontoolsinc/labs/issues/comments/456", {
+        githubPatch("/repos/commonfabric/labs/issues/comments/456", {
           body: "updated comment",
         }),
     },
@@ -1124,12 +1288,12 @@ Deno.test("GitHub REST errors survive response cancellation failures", async () 
       )) as typeof fetch;
 
     const error = await assertRejects(
-      () => githubGet("/repos/commontoolsinc/labs/missing"),
+      () => githubGet("/repos/commonfabric/labs/missing"),
       Error,
     );
     assertEquals(
       error.message,
-      "GitHub API GET 404 Not Found: /repos/commontoolsinc/labs/missing",
+      "GitHub API GET 404 Not Found: /repos/commonfabric/labs/missing",
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -1342,7 +1506,7 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
       target: 4612,
       current: 4614,
       baseline: {
-        runUrl: "https://github.com/commontoolsinc/labs/actions/runs/900",
+        runUrl: "https://github.com/commonfabric/labs/actions/runs/900",
         sha: "b".repeat(40),
       },
     }],
@@ -1353,7 +1517,7 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
       },
     ],
     measurement: {
-      runUrl: "https://github.com/commontoolsinc/labs/actions/runs/901",
+      runUrl: "https://github.com/commonfabric/labs/actions/runs/901",
       baseSha: "a".repeat(40),
     },
   });
@@ -1391,7 +1555,7 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
   assertStringIncludes(comment, "Where this measurement came from:");
   assertStringIncludes(
     comment,
-    "  Measuring run: https://github.com/commontoolsinc/labs/actions/runs/901",
+    "  Measuring run: https://github.com/commonfabric/labs/actions/runs/901",
   );
   assertStringIncludes(comment, `  Base commit measured: ${"a".repeat(40)}`);
   // The reader is handed the command that says what landed since.
@@ -1401,7 +1565,7 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
   );
   assertStringIncludes(
     comment,
-    `  Baseline for packages/runner: run https://github.com/commontoolsinc/labs/actions/runs/900, commit ${
+    `  Baseline for packages/runner: run https://github.com/commonfabric/labs/actions/runs/900, commit ${
       "b".repeat(40)
     }`,
   );
@@ -1447,23 +1611,23 @@ Deno.test("buildCoverageDebtUnattributedComment omits run identity it does not h
       target: 0,
       current: 1,
       baseline: {
-        runUrl: "https://github.com/commontoolsinc/labs/actions/runs/900",
+        runUrl: "https://github.com/commonfabric/labs/actions/runs/900",
       },
     }],
     files: [{ relativePath: "tasks/test-records.ts", lines: [90] }],
     measurement: {
-      runUrl: "https://github.com/commontoolsinc/labs/actions/runs/901",
+      runUrl: "https://github.com/commonfabric/labs/actions/runs/901",
     },
   });
 
   assertStringIncludes(runOnly, "Where this measurement came from:");
   assertStringIncludes(
     runOnly,
-    "  Measuring run: https://github.com/commontoolsinc/labs/actions/runs/901",
+    "  Measuring run: https://github.com/commonfabric/labs/actions/runs/901",
   );
   assertStringIncludes(
     runOnly,
-    "  Baseline for tasks: run https://github.com/commontoolsinc/labs/actions/runs/900\n",
+    "  Baseline for tasks: run https://github.com/commonfabric/labs/actions/runs/900\n",
   );
   assertFalse(runOnly.includes("Base commit measured:"));
   assertFalse(runOnly.includes("merged into that base commit"));

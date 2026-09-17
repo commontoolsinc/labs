@@ -33,6 +33,8 @@ export interface IdentityAggregate {
   runs: number;
   failures: number;
   skips: number;
+
+  /** The worst duration among the identity's passing executions. */
   maxDurationMs: number;
 }
 
@@ -63,6 +65,12 @@ export function formatIdentity(key: string): string {
  * says what a batch was packed to spend and another counts the units it
  * opened — so summing them alongside a test's duration reports a number
  * that means nothing.
+ *
+ * The duration is taken from passing executions alone. A failure ended
+ * where the failure was reached, and where a wait's safety net ended it,
+ * the figure is that net's bound rather than anything about the test.
+ * The run, failure and skip counts read every record, which is what
+ * those counters are for.
  */
 export function aggregate(
   reports: readonly StoredReport[],
@@ -87,6 +95,7 @@ export function aggregate(
       entry.runs++;
       if (record.outcome === "fail") entry.failures++;
       if (record.outcome === "skip") entry.skips++;
+      if (record.outcome !== "pass") continue;
       entry.maxDurationMs = Math.max(entry.maxDurationMs, record.durationMs);
     }
   }
@@ -140,7 +149,10 @@ export function churnFamilies(
     .sort((a, b) => b.members - a.members);
 }
 
-/** Identities whose worst CI duration crossed the sixty-second rule. */
+/**
+ * Identities whose worst passing CI duration crossed the sixty-second
+ * rule.
+ */
 export function overSixtySeconds(
   byIdentity: ReadonlyMap<string, IdentityAggregate>,
 ): IdentityAggregate[] {

@@ -20,6 +20,7 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FabricUnavailable } from "@/fabric-primitives/FabricUnavailable.ts";
 
 /** A class with no fabric representation, wanted here by name. */
 export class PlainClass {}
@@ -119,6 +120,7 @@ export const LAYER_CORPUS: ReadonlyArray<[string, unknown]> = [
       new Uint8Array([2]),
     ),
   ],
+  ["a `FabricUnavailable`", new FabricUnavailable("error", "general", "boom")],
   ["a `FabricError`", FabricError.fromNativeError(new Error("x"))],
   ["a `Date`", new Date(1234)],
   ["a `Uint8Array`", new Uint8Array([1, 2, 3])],

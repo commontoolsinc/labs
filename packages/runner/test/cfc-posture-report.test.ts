@@ -294,6 +294,38 @@ describe("the CFC posture record", () => {
     });
   });
 
+  describe("the write floor beside the flow dial", () => {
+    // The floor credits the flow meet only where labels persist, so a
+    // deployment holding an enforcing floor below that rung turns away
+    // writes the join would have endorsed (ordering constraint 3,
+    // docs/specs/cfc-enforcement-matrix.md §2).
+
+    it("holds the floor at `enforce` where the flow dial is left alone", () => {
+      expect(presetCfcOptions({}).cfcWriteFloor).toBe("enforce");
+      expect(presetCfcOptions({ cfcFlowLabels: "persist" }).cfcWriteFloor).toBe(
+        "enforce",
+      );
+    });
+
+    it("drops the floor to `observe` where a caller puts flow labels below persist", () => {
+      expect(presetCfcOptions({ cfcFlowLabels: "observe" }).cfcWriteFloor).toBe(
+        "observe",
+      );
+      expect(presetCfcOptions({ cfcFlowLabels: "off" }).cfcWriteFloor).toBe(
+        "observe",
+      );
+    });
+
+    it("drops the floor under the max-enforcement bundle too, which pins it", () => {
+      expect(
+        presetCfcOptions({
+          cfcPosture: "max-enforcement",
+          cfcFlowLabels: "off",
+        }).cfcWriteFloor,
+      ).toBe("observe");
+    });
+  });
+
   describe("the enforcement-mode ladder", () => {
     const offLadder = "enforce-strictly" as CfcEnforcementMode;
 

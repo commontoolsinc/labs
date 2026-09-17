@@ -477,7 +477,6 @@ const collectSkillResources = async (
   const visitedDirectories = new Set<string>();
   let directoriesVisited = 0;
   let filesVisited = 0;
-  const rootSkillPath = resolve(options.skillDir, SKILL_FILE_NAME);
 
   const visit = async (dir: string, depth: number): Promise<void> => {
     let resolvedDir: string;
@@ -547,7 +546,14 @@ const collectSkillResources = async (
       return;
     }
 
-    entries.sort((a, b) => a.name.localeCompare(b.name));
+    entries.sort((a, b) => {
+      if (depth === 0) {
+        const aIsSkill = a.name === SKILL_FILE_NAME;
+        const bIsSkill = b.name === SKILL_FILE_NAME;
+        if (aIsSkill !== bIsSkill) return aIsSkill ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
     for (const entry of entries) {
       if (EXCLUDED_SKILL_DIRS.has(entry.name)) {
         continue;
@@ -570,9 +576,6 @@ const collectSkillResources = async (
         continue;
       }
       if (!stat.isFile) {
-        continue;
-      }
-      if (resolve(entryPath) === rootSkillPath) {
         continue;
       }
       filesVisited += 1;

@@ -1,7 +1,7 @@
 # Configuration Reference
 
 A categorized reference for environment variables, build flags, CLI args, and
-developer tasks across the Common Tools labs repo.
+developer tasks across the Common Fabric labs repo.
 
 This doc is **not** the source of truth — it points to the schemas that are.
 For exhaustive, always-current lists check the Zod schemas linked at the top
@@ -188,11 +188,11 @@ Used by `/routes/sandbox/exec` to execute untrusted pattern code.
 | `SANDBOX_TOOLSHED_URL` | _(falls back to `API_URL`)_ | URL injected into sandboxes as `CF_API_URL` so they can call back to this toolshed. |
 
 The executor itself is not in this repo; the toolshed only forwards to
-`SANDBOX_SERVICE_URL`. The service is `commontoolsinc/common-cluster` (Go): its
+`SANDBOX_SERVICE_URL`. The service is `commonfabric/common-cluster` (Go): its
 `node-agent` serves `/v1/sandboxes` and runs each sandbox as a gVisor container
 on a per-node ZFS dataset. The `runsc` runtime and `sandboxexec` library come
-from `commontoolsinc/gvisor` (branch `cfc_v2`), and the cluster is provisioned by
-`commontoolsinc/infra` (Terraform).
+from `commonfabric/gvisor` (branch `cfc_v2`), and the cluster is provisioned by
+`commonfabric/infra` (Terraform).
 
 ---
 

@@ -1,7 +1,8 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-09-17
+Last verified: 2026-09-18\
+Revision: `0cccfd338e+revision-verification`
 
 The [system map](system-map/README.md) moves in lockstep with this current-state
 reference.
@@ -44,6 +45,11 @@ the model to make policy decisions.
 
 The current package provides:
 
+- a console operator snapshot at `GET /api/health/detail`, retaining launch
+  decisions for all connector grants and refusals alongside independently cached
+  Docker and index observations, with deciding records, timestamps, causes, and
+  remedies; unknown observations remain distinct from failures, and reading the
+  route never waits for a live probe;
 - durable Loom composition, exact inspection, and bounded receipt recovery over
   an explicitly configured host command transport; current-turn console results
   include verified authored Loom receipts and the submitted origin. See
@@ -127,14 +133,15 @@ The current package provides:
 - a skills registry over `--skills-root`, defaulting for a run out of a labs
   checkout to that checkout's own `skills/` tree, with the resolved tree and its
   source recorded in run state and printed in operator output; skill preload by
-  name, indexed supporting-resource reads, and Deno/Bash skill scripts run in
-  the sandbox where the operator allows them — `--allow-skill-scripts` for every
-  skill the run holds, registry and acquired alike, or an exact entry for one.
-  The same execution path takes an acquired skill's script, checked against the
-  digest taken at acquisition; the tool output and the execution record carry
-  that acquisition in place of the registry digest fields, and the invocation is
-  labeled with confidentiality alone, because a non-empty `integrity` array in
-  `cfcInputLabels` makes the sandbox fail to start (CT-2302);
+  name, indexed reads of `SKILL.md` and supporting resources, and Deno/Bash
+  skill scripts run in the sandbox where the operator allows them —
+  `--allow-skill-scripts` for every skill the run holds, registry and acquired
+  alike, or an exact entry for one. The same execution path takes an acquired
+  skill's script, checked against the digest taken at acquisition; the tool
+  output and the execution record carry that acquisition in place of the
+  registry digest fields, and the invocation is labeled with confidentiality
+  alone, because a non-empty `integrity` array in `cfcInputLabels` makes the
+  sandbox fail to start (CT-2302);
 - recoverable rejection of a malformed tool call: a name no tool answers to,
   arguments that are not a JSON object, or a `delegate_task` argument of the
   wrong shape comes back as a `cf-harness.invalid-tool-call` tool result naming
@@ -143,7 +150,9 @@ The current package provides:
   `invalid` rather than `denied` — nothing about policy refused it — plus a
   `not-run` tool activity and an `invalid_tool_call` failure record. Only what
   the model cannot correct — transport, engine invariants, artifact persistence,
-  cancellation, the turn cap — ends the run;
+  cancellation, the turn cap — ends the run. A run-owned cancellation is
+  recorded as `canceled` in parent and active-child artifacts, with its reason
+  and without adding a failure record;
 - a release a confidentiality boundary refused is recorded as a policy decision
   with the outcome `withheld` rather than `denied`: the call ran and answered
   with the reference to the result whose values were held back, so the trace
@@ -175,6 +184,19 @@ The current package provides:
 - CFC modes `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`,
   plus prompt-slot, invocation-context, policy-event, and model-influence
   evidence;
+- parent-only `finish_task` for a question or a give-up reason, admitted through
+  ordinary policy and artifacts as the sole call in a model turn. It ends the
+  loop without another provider request, retaining the completed lifecycle and
+  reusable conversation. Reports carry the canonical task outcome; console
+  polling and SSE carry the same outcome, session identity, and current
+  continuation availability. The live pane renders the question or reason.
+  Children report blockers to the parent. Missing-input discovery distinguishes
+  released evidence, absence within an enumerated granted scope, and unknown
+  reads; it stops for input rather than repeating author delegation. Shared
+  target-selection guidance asks for an unnamed, unattached piece without a
+  registry read, preserves established conversation targets, and permits at most
+  one registry lookup for a name the user supplied. Only a unique released match
+  allows work to proceed;
 - a session-local address handle table: deterministic `cfh:a:` tokens minted per
   run for cell addresses, recorded in `run-state.json`, and carried across
   resume; the prompt loop swaps addresses to tokens in model-bound tool output
@@ -302,33 +324,33 @@ The current package provides:
   fabric identifier, an openable URL. Without the session configuration both
   tools are absent from the tool surface, for a `default`- or
   `pattern-author`-profile subagent as much as for the parent — a child shares
-  the one session the parent built; `--fabric-cfc-enforcement-mode` (raise-only:
-  `enforce-explicit` or `enforce-strict`) and `--fabric-cfc-flow-labels`
-  (`off`/`observe`/`persist`) set the session runtime's CFC dials, so with
-  labels persisted a confidentiality-tainted pattern write is refused at commit
-  under strict, and `--fabric-cfc-posture max-enforcement` opts the session
-  runtime into the runner's named posture bundle (every staged enforcement dial
-  on, the standard prompt-caveat policy loaded, public-only ceilings on the
-  network-fetch sinks), with the two per-dial flags applying over it — these are
-  the fabric session's dials, independent of the harness's own
-  `--cfc-enforcement-mode` up to one tie — under a session raised to
-  `enforce-strict` a harness dial nobody set follows the session, and one stated
-  weaker refuses startup naming both flags — and the resolved posture (each
-  dial's value and whether the operator, the named bundle, or the default
-  supplied it) is recorded as `fabricSessionCfc` in run state and the run
-  report, and printed in the operator summary — the whole posture record with
-  it, which a delegated child carries from its parent stamped `inherited`
-  because it runs on that parent's session; the session runtime can further run
-  under a read ceiling — the `--max-confidentiality` flag, or
-  `cfc.maxConfidentiality` (with `cfc.onExceed`) in the run manifest, met when
-  both are given — that bounds every `db.query` the run issues, a query's own
-  declaration met with it rather than replacing it; the ceiling governs only
-  query results declared per session (`PerSession<>`, `scope: "session"`,
-  `.asScope("session")`, or a session-scoped db) and the runtime refuses any
-  other query under it, so a pattern authored for a bounded run declares its
-  results per session; it is refused without a fabric session, recorded with its
-  source as `readMaxConfidentiality` in `fabricSessionCfc`, printed in the
-  operator summary, and inherited unchanged by a delegated child;
+  the one session the parent built; `--fabric-cfc-enforcement-mode` (the
+  enforcing rungs: `enforce-explicit` or `enforce-strict`) and
+  `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`) set the session
+  runtime's CFC dials, so with labels persisted a confidentiality-tainted
+  pattern write is refused at commit under strict, and
+  `--fabric-cfc-posture max-enforcement` opts the session runtime into the
+  runner's named posture bundle (every staged enforcement dial on, the standard
+  prompt-caveat policy loaded, public-only ceilings on the network-fetch sinks),
+  with the two per-dial flags applying over it — these are the fabric session's
+  dials, independent of the harness's own `--cfc-enforcement-mode` up to one tie
+  — under a session raised to `enforce-strict` a harness dial nobody set follows
+  the session, and one stated weaker refuses startup naming both flags — and the
+  resolved posture (each dial's value and whether the operator, the named
+  bundle, or the default supplied it) is recorded as `fabricSessionCfc` in run
+  state and the run report, and printed in the operator summary — the whole
+  posture record with it, which a delegated child carries from its parent
+  stamped `inherited` because it runs on that parent's session; the session
+  runtime can further run under a read ceiling — the `--max-confidentiality`
+  flag, or `cfc.maxConfidentiality` (with `cfc.onExceed`) in the run manifest,
+  met when both are given — that bounds every `db.query` the run issues, a
+  query's own declaration met with it rather than replacing it; the ceiling
+  governs only query results declared per session (`PerSession<>`,
+  `scope: "session"`, `.asScope("session")`, or a session-scoped db) and the
+  runtime refuses any other query under it, so a pattern authored for a bounded
+  run declares its results per session; it is refused without a fabric session,
+  recorded with its source as `readMaxConfidentiality` in `fabricSessionCfc`,
+  printed in the operator summary, and inherited unchanged by a delegated child;
 - an opt-in pattern index (`--pattern-index-url`, or its
   `CF_HARNESS_PATTERN_INDEX_URL` environment fallback), which needs the fabric
   session configuration: index requests are signed with the session identity
@@ -424,16 +446,25 @@ The current package provides:
   child computes over references it cannot read out. It runs on its own turn
   budget of 24 rather than the default subagent cap of 8, since each
   compile-error iteration costs a turn, and it carries a return contract — a
-  discriminated union of `{ ok: true, resultRef, describes, hashtags? }` and
-  `{ ok: false, code, detail? }` — which is the profile's own rather than a
-  default: a `pattern-author` delegation that declares a `returnSchema` of its
-  own is refused, naming the field, because a channel this narrow cannot be left
-  caller-writable. A failure and a success are different shapes, and only the
-  success branch carries a reference; there is no field on it for source under
-  any name. The failure `code` comes from a fixed inert vocabulary, so a parent
-  learns why without declassifying anything, and any child return saying
-  `ok: false` reaches the parent as a coded failure rather than as a schema
-  complaint.
+  discriminated union of
+  `{ ok: true, resultRef, describes, hashtags?, verificationRef? }` and
+  `{ ok: false, code, detail?, verificationRef? }` — which is the profile's own
+  rather than a default: a `pattern-author` delegation that declares a
+  `returnSchema` of its own is refused, naming the field, because a channel this
+  narrow cannot be left caller-writable. A failure and a success are different
+  shapes, and only the success branch carries a piece result reference; there is
+  no field on it for source under any name. The failure `code` comes from a
+  fixed inert vocabulary, so a parent learns why without declassifying anything,
+  and any child return saying `ok: false` reaches the parent as a coded failure
+  rather than as a schema complaint.
+- revision verification guidance uses `read_piece_source.inputRef` for the
+  piece's bound arguments and ordinary `run_pattern` for an old/new rule check
+  over one bounded sample. The child's separate `verificationRef` carries no
+  values into the parent; comparison fields use the existing release path. Zero
+  effect, an empty sample, or unavailable evidence calls for a question instead
+  of a completed revision. Styling without a computed-surface observation is
+  explicitly reported as not checked. This is guidance, not a host proof of
+  arbitrary rule semantics.
 
 Run the capability probe instead of copying this list into adapters:
 

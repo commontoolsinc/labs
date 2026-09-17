@@ -14,6 +14,7 @@ import { type DID, isDID } from "@commonfabric/identity/did";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { extractHashtags } from "@commonfabric/utils/hashtags";
 import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { h } from "../builder/h.ts";
 // The sidecar instantiation observes its wave settlement (a serving-wave
@@ -1760,7 +1761,7 @@ export async function sidecarRunFailureDisposition(
  * this discrimination. Exported for the unit pin. */
 export function sidecarValueIsWinner(raw: unknown): boolean {
   if (raw === undefined) return false;
-  return !(typeof raw === "object" && raw !== null && "sidecarError" in raw);
+  return !(isObjectOrArray(raw) && "sidecarError" in raw);
 }
 
 // Test seam (this package has no logger-capture idiom — the OW45 register's

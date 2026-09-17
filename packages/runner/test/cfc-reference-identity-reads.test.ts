@@ -42,6 +42,7 @@ import {
 import { findAllWriteRedirectCells } from "../src/pattern-binding.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { machineryRead } from "../src/storage/reactivity-log.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-reference-identity");
@@ -123,20 +124,50 @@ describe("cfc-reference-identity-reads", () => {
     return { write, commit };
   };
 
+  type StoredEntry = {
+    path?: string[];
+    origin?: string;
+    label: { confidentiality?: unknown[] };
+  };
+
   type StoredDocument = {
     value?: unknown;
-    cfc?: {
-      labelMap?: {
-        entries: { origin?: string; label: { confidentiality?: unknown[] } }[];
-      };
-    };
+    cfc?: { labelMap?: { entries: StoredEntry[] } };
   } | undefined;
 
-  const derivedConfidentiality = (id: string): unknown[] | undefined =>
+  const storedEntries = (id: string): StoredEntry[] =>
     ((storageManager!.open(space).replica as unknown as {
       getDocument(id: string): StoredDocument;
-    }).getDocument(id))?.cfc?.labelMap?.entries
-      ?.find((entry) => entry.origin === "derived")?.label.confidentiality;
+    }).getDocument(id))?.cfc?.labelMap?.entries ?? [];
+
+  const derivedConfidentiality = (id: string): unknown[] | undefined =>
+    storedEntries(id).find((entry) => entry.origin === "derived")
+      ?.label.confidentiality;
+
+  /** The audiences a link-origin entry names at one path of a document. */
+  const pointerTagsAt = (
+    id: string,
+    path: string[],
+  ): string[] | undefined =>
+    tagsOf(
+      storedEntries(id).find((entry) =>
+        entry.origin === "link" &&
+        (entry.path ?? []).join("/") === path.join("/")
+      )?.label.confidentiality,
+    );
+
+  /**
+   * Every audience the document's container-shape stamps name, deduplicated.
+   * A transaction stamps its whole join on the container it wrote, so this is
+   * where a clause lands that is not tied to one slot.
+   */
+  const containerTags = (id: string): string[] => [
+    ...new Set(
+      storedEntries(id)
+        .filter((entry) => entry.origin === "structure")
+        .flatMap((entry) => tagsOf(entry.label.confidentiality) ?? []),
+    ),
+  ];
 
   // Runs `observe` in a transaction that also writes an output document, then
   // commits and returns the audiences the output's flow stamp names.
@@ -195,6 +226,34 @@ describe("cfc-reference-identity-reads", () => {
           .toBeDefined();
       });
       expect(join).toEqual(["pointer-label"]);
+    });
+
+    it("leaves the pointer's own label out when the runtime's own wiring obtains the reference", async () => {
+      const rt = makeRuntime();
+      const holder = await seedHolder(rt, [
+        pointerEntry(["ref"], "pointer-label"),
+      ]);
+      const join = await flowJoinOf(rt, "rir-machinery-out", (tx) => {
+        tx.runWithAmbientReadMeta(machineryRead, () => {
+          expect(readMaybeLink(tx, { ...holder, path: ["ref"] }))
+            .toBeDefined();
+        });
+      });
+      expect(join).toBeUndefined();
+    });
+
+    it("joins a content label a wiring read materializes at the same position", async () => {
+      const rt = makeRuntime();
+      const holder = await seedHolder(rt, [
+        contentEntry(["ref"], "declared-at-reference"),
+      ]);
+      const join = await flowJoinOf(rt, "rir-machinery-content-out", (tx) => {
+        tx.runWithAmbientReadMeta(machineryRead, () => {
+          expect(tx.readValueOrThrow({ ...holder, path: ["ref"] }))
+            .toBeDefined();
+        });
+      });
+      expect(join).toEqual(["declared-at-reference"]);
     });
   });
 
@@ -256,6 +315,88 @@ describe("cfc-reference-identity-reads", () => {
       );
       expect(found.map((link) => link.id)).toEqual([middle.id, last.id]);
       await tx.commit();
+    });
+  });
+
+  describe("carrying the reference onward", () => {
+    // Why a wiring probe can consume nothing without losing the label. What
+    // the runtime does with a reference it obtains is write that same
+    // reference into another slot, and the link write mints the source
+    // document's own label there (`derivePersistedLinkLabel`). So the
+    // protection arrives at the slot that now holds the reference, whatever
+    // the probe consumed. This is the substitute route the skip rests on, and
+    // nothing else pins it.
+
+    const seedOnward = async (rt: Runtime) => {
+      const seed = seeding(rt);
+      const target = seed.write("rir-onward-target", "s3cr3t", [
+        contentEntry([], "on-target"),
+      ]);
+      const holder = seed.write(
+        "rir-onward-holder",
+        { ref: createSigilLinkFromParsedLink(target) },
+        [pointerEntry(["ref"], "pointer-label")],
+      );
+      await seed.commit();
+      return holder;
+    };
+
+    /**
+     * Obtains the reference at the holder's slot the way the runtime's wiring
+     * does, writes it into a fresh document, and answers with what that
+     * document stores: the pointer label at the slot the reference landed in,
+     * and the audiences the container-shape stamps over the whole document
+     * name.
+     */
+    const carryOnward = async (
+      rt: Runtime,
+      outCause: string,
+      obtain: (tx: IExtendedStorageTransaction) => NormalizedFullLink,
+    ): Promise<{ slot: string[] | undefined; container: string[] }> => {
+      const tx = rt.edit();
+      const reference = obtain(tx);
+      const out = rt.getCell(space, outCause, undefined, tx);
+      out.set({ slot: createSigilLinkFromParsedLink(reference) });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+      const id = out.getAsNormalizedFullLink().id;
+      return {
+        slot: pointerTagsAt(id, ["slot"]),
+        container: containerTags(id),
+      };
+    };
+
+    it("mints the source's label at the slot the reference lands in", async () => {
+      const rt = makeRuntime();
+      const holder = await seedOnward(rt);
+      const carried = await carryOnward(
+        rt,
+        "rir-onward-out",
+        (tx) =>
+          tx.runWithAmbientReadMeta(
+            machineryRead,
+            () => readMaybeLink(tx, { ...holder, path: ["ref"] })!,
+          ),
+      );
+      expect(carried.slot).toEqual(["on-target"]);
+      expect(carried.container).toEqual([]);
+    });
+
+    it("mints the same label there when the probe consumed one", async () => {
+      // The slot's label does not come from the probe. An unmarked probe at
+      // the same position consumes the holder's pointer label, and what that
+      // adds is a stamp over the container the reference landed in — the
+      // second, coarser copy. The slot carries what it carried above either
+      // way, so the skip removes the copy and not the protection.
+      const rt = makeRuntime();
+      const holder = await seedOnward(rt);
+      const carried = await carryOnward(
+        rt,
+        "rir-onward-standalone-out",
+        (tx) => readMaybeLink(tx, { ...holder, path: ["ref"] })!,
+      );
+      expect(carried.slot).toEqual(["on-target"]);
+      expect(carried.container).toEqual(["pointer-label"]);
     });
   });
 

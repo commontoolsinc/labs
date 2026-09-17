@@ -31,6 +31,7 @@ import {
   FabricHash,
   FabricKeyPair,
   FabricRegExp,
+  FabricUnavailable,
 } from "@commonfabric/data-model/fabric-primitives";
 
 import { schemaTypeOfFabricPrimitive } from "@/schemaTypeOfFabricPrimitive.ts";
@@ -83,6 +84,11 @@ const CASES: readonly {
     ctor: FabricRegExp,
     make: () => new FabricRegExp(/x/),
     name: "FabricRegExp",
+  },
+  {
+    ctor: FabricUnavailable,
+    make: () => new FabricUnavailable("pending"),
+    name: "FabricUnavailable",
   },
 ];
 

@@ -57,6 +57,7 @@ export type HarnessRunStatus =
   | "pending"
   | "running"
   | "completed"
+  | "canceled"
   | "failed";
 
 /** Durable driver checkpoint for research before a root task's first turn. */
@@ -72,8 +73,8 @@ export interface HarnessOpeningResearch {
 }
 
 /**
- * How a run ended. `assistant_completed` is the one success: the model
- * answered without calling a tool. `setup_error` is a run that died before
+ * How a run ended. `assistant_completed` means the model returned a final
+ * answer or an admitted task outcome. `setup_error` is a run that died before
  * its first model turn, while what it holds — skill registry, grants, input
  * cells — was being established; the others end the loop itself.
  */
@@ -82,12 +83,14 @@ export type HarnessRunTerminalReason =
   | "max_model_turns"
   | "prompt_loop_error"
   | "setup_error"
+  | "canceled"
   | "process_interrupted";
 
 /** Whether `status` is one a run leaves only by being resumed. */
 export const isTerminalHarnessRunStatus = (
   status: HarnessRunStatus,
-): boolean => status === "completed" || status === "failed";
+): boolean =>
+  status === "completed" || status === "failed" || status === "canceled";
 
 /**
  * The resolved CFC posture of the run's fabric session — the Runtime that
@@ -168,6 +171,10 @@ export interface HarnessRunState {
   updatedAt: string;
   endedAt?: string;
   terminalReason?: HarnessRunTerminalReason;
+
+  /** Reason supplied by the run's controlling abort signal. */
+  cancelReason?: string;
+
   cfcEnforcementMode: CfcEnforcementMode;
   fabricSessionCfc?: HarnessFabricSessionCfcPosture;
   promptSlotBinding?: PromptSlotBinding;
@@ -261,6 +268,10 @@ export interface CreateHarnessRunStateOptions {
   status?: HarnessRunStatus;
   endedAt?: string;
   terminalReason?: HarnessRunTerminalReason;
+
+  /** Reason supplied by the run's controlling abort signal. */
+  cancelReason?: string;
+
   cfcEnforcementMode: CfcEnforcementMode;
   fabricSessionCfc?: HarnessFabricSessionCfcPosture;
   promptSlotBinding?: PromptSlotBinding;
@@ -334,6 +345,9 @@ export const createHarnessRunState = (
     ...(options.endedAt !== undefined ? { endedAt: options.endedAt } : {}),
     ...(options.terminalReason !== undefined
       ? { terminalReason: options.terminalReason }
+      : {}),
+    ...(options.cancelReason !== undefined
+      ? { cancelReason: options.cancelReason }
       : {}),
     cfcEnforcementMode: options.cfcEnforcementMode,
     ...(options.fabricSessionCfc !== undefined
@@ -548,8 +562,12 @@ export const setHarnessRunStatus = (
       now,
     );
   }
-  const { endedAt: _endedAt, terminalReason: _terminalReason, ...nonTerminal } =
-    state;
+  const {
+    endedAt: _endedAt,
+    terminalReason: _terminalReason,
+    cancelReason: _cancelReason,
+    ...nonTerminal
+  } = state;
   return patchHarnessRunState(nonTerminal, { status }, now);
 };
 

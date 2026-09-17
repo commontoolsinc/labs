@@ -114,7 +114,7 @@ export const uniqueCfcAtoms = (
   const references = new Set<object>();
   let groups: Map<string, CfcAtom[]> | undefined;
   for (const atom of atoms) {
-    if (typeof atom === "object" && atom !== null) {
+    if (isObjectOrArray(atom)) {
       if (references.has(atom)) continue;
     }
     if (groups === undefined && unique.length > ATOM_SCAN_LIMIT) {
@@ -123,7 +123,7 @@ export const uniqueCfcAtoms = (
     if (groups === undefined) {
       if (!unique.some((kept) => deepEqual(kept, atom))) {
         unique.push(atom as JSONValue);
-        if (typeof atom === "object" && atom !== null) references.add(atom);
+        if (isObjectOrArray(atom)) references.add(atom);
       }
       continue;
     }
@@ -133,7 +133,7 @@ export const uniqueCfcAtoms = (
     }
     group.push(atom as JSONValue);
     unique.push(atom as JSONValue);
-    if (typeof atom === "object" && atom !== null) references.add(atom);
+    if (isObjectOrArray(atom)) references.add(atom);
   }
   return unique;
 };

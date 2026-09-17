@@ -6,6 +6,7 @@
  * drawing the tiles chart their history with.
  */
 
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { Status } from "./types.ts";
 import { PROD_SERVICE } from "./config.ts";
 import {
@@ -143,7 +144,7 @@ function githubErrorBody(body: string): string | undefined {
   try {
     const value: unknown = JSON.parse(body);
     if (
-      value !== null && typeof value === "object" && "message" in value &&
+      isObjectOrArray(value) && "message" in value &&
       typeof value.message === "string"
     ) {
       detail = value.message;
@@ -519,7 +520,8 @@ export function clampInt(v: string | null, def: number, lo: number, hi: number):
 }
 
 // Turn a raw collector error into a short, calm tile message. The full error is
-// still logged; the wall shows a human phrase, not a stack trace or API path.
+// still logged; the dashboard shows a human phrase, not a stack trace or API
+// path.
 export function friendlyError(msg: string): string {
   const m = msg.toLowerCase();
   if (/connect|sending request|network|dns|refused|unreachable|timed ?out|timeout|econn/.test(m)) {

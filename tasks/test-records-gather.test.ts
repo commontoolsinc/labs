@@ -80,7 +80,7 @@ describe("test-records-gather", () => {
         schema: RECORD_SCHEMA_VERSION,
         line: "context",
         reportId: "01GATHERTEST000000000000",
-        repo: "commontoolsinc/labs",
+        repo: "commonfabric/labs",
         commit: "c".repeat(40),
         dirty: false,
         env: "ci",

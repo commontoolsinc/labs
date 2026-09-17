@@ -10,7 +10,7 @@ the decisions elsewhere in this tree that each confirms or replaces.
 
 `packages/runner/src/cell-reference.ts` owns the shared reader and renderer.
 [Migration](#migration) describes their adoption across callers.
-[#6775](https://github.com/commontoolsinc/labs/issues/6775) is the question this
+[#6775](https://github.com/commonfabric/labs/issues/6775) is the question this
 document answers.
 
 ## Vocabulary

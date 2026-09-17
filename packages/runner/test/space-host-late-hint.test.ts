@@ -503,6 +503,9 @@ describe("late space host hints", () => {
         path: [],
       };
       expect(stale.read(address).ok?.value).toBeUndefined();
+      const emptyReactive = reader.edit();
+      emptyReactive.validateReactiveReads = true;
+      expect(emptyReactive.read(address).ok?.value).toBeUndefined();
       expect(
         stale.write(address, { name: "derived from missing data" }).error,
       ).toBeUndefined();
@@ -517,6 +520,11 @@ describe("late space host hints", () => {
 
       const rejected = await stale.commit();
       expect(rejected.error?.name).toBe("StorageTransactionInconsistent");
+      const emptyRejected = await emptyReactive.commit();
+      expect(emptyRejected.error).toMatchObject({
+        name: "StorageTransactionInconsistent",
+        emptyReactiveCommit: true,
+      });
       expect(provider.replica.getDocument(targetId)).toEqual({
         value: { name: "intended data" },
       });

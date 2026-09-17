@@ -79,7 +79,9 @@ destination is the piece the row stands for, found by identity, so a mention
 already written gains the number once the universe lists its destination under
 one, and loses it when the universe stops. A producer whose collection names
 nothing leaves the key out, and a row without it is one no such query reaches
-and no pill takes a name from.
+and no pill takes a name from. A collection that names its members and shows
+none of the names is in the same position: it publishes no name on a member, so
+a row's copy is the empty string, which both ends read as no name.
 
 A PIECE may publish a `shortName` for itself too — the name the collection that
 created it gave it — and a producer building rows may copy it from there. The

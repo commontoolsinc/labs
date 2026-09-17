@@ -35,7 +35,7 @@ active organization repositories.
 This plan takes `cf view` from its current TypeScript and JavaScript, Markdown,
 JSON, JSONC, JSON Lines, YAML, extension-based Python highlighting, and diff
 support to honest handling of every textual syntax in the active
-`commontoolsinc` repositories.
+`commonfabric` repositories.
 
 The frozen evidence is in the
 [July 2026 coverage survey](../history/packages/cli/cf-view-language-coverage-2026-07.md).

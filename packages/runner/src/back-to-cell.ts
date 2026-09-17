@@ -4,6 +4,7 @@
  * to enable conversion back to cells when needed.
  */
 
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { Cell } from "./cell.ts";
 
 /**
@@ -45,7 +46,7 @@ export const opaqueReference = Symbol("opaqueReference");
 
 /** Whether `value` is the projection of an opaque position. */
 export function isOpaqueReference(value: unknown): boolean {
-  return typeof value === "object" && value !== null &&
+  return isObjectOrArray(value) &&
     (value as Record<symbol, unknown>)[opaqueReference] === true;
 }
 

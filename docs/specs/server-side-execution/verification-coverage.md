@@ -1107,8 +1107,9 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   / the transaction-layer kick / `ensureLinkedDocLoaded` / the served
   event's presync+preflight as its actor); the writer and
   materializer indexes are NAME-keyed by design (the one fan-in);
-  the N-run loop resubscribes once to the union of its instance logs
-  (the last-instance-wins replacement gone); S4 keys basis rows by
+  the N-run loop resubscribes to the union of its instance logs after
+  each instance (including while later instances run, pinned by
+  `scheduler-empty-reactive-reads.test.ts`); S4 keys basis rows by
   the run's FULL instance address and clears the stranded stamp and
   broader-chain keys in both directions (the RAGGED amendment,
   scopes.md §2 — narrowing below the space→user hop is per
@@ -4557,7 +4558,7 @@ supply; OW29/OW32/OW34 closed):
     the posture proves wrong during the build, flag for follow-up
     after merging to main rather than blocking.
   - Not rows, recorded: #5991's ledger comment POSTED 2026-08-18
-    (<https://github.com/commontoolsinc/labs/pull/5991#issuecomment-5337935897>;
+    (<https://github.com/commonfabric/labs/pull/5991#issuecomment-5337935897>;
     the second review round's report recovered on-branch beside the
     closeout, `stage-c/stage-c-tuning-independent-review.md`); the design
     pass's reconciled report (`stage-c-design.md`) LANDED 2026-08-18 as
@@ -6685,7 +6686,7 @@ supply; OW29/OW32/OW34 closed):
     [`ow45-default-app-store-incomplete-root-cause-2026-08-26.md`](../../history/plans/server-execution-v2/optimize/ow45-default-app-store-incomplete-root-cause-2026-08-26.md).
     **DIRECT CI UNSKIP PROBE, 2026-08-26: RED — NO LIFT.** Head
     `66a969ca02e8962ae44eeb4da264a575da421893`, Actions run
-    [33008274232, ON shard 5](https://github.com/commontoolsinc/labs/actions/runs/33008274232/job/98307864923).
+    [33008274232, ON shard 5](https://github.com/commonfabric/labs/actions/runs/33008274232/job/98307864923).
     The registry had no default-app entry, the job printed that no listed
     skip was in its file list, and the exact rapid-note step ran. The other
     nine ON pattern shards passed. Shard 5 failed only this target after
@@ -7897,7 +7898,7 @@ supply; OW29/OW32/OW34 closed):
     teardown with a port-free check, `gtimeout 600` never approached, quiet
     and loaded interleaved. Probe head `95f313835` (both entries and the
     default-app in-file guard removed in one commit), CI run
-    [33138358110](https://github.com/commontoolsinc/labs/actions/runs/33138358110);
+    [33138358110](https://github.com/commonfabric/labs/actions/runs/33138358110);
     eight of the ten ON pattern shards passed, shards 5 and 7 red — the two
     shards that carry the two probed files.
 
@@ -8132,7 +8133,7 @@ supply; OW29/OW32/OW34 closed):
       lift exactly as the bar states (captured and classified, never
       rerun-looped).
     **PROBE 2 (this PR's first board at head `83f31e47f`, run
-    [33160430927](https://github.com/commontoolsinc/labs/actions/runs/33160430927),
+    [33160430927](https://github.com/commonfabric/labs/actions/runs/33160430927),
     ON shard 7, job 98813758092): RED AT THE PROBED SURFACE — that lift
     attempt WITHDREW, and the classification found the SECOND supplier
     geometry.** The surface itself failed (the HOST's join, "Unknown
@@ -8176,7 +8177,7 @@ supply; OW29/OW32/OW34 closed):
     the CI geometry the identity-home persists ARE recorded, so the
     child replication converges order-independently.
     **PROBE 3 (the v4 board, run
-    [33164596936](https://github.com/commontoolsinc/labs/actions/runs/33164596936),
+    [33164596936](https://github.com/commonfabric/labs/actions/runs/33164596936),
     ON shard 7, job 98827162794): RED at the surface again — and the
     artifact caught the fix's own defect: the fallback NEVER FIRED
     (`closure-replication-fallback-origin` 0 beside the same one
@@ -8201,7 +8202,7 @@ supply; OW29/OW32/OW34 closed):
     there restores the entry with the accumulated map — no further
     iteration on this PR.
     **PROBE 4 (the keying-fix board, run
-    [33165960083](https://github.com/commontoolsinc/labs/actions/runs/33165960083),
+    [33165960083](https://github.com/commonfabric/labs/actions/runs/33165960083),
     ON shard 7, job 98831529935): RED at the surface — the THIRD
     geometry, and the declared hard stop is honored: THE ENTRY IS
     RESTORED.** Same signature, fallback counter still 0 — and this
@@ -8369,7 +8370,7 @@ supply; OW29/OW32/OW34 closed):
       and the entry restored carrying the map plus probe 5's 3b
       classification — the PROBE 5 block below.
     **PROBE 5 (run
-    [33198257149](https://github.com/commontoolsinc/labs/actions/runs/33198257149),
+    [33198257149](https://github.com/commonfabric/labs/actions/runs/33198257149),
     ON shard 7, job 98941298566, head `683477989`): RED at the surface —
     and the artifact is GEOMETRY 3B ON ITS PRE-DECLARED SIGNATURE, the
     first probe classified by a discriminator this arc built for it in
@@ -8559,7 +8560,7 @@ supply; OW29/OW32/OW34 closed):
     board across three PRs. The PROBE 6 block below carries the
     reading.]**
     **PROBE 6 (run
-    [33222653635](https://github.com/commontoolsinc/labs/actions/runs/33222653635),
+    [33222653635](https://github.com/commonfabric/labs/actions/runs/33222653635),
     head `1a5f3e66e`, THIS PR's own board — read settle-confirmed by
     the arc coordinator): GREEN AT THE PROBED SURFACE.** All ten
     server-execution ON shards succeeded — including ON shard 7 with
@@ -8696,7 +8697,7 @@ supply; OW29/OW32/OW34 closed):
       campaign's own report is PR #6469's (merged `23cf68e7d`) record.
     - **Requirement (2), the direct-CI unskip probe — MET at the probed
       SURFACE.** Probe head `95f313835`, CI run
-      [33138358110](https://github.com/commontoolsinc/labs/actions/runs/33138358110),
+      [33138358110](https://github.com/commonfabric/labs/actions/runs/33138358110),
       ON shard 5, job 98743591519: the registry carried no default-app entry,
       the job ran this exact step, and it **PASSED — `ok (18s)`** — the whole
       `default-app flow test` file green, the shard's published toolshed log

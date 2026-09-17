@@ -388,12 +388,26 @@ Deno.test("discord online: a history that can't be persisted is logged, not fata
 Deno.test("discord online: the identify frame carries the token and the privileged intents", async () => {
   await withWire({}, async (w) => {
     const view = connect(w);
-    const identify = w.socket().frames()[0] as { op: number; d: { token: string; intents: number } };
+    const identify = w.socket().frames()[0] as {
+      op: number;
+      d: {
+        token: string;
+        intents: number;
+        properties: { os: string; browser: string; device: string };
+      };
+    };
     assertEquals(identify.op, 2);
     assertEquals(identify.d.token, "tok");
     // GUILDS | GUILD_MEMBERS | GUILD_PRESENCES — the members and presences bits are
     // what the tile needs and what the bot must be granted.
     assertEquals(identify.d.intents, 259);
+    // Discord records these against the connection, where they pick this
+    // client out from the others a bot token can carry.
+    assertEquals(identify.d.properties, {
+      os: "linux",
+      browser: "commonfabric-dashboard",
+      device: "commonfabric-dashboard",
+    });
     w.socket().deliver({ op: 9 }); // invalid session, to end the poll
     await view;
   });

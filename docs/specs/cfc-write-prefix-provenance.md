@@ -3,7 +3,7 @@
 _Epic D, stage D4, of
 [`docs/history/plans/cfc-future-work-implementation.md`](../history/plans/cfc-future-work-implementation.md).
 This doc is a **soundness review** of the plan's proposed prefix approximation,
-grounded in the CFC spec (`commontoolsinc/specs` `cfc/08-09-runtime-label-propagation.md`
+grounded in the CFC spec (`commonfabric/specs` `cfc/08-09-runtime-label-propagation.md`
 §8.9, §8.9.1, §8.9.2). It found a real unsoundness in the plan text and fixes the
 design before code lands. Written 2026-07-02 at owner request; amended
 2026-07-03 (overlap-keyed bound, read positions in the digest, §8.9.2
@@ -272,7 +272,7 @@ Landed per §7 with two reconciliations, both recorded as
 
 ## Provenance
 
-Grounded in `commontoolsinc/specs` `cfc/08-09-runtime-label-propagation.md`
+Grounded in `commonfabric/specs` `cfc/08-09-runtime-label-propagation.md`
 §8.9.2 (*Propagation Algorithm* — the normative `computePcConfidentiality`
 definition and trigger-read joining), §8.9.1 (*Trusted Flow-Precision Claims*
 — *Decomposition before claims*, the `flow-taint-precision` normative

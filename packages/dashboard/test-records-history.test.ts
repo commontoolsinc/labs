@@ -27,7 +27,7 @@ function storeFetch(records: string[]): typeof fetch {
       schema: 1,
       line: "context",
       reportId: "01HISTORY000000000000000",
-      repo: "commontoolsinc/labs",
+      repo: "commonfabric/labs",
       commit: "a".repeat(40),
       dirty: false,
       env: "ci",
@@ -55,6 +55,12 @@ const FAIL = JSON.stringify({
   outcome: "fail",
   durationMs: 300,
 });
+const FORK_PASS = JSON.stringify({
+  line: "record",
+  test: { k: "unit", s: "bakery", n: "glaze" },
+  outcome: "pass",
+  durationMs: 50,
+});
 
 Deno.test("collectDay aggregates runs, failures, and durations per identity", async () => {
   const aggregates = await collectDay("2026/08/16", {
@@ -66,10 +72,43 @@ Deno.test("collectDay aggregates runs, failures, and durations per identity", as
     runs: 2,
     failures: 1,
     skips: 0,
-    totalDurationMs: 400,
-    maxDurationMs: 300,
+    totalDurationMs: 100,
+    maxDurationMs: 100,
   }]);
   assertEquals(isDayAggregate(aggregates[0]), true);
+});
+
+Deno.test("collectDay reads durations from passing records alone", async () => {
+  // A failure ended by a wait's safety net reports that net's bound, so a
+  // duration read from one describes the net rather than the test. Two
+  // passing runs of different lengths follow it, so the total is a sum
+  // and the worst is not simply the last one read.
+
+  const passing = (durationMs: number) =>
+    JSON.stringify({
+      line: "record",
+      test: { k: "unit", s: "bakery", n: "glaze" },
+      outcome: "pass",
+      durationMs,
+    });
+  const wedged = JSON.stringify({
+    line: "record",
+    test: { k: "unit", s: "bakery", n: "glaze" },
+    outcome: "fail",
+    durationMs: 300_000,
+  });
+  const aggregates = await collectDay("2026/08/16", {
+    fetchImpl: storeFetch([wedged, passing(100), passing(40)]),
+  });
+  assertEquals(aggregates, [{
+    key: '["unit","bakery","glaze"]',
+    day: "2026/08/16",
+    runs: 3,
+    failures: 1,
+    skips: 0,
+    totalDurationMs: 140,
+    maxDurationMs: 100,
+  }]);
 });
 
 Deno.test("collectDay separates variant records from default history", async () => {
@@ -118,13 +157,15 @@ Deno.test("collectDay counts nothing for a lane measuring itself", async () => {
 Deno.test("collectDay counts a fork run's report", async () => {
   // A body holding two reports, one from this repository and one from a fork.
   // See `docs/specs/test-records.md`, "Trust boundaries for consumers", for
-  // what the store's member gate leaves the fork flag meaning.
+  // what the store's member gate leaves the fork flag meaning. The fork
+  // report carries a passing run as well as a failing one, so its runs and
+  // its durations are both counted, and its failure's duration is not.
 
   const sameRepositoryContext = JSON.stringify({
     schema: 1,
     line: "context",
     reportId: "01HISTORYSAME00000000000",
-    repo: "commontoolsinc/labs",
+    repo: "commonfabric/labs",
     commit: "a".repeat(40),
     dirty: false,
     env: "ci",
@@ -138,7 +179,7 @@ Deno.test("collectDay counts a fork run's report", async () => {
     schema: 1,
     line: "context",
     reportId: "01HISTORYFORK00000000000",
-    repo: "commontoolsinc/labs",
+    repo: "commonfabric/labs",
     commit: "b".repeat(40),
     dirty: false,
     env: "ci",
@@ -166,7 +207,8 @@ Deno.test("collectDay counts a fork run's report", async () => {
     }
     return Promise.resolve(
       new Response(
-        [sameRepositoryContext, PASS, forkContext, FAIL].join("\n") + "\n",
+        [sameRepositoryContext, PASS, forkContext, FAIL, FORK_PASS]
+          .join("\n") + "\n",
         { status: 200 },
       ),
     );
@@ -175,11 +217,11 @@ Deno.test("collectDay counts a fork run's report", async () => {
   assertEquals(aggregates, [{
     key: '["unit","bakery","glaze"]',
     day: "2026/08/16",
-    runs: 2,
+    runs: 3,
     failures: 1,
     skips: 0,
-    totalDurationMs: 400,
-    maxDurationMs: 300,
+    totalDurationMs: 150,
+    maxDurationMs: 100,
   }]);
 });
 
@@ -224,8 +266,8 @@ Deno.test("isDayAggregate rejects inconsistent aggregates", () => {
     runs: 2,
     failures: 1,
     skips: 0,
-    totalDurationMs: 400,
-    maxDurationMs: 300,
+    totalDurationMs: 100,
+    maxDurationMs: 100,
   };
   assertEquals(isDayAggregate(sound), true);
   assertEquals(
@@ -266,8 +308,42 @@ Deno.test("the store refreshes missing days, persists, and reloads", async () =>
     assertEquals(identities[0]?.key, '["unit","bakery","glaze"]');
     const series = reloaded.series('["unit","bakery","glaze"]');
     assertEquals(series.passRates, [0.5, 0.5]);
-    assertEquals(series.meanDurationsMs, [200, 200]);
-    assertEquals(series.times.length, 2);
+    // Each day held one passing run of 100ms and one failure of 300ms.
+    assertEquals(series.meanDurationsMs, [100, 100]);
+    assertEquals(series.passRateTimes.length, 2);
+    assertEquals(series.durationTimes, series.passRateTimes);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("the store discards a cache written under the old rule", async () => {
+  // Version 1 held durations summed over every record, so its figures
+  // mean something else and the window is refetched rather than read.
+
+  const directory = await Deno.makeTempDir({ prefix: "test-records-history-" });
+  try {
+    const file = join(directory, "history.json");
+    await Deno.writeTextFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        days: {
+          "2026/08/16": [{
+            key: '["unit","bakery","glaze"]',
+            day: "2026/08/16",
+            runs: 2,
+            failures: 1,
+            skips: 0,
+            totalDurationMs: 400,
+            maxDurationMs: 300,
+          }],
+        },
+      }),
+    );
+    const store = new TestRecordsHistoryStore(file);
+    await store.load();
+    assertEquals(store.days(), []);
   } finally {
     await Deno.remove(directory, { recursive: true });
   }
@@ -348,8 +424,31 @@ Deno.test("series returns an empty shape for an unknown identity", async () => {
   try {
     const store = new TestRecordsHistoryStore(join(directory, "h.json"));
     const series = store.series('["unit","bakery","never-ran"]');
-    assertEquals(series.times, []);
+    assertEquals(series.passRateTimes, []);
     assertEquals(series.passRates, []);
+    assertEquals(series.durationTimes, []);
+    assertEquals(series.meanDurationsMs, []);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("series keeps a pass rate for a day with no passing run", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "test-records-history-" });
+  try {
+    const store = new TestRecordsHistoryStore(join(directory, "history.json"));
+    await store.refresh(Date.parse("2026-08-16T12:00:00Z"), {
+      fetchImpl: storeFetch([FAIL]),
+      windowDays: 1,
+      aliases: new AliasResolver([]),
+    });
+    const series = store.series('["unit","bakery","glaze"]');
+    assertEquals(series.passRates, [0]);
+    assertEquals(series.passRateTimes.length, 1);
+    // Nothing passed, so the day says nothing about how long the test
+    // takes and contributes no duration point.
+    assertEquals(series.durationTimes, []);
+    assertEquals(series.meanDurationsMs, []);
   } finally {
     await Deno.remove(directory, { recursive: true });
   }

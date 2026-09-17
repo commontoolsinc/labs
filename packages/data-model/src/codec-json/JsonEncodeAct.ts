@@ -1,3 +1,4 @@
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import type { FabricValue } from "@/interface.ts";
@@ -151,7 +152,7 @@ export class JsonEncodeAct extends BaseEncodeAct<JsonCodecValue, string> {
    * values (which `#unquote()` can collapse).
    */
   static #isQuoteSafe(v: JsonCodecValue): boolean {
-    if (v === null || typeof v !== "object") return true;
+    if (!isObjectOrArray(v)) return true;
     if (Array.isArray(v)) {
       return v.every((item) => JsonEncodeAct.#isQuoteSafe(item));
     }
@@ -169,7 +170,7 @@ export class JsonEncodeAct extends BaseEncodeAct<JsonCodecValue, string> {
    * literal and must not be recursed into.
    */
   static #unquote(v: JsonCodecValue): JsonCodecValue {
-    if (v === null || typeof v !== "object") {
+    if (!isObjectOrArray(v)) {
       return v;
     } else if (Array.isArray(v)) {
       const result = v.map(JsonEncodeAct.#unquote) as JsonCodecValue;

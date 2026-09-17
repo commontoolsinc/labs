@@ -122,8 +122,8 @@ export function newestFirstAtOrBefore(
 ): string[] {
   // Two manifests can be created in the same millisecond, and then the
   // creation time does not order them. The name does, and every reader
-  // sorts it the same way, so the lanes and the wall obey one manifest
-  // rather than two that happen to share an instant.
+  // sorts it the same way, so the lanes and the dashboard obey one
+  // manifest rather than two that happen to share an instant.
   return objects
     .filter(({ name, createdAt }) =>
       generatedAtOf(name) !== undefined && createdAt <= at

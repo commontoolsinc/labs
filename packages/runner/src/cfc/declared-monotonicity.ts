@@ -43,8 +43,8 @@ import type { CfcDeclaredWideningExemption, LabelMapEntry } from "./types.ts";
  * principal, a copied `exactCopyOf` label whose source changed — are
  * non-monotone declared updates by construction under `enforce`. That is
  * §8.12.1 semantics, not an accident: per-value evidence belongs in the
- * derived component, and the dial ships default-`off` while those mints
- * migrate.
+ * derived component, and the dial ships default-`observe` while those
+ * mints migrate.
  *
  * The one sanctioned exception (§8.12.7 route 2b — the future
  * declassification-event writer) is the per-transaction privileged
