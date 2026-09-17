@@ -197,6 +197,18 @@ export class FabricUnavailable extends BaseFabricPrimitive
     return this.#reason === UNAVAILABLE_REASONS.error;
   }
 
+  /**
+   * The encoded state of `this`, which is what both codecs emit: the reason,
+   * and the message only when there is one.
+   */
+  #state(): FabricUnavailableState {
+    const reason = this.#reason;
+
+    return (this.#errorMessage === null)
+      ? { reason }
+      : { reason, errorMessage: this.#errorMessage };
+  }
+
   //
   // Static members
   //
@@ -305,18 +317,6 @@ export class FabricUnavailable extends BaseFabricPrimitive
    */
   static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
     return this.#realmCodec;
-  }
-
-  /**
-   * The encoded state of `this`, which is what both codecs emit: the reason,
-   * and the message only when there is one.
-   */
-  #state(): FabricUnavailableState {
-    const reason = this.#reason;
-
-    return (this.#errorMessage === null)
-      ? { reason }
-      : { reason, errorMessage: this.#errorMessage };
   }
 }
 

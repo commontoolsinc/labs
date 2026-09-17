@@ -194,7 +194,8 @@ The hashed form applies everywhere this spec encodes a string via the
 `TAG_STRING` layout: standalone strings (this section), `symbol` keys (Section
 4.6), object keys (Section 4.13), `FabricInstance` type tags (Section 4.14),
 `FabricHash` algorithm tags (Section 4.11), `FabricRegExp` source/flags/flavor
-strings (Section 4.16), and `FabricKeyPair` algorithm names (Section 4.17).
+strings (Section 4.16), `FabricKeyPair` algorithm names (Section 4.17), and
+`FabricUnavailable` reasons and messages (Section 4.18).
 
 ### 4.5 `bigint`
 

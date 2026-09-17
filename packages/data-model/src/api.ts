@@ -468,11 +468,22 @@ export type UnavailableReason =
  * `errorMessage`; for the other three it is `null`.
  */
 export interface FabricUnavailable extends FabricPrimitive {
+  /** Why the data is unavailable. */
   readonly reason: UnavailableReason;
+
+  /** The message, when the reason is `error`; `null` otherwise. */
   readonly errorMessage: string | null;
+
+  /** Whether the reason is `pending`. */
   isPending(): boolean;
+
+  /** Whether the reason is `syncing`. */
   isSyncing(): boolean;
+
+  /** Whether the reason is `schemaMismatch`. */
   isSchemaMismatch(): boolean;
+
+  /** Whether the reason is `error`. */
   isError(): boolean;
 }
 

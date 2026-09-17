@@ -1429,6 +1429,13 @@ export class FabricUnavailable extends FabricPrimitive {
 
   constructor(reason: UnavailableReason, errorMessage: string | null = null) {
     super();
+    if (reason === "error") {
+      if (errorMessage === null) {
+        throw new Error("Reason `error` requires an `errorMessage`.");
+      }
+    } else if (errorMessage !== null) {
+      throw new Error(`Reason \`${reason}\` does not take an \`errorMessage\`.`);
+    }
     this.#reason = reason;
     this.#errorMessage = errorMessage;
   }
