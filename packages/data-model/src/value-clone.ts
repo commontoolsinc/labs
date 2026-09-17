@@ -224,6 +224,7 @@ export function cloneHelper(
     case VALUE_TAGS.FabricKeyPair:
     case VALUE_TAGS.FabricRegExp:
     case VALUE_TAGS.FabricHash:
+    case VALUE_TAGS.FabricUnavailable:
       return value;
 
     case VALUE_TAGS.FabricInstance: {

@@ -24,6 +24,7 @@ import type {
   FabricHash,
   FabricKeyPair,
   FabricRegExp,
+  FabricUnavailable,
   FactoryInput,
   HandlerFactory,
   JSONSchema,
@@ -197,6 +198,7 @@ type SchemaCore<
   : T extends { type: "FabricHash" } ? FabricHash
   : T extends { type: "FabricKeyPair" } ? FabricKeyPair
   : T extends { type: "FabricRegExp" } ? FabricRegExp
+  : T extends { type: "FabricUnavailable" } ? FabricUnavailable
   : T extends { type: "array" }
     ? T extends { items: infer I } ? SchemaArrayItems<I, Root, Depth, WrapCells>
     : unknown[]
@@ -286,9 +288,9 @@ type SchemaInner<
  * - anyOf unions
  * - Primitive types (string, number, boolean, null)
  * - `FabricPrimitive` types ("FabricBytes", "FabricEpochDay",
- *   "FabricEpochNsec", "FabricHash", "FabricKeyPair", "FabricRegExp"), each
- *   inferring the
- *   corresponding `FabricPrimitive` interface from this package
+ *   "FabricEpochNsec", "FabricHash", "FabricKeyPair", "FabricRegExp",
+ *   "FabricUnavailable"), each inferring the corresponding `FabricPrimitive`
+ *   interface from this package
  * - Arrays with typed items
  * - Objects with typed properties (required and optional)
  * - Cell and Stream wrapping via asCell/asStream

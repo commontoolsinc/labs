@@ -40,6 +40,10 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import {
+  FabricUnavailable,
+  UNAVAILABLE_SYNCING,
+} from "@/fabric-primitives/FabricUnavailable.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { EchoReport } from "./realm-echo-worker.ts";
 
@@ -1110,6 +1114,8 @@ describe("RealmCodecEngine", () => {
         days: new FabricEpochDay(20_000n),
         hash: new FabricHash(new Uint8Array([9, 8, 7]), "fid1"),
         regexp: new FabricRegExp(/ab+c/gi),
+        unavailable: new FabricUnavailable("error", "general", "boom"),
+        prefab: UNAVAILABLE_SYNCING,
       });
 
       expect(report.ok).toBe(true);
@@ -1121,6 +1127,8 @@ describe("RealmCodecEngine", () => {
         days: "FabricEpochDay",
         hash: "FabricHash",
         regexp: "FabricRegExp",
+        unavailable: "FabricUnavailable",
+        prefab: "FabricUnavailable",
       });
       // Content as well as class. A transposed field or a dropped value would
       // leave every `classes` entry correct, so the class check alone cannot
@@ -1131,6 +1139,11 @@ describe("RealmCodecEngine", () => {
       expect(report.facts?.hashTag).toBe("fid1");
       expect(report.facts?.hashBytes).toEqual([9, 8, 7]);
       expect(report.facts?.regexpParts).toEqual(["es2025", "ab+c", "gi"]);
+      expect(report.facts?.unavailableParts)
+        .toEqual(["error", "general", "boom"]);
+      // The far realm has its own prefab, and a message-less reason decodes to
+      // it there as it does here.
+      expect(report.facts?.prefabIsThatRealmsPrefab).toBe(true);
     });
 
     it("carries what a plain `postMessage()` would lose or mangle", async () => {
@@ -1274,6 +1287,7 @@ describe("RealmCodecEngine", () => {
         ["FabricEpochDay", FabricEpochDay],
         ["FabricHash", FabricHash],
         ["FabricRegExp", FabricRegExp],
+        ["FabricUnavailable", FabricUnavailable],
       ] as const
     ) {
       it(`declares \`${name}\` terminal`, () => {

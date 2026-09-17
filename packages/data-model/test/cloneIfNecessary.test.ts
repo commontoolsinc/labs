@@ -36,6 +36,7 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FabricUnavailable } from "@/fabric-primitives/FabricUnavailable.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import {
@@ -616,6 +617,11 @@ describe("cloneIfNecessary()", () => {
     {
       name: "FabricHash",
       factory: () => new FabricHash(new Uint8Array([1, 2, 3, 4]), "fid1"),
+      deepCloneImplemented: false,
+    },
+    {
+      name: "FabricUnavailable",
+      factory: () => new FabricUnavailable("error", "general", "boom"),
       deepCloneImplemented: false,
     },
   ];

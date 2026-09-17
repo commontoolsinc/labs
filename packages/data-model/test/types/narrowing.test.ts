@@ -24,6 +24,7 @@ import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FabricUnavailable } from "@/fabric-primitives/FabricUnavailable.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
 describe("narrowing", () => {
@@ -324,6 +325,8 @@ describe("narrowing", () => {
           .toBe(false);
         expect(isKeyableObjectOrArray(new FabricEpochNsec(1n))).toBe(false);
         expect(isKeyableObjectOrArray(new FabricEpochDay(1n))).toBe(false);
+        expect(isKeyableObjectOrArray(new FabricUnavailable("pending")))
+          .toBe(false);
         expect(isKeyableObjectOrArray(new FabricRegExp("es2025", "a+", "g")))
           .toBe(false);
         expect(
@@ -452,6 +455,8 @@ describe("narrowing", () => {
           .toBe(false);
         expect(isWalkableObjectOrArray(new FabricEpochNsec(1n))).toBe(false);
         expect(isWalkableObjectOrArray(new FabricEpochDay(1n))).toBe(false);
+        expect(isWalkableObjectOrArray(new FabricUnavailable("pending")))
+          .toBe(false);
         expect(isWalkableObjectOrArray(new FabricRegExp("es2025", "a+", "g")))
           .toBe(false);
         expect(
