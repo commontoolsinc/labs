@@ -374,6 +374,33 @@ describe("test-records-report", () => {
       expect(status).toBe(0);
     });
 
+    it("lists the collisions and the high-churn families it found", async () => {
+      const { out } = await captureConsole(() =>
+        runReport({
+          days: 1,
+          gate: false,
+          bucket: "b",
+          prefix: "p",
+          now: NOW,
+          fetchImpl: reportFetch({
+            "first.ndjson": ciBody(false, [
+              record("same", "pass", 1),
+              record("same", "pass", 2),
+              record("case #1", "pass", 1),
+              record("case #2", "pass", 1),
+              record("case #3", "pass", 1),
+              record("stable", "pass", 1),
+            ]),
+            "second.ndjson": ciBody(true, [record("stable", "pass", 1)]),
+          }),
+        })
+      );
+      expect(out).toContain("Collisions (1):");
+      expect(out).toContain("2x [unit] bakery: same in first.ndjson");
+      expect(out).toContain("High-churn identity families (1):");
+      expect(out).toContain('3 one-run members: ["unit","bakery","case ##"]');
+    });
+
     it("reports over the objects it read when one of them cannot be read", async () => {
       const { result: status, out, err } = await captureConsole(() =>
         runReport({
