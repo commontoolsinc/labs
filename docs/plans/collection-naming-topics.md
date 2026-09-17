@@ -347,7 +347,7 @@ Scope: `packages/navigation` (the member in a view and its URL),
 2. `/<space>/top` opens the board, the piece containing the namespace.
 3. `/<space>/top/999` shows a not-found state naming the collection.
 4. The item's own header shows the number, and the shell's header offers a
-   copyable portable reference `/@<space>/top/42`; board cards show the
+   copyable portable reference `//<space>/top/42`; board cards show the
    number. (Two headers, which is how this was read when the criterion was
    delivered and accepted: the badge is the item pattern's, while only the
    shell knows the space and the collection's name, so only the shell can

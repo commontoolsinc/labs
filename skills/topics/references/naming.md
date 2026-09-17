@@ -17,10 +17,10 @@ deno task cf cell get "$TOPICS_BOARD" index --step --select @,title,shortName
 
 The number is what a short reference is written with. Once the board's `names`
 map is bound as a slug, `<collection>/<member>` names a Topic wherever an
-address is taken — `deno task cf cell get /@<space>/top/42 title`,
-`deno task cf piece describe --cell /@<space>/top/42`,
-`deno task cf piece call --cell /@<space>/top/42 setTitle '{...}'` — and exactly
-one segment reaches a member, so `/@<space>/top/42/title` is that Topic's
+address is taken — `deno task cf cell get //<space>/top/42 title`,
+`deno task cf piece describe --cell //<space>/top/42`,
+`deno task cf piece call --cell //<space>/top/42 setTitle '{...}'` — and exactly
+one segment reaches a member, so `//<space>/top/42/title` is that Topic's
 `title` field. A name with no member after it is refused, naming the piece
 holding the collection; and `no member 999 in top` is the refusal for a member
 the board does not hold. `packages/cli/README.md` is the whole grammar, and
@@ -28,7 +28,7 @@ the board does not hold. `packages/cli/README.md` is the whole grammar, and
 
 A member name is the board's, not the fabric's: it means something only through
 the collection that issued it, so a citation carries the collection —
-`/@<space>/top/42`, never a bare `42`. A canonical `/of:` address remains the
+`//<space>/top/42`, never a bare `42`. A canonical `/of:` address remains the
 thing to pass in a reference position; the member name is for a person to read
 and type.
 
