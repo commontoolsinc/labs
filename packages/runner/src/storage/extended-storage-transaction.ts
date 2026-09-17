@@ -2963,6 +2963,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return getTransactionWriteDetails(this.tx, space);
   }
 
+  getWriteDetailsForTarget(target: {
+    space: MemorySpace;
+    id: URI;
+    scope?: CellScope;
+    path?: readonly PropertyKey[];
+  }): Iterable<TransactionWriteDetail> {
+    return this.tx.getWriteDetailsForTarget?.(target) ??
+      this.getWriteDetails(target.space);
+  }
+
   status(): StorageTransactionStatus {
     if (this.#statusOverride !== undefined) {
       return this.#statusOverride;
@@ -4152,6 +4162,16 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   ): Iterable<TransactionWriteDetail> {
     return this.#wrapped.getWriteDetails?.(space) ??
       getTransactionWriteDetails(this.#wrapped.tx, space);
+  }
+
+  getWriteDetailsForTarget(target: {
+    space: MemorySpace;
+    id: URI;
+    scope?: CellScope;
+    path?: readonly PropertyKey[];
+  }): Iterable<TransactionWriteDetail> {
+    return this.#wrapped.getWriteDetailsForTarget?.(target) ??
+      this.getWriteDetails(target.space);
   }
 
   status(): StorageTransactionStatus {

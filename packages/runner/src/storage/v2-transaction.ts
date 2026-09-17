@@ -1543,6 +1543,20 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
   }
 
+  *getWriteDetailsForTarget(target: {
+    space: MemorySpace;
+    id: URI;
+    scope?: CellScope;
+    path?: readonly PropertyKey[];
+  }): Iterable<TransactionWriteDetail> {
+    const branch = this.#branches.get(target.space);
+    const entry = branch?.docs.get(this.#docKey(target));
+    if (!entry || !isWritableDocument(entry)) {
+      return;
+    }
+    yield* entry.writeDetails.values();
+  }
+
   *getReadDetails(space: MemorySpace): Iterable<TransactionReadDetail> {
     const branch = this.#branches.get(space);
     if (!branch) {
