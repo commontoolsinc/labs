@@ -113,7 +113,7 @@ import {
   runMultiUserTestPattern,
 } from "./multi-user-test-runner.ts";
 import { inferProgramRoot } from "./program-root.ts";
-import { buildActionEvent } from "./trusted-test-event.ts";
+import { buildActionEvent } from "./trusted-action-event.ts";
 
 /**
  * How many idle-then-sync rounds a step's settle performs before it gives up
