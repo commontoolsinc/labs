@@ -20,8 +20,11 @@ two places that are already durable: the link schema the builder emits and the
 module's own `wrapper: "handler"` flag. Handler dispatch becomes structural,
 the cold-start repairs trigger on a structural mismatch instead of on the
 missing marker, the stream's document keeps only the `result` back-link it
-already carries, and a reader that has nothing but that document (FUSE, the
-state inspector, a bare address) resolves it through the owner's manifest.
+already carries, and the two readers that have nothing but that document, the
+state inspector and a bare address in the runtime, resolve it through the
+owner's manifest. FUSE's `entities/` view is not one of them: it projects a
+stream's document as an empty owned document until the follow-up lets it
+classify from the id.
 
 The contract change to state up front: **a stream is declared by the schema
 of the link that names it or by the kind of the handle that holds it. Its
@@ -45,9 +48,9 @@ it through the owner.**
 
 Every other writer is hand-rolled: four fields in the llm-dialog builtin
 (`packages/runner/src/builtins/llm-dialog.ts:3908`), the CLI test harness
-(`packages/cli/lib/test-runner.ts:1369`), and the tests: eight files build a
-stream cell with `setRaw({ $stream: true })`, and some 45 more carry the literal
-in fakes and stored-document fixtures.
+(`packages/cli/lib/test-runner.ts:1369`), and the tests: seven files build a
+stream cell with `setRaw({ $stream: true })`, and 41 more carry the literal in
+fakes and stored-document fixtures, 48 test files in all.
 
 ### The load-bearing reader
 
@@ -208,7 +211,9 @@ tell it is a stream.
   plain value. Its own comment says the listing and the CLI read guard must
   agree about which positions are callables; today they agree through the
   sentinel.
-- The FUSE entities view would project an empty owned document.
+- The FUSE entities view projects an empty owned document, and keeps doing so:
+  the owner walk is not added there (stage 2's FUSE item), and the follow-up
+  lets it classify from the id.
 - The FUSE piece view is mostly fine, because the bridge reads results through
   the pattern's result schema
   (`packages/piece/src/ops/piece-controller.ts:4990`) and its classifier falls
@@ -449,8 +454,9 @@ than what the list first said, the item says what it does now and why.
       own; an edit changes the pattern's identity, and a comment does not earn
       one.
 
-Stage 3 has no observable precondition in the data. Setup re-emits only
-manifest links; a running piece reuses its setup without re-emitting them
+Stage 3 is gated on the compatibility decision above, not on anything the data
+can show, because nothing in the data marks a piece as ready. Setup re-emits
+only manifest links; a running piece reuses its setup without re-emitting them
 (`runner.ts:2838`); the setup marker records pattern identity, not a format
 (`runner.ts:3257`); and links written into data before stage 1 are never
 rewritten. So what lets the value read go is the owner resolution above for
