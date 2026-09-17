@@ -7,8 +7,8 @@
  * key is the identity of a chart series across runs and across months, so the
  * text of a benchmark's group is part of the dashboard's contract with the
  * benchmark, not a label the benchmark owns. Renaming a group starts a new
- * series and abandons the old one; renaming one of the two keys the key tile
- * trends leaves that tile with nothing at all.
+ * series and abandons the old one; the key tile trends two keys and nothing
+ * else, so renaming one costs it half of what it reads.
  *
  * Nothing here reads the environment or the network, so the Benchmarks
  * workflow can run the check over the report it is about to upload with no
