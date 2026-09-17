@@ -445,16 +445,25 @@ The current package provides:
   child computes over references it cannot read out. It runs on its own turn
   budget of 24 rather than the default subagent cap of 8, since each
   compile-error iteration costs a turn, and it carries a return contract — a
-  discriminated union of `{ ok: true, resultRef, describes, hashtags? }` and
-  `{ ok: false, code, detail? }` — which is the profile's own rather than a
-  default: a `pattern-author` delegation that declares a `returnSchema` of its
-  own is refused, naming the field, because a channel this narrow cannot be left
-  caller-writable. A failure and a success are different shapes, and only the
-  success branch carries a reference; there is no field on it for source under
-  any name. The failure `code` comes from a fixed inert vocabulary, so a parent
-  learns why without declassifying anything, and any child return saying
-  `ok: false` reaches the parent as a coded failure rather than as a schema
-  complaint.
+  discriminated union of
+  `{ ok: true, resultRef, describes, hashtags?, verificationRef? }` and
+  `{ ok: false, code, detail?, verificationRef? }` — which is the profile's own
+  rather than a default: a `pattern-author` delegation that declares a
+  `returnSchema` of its own is refused, naming the field, because a channel this
+  narrow cannot be left caller-writable. A failure and a success are different
+  shapes, and only the success branch carries a piece result reference; there is
+  no field on it for source under any name. The failure `code` comes from a
+  fixed inert vocabulary, so a parent learns why without declassifying anything,
+  and any child return saying `ok: false` reaches the parent as a coded failure
+  rather than as a schema complaint.
+- revision verification guidance uses `read_piece_source.inputRef` for the
+  piece's bound arguments and ordinary `run_pattern` for an old/new rule check
+  over one bounded sample. The child's separate `verificationRef` carries no
+  values into the parent; comparison fields use the existing release path. Zero
+  effect, an empty sample, or unavailable evidence calls for a question instead
+  of a completed revision. Styling without a computed-surface observation is
+  explicitly reported as not checked. This is guidance, not a host proof of
+  arbitrary rule semantics.
 
 Run the capability probe instead of copying this list into adapters:
 

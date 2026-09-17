@@ -12,6 +12,7 @@ import {
 } from "./prompt-loop.ts";
 import { establishHarnessSessionContext } from "./session-assembly.ts";
 import { pieceTargetingContextMessages } from "./piece-targeting.ts";
+import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
 import type { HarnessInputCellSpec } from "./contracts/input-cells.ts";
 import type { HarnessPatternRefSpec } from "./contracts/pattern-refs.ts";
 import {
@@ -1703,7 +1704,10 @@ export class HarnessInteractiveChatService {
       // sandbox runtime for a turn that has no use for one.
       return {
         loop: this.#createPromptLoop(options),
-        contextMessages: pieceTargetingContextMessages([]),
+        contextMessages: [
+          ...pieceTargetingContextMessages([]),
+          REVISION_VERIFICATION_GUIDANCE,
+        ],
       };
     }
     const engine = options.engine ?? new CfHarnessEngine(options);
