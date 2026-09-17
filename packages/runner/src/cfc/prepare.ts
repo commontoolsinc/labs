@@ -2367,6 +2367,27 @@ const forEachFlowObservation = (
     // ordinary read of the target document. `nonRecursive` reads (key-add,
     // length, count) observe shape and membership; everything else is a
     // recursive value read.
+    //
+    // A probe the RUNTIME issued as its own plumbing is not an observation
+    // at all, and is skipped with the trace-covered ones. §4.6.3 puts the
+    // link-carried label on a STANDALONE reference-identity read — something
+    // the computation did with the answer — and the machinery marker names
+    // the reads no computation asked for: op instantiation, result plumbing,
+    // and the list coordinators' scaffolding, which probe prior slots to
+    // compare identities. What such a probe does with the reference it finds
+    // is write that same reference somewhere else, and the link write
+    // carries the source's label to the slot it lands in
+    // (`derivePersistedLinkLabel` below), so the pointer's protection
+    // arrives pointwise at the destination. Joining it into the flow stamp
+    // as well smears it over everything else the wiring transaction wrote —
+    // in a piece's case over the whole result projection, which is what took
+    // a nested piece's entire `$UI` away under the §8.10.6 display ceiling.
+    // A coordinator's genuine dependencies stay outside the marked scope:
+    // `filter` reads every predicate result there, and `flatMap` every child
+    // result. `map` reads no element value anywhere — it republishes
+    // references — so the link-origin entry the link write mints at each
+    // output slot is the whole of an element's protection in its output, and
+    // `cfc-template-population.test.ts` measures that over a labeled element.
     const logicalPath = canonicalizeLogicalPath(read.path);
     const space = read.space;
     const id = read.id as URI;
@@ -2386,7 +2407,7 @@ const forEachFlowObservation = (
       );
     let shape: ReadObservationShape;
     if (isLinkResolutionProbe(read.meta)) {
-      if (coveredByTrace()) {
+      if (coveredByTrace() || isMachineryRead(read.meta)) {
         continue;
       }
       shape = "followRef";

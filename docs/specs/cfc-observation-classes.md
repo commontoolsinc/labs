@@ -258,6 +258,51 @@ normative from C1 on:
   silently ending TransformedBy / PolicyCertified propagation. Pointer
   integrity evidence stays on the link entry (the LinkReference chain).
 
+### 6.2 The runtime's own wiring is the second non-standalone probe (2026-09-16)
+
+The dereference trace of §6.1 is not the only thing that makes a probe
+something other than a standalone observation. A probe carrying the
+machinery marker (`machineryRead`) is one the RUNTIME issued while wiring an
+operation up or plumbing a result, and no pattern or handler code runs inside
+a marked scope. §4.6.3's reference-identity row is about a read the
+computation made and then did something with; what a wiring probe does with
+the reference it finds is write that same reference into another slot, and
+the link write carries the source document's label to that slot as an
+`origin:"link"` entry. The pointer's protection therefore arrives pointwise
+at the destination without the flow stamp, and joining it into the stamp as
+well spreads it over every other path the wiring transaction wrote.
+`forEachFlowObservation` skips a marked probe alongside a trace-covered one,
+so such a read consumes nothing; a marked read that materializes content is
+unaffected and keeps consuming its ordinary labels.
+
+The measurement that forced this: at the strict dials with server execution
+on, `packages/patterns/integration/cfc-render-policy-demo.test.ts` lost each
+sub-piece's entire user interface to the §8.10.6 display ceiling. The
+transaction that wired the two sub-patterns up probed the sigil interior of
+the document holding the confidential health cell's reference, consumed the
+`origin:"link"` entry there, and the §8.12.5 route-2 declaration then wrote
+that clause at the ROOT of four documents at once — the sub-piece result
+projections among them, so the ceiling denied their `$UI` whole. Four such
+declarations per failing run before the skip, none after.
+
+The list coordinators are the case this could have under-tainted. `map`,
+`filter` and `flatMap` mark the presence probe and the slot-identity diffs
+over their prior slots, and each of the three then differs in what it reads
+outside that scope. `filter` reads every predicate result there, and `flatMap`
+reads every child result there, so membership and content in those two still
+depend on reads that taint. `map` reads no element value anywhere: it
+republishes references, so the link-origin entry at each output slot is the
+whole of an element's protection in its output.
+
+That entry is what makes the exclusion sound, and it does not come from any
+read. `list.set(members)` writes a link per member, and the link write mints
+the source document's own label at the slot the link lands in, so a reader
+reaching an element through the container consumes it there.
+`cfc-template-population.test.ts` measures that over a labeled element, beside
+the case that measures the marked probe adding nothing on top;
+`cfc-reference-identity-reads.test.ts` measures the same route for a wiring
+read that carries one reference onward.
+
 ## 7. Observation ceiling (LLM path) and render
 
 C4 makes the two big consumers class-aware, both via the §4 table — same

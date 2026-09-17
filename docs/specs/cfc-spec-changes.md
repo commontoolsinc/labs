@@ -1317,3 +1317,53 @@ implementation are in
 runtime marks the class with `writeDestinationRead` rather than by address, so
 §18.6.4's "excluded address patterns" obligation is discharged for this class
 by naming the marker. `open`.
+
+## From the wiring-probe classification (2026-09-16)
+
+**SC-42 [normative] A runtime wiring read is not an observation — §4.6.3 +
+§18.6.2.** `open`. §4.6.3's read-API mapping puts the link-carried label on a
+"standalone reference-identity read", and the refinement beneath it defines
+standalone by the dereference trace: a probe covered at or above by a trace
+the same transaction recorded is resolution machinery, and every other probe
+consumes the reference-identity row. No second boundary is named.
+
+The runner has a second class of probe that boundary does not reach. When the
+runtime wires an operation up — binding a node's inputs and outputs,
+resolving a write redirect, plumbing a result, scaffolding a list
+coordinator's container — it reads slots to find out which reference sits
+there, and follows none of them, so no trace covers the read. Those scopes
+carry the `machineryRead` marker and contain no pattern or handler code. What
+the runtime does with the reference is write that same reference into another
+slot, and the link write mints the source document's own label there, so the
+pointer's protection reaches the slot that receives it whatever the probe
+consumed. The per-transaction join is a second, coarser copy of it, stamped
+over every other path the transaction wrote.
+
+The cost of that copy is not theoretical. Setting a piece up rewrites the
+complete result projection, so the copy lands at the ROOT of each sub-piece's
+result document, where a covering entry covers `$UI` and the §8.10.6 display
+ceiling denies the piece's whole user interface rather than the confidential
+field inside it. Measured on
+`packages/patterns/integration/cfc-render-policy-demo.test.ts` at the strict
+dials: the clause reached the flow join through one observation, a `followRef`
+read at the sigil interior carrying the wiring marker, and the §8.12.5 route-2
+declaration then wrote it at `path: []` of four documents at once.
+
+Proposed edit: say in §4.6.3's refinement list that the dereference trace is
+one of two things that make a reference-identity probe something other than a
+standalone observation, and that a read the runtime issues as its own
+plumbing is the other. The table classifies observations a computation makes;
+a runtime moving a reference from one slot to another makes none. State the
+condition the exclusion rests on, which is the same one §18.6.2's list rests
+on: the excluded scopes contain no program code, and a scope that computes
+content from which reference sits at a slot is not one of them. §18.6.2 is
+the other place this could live — its enumerated set already excludes
+"reference resolution performed by the verification machinery itself", and
+wiring reads are the same kind of thing one layer out — so the two sections
+should at least cross-reference whichever carries it.
+
+Section 8.12.8 anticipates this entry. Its existence-channel paragraph says
+closing the per-child half for generic reference-structure containers "first
+requires the runtime to distinguish its own container-scaffolding reads from
+application reads (a machinery-read class beyond those of §18.6.2)", which is
+that marker, named as something the spec does not yet have.
