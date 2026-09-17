@@ -4287,6 +4287,15 @@ export class Runner {
     let runningPattern: Pattern | undefined;
     let cancelNodes: Cancel | undefined;
     let initialSchedulerRehydrationAvailable = true;
+    // The cold-start setup repair `instantiateInitialPattern` found owed for
+    // the pattern this start began with. It stages into the instantiation's
+    // own transaction, so the setup and the graph that reads it land or fail
+    // together, under the one retry and the wave settlement that transaction
+    // already has.
+    let setupRepair: {
+      pattern: Pattern;
+      stage: (tx: IExtendedStorageTransaction) => void;
+    } | undefined;
 
     // Helper to instantiate nodes for a pattern
     const instantiatePattern = (
@@ -4304,6 +4313,16 @@ export class Runner {
       const actualTx = useTx ?? this.#runtime.edit();
       enrollPieceOwnedStores(actualTx, resultCell, pattern);
       const shouldCommit = !useTx;
+      // A transaction that also carries the cold-start setup repair is named
+      // for it, so its seal and any refusal of it are attributed to the repair
+      // rather than to an ordinary instantiation.
+      const repair = shouldCommit && setupRepair?.pattern === pattern &&
+          !this.#storedManifestCovers(resultCell, pattern)
+        ? setupRepair
+        : undefined;
+      const startActionId = `${
+        repair ? "piece-start-repair" : "piece-instantiate"
+      }/${resultCell.sourceURI}`;
       if (shouldCommit) {
         // Self-minted instantiation tx (the hot-swap watcher's
         // swapToPattern arm reaches here tx-less): runtime-internal
@@ -4313,7 +4332,7 @@ export class Runner {
         // below. A PROVIDED tx keeps its caller's stamp — never
         // restamped here. No-op off the serving posture.
         this.#runtime.stampServerRun(actualTx, {
-          actionId: `piece-instantiate/${resultCell.sourceURI}`,
+          actionId: startActionId,
           kind: "bookkeeping",
         });
         // The instantiation's writes are authored bookkeeping bound for
@@ -4323,6 +4342,18 @@ export class Runner {
         // retires the piece registration along with the event handlers
         // its graph installed.
         markDurableReadTx(actualTx);
+        if (repair !== undefined) {
+          // Staged ahead of the nodes, which read what it writes. Fail
+          // closed: a repair that cannot proceed aborts the transaction
+          // before anything is wired or committed, and the piece is left
+          // exactly as it was.
+          try {
+            repair.stage(actualTx);
+          } catch (repairError) {
+            actualTx.abort();
+            throw repairError;
+          }
+        }
       }
       // A boot snapshot belongs to exactly one pattern instantiation. A later
       // patternIdentity hot-swap must register fresh under the same durable
@@ -4443,8 +4474,7 @@ export class Runner {
           // instantiation commit means the piece is running against
           // writes that never landed, so the failure surfaces loudly
           // and, on a serving runtime, counted.
-          const instantiateActionId =
-            `piece-instantiate/${resultCell.sourceURI}`;
+          const instantiateActionId = startActionId;
           const patternKeyAtInstantiation = currentPatternKey;
           const teardownRegistrationIfCurrent = () => {
             if (registrations.get(key) !== cancel) return;
@@ -5043,123 +5073,89 @@ export class Runner {
     // pointer; it replays the pattern the pointer already names
     // (samePattern=true: materializes the missing internal cells but leaves
     // the existing argument — the piece's data — untouched; no roll-forward,
-    // no user-data rewrite). Fail-closed: a repair that cannot proceed throws
-    // and leaves the piece exactly as it was. Only the plain start path is
-    // repaired — a caller-supplied `useTx` is a setup/run transaction that is
-    // already materializing state, so it is skipped rather than reasoned about.
+    // no user-data rewrite). It stages into the instantiation's own
+    // transaction (`setupRepair`), so the setup and the graph that reads it
+    // commit together, and a refused commit takes the instantiation's one
+    // retry, which stages the repair again. Fail-closed: a repair that cannot
+    // proceed throws and leaves the piece exactly as it was. Only the plain
+    // start path is repaired — a caller-supplied `useTx` is a setup/run
+    // transaction that is already materializing state, so it is skipped
+    // rather than reasoned about.
     const instantiateInitialPattern = (
       pattern: Pattern,
       ref: { identity: string; symbol: string } | undefined,
       useTx?: IExtendedStorageTransaction,
     ) => {
       if (
-        useTx !== undefined ||
-        ref === undefined ||
-        storedSetupMarker(resultCell, ref) === "matches" ||
-        this.#storedManifestCovers(resultCell, pattern) ||
+        useTx === undefined &&
+        ref !== undefined &&
+        storedSetupMarker(resultCell, ref) !== "matches" &&
+        !this.#storedManifestCovers(resultCell, pattern) &&
         // The root/default pattern is the PieceController's to repair (it has
         // the richer roll-forward + clear-error path); defer to it there.
-        this.#isSpaceDefaultPattern(resultCell)
+        !this.#isSpaceDefaultPattern(resultCell)
       ) {
-        instantiatePattern(pattern, useTx);
-        return;
-      }
-      // ONE repair transaction holds the precondition re-read, the setup
-      // state, the instantiate, AND prepare — staged together or not at all,
-      // so there is no window in which setup commits and the instantiate then
-      // races it. EVERY step sits inside the try: any failure aborts the tx
-      // and rethrows, so the piece is left exactly as it was.
-      const repairTx = this.#runtime.edit();
-      // Self-minted repair tx inside `#startCore()` — piece machinery with
-      // no scheduler run around it; bookkeeping per serving-loop.md
-      // §3d (reachable server-side via the demand loader's start).
-      this.#runtime.stampServerRun(repairTx, {
-        actionId: `piece-start-repair/${resultCell.sourceURI}`,
-        kind: "bookkeeping",
-      });
-      try {
-        // Precondition: the pinned identity must still equal `ref`. A
-        // concurrent updater or boot may have moved it; re-running the stale
-        // pinned pattern's setup would roll that newer identity back. The read
-        // is through repairTx so it also participates in commit conflict
-        // detection (mirrors the controller repair's expectedPatternIdentity).
-        const currentRef = getPatternIdentityRef(resultCell.withTx(repairTx));
-        if (
-          currentRef === undefined ||
-          currentRef.identity !== ref.identity ||
-          currentRef.symbol !== ref.symbol
-        ) {
-          throw new Error(
-            `Piece \`${resultCell.sourceURI}\` moved to another pattern ` +
-              "while its setup was being repaired",
-          );
-        }
-        this.#applySetupState(
-          repairTx,
+        setupRepair = {
           pattern,
-          ref,
-          // No re-stage, even though this doc's setup state was staged by
-          // another version: the precondition just re-read the pinned
-          // identity, so this is the SAME pattern repairing its own internal
-          // cells, not an update. Re-pointing the argument here would rewrite
-          // user data on a narrow instantiation repair.
-          {
-            sameStoredSetup: true,
-            restageStoredArgument: false,
-            // Inert here — `#applySetupState` reads only the two fields
-            // above — but stated rather than defaulted, because this repair
-            // deliberately leaves the piece's ARGUMENT alone even though its
-            // precondition proves the pattern is the same one.
-            storedSetupMatches: false,
-            // The argument was staged by another version and is not
-            // re-validated here, so the marker keeps saying so: the next
-            // setup for this identity still re-stages and validates it. The
-            // repair does not come back for that, because the manifest it
-            // writes now covers the pattern.
-            leaveCompletionMarker: true,
+          stage: (repairTx) => {
+            // A retry re-stages what a refused commit rolled back; once a
+            // commit has landed the manifest covers the pattern and there is
+            // nothing left to stage.
+            if (
+              this.#storedManifestCovers(resultCell.withTx(repairTx), pattern)
+            ) {
+              return;
+            }
+            // Precondition: the pinned identity must still equal `ref`. A
+            // concurrent updater or boot may have moved it; re-running the
+            // stale pinned pattern's setup would roll that newer identity
+            // back. The read is through the instantiation's transaction, so
+            // it also participates in commit conflict detection (mirrors the
+            // controller repair's expectedPatternIdentity).
+            const currentRef = getPatternIdentityRef(
+              resultCell.withTx(repairTx),
+            );
+            if (
+              currentRef === undefined ||
+              currentRef.identity !== ref.identity ||
+              currentRef.symbol !== ref.symbol
+            ) {
+              throw new Error(
+                `Piece \`${resultCell.sourceURI}\` moved to another pattern ` +
+                  "while its setup was being repaired",
+              );
+            }
+            this.#applySetupState(
+              repairTx,
+              pattern,
+              ref,
+              // No re-stage, even though this doc's setup state was staged by
+              // another version: the precondition just re-read the pinned
+              // identity, so this is the SAME pattern repairing its own
+              // internal cells, not an update. Re-pointing the argument here
+              // would rewrite user data on a narrow instantiation repair.
+              {
+                sameStoredSetup: true,
+                restageStoredArgument: false,
+                // Inert here — `#applySetupState` reads only the two fields
+                // above — but stated rather than defaulted, because this
+                // repair deliberately leaves the piece's ARGUMENT alone even
+                // though its precondition proves the pattern is the same one.
+                storedSetupMatches: false,
+                // The argument was staged by another version and is not
+                // re-validated here, so the marker keeps saying so: the next
+                // setup for this identity still re-stages and validates it.
+                // The repair does not come back for that, because the
+                // manifest it writes now covers the pattern.
+                leaveCompletionMarker: true,
+              },
+              undefined,
+              resultCell,
+            );
           },
-          undefined,
-          resultCell,
-        );
-        // Instantiate into the SAME tx: it reads the just-staged setup writes.
-        instantiatePattern(pattern, repairTx);
-        this.#runtime.prepareTxForCommit(repairTx);
-      } catch (repairError) {
-        repairTx.abort();
-        throw repairError;
+        };
       }
-      // Staging succeeded, so this is a SPECULATIVE start: the graph is wired
-      // locally and start() returns success. The commit is deliberately not
-      // awaited (consistent with every other start path), so its outcome can
-      // NOT be thrown back to a start() that has already resolved. Instead a
-      // committed-with-{error} result OR a rejected commit Promise tears the
-      // piece down so a later start() re-heals it rather than taking the
-      // "already started" fast path over a dead registration.
-      //
-      // Scope-safe teardown: unregister ONLY this start's own `cancel`. A
-      // stop+restart during the pending commit installs a NEWER cancel under
-      // the same key; deleting `this.#cancels[key]` unconditionally (as
-      // cleanup() does) would clobber that live registration and orphan its
-      // graph. Delete the key only while it still holds our cancel — the same
-      // guard createDeferredStartOwnership uses — and always drop/invoke ours.
-      const teardownAfterFailedCommit = () => {
-        if (registrations.get(key) === cancel) registrations.delete(key);
-        this.#allCancels.delete(cancel);
-        cancel();
-      };
-      const repairActionId = `piece-start-repair/${resultCell.sourceURI}`;
-      repairTx.addCommitCallback((_committedTx, result) => {
-        if (result.error) {
-          // Surfaced BEFORE the teardown, so a lost registration is a
-          // reported failure rather than a silent one.
-          this.#reportPieceStartCommitFailure(repairActionId, result.error);
-          teardownAfterFailedCommit();
-        }
-      });
-      repairTx.commit().catch((error) => {
-        this.#reportPieceStartCommitFailure(repairActionId, error);
-        teardownAfterFailedCommit();
-      });
+      instantiatePattern(pattern, useTx);
     };
 
     const resultCellForRead = tx ? resultCell.withTx(tx) : resultCell;
