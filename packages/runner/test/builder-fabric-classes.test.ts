@@ -168,7 +168,7 @@ describe("commonfabric `FabricSpecialObject` classes", () => {
   });
 
   describe("FabricUnavailable", () => {
-    it("constructs an instance from a reason and a message", () => {
+    it("constructs an instance from a reason, a kind, and a message", () => {
       const BoundFabricUnavailable = commonfabric
         .FabricUnavailable as typeof FabricUnavailable;
       const instance = new BoundFabricUnavailable("error", "network", "boom");

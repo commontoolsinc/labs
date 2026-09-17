@@ -161,6 +161,16 @@ function isUnavailableState(state: unknown): state is FabricUnavailableState {
     (typeof errorMessage === "string");
 }
 
+/** The reasons that have a prefab instance: every reason but `error`. */
+type TransientReason = Exclude<UnavailableReason, "error">;
+
+/** Whether `reason` is one of the transient reasons. */
+function isTransientReason(
+  reason: UnavailableReason,
+): reason is TransientReason {
+  return reason !== UNAVAILABLE_REASONS.error;
+}
+
 /**
  * Returns the instance a decoded state stands for: the prefab for a state
  * that is a transient reason alone, and a fresh instance otherwise. Throws as
@@ -169,11 +179,11 @@ function isUnavailableState(state: unknown): state is FabricUnavailableState {
 function instanceForState(state: FabricUnavailableState): FabricUnavailable {
   const { reason, errorKind, errorMessage } = state;
 
-  if ((errorKind === undefined) && (errorMessage === undefined)) {
-    const prefab = PREFABS_BY_REASON[reason];
-    if (prefab !== undefined) {
-      return prefab;
-    }
+  if (
+    isTransientReason(reason) &&
+    (errorKind === undefined) && (errorMessage === undefined)
+  ) {
+    return PREFABS_BY_REASON[reason];
   }
 
   return new FabricUnavailable(reason, errorKind ?? null, errorMessage ?? null);
@@ -463,15 +473,15 @@ export const UNAVAILABLE_SYNCING = new FabricUnavailable(
 );
 
 /**
- * The prefab instance for each reason that has one, keyed by reason, for the
- * codecs to decode to.
+ * The prefab instance for each transient reason, keyed by reason, for the
+ * codecs to decode to. The type is what holds "one per transient reason": a
+ * reason added without a prefab stops this file compiling.
  */
-const PREFABS_BY_REASON: Readonly<
-  Partial<Record<UnavailableReason, FabricUnavailable>>
-> = Object.freeze({
-  pending: UNAVAILABLE_PENDING,
-  syncing: UNAVAILABLE_SYNCING,
-});
+const PREFABS_BY_REASON: Readonly<Record<TransientReason, FabricUnavailable>> =
+  Object.freeze({
+    pending: UNAVAILABLE_PENDING,
+    syncing: UNAVAILABLE_SYNCING,
+  });
 
 // Compile-time check that the exported `FabricUnavailable` constructor matches
 // the `FabricUnavailableConstructor` declared in `@/api.ts`. This catches a

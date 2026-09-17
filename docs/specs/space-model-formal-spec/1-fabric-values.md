@@ -1477,7 +1477,10 @@ export class FabricUnavailable extends FabricPrimitive {
     }
     this.#reason = reason;
     this.#errorKind = errorKind;
-    this.#errorMessage = errorMessage;
+    // A message equal to the kind's default is stored as none.
+    this.#errorMessage = (errorMessage === defaultMessageFor(errorKind))
+      ? null
+      : errorMessage;
   }
 
   get reason(): UnavailableReason {

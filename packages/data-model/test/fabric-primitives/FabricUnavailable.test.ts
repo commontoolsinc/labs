@@ -35,19 +35,22 @@ import { shallowFabricFromConvertibleJsValue } from "@/index.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 
 /**
- * One instance per reason, each built afresh, keyed by reason. The
- * `satisfies` closes the set: a reason added to the type without a row here
- * stops this file compiling.
+ * One instance per reason, each built afresh, keyed by reason. The return
+ * type closes the set: a reason added to the type without a row here stops
+ * this file compiling.
  */
 function instancesByReason(): Record<UnavailableReason, FabricUnavailable> {
   return {
     pending: new FabricUnavailable("pending"),
     syncing: new FabricUnavailable("syncing"),
     error: new FabricUnavailable("error", "general", "boom"),
-  } satisfies Record<UnavailableReason, FabricUnavailable>;
+  };
 }
 
-/** One `error` instance per kind, each given no message, keyed by kind. */
+/**
+ * One `error` instance per kind, each given no message, keyed by kind. The
+ * return type closes the set as `instancesByReason()`'s does.
+ */
 function errorsByKind(): Record<UnavailableErrorKind, FabricUnavailable> {
   return {
     general: new FabricUnavailable("error", "general"),
@@ -58,33 +61,39 @@ function errorsByKind(): Record<UnavailableErrorKind, FabricUnavailable> {
     compile: new FabricUnavailable("error", "compile"),
     provider: new FabricUnavailable("error", "provider"),
     sync: new FabricUnavailable("error", "sync"),
-  } satisfies Record<UnavailableErrorKind, FabricUnavailable>;
+  };
 }
 
-/** The prefab for each reason that has one. */
+/** The reasons that have a prefab: every reason but `error`. */
+type TransientReason = Exclude<UnavailableReason, "error">;
+
+/**
+ * The prefab for each transient reason. The `satisfies` closes the set: a
+ * transient reason added to the type without a row here stops this file
+ * compiling, and the list below is derived from these keys.
+ */
 const PREFABS = {
   pending: UNAVAILABLE_PENDING,
   syncing: UNAVAILABLE_SYNCING,
-} satisfies Partial<Record<UnavailableReason, FabricUnavailable>>;
+} satisfies Record<TransientReason, FabricUnavailable>;
 
-/** The transient reasons, as the `satisfies` closes them. */
-const TRANSIENT_REASONS = ["pending", "syncing"] satisfies readonly Exclude<
-  UnavailableReason,
-  "error"
->[];
+/** The transient reasons, as the keys of `PREFABS`. */
+const TRANSIENT_REASONS = Object.keys(PREFABS) as readonly TransientReason[];
 
 describe("FabricUnavailable", () => {
-  // Pure type-identity / supertype checks: cross-cutting carve-out per the
-  // rule (don't fit a single member, aren't construction mechanics).
+  describe("class identity", () => {
+    // Supertype checks, which fit no single member and are not construction
+    // mechanics, so they get a block of their own.
 
-  it("is an instance of `FabricPrimitive`", () => {
-    expect(new FabricUnavailable("pending") instanceof FabricPrimitive)
-      .toBe(true);
-  });
+    it("is an instance of `FabricPrimitive`", () => {
+      expect(new FabricUnavailable("pending") instanceof FabricPrimitive)
+        .toBe(true);
+    });
 
-  it("is not a `FabricInstance` (it's a `FabricPrimitive`)", () => {
-    expect(new FabricUnavailable("pending") instanceof FabricInstance)
-      .toBe(false);
+    it("is not a `FabricInstance` (it's a `FabricPrimitive`)", () => {
+      expect(new FabricUnavailable("pending") instanceof FabricInstance)
+        .toBe(false);
+    });
   });
 
   describe("constructor()", () => {
@@ -623,12 +632,6 @@ describe("FabricUnavailable", () => {
 
     it("are two distinct instances", () => {
       expect(new Set(Object.values(PREFABS)).size).toBe(2);
-    });
-
-    it("are one per transient reason", () => {
-      expect(Object.keys(PREFABS).sort()).toEqual(
-        [...TRANSIENT_REASONS].sort(),
-      );
     });
   });
 
