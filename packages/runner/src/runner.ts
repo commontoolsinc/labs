@@ -184,6 +184,11 @@ import {
   resolveOriginal,
   resolveProducerEntryRef,
 } from "./builder/pattern-metadata.ts";
+import { classifyPieceOriginString } from "./piece-origin-kind.ts";
+import {
+  PATTERNS_ROUTE_PREFIX,
+  systemPatternSource,
+} from "./pattern-source-scheme.ts";
 import {
   resolveBuiltinImplementationIdentity,
   resolvePolicyFacingImplementationIdentity,
@@ -7453,6 +7458,64 @@ export class Runner {
   }
 
   /**
+   * The `system:` origin a child instantiated under `parent` claims, or
+   * `undefined` when it claims none.
+   *
+   * A child claims one when the piece it is instantiated under follows a
+   * `system:` origin and the child's module is one the runtime fetched from
+   * the deployment's patterns route as part of that program — the same
+   * ground on which the runtime claims the `system:` ref for the surfaces it
+   * instantiates itself (`docs/specs/piece-source-lifecycle.md`, "Origins").
+   * Both halves are required: the module's name alone is author-controlled
+   * (a locally compiled program may call a file anything), and it is the
+   * followed parent that says the name was a route the runtime resolved.
+   *
+   * The parent is the piece a handler belongs to as much as the piece a
+   * nested node sits in: a handler's result pattern runs into a receipt
+   * cell that records no origin, so the search walks the demand-root chain
+   * that receipt was started under.
+   */
+  #childSystemOrigin(
+    tx: IExtendedStorageTransaction,
+    parent: Cell<unknown>,
+    child: Pattern | Module,
+  ): string | undefined {
+    const sourcePath = getPatternSourcePath(child);
+    if (
+      sourcePath === undefined || !sourcePath.startsWith(PATTERNS_ROUTE_PREFIX)
+    ) {
+      return undefined;
+    }
+    if (this.#ancestorSystemOrigin(tx, parent) === undefined) return undefined;
+    return systemPatternSource(sourcePath.slice(PATTERNS_ROUTE_PREFIX.length));
+  }
+
+  /**
+   * Helper for {@link Runner.#childSystemOrigin}, which finds the `system:`
+   * origin `cell` or the nearest piece root it was started under records.
+   */
+  #ancestorSystemOrigin(
+    tx: IExtendedStorageTransaction,
+    cell: Cell<unknown>,
+  ): string | undefined {
+    const { space, id } = cell.getAsNormalizedFullLink();
+    const roots = this.#demandRootChains.get(id) ?? [];
+    for (const rootId of [id, ...roots]) {
+      const candidate = rootId === id
+        ? cell.withTx(tx)
+        : this.#runtime.getCellFromLink(
+          { id: rootId as URI, space, path: [] },
+          undefined,
+          tx,
+        );
+      const origin = getPatternSource(candidate);
+      if (origin === undefined) continue;
+      if (classifyPieceOriginString(origin).kind === "system") return origin;
+    }
+    return undefined;
+  }
+
+  /**
    * The demand-root CHAIN of a piece root (server-execution v2 Phase 7):
    * the roots of every ancestor piece that instantiated it, ending in
    * itself. Recorded when a piece starts under a known parent
@@ -11848,6 +11911,11 @@ export class Runner {
             : undefined,
         );
       }
+      const sourceOrigin = this.#childSystemOrigin(
+        instanceTx,
+        parentResultCell,
+        patternImpl,
+      );
       const childRun = this.#runWithStartOwnership(
         instanceTx,
         patternImpl,
@@ -11858,6 +11926,7 @@ export class Runner {
             schedulerRehydration,
           ),
           parentPieceRootId: parentResultCell.getAsNormalizedFullLink().id,
+          ...(sourceOrigin === undefined ? {} : { sourceOrigin }),
         },
       );
 
@@ -12243,6 +12312,14 @@ function initializePieceSourceHistory(
     getPieceSourceRevisions(candidate);
     throw new Error("piece source history exists without a pattern identity");
   }
+  if (origin !== undefined) {
+    candidate.setMetaRaw("patternSource", origin, rawMetaWriteAuthorization);
+  }
+  // The creation revision links the retained source, so it waits for a space
+  // that holds it: a cross-space child's closure replicates after its run.
+  // The origin is a claim about where the code comes from and stands either
+  // way; a piece carrying one and no revision is followed from a baseline the
+  // first adoption records.
   if (
     readVerifiedSourceClosure(
       runtime,
@@ -12252,9 +12329,6 @@ function initializePieceSourceHistory(
     ) === undefined
   ) {
     return;
-  }
-  if (origin !== undefined) {
-    candidate.setMetaRaw("patternSource", origin, rawMetaWriteAuthorization);
   }
   candidate.setMetaRaw("pieceSourceHistory", [{
     revisionId: crypto.randomUUID(),
