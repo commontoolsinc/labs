@@ -150,8 +150,9 @@ sidecar pattern running, so
 consumers can gate on `.result` without stranding in the multi-profile case
 (CT-1829). The `candidates` array holds all ordered profiles.
 
-Profile resolution waits for the Home root, roster, and referenced profile
-documents to load before publishing a new result or opening profile creation.
+Profile resolution waits for the Home root, default pattern, roster, and
+referenced profile documents to load before publishing a new result or opening
+profile creation.
 While those reads are pending, the existing wish state is retained; a new wish
 can remain unset. Confirmation re-runs the wish even when a document is absent
 and no data arrives. A confirmed empty roster opens profile creation. An entry

@@ -8,7 +8,10 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
-import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import {
+  type ClientMessage,
+  decodeMemoryBoundary,
+} from "@commonfabric/memory/v2";
 import { connect, loopback } from "@commonfabric/memory/v2/client";
 import { defer } from "@commonfabric/utils/defer";
 
@@ -94,6 +97,8 @@ describe("wish-home-readiness", () => {
             as: user,
           });
           const seed = makeRuntime(seedManager);
+          const homeRootId =
+            seed.getHomeSpaceCell().getAsNormalizedFullLink().id;
           const homeRequested = defer<void>();
           const homeReleased = defer<void>();
           let held = delayHome !== "none";
@@ -104,13 +109,20 @@ describe("wish-home-readiness", () => {
                 transport: {
                   ...base,
                   async send(payload) {
-                    const message = decodeMemoryBoundary(payload) as {
-                      type: string;
-                    };
+                    const message = decodeMemoryBoundary(
+                      payload,
+                    ) as ClientMessage;
+                    const roots = message.type === "graph.query"
+                      ? message.query.roots
+                      : message.type === "session.watch.add" ||
+                          message.type === "session.watch.set"
+                      ? message.watches.flatMap((watch) =>
+                        watch.kind === "operation" ? [] : watch.query.roots
+                      )
+                      : [];
                     if (
                       held && space === user.did() &&
-                      ["session.watch.add", "session.watch.set", "graph.query"]
-                        .includes(message.type)
+                      roots.some((root) => root.id === homeRootId)
                     ) {
                       homeRequested.resolve();
                       await homeReleased.promise;

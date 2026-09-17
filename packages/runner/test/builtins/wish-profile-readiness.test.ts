@@ -642,11 +642,14 @@ describe("wish-profile-readiness", () => {
       };
       expect(requireDocument).toThrow(WishProfilePending);
       expect(loads).toHaveLength(1);
+      runtime.scheduler.setDebounce(registered, 60_000);
+      const resetAt = performance.now();
       subscriptions.forEach((subscription) =>
         subscription.next({ type: "reset", space: user.did() })
       );
       await runtime.scheduler.idleWithPendingCommits();
       expect(runs).toBe(2);
+      expect(performance.now() - resetAt).toBeLessThan(60_000);
       loads[0].resolve();
       await manager.crossSpaceSettled();
       // The old epoch's completion must not confirm the new replica.

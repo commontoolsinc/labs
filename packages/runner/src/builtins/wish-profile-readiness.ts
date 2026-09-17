@@ -36,7 +36,9 @@ export function createWishProfileReadiness(
       if (!active) return { done: true };
       if (notification.type === "reset") {
         confirmations.clear();
-        if (action) runtime.scheduler.invalidateAction(action);
+        if (action) {
+          runtime.scheduler.invalidateAction(action, { retry: true });
+        }
       }
       return undefined;
     },
