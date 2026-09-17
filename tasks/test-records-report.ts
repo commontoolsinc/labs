@@ -211,8 +211,10 @@ const NAMED_FAILURES = 50;
  * command line, which `parseReportArgs` reports.
  *
  * A day that cannot be listed and an object that cannot be read are each
- * named on the standard error stream and left out rather than ending the
- * run. The printed report counts the objects it could not read, and the
+ * left out rather than ending the run. Every such day is named on the
+ * standard error stream, as are the first `NAMED_FAILURES` such objects,
+ * after which one line says the rest are not named. The printed report
+ * counts the objects it could not read, however many were named, and the
  * days it could not list, whose objects it has no count of. Every figure
  * under those counts is over the objects that were read.
  */
