@@ -25,6 +25,7 @@ import { type FabricValue, hashStringOf, valueEqual } from "@/index.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FabricUnavailable } from "@/fabric-primitives/FabricUnavailable.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
@@ -214,6 +215,9 @@ describe("valueEqual()", () => {
         new FabricRegExp(/a/i),
         new FabricEpochDay(1n),
         new FabricEpochDay(2n),
+        new FabricUnavailable("pending"),
+        new FabricUnavailable("syncing"),
+        new FabricUnavailable("error", "boom"),
         new UnknownValue("Node@1", { value: 1 }),
         new UnknownValue("Node@2", { value: 1 }),
         new UnknownValue("Node@1", { value: 2 }),
@@ -559,6 +563,18 @@ describe("valueEqual()", () => {
           .toBe(true);
         expect(valueEqual(new FabricEpochDay(7n), new FabricEpochDay(7n)))
           .toBe(true);
+        expect(
+          valueEqual(
+            new FabricUnavailable("error", "boom"),
+            new FabricUnavailable("error", "boom"),
+          ),
+        ).toBe(true);
+        expect(
+          valueEqual(
+            new FabricUnavailable("pending"),
+            new FabricUnavailable("syncing"),
+          ),
+        ).toBe(false);
       });
     });
 

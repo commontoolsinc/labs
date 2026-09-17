@@ -46,6 +46,9 @@ export const CODEC_TYPE_TAGS = Object.freeze(
     /** Constant for class `FabricRegExp`. */
     RegExp: "RegExp@1",
 
+    /** Constant for class `FabricUnavailable`. */
+    Unavailable: "Unavailable@1",
+
     // Tags for the primary versions built-in non-primitive `FabricInstance`
     // classes, specifically the tags used to _encode_ instances from a live
     // system. This is as opposed to the tags used for versions of the (in some

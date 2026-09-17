@@ -494,6 +494,41 @@ export interface FabricRegExpConstructor {
 
 export declare const FabricRegExp: FabricRegExpConstructor;
 
+/**
+ * Why a `FabricUnavailable` stands where data would otherwise be. `error` is
+ * the one reason that carries a message; the other three stand alone.
+ */
+export type UnavailableReason =
+  | "pending"
+  | "syncing"
+  | "schemaMismatch"
+  | "error";
+
+/**
+ * A marker standing in for data that is not available, saying why. It holds
+ * no data of its own: the reason, and for `error` the message, are the whole
+ * of what it says. Only an instance with reason `error` carries an
+ * `errorMessage`; for the other three it is `null`.
+ */
+export interface FabricUnavailable extends FabricPrimitive {
+  readonly reason: UnavailableReason;
+  readonly errorMessage: string | null;
+  isPending(): boolean;
+  isSyncing(): boolean;
+  isSchemaMismatch(): boolean;
+  isError(): boolean;
+}
+
+export interface FabricUnavailableConstructor {
+  new (
+    reason: UnavailableReason,
+    errorMessage?: string | null,
+  ): FabricUnavailable;
+  prototype: FabricUnavailable;
+}
+
+export declare const FabricUnavailable: FabricUnavailableConstructor;
+
 //
 // Concrete `FabricInstance` classes
 //
@@ -2388,6 +2423,7 @@ export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
     "FabricHash",
     "FabricKeyPair",
     "FabricRegExp",
+    "FabricUnavailable",
   ] as const,
 );
 

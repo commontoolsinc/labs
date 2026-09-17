@@ -11,6 +11,7 @@ import {
   FabricEpochNsec,
   FabricHash,
   FabricRegExp,
+  FabricUnavailable,
 } from "@commonfabric/data-model/fabric-primitives";
 import { emptySchemaObject, schemaForValueType } from "@/basic-schemas.ts";
 import { isInternedSchema } from "@/schema-intern.ts";
@@ -53,6 +54,7 @@ describe("basic-schemas", () => {
     testType("FabricEpochNsec", new FabricEpochNsec(1n));
     testType("FabricHash", new FabricHash(new Uint8Array(32), "fid1"));
     testType("FabricRegExp", new FabricRegExp(/x/));
+    testType("FabricUnavailable", new FabricUnavailable("pending"));
 
     describe("undefined", () => {
       it("returns `undefined`", () => {

@@ -29,6 +29,10 @@ import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import {
+  FabricUnavailable,
+  UNAVAILABLE_PENDING,
+} from "@/fabric-primitives/FabricUnavailable.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import * as nodeCrypto from "@node/crypto";
 
@@ -488,6 +492,51 @@ describe("value-hash", () => {
         expect(hex(hashBytesOf(nsec))).not.toBe(hex(hashBytesOf(days)));
       });
     });
+    describe("FabricUnavailable (dedicated TAG_UNAVAILABLE primitive tag)", () => {
+      it('matches a hand-computed byte stream for `FabricUnavailable("pending")`', () => {
+        // TAG_UNAVAILABLE (0x2D), the reason as a tagged string, then the
+        // absent message as TAG_NULL (0x20).
+        const expected = sha256([
+          0x2d,
+          0x24,
+          0x07,
+          ...new TextEncoder().encode("pending"),
+          0x20,
+        ]);
+        expect(hashBytesOf(new FabricUnavailable("pending"))).toEqual(expected);
+      });
+
+      it('matches a hand-computed byte stream for `FabricUnavailable("error", "boom")`', () => {
+        // TAG_UNAVAILABLE (0x2D), then the reason and the message each as a
+        // tagged string.
+        const expected = sha256([
+          0x2d,
+          0x24,
+          0x05,
+          ...new TextEncoder().encode("error"),
+          0x24,
+          0x04,
+          ...new TextEncoder().encode("boom"),
+        ]);
+        expect(hashBytesOf(new FabricUnavailable("error", "boom")))
+          .toEqual(expected);
+      });
+
+      it("produces the same hash for a prefab and a fresh instance with its reason", () => {
+        expect(hex(hashBytesOf(UNAVAILABLE_PENDING)))
+          .toBe(hex(hashBytesOf(new FabricUnavailable("pending"))));
+      });
+
+      it("produces different hashes for different reasons", () => {
+        expect(hex(hashBytesOf(new FabricUnavailable("pending"))))
+          .not.toBe(hex(hashBytesOf(new FabricUnavailable("syncing"))));
+      });
+
+      it("produces different hashes for different messages", () => {
+        expect(hex(hashBytesOf(new FabricUnavailable("error", "a"))))
+          .not.toBe(hex(hashBytesOf(new FabricUnavailable("error", "b"))));
+      });
+    });
     describe("FabricError (FabricInstance via [CODEC])", () => {
       it("matches a byte stream built from `[CODEC]` `encode()` output for `FabricError`", () => {
         // Build the expected byte stream programmatically because the encoded
@@ -764,6 +813,7 @@ describe("value-hash", () => {
           new FabricEpochNsec(0n),
           new FabricEpochDay(0n),
           new FabricBytes(new Uint8Array([1])),
+          new FabricUnavailable("pending"),
           FabricError.fromNativeError(new Error("x")),
         ];
         for (const v of values) {

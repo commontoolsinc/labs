@@ -27,6 +27,7 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import type { FabricUnavailable } from "@/fabric-primitives/FabricUnavailable.ts";
 
 //
 // Type tag bytes (Section 2 of the byte-level spec)
@@ -55,6 +56,7 @@ const TAG_HASH = 0x29;
 const TAG_SYMBOL = 0x2a;
 const TAG_REGEXP = 0x2b;
 const TAG_KEY_PAIR = 0x2c;
+const TAG_UNAVAILABLE = 0x2d;
 
 // Special for hashing:
 const TAG_STRING_HASH = 0xf0;
@@ -81,6 +83,7 @@ const TAG_HASH_BYTES = new Uint8Array([TAG_HASH]);
 const TAG_SYMBOL_BYTES = new Uint8Array([TAG_SYMBOL]);
 const TAG_REGEXP_BYTES = new Uint8Array([TAG_REGEXP]);
 const TAG_KEY_PAIR_BYTES = new Uint8Array([TAG_KEY_PAIR]);
+const TAG_UNAVAILABLE_BYTES = new Uint8Array([TAG_UNAVAILABLE]);
 
 //
 // Core: recursive value feeding
@@ -344,6 +347,14 @@ function feedObjectValue(
       feedValue(hasher, fab.source);
       feedValue(hasher, fab.flags);
       feedValue(hasher, fab.flavor);
+      return;
+    }
+
+    case VALUE_TAGS.FabricUnavailable: {
+      const fab = value as FabricUnavailable;
+      hasher.update(TAG_UNAVAILABLE_BYTES);
+      feedValue(hasher, fab.reason);
+      feedValue(hasher, fab.errorMessage);
       return;
     }
 

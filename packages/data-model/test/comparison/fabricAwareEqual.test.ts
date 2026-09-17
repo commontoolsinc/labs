@@ -27,6 +27,7 @@ import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FabricUnavailable } from "@/fabric-primitives/FabricUnavailable.ts";
 
 /** Fixed `FabricError` state, so two built the same way agree in every slot. */
 const errorState = (message: string) => ({
@@ -77,6 +78,12 @@ const SPECIAL_OBJECT_KINDS: readonly {
     make: () => new FabricHash(new Uint8Array([9, 9]), "fid1"),
     makeEqual: () => new FabricHash(new Uint8Array([9, 9]), "fid1"),
     makeDifferent: () => new FabricHash(new Uint8Array([9, 8]), "fid1"),
+  },
+  {
+    name: "FabricUnavailable",
+    make: () => new FabricUnavailable("error", "boom"),
+    makeEqual: () => new FabricUnavailable("error", "boom"),
+    makeDifferent: () => new FabricUnavailable("error", "bang"),
   },
   {
     // Built from explicit state rather than from a thrown `Error`, whose

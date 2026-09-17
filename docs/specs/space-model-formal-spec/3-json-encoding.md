@@ -153,6 +153,22 @@ does an `es2025` pattern that fails to construct. A pattern under any other
 flavor is stored faithfully and **not** validated, its dialect not being one
 this format can construct. See `1-fabric-values.md` Section 1.4.5.
 
+### `Unavailable@1` — unavailable data
+
+State is `{ reason: string }` or `{ reason: string, errorMessage: string }`.
+`reason` is one of `pending`, `syncing`, `schemaMismatch`, and `error`, and
+`errorMessage` is present exactly when the reason is `error`. A message-less
+reason's state is the reason alone: the message is absent rather than present
+as `null`.
+
+On decoding, a state that is not an object, whose `reason` is not one of the
+four, or whose `errorMessage` is present and not a string produces a
+`ProblematicValue`. So does a state pairing a message with a reason other than
+`error`, or omitting it from `error`: the class never writes either, and the
+constructor refuses both. A well-formed state naming a message-less reason
+decodes to that reason's prefab instance. See `1-fabric-values.md` Section
+1.4.12.
+
 ### `BigInt@1` — arbitrary-precision integers
 
 State is the base64url encoding of the value's minimal two's-complement

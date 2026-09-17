@@ -46,6 +46,10 @@ import {
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import {
+  FabricUnavailable,
+  UNAVAILABLE_PENDING,
+} from "@/fabric-primitives/FabricUnavailable.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { BaseLiveEnvironment } from "@/codec-interface/BaseLiveEnvironment.ts";
@@ -683,6 +687,25 @@ describe("JsonCodecEngine", () => {
       expect(re).toBeInstanceOf(FabricRegExp);
       expect(re.source).toBe("\\d+");
       expect(re.flags).toBe("g");
+    });
+
+    it("round-trips `FabricUnavailable` at top level and in nested structures", () => {
+      const top = roundTrip(
+        new FabricUnavailable("error", "boom"),
+      ) as unknown as FabricUnavailable;
+      expect(top).toBeInstanceOf(FabricUnavailable);
+      expect(top.reason).toBe("error");
+      expect(top.errorMessage).toBe("boom");
+
+      const obj = {
+        status: new FabricUnavailable("pending"),
+        label: "later",
+      };
+      const result = roundTrip(obj) as Record<string, FabricValue>;
+      expect(result.label).toBe("later");
+      // A message-less reason decodes to its prefab, through the engine as
+      // through the codec alone.
+      expect(result.status).toBe(UNAVAILABLE_PENDING);
     });
   });
 
