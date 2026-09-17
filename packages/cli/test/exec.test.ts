@@ -1351,6 +1351,34 @@ describe("resolveParsedExecInput edge cases", () => {
       deps,
     );
     expect(unschematized.input).toBeUndefined();
+
+    // The same verb as a stored link carries it: a content-addressed
+    // reference, with the declaration on the document it names.
+    const referenced = await resolveExecInvocation(
+      makeSpec("handler", externalizeSchema({ asCell: ["stream"] })),
+      [],
+      deps,
+    );
+    expect(referenced.parsed.verb).toBe("invoke");
+    expect(referenced.input).toBeUndefined();
+  });
+
+  it("reads piped stdin for a single-value handler whose schema is a content-addressed reference", async () => {
+    // The reference's root looks as bare as a schema-less verb's. What the
+    // verb takes is on the document it names: a string, so the piped payload
+    // is its input and the call is not a bare one.
+    const stored = externalizeSchema({ asCell: ["stream"], type: "string" });
+    expect(stored).toEqual({ $ref: expect.stringMatching(/^cid:/) });
+
+    const piped = await resolveExecInvocation(
+      makeSpec("handler", stored),
+      [],
+      {
+        isStdinTerminal: () => false,
+        readTextInput: () => Promise.resolve("hello"),
+      },
+    );
+    expect(piped.input).toBe("hello");
   });
 
   it("normalizes only object inputs for tools with a string help field", () => {
