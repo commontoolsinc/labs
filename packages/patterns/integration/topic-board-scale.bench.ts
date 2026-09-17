@@ -223,14 +223,13 @@ async function showTopicPage(
  * Bring `session` to a board whose newest topic it has already opened once and
  * left again, and return the operation that opens that topic a second time.
  *
- * That second open is what `reopen` measures, and what it is not is worth
- * saying: the page, its shell, its worker and its runtime client are all up
- * throughout, so this is not a runtime restart and not a reconnect. Neither is
- * measurable here — the measurement helper fails when the runtime client is
- * replaced, a page reload discards the realm holding the sample altogether, and
- * a transport reconnect needs a storage relay the Benchmarks workflow does not
- * run. Cold initialization is the navigation benchmark's `load`, `sign in`,
- * `board` and `open topic` segments.
+ * That second open is what `reopen` measures. What it is not is worth saying,
+ * because the plan's phrase is "reopen or reconnect": the page, its shell, its
+ * worker and its runtime client are all up throughout, so this is neither a
+ * runtime restart nor a reconnect, and this helper can bracket neither. "The
+ * board scaling benchmark" in `docs/development/BENCHMARKS.md` says why. Cold
+ * initialization is the navigation benchmark's `load`, `sign in`, `board` and
+ * `open topic` segments.
  */
 async function reachReopen(
   session: BoardSession,
@@ -267,31 +266,19 @@ for (const topicCount of SIZES) {
     });
     try {
       const operation = await reachReopen(session, fixture);
-      // Timed rather than read-accounted, and the reason is a measurement
-      // rather than a preference: a reopen completes no run that
+      // Timed rather than read-accounted: a reopen completes no run that
       // `measureTopicsReads()` can attribute to a lift, so it refuses the
-      // sample. That is a property of the operation rather than of where the
-      // interval is drawn. Four boundaries were measured, all of them re-opens
-      // within one live client, and the only one that yields a lift run yields
-      // it for the return to the board rather than for the reopen: measuring
-      // that return on its own records the same single `lastActivityOf` run,
-      // with the same counters, while the reopen leg beside it records none.
-      // Widening the boundary that far would also charge this series for a
-      // board render, which is what the `<size>` series above already measures.
-      // "The board scaling benchmark" in `docs/development/BENCHMARKS.md`
-      // records all four. The reads the browser tier records therefore come
-      // from the navigation benchmark's `comment` and `backlink` segments;
-      // graph size and timing are what a reopen has to report, and the sample
-      // below carries both.
+      // sample. Graph size and timing are what a reopen has to report, and the
+      // sample below carries both; the browser tier's reads come from the
+      // navigation benchmark's `comment` and `backlink` segments. "The board
+      // scaling benchmark" in `docs/development/BENCHMARKS.md` records the
+      // boundaries that were measured to establish it.
       //
-      // `mayRunNothing` is declared because a reopen was observed running
-      // nothing at all, not to quiet a check in advance: on a 100-topic board
-      // one iteration recorded a single `scheduler/run` span and a later one
+      // A reopen may run nothing in the worker at all: on a 100-topic board
+      // one iteration recorded a single `scheduler/run` span and later ones
       // recorded none, and on an eight-topic board a third visit to the same
-      // topic recorded none. That the worker may do no work is the substance
-      // of this measurement rather than an obstacle to it — what the interval
-      // times is the shell reaching a topic whose values are already computed
-      // — and each sample records the declaration alongside its run count.
+      // topic recorded none. `mayRunNothing` is declared for that, and each
+      // sample records the declaration alongside its run count.
       const sample = await timeTopicsOperation(session.page, {
         label: `reopen ${topicCount}`,
         operation,
