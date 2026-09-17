@@ -146,7 +146,10 @@ The argument MUST be omitted. A *named* `inSpace(spaceName)` derives the space
 DID from `Identity.fromPassphrase("common user").derive(spaceName)` (the
 `createSession` spaceName path) — the name ALONE, ignoring the authenticated
 user — so two users picking the same profile name, or one user creating two
-same-named profiles, collide into a single shared space. The anonymous case
+same-named profiles, collide into a single shared space. That named path
+supports the legacy space names used during development and nothing else, and is
+removed once those development-only spaces have been migrated
+([random space identities](../plans/random-space-identities.md)). The anonymous case
 instead derives a fresh DID from the creating handler's frame cause (per-user
 home-space input links + the durable per-event id), so the space is unique per
 user AND per creation event, stable across the cross-space-commit retry. The

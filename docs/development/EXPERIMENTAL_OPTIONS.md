@@ -1430,7 +1430,11 @@ the per-epic implementation notes).
   from the public passphrase `"common user"`
   ([`packages/identity/src/session.ts`](../../packages/identity/src/session.ts)).
   Anyone can derive that key today, so on a deployment with named spaces the
-  owner check is not yet a real boundary. The end state is on by default.
+  owner check is not yet a real boundary. That derivation supports the legacy
+  space names used during development and nothing else, and is removed once
+  those development-only spaces have been migrated
+  ([random space identities](../plans/random-space-identities.md)). The end
+  state is on by default.
 - **Status on 2026-08-07.** Implemented, off by default. The derivation
   weakness is pinned by a tripwire test
   ([`space-key-derivation-tripwire.test.ts`](../../packages/toolshed/routes/ingest-channels/space-key-derivation-tripwire.test.ts))
