@@ -2582,9 +2582,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const writeSpace = this.#writeSpace;
     if (!writeSpace) {
-      const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#finish(result);
-      return result;
+      return this.#finishEmptyCommit();
     }
 
     const native = withCommitTiming(
@@ -2598,9 +2596,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       operations.length === 0 &&
       !hasCommitPreconditions && !hasSqliteOps
     ) {
-      const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#finish(result);
-      return result;
+      return this.#finishEmptyCommit();
     }
 
     const validation = withCommitTiming(
@@ -2680,9 +2676,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     if (commits.length === 0) {
-      const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#finish(result);
-      return result;
+      return this.#finishEmptyCommit();
     }
 
     const validation = this.#validate();
@@ -2915,9 +2909,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     if (commits.length === 0) {
-      const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#finish(result);
-      return result;
+      return this.#finishEmptyCommit();
     }
 
     const validation = this.#validate();
@@ -3338,6 +3330,25 @@ export class V2StorageTransaction implements IStorageTransaction {
         space,
       }),
     };
+  }
+
+  /**
+   * Validates a reactive run before accepting its unchanged output. An input
+   * can change before the scheduler installs the run's read subscriptions;
+   * rejecting that stale snapshot lets its normal retry observe the change.
+   */
+  #finishEmptyCommit(): Result<Unit, CommitError> {
+    if ((this as IStorageTransaction).sourceAction !== undefined) {
+      const validation = this.#validate();
+      if (validation.error) {
+        // Retain the read activity so the scheduler can subscribe and retry.
+        this.#state = { status: "done", result: validation };
+        return validation;
+      }
+    }
+    const result = { ok: {} } satisfies Result<Unit, CommitError>;
+    this.#finish(result);
+    return result;
   }
 
   /**

@@ -1139,6 +1139,8 @@ export interface IStorageTransaction {
    * P5). Change records derived from this transaction must not re-trigger this
    * action. Compared by OBJECT IDENTITY — diagnostic action ids may collide
    * across instances.
+   * Reactive transactions validate their local read snapshots even when their
+   * writes are all no-ops, so a change preceding subscription setup retries.
    */
   sourceAction?: object;
 

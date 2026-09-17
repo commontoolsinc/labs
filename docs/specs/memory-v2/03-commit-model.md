@@ -135,6 +135,14 @@ path of `v2-transaction.ts`, and the local rejection is
 retryable. The two forms are equivalent in what reaches the server; they
 differ in when a change under an open transaction is discovered.
 
+A reactive run also checks its snapshots when it has no effective writes,
+before accepting an empty commit or seal. Its caller installs the run's read
+subscriptions at commit time; a change that arrived before those subscriptions
+must reject the stale run so the scheduler recomputes it. An unchanged output
+does not establish that the inputs are current. An empty transaction without a
+`sourceAction` can finish without this check because it has no reactive result
+to keep current.
+
 ## 3.4 Commit Structure
 
 A client commit explicitly separates dependencies on confirmed state from
