@@ -119,6 +119,29 @@ Deno.test("a version ahead is named even where its shape dropped a field", async
   assertStringIncludes(error.reason, `schema ${ahead}`);
 });
 
+Deno.test("a broken body of a shape this reader does read is a plain fault", async () => {
+  // The reader reads earlier shapes, so an earlier one it cannot parse is
+  // a broken object rather than one from further ahead. Naming its shape
+  // would say the wall cannot read that shape, which is false, and would
+  // have the wall stop fetching an object it should read again.
+  const name = `${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`;
+  const error = await assertRejects(
+    () =>
+      newestManifest({
+        fetchImpl: storeOf({
+          [name]: JSON.stringify({
+            ...sampleManifest({}),
+            schema: MANIFEST_SCHEMA_VERSION - 1,
+            entries: "not a list of entries",
+          }),
+        }),
+      }),
+    Error,
+    "not a manifest",
+  );
+  assertEquals(error instanceof ManifestSchemaError, false);
+});
+
 Deno.test("a broken body of this reader's own version is a plain fault", async () => {
   const name = `${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`;
   const error = await assertRejects(

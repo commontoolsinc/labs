@@ -12,27 +12,27 @@
  * published" is true.
  *
  * One refusal is singled out from the rest, because it behaves
- * differently. A body that arrives whole and is refused over the version
- * it declares, and over nothing else, is settled: the store creates
- * objects and never overwrites one, so that body is what the name holds
- * and a later read gets the same answer. It carries its own type, so a
- * reader can record it and stop fetching the object, and so the wall can
- * say which version it found rather than the phrase it gives a source
- * that went quiet. Every other refusal stays a plain fault and is read
- * again.
+ * differently. A body written in a shape from further ahead than this
+ * reader is settled: the store creates objects and never overwrites one,
+ * so that body is what the name holds and a later read gets the same
+ * answer. It carries its own type, so a reader can record it and stop
+ * fetching the object, and so the wall can say which shape it found
+ * rather than the phrase it gives a source that went quiet. Every other
+ * refusal stays a plain fault and is read again.
  *
- * What separates the two is the version a body declares against the one
- * this reader is built for. That is decidable from the body alone. Asking
- * the validator instead, by offering it the body under this reader's own
- * version, is not: a shape that drops a field an earlier one required is
- * refused over the missing field rather than over the version, and the
- * calibration has already lost a field that way once.
+ * `writtenAhead` is what separates the two, and every reader of this
+ * store asks it rather than comparing a declared shape against a bound of
+ * its own, so a wall passing over a body and a validator refusing one
+ * cannot come to disagree. A body from a shape this reader does read and
+ * still cannot parse is a broken object rather than one from further
+ * ahead, and is read again.
  *
  * Following the dashboard's values (README.md): what this feeds reports on
  * the system. It names tests, never people.
  */
 
 import {
+  declaredSchema,
   type LanePlan,
   listObjects,
   type Manifest,
@@ -40,6 +40,7 @@ import {
   objectUrl,
   parseManifest,
   SELECTION_AREA,
+  writtenAhead,
 } from "@commonfabric/test-support/records";
 
 export const TEST_SELECTION_BUCKET = "cf-ci-metadata";
@@ -105,28 +106,6 @@ export class ManifestSchemaError extends Error {
   }
 }
 
-/**
- * The version a refused body declares, when it is not the version this
- * reader is built for. This reader reads one version, so a body naming
- * another is one it has no way to read, whichever side of its own that
- * version falls.
- *
- * It takes the parsed body rather than the text, because a manifest holds
- * the whole corpus and the reader has already parsed it to ask the
- * validator.
- */
-function otherVersion(body: unknown): number | undefined {
-  // The version has to be the body's own. A body inheriting one from a
-  // polluted prototype declares nothing, and reading it as a version
-  // would refuse an object that is not a manifest at all, for good.
-  if (typeof body !== "object" || body === null) return undefined;
-  if (!Object.hasOwn(body, "schema")) return undefined;
-  const schema = (body as { schema: unknown }).schema;
-  return typeof schema === "number" && schema !== MANIFEST_SCHEMA_VERSION
-    ? schema
-    : undefined;
-}
-
 /** Fetches and validates a manifest, throwing when the object is unreadable. */
 export async function readManifest(name: string, options: {
   bucket?: string;
@@ -152,8 +131,10 @@ export async function readManifest(name: string, options: {
   }
   const manifest = parseManifest(body);
   if (manifest !== undefined) return manifest;
-  const schema = otherVersion(body);
-  if (schema !== undefined) throw new ManifestSchemaError(name, schema);
+  const schema = declaredSchema(body);
+  if (schema !== undefined && writtenAhead(body)) {
+    throw new ManifestSchemaError(name, schema);
+  }
   throw new Error(`manifest ${name}: not a manifest`);
 }
 
