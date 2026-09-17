@@ -3094,6 +3094,361 @@ describe("piece schema compatibility", () => {
     }
   });
 
+  describe("finite literal subsets", () => {
+    it("does not throw for listed values excluded by the source's declared type", () => {
+      for (
+        const [source, target] of [
+          [
+            { type: "string", enum: ["open", null] },
+            { enum: ["open", "closed"] },
+          ],
+          [{ type: "integer", enum: [1, 2.5] }, { const: 1 }],
+          [{ type: "number", enum: [1, "open"] }, { enum: [1, 2] }],
+          [{ type: "null", enum: [null, "open"] }, { const: null }],
+          [
+            { type: "string", const: "open", enum: ["open", null] },
+            { enum: ["open", "closed"] },
+          ],
+        ] satisfies [JSONSchema, JSONSchema][]
+      ) {
+        expect(() => assertSchemaSubset(source, target)).not.toThrow();
+      }
+    });
+
+    it("throws when the target excludes a value admitted by the source's type", () => {
+      expect(() =>
+        assertSchemaSubset(
+          { type: "number", enum: [1, 2.5] },
+          { type: "integer", enum: [1, 2.5] },
+        )
+      ).toThrow();
+      expect(() =>
+        assertSchemaSubset(
+          { type: "unknown", enum: ["open", null] },
+          { enum: ["open", "closed"] },
+        )
+      ).toThrow(/enum\/const/);
+    });
+
+    it("does not throw for a `null` type against an enum or const admitting `null`", () => {
+      for (const source of [{ type: "null" }, { type: ["null"] }] as const) {
+        expect(() => assertSchemaSubset(source, { enum: [null] })).not
+          .toThrow();
+        expect(() => assertSchemaSubset(source, { const: null })).not
+          .toThrow();
+        expect(() => assertSchemaSubset(source, { enum: ["open"] })).toThrow();
+      }
+    });
+
+    it("permits nullable literal argument widening and result narrowing", () => {
+      const wider: JSONSchema = { enum: ["open", "closed", null] };
+      for (
+        const narrower of [
+          { type: "null" },
+          { anyOf: [{ type: "string", enum: ["open"] }, { type: "null" }] },
+        ] satisfies JSONSchema[]
+      ) {
+        expect(() => assertSchemaSubset(narrower, wider)).not.toThrow();
+        expect(() => assertSchemaSubset(wider, narrower)).toThrow();
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(narrower, wider),
+            pattern(wider, narrower),
+          )
+        ).not.toThrow();
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(wider, true),
+            pattern(narrower, true),
+          )
+        ).toThrow(/argument:/);
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(true, narrower),
+            pattern(true, wider),
+          )
+        ).toThrow(/result:/);
+      }
+    });
+
+    for (
+      const [name, source] of [
+        ["a type list", { type: ["string", "null"], enum: ["open", null] }],
+        ["an `anyOf` sibling", { enum: ["open", null], anyOf: [{}] }],
+        ["an `anyOf` branch", { anyOf: [{ enum: ["open", null] }] }],
+        [
+          "a nested `anyOf` branch",
+          { anyOf: [{ anyOf: [{ enum: ["open", null] }] }] },
+        ],
+        [
+          "a type list inside `anyOf`",
+          { anyOf: [{ type: ["string", "null"], enum: ["open", null] }] },
+        ],
+      ] satisfies [string, JSONSchema][]
+    ) {
+      it(`compares mixed enums in ${name} against each target branch`, () => {
+        const target: JSONSchema = {
+          anyOf: [{ enum: ["open", "closed"] }, { type: "null" }],
+        };
+        for (const value of ["open", null]) {
+          expect(validateSchemaValue(source, value, source)).toBeUndefined();
+          expect(validateSchemaValue(target, value, target)).toBeUndefined();
+        }
+        expect(() => assertSchemaSubset(source, target)).not.toThrow();
+        expect(() => assertSchemaSubset(source, { type: ["string", "null"] }))
+          .not.toThrow();
+        expect(() =>
+          assertSchemaSubset(source, {
+            anyOf: [{ enum: ["closed"] }, { type: "null" }],
+          })
+        ).toThrow();
+        expect(() =>
+          assertSchemaSubset(source, { type: ["string", "integer"] })
+        ).toThrow();
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(source, target),
+            pattern(target, source),
+          )
+        ).not.toThrow();
+      });
+    }
+
+    for (
+      const [name, metadata] of [
+        ["asCell", { asCell: ["cell"] }],
+        ["readOnly", { readOnly: true }],
+        ["default", { default: "open" }],
+      ] satisfies [string, Exclude<JSONSchema, boolean>][]
+    ) {
+      it(`accepts mixed-enum widening in a branch retaining its \`${name}\``, () => {
+        const withValues = (values: string[]): JSONSchema => ({
+          anyOf: [
+            { type: "number" },
+            { enum: [...values, null], ...metadata },
+          ],
+        });
+        const narrower = withValues(["open", "closed"]);
+        const wider = withValues(["open", "closed", "archived"]);
+        expect(() => assertSchemaSubset(narrower, wider)).not.toThrow();
+        expect(() => assertSchemaSubset(wider, narrower)).toThrow(
+          /schema alternative accepted previously/,
+        );
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(narrower, wider),
+            pattern(wider, narrower),
+          )
+        ).not.toThrow();
+      });
+    }
+
+    for (
+      const [name, nested, definitions] of [
+        ["on the union", {
+          anyOf: [
+            { type: "number" },
+            { enum: ["open", "closed", null] },
+          ],
+          default: "open",
+        }, {}],
+        ["on a child branch", {
+          anyOf: [
+            { type: "number" },
+            { enum: ["open", "closed", null], default: "open" },
+          ],
+        }, {}],
+        ["in a referenced child branch", {
+          anyOf: [
+            { $ref: "#/$defs/state" },
+            { enum: [1, true] },
+          ],
+        }, {
+          state: { enum: ["open", "closed", null], default: "open" },
+        }],
+        ["when child defaults conflict", {
+          anyOf: [
+            { type: "number", default: 1 },
+            { enum: ["open", "closed", null], default: "open" },
+          ],
+        }, {}],
+      ] satisfies [
+        string,
+        Exclude<JSONSchema, boolean>,
+        Record<string, JSONSchema>,
+      ][]
+    ) {
+      it(`preserves defaults in an unchanged nested union ${name}`, () => {
+        const branch = { ...nested, asCell: ["cell"] } as const;
+        const narrower: JSONSchema = {
+          anyOf: [{ type: "string" }, branch],
+          $defs: definitions,
+        };
+        const wider: JSONSchema = {
+          anyOf: [{ type: "string" }, { type: "boolean" }, branch],
+          $defs: definitions,
+        };
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(narrower, wider),
+            pattern(wider, narrower),
+          )
+        ).not.toThrow();
+      });
+    }
+
+    it("refuses changed effective defaults in a nested union", () => {
+      const withDefault = (fallback: string): JSONSchema => ({
+        anyOf: [{
+          anyOf: [
+            { type: "number" },
+            { enum: ["open", "closed", null] },
+          ],
+          default: fallback,
+          asCell: ["cell"],
+        }],
+      });
+      const previous = withDefault("open");
+      const candidate = withDefault("closed");
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(previous, true),
+          pattern(candidate, true),
+        )
+      ).toThrow(/argument: defaults changed/);
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(true, previous),
+          pattern(true, candidate),
+        )
+      ).toThrow(/result: defaults changed/);
+    });
+
+    it("partitions a defaulted source union for a link without migrating its default", () => {
+      const source: JSONSchema = {
+        anyOf: [{
+          anyOf: [{ type: "number" }, { enum: ["open", "closed", null] }],
+          default: "open",
+        }],
+      };
+      const target: JSONSchema = {
+        anyOf: [
+          { type: ["null", "number"] },
+          { type: "string", enum: ["closed", "open"] },
+        ],
+      };
+      expect(() => assertSchemaSubset(source, target)).not.toThrow();
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(source, true),
+          pattern(target, true),
+        )
+      ).toThrow(/argument: defaults changed/);
+    });
+
+    it("accepts an unchanged type-list sibling while widening a mixed enum", () => {
+      const withValues = (values: string[]): JSONSchema => ({
+        anyOf: [
+          { type: ["null", "number"] },
+          { enum: [...values, 1] },
+        ],
+      });
+      const narrower = withValues(["open"]);
+      const wider = withValues(["open", "closed"]);
+      expect(() => assertSchemaSubset(narrower, wider)).not.toThrow();
+      expect(() => assertSchemaSubset(wider, narrower)).toThrow(
+        /schema alternative accepted previously/,
+      );
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(narrower, wider),
+          pattern(wider, narrower),
+        )
+      ).not.toThrow();
+    });
+
+    it("compares a referenced mixed enum against the whole target enum", () => {
+      const source: JSONSchema = {
+        anyOf: [{ $ref: "#/$defs/state" }],
+        $defs: { state: { enum: ["open", null] } },
+      };
+      expect(() =>
+        assertSchemaSubset(source, { enum: ["open", "closed", null] })
+      ).not.toThrow();
+      expect(() => assertSchemaSubset(source, { enum: ["open", "closed"] }))
+        .toThrow(/schema alternative accepted previously/);
+    });
+
+    it("retains sibling constraints and branch extensions when splitting enums", () => {
+      const source: JSONSchema = {
+        enum: ["open", null],
+        anyOf: [{ type: "string", minLength: 4 }, { type: "null" }],
+      };
+      const target: JSONSchema = {
+        anyOf: [{ type: "string", minLength: 5 }, { type: "null" }],
+      };
+      expect(validateSchemaValue(source, "open", source)).toBeUndefined();
+      expect(validateSchemaValue(target, "open", target)).toBeDefined();
+      expect(() => assertSchemaSubset(source, target)).toThrow(
+        /schema alternative accepted previously/,
+      );
+      expect(() =>
+        assertSchemaSubset(
+          { anyOf: [{ enum: ["open", null], readOnly: true }] },
+          { type: ["string", "null"] },
+        )
+      ).toThrow(/schema alternative accepted previously/);
+    });
+
+    it("leaves mixed enums containing an unclassified value whole", () => {
+      const value = FABRIC_PRIMITIVE_VALUES.FabricBytes;
+      const source = { enum: ["open", value] } as unknown as JSONSchema;
+      const target = {
+        anyOf: [{ type: "string" }, { enum: [value] }],
+      } as unknown as JSONSchema;
+      for (const admitted of ["open", value]) {
+        expect(validateSchemaValue(source, admitted, source)).toBeUndefined();
+        expect(validateSchemaValue(target, admitted, target)).toBeUndefined();
+      }
+      expect(() => assertSchemaSubset(source, target)).toThrow(
+        /schema alternative accepted previously/,
+      );
+    });
+
+    it("retains `FabricPrimitive` values while splitting a declared type list", () => {
+      const source = {
+        type: ["string", "null", "object"],
+        enum: ["open", null, FABRIC_PRIMITIVE_VALUES.FabricBytes],
+      } as unknown as JSONSchema;
+      const target: JSONSchema = { type: ["string", "null"] };
+      expect(
+        validateSchemaValue(
+          source,
+          FABRIC_PRIMITIVE_VALUES.FabricBytes,
+          source,
+        ),
+      )
+        .toBeUndefined();
+      expect(() => assertSchemaSubset(source, target)).toThrow();
+    });
+
+    it("refuses changed descendant defaults beneath a split object enum", () => {
+      const source: JSONSchema = { anyOf: [{ enum: ["open", {}] }] };
+      const target: JSONSchema = {
+        anyOf: [
+          { type: "string" },
+          { type: "object", properties: { count: { default: 1 } } },
+        ],
+      };
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(source, true),
+          pattern(target, true),
+        )
+      ).toThrow(/not stable under default insertion/);
+    });
+  });
+
   describe("bare enums spanning several types", () => {
     // A literal union with `null` among its members compiles to one bare enum,
     // `{enum: ["open", "closed", null]}`, and a `string | null` consumer to a
