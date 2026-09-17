@@ -340,7 +340,9 @@ export class ValueLens {
    *
    * The modeline is the row above the bottom edge, and it is there only when
    * it has something to say: a line being typed, a line in flight, where a
-   * search stands, or what the last line said. It costs the value a row while
+   * search stands, or what the last line said. What is left between the edges
+   * is the value's to scroll within: the `rows - 2` the two edges leave, and
+   * `rows - 3` for as long as the modeline is up. It costs that row only while
    * it is up, which is why it is not drawn empty — a frame that reserved the
    * row would be one row of the value short for the whole of a session that
    * never typed at it. A terminal with no room for it — two rows, which is the
