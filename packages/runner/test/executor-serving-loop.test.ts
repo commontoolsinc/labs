@@ -1947,9 +1947,10 @@ describe("stage F serving loop", () => {
     await activated();
     const spaceServer = host.spaceServer(space)!;
     parkObserverThrows = true;
-    await spaceServer.park("test-park-observer");
+    // `park()` awaits the whole park, so the net belongs on it: a throw
+    // that escaped the observer would leave this call unresolved.
     await withStuckNet(
-      spaceServer.whenParked,
+      spaceServer.park("test-park-observer"),
       "the park to complete past a throwing observer",
     );
     await parks.matching((entry) => entry.reason === "test-park-observer");
