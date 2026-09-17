@@ -2,11 +2,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  declaredSchema,
   digestIdentities,
   type Manifest,
   MANIFEST_SCHEMA_VERSION,
   parseManifest,
   serializeManifest,
+  writtenAhead,
 } from "./selection.ts";
 import { sampleManifest } from "./selection-testing.ts";
 
@@ -600,6 +602,43 @@ describe("selection", () => {
       manifest.entries[0]!.lastRun = "2026-08-20";
       manifest.entries[0]!.inputs.lastCatch = "2026-08-20";
       expect(parseManifest(serializeManifest(manifest))).toEqual(manifest);
+    });
+  });
+
+  describe("declaredSchema()", () => {
+    it("reads the shape a body declares in its own field", () => {
+      expect(declaredSchema({ schema: 3 })).toBe(3);
+      expect(declaredSchema({ schema: 0 })).toBeUndefined();
+      expect(declaredSchema({ schema: 1.5 })).toBeUndefined();
+      expect(declaredSchema({ schema: "2" })).toBeUndefined();
+      expect(declaredSchema({})).toBeUndefined();
+      expect(declaredSchema(null)).toBeUndefined();
+      expect(declaredSchema([])).toBeUndefined();
+    });
+
+    it("reads nothing from a shape a body only inherits", () => {
+      // A body declares a shape in its own field or not at all. Taking an
+      // inherited one would have every reader pass over an object that is
+      // not a manifest, and a reader that passes over its whole store
+      // reports nothing where it should report a fault.
+      const polluted = Object.prototype as unknown as { schema?: number };
+      polluted.schema = MANIFEST_SCHEMA_VERSION + 1;
+      try {
+        expect(declaredSchema(JSON.parse('{"not":"a manifest"}')))
+          .toBeUndefined();
+        expect(writtenAhead(JSON.parse('{"not":"a manifest"}'))).toBe(false);
+      } finally {
+        delete polluted.schema;
+      }
+    });
+  });
+
+  describe("writtenAhead()", () => {
+    it("is true only of a shape past the one this reader is built for", () => {
+      expect(writtenAhead({ schema: MANIFEST_SCHEMA_VERSION + 1 })).toBe(true);
+      expect(writtenAhead({ schema: MANIFEST_SCHEMA_VERSION })).toBe(false);
+      expect(writtenAhead({ schema: MANIFEST_SCHEMA_VERSION - 1 })).toBe(false);
+      expect(writtenAhead({})).toBe(false);
     });
   });
 

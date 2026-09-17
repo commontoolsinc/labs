@@ -95,7 +95,10 @@ export const MANIFESTS_LOOKED_BACK = 8;
  * the whole corpus.
  */
 export function declaredSchema(value: unknown): number | undefined {
-  if (!isRecord(value)) return undefined;
+  // The shape has to be the body's own. A body inheriting one from a
+  // polluted prototype declares nothing, and reading it as a declaration
+  // would have a reader pass over an object that is not a manifest.
+  if (!isRecord(value) || !Object.hasOwn(value, "schema")) return undefined;
   const schema = value.schema;
   return typeof schema === "number" && Number.isInteger(schema) && schema > 0
     ? schema
