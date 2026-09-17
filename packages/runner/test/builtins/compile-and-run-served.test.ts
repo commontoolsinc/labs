@@ -23,6 +23,7 @@ import { Runtime } from "../../src/runtime.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "../cfc-seed-envelope.ts";
 import { createTrustedBuilder } from "../support/trusted-builder.ts";
@@ -813,7 +814,7 @@ describe("compile-and-run-served", () => {
     const writeSourceLabels = async (atoms: string[]) => {
       const tx = f.runtime.edit();
       writeSeedEnvelopeDoc(tx, f.inputs.space);
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: f.inputs.space,
         scope: "space",
         id: f.inputs.getAsNormalizedFullLink().id,

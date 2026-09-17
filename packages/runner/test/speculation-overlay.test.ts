@@ -77,6 +77,7 @@ import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import type { JSONSchema, Module, Pattern } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
+import { seedStoredEnvelope } from "./cfc-seed-envelope.ts";
 
 const spaceSigner = await Identity.fromPassphrase("speculation overlay space");
 const space = spaceSigner.did() as MemorySpace;
@@ -1377,7 +1378,7 @@ describe("Phase 2 speculation overlay", () => {
       };
       const current = seedTx.readOrThrow(docAddress);
       const base = current && typeof current === "object" ? current : {};
-      seedTx.writeOrThrow(docAddress, {
+      seedStoredEnvelope(seedTx, docAddress, {
         ...base,
         cfc: {
           version: 1,
@@ -1564,7 +1565,7 @@ describe("Phase 2 speculation overlay", () => {
       };
       const current = seedTx.readOrThrow(docAddress);
       const base = current && typeof current === "object" ? current : {};
-      seedTx.writeOrThrow(docAddress, {
+      seedStoredEnvelope(seedTx, docAddress, {
         ...base,
         cfc: {
           version: 1,
@@ -1743,7 +1744,7 @@ describe("Phase 2 speculation overlay", () => {
       };
       const current = seedTx.readOrThrow(docAddress);
       const base = current && typeof current === "object" ? current : {};
-      seedTx.writeOrThrow(docAddress, {
+      seedStoredEnvelope(seedTx, docAddress, {
         ...base,
         cfc: {
           version: 1,
@@ -1922,7 +1923,7 @@ describe("Phase 2 speculation overlay", () => {
         }, { value: lateSchema });
         const current = seedTx.readOrThrow(docAddress);
         const base = current && typeof current === "object" ? current : {};
-        seedTx.writeOrThrow(docAddress, {
+        seedStoredEnvelope(seedTx, docAddress, {
           ...base,
           cfc: {
             version: 1,
@@ -2047,7 +2048,7 @@ describe("Phase 2 speculation overlay", () => {
         await writerDraft.sync();
         const tx = writerRuntime.edit();
         for (const write of writes) {
-          tx.writeOrThrow({
+          seedStoredEnvelope(tx, {
             space,
             id: write.id as never,
             scope: write.scope as never,

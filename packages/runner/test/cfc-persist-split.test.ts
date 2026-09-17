@@ -7,6 +7,7 @@ import { internSchema } from "@commonfabric/data-model-schema";
 import {
   SEED_ENVELOPE_SCHEMA,
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -70,7 +71,7 @@ describe("CFC observation classes (C2 persist split)", () => {
     const cell = rt.getCell(space, cause, undefined, seed);
     const id = cell.getAsNormalizedFullLink().id;
     writeSeedEnvelopeDoc(seed, space);
-    seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+    seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
       value,
       cfc: {
         version: 1,

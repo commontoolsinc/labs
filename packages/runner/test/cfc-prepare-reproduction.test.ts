@@ -11,6 +11,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -70,7 +71,10 @@ describe("CFC prepare reproduction", () => {
       const seed = runtime.edit();
       const source = runtime.getCell(space, "messages", undefined, seed);
       writeSeedEnvelopeDoc(seed, space);
-      seed.writeOrThrow({ ...source.getAsNormalizedFullLink(), path: [] }, {
+      seedStoredEnvelope(seed, {
+        ...source.getAsNormalizedFullLink(),
+        path: [],
+      }, {
         value: Array.from({ length: 50 }, (_, n) => ({ n })),
         cfc: {
           version: 1,

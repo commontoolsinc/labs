@@ -363,37 +363,56 @@ therefore carries its own guard:
   first of these guards to run, ahead of the ones keyed by target id, so which
   document a write names cannot decide whether it is asked for an authorization.
   Meta fields stay readable.
-- A write addressed at a document's `["cfc"]` label map from outside the
-  runtime's privileged persistence scope is recorded, and the commit boundary
-  turns each record into a fail-closed reason (audit S18).
-- A document-root (`path: []`) write replaces the envelope rather than merging
-  into it, so an envelope that leaves the document without a label map erases
-  the stored one and leaves a labeled document reading as an unlabeled one.
-  Made outside the privileged persistence scope on a document that stores a
-  map, such a write is recorded like one that names the `["cfc"]` path, and
-  yields the same fail-closed reason. Dropping the member erases the map, and
-  so does carrying a value a reader reports as absent — `cfc: null`, a record
-  with no `version`. Creating a document, replacing one that stores no map, and
-  an envelope that carries the stored map forward all pass through.
-- That guard reads the stored member through the writing transaction, which
-  bounds it: a transaction whose view does not hold the document gets the same
-  "no map here" a document with no map gives, so a writer that has not synced
-  the document erases its label map and commits. No race is involved — the map
-  is present throughout, and the writer never looked. What the guard
-  establishes is that a root envelope write cannot erase a label map the
-  writing transaction has loaded. Closing the rest means forcing the document
-  into view before deciding, which turns every blind root write into a
+- The reserved siblings — the `cfc` label map and `source` — are the runtime's,
+  and a write reaching either from outside the privileged persistence scope is
+  recorded, with the commit boundary turning each record into a fail-closed
+  reason (audit S18). The prepare pass excludes both from its accounting: a
+  read of one is left out of the flow join, and a write to one is left out of
+  schema write policy and flow-label attachment. That exclusion describes the
+  runtime's own bookkeeping, and it holds only because this guard establishes
+  that the runtime is who writes here, so one list of sibling names drives the
+  exclusion and the guard together.
+- Three shapes reach a reserved sibling. An address can name it, or a path
+  inside it. And a document-root (`path: []`) write replaces the envelope
+  rather than merging into it, so its envelope reaches every sibling at once —
+  leaving one out erases what was stored, and leaving a different one behind
+  installs what the derivation pass never derived. A root write is decided
+  against the stored sibling, so one that carries the stored sibling forward
+  unchanged passes: code that replaces a document wholesale reads the stored
+  envelope and spreads it, the way `ACLManager` does. Creating a document, and
+  replacing one that carries no reserved sibling, pass for the same reason.
+- A sibling is compared on what a reader would see rather than on the presence
+  of a key. For `cfc` that account is `cfcMetadataPresent`: an envelope
+  carrying `cfc: null`, or a record with no `version`, erases the map as surely
+  as one carrying no `cfc` at all, and a stored value the reader reports as
+  absent is not a map to erase. An envelope whose `version` this build cannot
+  read is not an erasure — the reader throws on it and every consumer fails
+  closed — but it is still not the stored map, so it records as a forgery.
+  Nothing interprets `source`, so definedness is the whole account there.
+- Nothing outside the runtime is given a way past this. A fixture still needs
+  stored label state in shapes the derivation pass does not produce — a forged
+  atom, a version this build cannot read, a record carrying no label map — and
+  reaches one write inside the privileged persistence scope through the
+  transaction's `accessForTestingOnly` getter, which a lint rule confines to
+  tests and benchmarks. The runtime keeps no second door: there is no write
+  option, and no exported value, that lets a caller past the guard.
+- The refusal is a record rather than a throw, unlike the meta seam beside it.
+  A forged label map is a signal whose treatment follows the enforcement mode:
+  enforce rejects the commit, observe diagnoses it, and `disabled` keeps the
+  record so a mid-transaction escalation still rejects. A deployment running
+  with CFC disabled consults no label map, so a forged one decides nothing
+  while it runs — the map it wrote is durable, and a later run with enforcement
+  on reads what is stored.
+- The guard reads the stored sibling through the writing transaction, which
+  bounds the erasure half: a transaction whose view does not hold the document
+  gets the same "nothing here" a document with nothing gives, so a writer that
+  has not synced the document erases its label map and commits. No race is
+  involved — the map is present throughout, and the writer never looked. The
+  forgery half carries no such bound, because it is decided from the envelope
+  the writer supplied. Closing the erasure half means forcing the document into
+  view before deciding, which turns every blind root write into a
   read-modify-write, or making the commit boundary establish what the space
   holds; both are open.
-- A document-root write that leaves SOME label map behind reaches the stored
-  one with no record made, whether it mints a map where the document stored
-  none or substitutes one for another. The `["cfc"]` guard keys on the
-  address, and this write's address is the document. That is what stands open
-  on this seam: label-map forgery through the document root. The CFC test
-  suite seeds stored label state through exactly these shapes —
-  `seedPrivilegedCfc`, and the metadata re-pointing in the speculation-overlay
-  fixtures — so closing the seam means giving those fixtures a sanctioned way
-  to seed first.
 - A guard on a seam governs writes to it, not the runtime entry points that
   write it while doing their own work. The same reach that hands a handler
   the storage transaction hands it the runtime: `runtime.run` instantiates a

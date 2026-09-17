@@ -47,6 +47,7 @@ import {
 import type { HarnessHandleTable } from "../src/contracts/handle-table.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import type { HarnessToolContext } from "../src/tools/types.ts";
+import { seedStoredEnvelope } from "../../runner/test/cfc-seed-envelope.ts";
 
 const signer = await Identity.fromPassphrase("cf-harness describe-handle");
 
@@ -806,7 +807,7 @@ describe("describe_handle", () => {
         id: `cid:${LABEL_SEED_SCHEMA_HASH}` as URI,
         path: [],
       }, { value: LABEL_SEED_SCHEMA } as FabricValue);
-      seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+      seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
         value: { note: "a value nothing here reads" },
         cfc: {
           version: 1,

@@ -6,6 +6,7 @@ import { Identity } from "@commonfabric/identity";
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import type { CfcConfClause } from "../src/cfc/clause.ts";
@@ -60,7 +61,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     const fullCaveat = cfcAtom.caveat("derived-from", "did:key:alice");
     const seed = runtime.edit();
     writeSeedEnvelopeDoc(seed, signer.did());
-    seed.writeOrThrow({
+    seedStoredEnvelope(seed, {
       space: signer.did(),
       scope: "space",
       id: sourceId,
@@ -334,7 +335,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
       ).id!;
       const seed = runtime.edit();
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: sourceId,
