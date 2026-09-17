@@ -845,14 +845,26 @@ export async function readCfInputValue(
 }
 
 /**
- * Fill the native `<textarea>` a `cf-textarea` wraps, and commit the edit.
+ * Fill the native `<textarea>` a `cf-textarea` wraps, and let the blur commit
+ * it.
  *
  * Separate from {@link fillCfInput} because that one drives an `<input>`: it
  * resolves `element.shadowRoot?.querySelector("input")` and gives up on a host
  * that has none. This drives the field as a person does — focus, set the value,
- * dispatch `input`/`change`/`blur` — and then asks the host to `commit()`, so
- * the two-way-bound draft cell flushes rather than holding the typed text in
- * the control alone.
+ * dispatch `input` and `change`, then blur.
+ *
+ * The blur is what commits the draft, and it is load-bearing rather than
+ * tidiness. `cf-textarea` defaults to the `debounce` timing strategy at 300ms,
+ * and its blur handler reaches `InputTimingController.onBlur` by way of its
+ * cell controller; that method runs the pending callback at once rather than
+ * waiting the timer out. Without the blur the write waits out the debounce
+ * instead, which a caller clicking a submit control on the next line does not
+ * wait for.
+ *
+ * There is no `commit()` to call on this host. `cf-input` declares one and
+ * `cf-textarea` does not, so a `commit?.()` here resolves to `undefined` every
+ * time — which makes it worse than dead, because it reads as the thing that
+ * flushes the draft while the blur above it is doing that work.
  *
  * Presentation mode does not animate this fill. `typeIntoCfInput`, the
  * presentation path {@link fillCfInput} routes through, resolves an
@@ -868,14 +880,15 @@ export async function fillCfTextarea(
   const field = await page.waitForSelector(selector, {
     strategy: "pierce",
   });
-  const filled = await field.evaluate(async (element: Element, nextValue) => {
+  // Two ways to come back empty-handed, reported apart: a selector that names
+  // no textarea is a different defect from one that names a textarea the fill
+  // did not take, and a single message for both asserts whichever cause it
+  // happens to name.
+  const outcome = await field.evaluate((element: Element, nextValue) => {
     const textarea = element instanceof HTMLTextAreaElement
       ? element
       : element.shadowRoot?.querySelector("textarea");
-    if (!(textarea instanceof HTMLTextAreaElement)) return false;
-    const root = textarea.getRootNode();
-    const host = root instanceof ShadowRoot ? root.host : element;
-    const hostElement = host as Element & { commit?: () => Promise<void> };
+    if (!(textarea instanceof HTMLTextAreaElement)) return "no-textarea";
     textarea.focus();
     const setter = Object.getOwnPropertyDescriptor(
       HTMLTextAreaElement.prototype,
@@ -890,12 +903,14 @@ export async function fillCfTextarea(
       new Event("change", { bubbles: true, composed: true }),
     );
     textarea.blur();
-    await hostElement.commit?.();
-    return textarea.value === nextValue;
+    return textarea.value === nextValue ? "filled" : "value-mismatch";
   }, { args: [value] });
-  if (!filled) {
+  if (outcome === "no-textarea") {
+    throw new Error(`"${selector}" did not resolve to a textarea`);
+  }
+  if (outcome !== "filled") {
     throw new Error(
-      `"${selector}" did not resolve to a fillable textarea`,
+      `"${selector}" resolved a textarea that did not take the value`,
     );
   }
 }
