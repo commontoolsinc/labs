@@ -91,24 +91,6 @@ export type ErrorKindsAgree = MustBeTrue<
 >;
 
 /**
- * The message `errorMessage` returns for each kind when none was stored.
- * Presentation rather than state: none of these is ever encoded or hashed,
- * and a message given at construction that equals its kind's entry here is
- * stored as no message at all.
- */
-const DEFAULT_ERROR_MESSAGES: Readonly<Record<UnavailableErrorKind, string>> =
-  Object.freeze({
-    general: "An error occurred.",
-    schemaMismatch: "The value does not match its schema.",
-    invalidInput: "An input is invalid.",
-    network: "A network request failed.",
-    decode: "A response could not be decoded.",
-    compile: "Compilation failed.",
-    provider: "A provider reported a failure.",
-    sync: "Synchronization failed.",
-  });
-
-/**
  * The encoded state of a {@link FabricUnavailable}: the reason; for the
  * `error` reason the kind; and the message when one is stored. A field that
  * has nothing to say is absent rather than `null`, so that the state of a
@@ -120,82 +102,8 @@ type FabricUnavailableState = {
   errorMessage?: string;
 };
 
-/**
- * Whether `state` has the shape of a {@link FabricUnavailableState}: a plain
- * object whose own `reason` is one of the reasons, whose own `errorKind`, if
- * present at all, is one of the kinds, and whose own `errorMessage`, if
- * present at all, is a string. Every field is read as an own property, so
- * nothing inherited stands in for one. Presence is the test for the optional
- * fields rather than a comparison against `undefined`, because the realm
- * format carries `undefined` faithfully, and a field sent that way is a
- * malformation rather than an absence. Whether the fields present belong with
- * the reason is the constructor's to decide.
- */
-function isUnavailableState(state: unknown): state is FabricUnavailableState {
-  if (!isPlainObject(state) || !Object.hasOwn(state, "reason")) {
-    return false;
-  }
-
-  const { reason, errorKind, errorMessage } = state as {
-    reason: unknown;
-    errorKind?: unknown;
-    errorMessage?: unknown;
-  };
-
-  if (
-    (typeof reason !== "string") ||
-    !Object.hasOwn(UNAVAILABLE_REASONS, reason)
-  ) {
-    return false;
-  }
-
-  if (
-    Object.hasOwn(state, "errorKind") &&
-    ((typeof errorKind !== "string") ||
-      !Object.hasOwn(UNAVAILABLE_ERROR_KINDS, errorKind))
-  ) {
-    return false;
-  }
-
-  return !Object.hasOwn(state, "errorMessage") ||
-    (typeof errorMessage === "string");
-}
-
 /** The reasons that have a prefab instance: every reason but `error`. */
 type TransientReason = Exclude<UnavailableReason, "error">;
-
-/** Whether `reason` is one of the transient reasons. */
-function isTransientReason(
-  reason: UnavailableReason,
-): reason is TransientReason {
-  return reason !== UNAVAILABLE_REASONS.error;
-}
-
-/**
- * Returns the instance a decoded state stands for: the prefab for a state
- * that is a transient reason alone, and a fresh instance otherwise. Throws as
- * the constructor does when the fields present do not belong with the reason.
- * The optional fields are read as own properties, as `isUnavailableState()`
- * tested them, so a field that is only inherited is absent here too.
- */
-function instanceForState(state: FabricUnavailableState): FabricUnavailable {
-  const { reason } = state;
-  const errorKind = Object.hasOwn(state, "errorKind")
-    ? state.errorKind
-    : undefined;
-  const errorMessage = Object.hasOwn(state, "errorMessage")
-    ? state.errorMessage
-    : undefined;
-
-  if (
-    isTransientReason(reason) &&
-    (errorKind === undefined) && (errorMessage === undefined)
-  ) {
-    return PREFABS_BY_REASON[reason];
-  }
-
-  return new FabricUnavailable(reason, errorKind ?? null, errorMessage ?? null);
-}
 
 /**
  * A marker standing in for data that is not available, saying why. It holds
@@ -277,7 +185,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
     this.#reason = reason;
     this.#errorKind = errorKind;
     this.#errorMessage = ((errorKind !== null) &&
-        (errorMessage === DEFAULT_ERROR_MESSAGES[errorKind]))
+        (errorMessage === FabricUnavailable.#DEFAULT_ERROR_MESSAGES[errorKind]))
       ? null
       : errorMessage;
   }
@@ -310,7 +218,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
 
     return (kind === null)
       ? null
-      : (this.#errorMessage ?? DEFAULT_ERROR_MESSAGES[kind]);
+      : (this.#errorMessage ?? FabricUnavailable.#DEFAULT_ERROR_MESSAGES[kind]);
   }
 
   /**
@@ -373,6 +281,25 @@ export class FabricUnavailable extends BaseFabricPrimitive
   // Static members
   //
 
+  /**
+   * The message `errorMessage` returns for each kind when none was stored.
+   * Presentation rather than state: none of these is ever encoded or hashed,
+   * and a message given at construction that equals its kind's entry here is
+   * stored as no message at all.
+   */
+  static #DEFAULT_ERROR_MESSAGES: Readonly<
+    Record<UnavailableErrorKind, string>
+  > = Object.freeze({
+    general: "An error occurred.",
+    schemaMismatch: "The value does not match its schema.",
+    invalidInput: "An input is invalid.",
+    network: "A network request failed.",
+    decode: "A response could not be decoded.",
+    compile: "Compilation failed.",
+    provider: "A provider reported a failure.",
+    sync: "Synchronization failed.",
+  });
+
   static #jsonCodec = Object.freeze(
     new (class UnavailableCodec
       extends BaseNonterminalCodec<never, FabricUnavailableState> {
@@ -391,7 +318,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
 
       /** @inheritDoc */
       canDecode(state: FabricValue): state is FabricUnavailableState {
-        return isUnavailableState(state);
+        return FabricUnavailable.#isState(state);
       }
 
       /**
@@ -408,7 +335,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
         _env: LiveEnvironment,
       ): FabricValue {
         try {
-          return instanceForState(state);
+          return FabricUnavailable.#instanceForState(state);
         } catch (e) {
           return new ProblematicValue(
             typeTag,
@@ -434,7 +361,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
 
       /** @inheritDoc */
       canDecode(state: RealmCodecValue): state is FabricUnavailableState {
-        return isUnavailableState(state);
+        return FabricUnavailable.#isState(state);
       }
 
       /**
@@ -449,7 +376,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
         _env: LiveEnvironment,
       ): FabricValue {
         try {
-          return instanceForState(state);
+          return FabricUnavailable.#instanceForState(state);
         } catch (e) {
           return new ProblematicValue(
             typeTag,
@@ -477,6 +404,87 @@ export class FabricUnavailable extends BaseFabricPrimitive
    */
   static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
     return this.#realmCodec;
+  }
+
+  /**
+   * Helper for both codecs' `canDecode()`, which reports whether `state` has
+   * the shape of a {@link FabricUnavailableState}: a plain object whose own
+   * `reason` is one of the reasons, whose own `errorKind`, if
+   * present at all, is one of the kinds, and whose own `errorMessage`, if
+   * present at all, is a string. Every field is read as an own property, so
+   * nothing inherited stands in for one. Presence is the test for the optional
+   * fields rather than a comparison against `undefined`, because the realm
+   * format carries `undefined` faithfully, and a field sent that way is a
+   * malformation rather than an absence. Whether the fields present belong with
+   * the reason is the constructor's to decide.
+   */
+  static #isState(state: unknown): state is FabricUnavailableState {
+    if (!isPlainObject(state) || !Object.hasOwn(state, "reason")) {
+      return false;
+    }
+
+    const { reason, errorKind, errorMessage } = state as {
+      reason: unknown;
+      errorKind?: unknown;
+      errorMessage?: unknown;
+    };
+
+    if (
+      (typeof reason !== "string") ||
+      !Object.hasOwn(UNAVAILABLE_REASONS, reason)
+    ) {
+      return false;
+    }
+
+    if (
+      Object.hasOwn(state, "errorKind") &&
+      ((typeof errorKind !== "string") ||
+        !Object.hasOwn(UNAVAILABLE_ERROR_KINDS, errorKind))
+    ) {
+      return false;
+    }
+
+    return !Object.hasOwn(state, "errorMessage") ||
+      (typeof errorMessage === "string");
+  }
+
+  /** Helper for `#instanceForState()`, which reports whether `reason` is transient. */
+  static #isTransientReason(
+    reason: UnavailableReason,
+  ): reason is TransientReason {
+    return reason !== UNAVAILABLE_REASONS.error;
+  }
+
+  /**
+   * Helper for both codecs' `decode()`, which returns the instance a decoded
+   * state stands for: the prefab for a state that is a transient reason alone, and a fresh instance otherwise. Throws as
+   * the constructor does when the fields present do not belong with the reason.
+   * The optional fields are read as own properties, as `#isState()`
+   * tested them, so a field that is only inherited is absent here too.
+   */
+  static #instanceForState(
+    state: FabricUnavailableState,
+  ): FabricUnavailable {
+    const { reason } = state;
+    const errorKind = Object.hasOwn(state, "errorKind")
+      ? state.errorKind
+      : undefined;
+    const errorMessage = Object.hasOwn(state, "errorMessage")
+      ? state.errorMessage
+      : undefined;
+
+    if (
+      FabricUnavailable.#isTransientReason(reason) &&
+      (errorKind === undefined) && (errorMessage === undefined)
+    ) {
+      return PREFABS_BY_REASON[reason];
+    }
+
+    return new FabricUnavailable(
+      reason,
+      errorKind ?? null,
+      errorMessage ?? null,
+    );
   }
 }
 
