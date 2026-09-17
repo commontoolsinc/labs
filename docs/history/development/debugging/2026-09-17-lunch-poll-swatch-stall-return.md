@@ -1,7 +1,7 @@
 ---
 status: historical
-created: 2026-09-16
-archived: 2026-09-16
+created: 2026-09-17
+archived: 2026-09-17
 reason: "Deflaking record: the lunch-poll swatch stall on the server-execution ON arm, reproduced and characterized on main; what raises its rate, what it is not, and the measurement trap that voided a first bisect."
 ---
 
