@@ -67,7 +67,8 @@ export type CreateProfileEvent = {
 // name — or one user creating two same-named profiles — collide into a single
 // shared space. That named path supports the legacy space names used during
 // development and nothing else, and is removed once those development-only
-// spaces have been migrated (docs/plans/random-space-identities.md). The anonymous case instead derives the DID from this handler's
+// spaces have been migrated (docs/plans/random-space-identities.md).
+// The anonymous case instead derives the DID from this handler's
 // frame cause, which carries the creating user's per-home-space input links plus
 // the durable per-event id (runner.ts `createPatternFrame` cause): unique per
 // user AND per creation event, stable across the cross-space-commit retry. The
