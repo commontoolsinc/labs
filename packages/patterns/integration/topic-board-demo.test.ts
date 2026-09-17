@@ -18,26 +18,44 @@
  *
  * A candidate may change, without invalidating the comparison: how the board
  * produces its crossref pivot and where that production is shared; which
- * per-topic derivations are reused; what a view demands; what is cached and
- * what is computed lazily; how often a lift runs; how long any of it takes;
- * and the order the board lists its cards in. None of those is asserted here.
- * The card is addressed by its title through `clickCardOpenLink` precisely so
- * that the ordering is not asserted by accident.
+ * per-topic derivations are reused; what is cached and what is computed
+ * lazily; how often a lift runs; and how long any of it takes. Those are the
+ * properties the plan's stages exist to move, and none of them is asserted
+ * here.
+ *
+ * Two further properties are not asserted here either, for the opposite
+ * reason — the plan constrains them, and constrains them somewhere else. The
+ * order the board lists its cards in is held by the plan's compatibility
+ * requirements, which preserve visible ordering; `clickCardOpenLink` addresses
+ * a card by its title so that this journey does not come to rest on that
+ * ordering, not because the ordering is free to move. What a view demands is
+ * held by the headless read-budget tests, `topics-read-budget-*.test.ts`, and
+ * this journey counts no reads at all.
  *
  * A candidate may not change, and this fails if it does: the board lists each
  * topic the fixture seeded; the Open link on a card addresses the topic that
  * card describes; a cited topic names the topic citing it, by an identity the
  * shell can select; and a comment sent through the composer is stored with its
- * author and shown. The middle two are each checked on the one card and the one
- * citation this journey passes through, which is what a journey can check.
+ * author and shown in the thread. The middle two are each checked on the one
+ * card and the one citation this journey passes through, which is what a
+ * journey can check.
  *
- * Two counts are left unasserted on purpose, and neither is a weakening. The
- * board's topic count would additionally say that nothing else is listed, which
- * this does not need: the space holds the demo's board alone. The thread's
- * comment count is avoided because `topic-retraction-controls.test.ts` records
- * that a topic's first `addComment` can commit twice under server execution
- * (#6808), so a count would fail for a reason that is not the regression this
- * demo is for.
+ * Two counts are left unasserted on purpose, and neither is a weakening. What
+ * the board's card count would add over waiting for each title is that each
+ * topic is listed once and no topic is doubled, and that is what
+ * `topic-board-child-contract.test.ts` asserts by title rather than by count,
+ * for the reason its `topicTitles` doc comment gives: a count says a defect
+ * happened without saying which. The thread's comment count is avoided because
+ * `topic-retraction-controls.test.ts` records that a topic's first `addComment`
+ * can commit twice under server execution (#6808), so a count would fail for a
+ * reason that is not the regression this demo is for.
+ *
+ * Some of what the journey navigates by is rendered copy rather than behavior:
+ * the `Referenced by` heading, the `Send` button's text, the one `cf-textarea`
+ * a topic page carries, and the profile wish's `#wish-profile-name-input` and
+ * `CreateProfile` action. The computation work touches none of them, so a
+ * failure naming one is a copy or markup change in Topics or in the wish —
+ * move the anchor, rather than reading it as a regression in what this shows.
  */
 
 import { Identity } from "@commonfabric/identity";
@@ -58,8 +76,8 @@ import {
 import { clickButtonWithExactText } from "./note-button-helpers.ts";
 import {
   initializePiecesController,
-  PieceController,
-  PiecesController,
+  type PieceController,
+  type PiecesController,
 } from "./pieces-controller.ts";
 import {
   crossrefTargets,
@@ -122,6 +140,13 @@ const COMMENT = "Followed the backlink here from the topic this one cites.";
  * reaching for the structure around it.
  */
 const COMMENT_DRAFT = "cf-textarea";
+
+/**
+ * One rendered comment. `topic.tsx` puts `data-comment-row` on each row of the
+ * thread, and a `data-*` prop is the one form that reaches the DOM as an
+ * attribute a selector can match.
+ */
+const COMMENT_ROW = "[data-comment-row]";
 
 /** Pinned by the runner (wish.ts) and the profile-create pattern. */
 const TRUSTED_PROFILE_CREATE_ACTION = "CreateProfile";
@@ -238,7 +263,10 @@ describe("Topics board demo", () => {
     await timeline.run("Adding a comment to the thread", async () => {
       await fillCfTextarea(page, COMMENT_DRAFT, COMMENT);
       await clickButtonWithExactText(page, "Send");
-      await waitForSettledText(page, "body", COMMENT);
+      // The thread's own rows, because "the thread shows it" is the claim.
+      // Against `body` this would pass on the text being anywhere on the page,
+      // which is a weaker statement than the one this step is here to make.
+      await waitForSettledText(page, COMMENT_ROW, COMMENT);
     });
 
     // Shown is half of it; the other half is that it reached the store, read
@@ -255,11 +283,13 @@ describe("Topics board demo", () => {
     const authors = thread
       .filter((comment) => comment.body === COMMENT)
       .map((comment) => comment.author?.name);
-    // Stated before the `every` below, which an empty array satisfies: without
-    // this line a thread that stored nothing would pass.
+    // Stated before the set below, which an empty thread would also satisfy:
+    // without this line a thread that stored nothing would pass.
     expect(authors.length).toBeGreaterThan(0);
-    // The viewer's Profile, not the agent that seeded the board.
-    expect(authors.every((name) => name === VIEWER)).toBe(true);
+    // The viewer's Profile, not the agent that seeded the board. A set rather
+    // than `every`, so a wrong author is named in the failure instead of being
+    // reported as `true !== false`.
+    expect(new Set(authors)).toEqual(new Set([VIEWER]));
 
     logStepTimings("topic-board-demo", timeline);
   });
