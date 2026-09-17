@@ -11,10 +11,14 @@ import { expect } from "@std/expect";
 import { fromFileUrl } from "@std/path";
 
 import { Identity } from "@commonfabric/identity";
-import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
+import { type Cell, Runtime, type RuntimeProgram } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { createProfile, type ProfileCreateConfig } from "../lib/profile.ts";
+import {
+  createdByThisCall,
+  createProfile,
+  type ProfileCreateConfig,
+} from "../lib/profile.ts";
 
 const sysDir = fromFileUrl(
   new URL("../../patterns/system/", import.meta.url),
@@ -122,6 +126,37 @@ describe("createProfile()", () => {
     await expect(createProfile({ ...CONFIG, name: "Ada\u001bLovelace" }, {
       loadPieces,
     })).rejects.toThrow(/control characters/);
+  });
+
+  it("picks the profile carrying this call's name when two appeared at once, and refuses a tie", async () => {
+    // Two profiles land between one call's first read and its second, as
+    // two processes creating at once make happen.
+    const ada = await createProfile(CONFIG, { loadPieces });
+    const alan = await createProfile({ ...CONFIG, name: "Alan Turing" }, {
+      loadPieces,
+    });
+    const links = host.key("profiles").asSchema({
+      type: "array",
+      items: { type: "unknown", asCell: ["cell"] },
+      // deno-lint-ignore no-explicit-any
+    } as any).get() as Cell<unknown>[];
+    const candidates: [string, Cell<unknown>][] = links.map((link) => [
+      link.getAsNormalizedFullLink().space,
+      link,
+    ]);
+    expect(candidates.map(([space]) => space).sort())
+      .toEqual([ada.space, alan.space].sort());
+    const picked = await createdByThisCall(candidates, "Alan Turing");
+    expect(picked?.[0]).toBe(alan.space);
+    const twoAdas = await createProfile(CONFIG, { loadPieces });
+    const tie = candidates.filter(([space]) => space !== alan.space).concat([[
+      twoAdas.space,
+      links.length === 3 ? links[2] : candidates[0][1],
+    ]]);
+    await expect(createdByThisCall(tie, "Ada Lovelace")).rejects.toThrow(
+      /more than one carries that name/,
+    );
+    expect(await createdByThisCall([], "Ada Lovelace")).toBeUndefined();
   });
 
   it("trims the name and refuses a blank one before connecting", async () => {
