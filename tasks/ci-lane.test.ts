@@ -974,7 +974,11 @@ describe("running a lane's work", () => {
         }],
         ["deno", "toolshed"],
         { objectName: "manifest-x.json.gz" },
-        ["binaries: build-binary toolshed costs 900s"],
+        [{
+          test: { k: "unit", s: "toolshed", n: "build-binary toolshed" },
+          suite: "binaries",
+          cost: 900,
+        }],
         { selections: [], projectedSeconds: 0 },
         LANE_BUDGET_SECONDS,
         0,
@@ -1422,6 +1426,49 @@ describe("the lane's own housekeeping", () => {
       else Deno.env.set("GITHUB_STEP_SUMMARY", previous);
     }
     expect(await Deno.readTextFile(summary)).toContain("manifest-x.json.gz");
+    await Deno.remove(summary);
+  });
+
+  it("names the costliest of what no lane can run, and counts the rest", async () => {
+    // A cost model charging a whole suite more than a lane can hold puts
+    // every test in that suite on this list. A bullet each is more than
+    // a job summary holds, and GitHub drops a summary past its bound
+    // whole rather than shortening it.
+    const summary = await Deno.makeTempFile({ prefix: "summary-" });
+    const previous = Deno.env.get("GITHUB_STEP_SUMMARY");
+    Deno.env.set("GITHUB_STEP_SUMMARY", summary);
+    const log = console.log;
+    console.log = () => {};
+    // Cheapest first, so an order the summary keeps as given would show.
+    const tooSlow = Array.from({ length: 25 }, (_, at) => ({
+      test: { k: "unit" as const, s: "memory", n: `test ${at}` },
+      suite: "workspace-unit",
+      cost: 900 + at,
+    }));
+    try {
+      describePlan(
+        { lane: 1, of: 5, full: false, dryRun: true, laneCount: false, root },
+        [],
+        [],
+        { objectName: "manifest-x.json.gz" },
+        tooSlow,
+        { selections: [], projectedSeconds: 0 },
+        LANE_BUDGET_SECONDS,
+        0,
+        0,
+      );
+    } finally {
+      console.log = log;
+      if (previous === undefined) Deno.env.delete("GITHUB_STEP_SUMMARY");
+      else Deno.env.set("GITHUB_STEP_SUMMARY", previous);
+    }
+    const held = await Deno.readTextFile(summary);
+    const named = held.split("\n").filter((line) => line.startsWith("- work"));
+    expect(named).toHaveLength(10);
+    expect(named[0]).toContain("test 24");
+    expect(named[0]).toContain("924s");
+    expect(named.at(-1)).toContain("test 15");
+    expect(held).toContain("- and 15 more");
     await Deno.remove(summary);
   });
 

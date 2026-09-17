@@ -34,6 +34,7 @@ import {
   objectUrl,
   readObject,
   type StoredReport,
+  testIdentityKey,
   testIdentityOfKey,
 } from "@commonfabric/test-support/records";
 import {
@@ -73,7 +74,7 @@ import {
   type CoverageBaseline,
   serializeManifest,
 } from "./test-selection/manifest.ts";
-import { plan } from "./test-selection/plan.ts";
+import { costliestUnschedulable, plan } from "./test-selection/plan.ts";
 import {
   COST_WINDOW_DAYS,
   LANE_BUDGET_SECONDS,
@@ -873,10 +874,19 @@ function summarize(
     `test selection: ${selected} of ${manifest.entries.length} identities ` +
       `fit the budget`,
   );
-  for (const entry of reference.unschedulable) {
+  // The count and the surfaces say how much there is and where.
+  const { named, rest } = costliestUnschedulable(reference.unschedulable);
+  for (const entry of named) {
     console.log(
       `test selection: unschedulable, ${entry.cost.toFixed(1)}s: ` +
         JSON.stringify(entry.test),
+    );
+  }
+  if (rest.length > 0) {
+    console.log(
+      `test selection: ${rest.length} further identities cost more than a ` +
+        `lane can hold, recorded by ` +
+        `${namingSurfaces(rest.map((entry) => testIdentityKey(entry.test)))}`,
     );
   }
 }

@@ -54,6 +54,7 @@ import {
 import { collectRecords } from "./test-records-gather.ts";
 import { fetchManifest, type ManifestFetch } from "./test-selection/store.ts";
 import {
+  costliestUnschedulable,
   fullLaneCount,
   plan,
   type Selection,
@@ -67,8 +68,13 @@ import {
   measuredSetName,
   measuredSets,
 } from "./test-selection/coverage.ts";
-import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
+import type {
+  Manifest,
+  UnschedulableEntry,
+  WithheldReason,
+} from "./test-selection/manifest.ts";
 import { LANES } from "./test-selection/policy.ts";
+import { say } from "./step-summary.ts";
 import { writeLcovReport } from "./write-coverage-lcov.ts";
 import {
   batchMeasurementName,
@@ -916,16 +922,6 @@ export async function describeCapabilityLogs(
   }
 }
 
-/** Says something both on the lane's output and in the job summary. */
-function say(lines: readonly string[]): void {
-  const text = `${lines.join("\n")}\n`;
-  console.log(text);
-  const summary = Deno.env.get("GITHUB_STEP_SUMMARY");
-  if (summary !== undefined && summary.length > 0) {
-    Deno.writeTextFileSync(summary, text, { append: true });
-  }
-}
-
 /**
  * Names the records this lane produced that no suite describes, which is
  * the only report they get before the store half of the drift guard
@@ -1014,7 +1010,7 @@ export function describePlan(
   batches: readonly Batch[],
   capabilities: readonly CapabilityId[],
   manifest: { objectName?: string; absent?: string },
-  unschedulable: readonly string[],
+  unschedulable: readonly UnschedulableEntry[],
   chosen: { selections: readonly Selection[]; projectedSeconds: number },
   budget: number,
   unmeasured: number,
@@ -1056,10 +1052,25 @@ export function describePlan(
     );
   }
   if (unschedulable.length > 0) {
+    // A discretionary identity costing more than a lane's hard bound
+    // runs nowhere, because a lane holding it would be killed before it
+    // reported anything. Naming it is what turns that into something
+    // somebody can act on; the sixty-second rule is where such a test
+    // gets split.
     lines.push("");
     lines.push("Nothing can run these, so nothing did:");
     lines.push("");
-    for (const entry of unschedulable) lines.push(`- ${entry}`);
+    // The summary has the withheld and coverage reports to hold after
+    // this one, so this one takes a fixed share of it and the count
+    // says how much there is.
+    const { named, rest } = costliestUnschedulable(unschedulable);
+    for (const entry of named) {
+      lines.push(
+        `- ${entry.suite}: ${testIdentityKey(entry.test)} costs ` +
+          `${entry.cost.toFixed(0)}s, more than a lane can hold`,
+      );
+    }
+    if (rest.length > 0) lines.push(`- and ${rest.length} more`);
   }
   say(lines);
 }
@@ -1242,16 +1253,8 @@ export async function runLane(
     );
   }
   const batches = batchesOf(suites, seen.manifest, mine.selections);
-  // A discretionary identity costing more than a lane's hard bound
-  // runs nowhere, because a lane holding it would be killed before it
-  // reported anything. Naming it is what turns that into something
-  // somebody can act on; the sixty-second rule is where such a test
-  // gets split. A mandatory one is placed however much it costs, and
-  // the over-budget line below is where a lane says it ran long.
-  const unschedulable = laid.unschedulable.map((entry) =>
-    `${entry.suite}: ${testIdentityKey(entry.test)} costs ` +
-    `${entry.cost.toFixed(0)}s, more than a lane can hold`
-  );
+  // A mandatory identity is placed however much it costs, and this is
+  // where a lane says it ran long.
   if (laid.overBudgetSeconds > 0) {
     console.log(
       `ci-lane: the mandatory set puts a lane ` +
@@ -1269,7 +1272,7 @@ export async function runLane(
     batches,
     [...needs].sort(),
     fetched,
-    unschedulable,
+    laid.unschedulable,
     { selections: mine.selections, projectedSeconds: mine.projectedSeconds },
     laid.budgetSeconds,
     seen.unmeasured,

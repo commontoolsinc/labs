@@ -32,6 +32,7 @@ import {
   namesCoverageSourceGroup,
 } from "./ci-check-lib.ts";
 import { collectMeasuredSetDebt } from "./coverage-metrics.ts";
+import { say } from "./step-summary.ts";
 import { readWorkspaceMembers } from "./workspace-tests.ts";
 import { loadTopology } from "./test-topology.ts";
 import type { Suite } from "./test-topology/suite.ts";
@@ -462,16 +463,6 @@ export function formatGateReport(report: GateReport): string[] {
     lines.push("```");
   }
   return lines;
-}
-
-/** Says something both on the job's output and in its summary. */
-function say(lines: readonly string[]): void {
-  const text = `${lines.join("\n")}\n`;
-  console.log(text);
-  const summary = Deno.env.get("GITHUB_STEP_SUMMARY");
-  if (summary !== undefined && summary.length > 0) {
-    Deno.writeTextFileSync(summary, text, { append: true });
-  }
 }
 
 /**
