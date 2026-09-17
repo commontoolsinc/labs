@@ -40,6 +40,7 @@ import {
   FabricHash,
   FabricKeyPair,
   FabricRegExp,
+  FabricUnavailable,
 } from "@commonfabric/data-model/fabric-primitives";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
@@ -1363,6 +1364,7 @@ const FABRIC_PRIMITIVE_CLASSES: {
   FabricHash,
   FabricKeyPair,
   FabricRegExp,
+  FabricUnavailable,
 };
 
 /**
