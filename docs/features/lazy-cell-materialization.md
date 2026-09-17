@@ -121,9 +121,9 @@ a builder's input schema shrunk past a read the capability analysis did not see.
 A view counts such a read as a warning on the `schema-view` logger, under the
 key `unselected-key-read`. The logger is disabled by default, so nothing prints
 and the count is kept regardless. The pattern test runner fails a test on any
-warning its run counts, so a pattern test whose lift reads an unselected key
-fails, and the failure names the logger and the key. Enabling the logger prints
-which key was read and at which link.
+warning its run counts, unless the test allows console warnings, so a pattern
+test whose lift reads an unselected key fails, and the failure names the logger
+and the key. Enabling the logger prints which key was read and at which link.
 
 Three reads are not counted:
 

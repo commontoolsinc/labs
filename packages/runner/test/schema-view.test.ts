@@ -1132,9 +1132,10 @@ describe("schema-view", () => {
   describe("a key the data carries and the schema leaves unnamed", () => {
     // Such a key reads as `undefined`, which is what a key that is not there
     // reads as, so the view counts the read under a warning key of its own.
-    // The pattern test runner fails a test on any warning a run counts. Each
-    // case compares the count either side of its reads, since the logger and
-    // its counts are shared by the whole process.
+    // The pattern test runner fails a test on any warning a run counts, unless
+    // the test allows console warnings. Each case compares the count either
+    // side of its reads, since the logger and its counts are shared by the
+    // whole process.
 
     const ROW: JSONSchema = {
       type: "object",
@@ -1145,85 +1146,131 @@ describe("schema-view", () => {
     const unselectedReads = (): number =>
       getLogger("schema-view").countsByKey["unselected-key-read"]?.warn ?? 0;
 
+    /**
+     * Runs `body` over the value a read of `value` under `schema` gives, and
+     * returns how many unselected-key reads it counted.
+     */
+    const countedDuring = async (
+      cause: string,
+      value: unknown,
+      schema: JSONSchema,
+      lazy: boolean,
+      body: (view: Record<string, unknown>) => void,
+    ): Promise<number> => {
+      const { tx, get } = (await seeded(cause, value, schema))(lazy);
+      try {
+        const view = get() as Record<string, unknown>;
+        const before = unselectedReads();
+        body(view);
+        return unselectedReads() - before;
+      } finally {
+        await tx.commit();
+      }
+    };
+
     it("returns `undefined` for the key and counts the read", async () => {
-      const read = await seeded(
+      const counted = await countedDuring(
         "unselected-own",
         { id: "a", driver: "x" },
         ROW,
+        true,
+        (view) => expect(view.driver).toBeUndefined(),
       );
-      const view = read(true).get() as Record<string, unknown>;
+      expect(counted).toBe(1);
+    });
 
-      const before = unselectedReads();
-      expect(view.driver).toBeUndefined();
-      expect(unselectedReads() - before).toBe(1);
+    it("prints the key and the link it was read at once the logger is enabled", async () => {
+      const logger = getLogger("schema-view");
+      const printed: unknown[][] = [];
+      const warn = console.warn;
+      logger.disabled = false;
+      console.warn = (...args: unknown[]) => {
+        printed.push(args);
+      };
+      try {
+        await countedDuring(
+          "unselected-printed",
+          { id: "a", driver: "x" },
+          ROW,
+          true,
+          (view) => expect(view.driver).toBeUndefined(),
+        );
+      } finally {
+        console.warn = warn;
+        logger.disabled = true;
+      }
+
+      const line = printed.find((args) => args.includes("unselected-key-read"));
+      const text = (line ?? []).join(" ");
+      expect(text).toContain("`driver`");
+      expect(text).toContain("of:");
     });
 
     it("counts nothing for a key the schema selects", async () => {
-      const read = await seeded("unselected-selected", {
-        id: "a",
-        driver: "x",
-      }, ROW);
-      const view = read(true).get() as Record<string, unknown>;
-
-      const before = unselectedReads();
-      expect(view.id).toBe("a");
-      expect(unselectedReads() - before).toBe(0);
+      const counted = await countedDuring(
+        "unselected-selected",
+        { id: "a", driver: "x" },
+        ROW,
+        true,
+        (view) => expect(view.id).toBe("a"),
+      );
+      expect(counted).toBe(0);
     });
 
     it("counts nothing for a key the data does not carry", async () => {
-      const read = await seeded("unselected-absent", { id: "a" }, ROW);
-      const view = read(true).get() as Record<string, unknown>;
-
-      const before = unselectedReads();
-      expect(view.driver).toBeUndefined();
-      expect(unselectedReads() - before).toBe(0);
+      const counted = await countedDuring(
+        "unselected-absent",
+        { id: "a" },
+        ROW,
+        true,
+        (view) => expect(view.driver).toBeUndefined(),
+      );
+      expect(counted).toBe(0);
     });
 
     it("counts nothing for a key the schema turns down", async () => {
-      const read = await seeded("unselected-turned-down", {
-        id: "a",
-        driver: "x",
-        owner: "o",
-      }, {
-        ...(ROW as object),
-        properties: { id: { type: "string" }, driver: false },
-        additionalProperties: false,
-      } as JSONSchema);
-      const view = read(true).get() as Record<string, unknown>;
-
-      const before = unselectedReads();
-      // `driver` is declared `false`; `owner` is refused by a schema that
-      // refuses what it does not name.
-      expect(view.driver).toBeUndefined();
-      expect(view.owner).toBeUndefined();
-      expect(unselectedReads() - before).toBe(0);
+      const counted = await countedDuring(
+        "unselected-turned-down",
+        { id: "a", driver: "x", owner: "o" },
+        {
+          ...(ROW as object),
+          properties: { id: { type: "string" }, driver: false },
+          additionalProperties: false,
+        } as JSONSchema,
+        true,
+        (view) => {
+          // `driver` is declared `false`; `owner` is refused by a schema that
+          // refuses what it does not name.
+          expect(view.driver).toBeUndefined();
+          expect(view.owner).toBeUndefined();
+        },
+      );
+      expect(counted).toBe(0);
     });
 
     it("counts nothing for the keys JavaScript probes on any object", async () => {
-      const read = await seeded("unselected-machinery", {
-        id: "a",
-        then: "later",
-        toJSON: "text",
-      }, ROW);
-      const view = read(true).get() as Record<string, unknown>;
-
-      const before = unselectedReads();
-      expect(view.then).toBeUndefined();
-      expect(view.toJSON).toBeUndefined();
-      expect(unselectedReads() - before).toBe(0);
+      const counted = await countedDuring(
+        "unselected-machinery",
+        { id: "a", then: "later", toJSON: "text" },
+        ROW,
+        true,
+        (view) => {
+          expect(view.then).toBeUndefined();
+          expect(view.toJSON).toBeUndefined();
+        },
+      );
+      expect(counted).toBe(0);
     });
 
     it("counts nothing on an eager read, which hands back a plain object", async () => {
-      const read = await seeded(
+      const counted = await countedDuring(
         "unselected-eager",
         { id: "a", driver: "x" },
         ROW,
+        false,
+        (value) => expect(value.driver).toBeUndefined(),
       );
-      const value = read(false).get() as Record<string, unknown>;
-
-      const before = unselectedReads();
-      expect(value.driver).toBeUndefined();
-      expect(unselectedReads() - before).toBe(0);
+      expect(counted).toBe(0);
     });
   });
 

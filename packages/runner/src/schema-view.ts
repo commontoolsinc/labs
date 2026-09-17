@@ -738,9 +738,9 @@ function createObjectView(
       // that selects less than its body reads: one written by hand narrower
       // than the code, or an input schema shrunk past a read the capability
       // analysis did not see. The read is counted under a key of its own; the
-      // pattern test runner fails a test on any warning a run counts. A key
-      // the schema turned down on purpose is a deliberate absence, and is not
-      // counted.
+      // pattern test runner fails a test on any warning a run counts, unless
+      // the test allows console warnings. A key the schema turned down on
+      // purpose is a deliberate absence, and is not counted.
       if (
         !isTurnedDown(narrowed) && Object.hasOwn(value, key) &&
         !MACHINERY_PROBED_KEYS.has(key)
