@@ -72,8 +72,8 @@ export interface HarnessOpeningResearch {
 }
 
 /**
- * How a run ended. `assistant_completed` is the one success: the model
- * answered without calling a tool. `setup_error` is a run that died before
+ * How a run ended. `assistant_completed` means the model returned a final
+ * answer or an admitted task outcome. `setup_error` is a run that died before
  * its first model turn, while what it holds — skill registry, grants, input
  * cells — was being established; the others end the loop itself.
  */

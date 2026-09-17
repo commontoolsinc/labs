@@ -312,6 +312,9 @@ The completed-turn result is:
 
 ```json
 {
+  "outcome": "completed",
+  "sessionId": "…",
+  "continuable": true,
   "looms": [],
   "pieces": [
     {
@@ -323,6 +326,20 @@ The completed-turn result is:
   "finalText": "Your reading list is ready."
 }
 ```
+
+`outcome` is `completed`, `question`, or `gave-up`. All three are normally ended
+turns and return **200**. A question includes `question: { "text": "…" }`; a
+give-up includes `reason: "…"`. Each field is present only for its matching
+outcome. `finalText` carries the human-readable answer, question, or reason in
+every case. An older result without `outcome` means `completed`.
+
+`sessionId` identifies the conversation on every result. `continuable` says
+whether it currently accepts another turn: the session must be idle and
+reusable. A reply uses the existing task route with that `sessionId`, so the
+question and its tool context remain in the conversation after a restart too.
+Clients retain the piece-to-session association for questions and give-ups as
+well as completed tasks. A closed or busy session reports `continuable: false`;
+this preflight value can change before the next request arrives.
 
 `pieces` is always present, including as `[]` when the run assigned no slug.
 `looms` is also always present: it contains verified current-turn composition
@@ -379,10 +396,17 @@ Start. The feed then shows, in the order the harness produces them:
   assistant lines as they happen and closing with the child's status.
 - **the final text** of the turn, in a boxed entry, when it completes.
 
-The `turn_completed` event also carries the same structured object under
-`result`. Live streams and replayed durable events have the same shape, so a
-caller can open `result.pieces[0].url` without parsing assistant prose. Pollers
-read the same object from `GET /api/turns/<turnId>/result`.
+The `turn_completed` event carries the same `outcome` and its matching question
+or reason at the event level, and the structured object under `result`. Its turn
+attribution is unchanged. Live streams and replayed durable events have the same
+shape, so a caller can open `result.pieces[0].url` without parsing assistant
+prose. Pollers read the same object from `GET /api/turns/<turnId>/result`.
+
+The parent calls `finish_task` alone to ask a question or explain why it cannot
+proceed. This uses the ordinary tool policy and artifact path, then ends the
+turn without another model request. The live pane shows the sentence as "waiting
+for your answer" or "stopped", without a failure badge. Child agents report
+blockers to their parent; they cannot end the user's task themselves.
 
 When the run names a piece, the `assign_slug` result carries a `slug` and a
 `url`, and the page raises an **Open your piece** link above the feed. That link

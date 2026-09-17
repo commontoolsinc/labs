@@ -579,6 +579,7 @@ Deno.test({
           "write_file",
           "delegate_task",
           "describe_handle",
+          "finish_task",
           "research",
         ],
       });
@@ -729,7 +730,7 @@ Deno.test({
         {
           model: "gpt-5.4",
           messageCount: 1,
-          toolCount: 9,
+          toolCount: 10,
         },
       );
       assert(

@@ -851,6 +851,9 @@ describe("console/server", () => {
             url: "http://localhost:8000/console-test/reading-list",
           }],
           spaceName: "console-test",
+          outcome: "completed",
+          sessionId: started.sessionId,
+          continuable: true,
           finalText: "built it",
         });
       } finally {
@@ -923,6 +926,9 @@ describe("console/server", () => {
           looms: [],
           pieces: [],
           spaceName: "console-test",
+          outcome: "completed",
+          sessionId: started.sessionId,
+          continuable: true,
           finalText: "restored result",
         });
       } finally {
@@ -1557,6 +1563,9 @@ describe("console/server", () => {
           url: "http://localhost:8000/console-test/reading-list",
         }],
         spaceName: "console-test",
+        outcome: "completed",
+        sessionId: expect.any(String),
+        continuable: true,
         finalText: "built it",
       });
     });
@@ -1570,6 +1579,9 @@ describe("console/server", () => {
         looms: [],
         pieces: [],
         spaceName: "console-test",
+        outcome: "completed",
+        sessionId: expect.any(String),
+        continuable: true,
         finalText: "calculated it",
       });
     });

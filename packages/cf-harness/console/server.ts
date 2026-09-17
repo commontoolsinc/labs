@@ -79,6 +79,7 @@ import {
   DEFAULT_SUBAGENT_PROFILE,
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
 } from "../src/contracts/subagent.ts";
+import { readHarnessTaskOutcome } from "../src/contracts/task-outcome.ts";
 import { parseHostMountSpecs } from "../src/host-mounts.ts";
 import {
   checkInputCellSpec,
@@ -996,19 +997,36 @@ export class ConsoleServer {
       envelope.sessionId,
       envelope.event.turnId,
     ) ?? {
+      ...(envelope.event.outcome === "question"
+        ? { outcome: "question" as const, question: envelope.event.question }
+        : envelope.event.outcome === "gave-up"
+        ? { outcome: "gave-up" as const, reason: envelope.event.reason }
+        : { outcome: "completed" as const }),
+      sessionId: envelope.sessionId,
+      continuable: this.#sessionContinuable(envelope.sessionId),
       pieces: [],
       looms: [],
       spaceName: this.#config.fabricSession.space,
       finalText: envelope.event.finalText ?? "",
     };
+    const taskOutcome = readHarnessTaskOutcome(result);
+    if (taskOutcome === undefined) {
+      throw new Error("console result contains an invalid task outcome");
+    }
     const event: ConsoleTurnCompletedEvent = {
       ...envelope.event,
+      ...taskOutcome,
       result,
     };
     return {
       ...envelope,
       event,
     };
+  }
+
+  #sessionContinuable(sessionId: string): boolean {
+    const [session] = this.#service.status(sessionId).sessions;
+    return session?.status === "idle" && session.reusable;
   }
 
   async #readTurnResult(
@@ -1021,6 +1039,8 @@ export class ConsoleServer {
       entry.turn.turnId === turnId
     )?.input.loomId;
     return await readConsoleTurnResult({
+      sessionId,
+      continuable: this.#sessionContinuable(sessionId),
       ...(originLoomId !== undefined ? { originLoomId } : {}),
       artifactRoot: session?.artifactRoot ?? this.#config.artifactRoot,
       turnId,

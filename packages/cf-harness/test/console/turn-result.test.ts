@@ -101,6 +101,8 @@ describe("console/turn-result", () => {
     try {
       await writeTranscript(artifactRoot, "coverage", transcript);
       const result = await readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
         artifactRoot,
         turnId: "coverage",
         spaceName: "space",
@@ -123,6 +125,8 @@ describe("console/turn-result", () => {
       );
       await writeTranscript(artifactRoot, "later-duplicates", transcript);
       const laterDuplicates = await readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
         artifactRoot,
         turnId: "later-duplicates",
         spaceName: "space",
@@ -136,6 +140,8 @@ describe("console/turn-result", () => {
       });
       await writeTranscript(artifactRoot, "independent", transcript);
       const independent = await readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
         artifactRoot,
         turnId: "independent",
         spaceName: "space",
@@ -277,6 +283,8 @@ describe("console/turn-result", () => {
         mutate(transcript);
         await writeTranscript(artifactRoot, name, transcript, first);
         const result = await readConsoleTurnResult({
+          sessionId: "session",
+          continuable: true,
           artifactRoot,
           turnId: name,
           spaceName: "space",
@@ -342,6 +350,8 @@ describe("console/turn-result", () => {
         },
       ], 2);
       const result = await readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
         artifactRoot,
         turnId: "turn-looms",
         spaceName: "test-space",
@@ -381,10 +391,15 @@ describe("console/turn-result", () => {
       ]);
 
       await expect(readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
         artifactRoot,
         turnId: "turn-with-piece",
         spaceName: "console-test",
       })).resolves.toEqual({
+        outcome: "completed",
+        sessionId: "session",
+        continuable: true,
         looms: [],
         pieces: [{
           slug: "reading-list",
@@ -418,10 +433,15 @@ describe("console/turn-result", () => {
       ]);
 
       await expect(readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
         artifactRoot,
         turnId: "turn-without-piece",
         spaceName: "console-test",
       })).resolves.toEqual({
+        outcome: "completed",
+        sessionId: "session",
+        continuable: true,
         looms: [],
         pieces: [],
         spaceName: "console-test",
@@ -460,10 +480,15 @@ describe("console/turn-result", () => {
       ], 4);
 
       await expect(readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
         artifactRoot,
         turnId: "follow-up-turn",
         spaceName: "console-test",
       })).resolves.toEqual({
+        outcome: "completed",
+        sessionId: "session",
+        continuable: true,
         looms: [],
         pieces: [],
         spaceName: "console-test",
@@ -490,10 +515,15 @@ describe("console/turn-result", () => {
       await Deno.writeTextFile(reportPath, JSON.stringify(report));
 
       await expect(readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
         artifactRoot,
         turnId,
         spaceName: "console-test",
       })).resolves.toEqual({
+        outcome: "completed",
+        sessionId: "session",
+        continuable: true,
         looms: [],
         pieces: [],
         spaceName: "console-test",
@@ -528,6 +558,8 @@ describe("console/turn-result", () => {
       );
 
       await expect(readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
         artifactRoot,
         turnId,
         spaceName: "console-test",
@@ -561,6 +593,8 @@ describe("console/turn-result", () => {
       );
 
       await expect(readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
         artifactRoot,
         turnId,
         spaceName: "console-test",
@@ -576,6 +610,8 @@ describe("console/turn-result", () => {
     });
     try {
       await expect(readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
         artifactRoot,
         turnId: "../another-run",
         spaceName: "console-test",
@@ -591,6 +627,8 @@ describe("console/turn-result", () => {
       );
 
       await expect(readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
         artifactRoot,
         turnId,
         spaceName: "console-test",
@@ -624,10 +662,15 @@ describe("console/turn-result", () => {
       ]);
 
       await expect(readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
         artifactRoot,
         turnId,
         spaceName: "console-test",
       })).resolves.toEqual({
+        outcome: "completed",
+        sessionId: "session",
+        continuable: true,
         looms: [],
         pieces: [],
         spaceName: "console-test",

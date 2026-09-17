@@ -103,6 +103,10 @@ import {
   WEB_FETCH_SUBAGENT_PROFILE,
   WEB_SEARCH_SUBAGENT_PROFILE,
 } from "./contracts/subagent.ts";
+import {
+  type HarnessTaskOutcome,
+  readHarnessTaskOutcome,
+} from "./contracts/task-outcome.ts";
 import type {
   BuiltinToolId,
   HarnessToolDescriptor,
@@ -288,6 +292,10 @@ export interface RunHarnessTranscriptOptions {
 export interface HarnessPromptLoopResult {
   model: string;
   finalAssistantText: string;
+
+  /** User-facing disposition; absent on older injected loop results. */
+  taskOutcome?: HarnessTaskOutcome;
+
   transcript: HarnessTranscriptMessage[];
   modelTurns: number;
 
@@ -1314,7 +1322,7 @@ const buildSubagentSystemPrompt = (
     "You are a focused cf-harness subagent working on one delegated task.",
     "You start with a fresh context and do not know the parent conversation.",
     "Use only the task and context provided in this child run.",
-    "Do not ask the user follow-up questions.",
+    "Report missing inputs or choices to the parent through your failure-return contract; the parent owns questions to the user. Do not repeat authoring to discover a source the granted references do not hold. Unavailable, refused, or unsettled reads remain unknown, not absent.",
     "Do not attempt to delegate further; nested subagents are not available.",
     `Subagent profile: ${profileConfig.profile}`,
     ...(profileConfig.hostToolIds.length > 0
@@ -2910,7 +2918,8 @@ export class CfHarnessPromptLoop {
     this.#allowedToolIds = new Set(
       requestedToolIds.filter((toolId) =>
         !withheld.has(toolId) &&
-        (isSubagent || !isSubagentOnlyToolId(toolId))
+        (isSubagent || !isSubagentOnlyToolId(toolId)) &&
+        (!isSubagent || toolId !== "finish_task")
       ),
     );
     this.#nativeModelToolIds = options.nativeModelToolIds ?? [];
@@ -3494,6 +3503,7 @@ export class CfHarnessPromptLoop {
     };
     const persistRunReport = async (
       finalAssistantText?: string,
+      taskOutcome?: HarnessTaskOutcome,
     ): Promise<void> => {
       await this.engine.persistPolicyTrace(await buildPolicyTrace());
       await this.engine.persistRunReport(
@@ -3511,6 +3521,7 @@ export class CfHarnessPromptLoop {
             : "custom",
           modelTurns,
           ...(finalAssistantText !== undefined ? { finalAssistantText } : {}),
+          ...(taskOutcome !== undefined ? { taskOutcome } : {}),
           timeline: reportTimeline,
           toolActivity,
           modelAttempts,
@@ -3577,9 +3588,9 @@ export class CfHarnessPromptLoop {
     for (const message of transcript) {
       await options.onTranscriptEvent?.({ message, transcript });
     }
-    // Set by the model turn that answers without a tool call, which is the
-    // one way the loop ends in success.
+    // A normal final answer or an admitted finish_task ends the model loop.
     let finalAssistantText: string | undefined;
+    let taskOutcome: HarnessTaskOutcome = { outcome: "completed" };
     try {
       const openingResearch = await this.#prepareOpeningResearch({
         task: options.openingResearchTask,
@@ -3703,8 +3714,22 @@ export class CfHarnessPromptLoop {
             (activity) => toolActivity.push(activity),
             (usage) => descendantUsage.push(usage),
             options.onTranscriptEvent,
+            undefined,
+            toolCalls.length,
           );
           const toolMessage = invokedToolCall.toolMessage;
+          if (toolMessage.toolName === "finish_task") {
+            const output = JSON.parse(toolMessage.content);
+            const outcome = output.status === "ok"
+              ? readHarnessTaskOutcome(output.taskOutcome)
+              : undefined;
+            if (outcome !== undefined && outcome.outcome !== "completed") {
+              taskOutcome = outcome;
+              finalAssistantText = outcome.outcome === "question"
+                ? outcome.question.text
+                : outcome.reason;
+            }
+          }
           transcript.push(toolMessage);
           // After the result rather than after the call that asked for it: a
           // marker names the artifact holding what it replaced, and both the
@@ -3757,6 +3782,7 @@ export class CfHarnessPromptLoop {
             pendingCfcModelContextObservations,
           );
         }
+        if (finalAssistantText !== undefined) break;
       }
     } catch (error) {
       annotatePromptLoopError(error, modelTurns);
@@ -3781,10 +3807,11 @@ export class CfHarnessPromptLoop {
       throw turnLimitError;
     }
     await this.engine.completeRun("assistant_completed");
-    await persistRunReport(finalAssistantText);
+    await persistRunReport(finalAssistantText, taskOutcome);
     return {
       model,
       finalAssistantText,
+      taskOutcome,
       transcript,
       modelTurns,
       ...(modelUsage.length > 0
@@ -3817,7 +3844,8 @@ export class CfHarnessPromptLoop {
    * before dispatch), `describe_handle`, whose input names a token rather
    * than a referent, and `research`, whose private loop must retain the same
    * opaque tokens it describes and binds. `loom_compose` also proves
-   * membership before resolving a Pattern Instance. Returns `input` itself
+   * membership before resolving a Pattern Instance. `finish_task` preserves
+   * its user-facing message as text. Returns `input` itself
    * when no substitution applies.
    */
   #resolveHandleTokensInToolInput(
@@ -3826,7 +3854,7 @@ export class CfHarnessPromptLoop {
   ): Record<string, unknown> {
     if (
       toolId === "delegate_task" || toolId === "describe_handle" ||
-      toolId === "research" ||
+      toolId === "research" || toolId === "finish_task" ||
       toolId === "loom_compose"
     ) {
       return input;
@@ -4133,6 +4161,7 @@ export class CfHarnessPromptLoop {
     recordDescendantUsage: (usage: HarnessModelUsage) => void = () => {},
     onTranscriptEvent?: (event: HarnessTranscriptEvent) => void | Promise<void>,
     origin?: HarnessToolInvocationOrigin,
+    toolCallCount = 1,
   ): Promise<InvokedToolCallMessages> {
     // The name the model wrote stays out of the complaint: it is model text,
     // and a tool name carries injected instruction as readily as any other
@@ -4263,6 +4292,22 @@ export class CfHarnessPromptLoop {
         ...(origin !== undefined ? { origin } : {}),
         ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
         policyEventIndexes,
+        recordActivity,
+      });
+    }
+    if (toolId === "finish_task" && toolCallCount !== 1) {
+      return await this.#rejectInvalidToolCall({
+        toolCall,
+        invalid: {
+          reason: "invalid-argument",
+          toolId,
+          field: "toolCalls",
+          expected: "finish_task as the only tool call in this model turn",
+        },
+        sequence,
+        startedAt: activityStartedAt,
+        effectClass: tool.descriptor.effectClass,
+        ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
         recordActivity,
       });
     }

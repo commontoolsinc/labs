@@ -176,6 +176,15 @@ The current package provides:
 - CFC modes `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`,
   plus prompt-slot, invocation-context, policy-event, and model-influence
   evidence;
+- parent-only `finish_task` for a question or a give-up reason, admitted through
+  ordinary policy and artifacts as the sole call in a model turn. It ends the
+  loop without another provider request, retaining the completed lifecycle and
+  reusable conversation. Reports carry the canonical task outcome; console
+  polling and SSE carry the same outcome, session identity, and current
+  continuation availability. The live pane renders the question or reason.
+  Children report blockers to the parent. Missing-input discovery distinguishes
+  released evidence, absence within an enumerated granted scope, and unknown
+  reads; it stops for input rather than repeating author delegation;
 - a session-local address handle table: deterministic `cfh:a:` tokens minted per
   run for cell addresses, recorded in `run-state.json`, and carried across
   resume; the prompt loop swaps addresses to tokens in model-bound tool output
