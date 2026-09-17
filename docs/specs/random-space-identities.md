@@ -100,6 +100,12 @@ records its own DID:
   as the writes that refer to it. `inSpace("notebook")` therefore means "the
   space this space calls notebook". Two spaces using one name reach two spaces.
 
+  The creator of a space made this way is the identity the run is acting as:
+  on a client, the user whose runtime is resolving the name; on a serving
+  runtime, the run's demanding identity. A serving run with no such identity
+  resolves no name and creates no space, rather than creating one owned by the
+  service.
+
   An allocation record is one document per name, addressed by a canonical cause
   over the calling space and the name, and immutable once written. A
   compare-and-set against a document that does not yet exist is then the whole

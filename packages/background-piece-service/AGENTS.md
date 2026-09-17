@@ -23,7 +23,7 @@ piece's `bgUpdater` stream. The default interval is 60 seconds.
   `Identity.fromPassphrase("common user").derive(spaceName).did()`. That
   derivation supports the legacy space names used during development and nothing
   else, and is removed once those development-only spaces have been migrated
-  (`docs/plans/random-space-identities.md`).
+  ([random space identities](../../docs/plans/random-space-identities.md)).
 - `CompilerError: no exported member 'pattern'` means the binaries are stale
   against the current source, not that the piece is wrong. Rebuild them.
 

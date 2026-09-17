@@ -1,7 +1,7 @@
 ---
 status: historical
-created: 2026-09-16
-archived: 2026-09-16
+created: 2026-09-17
+archived: 2026-09-17
 reason: "Review of the random space identity plan as it stood at 59e8a2540c; its findings were applied to the live plan and specification."
 superseded-by: docs/plans/random-space-identities.md
 ---
