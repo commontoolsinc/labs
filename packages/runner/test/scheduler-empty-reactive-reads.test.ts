@@ -40,7 +40,6 @@ async function fixture(sealing = false) {
       runtime.clearSealDestination();
       await storage.synced();
       await runtime.dispose();
-      await storage.close();
     },
   };
 }
@@ -141,6 +140,41 @@ describe("scheduler-empty-reactive-reads", () => {
         await close();
       }
     });
+  }
+
+  for (const shallow of [false, true]) {
+    for (const initiallyPresent of [false, true]) {
+      it(`recomputes when an undefined field changes presence from ${initiallyPresent} with shallow reads ${shallow}`, async () => {
+        const { runtime, space, close } = await fixture();
+        const input = runtime.getCell<{ field?: undefined }>(space, "input");
+        const address = toMemorySpaceAddress(
+          input.key("field").getAsNormalizedFullLink(),
+        );
+        let runs = 0;
+        let cancel: (() => void) | undefined;
+        try {
+          const seed = runtime.edit();
+          input.withTx(seed).set(initiallyPresent ? { field: undefined } : {});
+          expect((await seed.commit()).error).toBeUndefined();
+          cancel = runtime.scheduler.subscribe(async (tx) => {
+            expect(tx.tx.read(address, { nonRecursive: shallow }).error)
+              .toBeUndefined();
+            if (++runs === 1) {
+              const update = runtime.edit();
+              input.withTx(update).set(
+                initiallyPresent ? {} : { field: undefined },
+              );
+              expect((await update.commit()).error).toBeUndefined();
+            }
+          }, { isEffect: true });
+          await runtime.settled();
+          expect(runs).toBe(2);
+        } finally {
+          cancel?.();
+          await close();
+        }
+      });
+    }
   }
 
   it("recomputes when a shallow read gains a key", async () => {

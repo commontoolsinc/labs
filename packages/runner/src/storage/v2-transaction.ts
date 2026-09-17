@@ -3302,6 +3302,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   #validateReplicaRoute(
     space: MemorySpace,
     branch: SpaceBranch,
+    emptyReactiveCommit?: true,
   ): Result<Unit, IStorageTransactionInconsistent> {
     const currentReplica = this.#storage.open(space).replica;
     if (currentReplica === branch.replica) return { ok: {} };
@@ -3328,6 +3329,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         expected,
         actual,
         space,
+        emptyReactiveCommit,
       }),
     };
   }
@@ -3353,8 +3355,10 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   /** Checks exactly the deep and shallow reads that wake a reactive run. */
   #validateReactiveReads(): Result<Unit, IStorageTransactionInconsistent> {
-    const routes = this.validateReplicaRoutes();
-    if (routes.error) return routes;
+    for (const [space, branch] of this.#branches) {
+      const route = this.#validateReplicaRoute(space, branch, true);
+      if (route.error) return route;
+    }
     const log = this.getReactivityLog();
     for (
       const [reads, shallow] of [
@@ -3386,9 +3390,14 @@ export class V2StorageTransaction implements IStorageTransaction {
           allowArrayLength: true,
         });
         if (
-          shallow
+          hasValueAtPath(doc.initial.value, address.path, {
+              allowArrayLength: true,
+            }) !== hasValueAtPath(current, address.path, {
+              allowArrayLength: true,
+            }) ||
+          (shallow
             ? shallowStructureChanged(expected, actual)
-            : !valueEqual(expected, actual)
+            : !valueEqual(expected, actual))
         ) {
           return {
             error: StateInconsistency({

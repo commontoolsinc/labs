@@ -138,10 +138,12 @@ differ in when a change under an open transaction is discovered.
 A reactive computation opts into `validateReactiveReads`, which checks its
 scheduling dependencies before accepting an empty commit or seal. Deep reads
 compare the value at the read path; shallow reads compare container structure.
+Both distinguish an absent field from a present `undefined` value.
 Changes to unrelated fields do not reject an empty computation. The scheduler
 installs subscriptions in the same synchronous turn, including the union of
 instance reads after each fan-out instance, so changes during later instances
-remain observed. A rejected empty computation carries `emptyReactiveCommit`
+remain observed. A rejected empty computation (including a replaced replica
+route) carries `emptyReactiveCommit`
 and retries past debounce and throttle to finish a one-shot pull's work.
 Event handlers also carry `sourceAction`, but do not opt into this check:
 their empty commits retain ordinary completion and post-commit effects.
