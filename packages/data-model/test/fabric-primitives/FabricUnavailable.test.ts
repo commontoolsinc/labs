@@ -90,6 +90,14 @@ describe("FabricUnavailable", () => {
         .toThrow(/Not an `UnavailableReason`/);
     });
 
+    it("throws given a non-string reason that coerces to a valid one", () => {
+      // An array or an object with a `toString()` reads as a key when looked
+      // up in the table, so the table lookup alone would admit it.
+      expect(() =>
+        new FabricUnavailable(["pending"] as unknown as UnavailableReason)
+      ).toThrow(/Not an `UnavailableReason`: `pending`/);
+    });
+
     it("throws given reason `error` and no message", () => {
       expect(() => new FabricUnavailable("error"))
         .toThrow(/requires an `errorMessage`/);
@@ -207,6 +215,18 @@ describe("FabricUnavailable", () => {
           expect(codec.canDecode({ reason: "gone" })).toBe(false);
           expect(codec.canDecode({ reason: "constructor" })).toBe(false);
           expect(codec.canDecode({})).toBe(false);
+        });
+
+        it("returns `false` for a reason that is inherited rather than own", () => {
+          // Read as an own property, so a `reason` reachable only through the
+          // prototype chain does not stand in for one.
+          const polluted = Object.prototype as { reason?: unknown };
+          polluted.reason = "pending";
+          try {
+            expect(codec.canDecode({})).toBe(false);
+          } finally {
+            delete polluted.reason;
+          }
         });
 
         it("returns `false` for a message that is present and not a string", () => {

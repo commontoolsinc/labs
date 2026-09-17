@@ -75,19 +75,20 @@ type FabricUnavailableState = {
 
 /**
  * Whether `state` has the shape of a {@link FabricUnavailableState}: a plain
- * object whose `reason` is one of the reasons, and whose `errorMessage`, if
- * present at all, is a string. Presence is the test for the message rather
- * than a comparison against `undefined`, because the realm format carries
- * `undefined` faithfully, and a message sent that way is a malformation
- * rather than an absence. Whether the message belongs with the reason is the
- * constructor's to decide.
+ * object whose own `reason` is one of the reasons, and whose own
+ * `errorMessage`, if present at all, is a string. Both fields are read as own
+ * properties, so nothing inherited stands in for one. Presence is the test
+ * for the message rather than a comparison against `undefined`, because the
+ * realm format carries `undefined` faithfully, and a message sent that way is
+ * a malformation rather than an absence. Whether the message belongs with the
+ * reason is the constructor's to decide.
  */
 function isUnavailableState(state: unknown): state is FabricUnavailableState {
-  if (!isPlainObject(state)) {
+  if (!isPlainObject(state) || !Object.hasOwn(state, "reason")) {
     return false;
   }
 
-  const { reason } = state as { reason?: unknown };
+  const { reason } = state as { reason: unknown };
 
   if (
     (typeof reason !== "string") ||
@@ -138,7 +139,10 @@ export class FabricUnavailable extends BaseFabricPrimitive
   constructor(reason: UnavailableReason, errorMessage: string | null = null) {
     super();
 
-    if (!Object.hasOwn(UNAVAILABLE_REASONS, reason)) {
+    if (
+      (typeof reason !== "string") ||
+      !Object.hasOwn(UNAVAILABLE_REASONS, reason)
+    ) {
       throw new Error(
         `Not an \`UnavailableReason\`: ${backtickQuote(String(reason))}`,
       );
