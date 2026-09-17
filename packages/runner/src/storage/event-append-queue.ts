@@ -213,6 +213,10 @@ export class EventAppendQueue {
   /** DIAGNOSTIC (tests): sends held by pacing so far. */
   #pacedHolds = 0;
 
+  /** DIAGNOSTIC (tests): called as each pacing hold begins — the edge a
+   * test waits on when it has to act while a send is held, which the
+   * counter beside it can only be polled for. */
+  readonly #onPacedHold?: () => void;
   #loaded: Promise<void>;
 
   /** The tail of the save chain — `persisted` awaits it (tests, and
@@ -238,12 +242,16 @@ export class EventAppendQueue {
     /** OW27 per-stream send pacing; absent = the default posture,
      * `false` = unpaced. */
     pacing?: EventAppendPacing | false;
+
+    /** DIAGNOSTIC (tests): see `#onPacedHold`. */
+    onPacedHold?: () => void;
   }) {
     this.#space = options.space;
     this.#store = options.store ?? memoryEventAppendQueueStore();
     this.#transact = options.transact;
     this.#nextLocalSeq = options.nextLocalSeq;
     this.#onRefused = options.onRefused;
+    this.#onPacedHold = options.onPacedHold;
     const pacing = options.pacing === false
       ? undefined
       : options.pacing ?? DEFAULT_EVENT_APPEND_PACING;
@@ -479,6 +487,16 @@ export class EventAppendQueue {
           this.#retryRelease = undefined;
           resolve();
         }, Number.isFinite(minDeficitMs) ? minDeficitMs : 1);
+        // Reported with the release and the timer already in place, so a
+        // `close()` from the hook reaches both.
+        try {
+          this.#onPacedHold?.();
+        } catch (error) {
+          logger.warn("event-queue-paced-hold-observer-failed", () => [
+            "paced-hold observer threw",
+            error,
+          ]);
+        }
       });
     }
   }

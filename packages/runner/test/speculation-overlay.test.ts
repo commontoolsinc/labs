@@ -43,6 +43,13 @@ import { ExecutorHost } from "../src/executor/host.ts";
 import { waitForSettled } from "../src/executor/watermark.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import {
+  ArrivalLog,
+  awaitAdmitted,
+  awaitReplica,
+} from "./support/serving-waits.ts";
+import { flushMicrotasks } from "./speculation-intent-test-utils.ts";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import {
   SpeculationOverlayDestination,
   stampSpeculationRunContext,
 } from "../src/speculation/overlay-destination.ts";
@@ -65,7 +72,6 @@ import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import type { JSONSchema, Module, Pattern } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
-import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("speculation overlay space");
 const space = spaceSigner.did() as MemorySpace;
@@ -108,14 +114,25 @@ describe("Phase 2 speculation overlay", () => {
         };
       },
       policy: { flushDeadlineMs: 5_000, idleParkMs: 600_000 },
+      onActivationSettled: (activatedSpace, outcome) =>
+        activations.record({ space: activatedSpace, outcome }),
     });
 
+  /** Resolves once `activatedSpace` has an ACTIVE tenure — activation
+   * finishes on no admission or session edge of its own. */
+  const activated = (activatedSpace: MemorySpace): Promise<unknown> =>
+    activations.matching((entry) =>
+      entry.space === activatedSpace && entry.outcome === "active"
+    );
+
+  let activations: ArrivalLog<{ space: string; outcome: string }>;
   let onServingRuntime: ((runtime: Runtime) => Promise<void>) | undefined;
 
   beforeEach(() => {
     server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
     _servingRuntime = undefined;
     onServingRuntime = undefined;
+    activations = new ArrivalLog();
   });
 
   afterEach(async () => {
@@ -238,9 +255,11 @@ describe("Phase 2 speculation overlay", () => {
 
     // The ECHO: the client's speculative run rendered 42 with no server
     // executor in existence.
-    await waitUntil(
-      () => clientResult.key("total").get() === 42,
-      "the speculative echo to render",
+    await waitForCellValue(
+      clientRuntime,
+      clientResult.key("total"),
+      (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
     const overlay = clientRuntime.speculationOverlay;
     expect(overlay).toBeDefined();
@@ -278,19 +297,18 @@ describe("Phase 2 speculation overlay", () => {
         "spec-result",
         served.resultSchema,
       );
-      for (let attempt = 0;; attempt++) {
-        await argument.sync();
-        await result.sync();
-        const tx = runtime.edit();
-        runtime.run(tx, served, argument, result);
-        const committed = await tx.commit();
-        if (committed.error === undefined) break;
-        if (attempt >= 4) {
-          throw new Error(
-            `serving pattern run failed: ${committed.error.message}`,
-          );
-        }
-        await new Promise((resolve) => setTimeout(resolve, 25));
+      await argument.sync();
+      await result.sync();
+      // Flushed before the run commits, so the replica the commit reads
+      // against is current and the commit has nothing to conflict with.
+      await runtime.storageManager.synced();
+      const tx = runtime.edit();
+      runtime.run(tx, served, argument, result);
+      const committed = await tx.commit();
+      if (committed.error !== undefined) {
+        throw new Error(
+          `serving pattern run failed: ${committed.error.message}`,
+        );
       }
       await runtime.idle();
     };
@@ -299,21 +317,18 @@ describe("Phase 2 speculation overlay", () => {
     clientArg.withTx(pokeTx).set({ n: 8 });
     expect((await pokeTx.commit()).error).toBeUndefined();
     const pokeSeq = Engine.serverSeq(engine);
-    await waitUntil(
-      () => host!.spaceServer(space)?.active === true,
-      "space activation",
-    );
-    await waitForSettled(clientRuntime, space, pokeSeq, {
-      timeoutMs: 30_000,
-    });
+    await activated(space);
+    await waitForSettled(clientRuntime, space, pokeSeq);
 
     // Retirement (speculation.md §4): the covering watermark retires
     // every entry; the STORE value renders through the same path.
     await overlay!.waitForSpaceQuiescence(space);
     expect(overlay!.entryCount(space)).toBe(0);
-    await waitUntil(
-      () => clientResult.key("total").get() === 56,
-      "the authoritative value to render",
+    await waitForCellValue(
+      clientRuntime,
+      clientResult.key("total"),
+      (total: number | undefined) => total === 56,
+      { stuckLabel: "the authoritative total to render as 56" },
     );
 
     // The single-deriver envelope (testing.md §4): every derived-class
@@ -403,15 +418,12 @@ describe("Phase 2 speculation overlay", () => {
     result.key("bump").send({});
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
-    await waitUntil(
-      () => {
-        const records = Engine.selectCommitsSince(engine, {
-          fromSeq: before,
-        });
-        return records.some((record) => record.class === "authored");
-      },
-      "the authored event-append commit",
-    );
+    await awaitAdmitted(server, () => {
+      const records = Engine.selectCommitsSince(engine, {
+        fromSeq: before,
+      });
+      return records.some((record) => record.class === "authored");
+    });
     // The store's ONLY new state is the event: the sidecar entry is
     // stamped from the authenticated envelope (firedAt = the firing
     // session — protocol.md §2's authored event-append row), and the
@@ -430,12 +442,11 @@ describe("Phase 2 speculation overlay", () => {
     expect(afterFire[0].class).toBe("authored");
     // The ECHO: the handler ran locally and its write renders through
     // the overlay — a live entry tagged with the fired event's id.
-    await waitUntil(
-      () => {
-        const value = argument.key("value").get() as number | undefined;
-        return (value ?? 0) >= 1;
-      },
-      "the handler echo to render",
+    await waitForCellValue(
+      clientRuntime,
+      argument.key("value"),
+      (value: number | undefined) => (value ?? 0) >= 1,
+      { stuckLabel: "the argument's value to take the handler's write" },
     );
     expect(overlay!.entryCount(space)).toBeGreaterThanOrEqual(1);
     // The durable half of the doc the handler wrote did NOT change:
@@ -507,6 +518,7 @@ describe("Phase 2 speculation overlay", () => {
       // Arm 1 — REFUSED at admission: the callback's tx reads ERROR.
       replica.enqueueEventAppend = () =>
         Promise.resolve({ delivered: false, refused: "admission said no" });
+      const refusedAcks = new ArrivalLog<void>();
       let refusedStatus:
         | { status: string; error?: { message?: string } }
         | undefined;
@@ -521,12 +533,10 @@ describe("Phase 2 speculation overlay", () => {
         ): unknown;
       }).send({}, (ackTx) => {
         refusedStatus = ackTx.status();
+        refusedAcks.record();
       });
       await clientRuntime.idle();
-      await waitUntil(
-        () => refusedStatus !== undefined,
-        "the refused ack to settle",
-      );
+      await refusedAcks.reached(1);
       expect(refusedStatus!.status).toBe("error");
       expect(refusedStatus!.error?.message).toContain("admission said no");
 
@@ -540,8 +550,9 @@ describe("Phase 2 speculation overlay", () => {
       }).send({}, () => {
         heldFired = true;
       });
-      await clientRuntime.idle();
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // The ack fires from the append's own commit, which the held
+      // enqueue never issues; a stray one would be this runtime's work,
+      // and the drain runs it.
       await clientRuntime.idle();
       expect(heldFired).toBe(false);
     } finally {
@@ -558,11 +569,13 @@ describe("Phase 2 speculation overlay", () => {
     } as unknown as Runtime;
     const destination = new SpeculationOverlayDestination(runtime);
     const flushed: string[] = [];
+    const flushArrivals = new ArrivalLog<string>();
     const effectOf = (kind: string): PostCommitSideEffect => ({
       id: `${kind}:1`,
       kind,
       flush: () => {
         flushed.push(kind);
+        flushArrivals.record(kind);
       },
     });
     const derivationTx = {} as unknown as IExtendedStorageTransaction;
@@ -576,11 +589,7 @@ describe("Phase 2 speculation overlay", () => {
       effectOf("sqlite-query"),
     ]);
     expect(owned).toBe(true);
-    await waitUntil(
-      () => flushed.length === 1,
-      "the navigateTo enactment to flush",
-      2_000,
-    );
+    await flushArrivals.reached(1);
     expect(flushed).toEqual(["navigateTo"]);
 
     // An event-handler echo follows the SAME egress rule since Phase 3
@@ -802,7 +811,7 @@ describe("Phase 2 speculation overlay", () => {
     expect(destination.deferSealedEffects(handlerTx, [dialogStart])).toBe(
       true,
     );
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await flushMicrotasks();
     expect(flushed).toEqual([]);
   });
 
@@ -905,9 +914,11 @@ describe("Phase 2 speculation overlay", () => {
     }
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
-    await waitUntil(
-      () => clientResult.key("total").get() === 42,
-      "the speculative echo to render",
+    await waitForCellValue(
+      clientRuntime,
+      clientResult.key("total"),
+      (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
     const overlay = clientRuntime.speculationOverlay!;
     expect(overlay.entryCount(space)).toBeGreaterThanOrEqual(1);
@@ -1007,9 +1018,11 @@ describe("Phase 2 speculation overlay", () => {
     }
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
-    await waitUntil(
-      () => clientResult.key("total").get() === 42,
-      "the speculative echo to render",
+    await waitForCellValue(
+      clientRuntime,
+      clientResult.key("total"),
+      (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
     const overlay = clientRuntime.speculationOverlay!;
     const echoEntries = overlay.entryCount(space);
@@ -1065,9 +1078,11 @@ describe("Phase 2 speculation overlay", () => {
         compiled.resultSchema,
       );
       await readerResult.sync();
-      await waitUntil(
-        () => readerResult.key("total").get() === 777,
-        "the typed value to be durable",
+      await waitForCellValue(
+        readerRuntime,
+        readerResult.key("total"),
+        (total: number | undefined) => total === 777,
+        { stuckLabel: "the reader's total to reach 777" },
       );
     } finally {
       await readerRuntime.dispose();
@@ -1234,9 +1249,11 @@ describe("Phase 2 speculation overlay", () => {
         DRAFT_SCHEMA,
       );
       await readerDraft.sync();
-      await waitUntil(
-        () => readerDraft.key("name").get() === "typed-name",
-        "the typed value to be durable",
+      await waitForCellValue(
+        readerRuntime,
+        readerDraft.key("name"),
+        (name: string | undefined) => name === "typed-name",
+        { stuckLabel: "the reader to see the typed draft name" },
       );
     } finally {
       await readerRuntime.dispose();
@@ -1426,9 +1443,11 @@ describe("Phase 2 speculation overlay", () => {
         DRAFT_SCHEMA,
       );
       await readerDraft.sync();
-      await waitUntil(
-        () => readerDraft.key("name").get() === "typed-name",
-        "the typed value to be durable",
+      await waitForCellValue(
+        readerRuntime,
+        readerDraft.key("name"),
+        (name: string | undefined) => name === "typed-name",
+        { stuckLabel: "the reader to see the typed draft name" },
       );
     } finally {
       await readerRuntime.dispose();
@@ -1602,9 +1621,11 @@ describe("Phase 2 speculation overlay", () => {
         DRAFT_SCHEMA,
       );
       await readerDraft.sync();
-      await waitUntil(
-        () => readerDraft.key("name").get() === "typed-name",
-        "the typed value to be durable",
+      await waitForCellValue(
+        readerRuntime,
+        readerDraft.key("name"),
+        (name: string | undefined) => name === "typed-name",
+        { stuckLabel: "the reader to see the typed draft name" },
       );
     } finally {
       await readerRuntime.dispose();
@@ -1779,9 +1800,11 @@ describe("Phase 2 speculation overlay", () => {
         DRAFT_SCHEMA,
       );
       await readerDraft.sync();
-      await waitUntil(
-        () => readerDraft.key("name").get() === "typed-name",
-        "the typed value to be durable",
+      await waitForCellValue(
+        readerRuntime,
+        readerDraft.key("name"),
+        (name: string | undefined) => name === "typed-name",
+        { stuckLabel: "the reader to see the typed draft name" },
       );
     } finally {
       await readerRuntime.dispose();
@@ -1899,12 +1922,12 @@ describe("Phase 2 speculation overlay", () => {
     }
     // The metadata integrated over the watch; the kick's empty pull has
     // settled (the pull joins the synced() barrier).
-    await waitUntil(
+    await awaitReplica(
+      clientManager,
       () =>
         (replica.getDocument(draftLink.id, draftLink.scope) as {
           cfc?: { schemaHash?: string };
         } | undefined)?.cfc?.schemaHash === lateHash,
-      "frame 1's metadata to integrate",
     );
     // The kick's pull joins the replica's inbound settle: after this,
     // frame 1's pull has fully completed. (The doc may already be at
@@ -1961,9 +1984,9 @@ describe("Phase 2 speculation overlay", () => {
     }
 
     // The heal: the reference resolves on this replica via the re-kick.
-    await waitUntil(
+    await awaitReplica(
+      clientManager,
       () => replica.getDocument(`cid:${lateHash}` as never) !== undefined,
-      "the re-armed kick to deliver the stored schema document",
     );
 
     // The hook's remaining CONSTRUCTIBLE skip arms, coverage-verified
@@ -2080,7 +2103,7 @@ describe("Phase 2 speculation overlay", () => {
         value: { ...docBValue, cfc: pairCfc },
       },
     ]);
-    await waitUntil(readerSees("pair-frame"), "the pair frame to integrate");
+    await awaitReplica(clientManager, readerSees("pair-frame"));
 
     // The schemaHash-less metadata frame (the string-shape guard).
     await writeDocFrame([{
@@ -2098,7 +2121,7 @@ describe("Phase 2 speculation overlay", () => {
         },
       },
     }]);
-    await waitUntil(readerSees("fourth-frame"), "frame 4 to integrate");
+    await awaitReplica(clientManager, readerSees("fourth-frame"));
 
     // The doc-shape guard (a non-object root) is NOT constructible:
     // the write path refuses any non-object full-document root
@@ -2818,9 +2841,11 @@ describe("Phase 2 speculation overlay", () => {
     const cancelDemand = clientResult.sink(() => {});
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
-    await waitUntil(
-      () => clientResult.key("total").get() === 42,
-      "the speculative echo to render",
+    await waitForCellValue(
+      clientRuntime,
+      clientResult.key("total"),
+      (total: number | undefined) => total === 42,
+      { stuckLabel: "the client's total to reach 42" },
     );
 
     const engine = await server.engineForSpace(space);
@@ -2829,9 +2854,11 @@ describe("Phase 2 speculation overlay", () => {
     handlerRuns = 0;
     clientResult.key("copy").send({});
     await clientRuntime.idle();
-    // Observation window: the handler runs exactly once; a backoff loop
-    // would re-run it many times here.
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    // The handler runs exactly once. A re-run is this runtime's own
+    // scheduler work — the pre-fix defect was a backoff loop, which
+    // keeps the scheduler busy — so the drain and the store round trip
+    // below are ordered after one.
+    await clientRuntime.storageManager.synced();
     await clientRuntime.idle();
     expect(handlerRuns).toBe(1);
     // Events-down (F10 deleted): the handler's write DIVERTED to the
@@ -3029,7 +3056,7 @@ describe("Phase 2 speculation overlay", () => {
     // entry consumed) — but the origin's verdict is still in flight, so
     // the sweep skips the entry as blocked.
     watermarkCallback!({ seq: 50 });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await flushMicrotasks();
     expect(destination.entryCount(space)).toBe(1);
 
     // The verdict lands: origin 10 acked at store seq 5; its layer
@@ -3133,7 +3160,7 @@ describe("Phase 2 speculation overlay", () => {
       },
     }]);
     expect(owned).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushMicrotasks();
     expect(flushed).toBe(0);
 
     // The rejection half (r3739139536), on a fresh destination: a
@@ -3226,8 +3253,8 @@ describe("Phase 2 speculation overlay", () => {
     expect((await tx.commit()).error).toBeUndefined();
     const cancelDemand = result.sink(() => {});
     await clientRuntime.idle();
-    // Give any (wrong) floating egress every chance to fire.
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    // A floating egress would be this runtime's own tracked work.
+    await clientRuntime.idle();
     expect(calls).toEqual([]);
     // And the branch RENDERS PENDING (speculation.md §2: on a memo
     // miss the node reads as pending — the ordinary loading state —
@@ -3312,9 +3339,11 @@ describe("Phase 2 speculation overlay", () => {
       seeded.argument.withTx(tx).set({ items: [1, 2] });
       expect((await tx.commit()).error).toBeUndefined();
       await seeder.runtime.idle();
-      await waitUntil(
-        () => (seeded.result.key("doubled").get() ?? []).length === 2,
-        "the seeded two-element array",
+      await waitForCellValue(
+        seeder.runtime,
+        seeded.result.key("doubled"),
+        (doubled: number[] | undefined) => (doubled ?? []).length === 2,
+        { stuckLabel: "the seeded two-element array to render" },
       );
       await seeder.runtime.storageManager.synced();
       // The derived document itself, so the arrival below lands on the
@@ -3341,9 +3370,14 @@ describe("Phase 2 speculation overlay", () => {
     });
     const client = await install(clientRuntime);
     await clientRuntime.idle();
-    await waitUntil(
-      () => (client.result.key("doubled").get() ?? []).length === 2,
-      "the stored two-element array at the flag-ON client",
+    await waitForCellValue(
+      clientRuntime,
+      client.result.key("doubled"),
+      (doubled: number[] | undefined) => (doubled ?? []).length === 2,
+      {
+        stuckLabel:
+          "the stored two-element array to render at the flag-ON client",
+      },
     );
     // The same derived document both sides derive into, so the arrival
     // below lands under the entry this client seals rather than beside it.
@@ -3364,9 +3398,11 @@ describe("Phase 2 speculation overlay", () => {
       expect((await tx.commit()).error).toBeUndefined();
     }
     await clientRuntime.idle();
-    await waitUntil(
-      () => (client.result.key("doubled").get() ?? []).length === 3,
-      "the speculative three-element echo",
+    await waitForCellValue(
+      clientRuntime,
+      client.result.key("doubled"),
+      (doubled: number[] | undefined) => (doubled ?? []).length === 3,
+      { stuckLabel: "the speculative three-element echo to render" },
     );
     expect(clientRuntime.speculationOverlay!.entryCount(space))
       .toBeGreaterThanOrEqual(1);
@@ -3394,7 +3430,8 @@ describe("Phase 2 speculation overlay", () => {
       await writer.manager.close();
     }
     const replica = clientRuntime.storageManager.open(space).replica;
-    await waitUntil(
+    await awaitReplica(
+      clientManager,
       () =>
         JSON.stringify(
           (replica.getNonSpeculativeDocument!(
@@ -3402,7 +3439,6 @@ describe("Phase 2 speculation overlay", () => {
             derivedLink.scope,
           ) as { value?: unknown } | undefined)?.value,
         ) === JSON.stringify([7, 8, 9]),
-      "the authoritative array to reach the client's confirmed view",
     );
 
     // The entry still stands, so what renders is the entry's own value —

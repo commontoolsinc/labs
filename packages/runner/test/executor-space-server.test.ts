@@ -60,7 +60,7 @@ import {
   type ServingLoopStats,
 } from "../src/executor/stats.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
-import { waitUntil } from "./support/wait-until.ts";
+import { ArrivalLog, awaitEach } from "./support/serving-waits.ts";
 
 const spaceSigner = await Identity.fromPassphrase("space-server test space");
 const space = spaceSigner.did() as MemorySpace;
@@ -94,6 +94,9 @@ describe("stage G SpaceServer recovery seams", () => {
     engine = await server.engineForSpace(space);
     servingRuntime = undefined;
     spaceServer = undefined;
+    cycles = new ArrivalLog();
+    parks = new ArrivalLog();
+    retirements = new ArrivalLog();
   });
 
   afterEach(async () => {
@@ -102,6 +105,15 @@ describe("stage G SpaceServer recovery seams", () => {
   });
 
   let lastStats = emptyServingLoopStats();
+
+  /** Every wave cycle the tenure under test completes, committed or
+   * not — the edge the loop's own counters move behind. */
+  let cycles: ArrivalLog<void>;
+  /** Every park, with its reason. */
+  let parks: ArrivalLog<string>;
+  /** Each in-flight effect as the outbox retires it — the activation
+   * re-send retires its row without a wave, so no cycle reports it. */
+  let retirements: ArrivalLog<void>;
 
   const newSpaceServer = (
     options: {
@@ -139,6 +151,9 @@ describe("stage G SpaceServer recovery seams", () => {
       },
       localSeqRef: { value: 0 },
       stats,
+      onWaveCycle: cycles.record,
+      onEffectRetired: retirements.record,
+      onParked: parks.record,
       policy: options.policy ?? { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
       ...(options.onParked !== undefined ? { onParked: options.onParked } : {}),
     });
@@ -161,10 +176,7 @@ describe("stage G SpaceServer recovery seams", () => {
     probe.withTx(tx).set({ n: 1 });
     // Resolves at SEAL; the loop's cycle commits the wave.
     expect((await tx.commit()).error).toBeUndefined();
-    await waitUntil(
-      () => Engine.serverSeq(engine) > seqBefore,
-      `the ${probeName} wave to commit`,
-    );
+    await awaitEach(cycles, () => Engine.serverSeq(engine) > seqBefore);
   };
 
   it("refuses to activate on a runtime without servingPosture: the Phase-2 speculation default would divert factory-time loads (serving-loop.md §3)", async () => {
@@ -253,13 +265,14 @@ describe("stage G SpaceServer recovery seams", () => {
     const created = newSpaceServer();
     expect(await created.activate()).toBe(true);
 
-    // Delivered by the activation re-send itself — no wave ran (no
-    // input, no demand): delete the re-send call in activate() and this
-    // times out with the row still pending.
-    await waitUntil(
+    // Delivered by the activation re-send itself — no wave ran (no input,
+    // no demand), so the re-send's own retirement is the edge here and a
+    // cycle never comes. Delete the re-send call in activate() and this
+    // never returns with the row still pending.
+    await awaitEach(
+      retirements,
       () =>
         selectPendingExecutionOutboxRows(engine, { branch: "" }).length === 0,
-      "the activation re-send to retire the row",
     );
     const targetEngine = await server.engineForSpace(targetSpace);
     const doc = Engine.read(targetEngine, {
@@ -306,10 +319,10 @@ describe("stage G SpaceServer recovery seams", () => {
     // Drive one wave that stages NO appends: the owed drain — armed by
     // the failed activation re-send — must deliver the surviving row.
     await driveOneWave("owed-drain-probe");
-    await waitUntil(
+    await awaitEach(
+      cycles,
       () =>
         selectPendingExecutionOutboxRows(engine, { branch: "" }).length === 0,
-      "the owed post-wave drain to deliver the row",
     );
     const targetEngine = await server.engineForSpace(targetSpace);
     const doc = Engine.read(targetEngine, {
@@ -401,10 +414,7 @@ describe("stage G SpaceServer recovery seams", () => {
     });
     probe.withTx(probeTx).set({ n: 1 });
     expect((await probeTx.commit()).error).toBeUndefined();
-    await waitUntil(
-      () => Engine.serverSeq(engine) > seqBefore,
-      "the straggler's wave to commit",
-    );
+    await awaitEach(cycles, () => Engine.serverSeq(engine) > seqBefore);
 
     // The straggler: a late deferSealedEffects for the CLOSED wave's tx
     // (in production, a continuation racing park/rotation). It must be
@@ -470,10 +480,7 @@ describe("stage G SpaceServer recovery seams", () => {
     // Baseline: no floor, the advance reaches the batch head.
     const s1 = await write("of:clamp-a");
     notice(s1);
-    await waitUntil(
-      () => created.watermark === s1,
-      "the un-clamped baseline advance",
-    );
+    await awaitEach(cycles, () => created.watermark === s1);
     expect(stats.watermarkClamped).toBe(0);
 
     // PARTIAL clamp: two inputs, the floor shadows the second — W
@@ -490,10 +497,7 @@ describe("stage G SpaceServer recovery seams", () => {
     // Enqueued back-to-back synchronously: one input batch, one cycle.
     notice(s2);
     notice(s3);
-    await waitUntil(
-      () => created.watermark === s2,
-      "the clamped advance to floor-1",
-    );
+    await awaitEach(cycles, () => created.watermark === s2);
     expect(created.watermark).toBe(s3 - 1);
     expect(stats.watermarkClamped).toBe(1);
 
@@ -505,10 +509,7 @@ describe("stage G SpaceServer recovery seams", () => {
     // missed it.
     const s4 = await write("of:clamp-d");
     notice(s4);
-    await waitUntil(
-      () => stats.watermarkClamped >= 2,
-      "the fully-suppressed clamp to be counted",
-    );
+    await awaitEach(cycles, () => stats.watermarkClamped >= 2);
     expect(created.watermark).toBe(s2);
     expect(stats.watermarkClamped).toBe(2);
 
@@ -517,29 +518,20 @@ describe("stage G SpaceServer recovery seams", () => {
     floor = 1;
     const s5 = await write("of:clamp-e");
     notice(s5);
-    await waitUntil(
-      () => stats.watermarkClamped >= 3,
-      "the sentinel-floored clamp to be counted",
-    );
+    await awaitEach(cycles, () => stats.watermarkClamped >= 3);
     expect(created.watermark).toBe(s2);
 
     // The PROMPT lift: the flip resolves the input wait directly — no
     // admitted commit remains on the feed (s3..s5 drained cycles ago;
     // only their VISIBILITY changed), so without the wake the catch-up
-    // wave would sit out idleParkMs (600 s here) and this bounded wait
-    // would time out. Fired the way the replica's confirmPending does
-    // at promotion; poll-fired because the loop re-arms its wait
-    // between cycles (a real promotion burst fires once per flipped
-    // doc, so repeated fires are the production shape too).
+    // wave would sit out idleParkMs (600 s here) and this wait would
+    // never return. Fired the way the replica's confirmPending does at
+    // promotion, and fired once: the loop arms its input wait
+    // synchronously after the cycle edge the wait above resolved on, so
+    // it is already waiting when this lands.
     floor = undefined;
-    await waitUntil(
-      () => {
-        replica.shadowFlipObserver?.();
-        return created.watermark === s5;
-      },
-      "the clamp to lift promptly on the shadow-flip wake",
-      15_000,
-    );
+    replica.shadowFlipObserver?.();
+    await awaitEach(cycles, () => created.watermark === s5);
     expect(stats.watermarkClamped).toBe(3);
   });
 
@@ -554,7 +546,11 @@ describe("stage G SpaceServer recovery seams", () => {
         0;
     const failuresBefore = watermarkFailureCount();
     const retryCommitGate = Promise.withResolvers<void>();
-    let watermarkCommitAttempts = 0;
+    /** Each watermark-bookkeeping commit as it is attempted. The second
+     * attempt blocks on the gate below, inside the wave cycle that made
+     * it, so the cycle it belongs to does not end until the test
+     * releases it and there is no cycle edge to wait on for it. */
+    const watermarkCommits = new ArrivalLog<void>();
     runtime.edit = (options) => {
       const tx = edit(options);
       const commit = tx.commit.bind(tx);
@@ -564,8 +560,9 @@ describe("stage G SpaceServer recovery seams", () => {
         ) {
           return commit();
         }
-        watermarkCommitAttempts += 1;
-        if (watermarkCommitAttempts === 1) {
+        watermarkCommits.record();
+        const attempt = watermarkCommits.entries.length;
+        if (attempt === 1) {
           const reason = new Error("injected watermark commit failure");
           return Promise.resolve({
             error: {
@@ -575,7 +572,7 @@ describe("stage G SpaceServer recovery seams", () => {
             },
           });
         }
-        if (watermarkCommitAttempts === 2) {
+        if (attempt === 2) {
           return retryCommitGate.promise.then(() => commit());
         }
         return commit();
@@ -595,11 +592,11 @@ describe("stage G SpaceServer recovery seams", () => {
       sessionId: "session:watermark-failure",
       writes: [{ id: "of:watermark-failure-first", scopeKey: "space" }],
     });
-    await waitUntil(
+    await awaitEach(
+      cycles,
       () => watermarkFailureCount() > failuresBefore,
-      "the failed watermark transaction to be reported",
     );
-    expect(watermarkCommitAttempts).toBe(1);
+    expect(watermarkCommits.entries.length).toBe(1);
 
     const second = await server.writeDocument(
       space,
@@ -614,18 +611,12 @@ describe("stage G SpaceServer recovery seams", () => {
         sessionId: "session:watermark-failure",
         writes: [{ id: "of:watermark-failure-second", scopeKey: "space" }],
       });
-      await waitUntil(
-        () => watermarkCommitAttempts === 2,
-        "the fresh input to start the retry transaction",
-      );
+      await watermarkCommits.reached(2);
       expect(created.watermark).toBeLessThan(first.seq);
     } finally {
       retryCommitGate.resolve();
     }
-    await waitUntil(
-      () => created.watermark >= second.seq,
-      "the watermark to advance after the retry commits",
-    );
+    await awaitEach(cycles, () => created.watermark >= second.seq);
   });
 
   it("fires an EFFECT-ONLY batch on a quiet space: an all-no-op tx's deferred effects close a vacuous wave instead of starving until park (round-2 thread 1)", async () => {
@@ -641,6 +632,7 @@ describe("stage G SpaceServer recovery seams", () => {
 
     const runtime = servingRuntime!;
     let flushed = 0;
+    const flushArrivals = new ArrivalLog<void>();
     const seqBefore = Engine.serverSeq(engine);
     const tx = runtime.edit();
     stampWaveRunContext(tx, {
@@ -654,6 +646,7 @@ describe("stage G SpaceServer recovery seams", () => {
       kind: "fetchTest-start",
       flush: () => {
         flushed += 1;
+        flushArrivals.record();
       },
     });
     expect((await tx.commit()).error).toBeUndefined();
@@ -661,10 +654,7 @@ describe("stage G SpaceServer recovery seams", () => {
     // The effect must FIRE with no further input: the loop counts the
     // deferred batch as work, closes the (vacuous, zero-contribution)
     // wave, and admits the batch to the outbox.
-    await waitUntil(
-      () => flushed === 1,
-      "the effect-only batch to fire on the quiet space",
-    );
+    await flushArrivals.reached(1);
     // Vacuous close: nothing was committed for it.
     expect(Engine.serverSeq(engine)).toBe(seqBefore);
     expect(created.deferredEffectWaveCount).toBe(0);
@@ -724,13 +714,9 @@ describe("stage G SpaceServer recovery seams", () => {
     // were withdrawn with the rejection, so firing would egress work
     // whose claim never became durable (pre-fix, every non-lease-lost
     // abort admitted the batch).
-    await waitUntil(
-      () => lastStats.waves > wavesBefore,
-      "the rejected wave to be counted",
-    );
-    // Give a wrongly-admitted flush every chance to run before the
-    // negative assertion.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The cycle that closed the wave is the edge; its end is ordered
+    // after any flush the wave would wrongly have admitted.
+    await awaitEach(cycles, () => lastStats.waves > wavesBefore);
     expect(flushed).toBe(0);
     expect(Engine.serverSeq(engine)).toBe(seqBefore);
   });
@@ -739,11 +725,13 @@ describe("stage G SpaceServer recovery seams", () => {
     // A Proxy facade over the real server that records the notice; every
     // other call passes through (the sx2 facade pattern above).
     const notices: Array<{ space: string; principal: string }> = [];
+    const noticeArrivals = new ArrivalLog<void>();
     const spy = new Proxy(server, {
       get(target, prop, receiver) {
         if (prop === "noteLeaseReacquired") {
           return (notice: { space: string; principal: string }) => {
             notices.push(notice);
+            noticeArrivals.record();
             return target.noteLeaseReacquired(notice);
           };
         }
@@ -762,25 +750,23 @@ describe("stage G SpaceServer recovery seams", () => {
       },
     });
     expect(await created.activate()).toBe(true);
-    // Plain renewals report nothing.
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Activation itself reports nothing. Whether a PLAIN renewal reports
+    // is carried by the count assertions after the blip below: the renew
+    // ticks every 25 ms for the rest of this test, so a renewal that
+    // reported would push the count past the one the blip produces.
     expect(notices).toEqual([]);
     expect(stats.lease.lost).toBe(0);
 
     // The blip: the row vanishes with NO rival, so the next tick's
     // renewal FAILS and the same-process reacquire SUCCEEDS.
     releaseExecutionLease(engine, { space, holder: created.holder });
-    await waitUntil(() => stats.lease.lost >= 1, "the renew tick to fail");
-    await waitUntil(
-      () => liveExecutionLeaseHolder(engine, space) === created.holder,
-      "the reacquire to restore the row",
-    );
-    await waitUntil(() => notices.length >= 1, "the reacquire notice");
+    // The notice is the reacquire's own edge; the failed tick and the
+    // restored row are what produced it.
+    await noticeArrivals.reached(1);
+    expect(stats.lease.lost).toBeGreaterThanOrEqual(1);
+    expect(liveExecutionLeaseHolder(engine, space)).toBe(created.holder);
     expect(notices).toEqual([{ space, principal: serviceSigner.did() }]);
     expect(created.active).toBe(true);
-    // Later plain renewals still report nothing (one notice per blip).
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(notices.length).toBe(1);
 
     // A blip the reacquire LOSES (a rival took the row) parks the space
     // and reports nothing: there is no live lease to re-arm under.
@@ -792,7 +778,9 @@ describe("stage G SpaceServer recovery seams", () => {
         ttlMs: 600_000,
       }),
     ).toBe(true);
-    await waitUntil(() => created.active !== true, "the space to park");
+    await parks.reached(1);
+    expect(created.active).not.toBe(true);
+    // One notice per blip, over every plain renewal since.
     expect(notices.length).toBe(1);
   });
 
@@ -841,10 +829,7 @@ describe("stage G SpaceServer recovery seams", () => {
       sessionId: "session:p2f-late",
       writes: [{ id: "of:p2f-late-b", scopeKey: "space" }],
     });
-    await waitUntil(
-      () => created.watermark >= second.seq,
-      "the in-order record to drain and settle",
-    );
+    await awaitEach(cycles, () => created.watermark >= second.seq);
     // The LATE notice: seq below the drained head. Pre-fix it was
     // silently skipped (never counted); post-fix it counts exactly
     // once — a replayed duplicate stays skipped.
@@ -855,9 +840,9 @@ describe("stage G SpaceServer recovery seams", () => {
       sessionId: "session:p2f-late",
       writes: [{ id: "of:p2f-late-a", scopeKey: "space" }],
     });
-    await waitUntil(
+    await awaitEach(
+      cycles,
       () => stats.authoredSeen === authoredBefore + 2,
-      "the late authored notice to be counted",
     );
     created.enqueueCommit({
       space,
@@ -866,7 +851,7 @@ describe("stage G SpaceServer recovery seams", () => {
       sessionId: "session:p2f-late",
       writes: [{ id: "of:p2f-late-a", scopeKey: "space" }],
     });
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await cycles.reached(cycles.entries.length + 1);
     expect(stats.authoredSeen).toBe(authoredBefore + 2);
     // Coverage math stayed in-order: W never regressed.
     expect(created.watermark).toBeGreaterThanOrEqual(second.seq);
@@ -979,10 +964,7 @@ describe("stage G SpaceServer recovery seams", () => {
 
     // The root terminalizes: attempted, confirmed synced-no-meta,
     // parked — counted once.
-    await waitUntil(
-      () => stats.structureLoadTerminal === 1,
-      "the demanded root to terminalize",
-    );
+    await awaitEach(cycles, () => stats.structureLoadTerminal === 1);
 
     // THE CHURN STOPS (the starvation fork's fix): further cycles —
     // driven by unrelated commits — re-attempt NOTHING for the parked
@@ -1003,10 +985,7 @@ describe("stage G SpaceServer recovery seams", () => {
         sessionId: "session:p2f-unrelated",
         writes: [{ id: `of:p2f-unrelated-${i}`, scopeKey: "space" }],
       });
-      await waitUntil(
-        () => created.watermark >= applied.seq,
-        `unrelated cycle ${i} to settle`,
-      );
+      await awaitEach(cycles, () => created.watermark >= applied.seq);
     }
     expect(stats.structureLoadDeferred).toBe(deferredAtTerminal);
     expect(stats.structureLoadTerminal).toBe(terminalAtTerminal);
@@ -1095,10 +1074,7 @@ describe("stage G SpaceServer recovery seams", () => {
           sessionId: "session:ow46-noise",
           writes: [{ id: `of:ow46-noise-${i}`, scopeKey: "space" }],
         });
-        await waitUntil(
-          () => created.watermark >= applied.seq,
-          `noise cycle ${i} to settle`,
-        );
+        await awaitEach(cycles, () => created.watermark >= applied.seq);
       }
     } finally {
       console.warn = originalWarn;
@@ -1147,13 +1123,10 @@ describe("stage G SpaceServer recovery seams", () => {
       // the re-arm below is what distinguishes them). Poll-fired: the
       // wake resolves the loop's input wait, which is re-armed between
       // cycles (the clamp test's idiom).
-      await waitUntil(
-        () => {
-          created.noteDemandChanged();
-          return stats.structureLoadTerminal === 1;
-        },
-        "the not-yet-created root to terminalize",
-      );
+      await awaitEach(cycles, () => {
+        created.noteDemandChanged();
+        return stats.structureLoadTerminal === 1;
+      });
 
       // NOW create the piece at that root through a CLIENT runtime —
       // the scheduler tell's creation shape (an outside-scheduler
@@ -1212,25 +1185,18 @@ describe("stage G SpaceServer recovery seams", () => {
         writes: [{ id: rootId, scopeKey: "space" }],
       });
 
-      await waitUntil(
-        () => stats.structureLoadRearmed === 1,
-        "the terminal root to re-arm on the creation commit",
-      );
+      await awaitEach(cycles, () => stats.structureLoadRearmed === 1);
       // The settle-gated retry LOADS the piece: no re-terminalization,
       // and the piece's derivation serves — the derived total lands in
       // the engine under a derived-class commit.
-      await waitUntil(
-        () => {
-          const row = engine.database.prepare(
-            `SELECT c.class AS class FROM revision r
+      await awaitEach(cycles, () => {
+        const row = engine.database.prepare(
+          `SELECT c.class AS class FROM revision r
              JOIN "commit" c ON c.seq = r.commit_seq
              WHERE r.id LIKE 'computed:%' ORDER BY r.seq DESC LIMIT 1`,
-          ).get() as { class: string } | undefined;
-          return row?.class === "derived";
-        },
-        "the re-armed piece to derive server-side",
-        15_000,
-      );
+        ).get() as { class: string } | undefined;
+        return row?.class === "derived";
+      });
       expect(stats.structureLoadTerminal).toBe(1);
       expect(stats.structureLoadFailures).toBe(0);
     } finally {
@@ -1397,10 +1363,9 @@ describe("stage G SpaceServer recovery seams", () => {
         }>
       ).filter((annotation) => annotation.actingUser !== undefined);
     };
-    await waitUntil(
+    await awaitEach(
+      cycles,
       () => actingRows().some((a) => a.actingUser === demander.principal),
-      "the argument-demand derivation to act as the demanding user",
-      15_000,
     );
     // A USER-scoped instance value carries the user only (design §F,
     // RULED 2026-08-16): no session on a user-instance run's writes.
@@ -1520,9 +1485,9 @@ describe("stage G SpaceServer recovery seams", () => {
     const serving = servingRuntime!;
     // The demand registry has absorbed the identity-bearing demand —
     // the run supply's input.
-    await waitUntil(
+    await awaitEach(
+      cycles,
       () => created.demandedIdentitiesOf(demandedRoot).length === 1,
-      "the demanded identity to register",
     );
 
     const cancels: Array<() => void> = [];
@@ -1598,12 +1563,11 @@ describe("stage G SpaceServer recovery seams", () => {
         const entriesOf = () =>
           ((Engine.read(engine, { id: sidecarId })?.value ??
             {}) as StreamEventsDocValue).entries ?? [];
-        await waitUntil(
+        await awaitEach(
+          cycles,
           () =>
             entriesOf().length === 1 &&
             entriesOf()[0].consequenced === true,
-          `the ${arm.stream} emission to commit and consequence`,
-          20_000,
         );
         return { entry: entriesOf()[0] };
       };
@@ -1653,14 +1617,13 @@ describe("stage G SpaceServer recovery seams", () => {
             actingSession?: string;
           }>
         ).filter((annotation) => annotation.actingUser !== undefined);
-      await waitUntil(
+      await awaitEach(
+        cycles,
         () =>
           actingAnnotations().some((a) =>
             a.actingUser === demander.principal &&
             a.actingSession === undefined
           ),
-        "the handler consequence to carry the demanding actor",
-        20_000,
       );
       // And the userless arm never manufactured an actor anywhere.
       expect(
