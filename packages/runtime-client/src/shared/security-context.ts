@@ -14,6 +14,14 @@ import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import type { RuntimeSecurityContext } from "@/protocol/mod.ts";
 
 /**
+ * Every field of `T`, each one required and keeping its own type, `undefined`
+ * included. A literal held to this names every field the type declares, so a
+ * field added to `T` and left out of a literal that builds one is a type error
+ * rather than a value that reads as absent.
+ */
+export type EveryFieldOf<T> = { [K in keyof Required<T>]: T[K] };
+
+/**
  * One spelling for one origin. A `URL` round-trip settles the variance two
  * documents can differ by while meaning the same host -- an absent trailing
  * slash, a default port written out -- so that agreeing on a backend does not
@@ -71,16 +79,6 @@ const SECURITY_CONTEXT_FIELDS: Record<
 };
 
 /**
- * The fields on which `asserted` and `running` disagree, in a fixed order, or
- * an empty list where they agree throughout.
- *
- * Compared field by field rather than as two whole objects: the two are built
- * in different documents and one of them crossed an encoding, so a posture
- * carried as an absent property in one and as an explicit `undefined` in the
- * other is the same posture and compares equal here.
- */
-
-/**
  * A read ceiling compares by clause with the runner's own structural clause
  * equality (`clausesEqual`, insensitive to the order of an `anyOf`'s
  * alternatives, opaque on a malformed shape) and as a multiset of clauses,
@@ -107,6 +105,15 @@ function readCeilingsEqual(
   return true;
 }
 
+/**
+ * The fields on which `asserted` and `running` disagree, in a fixed order, or
+ * an empty list where they agree throughout.
+ *
+ * Compared field by field rather than as two whole objects: the two are built
+ * in different documents and one of them crossed an encoding, so a posture
+ * carried as an absent property in one and as an explicit `undefined` in the
+ * other is the same posture and compares equal here.
+ */
 export function securityContextDifferences(
   asserted: RuntimeSecurityContext,
   running: RuntimeSecurityContext,
