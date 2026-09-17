@@ -1676,6 +1676,15 @@ interface SetupStateReuse {
    * pattern, only the lack of evidence that it is not.
    */
   storedSetupMatches: boolean;
+
+  /**
+   * Leave the completion marker as it stands. The marker says an identity's
+   * argument was staged along with its internal cells and result projection,
+   * and a later setup that finds it matching re-stages and validates nothing.
+   * A caller that deliberately leaves the argument alone has not staged all of
+   * that, so it leaves the marker saying what it said.
+   */
+  leaveCompletionMarker?: boolean;
 }
 
 /**
@@ -3339,10 +3348,12 @@ export class Runner {
     // internal cells, and result projection were staged by setup(). Pattern
     // loading continues to use patternIdentity.
     if (durableEntryRef) {
-      resultCell.withTx(tx).setMetaRaw("patternSetupIdentity", {
-        identity: durableEntryRef.identity,
-        symbol: durableEntryRef.symbol,
-      }, rawMetaWriteAuthorization);
+      if (!setupState.leaveCompletionMarker) {
+        resultCell.withTx(tx).setMetaRaw("patternSetupIdentity", {
+          identity: durableEntryRef.identity,
+          symbol: durableEntryRef.symbol,
+        }, rawMetaWriteAuthorization);
+      }
       // The durable stamps staged above supersede a keyless session pointer
       // — WHEN they commit. They are transaction state, so the pointer
       // removal rides the same commit: dropping it at staging would leave a
@@ -5024,8 +5035,11 @@ export class Runner {
     // reachable here for the nested pieces that never pass through it.
     //
     // The trigger is that stored state and nothing else: a setup-completion
-    // marker naming another version, and a manifest missing one of this
-    // pattern's derived internal cells. The repair moves no durable identity
+    // marker that does not name this version, and a manifest missing one of
+    // this pattern's derived internal cells. A marker naming another version
+    // and no marker at all both qualify: a doc set up before the marker
+    // existed carries none, and drifts the same way. Only a marker naming
+    // this version says its setup ran. The repair moves no durable identity
     // pointer; it replays the pattern the pointer already names
     // (samePattern=true: materializes the missing internal cells but leaves
     // the existing argument — the piece's data — untouched; no roll-forward,
@@ -5041,7 +5055,7 @@ export class Runner {
       if (
         useTx !== undefined ||
         ref === undefined ||
-        storedSetupMarker(resultCell, ref) !== "other" ||
+        storedSetupMarker(resultCell, ref) === "matches" ||
         this.#storedManifestCovers(resultCell, pattern) ||
         // The root/default pattern is the PieceController's to repair (it has
         // the richer roll-forward + clear-error path); defer to it there.
@@ -5097,6 +5111,12 @@ export class Runner {
             // deliberately leaves the piece's ARGUMENT alone even though its
             // precondition proves the pattern is the same one.
             storedSetupMatches: false,
+            // The argument was staged by another version and is not
+            // re-validated here, so the marker keeps saying so: the next
+            // setup for this identity still re-stages and validates it. The
+            // repair does not come back for that, because the manifest it
+            // writes now covers the pattern.
+            leaveCompletionMarker: true,
           },
           undefined,
           resultCell,

@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { Cell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getMetaLink } from "../src/link-utils.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
@@ -78,8 +79,13 @@ describe("nested-piece-setup-repair", () => {
 
   // Set up for V1 (data + V1 internal cells), then re-point patternIdentity
   // at V3 without re-running setup. Returns the stopped piece cell, ready to
-  // start.
-  const nestedPieceSetUpForV1 = async (rt: Runtime) => {
+  // start. `marker` says what the setup-completion marker is left naming: the
+  // V1 that setup stamped, nothing at all (a doc set up before the marker
+  // existed), or V3 (a claim that V3's setup ran).
+  const nestedPieceSetUpForV1 = async (
+    rt: Runtime,
+    marker: "v1" | "absent" | "v3" = "v1",
+  ) => {
     const tx = rt.edit();
     const pm = rt.patternManager;
     const v1 = await pm.compilePattern(programOf(V1_NO_HANDLER), { space, tx });
@@ -103,9 +109,90 @@ describe("nested-piece-setup-repair", () => {
       identity: v3Ref.identity,
       symbol: v3Ref.symbol,
     }, rawMetaWriteAuthorization);
+    if (marker !== "v1") {
+      cell.withTx(tx2).setMetaRaw(
+        "patternSetupIdentity",
+        marker === "v3"
+          ? { identity: v3Ref.identity, symbol: v3Ref.symbol }
+          : undefined,
+        rawMetaWriteAuthorization,
+      );
+    }
     await tx2.commit();
     return { cell, v3Ref };
   };
+
+  const setupMarkerOf = (cell: unknown) =>
+    (cell as { getMetaRaw: (k: string) => unknown }).getMetaRaw(
+      "patternSetupIdentity",
+    ) as { identity?: string } | undefined;
+
+  const manifestOf = (cell: unknown) =>
+    (cell as { getMetaRaw: (k: string) => unknown }).getMetaRaw(
+      "internal",
+    ) as unknown[];
+
+  const bumpAndCount = async (cell: Cell<Record<string, unknown>>) => {
+    const before = (cell.getAsQueryResult() as { count: number }).count;
+    (cell.key("bump") as unknown as { send: (e: unknown) => void }).send({});
+    await cell.pull();
+    return (cell.getAsQueryResult() as { count: number }).count - before;
+  };
+
+  it("heals a nested piece whose doc carries no setup marker", async () => {
+    // A doc set up before the marker existed drifts the same way and has
+    // nothing naming another version, only a manifest that lacks the stream.
+    const rt = newRuntime();
+    try {
+      const { cell } = await nestedPieceSetUpForV1(rt, "absent");
+      expect(await rt.start(cell)).toBe(true);
+      await cell.pull();
+      expect(await bumpAndCount(cell)).toBe(1);
+      await rt.storageManager.synced();
+    } finally {
+      await rt.dispose();
+    }
+  });
+
+  it("leaves the setup marker naming the version that staged the argument", async () => {
+    // The repair stages internal cells and the result projection, and leaves
+    // the argument alone. A marker naming V3 would tell the next setup for V3
+    // that its argument was staged and validated, and it was not.
+    const rt = newRuntime();
+    try {
+      const { cell, v3Ref } = await nestedPieceSetUpForV1(rt);
+      const staged = setupMarkerOf(cell)?.identity;
+      expect(staged).toBeDefined();
+      expect(staged).not.toBe(v3Ref.identity);
+
+      expect(await rt.start(cell)).toBe(true);
+      await cell.pull();
+      expect(await bumpAndCount(cell)).toBe(1);
+      await rt.storageManager.synced();
+
+      expect(setupMarkerOf(cell)?.identity).toBe(staged);
+    } finally {
+      await rt.dispose();
+    }
+  });
+
+  it("repairs nothing when the setup marker already names the pattern", async () => {
+    // The marker is the one piece of evidence that this version's setup ran,
+    // so a start trusts it and writes no setup of its own.
+    const rt = newRuntime();
+    try {
+      const { cell } = await nestedPieceSetUpForV1(rt, "v3");
+      const manifest = manifestOf(cell);
+
+      expect(await rt.start(cell)).toBe(true);
+      await cell.pull();
+      await rt.storageManager.synced();
+
+      expect(manifestOf(cell)).toEqual(manifest);
+    } finally {
+      await rt.dispose();
+    }
+  });
 
   it("heals a nested piece by re-running its setup on start", async () => {
     const rt = newRuntime();
