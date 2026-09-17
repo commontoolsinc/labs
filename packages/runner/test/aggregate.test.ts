@@ -95,7 +95,8 @@ describe("aggregate", () => {
     // A leaf reads each element's value through its link. A document nothing
     // has written yet reads as undefined, and the leaf then leaves the sum
     // unpublished rather than counting the absence as a number; the value
-    // arriving re-runs the leaf.
+    // arriving re-runs the leaf. More than 32 entries also requires a parent
+    // combine node, which must wait for the incomplete child's state.
     const aggregate = createNodeFactory({
       type: "ref",
       implementation: "aggregate",
@@ -128,7 +129,7 @@ describe("aggregate", () => {
       undefined,
       tx,
     );
-    list.set([present, absent]);
+    list.set([...Array.from({ length: 32 }, () => present), absent]);
     const output = runtime.getCell<{ value: number }>(
       space,
       "output over an absent value",
@@ -146,7 +147,7 @@ describe("aggregate", () => {
       absent.withTx(arrive).set(7);
       await arrive.commit();
       await runtime.idle();
-      expect(await result.key("value").pull()).toBe(12);
+      expect(await result.key("value").pull()).toBe(167);
     } finally {
       cancel();
     }

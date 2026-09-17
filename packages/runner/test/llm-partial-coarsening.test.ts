@@ -5,8 +5,10 @@
  * docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
  */
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
+
 import { Identity } from "@commonfabric/identity";
 import { LLMClient, type LLMResponse } from "@commonfabric/llm";
 import {
@@ -15,6 +17,7 @@ import {
   resetMockMode,
 } from "@commonfabric/llm/client";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { PARTIAL_BATCH_MS } from "../src/builtins/llm.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { LlmResultState } from "./support/llm-result.ts";
@@ -140,85 +143,116 @@ describe("LLM partial batch coarsening (channel 6)", () => {
     }
   });
 
-  it("drops a partial the batch window would write for a superseded run", async () => {
-    // The batch body checks the run it belongs to against the current run. A
-    // newer request supersedes the first before its window elapses, so the
-    // first run's batched partial is skipped rather than written over the
-    // newer request's state. The request messages come from a cell, so
-    // changing them re-runs the node; both requests are held open.
-    enableMockMode();
-    clearMockResponses();
-    const storageManager = StorageManager.emulate({ as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    const original = LLMClient.prototype.sendRequest;
-    const held: Array<() => void> = [];
-    const partials: Array<(text: string) => void> = [];
-    LLMClient.prototype.sendRequest = (request, partial) => {
-      const response = Promise.withResolvers<LLMResponse>();
-      held.push(() =>
-        response.resolve({
-          id: "superseded",
-          role: "assistant",
-          content: String(request.messages[0]?.content ?? ""),
-        })
-      );
-      if (partial) partials.push(partial);
-      return response.promise;
-    };
-    try {
-      const tx = runtime.edit();
-      const { commonfabric: builder } = createTrustedBuilder(runtime);
-      type Msg = { role: "user" | "assistant" | "tool"; content: string };
-      const messages = runtime.getCell<Msg[]>(
-        space,
-        "llm-superseded-messages",
-        undefined,
-        tx,
-      );
-      messages.set([{ role: "user", content: "first" }]);
-      const testPattern = builder.pattern<{ messages: Msg[] }>(
-        ({ messages }) => builder.llm({ messages }),
-      );
-      const resultCell = runtime.getCell(
-        space,
-        "llm-superseded",
-        testPattern.resultSchema,
-        tx,
-      );
-      const result = runtime.run(tx, testPattern, { messages }, resultCell);
-      tx.commit();
-      // A sink is the demand that runs the node and dispatches its request.
-      const stop = result.sink(() => {});
-      try {
-        await clock.settle();
+  for (const afterBatchWindow of [false, true]) {
+    it(
+      afterBatchWindow
+        ? "drops a superseded partial while its batch waits for idle"
+        : "drops a partial the batch window would write for a superseded run",
+      async () => {
+        // The batch body checks the run it belongs to against the current run. A
+        // newer request supersedes the first before its window elapses or while
+        // its batch waits for idle. The request messages come from a cell, so
+        // changing them re-runs the node; both requests are held open.
+        enableMockMode();
+        clearMockResponses();
+        const storageManager = StorageManager.emulate({ as: signer });
+        const runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+        });
+        const original = LLMClient.prototype.sendRequest;
+        const held: Array<() => void> = [];
+        const partials: Array<(text: string) => void> = [];
+        LLMClient.prototype.sendRequest = (request, partial) => {
+          const response = Promise.withResolvers<LLMResponse>();
+          held.push(() =>
+            response.resolve({
+              id: "superseded",
+              role: "assistant",
+              content: String(request.messages[0]?.content ?? ""),
+            })
+          );
+          if (partial) partials.push(partial);
+          return response.promise;
+        };
+        try {
+          const tx = runtime.edit();
+          const { commonfabric: builder } = createTrustedBuilder(runtime);
+          type Msg = { role: "user" | "assistant" | "tool"; content: string };
+          const messages = runtime.getCell<Msg[]>(
+            space,
+            "llm-superseded-messages",
+            undefined,
+            tx,
+          );
+          messages.set([{ role: "user", content: "first" }]);
+          const testPattern = builder.pattern<{ messages: Msg[] }>(
+            ({ messages }) => builder.llm({ messages }),
+          );
+          const resultCell = runtime.getCell(
+            space,
+            "llm-superseded",
+            testPattern.resultSchema,
+            tx,
+          );
+          const result = runtime.run(tx, testPattern, { messages }, resultCell);
+          tx.commit();
+          // A sink is the demand that runs the node and dispatches its request.
+          const observedPartials: Array<string | undefined> = [];
+          const stop = result.sink((value: LlmResultState) => {
+            observedPartials.push(value?.partial);
+          });
+          const releaseIdle = Promise.withResolvers<void>();
+          try {
+            await clock.settle();
 
-        // The first request is in flight; stream its partial to arm the
-        // batch timer, then supersede it before the window elapses.
-        expect(partials.length).toBe(1);
-        partials[0]("stale");
-        const bump = runtime.edit();
-        messages.withTx(bump).set([{ role: "user", content: "second" }]);
-        await bump.commit();
-        await clock.settle();
-        expect(partials.length).toBe(2);
+            const enteredIdle = Promise.withResolvers<void>();
+            const originalIdle = runtime.idle.bind(runtime);
+            let holdNextIdle = true;
+            using _idle = afterBatchWindow
+              ? stub(runtime, "idle", (...args) => {
+                if (!holdNextIdle) return originalIdle(...args);
+                holdNextIdle = false;
+                enteredIdle.resolve();
+                return releaseIdle.promise;
+              })
+              : undefined;
 
-        // The first run's batch window elapses now, against the newer run.
-        await clock.tick(PARTIAL_BATCH_MS);
-        await clock.settle();
-        // The stale partial was skipped: the cell never shows it.
-        expect((result.get() as LlmResultState)?.partial).not.toBe("stale");
-      } finally {
-        stop();
-      }
-    } finally {
-      for (const release of held) release();
-      LLMClient.prototype.sendRequest = original;
-      resetMockMode();
-      await runtime.dispose({ closeStorage: false });
-      await storageManager.close();
-    }
-  });
+            expect(partials.length).toBe(1);
+            partials[0]("stale");
+            if (afterBatchWindow) {
+              await clock.tick(PARTIAL_BATCH_MS);
+              await enteredIdle.promise;
+            }
+            const bump = runtime.edit();
+            messages.withTx(bump).set([{ role: "user", content: "second" }]);
+            await bump.commit();
+            await clock.settle();
+            expect(partials.length).toBe(2);
+
+            releaseIdle.resolve();
+            if (!afterBatchWindow) await clock.tick(PARTIAL_BATCH_MS);
+            await clock.settle();
+            expect(observedPartials).not.toContain("stale");
+            expect((result.get() as LlmResultState)?.partial).not.toBe("stale");
+
+            partials[1]("fresh");
+            await clock.tick(PARTIAL_BATCH_MS);
+            await clock.settle();
+            expect(observedPartials).toContain("fresh");
+            expect((result.get() as LlmResultState)?.partial).toBe("fresh");
+          } finally {
+            releaseIdle.resolve();
+            stop();
+          }
+        } finally {
+          for (const release of held) release();
+          LLMClient.prototype.sendRequest = original;
+          resetMockMode();
+          await runtime.dispose({ closeStorage: false });
+          await storageManager.close();
+        }
+      },
+    );
+  }
 });
