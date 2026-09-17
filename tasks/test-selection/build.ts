@@ -384,14 +384,16 @@ export function readReport(
       ...laneObservationsOf(report.objectName, group.records, day),
     );
     for (const record of group.records) {
-      const test = resolver.resolve(record.test, day);
       // A lane measuring its own setup or one of its batches is not a
       // test, so nothing here scores it: a catch, a flake observation and
       // a churn rate are all statements about a test, and a lane is
       // neither passing nor failing in the sense they read. It reaches
       // the store as an ordinary record so that it travels the path every
-      // record travels, and this is where that path parts.
-      if (isLaneMeasurement(test)) continue;
+      // record travels, and this is where that path parts. What a record
+      // is, is asked of the identity the lane wrote, so no line in the
+      // alias file decides whether a measurement is scored as a test.
+      if (isLaneMeasurement(record.test)) continue;
+      const test = resolver.resolve(record.test, day);
       const key = testIdentityKey(test);
       // A record with no file names its own identity as the unit, which
       // is all an unmapped record can say. Where another record of the

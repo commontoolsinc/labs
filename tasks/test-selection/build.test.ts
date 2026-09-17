@@ -376,6 +376,52 @@ describe("build", () => {
       expect([...read.durations.keys()]).toEqual([KEY]);
     });
 
+    it("asks the alias file nothing about a lane measuring itself", () => {
+      // What a record is, is read from the identity the lane wrote, so a
+      // line in the alias file settles neither half: it cannot score a
+      // lane's overhead as the test it renames to, and it cannot take
+      // that overhead away from the cost model either.
+      const read = readReport(
+        stored(CI_NAME, context(), [
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+            durationMs: 92_000,
+          }),
+          record({
+            test: {
+              k: "gate",
+              s: "ci",
+              n: "ci-lane planned batch workspace-unit",
+            },
+            durationMs: 40_000,
+          }),
+          record({
+            test: {
+              k: "gate",
+              s: "ci",
+              n: "ci-lane units batch workspace-unit",
+            },
+            durationMs: 17,
+          }),
+        ]),
+        new AliasResolver([{
+          date: "2026-08-21",
+          from: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+          to: { k: "unit", s: "memory", n: "space > writes" },
+        }]),
+      );
+      expect(read.observations).toEqual([]);
+      expect([...read.surfaces.keys()]).toEqual([]);
+      expect([...read.durations.keys()]).toEqual([]);
+      expect(read.lanes).toEqual([{
+        day: "2026-08-20",
+        suite: "workspace-unit",
+        planned: 40,
+        spent: 92,
+        units: 17,
+      }]);
+    });
+
     it("keeps a lane's measurements of itself for the cost model", () => {
       // Left out of everything scored, and not discarded either: what
       // the packer charges a lane beyond its tests is fitted from them.
