@@ -908,12 +908,28 @@ live — and `describe_handle` answers from that declaration, so there is one
 source of truth and nothing an operator-written view could drift from or quietly
 claim.
 
+A `<link>` may also be a piece's NAME: `pattern:<space>/<slug>`, or the bare
+`<slug>` meaning a piece in the session's own space. That is what a surface
+holding a rendered piece has — the id a piece sits at does not cross to a client
+— so the session resolves the name to the piece's address before it mints, and
+what the handle table holds is the address either way. The model is told no more
+than it is told for a reference. It names a piece, not a cell inside one: a path
+after the slug is refused, and the general cell case is CT-2319's. The retired
+`piece:` spelling is not read as an address.
+
+A qualified name is resolved in the session's own space or not at all. A space
+the session cannot check the name of — one configured by `did:key`, which
+carries no name — refuses the qualified form rather than answering with this
+space's same-slug piece, because the same slug in another space is a different
+piece. A bare slug is unaffected: it names no space to disagree about.
+
 Unlike a grant, an input cell is explicit configuration, so failure is closed
 and loud rather than tolerated: a malformed argument is a usage error, and a
-reference that does not parse, targets another space, or arrives on a run
-without a fabric session fails the run before the model is involved. The cells
-are recorded in run state (`inputCells`), replayed rather than re-minted on
-resume, and reported in the operator summary as `inputCells:`.
+reference that does not parse, targets another space, names a piece the space
+does not hold, or arrives on a run without a fabric session fails the run before
+the model is involved. The cells are recorded in run state (`inputCells`),
+replayed rather than re-minted on resume, and reported in the operator summary
+as `inputCells:`.
 
 #### Inspecting a handle's shape
 
