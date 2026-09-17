@@ -337,10 +337,10 @@ export async function prepareTopicsProgram(
 }
 
 /**
- * Helper for {@link prepareTopicsProgram}, which compiles the Topics program
- * under `sourceRoot` the way the topic board fixture deploys it, with that
- * directory as the program root, on an emulated runtime, and returns every
- * module it emits.
+ * Compiles the Topics program under `sourceRoot` the way the topic board
+ * fixture deploys it, with that directory as the program root, on an emulated
+ * runtime, and returns every module it emits. Helper for
+ * {@link prepareTopicsProgram}.
  */
 async function compileTopicsProgram(
   sourceRoot: string,

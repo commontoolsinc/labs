@@ -56,6 +56,17 @@ describe("topics-browser-measurement-core", () => {
     "",
   ].join("\n");
 
+  describe("the recorded fixture", () => {
+    it("holds a lift under each of the four names measured separately", () => {
+      expect(Object.keys(fixture.lifts).toSorted()).toEqual([
+        "backlinksOf",
+        "crossrefTable",
+        "lastActivityOf",
+        "presentCommentCountOf",
+      ]);
+    });
+  });
+
   describe("locateLift()", () => {
     it("returns the line and column where the lift's function starts", () => {
       expect(locateLift(fryer, "doubled")).toEqual({ line: 4, col: 2 });

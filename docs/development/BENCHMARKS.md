@@ -429,14 +429,27 @@ deno task cf check packages/patterns/topics/main.tsx --json --no-check \
   --root packages/patterns
 ```
 
-It emits the whole compiled program, each module preceded by the
-`// cf:module/<identity>` comment naming the identity it compiles to, which is
-the identity the helper's own compile produces. A lift's compiled text is its
-`const <name> = (0, <alias>.lift)(...)` declaration there, and the fixture's
-shifted identity is what the same command reports for `/topics/main.tsx` with
-the recorded number of lines added above the pivot. The previews come from a
-board seeded from those sources, as a graph snapshot reports them at each
-lift's site, and the instrumented one from a compile with pattern coverage on.
+It prints a JSON document, and the whole compiled program is the string at
+`files[0].output`: every module of it, each preceded by the
+`// cf:module/<identity>` comment naming the identity that module compiles to,
+which is the identity the helper's own compile reports for it. A lift's
+`const <name> = (0, <alias>.lift)(...)` declaration is where to find the lift
+in that text, and what the fixture records is the function the declaration
+passes, which is what `compiledLiftText()` returns and what a preview begins.
+The fixture's shifted identity is what the same command reports for
+`/topics/main.tsx` after adding lines at the top of
+`packages/patterns/topics/main.tsx`, as many as the case that reads that
+identity names; the added lines come back out once the command has run.
+
+No command prints a preview. A preview is what a running board reports for the
+action at a lift's site: the implementation's `toString()` cut to its first 200
+characters, carried on that action's node in a scheduler graph snapshot. The
+browser helper reads one through `RuntimeClient.getGraphSnapshot()`, and a
+headless run built with `topics-headless-fixture.ts` takes the same snapshot
+from `runtime.scheduler` without a browser. The instrumented preview is one of
+the same kind, from a board whose runtime collects pattern coverage, which
+writes a `__cfPatternCoverage?.hit(` call before each statement; that call is
+all the cases reading that preview ask of it.
 
 ## The multiplayer contention benchmark
 
