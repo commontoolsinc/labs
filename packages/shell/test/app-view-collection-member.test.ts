@@ -614,18 +614,21 @@ describe("AppView collection members", () => {
   });
 
   it("cites a space by name only where a page address keeps the name as written", async () => {
-    // A page URL percent-encodes a space character and resolves a dot segment
-    // away, and the page reader takes an escaped `@` at the head of a space
-    // for its mark. Each of the first three names would open another space,
-    // so each is cited by the DID it resolved to. A URL keeps the escape in
-    // the last as written, and both readers read it back as the same name, so
-    // it is cited by that name.
+    // A page URL percent-encodes a space character and a non-ASCII one, and
+    // resolves a dot segment away; the page reader takes an escaped `@` at
+    // the head of a space for its mark, and a name that is `..` reaches the
+    // page the segments after it name. Each such name would open another
+    // space, so each is cited by the DID it resolved to. A URL keeps the
+    // escape in the last name as written, and both readers read it back as
+    // that name, so it is cited by it.
 
     const restore = installBrowserGlobals();
     try {
       const { XAppView } = await import("../src/views/AppView.ts");
       const cases = [
         { spaceName: "demo space", cited: SPACE },
+        { spaceName: "my space", cited: SPACE },
+        { spaceName: "caf\u00e9", cited: SPACE },
         { spaceName: "..", cited: SPACE },
         { spaceName: "%40demo", cited: SPACE },
         { spaceName: "demo%20space", cited: "demo%20space" },
