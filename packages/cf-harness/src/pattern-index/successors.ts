@@ -50,13 +50,16 @@ export const resolvePatternIndexSuccessors = (
     }
     if (seen.has(id)) continue;
     seen.add(id);
+    if (
+      rows.get(id)?.quality === "penalized" ||
+      (id === hit.patternId && hit.quality === "penalized")
+    ) continue;
     if (id === hit.patternId) {
       results.push(hit);
       continue;
     }
     const row = rows.get(id)!;
     const pattern = records.get(id)!;
-    if (row.quality === "penalized") continue;
     if (row.quality !== "proven" && row.quality !== "unproven") {
       throw new Error("pattern index successor has no quality classification");
     }

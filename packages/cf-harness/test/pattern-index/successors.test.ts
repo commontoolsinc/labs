@@ -122,6 +122,25 @@ describe("resolvePatternIndexSuccessors()", () => {
     expect(result.results).toEqual([hit("other")]);
   });
 
+  it("withholds an unchanged hit when search or the refreshed catalog penalizes it", () => {
+    for (const source of ["search", "catalog"] as const) {
+      const result = resolvePatternIndexSuccessors(
+        {
+          results: [{
+            ...hit("old"),
+            quality: source === "search" ? "penalized" : "proven",
+          }],
+        },
+        [{
+          ...row("old"),
+          quality: source === "catalog" ? "penalized" : "proven",
+        }],
+        [pattern("old")],
+      );
+      expect(result.results).toEqual([]);
+    }
+  });
+
   it("ignores a different owner's claim to replace a pattern", () => {
     const result = resolvePatternIndexSuccessors(
       { results: [hit("old")] },

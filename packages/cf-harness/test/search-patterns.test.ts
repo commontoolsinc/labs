@@ -101,7 +101,6 @@ const stubIndex = (
   patterns: Record<string, unknown> = {},
 ): IndexStub => {
   const calls: { fn: string; body: unknown }[] = [];
-  const metadataRead = new Set<string>();
   const catalogRecords = new Map(results.map((result) => {
     const record = result as Record<string, unknown>;
     return [record.patternId as string, record];
@@ -130,10 +129,7 @@ const stubIndex = (
       }));
     }
     const id = (body as { patternId: string }).patternId;
-    const pattern = metadataRead.has(id)
-      ? patterns[id]
-      : catalogRecords.get(id);
-    metadataRead.add(id);
+    const pattern = patterns[id];
     return Promise.resolve(
       pattern === undefined
         ? new Response(JSON.stringify({ error: "unknown pattern" }), {
@@ -266,8 +262,28 @@ describe("search-patterns", () => {
     });
   });
 
-  it("still reports a hit whose record could not be read", async () => {
+  it("reports a discovery error when catalog metadata cannot be read", async () => {
     const index = stubIndex([SEARCH_HIT]);
+    const result = await createEngine(index).invokeBuiltinTool(
+      "search_patterns",
+      { tags: ["expenses"] },
+    );
+    const output = result.output as SearchPatternsToolErrorOutput;
+    expect(output.status).toBe("error");
+    expect(output.message).toContain("getPattern failed (404)");
+    expect(output).not.toHaveProperty("results");
+  });
+
+  it("keeps a discovered hit when the later shape request loses service", async () => {
+    const index = stubIndex([SEARCH_HIT], { "pat-expenses": PATTERN_RECORD });
+    const available = index.fetchFn;
+    let reads = 0;
+    index.fetchFn = (input, init) => {
+      if (String(input).endsWith("/getPattern") && ++reads === 2) {
+        return Promise.resolve(new Response("unavailable", { status: 503 }));
+      }
+      return available(input, init);
+    };
     const result = await createEngine(index).invokeBuiltinTool(
       "search_patterns",
       { tags: ["expenses"] },
