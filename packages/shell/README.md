@@ -23,11 +23,13 @@ The shell currently supports these browser URL forms:
   does not hold is reported by name, alongside the collection's. The header
   offers the member's portable reference, `//<space>/<collection>/<member>`,
   which carries its own space and so depends on no binding of the reader's. The
-  space is written as the page names it, except that a name holding a character
-  the [cell reference grammar][space-vocabulary] reserves is written as the
-  space's DID. Where the slug names a piece rather than a collection there are
-  no members to name, so the segment is reported by name, alongside the slug,
-  and nothing opens. An address carrying segments past the member opens nothing
+  space is written as the page names it unless `cf` or the shell would read that
+  name back as another space: a name holding a character the
+  [cell reference grammar][space-vocabulary] reserves, or one a page URL
+  rewrites, such as a name holding a space character, is written as the space's
+  DID. Where the slug names a piece rather than a collection there are no
+  members to name, so the segment is reported by name, alongside the slug, and
+  nothing opens. An address carrying segments past the member opens nothing
   either: no segment after a member is resolved, so a nested address such as
   `/<space>/top/42/comments/7` is reported by the segments past the member.
 - `//<space-name-or-did>/...`: any of the other forms, `.embed` included (as
