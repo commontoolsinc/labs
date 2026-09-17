@@ -71,7 +71,13 @@ generations. Preserve linked record identity for editing handlers.
 No stored hoist name on any deployed board or topic generation may resolve to a
 different body. The [pattern update gates](../specs/pattern-update-testing.md)
 do not establish this; T5 establishes how to check it, with evidence from their
-stored data.
+stored data. The transformer numbers a file's hoisted builder calls in the order
+it reaches them, from a counter it keeps per builder kind within that file, so a
+new reactive callback operator renumbers every hoist of its kind after it. A new
+operator therefore lives in a pattern in a module of its own, which numbers its
+own hoists from one and leaves the board's and the topic's as they are;
+instantiating that pattern from `main.tsx` or `topic.tsx` is not itself a
+hoisted call.
 
 ## Execution tracker
 
@@ -114,17 +120,19 @@ implementation and prototypes can begin earlier.
       index producer through a subpattern with an explicit Cell input, the shape
       [reactive collections](../common/concepts/reactive-collections.md#choose-aggregate-semantics-deliberately)
       gives for a computed list, under a schema that carries `topic` as a Cell
-      so the index keys by canonical Cell identity. `crossrefTable` is a `lift`,
-      whose result type exposes no index operator, and `TopicCrossrefRow.topic`
-      is `unknown` so that reading the table expands no topic. Second, the
-      resulting handle reaches topics without broadening demand. Topics that
-      `addTopic` and the board's composer create hold `boardCrossrefs` as a link
-      to the board's cross-reference table; older topics may not, which step 1's
-      inventory records. Decide between carrying the handle through that link,
-      which changes the board's published `crossrefs` result, and a new topic
-      input, which needs the one-time link-bind onto every existing topic that
-      the `mentionable` and `boardNames` inputs describe. Classify the choice
-      under step 1 of the
+      so the index keys by canonical Cell identity. The subpattern lives in a
+      module of its own, which is how a new operator meets the hoist requirement
+      under [compatibility requirements](#compatibility-requirements).
+      `crossrefTable` is a `lift`, whose result type exposes no index operator,
+      and `TopicCrossrefRow.topic` is `unknown` so that reading the table
+      expands no topic. Second, the resulting handle reaches topics without
+      broadening demand. Topics that `addTopic` and the board's composer create
+      hold `boardCrossrefs` as a link to the board's cross-reference table;
+      older topics may not, which step 1's inventory records. Decide between
+      carrying the handle through that link, which changes the board's published
+      `crossrefs` result, and a new topic input, which needs the one-time
+      link-bind onto every existing topic that the `mentionable` and
+      `boardNames` inputs describe. Classify the choice under step 1 of the
       [stored-state procedure](#stored-state-and-deployment-procedure), and list
       a link-bind in the step 7 manifest. Retain existing public results through
       a compatibility bridge where needed; do not assume adding a required field
@@ -135,16 +143,22 @@ implementation and prototypes can begin earlier.
       production, per-source-occurrence mention deduplication, and shared
       grouping by destination. The derived edges reach `groupBy` through the
       same producer boundary T2 proves. Preserve backlink order and original
-      source links. Measure edge production separately from bucket lookup.
-      Compare against the T2 candidate, not only the original implementation.
-      Exit: same-count retargets update only the required relation work where
-      supported, complete-workload costs justify adoption, or a report explains
-      deferral. Depends on T0 and T2's boundary decisions; T1 need not block it.
+      source links. Deduplicate across board entries as well as within one
+      source's mention list: a topic the board lists at two entries, whether as
+      the same link twice or as an alias of it, is one source in the backlinks
+      of every topic it mentions, and keeps the place of its first entry.
+      Measure edge production separately from bucket lookup. Compare against the
+      T2 candidate, not only the original implementation. Exit: same-count
+      retargets update only the required relation work where supported,
+      complete-workload costs justify adoption, or a report explains deferral.
+      Depends on T0 and T2's boundary decisions; T1 need not block it.
 - [ ] **T4 — Evaluate large-thread aggregates.** Compare a maintained active
       comment count and activity maxima with the T1 implementation. Use explicit
       Cell receivers and measure score/predicate production; do not rely on
-      unsupported ordinary-array `.map(...).sum()` chains. Exit: adopt only the
-      candidates with justified end-to-end tradeoffs. Depends on T0 and T1.
+      unsupported ordinary-array `.map(...).sum()` chains. A maintained count or
+      activity maximum carrying a callback is a new operator, so it too lives in
+      a pattern in a module of its own. Exit: adopt only the candidates with
+      justified end-to-end tradeoffs. Depends on T0 and T1.
 - [ ] **T5 — Harden accepted changes and prepare release artifacts.** Add
       regression read budgets, run all relevant authored/package/integration
       tests, preserve compatibility baselines, pass the
@@ -152,8 +166,9 @@ implementation and prototypes can begin earlier.
       maintained docs. Produce matched before/after demos and reports. Establish
       and record how to check the hoist requirement under
       [compatibility requirements](#compatibility-requirements), with evidence
-      from the stored data of deployed board and topic generations. That check
-      depends on acquiring the snapshot
+      from the stored data of deployed board and topic generations, among them a
+      read-only copy of the primary Topics instances obtained with Gideon. That
+      check depends on acquiring the snapshot
       [stored-state step 3](#stored-state-and-deployment-procedure) describes,
       which can begin before T6. Each implementation PR needs a review through
       the [`cf-review` skill](../../skills/cf-review/SKILL.md) and a clean Cubic
@@ -227,12 +242,16 @@ last-activity lift once. The measurement is one small sample, taken with
 on. [Server execution](../development/EXPERIMENTAL_OPTIONS.md#serverexecution)
 and lazy materialization off are not yet measured. T0 measures both before the
 baseline report, in runs labeled by mode; the scheduled Benchmarks workflow runs
-client execution only. The headless tier runs the three workloads with the
-demand the browser measured, labeling the all-backlinks workload a scaling probe
-rather than normal UI behavior. Measure cold initialization, warm updates, and
-reopen or reconnect separately. Hold runtime, source package, data, demand, and
-feature flags constant between comparison arms; alternate repeated timing runs
-and report their distribution rather than a single favorable sample.
+client execution only. Of those three, the headless tier measures the
+board-with-one-topic workload with the demand the browser measured, and the
+all-backlinks workload as a scaling probe rather than normal UI behavior: no
+browser workload measures its demand, which is the pivot and every topic's
+backlinks. The probe records the board-alone workload as not measured, because a
+board loaded before any topic is opened runs none of those four lifts, so there
+is no work of theirs to measure headlessly. Measure cold initialization, warm
+updates, and reopen or reconnect separately. Hold runtime, source package, data,
+demand, and feature flags constant between comparison arms; alternate repeated
+timing runs and report their distribution rather than a single favorable sample.
 
 Test mention insertion/removal, same-count destination retargeting, duplicate
 and self-mentions, aliases/scoped references, topic reorder/removal, rename-only
@@ -324,7 +343,7 @@ board's package does not upgrade those existing children.
 7. Before live execution, record target order, link-binds, exact package hashes,
    retained source revisions, expected schema/data changes, acceptance commands,
    snapshot location, and rollback actions. The live targets are test Topics
-   instances; anything touching the primary Topics instances is coordinated with
+   instances; any change to the primary Topics instances is coordinated with
    Gideon, who runs their live upgrade. Coordinate legacy writers and client
    refresh if a schema/state transition requires them. Source restoration does
    not undo stored-data migration. Whole-space snapshot restoration can discard
