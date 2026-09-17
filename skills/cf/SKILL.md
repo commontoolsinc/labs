@@ -136,12 +136,18 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 Every read and every call names a target, and the spelling decides whether the
 answer composes into the next command.
 
-- `/[@<space>/]<piece>[@<scope>][/<path>]` — the reference, the one syntax the
-  whole fabric shares. `<space>` is a name or a DID and `<piece>` is a slug or a
-  handle, so `/@my-space/tracker/items` and `/@did:key:.../of:fid1:.../items`
+- `//<space>/<piece>[@<scope>][/<path>]`, and `/<piece>[@<scope>][/<path>]`
+  where `--space` names the space — the reference, the one syntax the whole
+  fabric shares. `<space>` is a name or a DID and `<piece>` is a slug or a
+  handle, so `//my-space/tracker/items` and `//did:key:.../of:fid1:.../items`
   are the same shape. A space embedded in it supplies `--space` when the flag is
   absent, and must agree with it when both are given. **An address printed by
   one command is accepted by the next with no flag beside it.**
+- `//` is the space prefix to write, for a name and for a DID alike. `/@` is
+  accepted before a DID, so `/@did:key:.../of:fid1:.../items` still reads;
+  before a name it is refused, and `/@my-space/tracker/items` reports the
+  `/@my-space/` prefix retired and names `//my-space/` to write instead.
+  `packages/cli/README.md` carries the whole grammar.
 - On `cf cell get`, `cf cell set` and `cf piece call`, write the reference in
   the first positional — `cf cell get /tracker items/0/title`. A reference
   begins with `/` and a relative path never does, so the two cannot collide.
