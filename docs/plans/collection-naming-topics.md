@@ -276,9 +276,9 @@ Scope: `packages/piece/src/slugs.ts`, `packages/runner/src/slug-resolution.ts`,
    and `cf piece slugs` lists it, naming the containing piece. Both demos run
    on the exemplar board.
 2. A reference that names a collection and then a member resolves to that
-   member: `cf cell get /@<space>/top/42 title`,
-   `cf piece describe --cell /@<space>/top/42`, and
-   `cf piece call --cell /@<space>/top/42 <verb>` all reach it. A reference
+   member: `cf cell get //<space>/top/42 title`,
+   `cf piece describe --cell //<space>/top/42`, and
+   `cf piece call --cell //<space>/top/42 <verb>` all reach it. A reference
    that stops at the collection refuses, naming the piece that holds it. The
    walk lives in `resolvePieceReference`, which takes an address and the path
    written after it; `resolvePieceAddress` is its no-path case and refuses a
@@ -286,10 +286,10 @@ Scope: `packages/piece/src/slugs.ts`, `packages/runner/src/slug-resolution.ts`,
    with.
 3. A slug resolving to a non-piece with no further path fails with a message
    naming the containing piece.
-4. `/@<space>/top/999` fails with "no member 999 in top".
+4. `//<space>/top/999` fails with "no member 999 in top".
 5. Unit tests in `packages/piece/test/slug.test.ts` and `packages/cli/test`.
 
-Demo: `cf cell get /@<space>/top/2 title` on the local exemplar board.
+Demo: `cf cell get //<space>/top/2 title` on the local exemplar board.
 
 ### S2b — Assignment refuses by default
 
@@ -369,7 +369,7 @@ mention).
 3. Autocomplete matches the number as well as the title.
 4. A pasted `#42` stays plain text; the editor's documentation says so and
    why.
-5. Stretch: the pill's plain-text copy is `/@<space>/top/42`.
+5. Stretch: the pill's plain-text copy is `//<space>/top/42`.
 
 ### S6 — Graft onto Topics
 
