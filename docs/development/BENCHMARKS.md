@@ -222,6 +222,35 @@ topic, and following a crossref to a sibling. Its `topic board` group charts
 each of those as its own series plus a `journey` series for the whole sequence,
 so a regression lands on the segment that caused it.
 
+Two further series in that group measure the Topics derivations rather than the
+navigation over them, for the browser tier of [the Topics computation
+plan](../plans/topics-computation-cost.md). Each charts a timed interval and
+writes one read-accounted sample of the same operation to stderr; the reads and
+the graph sizes are there rather than on a chart because a sample taken with
+accounting on carries its overhead in the elapsed time and is not a latency
+measurement.
+
+- `comment` is a warm update: sending a comment on an open topic, which moves
+  that topic's comment count and its last activity. It runs against a board of
+  its own, in its own space, because sending a comment is a durable write that
+  makes the commented topic the board's first card, which would leave `crossref`
+  and `journey` opening a card with no citation to follow. Each iteration
+  comments on a topic that has none, so every iteration measures the same thing;
+  how cost grows with thread length is the headless probe's question, and its
+  thread cases run at 10, 100, and 1,000 comments.
+- `backlink` opens the topic the most siblings cite and waits for every row the
+  topic's backlink derivation produces. `crossref` cannot measure that: it
+  follows a citation outward from the board's first card, which is the newest
+  topic, and nothing cites the newest topic. The segment reaches its topic
+  through the shell's own navigation rather than by clicking, because a topic in
+  the middle of the board is on no card or link the page is showing.
+
+The comment segment needs the viewer to have a Profile, since the composer's
+field and its send button are both disabled until `#profile` resolves to a named
+one. The first session of a run creates one through the wish's own create
+surface; later sessions find it already there. One wait tells those two states
+apart, so nothing races and nothing polls.
+
 The `load` segment ends after the shell publishes its ready application and
 selects the requested board route. Shell readiness is an explicit notification
 from bootstrap; selecting the route does not require its topic data to have
@@ -283,6 +312,27 @@ board sizes of 100, 1000, and 10000, in a `topic board scale` group whose
 series are named for the sizes. The boards carry no crossrefs, so the numbers
 describe the cost of the list rather than of the join over it.
 `CF_TOPIC_BOARD_DEMAND=full` selects full-result seeding.
+
+A second series per size, named `reopen <size>`, measures a reopen for the
+browser tier of [the Topics computation
+plan](../plans/topics-computation-cost.md): a topic this page has already opened
+once, opened again, so that what it measures is reaching the topic rather than
+computing it for the first time. It asks whether that cost grows with the board
+behind the topic, which is the question this file exists for and which the
+navigation benchmark's single board cannot answer. Reopening writes nothing, so
+both series of a size share its one seeded board, and a size skipped for one is
+skipped for the other. Like the navigation benchmark's two new series, this one
+charts a timed interval and writes one read-accounted sample to stderr.
+
+What `reopen` does not measure is worth stating, because the plan's phrase is
+"reopen or reconnect" and only the first half of it is measured here. The page,
+its shell, its worker and its runtime client stay up throughout, so this is not
+a runtime restart and not a reconnect. Neither is measurable through this
+helper: it fails when the runtime client is replaced, a page reload discards the
+realm holding the sample altogether, and a transport-level reconnect needs a
+storage relay the Benchmarks workflow does not run. Cold initialization is
+measured separately, by the navigation benchmark's `load`, `sign in`, `board`
+and `open topic` segments, and a warm update by its `comment` segment.
 The navigation fixture's citations and the scale fixture's lack of citations
 are distinct workloads, so their timings do not form a size-only comparison.
 
@@ -323,8 +373,10 @@ the two skipped sizes should be enabled as part of whatever lowers it.
 measures one operation a caller drives in a Topics board's browser page, for the
 browser tier of [the Topics computation
 plan](../plans/topics-computation-cost.md). A caller invokes it around the
-operation. It adds no benchmark series of its own, and the plan's T0 work wires
-it into the scale and navigation benchmarks.
+operation. Four benchmark series use it: `comment` and `backlink` in the
+navigation benchmark, and `reopen <size>` in the scale benchmark. Each charts
+the interval `timeTopicsOperation()` brackets and writes one
+`measureTopicsReads()` sample of the same operation to `diagnostics.log`.
 
 `measureTopicsReads()` turns telemetry and body read accounting on in the
 shell's runtime client, runs the operation, waits until the view has settled and

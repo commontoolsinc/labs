@@ -844,6 +844,54 @@ export async function readCfInputValue(
   return probe.value;
 }
 
+/**
+ * Fill a `cf-textarea`'s inner native `<textarea>` with `value`, driving it the
+ * way a person does: focus, set the value through the native setter, dispatch
+ * `input` and `change`, then blur.
+ *
+ * {@link fillCfInput} resolves an inner `<input>` and reports `no-inner-input`
+ * for anything else, so it does not reach a textarea host. What reaches the
+ * bound cell is the `input` event: `cf-textarea` answers it by calling
+ * `setValue` on its cell controller, whose default timing debounces by 300ms,
+ * and the blur that follows runs that pending write immediately rather than
+ * leaving the caller to wait the delay out.
+ *
+ * @throws If `selector` does not resolve to a textarea, or if the field does
+ *   not hold `value` afterward.
+ */
+export async function fillCfTextarea(
+  page: Page,
+  selector: string,
+  value: string,
+): Promise<void> {
+  await waitForRuntimeIdle(page);
+  const field = await page.waitForSelector(selector, { strategy: "pierce" });
+  const filled = await field.evaluate((element: Element, nextValue: string) => {
+    const textarea = element instanceof HTMLTextAreaElement
+      ? element
+      : element.shadowRoot?.querySelector("textarea");
+    if (!(textarea instanceof HTMLTextAreaElement)) return false;
+    textarea.focus();
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )?.set;
+    if (setter) setter.call(textarea, nextValue);
+    else textarea.value = nextValue;
+    textarea.dispatchEvent(
+      new Event("input", { bubbles: true, composed: true }),
+    );
+    textarea.dispatchEvent(
+      new Event("change", { bubbles: true, composed: true }),
+    );
+    textarea.blur();
+    return textarea.value === nextValue;
+  }, { args: [value] });
+  if (!filled) {
+    throw new Error(`Unable to fill cf-textarea "${selector}"`);
+  }
+}
+
 export async function waitForRuntimeIdle(
   page: Page,
 ) {

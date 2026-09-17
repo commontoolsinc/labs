@@ -12,6 +12,13 @@
  * (see `DEFAULT_CITING_TOPICS` in `topic-board-fixture.ts`), and a scaling
  * measurement wants the cost of the list itself, not of the join over it.
  *
+ * A second series per size measures a reopen, for the browser tier of
+ * `docs/plans/topics-computation-cost.md`: a topic that this page has already
+ * opened once, opened again. It asks whether reaching one topic costs more as
+ * the board behind it grows, which is the question this file exists for and
+ * which the navigation benchmark's single board cannot answer. Reopening writes
+ * nothing, so both series share each size's one seeded board.
+ *
  * Requirements and stdout discipline are the same as the navigation benchmark:
  * a toolshed at `API_URL`, a shell at `FRONTEND_URL`, a Chrome for Astral, and
  * nothing but the JSON report on stdout.
@@ -23,8 +30,18 @@ import {
   seedIdentity,
   seedTopicBoardOutOfProcess,
   type TopicBoardFixture,
+  topicTitle,
 } from "./topic-board-fixture.ts";
 import { BoardSession } from "./topic-board-session.ts";
+import { waitForSettledText } from "./cfc-browser-helpers.ts";
+import {
+  formatTopicsSample,
+  measureTopicsReads,
+  prepareTopicsProgram,
+  timeTopicsOperation,
+  type TopicsProgram,
+} from "./topics-browser-measurement.ts";
+import { waitForPieceView } from "./topics-navigation-helpers.ts";
 
 const DEMAND = parseTopicBoardDemand(Deno.env.get("CF_TOPIC_BOARD_DEMAND"));
 const GROUP = "topic board scale";
@@ -79,6 +96,17 @@ const ITERATIONS = 3;
 const WARMUP = 1;
 
 const PASSPHRASE = "topic board scale benchmark";
+
+/**
+ * The topic page's empty-thread text. No board card carries it, so seeing it is
+ * what says the board view has been replaced by the topic's — the shell selects
+ * a piece before its page has rendered, and a title or a comment count would
+ * otherwise be matched against the board's own card for that topic.
+ */
+const EMPTY_THREAD = "No comments yet.";
+
+/** What a seeded topic's comment-count lift renders, none having a comment. */
+const COMMENT_COUNT = "0 comments";
 
 const encoder = new TextEncoder();
 
@@ -147,6 +175,148 @@ for (const topicCount of SIZES) {
       b.start();
       await session.showBoard();
       b.end();
+    } finally {
+      await session.close();
+    }
+  });
+}
+
+/**
+ * The Topics program a read-accounted sample attributes its runs against,
+ * compiled on first use so a run whose sizes are all skipped compiles nothing.
+ */
+let compiling: Promise<TopicsProgram> | undefined;
+
+function topicsProgram(): Promise<TopicsProgram> {
+  compiling ??= prepareTopicsProgram();
+  return compiling;
+}
+
+/**
+ * The topic a reopen case opens: the newest, which is the board's first card,
+ * since a freshly seeded board's last activity is each topic's creation.
+ */
+const reopenTopic = (topicCount: number): number => topicCount - 1;
+
+/**
+ * Show the piece `pieceId` through the shell's own navigation, so one runtime
+ * serves the whole sequence, and wait for the selected view to be it.
+ */
+async function showPiece(
+  session: BoardSession,
+  spaceName: string,
+  pieceId: string,
+): Promise<void> {
+  await session.page.evaluate(
+    async (space: string, piece: string) => {
+      await globalThis.app.setView({ spaceName: space, pieceId: piece });
+    },
+    { args: [spaceName, pieceId] },
+  );
+  await waitForPieceView(session.page, spaceName, pieceId);
+}
+
+/**
+ * Show the topic at `index` of `fixture` and wait for its page to have formed:
+ * its empty thread, then its title, then the count its comment-count lift
+ * produces. These boards carry no citations, so the topic has neither a
+ * `Referenced by` card nor a `References` one to wait for.
+ */
+async function showTopicPage(
+  session: BoardSession,
+  fixture: TopicBoardFixture,
+  index: number,
+): Promise<void> {
+  await showPiece(session, fixture.spaceName, fixture.topics[index].fid);
+  await waitForSettledText(session.page, "body", EMPTY_THREAD);
+  await waitForSettledText(session.page, "body", topicTitle(index));
+  await waitForSettledText(session.page, "body", COMMENT_COUNT);
+}
+
+/**
+ * Bring `session` to a board whose newest topic it has already opened once and
+ * left again, and return the operation that opens that topic a second time.
+ *
+ * That second open is what `reopen` measures, and what it is not is worth
+ * saying: the page, its shell, its worker and its runtime client are all up
+ * throughout, so this is not a runtime restart and not a reconnect. Neither is
+ * measurable here — the measurement helper fails when the runtime client is
+ * replaced, a page reload discards the realm holding the sample altogether, and
+ * a transport reconnect needs a storage relay the Benchmarks workflow does not
+ * run. Cold initialization is the navigation benchmark's `load`, `sign in`,
+ * `board` and `open topic` segments.
+ */
+async function reachReopen(
+  session: BoardSession,
+  fixture: TopicBoardFixture,
+): Promise<() => Promise<void>> {
+  const index = reopenTopic(fixture.topics.length);
+  await session.load();
+  await session.signIn();
+  await session.showBoard();
+  await showTopicPage(session, fixture, index);
+  await showPiece(session, fixture.spaceName, fixture.boardId);
+  await session.showBoard();
+  return () => showTopicPage(session, fixture, index);
+}
+
+/** Sizes whose read-accounted sample has been taken. */
+const sampled = new Set<number>();
+
+/**
+ * Take a size's one read-accounted reopen sample and write it to stderr, the
+ * first time it is asked for.
+ *
+ * The sample runs in a browser of its own, so the session about to be timed
+ * reaches its starting point having had nothing done to it, and so the sample
+ * measures the operation from the state every timed iteration starts in. Its
+ * elapsed time carries the accounting's overhead, which is why it is reported
+ * as reads rather than charted as a series of its own.
+ */
+async function recordReopenReadsOnce(
+  topicCount: number,
+  fixture: TopicBoardFixture,
+): Promise<void> {
+  if (sampled.has(topicCount)) return;
+  sampled.add(topicCount);
+  const session = await BoardSession.open({
+    fixture,
+    identity: await seedIdentity(PASSPHRASE),
+  });
+  try {
+    const operation = await reachReopen(session, fixture);
+    const sample = await measureTopicsReads(session.page, {
+      label: `reopen ${topicCount}`,
+      program: await topicsProgram(),
+      operation,
+    });
+    note(formatTopicsSample(sample).join("\n"));
+  } finally {
+    await session.close();
+  }
+}
+
+for (const topicCount of SIZES) {
+  Deno.bench({
+    name: `reopen ${topicCount}`,
+    group: GROUP,
+    n: ITERATIONS,
+    warmup: WARMUP,
+    ignore: topicCount > SCALE_LIMIT,
+  }, async (b) => {
+    const fixture = await board(topicCount);
+    await recordReopenReadsOnce(topicCount, fixture);
+    const session = await BoardSession.open({
+      fixture,
+      identity: await seedIdentity(PASSPHRASE),
+    });
+    try {
+      const operation = await reachReopen(session, fixture);
+      await timeTopicsOperation(session.page, {
+        label: `reopen ${topicCount}`,
+        operation,
+        interval: b,
+      });
     } finally {
       await session.close();
     }
