@@ -401,12 +401,13 @@ const childSchema = (
   // that names some reaches `schemaAtPath` as a missing property rather than as
   // `false`, and an eager read drops the property either way.
   //
-  // One that names none and carries an `allOf` has not: an eager read merges
+  // One that names none and carries `allOf` parts has not: an eager read merges
   // the keywords beside an `allOf` into each part before it looks at a key, so
-  // a part can name this one, and it is left to the read below.
+  // a part can name this one, and it is left to the read below. An `allOf`
+  // holding no parts names nothing, and an eager read passes over it.
   if (
     schema.additionalProperties === false &&
-    (isObjectOrArray(schema.properties) || schema.allOf === undefined)
+    (isObjectOrArray(schema.properties) || !schema.allOf?.length)
   ) {
     return EXCLUDED_REJECTED;
   }

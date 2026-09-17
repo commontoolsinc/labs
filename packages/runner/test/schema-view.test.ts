@@ -1168,6 +1168,28 @@ describe("schema-view", () => {
           await lazy.tx.commit();
         }
       });
+
+      it("leaves out every property when the `allOf` beside it holds no parts", async () => {
+        // An eager read passes over an `allOf` with nothing in it, so no part
+        // is there to name a key and the refusal stands.
+        const read = await seeded(
+          "turned-down-names-none-empty-allof",
+          { id: "a", driver: "x" },
+          { ...closed, allOf: [] } as const,
+        );
+        const eager = read(false);
+        const lazy = read(true);
+        try {
+          expect(Object.keys(eager.get() as object)).toEqual([]);
+          const value = lazy.get() as Record<string, unknown>;
+          expect(Object.keys(value)).toEqual([]);
+          expect("driver" in value).toBe(false);
+          expect(value.driver).toBe(undefined);
+        } finally {
+          await eager.tx.commit();
+          await lazy.tx.commit();
+        }
+      });
     });
 
     it("hands over every property under a schema that names none and refuses none", async () => {
