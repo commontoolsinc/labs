@@ -788,6 +788,39 @@ describe("piece source lifecycle", () => {
     }
   });
 
+  it("applies a compiled nullable literal widening while retaining its stored argument", async () => {
+    const program = (stateType: string): RuntimeProgram => ({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+          import { pattern } from "commonfabric";
+          export default pattern<{ state: ${stateType} }, { active: boolean }>(
+            ({ state }) => ({ active: state !== null }),
+          );
+        `,
+      }],
+    });
+    for (
+      const [stateType, value] of [
+        ["null", null],
+        ['"open" | null', null],
+        ['"open" | null', "open"],
+      ] as const
+    ) {
+      const previous = program(stateType);
+      const piece = await pieces.create(previous, { input: { state: value } });
+      await piece.setPattern(program('"open" | "closed" | null'));
+      expect(await piece.input.get(["state"])).toBe(value);
+      expect(await piece.result.get(["active"])).toBe(value !== null);
+      const state = await readPieceSourceState(runtime, piece.getCell());
+      expect(state.history.at(-1)?.operation).toBe("edit");
+      await expect(piece.setPattern(previous)).rejects.toThrow(
+        "Pattern schemas are not backward compatible",
+      );
+    }
+  });
+
   it("rejects an edit when recorded source is unavailable", async () => {
     const piece = await pieces.create(versionProgram("current"), { input: {} });
     const before = await readPieceSourceState(runtime, piece.getCell());

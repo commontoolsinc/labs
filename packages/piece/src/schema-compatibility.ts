@@ -1522,7 +1522,8 @@ function literalSubsetIssue(
   target: SchemaObject,
   path: string,
 ): string | undefined {
-  const sourceValues = allowedLiteralValues(source);
+  const sourceValues = allowedLiteralValues(source) ??
+    (source.type === "null" ? [null] : undefined);
   const targetValues = allowedLiteralValues(target);
   if (!targetValues) return undefined;
   if (!sourceValues) {
@@ -1540,16 +1541,30 @@ function literalSubsetIssue(
   return undefined;
 }
 
+/**
+ * Helper for literal and type proofs, which intersects `const`, `enum`, and
+ * the declared `type`. Values outside {@link valueSchemaType}'s vocabulary
+ * stay listed so their constraints still reach the ordinary object proof.
+ */
 function allowedLiteralValues(
   schema: SchemaObject,
 ): readonly unknown[] | undefined {
+  let values: readonly unknown[] | undefined = schema.enum;
   if (Object.hasOwn(schema, "const")) {
-    return schema.enum === undefined ||
+    values = schema.enum === undefined ||
         schema.enum.some((value) => fabricAwareEqual(value, schema.const))
       ? [schema.const]
       : [];
   }
-  return schema.enum;
+  if (values === undefined || schema.type === undefined) return values;
+  const declared = typeof schema.type === "string"
+    ? [schema.type]
+    : schema.type;
+  return values.filter((value) => {
+    const type = valueSchemaType(value);
+    return type === undefined ||
+      declared.some((admitted) => schemaTypeAdmits(admitted, type));
+  });
 }
 
 function typeSubsetIssue(
@@ -1722,21 +1737,22 @@ function schemaMayProduceType(
  * the parent node's default and extensions, including for a single-type node.
  * Branch and descendant schemas retain their own defaults and extensions.
  *
- * A source node with neither `anyOf` nor a `type` list, whose `enum` values
- * {@link schemaTypes} reads as more than one type, expands into one fragment
- * per type, each listing only that type's values. The fragments together
- * accept exactly what the node does, and the nullable literal union
- * `{enum: ["open", null]}` meets a `string` branch and a `null` branch one
- * type at a time. A node listing a value {@link valueSchemaType} cannot name,
- * such as a `FabricPrimitive`, stays whole. A target node stays whole too: a
- * source alternative has to fit inside a single target alternative, and one
- * listing values of several types fits only the whole node.
+ * Source enums expand by type through {@link sourceEnumAlternatives}, including
+ * beside a `type` list or inside `anyOf`. Target enums stay whole: a source
+ * alternative has to fit inside a single target alternative, and one listing
+ * values of several types can fit the whole enum.
  */
 function schemaAlternatives(
   schema: SchemaObject,
   side: "source" | "target",
 ): JSONSchema[][] {
   const fragment = withoutNodeLevelKeywords(schema);
+  if (side === "source") {
+    const alternatives = sourceEnumAlternatives(fragment);
+    if (alternatives.length > 1) {
+      return alternatives.map((alternative) => [alternative]);
+    }
+  }
   if (fragment.anyOf) {
     const { anyOf, ...base } = fragment;
     return anyOf.map((alternative) => [base, alternative]);
@@ -1755,19 +1771,39 @@ function schemaAlternatives(
     return types.filter((type) => !isFabricPrimitiveSchemaType(type))
       .map((type) => [type === "unknown" ? untyped : { ...untyped, type }]);
   }
-  // With no `type` list, `schemaTypes` names more than one type only when it
-  // can name every listed value, and a `const` lists a single value. So each
-  // `enum` value lands in exactly one fragment, and a value the declared
-  // `type` rejects lands in none.
-  const types = side === "source" ? schemaTypes(fragment) : undefined;
-  const values = fragment.enum;
-  if (types !== undefined && types.length > 1 && values !== undefined) {
-    return types.map((type) => [{
-      ...fragment,
-      enum: values.filter((value) => valueSchemaType(value) === type),
-    }]);
-  }
   return [[fragment]];
+}
+
+/**
+ * Helper for {@link schemaAlternatives}, which partitions source enums by
+ * their admitted literal types, retaining sibling constraints and branch-level
+ * defaults and extensions. Distributes partitions inside `anyOf` through its
+ * enclosing nodes. Enums containing an unclassified value stay whole, and
+ * references remain for the scoped proof to resolve.
+ */
+function sourceEnumAlternatives(
+  schema: JSONSchema,
+): JSONSchema[] {
+  if (typeof schema === "boolean") return [schema];
+  if (schema.anyOf !== undefined) {
+    const branches = schema.anyOf.flatMap(sourceEnumAlternatives);
+    if (branches.length > schema.anyOf.length) {
+      return branches.map((branch) => ({ ...schema, anyOf: [branch] }));
+    }
+  }
+  const listed = schema.enum;
+  const values = allowedLiteralValues(schema);
+  if (listed !== undefined && values !== undefined) {
+    const types = values.map(valueSchemaType);
+    const distinct = [...new Set(types)];
+    if (!distinct.includes(undefined) && distinct.length > 1) {
+      return distinct.map((type) => ({
+        ...schema,
+        enum: listed.filter((value) => valueSchemaType(value) === type),
+      }));
+    }
+  }
+  return [schema];
 }
 
 /**
@@ -1857,12 +1893,6 @@ function schemaTypes(schema: SchemaObject): readonly string[] | undefined {
   for (const value of values) {
     const type = valueSchemaType(value);
     if (type === undefined) return declared;
-    if (
-      declared !== undefined &&
-      !declared.some((admitted) => schemaTypeAdmits(admitted, type))
-    ) {
-      continue;
-    }
     if (!types.includes(type)) types.push(type);
   }
   return types;

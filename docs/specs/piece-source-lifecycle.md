@@ -669,6 +669,17 @@ alternatives, then omit the root default from both sides of each alternative
 comparison. Descendant defaults remain checked. This applies to both pattern
 evolution and link proofs, under their respective default policies.
 
+Literal comparisons intersect `const` and `enum` with the declared `type`, so
+values that the type excludes do not restrict a widening. A `null` type proves
+membership in an enum or const containing `null`. Source enums containing
+several JSON value types are partitioned by type, including beside a type list
+or within nested `anyOf` branches, with sibling constraints and branch metadata
+retained. Each partition must satisfy a target alternative. Target enums remain
+whole, and an enum containing a value outside the JSON type vocabulary, such as
+a `FabricPrimitive`, remains subject to the conservative object proof. These
+rules permit adding an option to a nullable literal argument while still
+refusing to remove an admitted option or widen a result contract.
+
 An incompatible pattern contract or retained link becomes an
 actionable warning. The UI requires explicit confirmation, and command-line
 tooling requires an explicit flag, before applying it. A materialized retained
