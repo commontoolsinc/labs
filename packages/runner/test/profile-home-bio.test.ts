@@ -59,7 +59,7 @@ describe("profile-home bio (owner-protected free-text field)", () => {
       const result = rt.run(
         tx,
         pattern as any,
-        { name: "Ada" },
+        { initialName: "Ada" },
         resultCell,
       );
       rt.prepareTxForCommit(tx);

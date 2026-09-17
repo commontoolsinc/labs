@@ -254,8 +254,7 @@ export type ProfileHomeOutput = {
 };
 
 export type ProfileHomeInput = {
-  // Required so a source update cannot default away a legacy saved name.
-  name: Writable<OwnerProtectedProfileWrite<string, typeof setName>>;
+  /** Display fallback until the name is stored through `setName`. */
   initialName?: string;
 };
 
@@ -717,11 +716,16 @@ const applyInitialName = lift<
   { initialName?: string; name: Writable<string> },
   string
 >(({ initialName, name }) => {
-  return name.get() ?? trimInitialName(initialName);
+  return name.get() || trimInitialName(initialName);
 });
 
 export default pattern<ProfileHomeInput, ProfileHomeOutput>(
-  ({ initialName, name, [SELF]: self }) => {
+  ({ initialName, [SELF]: self }) => {
+    // A static initializer keeps the writable name's identity across releases.
+    // Profile creation seeds it through the same protected setter used to edit.
+    const name = new Writable<
+      OwnerProtectedProfileWrite<string, typeof setName>
+    >("").for("name");
     const avatar = new Writable<
       OwnerProtectedProfileWrite<string, typeof setAvatar>
     >("").for("avatar");

@@ -15,6 +15,7 @@ import {
   type RuntimeProgram,
 } from "../src/index.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import { stampWaveRunContext } from "../src/executor/wave.ts";
 
 const signer = await Identity.fromPassphrase("pattern creation source");
 const childSpace = (await signer.derive("child")).did();
@@ -195,8 +196,11 @@ describe("pattern-creation-source", () => {
       await fresh.idle();
       const childKey = `${child.space}/space/${child.sourceURI}` as const;
       expect(fresh.runner.cancels.has(childKey)).toBe(true);
-      expect(getPatternIdentityRef(child)).toEqual(editedRef);
-      expect(getPieceSourceRevisions(child)).toEqual(revisions);
+      const resumedChild = fresh.getCellFromLink(
+        child.getAsNormalizedFullLink(),
+      );
+      expect(getPatternIdentityRef(resumedChild)).toEqual(editedRef);
+      expect(getPieceSourceRevisions(resumedChild)).toEqual(revisions);
       fresh.runner.stop(resumed);
       expect(fresh.runner.cancels.has(childKey)).toBe(false);
     } finally {
@@ -216,6 +220,96 @@ describe("pattern-creation-source", () => {
     expect(runtime.runner.cancels.has(
       `${child.space}/space/${child.sourceURI}`,
     )).toBe(false);
+  });
+
+  it("leaves a replacement child running when the original parent stops", async () => {
+    const { parent, child, pattern } = await create(origin);
+    runtime.runner.stop(parent);
+    const tx = runtime.edit();
+    runtime.runner.run(tx, pattern, {}, parent);
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    await runtime.idle();
+    const childKey = `${child.space}/space/${child.sourceURI}` as const;
+    const original = runtime.runner.cancels.get(childKey);
+    expect(original).toBeDefined();
+    runtime.runner.stop(child);
+    const replacement = runtime.edit();
+    runtime.runner.run(replacement, undefined, undefined, child);
+    runtime.prepareTxForCommit(replacement);
+    expect((await replacement.commit()).error).toBeUndefined();
+    await runtime.idle();
+    const current = runtime.runner.cancels.get(childKey);
+    expect(current).toBeDefined();
+    expect(current).not.toBe(original);
+    runtime.runner.stop(parent);
+    expect(runtime.runner.cancels.get(childKey)).toBe(current);
+  });
+
+  it("keeps the outer demand root when a tracked child resumes on a server", async () => {
+    const input = program(origin, false);
+    input.files[0].contents = input.files[0].contents.replace(
+      "{},",
+      "{ n: 21 },",
+    );
+    input.files[1].contents = `
+      import { computed, pattern } from "commonfabric";
+      export default pattern<{ n: number }, { value: number }>(({ n }) => ({
+        value: computed(() => n * 2),
+      }));
+    `;
+    const tx = runtime.edit();
+    const pattern = await runtime.patternManager.compilePattern(input, {
+      space: signer.did(),
+      tx,
+    });
+    const parent = runtime.getCell(signer.did(), "demand-parent");
+    runtime.runner.run(tx, pattern, {}, parent);
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    await parent.pull();
+    await runtime.patternManager.flushCompileCacheWrites();
+    const child = parent.key("child").asSchema<Cell<unknown>>({
+      type: "unknown",
+      asCell: ["cell"],
+    }).get().withTx();
+    const fresh = new Runtime({
+      apiUrl: new URL("https://creation.test"),
+      storageManager: manager,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    const seen: string[][] = [];
+    fresh.installSealDestination({ seal: (tx) => tx.tx.commit() }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+      runDemanderResolver: (roots) => {
+        seen.push([...roots]);
+        return [];
+      },
+    });
+    try {
+      const resumed = fresh.getCellFromLink(parent.getAsNormalizedFullLink());
+      expect(await fresh.start(resumed)).toBe(true);
+      await fresh.idle();
+      const resumedChild = fresh.getCellFromLink(
+        child.getAsNormalizedFullLink(),
+      );
+      await resumedChild.key("value").pull();
+      const childDemands = seen.filter((roots) =>
+        roots.includes(child.sourceURI)
+      );
+      expect(childDemands.length).toBeGreaterThan(0);
+      for (const roots of childDemands) {
+        expect(roots).toContain(parent.sourceURI);
+      }
+    } finally {
+      fresh.clearSealDestination();
+      await fresh.dispose();
+    }
   });
 
   it("refuses an unusable origin before publishing a child", async () => {

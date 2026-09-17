@@ -38,6 +38,7 @@ import {
 
 import { isAliasBinding } from "./alias-binding.ts";
 import {
+  getTopFrame,
   patternFromFrame,
   popFrame,
   pushFrameFromCause,
@@ -285,6 +286,10 @@ type StartAttempt = {
   readonly lifecycleEpoch: number;
   readonly generationsByDoc: Map<string, number>;
   readonly preResolutionStopKeys: Set<string>;
+  readonly options?: Pick<
+    RunnerRunOptions,
+    "parentPieceRootId" | "awaitSyncBeforeInitialRun"
+  >;
   // The result this attempt resolved to, which a link start only learns by
   // following the link.
   targetKey?: `${MemorySpace}/${ScopeKey}/${URI}`;
@@ -5589,6 +5594,7 @@ export class Runner {
       if (!this.#isStartAttemptCurrent(attempt)) return Promise.resolve(false);
       try {
         attempt.installedRegistration = this.#startCore(rootCell, {
+          ...attempt.options,
           givenPattern: resolvedPattern,
         });
       } catch (err) {
@@ -5635,6 +5641,7 @@ export class Runner {
       const startCoreStart = performance.now();
       try {
         attempt.installedRegistration = this.#startCore(rootCell, {
+          ...attempt.options,
           givenPattern: resolvedPattern,
           schedulerRehydration: this.#schedulerRehydrationOptions(
             rootCell,
@@ -5644,6 +5651,7 @@ export class Runner {
             // (e.g. maps reconciling an empty array, then re-running once it
             // streams in).
             true,
+            attempt.options?.parentPieceRootId,
           ),
         });
       } finally {
@@ -6602,11 +6610,13 @@ export class Runner {
   #startFromServedState<T>(
     resultCell: Cell<T>,
     ownership?: DeferredCancelOwnership,
+    options?: StartAttempt["options"],
   ): Promise<boolean> {
     const attempt: StartAttempt = {
       lifecycleEpoch: this.#lifecycleEpoch,
       generationsByDoc: new Map(),
       preResolutionStopKeys: new Set(),
+      options,
     };
     this.#activeStartAttempts.add(attempt);
     this.#trackStartAttempt(attempt, this.#getDocKey(resultCell));
@@ -7706,6 +7716,16 @@ export class Runner {
     // discarded afterward.
     const planTx = this.#runtime.edit();
     if (identity !== undefined) planTx.tx.scopeKeyIdentity = identity;
+    try {
+      await this.#preparePatternCreationSources(
+        pattern.nodes,
+        resultCell.space,
+        planTx,
+      );
+    } catch (error) {
+      planTx.abort("tracked source preparation failed");
+      throw error;
+    }
     const argumentMetaLink = getMetaLink(resultCell, "argument");
     const argumentLink = argumentMetaLink ??
       (inputs !== undefined
@@ -9819,6 +9839,9 @@ export class Runner {
       // still rejects every parent write in this duplicate transaction. This
       // local observation is only containment, not a system-wide receipt proof.
       tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
+      // The winner owns the child and its initialization events. A repeated
+      // delivery must neither re-emit those events nor materialize its graph.
+      frame.deferredStreamSends = undefined;
       return result;
     }
 
@@ -9843,6 +9866,7 @@ export class Runner {
     const deferForNavigate = this.#handlerResultPatternHasNavigateTo(
       resultPattern,
     );
+    if (deferForNavigate) this.#refuseDeferredStreamSends(frame);
     // Phase 4 (protocol.md §5): on a flag-ON CLIENT, a navigate-bearing
     // result's deferred start is a SPECULATIVE handler consequence — it
     // must divert to the overlay with its event's id, never commit the
@@ -9908,6 +9932,13 @@ export class Runner {
         );
         installedCancel = run.installedCancel;
         cancelDeferredStart = run.cancelDeferredStart;
+        if (
+          cancelDeferredStart !== undefined &&
+          frame.deferredStreamSends?.length
+        ) {
+          cancelDeferredStart();
+          this.#refuseDeferredStreamSends(frame);
+        }
         return run.resultCell;
       })();
 
@@ -9969,6 +10000,8 @@ export class Runner {
       }
     }
 
+    frame.hasMaterializedGraph = !deferForNavigate &&
+      cancelDeferredStart === undefined;
     return result;
   }
 
@@ -10393,17 +10426,19 @@ export class Runner {
             if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
               return this.#resolvePendingSpaceNamesAndRetry(frame, tx);
             }
-            const normalized = normalizeSandboxResult(result, name);
-            return this.#handleJavaScriptHandlerResult(
-              tx,
-              module.resultSchema,
-              normalized.value,
-              normalized.hasReactive,
-              frame,
-              resultCell,
-              addCancel,
-              cause,
-            );
+            return this.#withPreparedFrameSources(frame, tx, () => {
+              const normalized = normalizeSandboxResult(result, name);
+              return this.#handleJavaScriptHandlerResult(
+                tx,
+                module.resultSchema,
+                normalized.value,
+                normalized.hasReactive,
+                frame,
+                resultCell,
+                addCancel,
+                cause,
+              );
+            });
           } finally {
             logger.timeEnd("stream", "postRun");
           }
@@ -10748,20 +10783,22 @@ export class Runner {
             if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
               return this.#resolvePendingSpaceNamesAndRetry(frame, tx);
             }
-            const normalized = normalizeSandboxResult(result, name);
-            return this.#writeJavaScriptActionResult(
-              tx,
-              module.resultSchema,
-              normalized.value,
-              normalized.hasReactive,
-              frame,
-              resultCell,
-              outputs,
-              addCancel,
-              resultFor,
-              previousResultCellRef,
-              tx.getNarrowestReadScope(),
-            );
+            return this.#withPreparedFrameSources(frame, tx, () => {
+              const normalized = normalizeSandboxResult(result, name);
+              return this.#writeJavaScriptActionResult(
+                tx,
+                module.resultSchema,
+                normalized.value,
+                normalized.hasReactive,
+                frame,
+                resultCell,
+                outputs,
+                addCancel,
+                resultFor,
+                previousResultCellRef,
+                tx.getNarrowestReadScope(),
+              );
+            });
           } finally {
             logger.timeEnd("action", "postRun");
           }
@@ -11787,6 +11824,89 @@ export class Runner {
     return { ...io, childResultCell, sendToBindings: true };
   }
 
+  /**
+   * Prepare an authored graph and deliver sends to its newly created streams.
+   * A graph whose startup is deferred, including a navigateTo result, cannot
+   * receive these sends in the creating handler and refuses them before commit.
+   */
+  #withPreparedFrameSources<T>(
+    frame: Frame,
+    tx: IExtendedStorageTransaction,
+    finish: () => T,
+  ): T | Promise<T> {
+    const nodes = [...frame.reactives].flatMap((cell) => [
+      ...cell.export().nodes,
+    ]);
+    const preparing = this.#preparePatternCreationSources(
+      nodes,
+      frame.space!,
+      tx,
+    );
+    const materialize = () => {
+      const result = finish();
+      const sends = frame.deferredStreamSends;
+      if (!frame.hasMaterializedGraph) this.#refuseDeferredStreamSends(frame);
+      frame.deferredStreamSends = undefined;
+      if (sends !== undefined) {
+        tx.setCfcImplementationIdentity(frame.implementationIdentity);
+        for (const send of sends) send();
+      }
+      return result;
+    };
+    // The original transaction retains the acting handler identity and owns
+    // the parent link, child setup, source, and revision as one commit. Sends
+    // queued here keep that transaction's ordinary event-lineage disposition.
+    return preparing === undefined
+      ? materialize()
+      : preparing.then(materialize);
+  }
+
+  /** Refuse sends whose newly constructed target cannot materialize inline. */
+  #refuseDeferredStreamSends(frame: Frame): void {
+    if (!frame.deferredStreamSends?.length) return;
+    throw new Error(
+      "Cannot send to a newly created pattern's stream when its graph " +
+        "startup is deferred (including navigateTo); initialize through " +
+        "pattern inputs or send from a later handler.",
+    );
+  }
+
+  /** Prepare source reads for the tracked pattern nodes reachable from a graph. */
+  #preparePatternCreationSources(
+    nodes: Iterable<{ module: unknown }>,
+    space: MemorySpace,
+    tx: IExtendedStorageTransaction,
+  ): Promise<void> | undefined {
+    const work: Promise<void>[] = [];
+    const visited = new Map<Pattern, Set<MemorySpace>>();
+    const visit = (
+      nodes: Iterable<{ module: unknown }>,
+      space: MemorySpace,
+    ) => {
+      for (const { module } of nodes) {
+        if (!isModule(module) || module.type !== "pattern") continue;
+        const child = module.implementation;
+        if (!isPattern(child)) continue;
+        const targetSpace = module.targetSpace ?? space;
+        if (module.sourceOrigin !== undefined) {
+          work.push(this.#runtime.patternManager.preparePatternSource(
+            child,
+            space,
+            targetSpace,
+            tx,
+          ));
+        }
+        const spaces = visited.get(child) ?? new Set<MemorySpace>();
+        if (spaces.has(targetSpace)) continue;
+        spaces.add(targetSpace);
+        visited.set(child, spaces);
+        visit(child.nodes, targetSpace);
+      }
+    };
+    visit(nodes, space);
+    return work.length === 0 ? undefined : Promise.all(work).then(() => {});
+  }
+
   #instantiatePatternNode(
     tx: IExtendedStorageTransaction,
     plan: NodePlan & { kind: "pattern" },
@@ -11882,7 +12002,12 @@ export class Runner {
       // A tracked child owns its stored code and inputs after creation. Its
       // current pattern may be an owner edit absent from this runtime's cache.
       const childRun = resumeExisting
-        ? this.#resumeChildAfterCommit(instanceTx, childResultCell, addCancel)
+        ? this.#resumeChildAfterCommit(instanceTx, childResultCell, {
+          awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
+            schedulerRehydration,
+          ),
+          parentPieceRootId: parentResultCell.getAsNormalizedFullLink().id,
+        })
         : this.#runWithStartOwnership(
           instanceTx,
           patternImpl,
@@ -11910,6 +12035,14 @@ export class Runner {
       return childRun;
     };
     const childRun = initialize(tx);
+    const frame = getTopFrame();
+    if (
+      childRun.cancelDeferredStart !== undefined &&
+      frame?.deferredStreamSends?.length
+    ) {
+      childRun.cancelDeferredStart();
+      this.#refuseDeferredStreamSends(frame);
+    }
     // Static bindings and child setup belong to each selected actor. The
     // enclosing program group owns one graph and one child retention.
     const initializers = schedulerRehydration.implementationSelection
@@ -11922,7 +12055,17 @@ export class Runner {
     addCancel(
       this.#usesScopedPrograms(childResultCell)
         ? this.retainChild(childResultCell)
-        : () => this.releaseChild(childResultCell, childRun.installedCancel),
+        : () => {
+          if (childRun.cancelDeferredStart !== undefined) {
+            if (
+              !this.#independentlyStartedResults.has(
+                this.#getDocKey(childResultCell),
+              )
+            ) childRun.cancelDeferredStart();
+          } else {
+            this.releaseChild(childResultCell, childRun.installedCancel);
+          }
+        },
     );
   }
 
@@ -11930,25 +12073,20 @@ export class Runner {
   #resumeChildAfterCommit<T>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
-    addCancel: AddCancel,
+    options: StartAttempt["options"],
   ): RunResult<T> {
     const ownership = this.#createDeferredStartOwnership(resultCell);
-    if (!this.#usesScopedPrograms(resultCell)) {
-      addCancel(() => {
-        if (
-          !this.#independentlyStartedResults.has(this.#getDocKey(resultCell))
-        ) {
-          ownership.cancel();
-        }
-      });
-    }
     tx.addCommitCallback((_committedTx, result) => {
       if (result.error) {
         ownership.cancel();
         return;
       }
       if (ownership.isCancelled()) return;
-      const work = this.#startFromServedState(resultCell.withTx(), ownership)
+      const work = this.#startFromServedState(
+        resultCell.withTx(),
+        ownership,
+        options,
+      )
         .then((started) => {
           if (!started) ownership.cancel();
         }).catch((error) => {

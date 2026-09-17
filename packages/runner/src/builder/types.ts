@@ -308,6 +308,12 @@ export type Frame = {
   inHandler?: boolean;
   reactives: Set<Reactive<any>>;
 
+  /** Stream sends waiting for this handler's newly constructed child graph. */
+  deferredStreamSends?: (() => void)[];
+
+  /** The handler's child graph is materialized and its streams can resolve. */
+  hasMaterializedGraph?: boolean;
+
   /**
    * Positive marker for the kind of authored pattern code running under this
    * frame: "handler" for an event handler, "lift" for a reactive computation

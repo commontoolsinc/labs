@@ -304,10 +304,12 @@ and history, including an owner's detach or edit.
 The system profile creator uses this option for new profile homes. They follow
 `system:system/profile-home.tsx` when opened through the ordinary reconciler.
 Existing profiles are unchanged; attaching an origin to one remains an explicit
-source transition. Automatic source updates carry the same verified writer
-inheritance as direct source replacements, so the successor can write fields
-protected by its predecessor. That authority requires durable acceptance and
-cannot be installed by sealing a serving wave.
+source transition. Updates from deployment-gated `system:` origins carry the
+same verified writer inheritance as direct source replacements, so the
+successor can write fields protected by its predecessor. Fabric-origin updates
+derive no such inheritance. That authority requires durable acceptance; serving
+runtimes use the direct bookkeeping commit route rather than sealing the
+transition into a withdrawable wave.
 
 Invocations without an explicit origin continue to run a module of the
 instantiating program. Recording detached creation revisions for these pieces

@@ -1778,6 +1778,24 @@ export class CellImpl<T extends FabricValue>
       ) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 
+      const frame = getTopFrame();
+      if (
+        frame?.frameKind === "handler" && !frame.hasMaterializedGraph &&
+        [...(cellNodes.get(this.#causeContainer.cell) ?? [])].some((node) =>
+          node.frame === frame && node.module.type === "pattern" &&
+          isCellResultForDereferencing(node.outputs) &&
+          Object.is(getCellOrThrow(node.outputs), this.#causeContainer.cell)
+        )
+      ) {
+        // A new child's public stream acquires its redirect and handler when
+        // the frame's graph materializes. Preserve the payload now, then
+        // resolve that stream inside the same handler transaction.
+        (frame.deferredStreamSends ??= []).push(() => {
+          this.set(event, onCommit, sendOptions);
+        });
+        return this as unknown as Cell<T>;
+      }
+
       const mintedKeys = mintedRuntimeInjectedEventKeys(
         sendOptions?.runtimeInjectedEventKeys,
       );

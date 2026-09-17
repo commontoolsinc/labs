@@ -69,8 +69,8 @@ export type CreateProfileEvent = {
 // frame cause, which carries the creating user's per-home-space input links plus
 // the durable per-event id (runner.ts `createPatternFrame` cause): unique per
 // user AND per creation event, stable across the cross-space-commit retry. The
-// display name flows only to the writable `name` input, independently of the
-// space identity. Existing profiles keep their concrete DID link.
+// display name flows only to `initialName` and the name setter, independently of
+// the space identity. Existing profiles keep their concrete DID link.
 export const submitProfileCreation = handler<
   CreateProfileEvent,
   {
@@ -92,10 +92,11 @@ export const submitProfileCreation = handler<
     "").trim();
   if (name) {
     const profile = ProfileHome.inSpace()(
-      { name },
+      { initialName: name },
       { sourceOrigin: "system:system/profile-home.tsx" },
     );
     profiles.push(profile as ProfileHomeOutput);
+    profile.setName.send({ name });
   }
 });
 

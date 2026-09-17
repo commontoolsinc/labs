@@ -628,7 +628,7 @@ function factoryFromPattern<T, R>(
           toEncodableForm: () => moduleToEncodableForm(module),
         };
 
-        const outputs = reactive<R>();
+        const outputs = reactive<R>(undefined, pattern.resultSchema);
         const frame = getTopFrame();
         if (defaultSpace !== undefined) {
           const targetSpace = resolveInSpaceTargetSpace(defaultSpace, frame);

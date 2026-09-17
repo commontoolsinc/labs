@@ -614,8 +614,10 @@ model).
 
 ### Module update delegation (`piece setsrc`)
 
-`piece setsrc` is the temporary authority handoff while pattern files remain
-local, content-addressed modules. Compilation persists artifacts without
+`piece setsrc` and automatic updates from deployment-gated `system:` origins
+use the temporary authority handoff while pattern files remain local,
+content-addressed modules. Automatic updates from fabric origins derive no
+delegation. Compilation persists artifacts without
 granting update authority. Setup prepares a proposal from the current and
 candidate entries' verified recursive source closures. The two entries match
 each other outright, since the update is what names the one as the other's
@@ -639,7 +641,8 @@ update chain cold-reload-stable.
 A source update carrying proposed authority requires an owned setup transaction
 that commits to storage. A serving wave's withdrawable acceptance cannot publish
 runtime authority and is refused at this boundary. On a serving runtime the
-served `setsrc` verb's setup transaction therefore commits directly to the
+served `setsrc` verb's setup transaction and a system-origin reconciliation
+therefore commit directly to the
 store, outside the wave, and registers its authority from that verdict
 ([`server-pattern-lifecycle.md`](../features/server-pattern-lifecycle.md)).
 

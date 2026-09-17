@@ -78,7 +78,7 @@ describe("profile-home addPiece (followable piece card)", () => {
       const result = rt.run(
         tx,
         pattern as any,
-        { name: "Ada" },
+        { initialName: "Ada" },
         resultCell,
       );
       rt.prepareTxForCommit(tx);

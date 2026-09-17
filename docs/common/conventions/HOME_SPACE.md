@@ -106,12 +106,11 @@ uses ordinary source reconciliation to follow later releases. Reopening or
 retrying creation preserves an existing profile's detach, edit, or repoint;
 profiles created without an origin need an explicit one-time source transition.
 
-The creator supplies the name as a persisted, owner-protected writable input.
-Source updates keep that input and the profile's other saved fields; authorized
-edits continue through `setName`. The `name` input is required, so an update
-cannot silently replace a legacy saved name with a default. When explicitly
-migrating an older profile, copy its current saved name into this input as part
-of the migration before following the current source.
+The profile stores its name in a stable internal cell. The creator initializes
+it through `setName`, the same owner-protected stream used for later edits.
+Source updates preserve that cell and the profile's other saved fields. The
+profile's argument contract does not require a name input or a data migration
+before an existing profile can adopt the source.
 
 `profiles`/`defaultProfile`/`mru` are CFC-protected profile-link data, created
 through the trusted profile-create / picker surfaces. Untrusted writes are

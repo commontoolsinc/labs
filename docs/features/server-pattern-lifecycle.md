@@ -22,6 +22,11 @@ storage writes. Its normal storage reads can still demand materialization by the
 serving runtime, and a check does not freeze the space
 ([`module-loading.md`](../specs/module-loading.md)).
 
+Automatic source reconciliation for deployment-gated `system:` origins uses
+the same direct bookkeeping commit route when it carries module-update
+authority. Its pointer, retained revision, setup, and delegations commit
+together; the runtime registers writer inheritance from the storage verdict.
+
 The verbs run only when `EXPERIMENTAL_SERVER_EXECUTION` selects the ON arm
 ([`EXPERIMENTAL_OPTIONS.md`](../development/EXPERIMENTAL_OPTIONS.md#serverexecution)).
 Off the flag a deployment has no serving loop, the route answers 503, and

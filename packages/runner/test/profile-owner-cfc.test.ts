@@ -643,7 +643,7 @@ describe("profile owner CFC policy", () => {
       runtime.runner.run(
         tx,
         profileHomePattern,
-        { name: "Ada" },
+        { initialName: "Ada" },
         resultCell,
       );
       tx.prepareCfc();

@@ -2,7 +2,14 @@ import { action, assert, pattern, TESTS } from "commonfabric";
 import ProfileHome from "./profile-home.tsx";
 
 export default pattern(() => {
-  const profile = ProfileHome({ name: "Ada Lovelace" });
+  const profile = ProfileHome({ initialName: "Ada Lovelace" });
+
+  const assert_initial_name_fallback = assert(() =>
+    profile.initialNameApplied === "Ada Lovelace"
+  );
+  const action_initialize_name = action(() => {
+    profile.setName.send({ name: "Ada Lovelace" });
+  });
 
   // CT-1748: the rendered profile view. Single context, so the owner-protected
   // name/avatar/elements resolve cleanly (no cross-stamp moduleIdentity
@@ -194,6 +201,8 @@ export default pattern(() => {
 
   return {
     [TESTS]: [
+      { assertion: assert_initial_name_fallback },
+      { action: action_initialize_name },
       { assertion: assert_inbox_empty_at_birth },
       { action: action_set_inbox },
       { assertion: assert_inbox_set_with_the_host_trimmed },

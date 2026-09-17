@@ -28,7 +28,7 @@ export default pattern(() => {
   const assert_not_editing_by_default = assert(() => embed.isEditing === false);
 
   // (2) Amend contract: a real profile the embed's save handlers write through.
-  const profile = ProfileHome({ name: "Ada Lovelace" });
+  const profile = ProfileHome({ initialName: "Ada Lovelace" });
 
   // The embed's "Save name" is: read the draft, suppress empty, send { name }
   // into the profile's exported setName stream. Reproduce that call shape.

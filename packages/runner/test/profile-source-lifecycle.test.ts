@@ -30,38 +30,42 @@ const program: RuntimeProgram = {
 };
 
 describe("profile-source-lifecycle", () => {
-  it("keeps a legacy saved name until its writable input is migrated", async () => {
+  it("preserves a legacy saved name when its source is updated", async () => {
     const signer = await Identity.fromPassphrase("legacy profile source");
     const manager = EmulatedStorageManager.emulate({ as: signer });
     const current = program.files[1];
     // Reproduce the legacy layout: the argument carries an initial name and
     // the mutable name is an internal cell initialized from that argument.
     const legacySource = current.contents.replace(
-      "name: Writable<OwnerProtectedProfileWrite<string, typeof setName>>;",
-      "",
-    ).replace(
-      "({ initialName, name, [SELF]: self }) => {",
-      `({ initialName, [SELF]: self }) => {
-        const initialProfileName = trimInitialName(initialName);
-        const name = new Writable<OwnerProtectedProfileWrite<string, typeof setName>>(
-          initialProfileName,
-        ).for("name");`,
+      `    const name = new Writable<
+      OwnerProtectedProfileWrite<string, typeof setName>
+    >("").for("name");`,
+      `    const initialProfileName = trimInitialName(initialName);
+    const name = new Writable<
+      OwnerProtectedProfileWrite<string, typeof setName>
+    >(initialProfileName).for("name");`,
     );
     expect(legacySource).not.toBe(current.contents);
     const currentIdentity = await resolveEntryIdentity(
       current.name,
       () => Promise.resolve(current.contents),
     );
+    let servedSource = legacySource;
+    let servedIdentity = await resolveEntryIdentity(
+      current.name,
+      () => Promise.resolve(legacySource),
+    );
     const runtime = new Runtime({
       apiUrl: new URL("https://profile.test"),
       storageManager: manager,
       fetch: (input) => {
         const url = new URL(input instanceof Request ? input.url : input);
+        if (url.pathname !== current.name) {
+          return Promise.resolve(new Response("not found", { status: 404 }));
+        }
         return Promise.resolve(
           new Response(
-            url.searchParams.has("identity")
-              ? currentIdentity
-              : current.contents,
+            url.searchParams.has("identity") ? servedIdentity : servedSource,
           ),
         );
       },
@@ -88,16 +92,29 @@ describe("profile-source-lifecycle", () => {
       await name.pull();
       expect(name.get()).toBe("Saved name");
       const before = getPatternIdentityRef(profile);
-      const history = getPieceSourceRevisions(profile);
+      servedSource = current.contents;
+      servedIdentity = currentIdentity;
 
       expect(await runtime.sourceReconciler.reconcile(profile)).toBe(
-        "unavailable",
+        "updated",
       );
       await runtime.runner.idlePointerMaintenance();
       await name.pull();
       expect(name.get()).toBe("Saved name");
-      expect(getPatternIdentityRef(profile)).toEqual(before);
-      expect(getPieceSourceRevisions(profile)).toEqual(history);
+      expect(getPatternIdentityRef(profile)?.identity).not.toBe(
+        before?.identity,
+      );
+      expect(getPatternIdentityRef(profile)?.identity).toBe(currentIdentity);
+      expect(getPieceSourceRevisions(profile).map((entry) => entry.operation))
+        .toEqual(["create", "origin-update"]);
+
+      const rename = runtime.edit();
+      profile.withTx(rename).key("setName").send({ name: "Updated name" });
+      runtime.prepareTxForCommit(rename);
+      expect((await rename.commit()).error).toBeUndefined();
+      await runtime.idle();
+      await name.pull();
+      expect(name.get()).toBe("Updated name");
     } finally {
       await runtime.patternManager.flushCompileCacheWrites();
       await runtime.dispose();
@@ -210,6 +227,8 @@ describe("profile-source-lifecycle", () => {
       expect(name.get()).toBe("Ada");
 
       const rejectUntrustedNameWrite = async () => {
+        await name.pull();
+        const previousName = name.get();
         const tx = second.edit();
         tx.setCfcImplementationIdentity({
           kind: "builtin",
@@ -217,7 +236,11 @@ describe("profile-source-lifecycle", () => {
         });
         name.withTx(tx).set("Untrusted rename");
         second.prepareTxForCommit(tx);
-        expect((await tx.commit()).error).toBeDefined();
+        expect((await tx.commit()).error?.message).toContain(
+          "writeAuthorizedBy",
+        );
+        await name.pull();
+        expect(name.get()).toBe(previousName);
       };
       await rejectUntrustedNameWrite();
 

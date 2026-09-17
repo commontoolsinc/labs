@@ -670,13 +670,17 @@ verified code artifact, symbol/binding path within it)**. Same artifact hash
 + same symbol = same identity wherever the artifact is loaded; any code
 change changes the hash and with it every identity within the artifact.
 Rebinding does not inherit authority by default. The narrow temporary exception
-is an explicit `piece setsrc` update: the new entry succeeds the old entry
+is an explicit `piece setsrc` update or an automatic update from a
+deployment-gated `system:` origin: the new entry succeeds the old entry
 outright, since the update is what names the pair, and every other module in
 the old and new recursive closures matches by canonical filename — directly,
 or under the root substitution the two entry names define when they share a
 tail (the same authored tree served under `/api/patterns` and supplied from a
 checkout under `/packages/patterns`) — persisting a cumulative
-successor-to-predecessor delegation; an ambiguous match derives none.
+successor-to-predecessor delegation; an ambiguous match derives none. Automatic
+updates from fabric origins derive no writer inheritance. System-origin updates
+publish their delegation only after the source transition commits durably;
+serving runtimes use the direct bookkeeping commit route for that transition.
 `writeAuthorizedBy` accepts the current module hash or a predecessor reachable
 through the delegation map authenticated in the target document's space, but
 still requires the same symbol/binding path. A delegation loaded from another

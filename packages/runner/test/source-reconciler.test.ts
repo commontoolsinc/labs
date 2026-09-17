@@ -118,18 +118,21 @@ describe("piece source reconciliation", () => {
     await runtime?.dispose();
   });
 
-  function createRuntime(fetch: RuntimeFetch): Runtime {
+  function createRuntime(fetch: RuntimeFetch, serving = false): Runtime {
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
       fetch,
+      ...(serving
+        ? { servingPosture: true, experimental: { serverExecution: true } }
+        : {}),
     });
     return runtime;
   }
 
   /** A piece running v1 of the tracked pattern, with no origin yet. */
-  async function preparePiece(fetch: RuntimeFetch) {
-    createRuntime(fetch);
+  async function preparePiece(fetch: RuntimeFetch, serving = false) {
+    createRuntime(fetch, serving);
     const space = signer.did();
     const initialIdentity = await identityFor(source("v1"));
     const initial = await runtime.patternManager.compilePattern(
@@ -333,6 +336,49 @@ describe("piece source reconciliation", () => {
       expect(await runtime.start(piece)).toBe(true);
       await runtime.idle();
       expect((await piece.pull())?.marker).toBe("v2");
+    });
+
+    it("commits system writer inheritance durably while a serving wave is open", async () => {
+      const v2Identity = await identityFor(source("v2"));
+      const piece = await preparePiece(
+        servingFetch(() => v2Identity, () => source("v2")),
+        true,
+      );
+      const previous = getPatternIdentityRef(piece)!;
+      await stampSource(piece, PARENT_SOURCE);
+      const stamped = new Map<object, { actionId: string; direct?: boolean }>();
+      let durableUpdate = false;
+      runtime.installSealDestination({
+        seal: (tx) => {
+          // Like the serving loop's direct route, this verdict comes from
+          // storage. A wave acceptance cannot publish writer inheritance.
+          const info = stamped.get(tx);
+          if (info?.actionId === `source-reconcile/${piece.sourceURI}`) {
+            expect(info.direct).toBe(true);
+            durableUpdate = true;
+          }
+          return tx.tx.commit();
+        },
+      }, {
+        runStamper: (tx, info) => {
+          stamped.set(tx, {
+            actionId: info.actionId,
+            direct: info.directCommit,
+          });
+        },
+      });
+      try {
+        expect(await reconcile(piece)).toBe("updated");
+        expect(durableUpdate).toBe(true);
+        expect(getPatternIdentityRef(piece)?.identity).toBe(v2Identity);
+        expect(runtime.grantsModuleDelegation(
+          piece.space,
+          v2Identity,
+          previous.identity,
+        )).toBe(true);
+      } finally {
+        runtime.clearSealDestination();
+      }
     });
 
     it("moves a running piece's pointer and lets its watcher re-instantiate", async () => {
@@ -762,6 +808,7 @@ describe("piece source reconciliation", () => {
   describe("source inside the fabric", () => {
     it("adopts the pattern another piece currently runs", async () => {
       const piece = await preparePiece(refuseEveryFetch);
+      const previous = getPatternIdentityRef(piece)!;
       const upstream = await compileMarkerPattern("v2");
       const upstreamRef = runtime.patternManager.getArtifactEntryRef(upstream)!;
       const upstreamPiece = runtime.getCell(
@@ -776,6 +823,11 @@ describe("piece source reconciliation", () => {
 
       expect(await reconcile(piece)).toBe("updated");
       expect(getPatternIdentityRef(piece)).toEqual(upstreamRef);
+      expect(runtime.grantsModuleDelegation(
+        piece.space,
+        upstreamRef.identity,
+        previous.identity,
+      )).toBe(false);
     });
 
     it("follows a later change made by the piece it is following", async () => {

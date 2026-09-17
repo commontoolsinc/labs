@@ -1091,7 +1091,7 @@ export class SourceReconciler {
       origin: claim?.origin ?? state.storedSource ?? null,
       expected: state.snapshot,
     };
-    const sourceUpdate = baseline.kind === "retain"
+    const sourceUpdate = origin.kind === "system" && baseline.kind === "retain"
       ? await runtime.patternManager.prepareSourceUpdate(
         state.space,
         state.running.identity,
@@ -1246,9 +1246,6 @@ export class SourceReconciler {
         // Throwing ends the retry loop; aborting the transaction would be
         // classified as retryable and consume the remaining attempts.
         signal?.throwIfAborted();
-        if (sourceUpdate !== undefined && runtime.sealDestinationInstalled) {
-          throw new Error("source update authority requires a durable commit");
-        }
         const candidate = resultCell.withTx(tx);
         const currentRef = getPatternIdentityRef(candidate);
         // The piece must still run what the candidate was compared against, and
@@ -1265,6 +1262,9 @@ export class SourceReconciler {
         runtime.stampServerRun(tx, {
           actionId: `source-reconcile/${resultCell.sourceURI}`,
           kind: "bookkeeping",
+          // Writer inheritance registers from the store's verdict, so the
+          // serving loop commits this update outside its withdrawable wave.
+          ...(sourceUpdate === undefined ? {} : { directCommit: true }),
         });
         return write(tx);
       },

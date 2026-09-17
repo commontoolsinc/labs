@@ -32,6 +32,7 @@ import {
   type ModuleDelegationMap,
   moduleDelegationsFromDocs,
   planCompileCacheWriteChunks,
+  prepareSourceClosureVerification,
   readVerifiedSourceClosure,
   recordUndeclarablePolicyStore,
   ROOT_LINK_SPECIFIER,
@@ -1134,6 +1135,47 @@ export class PatternManager {
     const entryRef = this.getArtifactEntryRef(pattern);
     if (!entryRef) return;
     this.#issueReplication(entryRef.identity, fromSpace, toSpace, delegated);
+  }
+
+  /**
+   * Load the source a tracked child may retain, including pinned fabric
+   * dependencies. The caller stages creation in its original transaction after
+   * this resolves. An absent closure is checked only if the child is new.
+   */
+  async preparePatternSource(
+    pattern: Pattern | Module,
+    fromSpace: MemorySpace,
+    toSpace: MemorySpace,
+    tx: IExtendedStorageTransaction,
+  ): Promise<void> {
+    const entry = this.getArtifactEntryRef(pattern);
+    if (entry === undefined) return;
+    await prepareSourceClosureVerification();
+    const visited = new Set<string>();
+    const load = async (identity: string): Promise<void> => {
+      if (visited.has(identity)) return;
+      visited.add(identity);
+      const retained = await loadVerifiedSourceClosure(
+        this.#runtime,
+        toSpace,
+        identity,
+        tx,
+      );
+      const source = retained ??
+        (fromSpace === toSpace ? undefined : await loadVerifiedSourceClosure(
+          this.#runtime,
+          fromSpace,
+          identity,
+          tx,
+        ));
+      if (source === undefined) return;
+      for (const doc of source.values()) {
+        for (const dependency of fabricImportRefsFromSource(doc)) {
+          await load(dependency.targetIdentity);
+        }
+      }
+    };
+    await load(entry.identity);
   }
 
   /**
