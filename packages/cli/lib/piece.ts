@@ -1976,12 +1976,6 @@ async function updateOnServer(
 }
 
 /**
- * Replaces the piece's source and returns its setup transaction receipt.
- * Against a serving deployment the update is the serving runtime's to
- * commit; a piece addressed at a scope keeps the client-side path, since
- * the served verb takes the piece's id alone.
- */
-/**
  * Points a piece at `origin` and adopts what that origin currently serves,
  * in one source transition (`repoint`). From then on the piece follows the
  * origin: opening it adopts each later release the origin ships.
@@ -1992,8 +1986,9 @@ async function updateOnServer(
  * is recorded with the revision. The transition carries the same writer
  * delegation a `setsrc` does, since it is the owner's explicit act.
  *
- * @throws Error when the piece cannot be resolved, or when the origin cannot
- * be read or does not compile.
+ * @throws Error when the deployment serves piece lifecycle verbs (the served
+ * update takes no origin), when the piece cannot be resolved, or when the
+ * origin cannot be read or does not compile.
  */
 export async function followPieceSource(
   config: PieceConfig,
@@ -2001,6 +1996,15 @@ export async function followPieceSource(
   deps: PieceOperationDependencies = {},
 ): Promise<PieceSourceActionResult> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  // Against a serving deployment a source transition is the serving
+  // runtime's to commit, and the served update verb carries no origin yet;
+  // a client-side repoint there would commit outside the served lifecycle.
+  if (servesLifecycleVerbs(pieces)) {
+    throw new Error(
+      "This deployment serves piece lifecycle verbs, and `follow` is not " +
+        "served yet; the served update takes no origin.",
+    );
+  }
   const resolvedConfig = await resolvePieceConfigWithPieces(
     config,
     pieces,
@@ -2017,6 +2021,12 @@ export async function followPieceSource(
   return result;
 }
 
+/**
+ * Replaces the piece's source and returns its setup transaction receipt.
+ * Against a serving deployment the update is the serving runtime's to
+ * commit; a piece addressed at a scope keeps the client-side path, since
+ * the served verb takes the piece's id alone.
+ */
 export async function setPiecePattern(
   config: PieceConfig,
   entry: EntryConfig,
