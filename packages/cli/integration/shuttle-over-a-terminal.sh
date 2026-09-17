@@ -306,6 +306,7 @@ get ..#argument/items
 cd ../..
 cd /slugs/first
 watch settings/note
+@drawn written once and never again
 @frame /written\r
 @drawn / written  1 of 1
 @frame :pwd\r
@@ -877,7 +878,15 @@ step "31. A line typed at a view runs where a typed line runs, and the editor ta
 # view with a line in flight takes no second one, so the `e` would ask for
 # nothing and the `q` would close the view out from under the answer.
 #
-# The `/written` before them is waited for by what the search drew, which is
+# The first wait is for the value itself, and it is not decoration: a view
+# opens before the cell it watches has settled — the frame is drawn as soon as
+# the lens is handed over, and the first reading arrives on the subscription,
+# one quiet runtime later. A search typed into that window finds `<nothing has
+# settled yet>`, draws `no match`, and waits out the session. Typing at a view
+# is the one place in this script where the keys can outrun what they are
+# about, because every line elsewhere is answered before the next is typed.
+#
+# The `/written` after it is waited for by what the search drew, which is
 # the one of the three the transcript cannot carry: where a search stands is
 # drawn on the alternate screen, and `@drawn` is what reads there. `1 of 1` is
 # the whole assertion — the pattern was found, once, in the rendering of a cell
