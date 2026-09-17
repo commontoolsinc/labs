@@ -542,61 +542,77 @@ describe("SpaceServer", () => {
     ]);
   });
 
-  for (const phase of ["sidecar sync", "publication", "response"] as const) {
+  for (
+    const phase of [
+      "sidecar sync",
+      "publication",
+      "response",
+      "stream document sync",
+    ] as const
+  ) {
     for (const outcome of ["success", "failure"] as const) {
       it(`leaves events pending when tenure ends during ${phase} ${outcome}`, async () => {
         const fixture = await openFixture();
         await fixture.admit();
-        const provider = fixture.runtime.storageManager.open(space);
-        const release = Promise.withResolvers<void>();
-        let entered = 0;
-        const hold = async () => {
-          entered++;
-          await release.promise;
+        const manager = fixture.runtime.storageManager;
+        const provider = manager.open(space);
+        let parked: Promise<void> | undefined;
+        // A park ends the tenure in its synchronous prefix and only then
+        // awaits its seal chain and the runtime's disposal, so the drain
+        // pass resumes from this wait inside that window: the tenure is
+        // over and the runtime is still alive. Ending the tenure once the
+        // pass has already resumed would leave nothing for the pass to
+        // notice.
+        const endTenure = () => {
+          parked = fixture.serving.park("visibility-test");
           if (outcome === "failure") {
             throw new Error(`injected ${phase} failure`);
           }
         };
-        const sync = provider.sync.bind(provider);
+        const syncCell = manager.syncCell.bind(manager);
         const flush = server.flushSessions.bind(server);
         const pull = provider.pullToServerHead!.bind(provider);
-        using _sync = stub(provider, "sync", async (uri, ...args) => {
-          const result = await sync(uri, ...args);
+        let sidecarSynced = false;
+        using _syncCell = stub(manager, "syncCell", async (cell, ...rest) => {
+          const result = await syncCell(cell, ...rest);
+          if (parked !== undefined) return result;
+          const { id } = cell.getAsNormalizedFullLink();
+          if (id === sidecars[0]) {
+            sidecarSynced = true;
+            if (phase === "sidecar sync") endTenure();
+          }
+          // The sidecar gate puts this at the drain's own load of the
+          // stream document, which the pass reaches per entry.
           if (
-            phase === "sidecar sync" && uri === sidecars[0] && entered === 0
+            phase === "stream document sync" && sidecarSynced &&
+            id === streams[0].id
           ) {
-            await hold();
+            endTenure();
           }
           return result;
         });
         using _flush = stub(server, "flushSessions", async (spaces) => {
           await flush(spaces);
           if (
-            phase === "publication" && spaces !== undefined && entered === 0
+            phase === "publication" && spaces !== undefined &&
+            parked === undefined
           ) {
-            await hold();
+            endTenure();
           }
         });
         using _pull = stub(provider, "pullToServerHead", async () => {
           await pull();
-          if (phase === "response" && entered === 0) await hold();
+          if (phase === "response" && parked === undefined) endTenure();
         });
-        try {
-          await fixture.drain();
-          expect(entered, `${phase} must start before teardown`).toBe(1);
-          const parked = fixture.serving.park("visibility-test");
-          await clock.settle();
-          release.resolve();
-          await settle(parked);
-          await clock.settle();
-          expect(fixture.called).toEqual([]);
-          expect(fixture.storedLog()).toEqual([]);
-          expect(readWatermarkSeq(fixture.engine)).toBe(1);
-          expect(fixture.entries().map((entry) => entry.consequenced === true))
-            .toEqual([false, false]);
-        } finally {
-          release.resolve();
-        }
+        await fixture.drain();
+        expect(parked, `${phase} must run before teardown`).toBeDefined();
+        await settle(parked!);
+        await clock.settle();
+        expect(fixture.called).toEqual([]);
+        expect(fixture.storedLog()).toEqual([]);
+        expect(readWatermarkSeq(fixture.engine)).toBe(1);
+        expect(fixture.entries().map((entry) => entry.consequenced === true))
+          .toEqual([false, false]);
       });
     }
   }
