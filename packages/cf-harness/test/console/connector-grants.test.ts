@@ -218,6 +218,9 @@ describe("connector-grants", () => {
         piece: "cf-gmail-messages--gmail-work",
         reason:
           `\`${PIECES_PATH}\` declares no \`sqlite_sources\` entry for this piece and connection`,
+        remedy:
+          "Declare this piece and connection in pieces.json sqlite_sources, reconcile, and restart the console.",
+        state: "degraded",
       }]);
     });
 

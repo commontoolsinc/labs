@@ -4,10 +4,12 @@ import { join, resolve, toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
+  consoleHealthRows,
   ConsoleServer,
   createConsoleInteractiveServiceOptions,
   resolveConsoleConfig,
 } from "../../console/server.ts";
+import { ConsoleHealth, type ConsoleHealthRow } from "../../console/health.ts";
 import { harnessSessionChatPolicy } from "../../src/session-assembly.ts";
 import type { ConsoleSessionListing } from "../../console/sessions.ts";
 import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
@@ -710,6 +712,215 @@ describe("console/server", () => {
 
       expect(response.status).toBe(403);
     });
+  });
+
+  describe("GET /api/health/detail", () => {
+    it("returns the cached snapshot while a host probe remains pending and applies the existing host restriction", async () => {
+      const pending = Promise.withResolvers<readonly ConsoleHealthRow[]>();
+      const fact = {
+        id: "index.reachable",
+        group: "index",
+        label: "Index",
+        value: "not checked",
+        source: "host probe",
+      };
+      const health = new ConsoleHealth([], [{
+        id: fact.id,
+        initial: [fact],
+        read: () => pending.promise,
+        unavailable: () => [],
+      }]);
+      const healthServer = new ConsoleServer(
+        await config(),
+        () => server.service,
+        undefined,
+        health,
+      );
+      try {
+        const response = await healthServer.handle(
+          getRequest("/api/health/detail"),
+        );
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          version: 1,
+          rows: [{ ...fact, state: "unknown", checkedAt: null }],
+        });
+        expect(
+          (await healthServer.handle(
+            getRequest("/api/health/detail", { host: "evil.test:8100" }),
+          )).status,
+        ).toBe(403);
+        expect(server.service.turns()).toHaveLength(0);
+      } finally {
+        pending.resolve([]);
+        await health.refresh();
+      }
+    });
+  });
+
+  describe("consoleHealthRows()", () => {
+    it("keeps index URL credentials out of the configured value and retained launch evidence", async () => {
+      const indexUrl =
+        "https://user-secret:password-secret@index.test/api/?token=query-secret#fragment-secret";
+      const configured = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+        ],
+        { CF_HARNESS_PATTERN_INDEX_URL: indexUrl },
+        "/console",
+      );
+      const rows = consoleHealthRows(configured, {
+        checkedAt: "2026-09-17T00:00:00.000Z",
+        connectors: [],
+        resolved: [{ name: "index", value: indexUrl, source: "launch flag" }],
+      });
+      expect(rows.find((row) => row.id === "config.index")).toMatchObject({
+        value: "https://index.test/api/",
+        source: "console launch record",
+        detail: "launch flag",
+      });
+      expect(JSON.stringify(rows)).not.toContain("-secret");
+      expect(configured.patternIndex?.baseUrl).toBe(indexUrl);
+    });
+
+    it("retains the launch record only for inherited active values, including an equal explicit override", async () => {
+      const configured = await resolveConsoleConfig([
+        "--fabric-identity",
+        "key.pkcs8",
+        "--fabric-space",
+        "console-test",
+        "--port",
+        "8123",
+        "--session-db",
+        "none",
+      ], {
+        MEMORY_DIR: "/data/selected",
+        CF_HARNESS_MODEL: "test-model",
+        CF_HARNESS_ALLOW_SKILL_SCRIPTS: "1",
+      }, "/console");
+      const checkedAt = "2026-09-17T00:00:00.000Z";
+      const connector = {
+        id: "connector.refused.0",
+        group: "connectors",
+        label: "gmail",
+        value: "not granted",
+        source: "loom connector receipt + pieces.json (gmail)",
+        detail: "/loom/handles.json; /loom/pieces.json",
+        state: "degraded" as const,
+        reason: "Class already claimed.",
+        remedy: "Select a connection.",
+      };
+      const rows = consoleHealthRows(configured, {
+        checkedAt,
+        connectors: [connector],
+        resolved: [
+          { name: "port", value: "8123", source: "launch record" },
+          {
+            name: "store",
+            value: "/data/selected",
+            source: "loom toolshed-store-dir",
+          },
+          { name: "model", value: "other-model", source: "launch record" },
+        ],
+      });
+      expect(rows.find((row) => row.id === "config.port")).toMatchObject({
+        label: "Port",
+        value: "8123",
+        source: "console launch flag",
+        detail: "--port",
+      });
+      expect(rows.find((row) => row.id === "config.store")).toMatchObject({
+        value: "/data/selected",
+        source: "console launch record",
+        detail: "loom toolshed-store-dir",
+        checkedAt,
+      });
+      expect(rows.find((row) => row.id === "config.model")).toMatchObject({
+        value: "test-model",
+        source: "console configuration",
+        detail: "CF_HARNESS_MODEL",
+      });
+      expect(rows.find((row) => row.id === "config.skill-scripts"))
+        .toMatchObject({
+          label: "Skill Scripts",
+          value: "run in the sandbox",
+          source: "console configuration",
+          detail: "CF_HARNESS_ALLOW_SKILL_SCRIPTS",
+        });
+      expect(rows.find((row) => row.id === connector.id)).toEqual({
+        ...connector,
+        checkedAt,
+      });
+      expect(
+        rows.filter((row) => row.state !== "unknown").every((row) =>
+          Number.isFinite(Date.parse(row.checkedAt!))
+        ),
+      ).toBe(true);
+    });
+
+    it("keeps missing inventory, automatic store discovery and unobserved credentials unknown", async () => {
+      const rows = consoleHealthRows(await config());
+      expect(rows.find((row) => row.id === "connectors.inventory"))
+        .toMatchObject({
+          state: "unknown",
+          value: "0 explicit grants configured",
+        });
+      expect(rows.find((row) => row.id === "config.store")).toMatchObject({
+        state: "unknown",
+        value: "automatic discovery",
+      });
+      expect(rows.find((row) => row.id === "model.auth")).toMatchObject({
+        state: "unknown",
+        checkedAt: null,
+      });
+      expect(rows.find((row) => row.id === "config.index")).toMatchObject({
+        state: "degraded",
+        value: "not configured",
+      });
+      expect(
+        rows.filter((row) => row.id.startsWith("index.")).map((row) =>
+          row.state
+        ),
+      ).toEqual(["unknown", "unknown"]);
+    });
+
+    for (const mode of ["missing", "key", "none", "codex"] as const) {
+      it(`reports ${mode} credential provenance without publishing a credential`, async () => {
+        const options: CreateHarnessPromptLoopOptions = mode === "codex"
+          ? {
+            modelProvider: "openai-codex",
+            modelAuthSource: "cf-harness-local-store",
+          }
+          : {
+            modelProvider: "openai-compatible-gateway",
+            gatewayAuthMode: mode === "none" ? "none" : "bearer",
+            ...(mode === "key" ? { apiKey: "secret-test-value" } : {}),
+          };
+        const rows = consoleHealthRows(await config(), undefined, options, {
+          CF_HARNESS_API_KEY: mode === "key" ? "secret-test-value" : undefined,
+        });
+        expect(rows.find((row) => row.id === "model.auth")).toMatchObject({
+          label: "Model Authentication",
+          state: mode === "missing" ? "failed" : "ok",
+          source: mode === "codex"
+            ? "harness credential store"
+            : "console environment",
+          detail: mode === "codex"
+            ? "/console/.cf-harness/auth.json"
+            : mode === "none"
+            ? "CF_HARNESS_GATEWAY_AUTH_MODE"
+            : mode === "key"
+            ? "CF_HARNESS_API_KEY"
+            : "CF_HARNESS_API_KEY / OPENAI_API_KEY",
+        });
+        expect(JSON.stringify(rows)).not.toContain("secret-test-value");
+      });
+    }
   });
 
   describe("task Loom context", () => {

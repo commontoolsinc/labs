@@ -208,6 +208,7 @@ one.
 | Method | Route                        | Result                                                                                  |
 | ------ | ---------------------------- | --------------------------------------------------------------------------------------- |
 | `GET`  | `/api/health`                | Console health, configured Fabric API URL, and honestly limited Fabric-session liveness |
+| `GET`  | `/api/health/detail`         | Cached operator observations with deciding records, times, causes, and remedies         |
 | `POST` | `/api/task`                  | Starts a session or a follow-up turn                                                    |
 | `POST` | `/api/cancel`                | Cancels the active turn                                                                 |
 | `GET`  | `/api/sessions`              | Durable session summaries                                                               |
@@ -227,6 +228,42 @@ and HTTP reachability, configuration, or factory existence says nothing about
 whether a retained session can complete an operation. The field does not spend a
 provider turn or make a Fabric round trip. A caller needing proven substrate
 liveness must perform a separate probe.
+
+`GET /api/health/detail` returns `{version: 1, generatedAt, rows}` for an
+operator status panel. Each flat row carries `id`, `group`, `label`, `state`,
+`value`, `source`, and `checkedAt`. `source` is always a short human label;
+optional `detail` is one opaque string retaining the exact deciding paths,
+command, or endpoint for a selectable disclosure. URL credentials, query values,
+fragments, and connector references are omitted. Fixed labels use Title Case;
+connection names retain their recorded spelling. `reason`, when present,
+explains the cause; `remedy` names the operator action that can change it.
+Groups are open strings so clients can render new checks without learning new
+fields. `generatedAt` timestamps the snapshot; `checkedAt` timestamps each
+deciding observation. States are `ok`, `degraded`, `failed`, or `unknown`. Only
+an unknown row can have a null timestamp. An unavailable observation stays
+unknown rather than claiming a failure.
+
+Configuration rows name the active console address, port, space, store, model,
+and skill-script switch. The launcher passes its decision report directly into
+the server: connector rows retain every accepted or refused grant, its CFC class
+or refusal reason, and the injection receipt and piece declaration that decided
+it. Changing those files requires a console restart to establish new grants. A
+server flag takes precedence over the inherited launch value and its source. A
+directly configured server reports its explicit grants and marks the full
+connector inventory unknown. An absent injection receipt is also unknown; an
+observed empty receipt establishes an empty inventory.
+
+External rows check the running Docker daemon's `runsc-cfc` registration and the
+configured index's health and enrollment for the console identity. Each probe
+caches independently for 30 seconds. Reading the route returns the current
+snapshot immediately and schedules stale checks in the background, sharing any
+in-flight check. No probe is awaited by the route. The timestamp remains visible
+while an observation is being refreshed. Model rows describe the startup
+provider and credential source without exposing credentials or making a model
+request; a configured API key does not prove provider acceptance. Docker
+registration does not prove a sandbox can execute a task. Fabric-session
+liveness remains unverified, and Loom, toolshed, and application pin status
+belong to the application that observes them directly.
 
 A task body carries the text, optionally the session to continue, and optionally
 the cells the task is to be computed over, published patterns, and the

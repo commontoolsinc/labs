@@ -17,6 +17,7 @@ import {
   resolveConsoleLaunchPlan,
   WEAVER_PAIRING_PORT,
 } from "../../console/launch.ts";
+import type { ConsoleObservedLaunchHealth } from "../../console/health.ts";
 
 const PIECES_JSON = JSON.stringify({
   defaults: {
@@ -134,6 +135,83 @@ const fakeBinary = async (body: string): Promise<string> => {
 
 describe("launch", () => {
   describe("resolveConsoleLaunchPlan()", () => {
+    it("retains every grant and refusal with its deciding records and a distinct remedy", () => {
+      const pieces = JSON.parse(PIECES_JSON_WITH_CONNECTOR);
+      const original = pieces.pieces[0];
+      pieces.pieces.push({
+        ...original,
+        name: "duplicate",
+        sqlite_sources: [{
+          ...original.sqlite_sources[0],
+          connection_id: "gmail-other",
+        }],
+      }, {
+        name: "unlabeled",
+        sqlite_sources: [{ connection_id: "no-class", tables: {} }],
+      });
+      const handles = JSON.parse(HANDLES_JSON);
+      const invalidRef = "private-malformed-reference";
+      handles.handles.push(
+        {
+          connection_id: "gmail-other",
+          piece: "duplicate",
+          handle_ref: MAIL_REF,
+        },
+        { connection_id: "no-class", piece: "unlabeled", handle_ref: MAIL_REF },
+        { connection_id: "broken", piece: "broken", handle_ref: invalidRef },
+      );
+      const plan = resolveConsoleLaunchPlan({
+        ...WITH_CONNECTOR,
+        instance: {
+          ...WITH_CONNECTOR.instance!,
+          piecesJson: JSON.stringify(pieces),
+          handlesJson: JSON.stringify(handles),
+        },
+      }, OPTIONS);
+      expect(plan.health.resolved).toBe(plan.resolved);
+      expect(
+        plan.health.connectors.map(({ label, value, state }) => ({
+          label,
+          value,
+          state,
+        })),
+      ).toEqual([
+        {
+          label: "Connector Inventory",
+          value: "1 granted; 3 not granted",
+          state: "ok",
+        },
+        { label: "gmail-work", value: "granted as email", state: "ok" },
+        { label: "gmail-other", value: "not granted", state: "degraded" },
+        { label: "no-class", value: "not granted", state: "degraded" },
+        { label: "broken", value: "not granted", state: "unknown" },
+      ]);
+      expect(
+        plan.health.connectors.every((row) =>
+          row.detail?.includes(HANDLES_JSON_PATH) &&
+          row.detail?.includes(RECORDS.instance!.piecesJsonPath)
+        ),
+      ).toBe(true);
+      expect(plan.health.connectors[2]).toMatchObject({
+        source: "loom connector receipt + pieces.json (duplicate)",
+        reason:
+          "its declared CFC class `email` is already the grant connection `gmail-work` was named by",
+        remedy:
+          "Select the intended connection for the email class in Loom, then restart the console.",
+      });
+      expect(plan.health.connectors[3]).toMatchObject({
+        reason: "its declared table contract carries no CFC class",
+        remedy:
+          "Declare the per-column ifc.confidentiality Resource class in this connector's sqlite_sources, then restart the console.",
+      });
+      expect(JSON.stringify(plan.health.connectors)).not.toContain(MAIL_REF);
+      expect(plan.health.connectors[4]).toMatchObject({
+        state: "unknown",
+        reason: "its `handle_ref` does not parse",
+      });
+      expect(JSON.stringify(plan.health.connectors)).not.toContain(invalidRef);
+    });
+
     it("returns the identity, space and toolshed the instance records", () => {
       const plan = resolveConsoleLaunchPlan(RECORDS, OPTIONS);
 
@@ -1247,6 +1325,24 @@ describe("launch", () => {
           "/consoles/launched",
         );
         expect(Deno.env.get("MEMORY_DIR")).toBe("/checkout/cache/memory");
+      });
+    });
+
+    it("carries its observed decision report into serving", async () => {
+      await withEnvironmentRestored(async () => {
+        let observed: ConsoleObservedLaunchHealth | undefined;
+        await launchConsole(ARGS, {}, (_args, health) => {
+          observed = health;
+          return Promise.resolve();
+        }, io);
+        expect(observed?.resolved).toContainEqual({
+          name: "space",
+          value: "cf-harness-dev",
+          source: "named on the command line",
+        });
+        expect(Number.isFinite(Date.parse(observed?.checkedAt ?? ""))).toBe(
+          true,
+        );
       });
     });
 
