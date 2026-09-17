@@ -17,7 +17,7 @@
  *
  * Environment:
  *   GITHUB_TOKEN           - Required.
- *   GITHUB_REPOSITORY      - Optional, defaults to "commontoolsinc/labs".
+ *   GITHUB_REPOSITORY      - Optional, defaults to "commonfabric/labs".
  *   COVERAGE_COMMENT_FILE  - Optional, path to the payload file.
  */
 

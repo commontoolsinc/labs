@@ -98,7 +98,7 @@ The repository already measures everything this needs and throws none of
 it away. What it does not do is act on it.
 
 A successful `deno.yml` push build on 2026-08-25, [run
-32899488580](https://github.com/commontoolsinc/labs/actions/runs/32899488580)
+32899488580](https://github.com/commonfabric/labs/actions/runs/32899488580)
 at commit `c8893b3a8`, is the reference throughout this plan. The workflow
 contained 67 jobs. 66 ran and the pull-request `Status` job skipped. The
 jobs consumed 181 minutes of runner time and took 15 minutes and 23
@@ -3967,13 +3967,13 @@ answers somewhere people can see them.
       read, scored and written back forever, and the count of identities
       the topology has no unit for cannot be read.
 - [x] The one-off bootstrap dispatch. On 2026-09-06, [run
-      34020738350](https://github.com/commontoolsinc/labs/actions/runs/34020738350)
+      34020738350](https://github.com/commonfabric/labs/actions/runs/34020738350)
       on `main` folded 12 rollup days and 67,463,235 executions, then created
       `manifest-2026-09-06T08:02:32.080Z-01M1TWYZZV2PXG5Y5VG3MCY91Q.json.gz`
       and the matching state object. The public listing shows both, and later
       incremental runs succeeded from that state. As a later check, scheduled
       [run
-      34274701451](https://github.com/commontoolsinc/labs/actions/runs/34274701451)
+      34274701451](https://github.com/commonfabric/labs/actions/runs/34274701451)
       on 2026-09-08 folded 1,321,563 executions into 19,904 identities and
       created
       `manifest-2026-09-08T20:25:40.387Z-01M21B6E8PQV8ZPP0E21CMR4G3.json.gz`

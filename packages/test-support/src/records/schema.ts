@@ -109,7 +109,7 @@ export interface RunContext {
   /** ULID; unique per uploaded object. */
   reportId: string;
 
-  /** Canonical repository name, as in "commontoolsinc/labs". */
+  /** Canonical repository name, as in "commonfabric/labs". */
   repo: string;
 
   /** Full hash of the commit the tests ran against. */

@@ -669,7 +669,7 @@ real users, has now landed. The items are ordered by what unblocks what.
 ## Relationship to the CFC specification
 
 Contextual Flow Control (CFC) is the information-flow-control model specified
-in the `cfc/` directory of the `commontoolsinc/specs` repository (checked out
+in the `cfc/` directory of the `commonfabric/specs` repository (checked out
 as a sibling of this repository, `specs/cfc`). Its threat model places this
 work outside CFC's own scope: `09-threat-model.md` §9.3.2 lists cache timing
 and other hardware/physical side channels as out of scope, and states that

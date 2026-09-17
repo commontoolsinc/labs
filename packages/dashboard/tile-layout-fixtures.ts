@@ -232,12 +232,12 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
     view: {
       label: "production",
       status: "bad",
-      value: "common.tools down",
-      valueLabel: "common.tools down",
+      value: "commonfabric.com down",
+      valueLabel: "commonfabric.com down",
       extra:
         `<div class="tile-detail-list" tabindex="0" role="region" aria-label="Production target details; scroll for more" title="Scroll for more details" style="display:grid;grid-template-columns:auto 1fr;gap:7px 10px;margin-top:11px;font-size:12px;line-height:1.35">${
           [
-            "common.tools",
+            "commonfabric.com",
             "estuary",
             "rapids",
             "bastion",

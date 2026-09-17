@@ -29,7 +29,7 @@ Deno.test("piece summaries render human and JSON output", () => {
     symbol: "default",
     source: {
       ref: `cf:pattern:${identity}`,
-      repository: "https://github.com/commontoolsinc/labs",
+      repository: "https://github.com/commonfabric/labs",
       entry: "/packages/patterns/notes.tsx",
     },
   };
@@ -56,7 +56,7 @@ Deno.test("piece summaries render human and JSON output", () => {
   expect(table).toContain("of:notes");
   expect(table).toContain("Notes");
   expect(table).toContain(
-    "https://github.com/commontoolsinc/labs#/packages/patterns/notes.tsx",
+    "https://github.com/commonfabric/labs#/packages/patterns/notes.tsx",
   );
   expect(table).toContain("<error: stored data is unavailable>");
   expect(table).toContain("<unnamed>");

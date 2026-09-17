@@ -269,8 +269,8 @@ and never the place. `slugs` and `pieces` are reserved as the first segment of a
 rooted reference as well as at the root, so `cd /slugs/board` is the same as
 `cd /` then `cd slugs/board`. That is the one place the shell reads a reference
 differently from the rest of `cf`, which takes those two as ordinary slugs;
-[#6992](https://github.com/commontoolsinc/labs/issues/6992) retires the
-difference by refusing them as slug values.
+[#6992](https://github.com/commonfabric/labs/issues/6992) retires the difference
+by refusing them as slug values.
 
 A relative operand is the cell reference grammar's
 ([`docs/specs/cell-reference-grammar.md`](../../docs/specs/cell-reference-grammar.md)),

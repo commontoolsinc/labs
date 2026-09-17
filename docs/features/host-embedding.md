@@ -7,7 +7,7 @@ when the contract changes.
 
 > **Audience.** You are embedding `@commonfabric/ui` components and labs
 > patterns in a host that is *not* the labs shell — most concretely Loom
-> ([loom#3627](https://github.com/commontoolsinc/loom/pull/3627)). Bind
+> ([loom#3627](https://github.com/commonfabric/loom/pull/3627)). Bind
 > only to what is listed here; treat everything else (component
 > internals, create-surface DOM, resolution *implementation*) as in
 > motion.

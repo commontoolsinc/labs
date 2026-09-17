@@ -32,7 +32,7 @@
  * Environment:
  *   GITHUB_TOKEN         - Required.
  *   GITHUB_EVENT_PATH    - The workflow_run payload naming the run.
- *   GITHUB_REPOSITORY    - Optional, defaults to "commontoolsinc/labs".
+ *   GITHUB_REPOSITORY    - Optional, defaults to "commonfabric/labs".
  *   MAIN_REPORT_RUN_ID   - Optional, the run to report on in place of the
  *                          payload's, for running this by hand.
  *

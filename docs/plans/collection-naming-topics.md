@@ -250,7 +250,7 @@ Scope: `packages/patterns/collection-naming/` (new): `naming.ts`, `board.tsx`,
    reuse, allocator }, compact }`. `compact` is reserved: it declares that the
    member names hold no hyphen, and no renderer offers the compact spelling.
    Nothing reads the declaration at all —
-   [#6986](https://github.com/commontoolsinc/labs/issues/6986) is making one
+   [#6986](https://github.com/commonfabric/labs/issues/6986) is making one
    consumer real.
 9. Allocation reads the namespace's keys without expanding any member: the
    declared schema holds the values as unread references.

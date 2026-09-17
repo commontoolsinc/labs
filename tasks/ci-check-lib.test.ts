@@ -892,7 +892,7 @@ Deno.test("fetchPRBody reads the live pull request body from the GitHub API", as
     assertEquals(await fetchPRBody(3427), "LIVE PR BODY");
     assertEquals(
       requestedUrl,
-      "https://api.github.com/repos/commontoolsinc/labs/pulls/3427",
+      "https://api.github.com/repos/commonfabric/labs/pulls/3427",
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -933,8 +933,8 @@ Deno.test("fetchIssueComments reads every page of a pull request's comments", as
     assertEquals(comments[0], { id: 1, body: "comment 1" });
     assertEquals(comments[100], { id: 101, body: "" });
     assertEquals(requestedUrls, [
-      "https://api.github.com/repos/commontoolsinc/labs/issues/5727/comments?per_page=100&page=1",
-      "https://api.github.com/repos/commontoolsinc/labs/issues/5727/comments?per_page=100&page=2",
+      "https://api.github.com/repos/commonfabric/labs/issues/5727/comments?per_page=100&page=1",
+      "https://api.github.com/repos/commonfabric/labs/issues/5727/comments?per_page=100&page=2",
     ]);
   } finally {
     globalThis.fetch = originalFetch;
@@ -1010,8 +1010,8 @@ Deno.test("githubGet retries transient GitHub responses", async () => {
     }) as typeof fetch;
 
     assertEquals(
-      await githubGet<{ ok: string }>("/repos/commontoolsinc/labs/actions"),
-      { ok: "https://api.github.com/repos/commontoolsinc/labs/actions" },
+      await githubGet<{ ok: string }>("/repos/commonfabric/labs/actions"),
+      { ok: "https://api.github.com/repos/commonfabric/labs/actions" },
     );
     assertEquals(calls, 3);
   } finally {
@@ -1030,7 +1030,7 @@ Deno.test("githubGet does not retry non-transient GitHub responses", async () =>
 
     let rejected = false;
     try {
-      await githubGet("/repos/commontoolsinc/labs/missing");
+      await githubGet("/repos/commonfabric/labs/missing");
     } catch {
       rejected = true;
     }
@@ -1057,18 +1057,18 @@ Deno.test("GitHub REST errors include status text and omit response bodies", asy
       status: 503,
       statusText: "Service Unavailable",
       expectedMessage:
-        "GitHub API GET 503 Service Unavailable: /repos/commontoolsinc/labs/actions/runs/123/jobs",
+        "GitHub API GET 503 Service Unavailable: /repos/commonfabric/labs/actions/runs/123/jobs",
       request: () =>
-        githubGet("/repos/commontoolsinc/labs/actions/runs/123/jobs"),
+        githubGet("/repos/commonfabric/labs/actions/runs/123/jobs"),
     },
     {
       name: "POST 422",
       status: 422,
       statusText: "Unprocessable Content",
       expectedMessage:
-        "GitHub API POST 422 Unprocessable Content: /repos/commontoolsinc/labs/issues/123/comments",
+        "GitHub API POST 422 Unprocessable Content: /repos/commonfabric/labs/issues/123/comments",
       request: () =>
-        githubPost("/repos/commontoolsinc/labs/issues/123/comments", {
+        githubPost("/repos/commonfabric/labs/issues/123/comments", {
           body: "comment",
         }),
     },
@@ -1077,9 +1077,9 @@ Deno.test("GitHub REST errors include status text and omit response bodies", asy
       status: 500,
       statusText: "Internal Server Error",
       expectedMessage:
-        "GitHub API PATCH 500 Internal Server Error: /repos/commontoolsinc/labs/issues/comments/456",
+        "GitHub API PATCH 500 Internal Server Error: /repos/commonfabric/labs/issues/comments/456",
       request: () =>
-        githubPatch("/repos/commontoolsinc/labs/issues/comments/456", {
+        githubPatch("/repos/commonfabric/labs/issues/comments/456", {
           body: "updated comment",
         }),
     },
@@ -1124,12 +1124,12 @@ Deno.test("GitHub REST errors survive response cancellation failures", async () 
       )) as typeof fetch;
 
     const error = await assertRejects(
-      () => githubGet("/repos/commontoolsinc/labs/missing"),
+      () => githubGet("/repos/commonfabric/labs/missing"),
       Error,
     );
     assertEquals(
       error.message,
-      "GitHub API GET 404 Not Found: /repos/commontoolsinc/labs/missing",
+      "GitHub API GET 404 Not Found: /repos/commonfabric/labs/missing",
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -1342,7 +1342,7 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
       target: 4612,
       current: 4614,
       baseline: {
-        runUrl: "https://github.com/commontoolsinc/labs/actions/runs/900",
+        runUrl: "https://github.com/commonfabric/labs/actions/runs/900",
         sha: "b".repeat(40),
       },
     }],
@@ -1353,7 +1353,7 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
       },
     ],
     measurement: {
-      runUrl: "https://github.com/commontoolsinc/labs/actions/runs/901",
+      runUrl: "https://github.com/commonfabric/labs/actions/runs/901",
       baseSha: "a".repeat(40),
     },
   });
@@ -1391,7 +1391,7 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
   assertStringIncludes(comment, "Where this measurement came from:");
   assertStringIncludes(
     comment,
-    "  Measuring run: https://github.com/commontoolsinc/labs/actions/runs/901",
+    "  Measuring run: https://github.com/commonfabric/labs/actions/runs/901",
   );
   assertStringIncludes(comment, `  Base commit measured: ${"a".repeat(40)}`);
   // The reader is handed the command that says what landed since.
@@ -1401,7 +1401,7 @@ Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip 
   );
   assertStringIncludes(
     comment,
-    `  Baseline for packages/runner: run https://github.com/commontoolsinc/labs/actions/runs/900, commit ${
+    `  Baseline for packages/runner: run https://github.com/commonfabric/labs/actions/runs/900, commit ${
       "b".repeat(40)
     }`,
   );
@@ -1447,23 +1447,23 @@ Deno.test("buildCoverageDebtUnattributedComment omits run identity it does not h
       target: 0,
       current: 1,
       baseline: {
-        runUrl: "https://github.com/commontoolsinc/labs/actions/runs/900",
+        runUrl: "https://github.com/commonfabric/labs/actions/runs/900",
       },
     }],
     files: [{ relativePath: "tasks/test-records.ts", lines: [90] }],
     measurement: {
-      runUrl: "https://github.com/commontoolsinc/labs/actions/runs/901",
+      runUrl: "https://github.com/commonfabric/labs/actions/runs/901",
     },
   });
 
   assertStringIncludes(runOnly, "Where this measurement came from:");
   assertStringIncludes(
     runOnly,
-    "  Measuring run: https://github.com/commontoolsinc/labs/actions/runs/901",
+    "  Measuring run: https://github.com/commonfabric/labs/actions/runs/901",
   );
   assertStringIncludes(
     runOnly,
-    "  Baseline for tasks: run https://github.com/commontoolsinc/labs/actions/runs/900\n",
+    "  Baseline for tasks: run https://github.com/commonfabric/labs/actions/runs/900\n",
   );
   assertFalse(runOnly.includes("Base commit measured:"));
   assertFalse(runOnly.includes("merged into that base commit"));

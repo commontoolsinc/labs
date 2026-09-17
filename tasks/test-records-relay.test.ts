@@ -22,8 +22,8 @@ const PAYLOAD = {
     head_sha: "a".repeat(40),
     head_branch: "feature-branch",
     run_started_at: "2026-08-17T20:30:00Z",
-    repository: { full_name: "commontoolsinc/labs" },
-    head_repository: { full_name: "commontoolsinc/labs" },
+    repository: { full_name: "commonfabric/labs" },
+    head_repository: { full_name: "commonfabric/labs" },
     actor: { login: "octocat", id: 5453321 },
   },
 };

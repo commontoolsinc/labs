@@ -47,7 +47,7 @@ these routes.
 
 ## Request Proof Format
 
-The implementation uses a CommonTools-specific first-party request proof. It
+The implementation uses a CommonFabric-specific first-party request proof. It
 does not use the RFC 9421 header names or vocabulary. This keeps the local
 format separate from a future RFC 9421 implementation.
 

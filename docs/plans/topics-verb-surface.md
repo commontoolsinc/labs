@@ -315,6 +315,6 @@ Two preconditions belong to the board rather than to the code:
 - The board's demand names the eight members above, and losing the excluded
   fields from the board's published projection is accepted.
 
-[#6573]: https://github.com/commontoolsinc/labs/issues/6573
-[#6673]: https://github.com/commontoolsinc/labs/issues/6673
-[#6713]: https://github.com/commontoolsinc/labs/issues/6713
+[#6573]: https://github.com/commonfabric/labs/issues/6573
+[#6673]: https://github.com/commonfabric/labs/issues/6673
+[#6713]: https://github.com/commonfabric/labs/issues/6713

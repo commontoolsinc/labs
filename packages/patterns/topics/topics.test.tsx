@@ -377,7 +377,7 @@ export default pattern(() => {
   const action_link_valid_unlabeled = action(() => {
     boardVerbTopic.addLink.send({
       kind: "pr",
-      url: "https://github.com/commontoolsinc/labs/pull/4643",
+      url: "https://github.com/commonfabric/labs/pull/4643",
       label: "  ",
       agentName: "Sol",
     });
@@ -478,7 +478,7 @@ export default pattern(() => {
     (boardVerbTopic.links ?? []).length === 1 &&
     boardVerbTopic.links?.[0]?.kind === "pr" &&
     boardVerbTopic.links?.[0]?.label ===
-      "https://github.com/commontoolsinc/labs/pull/4643" &&
+      "https://github.com/commonfabric/labs/pull/4643" &&
     boardVerbTopic.links?.[0]?.addedBy?.name === "Sol" &&
     (boardVerbTopic.links?.[0]?.addedAt ?? 0) > 0
   );

@@ -351,7 +351,7 @@ describe("PiecesController.recreateDefaultPattern", () => {
   });
 
   it("stores an explicitly supplied repository for a custom root", async () => {
-    const repository = "https://github.com/commontoolsinc/labs";
+    const repository = "https://github.com/commonfabric/labs";
     const piece = await controller.recreateDefaultPattern({
       customProgram: defaultPatternProgram,
       repository,
@@ -366,7 +366,7 @@ describe("PiecesController.recreateDefaultPattern", () => {
 
   it("rejects a repository locator without a custom root program", async () => {
     await expect(controller.recreateDefaultPattern({
-      repository: "https://github.com/commontoolsinc/labs",
+      repository: "https://github.com/commonfabric/labs",
     })).rejects.toThrow(/only be supplied with a custom program/);
   });
 

@@ -8,8 +8,8 @@ import { artifactZip, bytes, makeZip } from "./test/artifact-zip.ts";
 
 Deno.test("landingHref: squash-merge trailing (#N) -> the PR", () => {
   assertEquals(
-    landingHref("packages/ts-transformers tests (#4435)", "sha", "commontoolsinc/labs"),
-    "https://github.com/commontoolsinc/labs/pull/4435",
+    landingHref("packages/ts-transformers tests (#4435)", "sha", "commonfabric/labs"),
+    "https://github.com/commonfabric/labs/pull/4435",
   );
 });
 

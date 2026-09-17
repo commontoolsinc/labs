@@ -32,7 +32,7 @@ const CONTEXT: RunContext = {
   schema: RECORD_SCHEMA_VERSION,
   line: "context",
   reportId: "01SHIPTEST00000000000000",
-  repo: "commontoolsinc/labs",
+  repo: "commonfabric/labs",
   commit: "d".repeat(40),
   dirty: false,
   branch: "main",
@@ -66,7 +66,7 @@ describe("test-records", () => {
   describe("buildLocalContext()", () => {
     it("returns this repository's commit, branch, and machine facts", async () => {
       const context = await buildLocalContext(Deno.cwd(), () => undefined);
-      expect(context.repo).toBe("commontoolsinc/labs");
+      expect(context.repo).toBe("commonfabric/labs");
       expect(context.commit).toMatch(/^[0-9a-f]{40}$/);
       expect(context.env).toBe("local");
       expect(context.denoVersion).toBe(Deno.version.deno);

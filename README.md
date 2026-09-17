@@ -75,7 +75,7 @@ Claude-mediated introduction. See
 [LOCAL_DEV_SERVERS.md](./docs/development/LOCAL_DEV_SERVERS.md) for
 troubleshooting.
 
-_New Common Tools employees are encouraged to visit go/trailhead._
+_New Common Fabric employees are encouraged to visit go/trailhead._
 
 ## Architecture
 
@@ -316,13 +316,13 @@ is a human with particular experiences, embedded in a larger system. We should
 stay away from topics that might have a strong emotional charge for any
 potential participant or onlooker now or in the future. Conversations must stay
 focused on topics that are non-controversial and related (even if indirectly) to
-Common Tools and the ecosystem we're trying to catalyze. If someone is
+Common Fabric and the ecosystem we're trying to catalyze. If someone is
 uncomfortable with a topic you brought up, back off, even if you don't
 understand why someone might be uncomfortable. If someone brings up a topic
 you're uncomfortable with, please contact <conduct@common.tools>.
 
 _See also our
-[code of conduct](https://github.com/commontoolsinc/labs?tab=coc-ov-file)._
+[code of conduct](https://github.com/commonfabric/labs?tab=coc-ov-file)._
 
 ### Discord
 
@@ -355,7 +355,7 @@ restricted to team members only.)
   largely written by agents.
 - **estuary:** the name of our production toolshed server.
 - **loom:** you may hear people in the community refer to "Loom"; this is a
-  product the Common Tools team is working on based on the open source work in
+  product the Common Fabric team is working on based on the open source work in
   this repository.
 - **pattern:** a program that runs on the Common Fabric runtime. See the
   [pattern documentation](./docs/common/).

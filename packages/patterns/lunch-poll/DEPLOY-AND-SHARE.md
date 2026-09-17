@@ -623,5 +623,5 @@ per option per viewer.
 
 For the deeper aggregate + write-conflict findings that still apply to a poll
 with many options and voters, see willkelly's perf investigation in
-[labs#4141](https://github.com/commontoolsinc/labs/pull/4141) (keyed-collection
-/ runtime-aggregate direction).
+[labs#4141](https://github.com/commonfabric/labs/pull/4141) (keyed-collection /
+runtime-aggregate direction).

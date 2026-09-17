@@ -10,7 +10,7 @@
 // Config (from environment)
 //
 
-export const REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "commontoolsinc/labs";
+export const REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "commonfabric/labs";
 
 /** Where the repository is hosted; a workflow run names it. */
 export const SERVER_URL = Deno.env.get("GITHUB_SERVER_URL") ??
