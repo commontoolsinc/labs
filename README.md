@@ -4,7 +4,9 @@
 fast-moving work: interfaces change often, and there is no API stability yet.
 You are welcome to explore the code, run and write patterns, and contribute.
 
-![A loom, by Midjourney](./docs/images/loom.jpg)
+![A sunset over the ocean](./docs/images/banner.jpg)
+
+[commonfabric.com](https://commonfabric.com)
 
 ## What is Common Fabric?
 
