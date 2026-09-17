@@ -861,10 +861,10 @@ export async function readCfInputValue(
  * instead, which a caller clicking a submit control on the next line does not
  * wait for.
  *
- * There is no `commit()` to call on this host. `cf-input` declares one and
- * `cf-textarea` does not, so a `commit?.()` here resolves to `undefined` every
- * time — which makes it worse than dead, because it reads as the thing that
- * flushes the draft while the blur above it is doing that work.
+ * There is no `commit()` to call on this host: `cf-input` declares one and
+ * `cf-textarea` does not. A `commit?.()` here would resolve to `undefined`, and
+ * would read as the thing that flushes the draft while the blur above it did
+ * that work.
  *
  * Presentation mode does not animate this fill. `typeIntoCfInput`, the
  * presentation path {@link fillCfInput} routes through, resolves an

@@ -40,15 +40,12 @@
  * card and the one citation this journey passes through, which is what a
  * journey can check.
  *
- * Two counts are left unasserted on purpose, and neither is a weakening. What
- * the board's card count would add over waiting for each title is that each
- * topic is listed once and no topic is doubled, and that is what
- * `topic-board-child-contract.test.ts` asserts by title rather than by count,
- * for the reason its `topicTitles` doc comment gives: a count says a defect
- * happened without saying which. The thread's comment count is avoided because
- * `topic-retraction-controls.test.ts` records that a topic's first `addComment`
- * can commit twice under server execution (#6808), so a count would fail for a
- * reason that is not the regression this demo is for.
+ * Two counts are not asserted. Waiting for each seeded title says every one of
+ * them is listed; that each is listed once and none is doubled is asserted by
+ * title in `topic-board-child-contract.test.ts`. And a topic's first
+ * `addComment` can commit twice under server execution, as
+ * `topic-retraction-controls.test.ts` records, so the thread can hold more
+ * records than this journey sent.
  *
  * Some of what the journey navigates by is rendered copy rather than behavior:
  * the `Referenced by` heading, the `Send` button's text, the one `cf-textarea`
@@ -96,10 +93,9 @@ import {
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
 /**
- * Topics on the demo's board. Small by default, because CI pays this on every
- * pull request and seeding cost grows faster than the topic count
- * (`docs/development/BENCHMARKS.md`, "The board scaling benchmark"). An
- * investigation that wants a fuller board asks for one.
+ * Topics on the demo's board. Small by default: seeding cost grows faster than
+ * the topic count (`docs/development/BENCHMARKS.md`, "The board scaling
+ * benchmark"). An investigation that wants a fuller board asks for one.
  */
 const SIZE = Number(Deno.env.get("CF_TOPICS_DEMO_TOPICS") ?? "5");
 if (!Number.isInteger(SIZE) || SIZE < 2) {
@@ -171,8 +167,7 @@ describe("Topics board demo", () => {
   let citingTopic: PieceController;
 
   beforeAll(async () => {
-    // A space of the demo's own, so the board it opens is the board it seeded
-    // and nothing else a shard put in the shared space.
+    // A space of the demo's own, so the board it opens is the board it seeded.
     const spaceName = `${SPACE_NAME}-topic-board-demo`;
     identity = await seedIdentity(`topic board demo ${crypto.randomUUID()}`);
     fixture = await seedTopicBoard({
@@ -291,6 +286,8 @@ describe("Topics board demo", () => {
     // reported as `true !== false`.
     expect(new Set(authors)).toEqual(new Set([VIEWER]));
 
-    logStepTimings("topic-board-demo", timeline);
+    // The size is in the label because it is configurable: a timing line
+    // without it cannot say which board it was taken on.
+    logStepTimings(`topic-board-demo size=${SIZE}`, timeline);
   });
 });
