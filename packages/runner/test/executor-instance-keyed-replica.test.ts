@@ -13,8 +13,8 @@
 //   instance's empty one), and writes her per-user consequence with the
 //   typed value (pre-stage-A: consequenced with zero writes);
 // - the resubscribe path is instance-aware: after both instances ran,
-//   BOB's input change wakes the node (the N-run loop resubscribes once
-//   to the UNION of the instance logs — pre-stage-A the last instance's
+//   BOB's input change wakes the node (the N-run loop resubscribes after
+//   each instance to the UNION of its logs — pre-stage-A the last instance's
 //   subscription replaced the others);
 // - S4 (basis rows keyed by the FULL instance address): a demand stamp
 //   broader or narrower than the run's discovered instance leaves no

@@ -217,6 +217,11 @@ export function watchReactiveActionCommit(state: {
   readonly reportTerminalRejection?: (error: Error) => void;
   readonly handleUnavailable?: () => boolean;
 
+  /** Whether a live demander will wake this action when its gates expire. */
+  readonly isLiveAction?: () => boolean;
+  /** Whether this node or fan-out instance already has an accepted result. */
+  readonly hasCommittedResult?: () => boolean;
+
   /** Wakes consumers after a successful commit of a still-active registration. */
   readonly onSuccess?: () => void;
 }): Promise<void> {
@@ -344,11 +349,21 @@ export function watchReactiveActionCommit(state: {
       // be a deferred re-run of an "already-ran" computation, which is not
       // idle work and gets its expiry wake only from a live demander; a
       // one-shot `pull()` has none once it resolves, so the refused first
-      // output would stand in for the answer. A local inconsistency waited
-      // on nothing, so its re-run
+      // output would stand in for the answer. An empty reactive commit also
+      // releases those gates if it has no accepted result yet or no live
+      // demander to wake it. A live node with a prior result keeps its gates.
+      // Other local inconsistencies waited on nothing, so their re-run
       // keeps the debounce: that is the spacing between it and the local
       // writer it raced (an interval `#now` tick's own write, for one).
-      state.markInvalid(state.action, { retry: waitedForCatchUp });
+      const emptyReactiveCommit = isStorageTransactionInconsistent(error) &&
+        typeof error === "object" && error !== null &&
+        "emptyReactiveCommit" in error && error.emptyReactiveCommit === true;
+      state.markInvalid(state.action, {
+        retry: waitedForCatchUp ||
+          (emptyReactiveCommit &&
+            (state.hasCommittedResult?.() !== true ||
+              state.isLiveAction?.() !== true)),
+      });
       state.pending.add(state.action);
       state.queueExecution();
       return;
@@ -510,6 +525,7 @@ export interface SchedulerActionRunState {
   readonly handleError: (error: Error, action: Action) => void;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
   readonly markInvalid: (action: Action, options?: MarkInvalidOptions) => void;
+  readonly isLiveAction: (action: Action) => boolean;
   readonly isDisposed?: () => boolean;
   readonly parkLocalRead?: (action: Action, log: ReactivityLog) => void;
   readonly queueExecution: () => void;
@@ -540,9 +556,8 @@ export async function runSchedulerAction(
 
   const record = state.nodes.get(action);
   const registrationToken = record?.registrationToken;
-  // A direct fan-out run registers after its last instance; a commit can
-  // settle before then. All instances share the lifetime acquired by that
-  // first subscription, while a registered run keeps its original lifetime.
+  // A direct fan-out run registers after its first instance. All instances
+  // share that subscription's lifetime; a registered run keeps its lifetime.
   const retryRegistration = {
     token: state.nodes.isEffect(action) || state.nodes.isComputation(action)
       ? registrationToken
@@ -633,6 +648,7 @@ export async function runSchedulerAction(
     }
     (tx.tx as { debugActionId?: string }).debugActionId = actionId;
     tx.tx.sourceAction = action;
+    tx.tx.validateReactiveReads = true;
     // Server-execution v2 stage F (serving-loop.md §3d): a serving
     // runtime's installed stamper attaches the wave run context here —
     // the reactive-action choke point — so every scheduler-driven
@@ -861,9 +877,8 @@ function causesForInstance(
 
 /** One run of a fanned-out node (stage B): the node's fan-out record, the
  * instance this run served, its dirtiness generation at start, and the
- * sink for its committed log. The loop resubscribes once to the union of
- * the instance logs after its last run, instead of this run resubscribing
- * (which would replace the previous instances' reads). */
+ * sink for its committed log. Each run subscribes to the union of the
+ * instance logs so its reads stay watched while later instances run. */
 interface FanOutRunArgs {
   readonly state: FanOutNodeState;
   readonly instance: FanOutInstance;
@@ -1209,6 +1224,8 @@ function finalizeReactiveActionCommit(
   );
   const fanOutRun = args.fanOutRun;
   const commitState: Parameters<typeof watchReactiveActionCommit>[0] = {
+    isLiveAction: () => state.isLiveAction(args.action),
+    hasCommittedResult: () => owner?.hasCommittedResult === true,
     canRetry: () =>
       !state.runtime.writeTeardownSignal.aborted &&
       state.isDisposed?.() !== true &&
@@ -1229,7 +1246,12 @@ function finalizeReactiveActionCommit(
     offBudgetRetries: state.offBudgetRetries,
     pending: state.pending,
     commitPromise,
-    onSuccess: () => state.runtime.scheduler.noteViewActionCurrent(args.action),
+    onSuccess: () => {
+      if (args.succeeded && owner !== undefined) {
+        owner.hasCommittedResult = true;
+      }
+      state.runtime.scheduler.noteViewActionCurrent(args.action);
+    },
     // A fanned-out instance's retry paths (a conflict, a refused seal —
     // the early-emit guard's fail-closed refusal among them) re-arm THAT
     // instance: its key is dirtied, its siblings stay current, and the
@@ -1289,13 +1311,19 @@ function finalizeReactiveActionCommit(
   recordOptionalActionRunDiagnostics(state, args, committedLog, elapsed);
 
   if (args.fanOutRun !== undefined) {
-    // One run of a fanned-out node: the loop resubscribes once to the
-    // union after its last instance (see runSchedulerAction).
     args.fanOutRun.collectLog(committedLog);
-  } else {
+  }
+  {
     logger.timeStart("scheduler", "run", "resubscribe");
     try {
-      state.resubscribe(args.action, committedLog);
+      // Each instance's commit and subscription share this synchronous turn;
+      // later instances can await while these dependencies remain watched.
+      state.resubscribe(
+        args.action,
+        fanOutRun === undefined
+          ? committedLog
+          : fanOutUnionLog(fanOutRun.state),
+      );
       args.retryRegistration.token ??= state.nodes.get(args.action)
         ?.registrationToken;
     } finally {

@@ -1143,6 +1143,13 @@ export interface IStorageTransaction {
   sourceAction?: object;
 
   /**
+   * Check scheduling dependencies before accepting an empty commit or seal.
+   * Set by reactive computations, whose subscriptions must cover changes since
+   * their reads. Event handlers retain ordinary empty-commit behavior.
+   */
+  validateReactiveReads?: boolean;
+
+  /**
    * The scope INSTANCE identity this transaction's scoped reads and writes
    * resolve against when it is NOT the storage manager's own session
    * (server-execution v2 stage A — OW17's tx→replica identity seam,
@@ -2565,6 +2572,9 @@ export interface IStorageTransactionInconsistent extends IStorageError {
   readonly name: "StorageTransactionInconsistent";
 
   readonly address: IMemoryAddress;
+
+  /** An empty reactive commit needs a fresh run; first results may bypass gates. */
+  readonly emptyReactiveCommit?: true;
 
   from(space: MemorySpace): IStorageTransactionInconsistent;
 }
