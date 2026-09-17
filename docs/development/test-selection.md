@@ -257,7 +257,7 @@ rather than a setting to fix.
 | `COVERAGE_COMMENT_LINES` | 25 | lines | chosen | Up when coverage comments are too noisy; down when debt is climbing unnoticed. |
 | `LOCAL_COVERAGE_MAX_SECONDS` | 30 | seconds | chosen | Up when too many sets are reported as expensive for the report to be worth reading; down when one is quietly eating a lane. Nothing is excluded either way; it only decides what the summary mentions. |
 | `LOCAL_COVERAGE_MAX_SETS` | 2 | measured sets | chosen | Up when broader changes should still be gated and the run can afford those sets' whole unit lists; down when sweeping changes are crowding lanes. |
-| `EXCLUDED_FROM_COVERAGE_GATE` | 9 | workspace members | chosen | Not a quantity. A line comes off when a package fits the run's budget or gains a Deno-only half, which gives it a measured set. A line goes on when a package's own tests stop being what covers it. |
+| `EXCLUDED_FROM_COVERAGE_GATE` | 8 | workspace members | chosen | Not a quantity. A line comes off when a package fits the run's budget or gains a Deno-only half, which gives it a measured set. A line goes on when a package's own tests stop being what covers it. |
 | `LOCAL_COVERAGE_BASELINE_DAYS` | 7 | days | chosen | Up when branches based further back are being reported for want of a baseline they contain; down when the manifest carries more history than anybody reads. |
 | `COVERAGE_TREND_WEEKS` | 3 | weeks | chosen | Up when the tile goes amber too readily; down when debt climbs for a month before anybody is told. |
 | `CATCH_BREADTH_WINDOW_DAYS` | 2 | days | chosen | Up when a broken runner's failures are being counted as catches; down when genuine breadth is being written off as environmental. |
@@ -294,6 +294,38 @@ entries, so the tests that had gone longest without running would be the
 ones it could no longer reach. An aggregate written before those files
 were carried holds none, and each identity rejoins the manifest as its
 records name a file again.
+
+A day of an identity's cost window carries the set of cost rules that
+sealed it, as `COST_RULE`. A day carrying no such stamp was sealed
+before the stamps began, which is every day an aggregate written before
+them holds, and it counts as another set's day like any other.
+
+Sealing a day drops every day of that identity another set sealed, so a
+state holds one set's days. Another set's day is charged while it is all
+there is, which for a test that has not passed since the change is until
+the day ages out of the window, and is dropped the moment the rules in
+force seal a day for that test.
+
+Changing which executions reach a day's sample, or what the sample
+holds, means changing `COST_RULE` in the same change. The cost window
+then refills over its own length, charging fewer days' figures while it
+does; carrying the old days instead would have figures the new rules
+would never produce deciding what a pull request runs for that same
+stretch.
+
+A change to what a manifest or an aggregate holds needs no cold start.
+The area both are written under is named rather than numbered and does
+not move, so a run finds the aggregate the run before it left; a stored
+body says which shape it was written in, and a reader reads anything at
+or under its own forward, field by field. What a reader will not read is
+a body from further ahead than itself. `writtenAhead` is what every
+reader asks about that, so that what counts as too far ahead is answered
+in one place.
+
+A lane looks past such a body to the newest one behind it, over
+`MANIFESTS_LOOKED_BACK` manifests, because a lane with no manifest runs
+the whole corpus. The wall reports a fault instead and shows nothing,
+which costs a person a figure rather than costing a run its selection.
 
 **Nothing gates on it.** When the publisher fails, the previous manifest is
 still the newest one and consumers keep using it. A manifest going stale
@@ -442,9 +474,11 @@ replaces score history with only the selected window.
   incremental one: it folds onto the state already there rather than
   replacing it, which is what separates it from a bootstrap.
 - If the complete paginated listing has no state objects under the intended
-  prefix and schema version, this is a cold start. Dispatch the workflow from
-  `main` once with bootstrap on and leave `days` empty so the landed sixty-day
-  default applies. Then require the three acceptance checks above.
+  prefix, this is a cold start. Dispatch the workflow from `main` once with
+  bootstrap on and leave `days` empty so the landed sixty-day default applies.
+  Then require the three acceptance checks above. A change to what a manifest
+  or an aggregate holds is not a cold start: the area is named rather than
+  numbered, so it does not move, and both are read forward.
 - If listing or pagination fails, the newest state cannot be read, or its schema
   is invalid, that is not absence. The publisher refuses to write by design.
   Leave the append-only manifests and state objects intact: they and the raw
@@ -465,9 +499,10 @@ read them, and creates nothing in the store.
 
 ## What a run leaves out
 
-A run's log names two kinds of identity that did not reach the manifest.
-The first is the design working. The second is a surface whose records do
-not say which unit they belong to.
+A run's log names four kinds of identity that did not reach the manifest.
+The first is the design working. The second is a test the tree no longer
+holds. The third is a surface whose records do not say which unit they
+belong to. The fourth is a topology defect.
 
 The first is the identities that measure a whole invocation:
 
@@ -484,12 +519,57 @@ the time of the steps inside it would count that work twice. The count is
 that separation working. It changes when a suite gains or loses such a
 record, and there is nothing to do about it either way.
 
-The second is the identities the topology has no unit for:
+The second is the identities that have left the tree:
 
 ```
-test selection: the topology has no unit for 3295 identities, so no lane
-can be asked to run one. What puts an identity here, and what takes it
-out again, is in docs/development/test-selection.md.
+test selection: 6 identities have left the tree: no suite claims them and
+no run of them has been recorded inside the window a state keeps counters
+for. Their states are dropped from the aggregate.
+test selection: those 6 were recorded by 2 surface(s): unit:utils 4,
+unit:memory 2
+```
+
+A test deleted from the repository keeps its records in the store, and
+the store is what the publisher reads, so without this the aggregate
+would carry its state for as long as the store lives. Two things have to
+hold before one is dropped. No suite claims it, so nothing in the tree
+can be asked to run it. And no run of it has been recorded inside the
+window a state keeps counters for, which is the longer of
+`CHURN_WINDOW_DAYS` and `FLAKE_WINDOW_DAYS` and so is sixty days today.
+
+The second condition is what the first cannot say on its own. A suite
+whose records name a scope the topology no longer holds claims none of
+its identities, and every one of those is still running on the default
+branch, so the runs hold them where the claim does not. What the second
+condition does not reach is a test the tree holds that nothing runs at
+all: a skip is the one outcome a state records nothing for, so such a
+test meets both conditions and is dropped like a deleted one. What that
+costs is catches from before the window, because every counter inside it
+is empty either way.
+
+A unit a configuration declares unavailable is the exception, and is kept
+under the variant that declared it: the declaration is the tree saying the
+test is there and does not run in this configuration. The exemption is
+read a unit at a time, so a declaration naming one leaf inside a unit does
+not reach it — such a unit is still enumerated and still running, and its
+identities are placed by their file rather than reaching this at all.
+
+That window is how long a deletion takes to settle. Until then the
+deleted test is in the count below rather than this one, because it did
+run inside the window. So this count is a one-off when a change deletes tests
+and nothing at all in between, and a count that stays large run after run
+is a suite that has stopped recording rather than a set of tests somebody
+deleted. The surfaces named beside it say which suite.
+
+The third is the identities no suite claims that the aggregate still
+carries:
+
+```
+test selection: no suite claims 3295 identities the aggregate still
+carries, so no lane can be asked to run one. Each has run inside the
+window a state keeps counters for, or a configuration declares its unit
+unavailable. What puts an identity here, and what takes it out again, is
+in docs/development/test-selection.md.
 test selection: those 3295 were recorded by 12 surface(s): unit:utils 742,
 unit:runtime-client 509, unit:ts-transformers 379,
 unit:schema-generator 314, unit:js-compiler 153, and 7 more
@@ -511,8 +591,7 @@ supplies neither has no file on any of its records, and neither does a
 name that two files in one report both report. Where a suite's units are
 not files — a dispatch arm, a pattern key — the answer is the recorded
 name instead, and a name no suite recognizes leaves the identity without a
-unit the same way. An identity that matches two suites is left out as
-well, which is a topology defect the drift guard fails on separately. What
+unit the same way. What
 is not in the count is the lane measuring its own setup and its own
 batches. Those records travel the same path as a test's, but nothing
 enumerates them and no lane can be asked to run one, so no suite has a
@@ -540,13 +619,26 @@ The count spans every identity the aggregate holds rather than the ones
 this run read, because the surfaces it is taken from do. Three different
 things are in it. The first is an identity whose records have never said
 which unit it is in, which is the one to act on, and the next record
-that says enough takes it out. The second is an identity nothing records
-any more: a deleted or renamed test keeps its state in the aggregate,
-and the file its records named may be one no suite has a unit for now.
-The third is an identity two suites both claim, which no record can
-settle, and which the drift guard fails on separately. Nothing in the
-count separates the three, and the surfaces named beside it are the only
-handle on which is which.
+that says enough takes it out. The second is a test deleted inside that
+window, which moves to the count above once the window has passed over
+it and is gone from the aggregate for good after that. The third is a
+test in a unit a configuration declares unavailable, which is here for
+as long as the declaration stands and is not something to act on: the
+declaration is why it stopped recording.
+
+The fourth is the identities two suites both claim:
+
+```
+test selection: 2 identities are claimed by more than one suite, which is
+a topology defect the drift guard fails on. They are left out rather than
+placed in whichever suite came first.
+```
+
+No record can settle which suite owns one, so placing it either way would
+put the work wherever the topology happened to be read in. The tree holds
+the test twice over rather than not at all, which is why this is counted
+apart from the tests that have left: an identity here keeps its history
+until the topology is fixed.
 
 The first runs after a change to what the aggregate carries report the
 whole corpus here. An aggregate written before the files were carried
@@ -566,6 +658,104 @@ JUnit path on the job's ship step, the `--preload` naming
 `deno test`, and the working directory that relative class names are
 joined onto. Where the records do have a file, the file is one no suite
 has a unit for, and the answer is in the topology rather than in the job.
+
+### When the cost model is empty
+
+Every run says what the cost model holds, so that one nobody measured is
+as visible as one somebody did:
+
+```
+test selection: the cost model holds 12 suite(s) and 5 capability
+setup(s)
+```
+
+The two halves are counted apart because they come from different
+records. A lane writes one per capability it opens and a pair per batch,
+and a lane killed part way through a batch leaves the pair unmatched, so
+a model can hold a capability setup and no suite at all.
+
+A suite's own figures are what a lane is charged for holding the suite
+and for opening each of its units, so a model with no suite in it
+charges nothing for either and a lane packed against it overruns the
+bound it is killed at. A capability setup
+is measured from a lane's own records and is unaffected, and the
+prologue is a fixed dial rather than a measurement at all, so it is
+there whether any lane has measured anything or not. That is why this is
+about the suites rather than everything a lane is charged. A run with no
+suite in its model says so rather than publishing the empty map in
+silence:
+
+```
+test selection: no suite has a measured cost in the last 7 day(s), so a
+lane is charged nothing for holding one or for opening its units, and a
+lane packed against this manifest overruns. See
+docs/development/test-selection.md.
+```
+
+Four different things end there. One of them the run can tell you
+about, and a third line says so when it applies:
+
+```
+test selection: 15 lane measurement(s) this run read came from a run
+the fold could not place, so the model was fitted without them.
+```
+
+**The fold declines the records of lanes that did run.** `provenance`
+decides where a run's executions happened from the run's own facts, and
+a run it cannot place contributes nothing — not its observations, not
+its durations, and not what its lanes measured. A lane exercised only
+from such runs therefore contributes nothing however long it runs and
+however far back the publisher reads. That third line is what tells
+this apart from a lane that has not run, and it is the one case here
+anybody can act on.
+
+It is counted over the objects the run folded, and over the same window
+the model is fitted across, so a run reading a wider window than the
+model's own — a bootstrap, or a window somebody asked for — does not
+offer a measurement from a day the model cannot reach as the reason a
+current model is empty. A measurement whose group carries no start time
+that reads as one has no day and is not counted at all. So the figure is
+evidence when it appears and says nothing when it does not: a run that
+folds nothing new prints no such line whatever the store holds.
+
+What `provenance` declines is what the record specification asks it to.
+Under the
+[trust boundaries](../specs/test-records.md#trust-boundaries-for-consumers)
+the store holds every object to, a run marked `fork: true` was authored
+under the repository's write access like any other, so a lane exercised
+from a fork's pull request is read like a lane exercised from any other.
+The flag marks a run whose head repository is not the base one, and
+marks a run whose payload named fewer than both, so it is never a claim
+that a fork ran the tests — which is why it settles whether a run may be
+a baseline and says nothing about reading its observations. What is left
+unplaceable is a run whose own facts do not say where it ran.
+
+The other three the line cannot separate. No lane has run: nothing to
+measure and nothing to do. A lane has run and recorded nothing, which
+looks like any other suite that recorded nothing. Or the fold has
+stopped reading a figure it used to read, or never started reading one
+the lane now writes — `readReport` is where a stored object becomes the
+kinds of thing the publisher takes out of it, and the lane measurements
+are one of them, so a change on either side of that pair is invisible
+except through the empty model itself.
+
+All four fill in as soon as a lane run the fold can place lands: every
+object the publisher folds for the first time gives up its lane
+measurements, so one run puts a figure in the model and seven days of
+runs fill the window `COST_WINDOW_DAYS` names. Until then the model is
+not merely thin. Every figure in it is a maximum — the worst capability
+opening seen, and the largest gap between what a batch was charged and
+what it took — so a model fitted over part of a window reads lower than
+one fitted over all of it, and reading low is the direction that
+overruns a lane. A suite with nothing at all in the window is charged
+nothing.
+
+Nothing recovers a figure from before the publisher could read it. An
+object the aggregate has already folded is never folded again, because
+the counters it feeds add rather than replace, so a run that reads it
+twice counts every execution in it twice. What a bootstrap is for is the
+history that follows from the objects themselves; what no run can undo
+is a window that went by while nothing readable was being written.
 
 ## What the run on the default branch does with a flaky test
 
@@ -653,9 +843,9 @@ shipped it — and two merges landing close together, which is the case
 this exists for, is exactly when the earlier relay is still running.
 
 The pull request's own run is read from the store instead, because the
-relay is where the trust decision about it was made: records from a fork
-run are authored by the fork, and the relay ships them only for a member.
-What the store holds is what this repository was willing to believe.
+relay is where the trust decision about it was made: it ships a fork run
+only for a team member, and the store is what that decision produced.
+Reading the run's own artifacts would go around that gate.
 
 The previous run is asked for by the parent commit's name rather than
 taken from a listing. Pushes to the default branch are not cancelled by

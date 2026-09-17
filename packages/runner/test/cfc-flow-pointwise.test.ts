@@ -191,14 +191,16 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     // exactly element i's taint. (Asserting on specific internal docs is
     // brittle — content lands in different docs on the inline-first-run vs
     // steady-state paths; what matters is what a reader's derivation
-    // joins.) The blind-passing split (link-resolution probes and
-    // link-origin pointer labels stay out of J; link-covered writes aren't
-    // stamped; pure-link-structure writes get exact-path `structure`
-    // stamps that slot reads below them never join) keeps the
-    // coordinator's scaffolding from smearing one element's taint onto
-    // the other — this test also pins that the batch first-run's coarse J
-    // landing on the container as shape taint does NOT leak back into
-    // later per-element results.
+    // joins.) Three parts of the blind-passing split keep the coordinator's
+    // scaffolding from smearing one element's taint onto the other:
+    // link-covered writes aren't stamped, so the per-slot link labels the
+    // link write mints from each source's own label are the pointwise
+    // answer; pure-link-structure writes get exact-path `structure` stamps
+    // that slot reads below them never join; and the `*`-path membership
+    // templates beside those stamps are not consumed by the coordinator's
+    // own scaffolding reads, which carry `machineryRead`. This test also
+    // pins that the batch first-run's coarse J landing on the container as
+    // shape taint does NOT leak back into later per-element results.
     const probe = async (index: number, cause: string): Promise<string[]> => {
       const ptx = runtime!.edit();
       const value = (result.key("mapped") as any).key(index).withTx(ptx)

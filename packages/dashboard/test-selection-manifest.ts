@@ -11,23 +11,44 @@
  * store that holds no manifest, which is the one case where "none has been
  * published" is true.
  *
+ * One refusal is singled out from the rest, because it behaves
+ * differently. A body written in a shape from further ahead than this
+ * reader is settled: the store creates objects and never overwrites one,
+ * so that body is what the name holds and a later read gets the same
+ * answer. It carries its own type, so a reader can record it and stop
+ * fetching the object, and so the wall can say which shape it found
+ * rather than the phrase it gives a source that went quiet. Every other
+ * refusal stays a plain fault and is read again.
+ *
+ * `writtenAhead` is what separates the two, and every reader of this
+ * store asks it rather than comparing a declared shape against a bound of
+ * its own, so a wall passing over a body and a validator refusing one
+ * cannot come to disagree. A body from a shape this reader does read and
+ * still cannot parse is a broken object rather than one from further
+ * ahead, and is read again.
+ *
  * Following the dashboard's values (README.md): what this feeds reports on
  * the system. It names tests, never people.
  */
 
 import {
+  declaredSchema,
   type LanePlan,
   listObjects,
   type Manifest,
+  MANIFEST_SCHEMA_VERSION,
   objectUrl,
   parseManifest,
+  SELECTION_AREA,
+  writtenAhead,
 } from "@commonfabric/test-support/records";
 
 export const TEST_SELECTION_BUCKET = "cf-ci-metadata";
-// The trailing slash is what keeps the listing inside this version. A
-// bare "v1" prefix also matches "v10", so a later schema's manifests
-// would sort above these and hide the newest one a v1 reader may use.
-export const TEST_SELECTION_PREFIX = "labs/test-selection/v1/";
+// The area is the one the publisher names, rather than a second copy of
+// it here that would part company the first time either moved. The
+// trailing slash is what keeps the listing inside the area, since a bare
+// "v1" prefix also matches "v10".
+export const TEST_SELECTION_PREFIX = `labs/test-selection/${SELECTION_AREA}/`;
 
 /** The generation time in a manifest's object name, when it is one. */
 export function generatedAtOf(objectName: string): string | undefined {
@@ -64,6 +85,27 @@ export async function manifestNames(options: {
   }).sort();
 }
 
+/**
+ * A manifest body declaring a version this reader is not built for. The
+ * object holding it is immutable, so a later read of that name returns the
+ * same body and the same answer.
+ */
+export class ManifestSchemaError extends Error {
+  #reason: string;
+
+  constructor(name: string, schema: number) {
+    const reason = `store holds schema ${schema}, ` +
+      `this wall reads ${MANIFEST_SCHEMA_VERSION}`;
+    super(`manifest ${name}: ${reason}`);
+    this.#reason = reason;
+  }
+
+  /** The refusal alone, for a line too narrow to carry the object name. */
+  get reason(): string {
+    return this.#reason;
+  }
+}
+
 /** Fetches and validates a manifest, throwing when the object is unreadable. */
 export async function readManifest(name: string, options: {
   bucket?: string;
@@ -77,11 +119,23 @@ export async function readManifest(name: string, options: {
   }
   // The store serves these with transcoding, so a plain fetch has
   // already decoded the gzip the object is stored under.
-  const manifest = parseManifest(await response.text());
-  if (manifest === undefined) {
+  const text = await response.text();
+  // A manifest holds every identity the store knows, so the body is
+  // parsed once here and the one value answers both questions asked of
+  // it.
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
     throw new Error(`manifest ${name}: not a manifest`);
   }
-  return manifest;
+  const manifest = parseManifest(body);
+  if (manifest !== undefined) return manifest;
+  const schema = declaredSchema(body);
+  if (schema !== undefined && writtenAhead(body)) {
+    throw new ManifestSchemaError(name, schema);
+  }
+  throw new Error(`manifest ${name}: not a manifest`);
 }
 
 /**

@@ -643,7 +643,23 @@ export interface DaySamples {
 
   /** How many ran in all, which is what a percentile's rank is taken over. */
   count: number;
+
+  /**
+   * Which set of cost rules measured them, on a day a state holds. A
+   * batch on its way into one carries none, since the day it is sealed
+   * into is what records the set that sealed it.
+   */
+  rule?: number;
 }
+
+/**
+ * Which set of cost rules a day a state holds was sealed under: which
+ * executions reach a day's sample, and what the sample holds. Change it
+ * to any other value in the same change that alters either. The values
+ * are not ordered and nothing but equality is asked of them; a day
+ * carrying none was sealed before the stamps began, under the first set.
+ */
+export const COST_RULE = 3;
 
 /** A fresh, empty sample. */
 export function emptySamples(): DaySamples {
@@ -719,16 +735,22 @@ export function sealDay(
   day: string,
   batch: DaySamples,
 ): void {
+  if (batch.count === 0) return;
+  // A day another set of rules sealed answers only until these rules
+  // have sealed one, and this is that sealing, so the rest of what that
+  // set left goes here. What is left afterwards is one set's days.
+  for (const [sealed, samples] of Object.entries(state.costByDay)) {
+    if (samples.rule !== COST_RULE) delete state.costByDay[sealed];
+  }
   // The only writer of a day's sample, so what is already there is
   // another sealing of the same day from an earlier run and can be
   // combined with this one. Nothing writes a provisional value alongside
   // it, whose count would then be added to a count that already includes
   // it.
-  if (batch.count === 0) return;
-  state.costByDay[day] = mergeSamples(
-    state.costByDay[day] ?? emptySamples(),
-    batch,
-  );
+  state.costByDay[day] = {
+    ...mergeSamples(state.costByDay[day] ?? emptySamples(), batch),
+    rule: COST_RULE,
+  };
 }
 
 /** A day as an older state wrote it: the percentile rather than the samples. */
@@ -747,16 +769,25 @@ interface StoredPercentile {
  * how a day of slow runs would come to report a fast one.
  */
 export function readCostsForward(state: IdentityState): void {
-  const days = state.costByDay ?? {};
+  const held = state.costByDay;
+  const days = typeof held === "object" && held !== null && !Array.isArray(held)
+    ? held
+    : {};
   state.costByDay = days;
   // A stored day is one shape or the other, which the state's own
   // declared type cannot say.
   const read: Record<string, DaySamples | StoredPercentile> = days;
   for (const [day, held] of Object.entries(read)) {
+    // A day whose stored figures are not numbers, and one that is not a
+    // record of figures at all, are both read as a day with nothing in
+    // it, which is what a day this cannot make sense of is worth.
+    // Ending the read of the whole state is not, and a state is read
+    // back through this before anything has looked at what it holds.
+    if (typeof held !== "object" || held === null) {
+      days[day] = emptySamples();
+      continue;
+    }
     if ("slowest" in held) continue;
-    // A day whose stored figures are not numbers is read as a day with
-    // nothing in it, which is what a day this cannot make sense of is
-    // worth. Ending the read of the whole state is not.
     days[day] = Number.isInteger(held.count) && held.count > 0 &&
         Number.isFinite(held.p90)
       ? {

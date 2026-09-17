@@ -93,6 +93,7 @@ import {
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+  type CfcPreparationWork,
   POST_COMMIT_RELEASE_REJECTED,
   runtimeWritePolicyAuthorized,
 } from "../cfc/types.ts";
@@ -219,6 +220,9 @@ type CfcInstrumentationHooks = {
 
   /** One full consumed-label collection was started. Measurement only. */
   onConsumedLabelWalk?(): void;
+
+  /** Work performed by preparation, including label lookup and stamping. */
+  onPreparationWork?(kind: CfcPreparationWork, count: number): void;
 
   /** One dereference trace was recorded, and how many the transaction holds
    * after it. `probeBelongsToDereference` scans this set once per read
@@ -2036,6 +2040,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcInstrumentation.onConsumedLabelWalk?.();
   }
 
+  /** @inheritDoc */
+  noteCfcPreparationWork(kind: CfcPreparationWork, count = 1): void {
+    this.#cfcInstrumentation.onPreparationWork?.(kind, count);
+  }
+
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
     this.#assertWritable("writeCfcGrant()");
     // The trusted policy-writer path (§8.12.7 route 2a, design §2.3
@@ -2952,6 +2961,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     space: MemorySpace,
   ): Iterable<TransactionWriteDetail> {
     return getTransactionWriteDetails(this.tx, space);
+  }
+
+  getWriteDetailsForTarget(target: {
+    space: MemorySpace;
+    id: URI;
+    scope?: CellScope;
+    path?: readonly PropertyKey[];
+  }): Iterable<TransactionWriteDetail> {
+    return this.tx.getWriteDetailsForTarget?.(target) ??
+      this.getWriteDetails(target.space);
   }
 
   status(): StorageTransactionStatus {
@@ -4020,6 +4039,11 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.#wrapped.noteCfcConsumedLabelWalk();
   }
 
+  /** @inheritDoc */
+  noteCfcPreparationWork(kind: CfcPreparationWork, count = 1): void {
+    this.#wrapped.noteCfcPreparationWork(kind, count);
+  }
+
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
     return this.#wrapped.writeCfcGrant(input);
   }
@@ -4138,6 +4162,16 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   ): Iterable<TransactionWriteDetail> {
     return this.#wrapped.getWriteDetails?.(space) ??
       getTransactionWriteDetails(this.#wrapped.tx, space);
+  }
+
+  getWriteDetailsForTarget(target: {
+    space: MemorySpace;
+    id: URI;
+    scope?: CellScope;
+    path?: readonly PropertyKey[];
+  }): Iterable<TransactionWriteDetail> {
+    return this.#wrapped.getWriteDetailsForTarget?.(target) ??
+      this.getWriteDetails(target.space);
   }
 
   status(): StorageTransactionStatus {

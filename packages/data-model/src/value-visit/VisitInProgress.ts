@@ -3,20 +3,18 @@ import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import { type Primitive } from "@commonfabric/utils/types";
 
 import { codecOf, NULL_LIVE_ENVIRONMENT } from "@/codec-common/index.ts";
-import { isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
-import {
-  type FabricArray,
-  type FabricContainerValue,
-  FabricInstance,
-  type FabricPlainObject,
+import type {
+  FabricArrayPlus,
+  FabricContainerValuePlus,
+  FabricInstancePlus,
+  FabricPlainObjectPlus,
   FabricPrimitive,
-  type FabricValue,
+  FabricValue,
+  FabricValuePlus,
 } from "@/interface.ts";
 import {
-  type FabricValueTag,
-  isValidFabricValue,
-  isValidFabricValueLayer,
-  tagOfFabricValue,
+  type FabricValuePlusTag,
+  type PlusTypePredicate,
   tagOfFabricValueElseNull,
   VALUE_TAGS,
 } from "@/types";
@@ -26,7 +24,6 @@ import {
   type BaselineVisitResult,
   type DispatchingVisitorResult,
   DO_VISIT_SUBTYPE,
-  type DomainFor,
   type LeafVisitorResult,
   type RecurseForm,
   type ReplaceForm,
@@ -40,9 +37,9 @@ import {
  * _only_ when a replacement has been made (expected to be uncommon), thereby
  * avoiding allocation for the common un-replaced `visitSubtype` cases.
  */
-type VisitSubtypeOfForm<DomainExtra> = {
+type VisitSubtypeOfForm<PlusType> = {
   readonly type: "visitSubtypeOf";
-  readonly value: DomainFor<DomainExtra>;
+  readonly value: FabricValuePlus<PlusType>;
 };
 
 /**
@@ -52,13 +49,13 @@ type VisitSubtypeOfForm<DomainExtra> = {
  * heavyweight operation -- the one extra allocation is small potatoes, and it
  * keeps the code a wee bit simpler.
  */
-type RecurseOfForm = {
+type RecurseOfForm<PlusType> = {
   readonly type: "recurseOf";
   readonly containerTag:
     | typeof VALUE_TAGS.Array
     | typeof VALUE_TAGS.FabricInstance
     | typeof VALUE_TAGS.Object;
-  readonly container: FabricContainerValue;
+  readonly container: FabricContainerValuePlus<PlusType>;
   readonly doKeys: boolean;
   readonly doValues: boolean;
 };
@@ -70,33 +67,25 @@ type RecurseOfForm = {
  * This class is _intentionally_ omitted from the barrel `export` file for the
  * submodule.
  */
-export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
+export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
   /** Concrete visitor implementation. */
-  #visitor: ValueVisitor<DomainExtra, ResultType>;
+  #visitor: ValueVisitor<PlusType, ResultType>;
+
+  /** Bound method call to `#visitor.isPlusType()`. */
+  #isPlusType: PlusTypePredicate<PlusType>;
 
   /** Container stack of the visit currently in progress. */
-  #stack = new IndexTrackingStack<DomainFor<DomainExtra>>();
+  #stack = new IndexTrackingStack<FabricValuePlus<PlusType>>();
 
   /** Indicates if a visit is now actually in-progress. */
   #inProgress = false;
 
   /**
-   * Indicates if the value being visited is assumed to be a valid
-   * `FabricValue`.
-   */
-  #assumeValid = false;
-
-  /**
-   * When `#assumeValid` is `false`, whether to do deep type checks (vs.
-   * shallow).
-   */
-  #deepTypeCheck = false;
-
-  /**
    * Constructs an instance.
    */
-  constructor(visitor: ValueVisitor<DomainExtra, ResultType>) {
+  constructor(visitor: ValueVisitor<PlusType, ResultType>) {
     this.#visitor = visitor;
+    this.#isPlusType = visitor.isPlusType.bind(visitor);
   }
 
   //
@@ -104,40 +93,10 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   //
 
   /**
-   * Visits the indicated value as a top-level operation, where the domain and
-   * result type are assumed to all be known-valid `FabricValue`. This is only
-   * appropriate to call when this class is instantiated with default type
-   * parameters _and_ `value` can safely be assumed to be valid (either because
-   * of an explicit check or by fiat).
+   * Visits the indicated value as a top-level operation. See the top-level
+   * `visitValue()` for the extent to which encountered values are inspected.
    */
-  visitFabricValue(value: FabricValue): BaselineVisitResult<ResultType> {
-    return this.#mainVisit(value, true, false);
-  }
-
-  /**
-   * Visits the indicated value as a top-level operation, checking every
-   * encountered value to determine whether or not it is a `FabricValue`.
-   * See `visitValue()` for details on the `deepTypeCheck` argument.
-   */
-  visit(
-    value: DomainFor<DomainExtra>,
-    deepTypeCheck: boolean,
-  ): BaselineVisitResult<ResultType> {
-    return this.#mainVisit(value, false, deepTypeCheck);
-  }
-
-  //
-  // Visitor engine implementation
-  //
-  // This is arranged in approximately top-down fashion, to aid in readability.
-  //
-
-  /** Helper which implements most of a top-level visit. */
-  #mainVisit(
-    value: DomainFor<DomainExtra>,
-    assumeValid: boolean,
-    deepTypeCheck: boolean,
-  ): BaselineVisitResult<ResultType> {
+  visit(value: FabricValuePlus<PlusType>): BaselineVisitResult<ResultType> {
     if (this.#inProgress) {
       // This is a defense-in-depth protection against bugs in this submodule,
       // and also serves as documentation for the intended use of this class.
@@ -148,18 +107,24 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
     this.#inProgress = true;
     try {
-      this.#assumeValid = assumeValid;
-      this.#deepTypeCheck = deepTypeCheck;
       return this.#visitValue(value);
     } finally {
       this.#inProgress = false;
     }
   }
 
+  //
+  // Visitor engine implementation
+  //
+  // This is arranged in approximately top-down fashion, to aid in readability.
+  //
+
   /**
    * Visits a top-level value or contained sub-value.
    */
-  #visitValue(value: DomainFor<DomainExtra>): BaselineVisitResult<ResultType> {
+  #visitValue(
+    value: FabricValuePlus<PlusType>,
+  ): BaselineVisitResult<ResultType> {
     const result = this.#visitResolvingSubtype(value);
 
     switch (result?.type) {
@@ -220,12 +185,12 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * this method. See comment on the definition of `RecurseOfForm` for details.
    */
   #visitResolvingSubtype(
-    value: DomainFor<DomainExtra>,
+    value: FabricValuePlus<PlusType>,
   ):
-    | RecurseOfForm
+    | RecurseOfForm<PlusType>
     | Exclude<
-      LeafVisitorResult<DomainExtra, ResultType>,
-      ReplaceForm<DomainExtra>
+      LeafVisitorResult<PlusType, ResultType>,
+      ReplaceForm<PlusType>
     > {
     const vis = this.#visitor;
 
@@ -251,11 +216,11 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       }
 
       const tag = this.#tagOfValueElseNull(value);
-      let result: DispatchingVisitorResult<DomainExtra, ResultType>;
+      let result: DispatchingVisitorResult<PlusType, ResultType>;
 
       switch (tag) {
         case VALUE_TAGS.Array: {
-          const array = value as FabricArray;
+          const array = value as FabricArrayPlus<PlusType>;
           result = vis.visitFabricContainer(array);
           if (result?.type === "visitSubtype") {
             result = vis.visitFabricArray(array);
@@ -264,7 +229,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         }
 
         case VALUE_TAGS.FabricInstance: {
-          const instance = value as FabricInstance;
+          const instance = value as FabricInstancePlus<PlusType>;
           result = vis.visitFabricContainer(instance);
           if (result?.type === "visitSubtype") {
             result = vis.visitFabricInstance(instance);
@@ -273,7 +238,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         }
 
         case VALUE_TAGS.Object: {
-          const object = value as FabricPlainObject;
+          const object = value as FabricPlainObjectPlus<PlusType>;
           result = vis.visitFabricContainer(object);
           if (result?.type === "visitSubtype") {
             result = vis.visitFabricPlainObject(object);
@@ -281,22 +246,18 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
           break;
         }
 
-        case null: {
-          // `null` means that `value` was not recognized as a `FabricValue`.
-          if (this.#assumeValid) {
-            const desc = toCompactDebugString(value);
-            throw new Error(
-              `Encountered a non-\`FabricValue\` while doing an "assume valid" visit: ${desc}`,
-            );
-          } else if (vis.isDomainExtra(value)) {
-            result = vis.visitNonFabricValue(value);
-          } else {
-            const desc = toCompactDebugString(value);
-            throw new Error(
-              `Encountered a value outside of the visitor's domain: ${desc}`,
-            );
-          }
+        case VALUE_TAGS.PlusType: {
+          result = vis.visitPlusType(value as PlusType);
           break;
+        }
+
+        case null: {
+          // `null` means that `value` has no fabric shape and `isPlusType()`
+          // did not claim it.
+          const desc = toCompactDebugString(value);
+          throw new Error(
+            `Encountered a value outside of the visitor's domain: ${desc}`,
+          );
         }
 
         default: {
@@ -328,13 +289,13 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * the visitor returns something other than a `replace` result.
    */
   #visitResolvingCyclesAndReplacement(
-    value: DomainFor<DomainExtra>,
+    value: FabricValuePlus<PlusType>,
   ):
-    | RecurseOfForm
-    | VisitSubtypeOfForm<DomainExtra>
+    | RecurseOfForm<PlusType>
+    | VisitSubtypeOfForm<PlusType>
     | Exclude<
-      DispatchingVisitorResult<DomainExtra, ResultType>,
-      ReplaceForm<DomainExtra> | RecurseForm
+      DispatchingVisitorResult<PlusType, ResultType>,
+      ReplaceForm<PlusType> | RecurseForm
     > {
     const vis = this.#visitor;
     const origValue = value;
@@ -370,9 +331,11 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * Recurses into a `FabricArray`, iterating over all its elements, in response
    * to a `recurse` result.
    */
-  #recurseFabricArray(result: RecurseOfForm): BaselineVisitResult<ResultType> {
+  #recurseFabricArray(
+    result: RecurseOfForm<PlusType>,
+  ): BaselineVisitResult<ResultType> {
     const { container, doValues } = result;
-    const array = container as FabricArray;
+    const array = container as FabricArrayPlus<PlusType>;
     const vis = this.#visitor;
 
     if (!doValues) {
@@ -448,10 +411,10 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * per its normal codec.
    */
   #recurseFabricInstance(
-    result: RecurseOfForm,
+    result: RecurseOfForm<PlusType>,
   ): BaselineVisitResult<ResultType> {
     const { container, doValues } = result;
-    const instance = container as FabricInstance;
+    const instance = container as FabricInstancePlus<PlusType>;
     const vis = this.#visitor;
 
     if (!doValues) {
@@ -489,10 +452,10 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * response to a `recurse` result.
    */
   #recurseFabricPlainObject(
-    result: RecurseOfForm,
+    result: RecurseOfForm<PlusType>,
   ): BaselineVisitResult<ResultType> {
     const { container, doKeys, doValues } = result;
-    const plainObj = container as FabricPlainObject;
+    const plainObj = container as FabricPlainObjectPlus<PlusType>;
     const vis = this.#visitor;
 
     if (!(doKeys || doValues)) {
@@ -546,9 +509,9 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    */
   #adjustRecurseForm(
     result: RecurseForm,
-    finalValue: DomainFor<DomainExtra>,
-    finalValueTagIfKnown?: FabricValueTag | null,
-  ): RecurseOfForm {
+    finalValue: FabricValuePlus<PlusType>,
+    finalValueTagIfKnown?: FabricValuePlusTag | null,
+  ): RecurseOfForm<PlusType> {
     const tag = (finalValueTagIfKnown === undefined)
       ? this.#tagOfValueElseNull(finalValue)
       : finalValueTagIfKnown;
@@ -560,7 +523,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         return {
           type: "recurseOf",
           containerTag: tag,
-          container: finalValue as FabricContainerValue,
+          container: finalValue as FabricContainerValuePlus<PlusType>,
           doKeys: result.doKeys,
           doValues: result.doValues,
         };
@@ -578,11 +541,11 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * based on whether the visited value is a replacement.
    */
   #visitSubtypeFormFor(
-    origValue: DomainFor<DomainExtra>,
-    finalValue: DomainFor<DomainExtra>,
+    origValue: FabricValuePlus<PlusType>,
+    finalValue: FabricValuePlus<PlusType>,
   ):
     | VisitSubtypeForm
-    | VisitSubtypeOfForm<DomainExtra> {
+    | VisitSubtypeOfForm<PlusType> {
     if (Object.is(origValue, finalValue)) {
       return DO_VISIT_SUBTYPE;
     }
@@ -594,24 +557,12 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
-   * Gets the tag for the given value, in a manner which honors the
-   * type-checking style indicated by the top-level `visit*()` call on this
-   * instance.
+   * Gets the tag for the given value, consulting the visitor's `isPlusType()`
+   * only where the value's shape is not a fabric one.
    */
-  #tagOfValueElseNull(value: DomainFor<DomainExtra>): FabricValueTag | null {
-    if (this.#assumeValid) {
-      return tagOfFabricValueElseNull(value as FabricValue);
-    } else if (this.#deepTypeCheck) {
-      // TODO(danfuzz): If cached, `isValidDeepFrozenFabricValue()` is faster
-      // than `isValidFabricValue()`. The latter should actually sniff at the
-      // frozen cache.
-      const isFabricValue = isValidDeepFrozenFabricValue(value) ||
-        isValidFabricValue(value);
-      return isFabricValue ? tagOfFabricValue(value) : null;
-    } else {
-      return isValidFabricValueLayer(value)
-        ? tagOfFabricValue(value as FabricValue)
-        : null;
-    }
+  #tagOfValueElseNull(
+    value: FabricValuePlus<PlusType>,
+  ): FabricValuePlusTag | null {
+    return tagOfFabricValueElseNull(value, this.#isPlusType);
   }
 }

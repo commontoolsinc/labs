@@ -3084,11 +3084,16 @@ export class SpaceServer implements TransactionSealDestination {
    * tick here (so a permanently unrunnable event still hardens into
    * the events.md §5 DROP and clears the park criterion). */
   #armDeferredRescan(): void {
+    // Only a serving tenure arms a backstop. A drain pass runs on through
+    // the awaits a park makes — the seal chain, the runtime's disposal —
+    // and its deferrals land after the park has cleared this timer, which
+    // the park clears once. The entries such a pass leaves pending are
+    // scanned by the next activation.
+    if (!this.#active) return;
     if (this.#deferredRescanTimer !== undefined) return;
     this.#options.stats.events.deferredRescansArmed += 1;
     this.#deferredRescanTimer = setTimeout(() => {
       this.#deferredRescanTimer = undefined;
-      if (!this.#active) return;
       this.#options.stats.events.deferredRescansFired += 1;
       this.#eventScanOwed = true;
       this.#feedArrived?.resolve();

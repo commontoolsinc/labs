@@ -24,11 +24,10 @@
  * this exists for.
  *
  * The pull request's own run is read from the store instead, because the
- * relay is where the trust decision about it was made. Records from a
- * fork run are authored by the fork, and the relay ships them only for a
- * member; reading that run's artifacts would take fork-authored claims
- * about which tests passed and put them in a comment. What the store
- * holds is what this repository was willing to believe.
+ * relay is where the trust decision about it was made: it ships a fork
+ * run only for a team member, and the store is what that decision
+ * produced. Reading the run's own artifacts would go around the gate and
+ * put a fork's claims about which tests passed into a comment.
  *
  * Environment:
  *   GITHUB_TOKEN         - Required.

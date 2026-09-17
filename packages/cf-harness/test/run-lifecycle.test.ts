@@ -258,7 +258,10 @@ describe("run-lifecycle", () => {
         fabricSessionFactory: () =>
           Promise.resolve(
             {
-              pieces: { getSpace: () => SPACE_DID },
+              pieces: {
+                getSpace: () => SPACE_DID,
+                getSpaceName: () => undefined,
+              },
               // deno-lint-ignore no-explicit-any
             } as any,
           ),

@@ -1,6 +1,5 @@
 /**
- * An index over a set of paths for the one question `isPrefix` is asked
- * in bulk: is ANY path in the set a prefix of this one?
+ * Indexes prefix and bidirectional overlap queries over a set of paths.
  *
  * A linear scan costs the set's size per query, and the set is a document's
  * dereference-trace sources — measured at 249 for one pane, consulted once per
@@ -56,7 +55,7 @@ const createNode = (): PathPrefixNode => ({
   wildcardPaths: [],
 });
 
-/** A set of paths, queried for whether any of them prefixes a given path. */
+/** A set of paths queried by prefix or ancestor-or-descendant overlap. */
 export class PathPrefixIndex {
   #root = createNode();
 
@@ -96,20 +95,33 @@ export class PathPrefixIndex {
 
   /** Whether any added path is a prefix of `path`, by `isPrefix`'s rules. */
   hasPrefixOf(path: readonly string[]): boolean {
+    return this.#matches(path, false);
+  }
+
+  /** Whether any added path prefixes `path` or has `path` as a prefix. */
+  overlaps(path: readonly string[]): boolean {
+    return this.#matches(path, true);
+  }
+
+  #matches(path: readonly string[], includeDescendants: boolean): boolean {
     if (this.#root.terminal) return true;
     if (path.includes("*")) {
-      return this.#paths.some((source) => isPrefix(source, path));
+      return this.#paths.some((source) =>
+        isPrefix(source, path) || includeDescendants && isPrefix(path, source)
+      );
     }
     let node = this.#root;
     for (const segment of path) {
       for (const source of node.wildcardPaths) {
-        if (isPrefix(source, path)) return true;
+        if (
+          isPrefix(source, path) || includeDescendants && isPrefix(path, source)
+        ) return true;
       }
       const next = node.children.get(segment);
       if (next === undefined) return false;
       if (next.terminal) return true;
       node = next;
     }
-    return false;
+    return includeDescendants && node.children.size > 0;
   }
 }

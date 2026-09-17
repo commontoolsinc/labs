@@ -2911,6 +2911,312 @@ describe("piece schema compatibility", () => {
     ).toThrow(/enum\/const became more restrictive/);
   });
 
+  it("reads a bare enum's or const's type set from its values", () => {
+    // `{enum: [...]}` with no `type`, the spelling a literal union compiles
+    // to, admits exactly the types its values carry. So a `type: "string"`
+    // schema accepts a string enum whichever proof reaches it, and an enum
+    // candidate is judged by the enum rule rather than refused on type.
+
+    const states = ["open", "draft", "merged", "closed"];
+    expect(() => assertSchemaSubset({ enum: states }, { type: "string" }))
+      .not.toThrow();
+    expect(() => assertSchemaSubset({ const: "open" }, { type: "string" }))
+      .not.toThrow();
+
+    const argumentWith = (state: JSONSchema): Pattern =>
+      pattern(
+        { type: "object", properties: { state } },
+        oldPattern.resultSchema,
+      );
+    const resultWith = (state: JSONSchema): Pattern =>
+      pattern(
+        oldPattern.argumentSchema,
+        { type: "object", properties: { state } },
+      );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        argumentWith({ enum: states }),
+        argumentWith({ type: "string" }),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        argumentWith({ type: "string" }),
+        argumentWith({ enum: states }),
+      )
+    ).toThrow(/argument\.state: enum\/const became more restrictive/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        resultWith({ type: "string" }),
+        resultWith({ enum: states }),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        resultWith({ enum: states }),
+        resultWith({ type: "string" }),
+      )
+    ).toThrow(/result\.state: enum\/const became more restrictive/);
+  });
+
+  it("throws for a bare enum listing a value type the candidate does not accept", () => {
+    // Each listed value contributes the type the runtime validates it as,
+    // with an integral number an `integer`.
+
+    expect(() => assertSchemaSubset({ enum: ["a", 1] }, { type: "string" }))
+      .toThrow(/type integer is not accepted by the candidate schema/);
+    expect(() => assertSchemaSubset({ enum: [1, 2.5] }, { type: "number" }))
+      .not.toThrow();
+    expect(() => assertSchemaSubset({ enum: [1, 2.5] }, { type: "integer" }))
+      .toThrow(/type number is not accepted by the candidate schema/);
+    expect(() => assertSchemaSubset({ enum: [null] }, { type: "null" }))
+      .not.toThrow();
+    expect(() =>
+      assertSchemaSubset({ enum: [true, false] }, { type: "boolean" })
+    ).not.toThrow();
+    expect(() => assertSchemaSubset({ enum: [["a"]] }, { type: "array" }))
+      .not.toThrow();
+    expect(() => assertSchemaSubset({ enum: [{ a: 1 }] }, { type: "object" }))
+      .not.toThrow();
+  });
+
+  it("narrows a declared type to the literal values listed beside it", () => {
+    // `{type: "number", enum: [1, 2]}` and `{enum: [1, 2]}` accept the same
+    // two values and read as the same `integer` schema: the declared type
+    // bounds which listed values count, and those values bound the type.
+
+    expect(() =>
+      assertSchemaSubset({ type: "number", enum: [1, 2] }, { enum: [1, 2] })
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset({ enum: [1, 2] }, { type: "number", enum: [1, 2] })
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        { type: "integer", enum: [1, 2.5] },
+        { type: "integer" },
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        { type: "number", enum: [1, 2.5] },
+        { type: "integer" },
+      )
+    ).toThrow(/type number is not accepted by the candidate schema/);
+  });
+
+  it("leaves a schema listing a `FabricPrimitive` value unbounded on type", () => {
+    // The runtime checks an object schema's `required` keys on a
+    // `FabricPrimitive` whenever the schema declares no `type` or admits
+    // `object`, so the value's class name does not say which object
+    // keywords reach it. Unbounded, the schema keeps the object proof
+    // running against a target that also declares no type, so that link is
+    // refused where the value validator rejects the value, and it is
+    // refused on type against any typed target.
+
+    const value = new FabricBytes(new Uint8Array([1]));
+    const listed = { enum: [value] } as unknown as JSONSchema;
+    const requiring = {
+      enum: [value],
+      required: ["source"],
+    } as unknown as JSONSchema;
+    expect(validateSchemaValue(requiring, value, requiring)).toBe(
+      "missing required property source",
+    );
+    expect(() => assertSchemaSubset(listed, requiring))
+      .toThrow(/value\.source: newly required argument field has no default/);
+    for (
+      const typed of [
+        { type: "object", required: ["source"] },
+        { type: "FabricBytes" },
+      ] satisfies JSONSchema[]
+    ) {
+      expect(() => assertSchemaSubset(listed, typed))
+        .toThrow(/the candidate no longer accepts every previous type/);
+    }
+  });
+
+  describe("bare enums spanning several types", () => {
+    // A literal union with `null` among its members compiles to one bare enum,
+    // `{enum: ["open", "closed", null]}`, and a `string | null` consumer to a
+    // type list or an `anyOf`.
+
+    const nullableUnion: JSONSchema = { enum: ["open", "closed", null] };
+    const stringOrNull: JSONSchema = {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    };
+
+    it("does not throw when a type list or `anyOf` candidate has a branch accepting each listed value's type", () => {
+      expect(() =>
+        assertSchemaSubset(nullableUnion, { type: ["string", "null"] })
+      ).not.toThrow();
+      expect(() => assertSchemaSubset(nullableUnion, stringOrNull))
+        .not.toThrow();
+      expect(() =>
+        assertSchemaSubset(nullableUnion, {
+          anyOf: [{ enum: ["open", "closed"] }, { type: "null" }],
+        })
+      ).not.toThrow();
+      expect(() =>
+        assertSchemaSubset({ enum: ["a", 1] }, { type: ["string", "integer"] })
+      ).not.toThrow();
+    });
+
+    it("throws when a listed value has no candidate branch accepting it", () => {
+      // No branch of the first candidate admits `null`. The `string` branch
+      // of the second lists `open` alone, and the enum rule refuses `closed`.
+
+      expect(() =>
+        assertSchemaSubset({ enum: ["open", null] }, {
+          type: ["string", "integer"],
+        })
+      ).toThrow(/schema alternative accepted previously/);
+      expect(() =>
+        assertSchemaSubset(nullableUnion, {
+          anyOf: [{ enum: ["open"] }, { type: "null" }],
+        })
+      ).toThrow(/schema alternative accepted previously/);
+    });
+
+    it("throws for an enum listing a `FabricPrimitive` value beside values the candidate's branches accept", () => {
+      // A listed `FabricPrimitive` leaves the enum unbounded on type, so its
+      // values are not taken apart by type, and no typed branch accepts the
+      // enum whole. Here `open` and `null` each have a branch, and the
+      // `FabricBytes` value has none.
+
+      const listed = {
+        enum: ["open", null, new FabricBytes(new Uint8Array([1]))],
+      } as unknown as JSONSchema;
+      expect(() => assertSchemaSubset(listed, stringOrNull))
+        .toThrow(/schema alternative accepted previously/);
+    });
+
+    it("does not throw for a typed enum with a type list against branches accepting its values", () => {
+      // Each `type` in the list narrows the listed values to its own: the
+      // `string` branch reads as `open` alone and the `null` branch as `null`
+      // alone, which a `string` candidate refuses.
+
+      const typed: JSONSchema = {
+        type: ["string", "null"],
+        enum: ["open", null],
+      };
+      expect(() => assertSchemaSubset(typed, { type: ["string", "null"] }))
+        .not.toThrow();
+      expect(() => assertSchemaSubset(typed, stringOrNull)).not.toThrow();
+      expect(() => assertSchemaSubset(typed, { type: "string" }))
+        .toThrow(/schema alternative accepted previously/);
+    });
+
+    it("does not throw for a source branch listing values of several types against a bare enum candidate listing them all", () => {
+      // A candidate enum stays whole. A source branch has to fit inside a
+      // single candidate branch, and one listing values of several types fits
+      // only the whole enum.
+
+      expect(() =>
+        assertSchemaSubset(
+          { type: ["string", "null"], enum: ["open", null] },
+          nullableUnion,
+        )
+      ).not.toThrow();
+      expect(() =>
+        assertSchemaSubset(
+          { anyOf: [{ enum: ["open", null] }, { enum: [1] }] },
+          { enum: ["open", null, 1] },
+        )
+      ).not.toThrow();
+    });
+
+    it("throws for a type list or `anyOf` source against a bare enum candidate", () => {
+      // The `string` branch of either source meets the candidate enum whole,
+      // and a `string` schema admits values the enum does not list. The last
+      // case is that branch alone, refused by the enum rule.
+
+      const candidate: JSONSchema = { enum: ["open", null] };
+      expect(() => assertSchemaSubset({ type: ["string", "null"] }, candidate))
+        .toThrow(/schema alternative accepted previously/);
+      expect(() => assertSchemaSubset(stringOrNull, candidate))
+        .toThrow(/schema alternative accepted previously/);
+      expect(() => assertSchemaSubset({ type: "string" }, candidate))
+        .toThrow(/enum\/const became more restrictive/);
+    });
+
+    it("throws for a pattern update across the union only where it narrows an argument or widens a result", () => {
+      const argumentWith = (state: JSONSchema): Pattern =>
+        pattern(
+          { type: "object", properties: { state } },
+          oldPattern.resultSchema,
+        );
+      const resultWith = (state: JSONSchema): Pattern =>
+        pattern(
+          oldPattern.argumentSchema,
+          { type: "object", properties: { state } },
+        );
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          argumentWith(nullableUnion),
+          argumentWith(stringOrNull),
+        )
+      ).not.toThrow();
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          argumentWith(stringOrNull),
+          argumentWith(nullableUnion),
+        )
+      ).toThrow(/argument\.state: a schema alternative accepted previously/);
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          resultWith(stringOrNull),
+          resultWith(nullableUnion),
+        )
+      ).not.toThrow();
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          resultWith(nullableUnion),
+          resultWith(stringOrNull),
+        )
+      ).toThrow(/result\.state: a schema alternative accepted previously/);
+    });
+  });
+
+  it("keeps a composition unstable under defaults while a branch a default reaches lists the whole value", () => {
+    // Disjoint branch types keep a value from moving between branches, but a
+    // default inserted from a sibling `properties` still lands inside an
+    // object the value occupies. A branch listing that object whole, bare or
+    // typed, no longer matches it afterwards, so the default is refused. A
+    // branch admitting only scalars receives no default, and leaves the
+    // composition stable beside an open object branch.
+
+    const withBranch = (
+      combinator: "anyOf" | "oneOf",
+      branch: JSONSchema,
+    ): JSONSchema => ({
+      type: "object",
+      [combinator]: [branch, { type: "string" }],
+      properties: { a: { type: "number", default: 1 } },
+    });
+    for (const combinator of ["anyOf", "oneOf"] as const) {
+      for (
+        const branch of [
+          { enum: [{}] },
+          { type: "object", enum: [{}] },
+        ] satisfies JSONSchema[]
+      ) {
+        const schema = withBranch(combinator, branch);
+        expect(() => assertSchemaSubset(schema, schema))
+          .toThrow(/not stable under default insertion/);
+      }
+    }
+    const scalarBranch: JSONSchema = {
+      type: "object",
+      anyOf: [
+        { type: "object", properties: { b: { type: "number" } } },
+        { enum: ["none"] },
+      ],
+      properties: { a: { type: "number", default: 1 } },
+    };
+    expect(() => assertSchemaSubset(scalarBranch, scalarBranch)).not.toThrow();
+  });
+
   it("treats `FabricPrimitive` types as subtypes of object (one-way)", () => {
     // A "FabricBytes" source widens safely into an "object" target; the
     // reverse narrows and must be flagged. Same-type stays compatible.

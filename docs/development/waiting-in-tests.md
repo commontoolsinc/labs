@@ -12,7 +12,8 @@ studies](waiting-in-tests-rationale.md), holds the analysis behind these
 rules: the full argument for why a bounded timeout is never a guarantee, the
 sizing of the deno-web-test backstop, how the runner clock classifies timers
 across SES lockdown, the real-clock exemptions that were retired, why the
-runtime-client suite keeps the real clock, the CSP suite worked through as a
+runtime-client suite keeps the real clock, why neither runtime-disposal
+teardown carries a bound, the CSP suite worked through as a
 proving-a-negative example, the FUSE exec suite's design, and the production
 waits that apply the same principle outside tests. Nothing there is needed to
 write an ordinary test; read it when you need to know why a rule is what it
@@ -86,6 +87,18 @@ is the price of a collection that always returns, paid because the summary
 exists to explain a run already in trouble. The budget is a caller's option,
 so a case that wants the backstop exercised asks for a short one rather than
 waiting out the default.
+
+One bound a browser test runs under is not the repository's to sort, and
+belongs in an audit of these for that reason: astral puts its own deadline on
+every `page.evaluate`, so a page that never answers ends the call whether or
+not anything here asked for that. It sorts differently from the ones above,
+because it re-waits on the one in-flight call rather than reissuing it, which
+leaves a late answer still returned. [Sizing the deno-web-test
+backstop](waiting-in-tests-rationale.md#sizing-the-deno-web-test-backstop)
+works that mechanism through and says what each of the two harnesses running
+under it sets the deadline to; [Tearing a runtime down waits on its
+worker](#tearing-a-runtime-down-waits-on-its-worker) is where a test leans on
+it hardest.
 
 ## The primitives to use instead
 
@@ -506,6 +519,40 @@ the stuck-condition net above is for. The CLI suite's readiness probe is such a
 client. It disposes its controller once the wait returns, which also keeps a
 finished wait from holding the loop open for the rest of the suite.
 
+### Reading a pattern-test assertion
+
+A pattern test (`*.test.tsx`, run by `cf test`) states each expectation as an
+assertion step, and the runner reads each one exactly once. A false value is a
+failure rather than a reason to read again. The count does not depend on what a
+read found, which is the point: reading again because the first read said
+`false` is a retry however tightly it is bounded, and a pattern whose value
+converges only sometimes passes on the second attempt.
+
+Reading once takes a separation that a single read cannot make on its own. An
+asynchronous built-in — a fetch, a model call, a query — is a computation that
+runs only while something demands its result, so a read is also what starts
+one, and a read that starts the work cannot be the read that observes it. The
+runner therefore demands the assertion first, through `cell.sink()`, and holds
+that demand while `runtime.settled()` waits for the work the demand set going.
+Holding it across the wait is what keeps the built-in's cascade alive long
+enough to reach the assertion. Then the assertion is read, once, and reported.
+With nothing in flight the wait returns at once, so an assertion that is false
+on its own terms is reported as fast as one that never waited.
+
+`Cell.pull()` is what makes a single read enough, over a scope worth stating.
+It subscribes an effect that reads the cell, awaits `scheduler.idle()`, drives
+the link-target loads that read kicked off to convergence, and takes the value
+after all of it, so the read waits for the computations it depends on and for
+the links it followed. It waits for neither the storage sync nor an async
+built-in's own work: those are what `runtime.settled()` before it covers, which
+is why the demand and the wait are not redundant with the read. Its convergence
+also carries a bound of a hundred rounds, and a pull that exhausts it resolves
+anyway, with loads still pending and a warning naming the cell.
+
+`packages/cli/test/test-runner-assertion-reads.test.ts` states the count, for
+an assertion that holds, one that does not, and one whose value an async
+built-in produces.
+
 ### Naming the arrival, across runtimes
 
 A wait for state a *different* runtime wrote takes the same `defer()`-from-a-sink
@@ -551,8 +598,8 @@ test after `testTimeout` — 40 seconds by default, set per suite in
 `deno-web-test.config.ts` — and fails that test with a message naming it and
 saying how long it waited, leaving the rest of the run to report as usual.
 
-This is the distinction `waitForCondition`'s `timeout` draws, one level up: a
-stuck-condition safety net rather than a bound at the call site. It is why a
+This is the distinction `waitForCondition`'s safety net draws, one level up: a
+stuck-condition bound rather than a bound at the call site. It is why a
 wait inside one of these tests still takes no timeout of its own — adding one
 per call site would cap what each wait can observe, which is the thing being
 avoided, while the harness bound only decides when to stop believing a test will
@@ -572,6 +619,48 @@ document](waiting-in-tests-rationale.md#sizing-the-deno-web-test-backstop).
 `packages/deno-web-test/README.md` records what the bound does not cover: a test
 blocking the event loop outright, and the stuck test's own work, which goes on
 running in the page afterwards.
+
+## Tearing a runtime down waits on its worker
+
+A teardown that drops a runtime waits for the worker to say it is done.
+`RuntimeConnection.dispose()` sends a `Dispose` request and waits for the
+reply before it touches the transport, so that the storage the worker has
+buffered is flushed before the thread carrying it stops. Requests here carry
+no deadline, and this one is exempt from the abort that settles every other
+request in flight, which leaves the reply as the only thing that settles it. A
+worker that has stopped answering therefore never lets `dispose()` return.
+Neither of the two teardowns that await one adds a bound of its own, and what
+each is left exposed to differs.
+
+The browser teardown, `disposePageRuntime` in
+`packages/integration/shell-utils.ts`, asks the page through `page.evaluate`,
+which astral bounds on its own account at about five minutes for these suites
+— [the rationale
+document](waiting-in-tests-rationale.md#sizing-the-deno-web-test-backstop)
+has the mechanism and the arithmetic. That is a bound relied on rather than
+kept, and the teardown adds none of its own.
+
+What astral's bound does not supply is a name: a `RetryError` says only that
+the attempts ran out. So the catch reports the page instead, through the probe
+[the shared state primitive](#a-shared-state-primitive) describes. Nothing
+settled the disposal's request, so it is still in flight when the probe reads
+it, and the pending-request lines name it and say how long it has been
+outstanding. Those come from `RuntimeClient.getPendingRequests`, which reads
+main-thread bookkeeping and needs no round trip, so a wedged worker is the
+case it still answers. A failure warns rather than throws, since this is
+cleanup: a caller whose work is done has nothing left for it to fail, and a
+`finally` reaching it has a failure of its own to carry.
+
+The in-process suite, `packages/runtime-client/integration/client.test.ts`,
+binds each client with `await using`, so its teardown is `dispose()` itself
+with nothing between. Nothing bounds that: the worker holds Deno's event loop
+open, so the fail-fast the in-process waits above rely on never fires, and the
+run reaches the CI step limit. What places such a hang is the runner's own
+output — the last test printed without an `ok` is the one whose teardown is
+waiting — and what it is waiting for is a `Dispose` reply by construction,
+since that is the only request a teardown sends. Why a bound is not the answer
+there is in [the rationale
+document](waiting-in-tests-rationale.md#the-runtime-disposal-teardowns).
 
 ## Waiting for the scheduler and for the worker reconciler
 
@@ -657,12 +746,18 @@ deadlocks on the runtime's own machinery, not on any sleep it wrote.
 So the runner clock sorts a positive-delay `setTimeout` by who scheduled it,
 using the immediate stack frame:
 
-- A timer scheduled from `src/` — the runtime's own — **auto-advances**: when
-  the event loop would otherwise go idle, logical time jumps to the earliest
-  pending one and fires it, in fire order, with `Date.now` and `performance.now`
-  moving in lockstep. So a throttle window or a backoff retry elapses instantly
-  and deterministically, and the reactive waits above resolve on their own, with
-  no real time passing.
+- A timer scheduled from `src/` — the runtime's own — **auto-advances**: once
+  the event loop is idle, every zero-delay turn that was armed having run,
+  logical time jumps to the earliest pending one and fires it, in fire order,
+  with `Date.now` and `performance.now` moving in lockstep. So a throttle window
+  or a backoff retry elapses instantly and deterministically, and the reactive
+  waits above resolve on their own, with no real time passing — and never ahead
+  of a turn that was already queued. That last clause is what keeps a frame's
+  delivery ahead of a production deadline: the loopback transport and the
+  memory server's refresh each take a turn per frame, and the pump lets the
+  whole chain run before it jumps. Why it has to is worked through in [the
+  rationale
+  document](waiting-in-tests-rationale.md#the-pump-waits-for-the-loop-to-go-idle).
 - A timer scheduled from a `test/` file — a wall-clock sleep — **freezes**, so a
   test that waits on one still deadlocks and the sanitizer reports it. Delete
   the sleep and wait on `runtime.idle()`/`cell.pull()`/`runtime.settled()`,
@@ -682,6 +777,20 @@ step that lets the window elapse uses `clock.tick`. `clock.reset()` returns
 logical time to zero and drops pending timers: one frozen clock wraps a whole
 `describe`, so a suite whose cases each read absolute coarsened time (the `#now`
 grid tests) calls it from `beforeEach` to start each case from a known instant.
+
+The idle rule decides how a test may wait. A loop of round trips — `pull()`,
+`idle()`, `synced()`, repeated a fixed number of times — never lets the loop go
+idle, so no production timer fires inside it: the memory server's refresh
+cadence, a convergence backoff, a claim's staleness bound all stand still, and
+a value the fan-out would have delivered never arrives. That is the timing
+dependence such a loop has, failing the same way every time rather than
+passing on the cadence of the loop. Wait on the event instead —
+`waitForCellValue` on the cell that will change, `synced()` on the commit whose
+marker the fan-out carries, `clock.tick()` where the test genuinely measures a
+window — and the wait itself idles the loop, which is what fires the timer. A
+`pull()` computes and reads; for a document the replica already holds it
+fetches nothing, so what it returns after another replica's write is what the
+fan-out has delivered so far.
 
 One file stays on the real clock, listed with its reason in the runner preload's
 `realClockFiles` list. It is a resume test that holds the per-element documents
@@ -717,6 +826,27 @@ than a wait with a deadline — a healthy test never approaches the count, and
 what it reports is a livelock. Where the ceiling sits and why is in [the
 rationale
 document](waiting-in-tests-rationale.md#sizing-the-auto-advance-runaway-ceiling).
+
+### A production backstop cannot carry a test
+
+A production backstop — a timer that lets a wait give up and proceed as if the
+event it waited for had arrived — is the one kind of `src/` timer the pump must
+not be allowed to fire quietly. It fires the moment nothing else is pending, so
+a test whose awaited event never arrives passes anyway, riding a logical jump
+in place of the event; and where the module's logger sits above the warn the
+backstop logs, the count behind that warn is the only trace. The runner preload
+therefore installs a guard over every test, `test/support/silent-backstop-guard.ts`,
+that snapshots the count behind each listed backstop around the test body and
+fails the test when one moved, naming the backstop and what its firing means.
+
+The listed backstop is the conflict read-repair wait in `src/storage/v2.ts`: a
+commit's rejection returns after `CONFLICT_READ_REPAIR_TIMEOUT_MS` when the
+caught-up frame its retry is gated on never arrives. A test that trips the
+guard is either withholding that frame — a manual fan-out it never flushed — or
+has found a regression in the caught-up path. Either way the remedy is the
+event, never a wider backstop. `test/silent-backstop-guard.test.ts` holds the
+guard to this by running a test built to ride the backstop under the package
+preload and expecting the guard to fail it.
 
 One consequence is worth stating because it is easy to trip over. A test that
 guards a wait with its own wall-clock deadline — a `setTimeout(reject, ms)` — has
@@ -1215,7 +1345,8 @@ come true, with a stack that points at `waitFor` and nothing about the page.
 the identity it was awaiting where one was given, the last state it managed to
 read, and what the page held at the moment it gave up: the document's URL,
 title, and HTTP status, whether the shell's `x-root-view` element is in it,
-whether `globalThis.app` is there and which view it holds, and the tail of
+whether `globalThis.app` is there and which view it holds, the requests its
+runtime has sent the worker and has no reply to, and the tail of
 console messages `Page.applyConsoleFormatter` retains in the page. The page half
 of that is `readShellPageProbe` in
 `packages/integration/shell-page-probe.ts`; `describeStateWaitFailure` in
@@ -1232,13 +1363,28 @@ instance the toolshed's `Failed to proxy to ...` page, served with a 502 when
 its own fetch to the shell dev server fails. Without the check, every test in
 the run waits out the full minute and reports nothing that names the cause.
 
-`login()` reports the same block, for the same reason. It waits on
-`waitForCondition` for the shell to publish `globalThis.app`, and a document
-that is not the shell never publishes it, so that wait reaches the
-stuck-condition net five minutes later saying only that it did. The runtime
-handshake after it names which of its two stages ran out and nothing about the
-page it ran against. Both are wrapped, so any login failure names the identity
-being logged in as and what the page held. `readAndDescribeShellPage` is the
+`waitForCondition` carries the same block, and carries it for every wait rather
+than for a wrapped few. A wait that reaches the stuck-condition net renders the
+source the page ran, the arguments it was handed one to a line, the last throw
+the predicate itself made where it made one, and the page it ran out against;
+`describeConditionWaitFailure` in `packages/integration/utils.ts` assembles
+that. The source is usually what names the wait, waits carrying no names of
+their own, and where several sites share one predicate the arguments are what
+tell them apart. The predicate's own throw is the part nothing else can supply:
+a predicate that throws on every evaluation leaves a page identical to one a
+predicate merely reads as false.
+
+The net is five minutes and no test can sit through one, so its length for a
+single wait is read from `CF_WAIT_FOR_CONDITION_TIMEOUT_MS`. That exists for
+the tests that drive this report and for nothing else: shortening the net in a
+run caps what a wait may observe, which is what the net is written to avoid.
+
+`login()` reports the same block, and adds what the wait cannot know. It waits
+on `waitForCondition` for the shell to publish `globalThis.app`, which a
+document that is not the shell never publishes, and the runtime handshake after
+it names which of its two stages ran out and nothing about the page it ran
+against. Both are wrapped, so any login failure names the identity being logged
+in as and what the page held. `readAndDescribeShellPage` is the
 whole of what a report needs from a page — it reads the probe, renders it, and
 reports a page it could not read at all rather than replacing the failure being
 reported with a second one. Reach for it, rather than pairing the read and the
@@ -1251,22 +1397,6 @@ exception as a detail record, and stringifying one yields `[object Object]`.
 `describeThrown` takes an `Error`'s message, the first line of a page
 exception's description, and for anything else points at the cause, which the
 thrower attaches and Deno prints below the message.
-
-### A human-in-the-loop flow that no CI lane runs
-
-`packages/patterns/google/core/integration/google-calendar-importer.test.ts`
-drives the Google OAuth consent flow end to end, and a person has to complete
-that flow in a real browser. The test prints instructions to the console and then
-allows two minutes for the account selection and the scope approval. It cannot
-run unattended, and no CI lane runs it: the `patterns` package's `test` task
-ignores `google/core/integration`, and its `integration` tasks run only the
-`integration/` and `integration/reload/` directories. The check still sees the
-file, because the scan walks every `integration/` directory beneath `packages/`,
-so it needs an allowlist entry.
-
-Its waits are ordinary DOM and text conditions that `waitForCondition` would
-express. They stay a poll because nothing automated exercises this file, so
-converting it churns code that no run covers.
 
 ### A shell script observing another process through a kernel mount
 

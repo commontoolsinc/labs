@@ -45,6 +45,13 @@ import {
 } from "../fabric-observations.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
+  dedupedObservedOutputs,
+  type ObservedOutput,
+  observedOutputCause,
+  observedOutputsIn,
+  type RunPatternOutputConcern,
+} from "../run-pattern-output-concerns.ts";
+import {
   addressSealedPositions,
   isSealedOpaqueLinkObject,
   parseStructuredResultSchema,
@@ -161,8 +168,8 @@ export interface RunPatternToolSuccessOutput {
   rawValue?: unknown;
 
   /**
-   * What became of this run's contribution to the pattern index, when the
-   * run had one to make. Absent when the run published nothing at all — it
+   * This run's queued contribution to the pattern index, when the run had one
+   * to make. Absent when the run staged nothing at all — it
    * named a `patternId`, it gave no description, or the run has no index.
    */
   patternPublication?: RunPatternPublicationReport;
@@ -174,8 +181,10 @@ export interface RunPatternToolSuccessOutput {
    * flow touched. And what the render gate's probe THREW, when one did —
    * never what it rendered — on the same terms as every other thrown message
    * this tool withholds: a computation over data the model cannot read can
-   * carry that data in what it throws. A run with both carries the reason
-   * first and the thrown text after a blank line.
+   * carry that data in what it throws. And the text of every output
+   * `outputConcerns` named, which a composed instance is the only holder of
+   * and which the model is told the position of rather than the words. A run
+   * with more than one carries them in that order, separated by a blank line.
    *
    * **The artifact root is not a confidentiality boundary.** `bash` does not
    * reserve it the way `read_file`, `write_file`, `edit_file` and
@@ -184,25 +193,39 @@ export interface RunPatternToolSuccessOutput {
    * reviewers walked that route independently and one reproduced it with a
    * planted marker; CT-2117 carries the structural fix. Thrown text is here
    * because it is the class this artifact already holds and cannot be
-   * recovered any other way. Rendered DOM is NOT, because it can: the
+   * recovered any other way, and a composed instance's output text is here
+   * for the same reason: that instance is not something the model can
+   * address, so an operator reading the run back has nothing else to debug
+   * from. Rendered DOM is NOT, because it can: the
    * synthetic instance is a deterministic function of the argument schema
    * and the index records the program, so the render is reproducible rather
    * than needing to be kept.
    */
   rawCauseMessage?: string;
+
+  /**
+   * What the outputs of the patterns this run materialized say about the
+   * reads behind them: a failure an output reports, and an output that holds
+   * no rows. Present only when there is something to say, and a DISCLOSURE
+   * rather than a refusal — the run succeeded, and this is the reason to
+   * look. `run-pattern-output-concerns.ts` carries why no text travels with
+   * one.
+   */
+  outputConcerns?: readonly RunPatternOutputConcern[];
 }
 
 /**
- * What became of this run's contribution to the index after publication
- * policy and the render gate were applied.
+ * The contribution staged after publication policy and the render gate were
+ * applied. The tool returns before the session flush sends it to the index,
+ * so this report records intent at tool return, never an acknowledgment.
  *
- * Every field is pinned to a fixed set — the two unions and a boolean, with
+ * Every field is pinned to a fixed set — a status, a reason and a boolean, with
  * `message` drawn from `PATTERN_PUBLICATION_MESSAGES` and never composed. See
  * `pattern-index/publish-render-gate.ts` for why nothing derived from the
  * rendered DOM may join them.
  */
 export interface RunPatternPublicationReport {
-  status: PatternPublicationStatus;
+  status: "queued";
   reason: PatternPublicationReason;
   message: string;
 
@@ -322,7 +345,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_pattern",
   title: "Run Pattern",
   description:
-    `Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. Give it either your own sourceText or the patternId of a pattern search_patterns found. Source you write imports the runtime from "${RUNTIME_MODULE_SPECIFIER}" and from no other module — every pattern opens with a line of the form ${RUNTIME_MODULE_IMPORT_LINE} — and no package named after the product resolves. When the run's session reads under a confidentiality ceiling, every db.query result must be declared per session (PerSession<> on the result type, or the query's { scope: "session" } option); a query left space-scoped is refused under a ceiling rather than read. Bound every query's rows with a LIMIT — a few hundred is a sensible ceiling for a view — because every result row is materialized as its own document in the space, so an unbounded query over a large store writes a document per row it returns, and a re-run writes again only the rows that changed, except that a labeled result keys its rows on position and so also rewrites the rows a change displaced, and re-keys every row when the query's projection or the handle's tables change; an aggregate returning one row per group — count(*), sum(), a GROUP BY — is bounded by its own shape and needs no LIMIT. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.`,
+    `Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. Give it either your own sourceText or the patternId of a pattern search_patterns found. Source you write imports the runtime from "${RUNTIME_MODULE_SPECIFIER}" and from no other module — every pattern opens with a line of the form ${RUNTIME_MODULE_IMPORT_LINE} — and no package named after the product resolves. When the run's session reads under a confidentiality ceiling, every db.query result must be declared per session (PerSession<> on the result type, or the query's { scope: "session" } option); a query left space-scoped is refused under a ceiling rather than read. Bound every query's rows with a LIMIT — a few hundred is a sensible ceiling for a view — because every result row is materialized as its own document in the space, so an unbounded query over a large store writes a document per row it returns, and a re-run writes again only the rows that changed, except that a labeled result keys its rows on position and so also rewrites the rows a change displaced, and re-keys every row when the query's projection or the handle's tables change; an aggregate returning one row per group — count(*), sum(), a GROUP BY — is bounded by its own shape and needs no LIMIT. A pattern composing another passes on what the composed one reports: expose its error branch and its row count under your own result and render them, or the run answers over figures derived from a read that failed, and the result carries an outputConcerns entry naming the output you did not read. A query over a served store is still in flight when this call answers, so a sound read returns no rows here and lands them on the piece; the absent error is what says it is sound. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.`,
   effectClass: "side-effect",
   inputSchema: RUN_PATTERN_INPUT_SCHEMA,
   outputSchema: {
@@ -344,7 +367,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           properties: {
             status: {
               type: "string",
-              enum: ["discoverable", "recorded"],
+              enum: ["queued"],
             },
             reason: {
               type: "string",
@@ -370,6 +393,23 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           additionalProperties: false,
         },
         rawCauseMessage: { type: "string" },
+        outputConcerns: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              concern: {
+                type: "string",
+                enum: ["error-branch", "no-rows"],
+              },
+              key: { type: "string" },
+              patternId: { type: "string" },
+              message: { type: "string" },
+            },
+            required: ["concern", "key", "message"],
+            additionalProperties: false,
+          },
+        },
       },
       required: [
         "outputId",
@@ -1707,6 +1747,64 @@ export const runPatternTool: HarnessToolDefinition<
         };
       }
     }
+    // What every pattern this run materialized says about its own reads,
+    // read off each one's result rather than off the single value this call
+    // answers with. A composed reader exposes its failure and its emptiness
+    // as outputs, and a pattern composing it need pass neither on — which is
+    // how a run answers `ok` over a result of zeros. The reads are
+    // host-side and nothing they find travels as text, so they are not part
+    // of the release measurement above and are taken on a transaction of
+    // their own, abandoned like every other measurement here. Read after the
+    // exits above rather than before them, so a run that reports a failure
+    // pays for none of it: what these answer is only ever carried by a
+    // success.
+    //
+    // Every instantiation in the window is read, the run's own root
+    // included, so a failure the caller's own query reported is disclosed on
+    // the same terms as a composed one. The recorder's buffer is what bounds
+    // the work: a pattern materialized once per row of a list reports the
+    // same output many times, and `dedupedObservedOutputs` states each once.
+    const ownCellHash = comparableEntityHash(piece.id);
+    const concernsTx = pieces.runtime.edit();
+    const found: ObservedOutput[] = [];
+    const scan = (async () => {
+      for (
+        const record of session.instantiations?.since(instantiationStart) ?? []
+      ) {
+        try {
+          const instance = pieces.runtime.getCellFromLink(record.link)
+            .withTx(concernsTx);
+          await instance.pull();
+          // The `required` relaxation is the one the result read above uses,
+          // so a scoped link this session cannot materialize degrades its
+          // member rather than voiding the whole read. It is applied AFTER
+          // the pull, because it decides what to relax by reading what the
+          // cell holds, and before the pull it holds nothing.
+          const materialized = cellWithScopedLinkRequiredsRelaxed(instance);
+          found.push(...observedOutputsIn(
+            asSerializableValue(materialized.get()),
+            record.link.schema,
+            record.cell === ownCellHash ? undefined : record.identity,
+          ));
+        } catch {
+          // One instance that will not read back says nothing about the
+          // others, and this report is a disclosure: what a failed read
+          // costs is the reason to look at that one instance, so it is
+          // dropped rather than taking the report down with it.
+        }
+      }
+    })();
+    // Raced with the signal like every other wait this tool performs: the
+    // scan resolves a graph, and a caller that gave up while it was in flight
+    // is told it was cancelled rather than handed an answer it stopped
+    // waiting for. The transaction is abandoned whichever way the race goes.
+    const scanned = await raceWithAbort(scan, signal);
+    concernsTx.abort("run_pattern output-concern read");
+    if (scanned === "aborted") {
+      stopPiece(piece.getCell());
+      return cancelledOutput();
+    }
+    const observedOutputs = dedupedObservedOutputs(found);
     // A result the caller's own `resultSchema` refused is reported as neither
     // outcome: the pattern ran and landed a result, and the schema it did not
     // match was written by whoever called the tool, so it is evidence about
@@ -1861,9 +1959,9 @@ export const runPatternTool: HarnessToolDefinition<
       }
       return signal?.aborted === true ? "cancelled" : outcome;
     };
-    // Source the model wrote and successfully ran is contributed back to the
-    // index. Recording and being offered to search are separate: the default
-    // records the run, while deliberate corpus seeding may request immediate
+    // Source the model wrote and successfully ran is queued for the index.
+    // Recording and being offered to search are separate: the default
+    // requests a record, while deliberate corpus seeding may request immediate
     // discoverability. A render-gate failure always withholds discovery with
     // its own reason. A run naming a `patternId` records nothing: it ran what
     // the index already holds.
@@ -1917,7 +2015,7 @@ export const runPatternTool: HarnessToolDefinition<
             reason: "recorded-automatically" as const,
           };
         publication = {
-          status: publicationVerdict.status,
+          status: "queued",
           reason: publicationVerdict.reason,
           message: PATTERN_PUBLICATION_MESSAGES[publicationVerdict.reason],
           syntheticInputsComplete: publicationVerdict.syntheticInputsComplete,
@@ -1948,9 +2046,8 @@ export const runPatternTool: HarnessToolDefinition<
             argumentSchema: pattern.argumentSchema,
             resultSchema: pattern.resultSchema,
             dependencies: patternIndexDependencies(program.files),
-            // Recording and surfacing are separate. Everything that ran is
-            // recorded; only an explicit seed configuration asks search to
-            // offer a passing render immediately.
+            // Recording and surfacing are separate. Only an explicit seed
+            // configuration asks search to offer a passing render immediately.
             ...(publicationVerdict.status === "recorded"
               ? {
                 nonDiscoverable: {
@@ -1964,7 +2061,12 @@ export const runPatternTool: HarnessToolDefinition<
         }
       }
     }
-    const retainedCauses = [withheldRefusal?.reason, probeThrown].filter(
+    const outputConcerns = observedOutputs.map((one) => one.concern);
+    const retainedCauses = [
+      withheldRefusal?.reason,
+      probeThrown,
+      observedOutputCause(observedOutputs),
+    ].filter(
       (text): text is string => text !== undefined,
     );
     return {
@@ -1987,6 +2089,7 @@ export const runPatternTool: HarnessToolDefinition<
       ...(releaseObservation !== undefined ? { releaseObservation } : {}),
       ...(releaseDecision !== undefined ? { releaseDecision } : {}),
       ...(publication !== undefined ? { patternPublication: publication } : {}),
+      ...(outputConcerns.length > 0 ? { outputConcerns } : {}),
       ...(retainedCauses.length > 0
         ? { rawCauseMessage: retainedCauses.join("\n\n") }
         : {}),

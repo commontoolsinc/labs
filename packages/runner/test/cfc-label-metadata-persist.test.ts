@@ -247,6 +247,37 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     });
   }
 
+  it("retains every deepest cover when trailing templates share many label parts", async () => {
+    const atoms = Array.from({ length: 40 }, (_, i) => `source-${i}`);
+    const { storageManager, runtime, sourceId } = await setup([
+      { path: ["rows"], label: { confidentiality: ["ancestor"] } },
+      ...atoms.map((atom) => ({
+        path: ["rows", "*"],
+        label: { confidentiality: [atom] },
+      })),
+      {
+        path: ["rows", "0", "deep"],
+        label: { confidentiality: ["descendant"] },
+      },
+    ]);
+    try {
+      const persistedId = await commitLinkWrite(runtime, sourceId, {
+        version: 1,
+        entries: [{
+          path: ["rows", "*"],
+          label: { confidentiality: ["carried"] },
+        }],
+      });
+      const template = persistedEntriesFor(storageManager, persistedId).find((
+        entry,
+      ) => entry.origin === "link" && entry.path.join("/") === "field/rows/*");
+      expect(template?.label.confidentiality).toEqual([...atoms, "carried"]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("persists the full caveat when the view carries a redacted copy", async () => {
     const { storageManager, runtime, sourceId, fullCaveat } = await setup();
     try {

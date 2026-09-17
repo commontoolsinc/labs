@@ -151,8 +151,7 @@ export function parseImportMap(configText: string): Record<string, string> {
 /**
  * Returns the workspace member that owns `relPath`, or undefined when the path
  * lies under no member. The longest matching member wins, so a file under a
- * nested member (`packages/patterns/auth`) is attributed to it rather than to
- * the member that contains it (`packages/patterns`).
+ * member that sits inside another member's tree is attributed to the inner one.
  */
 export function owningMember(
   relPath: string,

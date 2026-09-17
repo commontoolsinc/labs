@@ -54,6 +54,7 @@ import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import type { CfcWriteFloorMode } from "@commonfabric/runner/cfc";
 import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
 import {
+  type CommitRejection,
   type RuntimeDiagnosticsSnapshot,
   type TrustedUiDescriptor,
   type WorkerRequest,
@@ -61,7 +62,7 @@ import {
 } from "./multi-runtime-ipc.ts";
 
 export type { TrustedUiDescriptor };
-export type { RuntimeDiagnosticsSnapshot };
+export type { CommitRejection, RuntimeDiagnosticsSnapshot };
 
 export interface MultiRuntimeSessionSpec {
   /** Label used in error messages and as the identity passphrase seed. */
@@ -113,6 +114,15 @@ export interface MultiRuntimeHarnessOptions {
 
   /** Enable scheduler graph/stats/action diagnostics for this harness run. */
   diagnostics?: boolean;
+
+  /**
+   * Record every commit the sessions have refused, for
+   * {@link MultiRuntimeSession.rejections}. Separate from `diagnostics`
+   * because it costs a listener and an array, while that costs the
+   * scheduler's per-action tracing; a test measuring contention wants the
+   * first and not the second.
+   */
+  recordRejections?: boolean;
   sessions: (string | MultiRuntimeSessionSpec)[];
   spaceName?: string;
 
@@ -437,6 +447,31 @@ export class MultiRuntimeSession {
     return await this.#client.call("diagnostics") as RuntimeDiagnosticsSnapshot;
   }
 
+  /**
+   * Every commit this session had refused since {@link clearRejections},
+   * oldest first, each carrying the rejection's text and the addresses the
+   * commit read and wrote. Throws unless the harness was created with
+   * `recordRejections`, so a test that forgets it fails rather than reading
+   * an empty list as an absence of refusals.
+   *
+   * These say what each refusal was over, which separates a document two
+   * sessions contend for from a commit dropped behind one that was. The
+   * `commit-revert` count in `loggerCounts` covers much the same population
+   * but is not the same measure: a revert is logged only for a commit with
+   * semantic operations and a subscriber to notify.
+   */
+  async rejections(): Promise<CommitRejection[]> {
+    const { rejections } = await this.#client.call("rejections") as {
+      rejections: CommitRejection[];
+    };
+    return rejections;
+  }
+
+  /** Drop what {@link rejections} has recorded, opening a fresh window. */
+  async clearRejections(): Promise<void> {
+    await this.#client.call("clearRejections");
+  }
+
   /** Per-logger message counts (logger name -> key -> {total,...}). */
   async loggerCounts(): Promise<
     Record<string, Record<string, { total: number }>> & { total: number }
@@ -518,6 +553,7 @@ export class MultiRuntimeHarness {
           spaceName,
           apiUrl: normalized.apiUrl?.href ?? apiUrl,
           diagnostics: options.diagnostics === true,
+          recordRejections: options.recordRejections === true,
           ...(normalized.wsDelayMs !== undefined
             ? { wsDelayMs: normalized.wsDelayMs }
             : {}),

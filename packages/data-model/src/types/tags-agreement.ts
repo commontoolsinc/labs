@@ -25,15 +25,11 @@
  * `Uint8Array<ArrayBufferLike>`, rather than `Uint8Array<ArrayBuffer>`.
  */
 
+import type { MustBeTrue, Same } from "@commonfabric/utils/types";
+
 import type { FabricConvertibleJsObject } from "@/interface.ts";
 
 import type { FabricConvertibleJsObjectTag } from "./tags.ts";
-
-/** Whether `A` and `B` are mutually assignable. */
-type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-
-/** Compiles only when its argument is `true`. */
-type MustBeTrue<T extends true> = T;
 
 /**
  * The declared `prototype` of the global named `Name`, or `never` when there

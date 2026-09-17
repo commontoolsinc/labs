@@ -81,6 +81,15 @@ checks may collect on succeeding operations too, so this counter measures work
 rather than rejected commits. Both counters are measurement only and do not
 affect CFC relevance, preparation, or enforcement.
 
+`overlapWildcardQueries` and `overlapConcreteQueries` count label-index queries
+during preparation, split by whether the query path contains `"*"`.
+`authoritativeCoverCalls` counts carried label entries checked against source
+authority, including checks answered from the preparation-local cover cache.
+`flowTemplateContainers` counts container stamps and `flowTemplateEntriesMinted`
+counts their three child templates (`shape`, `value`, and `followRef`). These
+counters measure work before final entry coalescing; they do not count distinct
+persisted entries.
+
 ## Architecture
 
 The Runner has been refactored to eliminate singleton patterns in favor of
@@ -223,6 +232,13 @@ The reactivity system is what makes the Runner dynamic:
 - Fine-grained updates minimize unnecessary recalculations
 
 ### Scheduler
+
+A reactive commit conflict waits for ordered catch-up and scoped recovery pulls
+before the scheduler queues its retry. Output reads excluded from scheduling
+still participate in validation and repair. The pending-commit barrier includes
+recovery; a retired registration or a runtime closing its storage cannot requeue
+the delayed retry. Fresh input changes remain eligible to run while recovery is
+pending.
 
 The scheduler manages the execution order of reactive updates:
 

@@ -886,8 +886,6 @@ original pattern with `entries`.
 
 - [ ] Migrate `packages/patterns/cfc-agent-prompt-injection-demo/main.tsx`.
 - [ ] Migrate `packages/patterns/deep-research.tsx`.
-- [ ] Migrate `packages/patterns/google/core/gmail-importer.tsx`.
-- [ ] Migrate `packages/patterns/google/core/google-calendar-importer.tsx`.
 - [ ] Migrate `packages/patterns/notes/note.tsx`.
 - [ ] Migrate `packages/patterns/shopping-list.tsx`.
 - [ ] Migrate the affected files under `packages/patterns/system/`, including

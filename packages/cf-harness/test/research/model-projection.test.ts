@@ -29,6 +29,16 @@ const kit = (): HarnessResearchKit => ({
     hashtags: [],
     importHint: 'import Counter from "cf:pattern:confirmed"',
     ownerDid: "did:key:zPublisher",
+    signals: {
+      uses: 2,
+      score: 1,
+      inherited: {
+        priorPatternId: "p".repeat(43),
+        asOf: "2026-09-17T00:00:00Z",
+        events: { run_succeeded: 1 },
+        score: 1,
+      },
+    },
     argumentType: "{ count: number }",
     resultType: "{ count: number }",
     argumentSchema: { type: "object", description: "unused secret shape" },
@@ -73,6 +83,9 @@ describe("research model context", () => {
     expect(projection.kit.summary).toBe("Use [fabric-id] in prose");
     expect(projection.kit.patterns[0].description).toBe("Counter [fabric-id]");
     expect(projection.kit.patterns[0].ownerDid).toBe("did:key:zPublisher");
+    expect(projection.kit.patterns[0].signals).toEqual(
+      original.patterns[0].signals,
+    );
     expect(projection.kit.patterns[0].importHint).toBe(
       original.patterns[0].importHint,
     );

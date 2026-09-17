@@ -605,7 +605,10 @@ export function resolveLinkTracingDereferences(
   // The stored link at `position`, which `record` says holds one. The first
   // walk to follow it reads the whole value there — the walk depends on the
   // siblings that could replace the link, not on the probe alone — and parses
-  // it; every later walk takes the parsed link from the record.
+  // it; every later walk takes the parsed link from the record. The read is a
+  // step of the dereference rather than a standalone reference-identity
+  // observation, and it is where a reader following the reference consumes a
+  // confidentiality the referring document declares at that position.
   const hopAt = (
     link: NormalizedFullLink,
     position: readonly string[],
@@ -985,6 +988,14 @@ export function resolveLinkTracingDereferences(
  * value, which might include siblings to the "/" and thus make the link
  * invalid. In these cases, we do need to be reactive to all changes there.
  *
+ * Both reads observe which reference sits at the position. The second runs
+ * only once the first has found a sigil payload beneath it, and what the
+ * function hands back is the parsed link alone, so nothing beyond the
+ * reference reaches the caller. They are journaled as reference-identity
+ * observations (`linkResolutionProbe`): they consume a pointer's own label and
+ * none of the content labels at the position, and they stay in the journal for
+ * reactivity.
+ *
  * @param tx - The storage transaction to read from.
  * @param link - The link to read.
  * @param onlyWriteRedirects - Whether to only read write redirects.
@@ -996,7 +1007,9 @@ export function readMaybeLink(
   onlyWriteRedirects = false,
 ): NormalizedFullLink | undefined {
   const readSubPath = (extraPath: readonly string[]) =>
-    tx.readValueOrThrow({ ...link, path: [...link.path, ...extraPath] });
+    tx.readValueOrThrow({ ...link, path: [...link.path, ...extraPath] }, {
+      meta: linkResolutionProbe,
+    });
 
   const maybeSigilPayload = linkPayloadAtProbe(readSubPath(linkProbeSubPath()));
   if (

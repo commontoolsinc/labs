@@ -321,6 +321,82 @@ describe("SpaceServer", () => {
     });
   }
 
+  describe("the deferral backstop", () => {
+    // Both cases fail the same drain pass at the same point: the queue attempt
+    // for an admitted event throws, and the pass defers the entry rather than
+    // consequencing it. What differs between them is whether the serving
+    // tenure is still running when the deferral lands.
+
+    it("fires a re-drain after a queue-time failure", async () => {
+      const fixture = await openFixture();
+      await fixture.admit();
+      const scheduler = fixture.runtime.scheduler;
+      using queued = stub(scheduler, "queueEvent", (): never => {
+        throw new Error("injected queue failure");
+      });
+
+      await fixture.drain();
+      expect(queued.calls).toHaveLength(2);
+      expect(fixture.stats.events.deferredRescansArmed).toBe(1);
+      expect(fixture.stats.events.deferredRescansFired).toBe(0);
+
+      await clock.tick(250);
+      expect(fixture.stats.events.deferredRescansFired).toBe(1);
+      expect(queued.calls).toHaveLength(3);
+    });
+
+    it("arms nothing once the tenure has parked", async () => {
+      const fixture = await openFixture();
+      await fixture.admit();
+      const scheduler = fixture.runtime.scheduler;
+      using queued = stub(scheduler, "queueEvent", (): never => {
+        // A park clears the backstop timer and the renew interval up front,
+        // then awaits the seal chain and the runtime's disposal. The pass runs
+        // on through those awaits, so the deferral below lands on a tenure
+        // that has already released every timer it owns.
+        void fixture.serving.park("test-park-mid-drain");
+        throw new Error("injected queue failure");
+      });
+
+      // The tick comes before the assertions: a backstop armed here is one
+      // nothing clears, and leaving it pending for the next case to fire
+      // reports one failure as two.
+      await fixture.drain();
+      await clock.tick(250);
+      expect(fixture.serving.active).toBe(false);
+      expect(queued.calls).toHaveLength(1);
+      expect(fixture.stats.events.deferredRescansArmed).toBe(0);
+      expect(fixture.stats.events.deferredRescansFired).toBe(0);
+      expect(fixture.called).toEqual([]);
+    });
+
+    it("leaves the entries of a parked pass to the next activation", async () => {
+      const fixture = await openFixture();
+      await fixture.admit();
+      const scheduler = fixture.runtime.scheduler;
+      {
+        using _queued = stub(scheduler, "queueEvent", (): never => {
+          void fixture.serving.park("test-park-mid-drain");
+          throw new Error("injected queue failure");
+        });
+        await fixture.drain();
+      }
+      await settle(fixture.serving.park("test-park-await"));
+      // Past the backstop boundary with the space parked, so what the next
+      // tenure processes is what its own activation scan found.
+      await clock.tick(250);
+      expect(fixture.called).toEqual([]);
+      expect(fixture.entries().map((entry) => entry.consequenced === true))
+        .toEqual([false, false]);
+
+      const next = await openFixture();
+      await next.drain();
+      expect(next.called).toEqual(["A", "B"]);
+      expect(next.entries().map((entry) => entry.consequenced === true))
+        .toEqual([true, true]);
+    });
+  });
+
   it("processes a pending legacy entry after sequenced arrivals", async () => {
     const fixture = await openFixture();
     await fixture.admit();

@@ -16,10 +16,14 @@ import {
 } from "@commonfabric/test-support/records";
 
 export {
+  declaredSchema,
   digestIdentities,
   MANIFEST_SCHEMA_VERSION,
+  MANIFESTS_LOOKED_BACK,
   parseManifest,
+  SELECTION_AREA,
   serializeManifest,
+  writtenAhead,
 } from "@commonfabric/test-support/records";
 export type {
   Calibration,

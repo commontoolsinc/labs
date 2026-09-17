@@ -199,6 +199,27 @@ describe("schema-compatibility-default-reach", () => {
     ).toThrow(/not stable under default insertion/);
   });
 
+  it("merges a default beside a composition into the branch the value occupies", () => {
+    // The branch types do not overlap, so `{}` stays in the branch that
+    // lists it, and the default from the sibling `properties` lands inside
+    // it there. `{}` satisfies the schema; what reads back does not.
+
+    const schema: JSONSchema = {
+      type: "object",
+      anyOf: [{ enum: [{}] }, { type: "string" }],
+      properties: { a: { type: "number", default: 1 } },
+    };
+    expect(validateSchemaValue(schema, {})).toBeUndefined();
+
+    const read = readThrough(schema, {});
+    expect(read).toEqual({ a: 1 });
+    expect(validateSchemaValue(schema, read)).toBe(
+      "value does not match anyOf",
+    );
+    expect(() => assertSchemaSubset(schema, schema))
+      .toThrow(/not stable under default insertion/);
+  });
+
   it("leaves a default written under `patternProperties` out of the value read", () => {
     // The walk follows `patternProperties` even though no default under it is
     // ever merged into a value. The comment on

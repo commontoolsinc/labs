@@ -3842,6 +3842,38 @@ Delta 2026-09-15 — nonce reconciliation in either order:
   (which retracts the record) enacts the optimistic flush instead of
   losing the navigation.
 
+Delta 2026-09-16 — the deferred start of a piece a speculative run
+created:
+
+- protocol §1's scheduler-tell rule and speculation §2's
+  no-creation-carve-out corollary add no sentence to the map; what
+  changes is which instrument covers the corollary, and which normative
+  sections describe the site. The 2026-08-07 batch recorded the
+  corollary as riding the stamping-boundary pins, because a run that
+  instantiates a pattern is stamped by construction. A run does not
+  always set the piece up in its own transaction: when the piece's
+  execution family is not in this replica yet,
+  `Runner.runAfterNamedFamilyLands` names that family, waits for it,
+  and sets the piece up in a transaction it mints itself. That
+  transaction was stamped bookkeeping whatever ran it, so a flag-ON
+  client committed the argument its speculative run computed over the
+  argument the served run wrote — a client path from a scheduler run to
+  the wire, which the wrappers around a transaction hid a second way by
+  hiding the stamp the lookup went after. The durable-read mark was
+  lost across the same wait.
+- serving-loop.md §3d sanctioned the speculative-consequence stamp for
+  the start a commit callback mints and listed every deferred start
+  under bookkeeping; it now says the stamp follows the run a start came
+  from, and names the third start and the derivation kind.
+  speculation.md's durable-read paragraph said the mark covers only the
+  transaction the runner mints for itself; it now says what a start
+  that waits for a family carries into the second one.
+- Instrument: `packages/runner/test/cold-speculative-child.test.ts` —
+  a child left cold and then run from a speculative transaction,
+  direct and through the real and nested transaction wrappers, with
+  authored and serving-runtime controls that still persist, and a pair
+  covering the durable-read mark either side of the wait.
+
 Delta 2026-08-16 — fan-out stage A (OW17 leg 1: the instance-keyed
 serving replica + wire; the client arrival gate):
 

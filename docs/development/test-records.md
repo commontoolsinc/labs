@@ -278,14 +278,18 @@ Readers that join history across renames apply the alias file through
 `loadAliasResolver` in `@commonfabric/test-support/records`, which the
 report tool and the dashboard collector already do. Consumers that feed
 decisions read only `submissions/ci/`, whose writer credential never
-exists as key material, and exclude fork-authored reports the way those
-two do. The relay's member gate means everything
-stored was authored under the write-access group's trust — `ci.fork`
-marks a team member's fork run — so the remaining distinction for a
-decision consumer is code provenance, not author trust: pull-request
-runs execute unmerged code, and failure-rate or duration baselines come
-from `ci.event` `"push"` runs, whose code the tree itself carries. Both
-fields are stamped from the trusted event payload.
+exists as key material. The relay's member gate means everything stored
+was authored under the write-access group's trust — `ci.fork` marks a
+team member's fork run — so the only distinction left for a decision
+consumer is code provenance, not author trust: pull-request runs execute
+unmerged code, and failure-rate or duration baselines come from
+`ci.event` `"push"` runs, whose code the tree itself carries. Both
+fields are stamped from the trusted event payload. A fork run and a
+same-repository run of a pull request are therefore read alike, and what
+`ci.fork` keeps a run out of is a baseline rather than the data. It is
+set for a payload that did not name both repositories as well, so a run
+the relay could not place is never taken for one of this repository's
+own pushes.
 
 Two attribution facts worth knowing when reading `local/` prefixes: the
 minting workflow takes a username input, so anyone with repository write

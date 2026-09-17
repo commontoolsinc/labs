@@ -9,18 +9,18 @@
  * one. Every reader that asks the topology where a record belongs asks
  * this first.
  *
- * The surface and the name prefix a measurement is written from are here
- * beside the predicate that recognizes one, so the lane and its readers
- * name the same thing.
+ * The surface and the name prefix a measurement is written from come
+ * from `@commonfabric/test-support/records`, beside the record schema,
+ * so that a reader outside this package recognizes what this composes.
  */
 
-import type { TestIdentity } from "@commonfabric/test-support/records";
+import {
+  isLaneMeasurement,
+  LANE_MEASUREMENT_PREFIX,
+  LANE_MEASUREMENT_SURFACE,
+} from "@commonfabric/test-support/records";
 
-/** The record surface the lane measures itself on. */
-export const LANE_MEASUREMENT_SURFACE = { kind: "gate", scope: "ci" };
-
-/** What the lane's own measurements are named for. */
-export const LANE_MEASUREMENT_PREFIX = "ci-lane ";
+export { isLaneMeasurement, LANE_MEASUREMENT_PREFIX, LANE_MEASUREMENT_SURFACE };
 
 /**
  * How a batch run with coverage on is named apart from one run without.
@@ -98,11 +98,4 @@ export function setupMeasurement(name: string): string | undefined {
   if (!name.startsWith(prefix)) return undefined;
   const capability = name.slice(prefix.length);
   return capability.length === 0 ? undefined : capability;
-}
-
-/** Whether an identity is the lane measuring itself rather than a test. */
-export function isLaneMeasurement(test: TestIdentity): boolean {
-  return test.k === LANE_MEASUREMENT_SURFACE.kind &&
-    test.s === LANE_MEASUREMENT_SURFACE.scope &&
-    test.n.startsWith(LANE_MEASUREMENT_PREFIX);
 }

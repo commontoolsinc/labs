@@ -1,4 +1,8 @@
-import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import type {
+  FabricPlainObject,
+  FabricValue,
+  SchemaPathSelector,
+} from "@commonfabric/api";
 import { hashStringOf } from "@commonfabric/data-model";
 import {
   type EntityRef,
@@ -10,7 +14,7 @@ import {
   jsonFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import { internPathSelector } from "@commonfabric/data-model-schema";
-import { isObjectNotArray, unsafeObjectKeyIn } from "@commonfabric/utils/types";
+import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 export const MEMORY_PROTOCOL = "memory" as const;
 export const DEFAULT_BRANCH = "" as const;
@@ -1278,7 +1282,7 @@ export type SessionOpenRequest = {
   requestId: string;
   space: string;
   session: SessionDescriptor;
-  invocation?: Record<string, unknown>;
+  invocation?: FabricPlainObject;
   authorization?: FabricValue;
 
   /**
@@ -2111,7 +2115,7 @@ export const compatibleMemoryProtocolFlags = (
 export const parseMemoryProtocolFlags = (
   value: unknown,
 ): MemoryProtocolFlags | null => {
-  if (!isObjectNotArray(value)) {
+  if (!isPlainObject(value)) {
     return null;
   }
 
@@ -2350,7 +2354,7 @@ export const toDocumentSelector = (
 
 export const isEntityDocument = (
   value: unknown,
-): value is EntityDocument => isObjectNotArray(value);
+): value is EntityDocument => isPlainObject(value);
 
 /**
  * Read a stored document payload: decode it, and refuse a root that is not a

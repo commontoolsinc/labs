@@ -196,7 +196,9 @@ bytes it was computed from, and a failure is never memoized.
 ### Fail-closed
 
 Every reader fails closed on an unresolvable label the way it fails
-closed on an unknown version. The three stored-envelope errors —
+closed on an unknown version; [the stored CFC
+envelope](cfc-stored-envelope.md) states that rule in general. The three
+stored-envelope errors —
 `UnknownCfcMetadataVersionError`, `UnreadableCfcMetadataError`, and
 `UnresolvableCfcLabelDocumentError` — share the base
 `StoredCfcMetadataError`, and each consumer that rethrows the version

@@ -1164,6 +1164,66 @@ describe("console/server", () => {
       expect((await listSessions()).sessions).toHaveLength(0);
     });
 
+    it("answers 400 for a piece address naming a space that is not this console's", async () => {
+      // The caller cannot see which space this console runs against, so the
+      // mismatch is this side's to explain — and it costs no turn to say it.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{
+          name: "pattern_1",
+          ref: "pattern:someone-elses-space/bill-inbox",
+        }],
+      }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        "this session runs in `console-test`",
+      );
+      expect((await listSessions()).sessions).toHaveLength(0);
+    });
+
+    it("answers 400 for a piece address whose slug is malformed", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{ name: "pattern_1", ref: "pattern:console-test/Bills!" }],
+      }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        "reference does not parse",
+      );
+      expect((await listSessions()).sessions).toHaveLength(0);
+    });
+
+    it("answers 400 for a bare slug the runtime's slug rule refuses", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{ name: "pattern_1", ref: "Bill Inbox" }],
+      }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        "reference does not parse",
+      );
+    });
+
+    it("answers 400 for a piece address naming a path under the piece", async () => {
+      // A slug names a piece or it names nothing; the general cell case is
+      // CT-2319's, and claiming it here would promise what nothing resolves.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{
+          name: "pattern_1",
+          ref: "pattern:console-test/bill-inbox/rows",
+        }],
+      }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        "more than one path segment",
+      );
+    });
+
     it("answers 400 for input cells that are not a list of name and ref", async () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "summarize the trip",

@@ -1,8 +1,9 @@
 /**
  * Indexes the label paths a consumed read can overlap, in label-map order.
  * Concrete queries follow one trie branch and check wildcard sources bucketed
- * by their concrete prefix. Wildcard queries scan using the same prefix
- * predicate. Callers still apply origin and read-depth rules to the candidates,
+ * by their concrete prefix. A trailing wildcard selects the matching child
+ * depth or subtree; interior wildcard queries use the prefix predicate.
+ * Callers still apply origin and read-depth rules to the candidates,
  * which include both ancestors and descendants.
  */
 
@@ -48,6 +49,7 @@ const createNode = (): Node => ({
 /** A collection-local snapshot of one validated label map. */
 export class ConsumedLabelIndex {
   #root = createNode();
+  #onQuery: ((wildcard: boolean) => void) | undefined;
 
   /**
    * Constructs a snapshot over validated entries. `canonicalPaths` preserves
@@ -55,8 +57,12 @@ export class ConsumedLabelIndex {
    */
   constructor(
     entries: readonly LabelMapEntry[],
-    options: { canonicalPaths?: boolean } = {},
+    options: {
+      canonicalPaths?: boolean;
+      onQuery?: (wildcard: boolean) => void;
+    } = {},
   ) {
+    this.#onQuery = options.onQuery;
     for (const [ordinal, entry] of entries.entries()) {
       const path = options.canonicalPaths
         ? Object.isFrozen(entry.path)
@@ -91,10 +97,12 @@ export class ConsumedLabelIndex {
     path: readonly string[],
     includeDescendants = true,
   ): readonly IndexedEntry[] {
+    this.#onQuery?.(path.includes("*"));
     if (path.length === 0) {
       return includeDescendants ? this.#root.descendants : this.#root.exact;
     }
-    if (path.includes("*")) {
+    const wildcardDepth = path.indexOf("*");
+    if (wildcardDepth >= 0 && wildcardDepth !== path.length - 1) {
       return this.#root.descendants.filter((source) =>
         isPrefix(source.path, path) ||
         (includeDescendants && isPrefix(path, source.path))
@@ -103,6 +111,20 @@ export class ConsumedLabelIndex {
     const candidates: IndexedEntry[] = [];
     let current = this.#root;
     for (const segment of path) {
+      if (segment === "*") {
+        if (includeDescendants) {
+          for (const entry of current.descendants) candidates.push(entry);
+        } else {
+          for (const entry of current.exact) candidates.push(entry);
+          for (const source of current.wildcard) {
+            if (source.path.length <= path.length) candidates.push(source);
+          }
+          for (const child of current.children.values()) {
+            for (const entry of child.exact) candidates.push(entry);
+          }
+        }
+        return candidates.sort((a, b) => a.ordinal - b.ordinal);
+      }
       for (const entry of current.exact) candidates.push(entry);
       for (const source of current.wildcard) {
         if (

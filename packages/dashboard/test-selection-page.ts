@@ -20,11 +20,13 @@ import { DETAIL_PAGE_STYLES } from "./detail-page.ts";
 import {
   compactSpan,
   escapeHtml,
-  friendlyError,
   groupDigits,
 } from "./lib.ts";
 import { STATUS_EDGE, STATUS_WASH } from "./palette.ts";
-import { sharedTestSelection } from "./test-selection-history.ts";
+import {
+  collectionSub,
+  sharedTestSelection,
+} from "./test-selection-history.ts";
 import {
   FLAKE_EXCLUSION_FALLBACK,
   FLAKE_WINDOW_FALLBACK_DAYS,
@@ -321,6 +323,6 @@ export async function testSelectionResponse(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("test selection page:", message);
-    return html(testSelectionUnavailable(friendlyError(message)), 503);
+    return html(testSelectionUnavailable(collectionSub(error)), 503);
   }
 }

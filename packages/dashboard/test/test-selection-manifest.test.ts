@@ -6,11 +6,14 @@ import {
   serializeManifest,
 } from "@commonfabric/test-support/records";
 
-import { newestManifest } from "../test-selection-manifest.ts";
+import {
+  newestManifest,
+  TEST_SELECTION_PREFIX,
+} from "../test-selection-manifest.ts";
 
 describe("test-selection-manifest", () => {
   it("reads the public store with default settings and reports an empty listing", async () => {
-    const prefix = "labs/test-selection/v1/";
+    const prefix = TEST_SELECTION_PREFIX;
     const generatedAt = "2026-09-15T04:00:00.000Z";
     const name = `${prefix}manifest-${generatedAt}-latest.json.gz`;
     const expected = sampleManifest({ generatedAt });

@@ -49,15 +49,17 @@ import {
   type LaneObservation,
   laneObservationsOf,
 } from "./calibrate.ts";
-import type { Suite } from "../test-topology/suite.ts";
+import { type Suite, unavailableUnits } from "../test-topology/suite.ts";
 import {
   type Calibration,
+  declaredSchema,
   dialSnapshot,
   digestIdentities,
   type Manifest,
   MANIFEST_SCHEMA_VERSION,
   type ManifestEntry,
   type WithheldEntry,
+  writtenAhead,
 } from "./manifest.ts";
 import { ObservationSpool } from "./observation-spool.ts";
 import {
@@ -185,7 +187,13 @@ export function parseAggregate(text: string): AggregateState | undefined {
   }
   if (typeof value !== "object" || value === null) return undefined;
   const state = value as Record<string, unknown>;
-  if (state.schema !== MANIFEST_SCHEMA_VERSION) return undefined;
+  // An aggregate written under an older shape is read forward, field by
+  // field, the way each field below says. Refusing it instead would cost
+  // every catch it holds, which accumulate over unbounded history and
+  // cannot be recovered from a window of records.
+  if (declaredSchema(state) === undefined || writtenAhead(state)) {
+    return undefined;
+  }
   if (typeof state.day !== "string" || !Array.isArray(state.folded)) {
     return undefined;
   }
@@ -239,7 +247,19 @@ export function parseAggregate(text: string): AggregateState | undefined {
   for (const file of Object.values(files as Record<string, unknown>)) {
     if (typeof file !== "string") return undefined;
   }
-  const states = state.states as Record<string, IdentityState>;
+  // An identity whose state is not a record of one is dropped, and the
+  // rest of the aggregate is read. Such an identity is then read as one
+  // with no history, which is what a test nothing has been recorded for
+  // is, and what that costs is the identity running until it has a
+  // history again. Refusing the aggregate over it would cost every
+  // identity the one thing here that no window of records rebuilds.
+  const states: Record<string, IdentityState> = {};
+  for (const [key, held] of Object.entries(state.states)) {
+    if (typeof held !== "object" || held === null || Array.isArray(held)) {
+      continue;
+    }
+    states[key] = held as IdentityState;
+  }
   for (const identity of Object.values(states)) readCostsForward(identity);
   return {
     schema: MANIFEST_SCHEMA_VERSION,
@@ -265,8 +285,10 @@ export function dayOf(startedAt: string): string {
 
 /**
  * Where one report's executions happened, and who saw them. Undefined for
- * a report a decision must not read: a fork run's records are authored by
- * the fork, and a run with no context cannot say where it came from.
+ * a report a decision must not read: a run with no context cannot say
+ * where it came from, a continuous-integration run naming no branch
+ * cannot be told apart from any other naming none, and a local object
+ * whose name holds no reporter has nobody to attribute it to.
  */
 export function provenance(
   context: RunContext | undefined,
@@ -279,12 +301,17 @@ export function provenance(
       ? undefined
       : { place: "local", source: reporter };
   }
-  if (context.ci === undefined || context.ci.fork === true) return undefined;
+  if (context.ci === undefined) return undefined;
   const branch = context.branch ?? "";
   if (branch.length === 0) return undefined;
-  const place = context.ci.event === "push" && branch === "main"
-    ? "main"
-    : "pr";
+  // A baseline is a run of code the tree itself carries: a push to the
+  // default branch that the fork flag does not mark. The flag marks a run
+  // whose head repository differs from this one, and marks a run whose
+  // payload did not name both, so neither can stand as a baseline.
+  const place =
+    context.ci.event === "push" && branch === "main" && !context.ci.fork
+      ? "main"
+      : "pr";
   return { place, source: branch };
 }
 
@@ -300,13 +327,25 @@ export interface ReadReport {
 
   /** What the lanes in this object measured about themselves. */
   lanes: LaneObservation[];
+
+  /**
+   * The day of each lane measurement in a group nothing may read, which
+   * the cost model is therefore fitted without. A lane exercised only
+   * from runs the fold cannot place records what it measured like any
+   * other lane and contributes nothing, and these are what tell that
+   * apart from no lane having run at all.
+   *
+   * The day travels with each of them so that a caller holds them to
+   * the same window as the measurements it kept. A group whose start
+   * time will not read as one has no day, and contributes none.
+   */
+  declinedDays: string[];
 }
 
 /**
  * Reads one stored object. A report a decision must not read contributes
- * nothing: a fork run's records are authored by the fork, a group with no
- * context cannot say where it came from, and a group whose start time is
- * not a time has no place in the order the rules read along.
+ * nothing: `provenance()` says which those are, and a group whose start
+ * time is not a time has no place in the order the rules read along.
  */
 export function readReport(
   report: StoredReport,
@@ -316,12 +355,24 @@ export function readReport(
   const surfaces = new Map<string, Surface>();
   const durations = new Map<string, Map<string, number[]>>();
   const lanes: LaneObservation[] = [];
+  const declinedDays: string[] = [];
   for (const group of report.reports) {
     const where = provenance(group.context, report.objectName);
     if (
       where === undefined || group.context === undefined ||
       !Number.isFinite(Date.parse(group.context.startedAt))
     ) {
+      // The identity as the lane wrote it, rather than as the resolver
+      // would rewrite it: a group this cannot place has no day to
+      // resolve an alias against, and no alias renames a measurement a
+      // lane writes about itself.
+      const startedAt = group.context?.startedAt;
+      if (startedAt !== undefined && Number.isFinite(Date.parse(startedAt))) {
+        const day = dayOf(startedAt);
+        for (const record of group.records) {
+          if (isLaneMeasurement(record.test)) declinedDays.push(day);
+        }
+      }
       continue;
     }
     const day = dayOf(group.context.startedAt);
@@ -373,7 +424,7 @@ export function readReport(
       byDay.set(day, [...(byDay.get(day) ?? []), record.durationMs]);
     }
   }
-  return { observations, surfaces, durations, lanes };
+  return { observations, surfaces, durations, lanes, declinedDays };
 }
 
 /** The invocation unit and suite a record belongs to. */
@@ -431,19 +482,26 @@ export interface Unplaced {
   suiteLevel: string[];
 
   /**
-   * Identities the topology has no unit for. What decides an identity's
-   * unit is its own records: the file, for a suite whose units are files,
-   * and the recorded name for one whose units are not. An identity whose
-   * records say neither is given a unit the first time it records one the
-   * tree holds. An identity that matches two suites is here as well, which
-   * is a topology defect the drift guard fails on rather than a record
-   * that says too little. The lane's measurements of itself are not here:
-   * they are not test surfaces, and `isLaneMeasurement` is what says so.
+   * Identities no suite claims. What decides an identity's unit is its
+   * own records: the file, for a suite whose units are files, and the
+   * recorded name for one whose units are not. An identity whose records
+   * say neither is given a unit the first time it records one the tree
+   * holds. The lane's measurements of itself are not here: they are not
+   * test surfaces, and `isLaneMeasurement` is what says so.
    *
    * These span the aggregate's whole history rather than one run's
    * reads, because the surfaces they are read from do.
    */
   unclaimed: string[];
+
+  /**
+   * Identities more than one suite claims, which is a topology defect
+   * the drift guard fails on rather than a record that says too little.
+   * Apart here because the tree holds the test twice over rather than
+   * not at all, and what is done about an identity the tree has lost
+   * must not be done about one it holds.
+   */
+  contested: string[];
 }
 
 /**
@@ -467,7 +525,7 @@ export function locateSurfaces(
   surfaces: ReadonlyMap<string, Surface>,
 ): { placed: Map<string, Surface>; unplaced: Unplaced } {
   const placed = new Map<string, Surface>();
-  const unplaced: Unplaced = { suiteLevel: [], unclaimed: [] };
+  const unplaced: Unplaced = { suiteLevel: [], unclaimed: [], contested: [] };
   for (const [key, surface] of surfaces) {
     const test = testIdentityOfKey(key);
     if (test === undefined) continue;
@@ -486,19 +544,82 @@ export function locateSurfaces(
     // an ambiguity to settle here, and the drift guard is what fails on
     // it. Placing it either way would put the work in whichever suite
     // came first.
-    const unit = claims.length === 1 ? claims[0]!.unit : undefined;
-    if (unit !== undefined) {
-      placed.set(key, {
-        suite: claims[0]!.suite.id,
-        unit,
-        fromFile: surface.fromFile,
-      });
+    if (claims.length === 1) {
+      const unit = claims[0]!.unit;
+      if (unit === undefined) unplaced.suiteLevel.push(key);
+      else {
+        placed.set(key, {
+          suite: claims[0]!.suite.id,
+          unit,
+          fromFile: surface.fromFile,
+        });
+      }
       continue;
     }
-    if (claims.length === 1) unplaced.suiteLevel.push(key);
-    else unplaced.unclaimed.push(key);
+    if (claims.length === 0) unplaced.unclaimed.push(key);
+    else unplaced.contested.push(key);
   }
   return { placed, unplaced };
+}
+
+/**
+ * The identities the aggregate carries for tests the tree has lost.
+ *
+ * A test deleted from the repository leaves its records in the store,
+ * and the store is what the fold reads, so the aggregate carries its
+ * state for good. Nothing can select it, because the topology has no
+ * unit for it and the manifest holds only what the topology placed. What
+ * it costs is a state read, scored and written back on every publisher
+ * run, and a place in the count of identities the topology has no unit
+ * for, which is the count that says a surface is recording without
+ * saying where it runs.
+ *
+ * Two things have to hold before one is dropped, and neither is enough
+ * alone. No suite claims the identity at all: an identity two suites
+ * both claim is a topology defect over a test the tree holds twice, and
+ * is not here. And no run of it has
+ * been recorded inside the longest window a state keeps counters for,
+ * which is what `lastRun` having no answer says: the default branch runs
+ * every test the tree holds, so a test that is still there and still
+ * runs records inside that window whether or not a change selects it.
+ *
+ * The second is what holds this against a topology that reads the tree
+ * wrongly. A suite that enumerates nothing leaves every identity it
+ * would have claimed with no unit, and every one of those is running, so
+ * none of them is dropped.
+ *
+ * A skip is not a run, so a test the tree holds that nothing ever runs
+ * is dropped like a deleted one. What that costs is catches from before
+ * the window: every counter inside it is empty either way, since a skip
+ * is the one outcome a state records nothing for.
+ *
+ * A unit a configuration declares unavailable is kept, under the variant
+ * that declared it. The declaration is the tree saying the test is there
+ * and does not run in this configuration, which is how the drift guard
+ * and `verify` each read one as well.
+ */
+export function departed(
+  suites: readonly Suite[],
+  unplaced: Unplaced,
+  folded: Pick<FoldResult, "states" | "surfaces">,
+): string[] {
+  // A skip registry belongs to one configuration, and the file it names
+  // is a unit of every configuration of that suite. Keyed by the variant
+  // as well, so a file skipped in one of them says nothing about the
+  // same file's identities in another.
+  const declared = new Set<string>();
+  for (const suite of suites) {
+    for (const unit of unavailableUnits(suite)) {
+      declared.add(`${suite.variant ?? ""}\t${unit}`);
+    }
+  }
+  return unplaced.unclaimed.filter((key) => {
+    const state = folded.states.get(key);
+    if (state === undefined || lastRun(state) !== undefined) return false;
+    const unit = folded.surfaces.get(key)?.unit;
+    const test = testIdentityOfKey(key);
+    return !declared.has(`${test?.v ?? ""}\t${unit}`);
+  });
 }
 
 /**
@@ -639,6 +760,7 @@ export class Fold {
   readonly #resolver: AliasResolver;
   readonly #today: string;
   #observations = 0;
+  #declined = 0;
 
   constructor(
     aggregate: AggregateState,
@@ -691,6 +813,18 @@ export class Fold {
     return this.#observations;
   }
 
+  /**
+   * Lane measurements this fold read and had to decline, counted over
+   * the objects it folded and over the same window the cost model is
+   * fitted across. What that model is fitted from is what a lane
+   * measured about itself, so a figure here is a lane that ran inside
+   * the window and whose measurement cannot be used, which is a
+   * different thing from a lane that has not run.
+   */
+  get declined(): number {
+    return this.#declined;
+  }
+
   /** Whether this object's records are already part of the aggregate. */
   knows(objectName: string): boolean {
     return this.#foldedIndex.has(objectName);
@@ -729,10 +863,16 @@ export class Fold {
    * batches must be later than earlier ones, because the rules that decide
    * whether a failure is a catch look backwards at what `main` last said
    * and forwards at what it says next.
+   *
+   * An object the aggregate already holds contributes nothing, however
+   * often it is handed over. Its executions are in the counters and its
+   * durations in the day's samples, and both of those add rather than
+   * replace, so folding one a second time would count all of it twice.
    */
   add(reports: readonly StoredReport[]): void {
     const observations: Observation[] = [];
     for (const report of reports) {
+      if (this.#foldedIndex.has(report.objectName)) continue;
       const read = readReport(report, this.#resolver);
       // Appended one at a time rather than spread: a rollup shard holds a
       // whole day, and spreading that many arguments onto the stack is
@@ -741,6 +881,7 @@ export class Fold {
         observations.push(observation);
       }
       this.#remember(read);
+      this.#countDeclined(read);
       this.#folded.push(report.objectName);
       this.#foldedIndex.add(report.objectName);
     }
@@ -771,10 +912,14 @@ export class Fold {
    * Folds one logical batch from reports arriving in arbitrary order.
    * Each run is spooled to disk, then replayed in time order for every
    * evidence pass and the final classification pass.
+   *
+   * An object the aggregate already holds contributes nothing, the way
+   * `add` passes over one.
    */
   async addUnordered(reports: AsyncIterable<StoredReport>): Promise<void> {
     using observations = new ObservationSpool();
     for await (const report of reports) {
+      if (this.#foldedIndex.has(report.objectName)) continue;
       for (const group of report.reports) {
         const read = readReport({
           objectName: report.objectName,
@@ -784,6 +929,7 @@ export class Fold {
         }, this.#resolver);
         observations.add(read.observations);
         this.#remember(read);
+        this.#countDeclined(read);
       }
       this.#folded.push(report.objectName);
       this.#foldedIndex.add(report.objectName);
@@ -806,6 +952,20 @@ export class Fold {
    */
   #withinCostWindow(lane: LaneObservation): boolean {
     return daysBetween(lane.day, this.#today) <= COST_WINDOW_DAYS;
+  }
+
+  /**
+   * Counts the declined measurements of one object that the cost model
+   * would have been fitted over. A run reading a window wider than the
+   * model's own — a bootstrap, or a window somebody asked for — reads
+   * declined measurements from days the model does not reach, and a
+   * count including those would offer a stale measurement as the reason
+   * a current model is empty.
+   */
+  #countDeclined(read: ReadReport): void {
+    for (const day of read.declinedDays) {
+      if (daysBetween(day, this.#today) <= COST_WINDOW_DAYS) this.#declined++;
+    }
   }
 
   /** Closes the fold, sealing each day's cost and aging the counters. */
@@ -894,7 +1054,7 @@ export function foldReports(
   today: string,
 ): FoldResult {
   const fold = new Fold(aggregate, resolver, today);
-  fold.add(reports.filter((report) => !fold.knows(report.objectName)));
+  fold.add(reports);
   return fold.finish();
 }
 

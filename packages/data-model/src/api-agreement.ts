@@ -17,17 +17,13 @@
  * gains alone fails here as well.
  */
 
+import type { MustBeTrue, Same } from "@commonfabric/utils/types";
+
 import type {
   FabricInstance as ApiFabricInstance,
   FabricPrimitive as ApiFabricPrimitive,
 } from "./api.ts";
 import type { FabricInstance, FabricPrimitive } from "./interface.ts";
-
-/** Whether `A` and `B` are mutually assignable. */
-type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-
-/** Compiles only when its argument is `true`. */
-type MustBeTrue<T extends true> = T;
 
 /** Whether `FabricInstance` agrees with its declaration. */
 export type InstanceAgrees = MustBeTrue<

@@ -4,6 +4,7 @@ import {
   AliasResolver,
   buildObjectBody,
   type RunContext,
+  type StoredReport,
   testIdentityKey,
   type TestRecord,
 } from "@commonfabric/test-support/records";
@@ -12,6 +13,7 @@ import {
   buildManifest,
   CI_SOURCE,
   dayOf,
+  departed,
   emptyAggregate,
   executionsFor,
   Fold,
@@ -32,6 +34,7 @@ import {
 } from "./manifest.ts";
 import type { Suite } from "../test-topology/suite.ts";
 import {
+  COST_RULE,
   costSeconds,
   daysBetween,
   emptyState,
@@ -68,6 +71,7 @@ function context(fields: Partial<RunContext> = {}): RunContext {
       workflow: "deno.yml",
       job: "Test (1/8)",
       event: "push",
+      fork: false,
     },
     os: "linux",
     arch: "x86_64",
@@ -85,6 +89,22 @@ function record(fields: Partial<TestRecord> = {}): TestRecord {
     durationMs: 40,
     ...fields,
   };
+}
+
+/**
+ * A run context the fold cannot place, because it names no branch. What
+ * decides a group's place is read from the run's own facts, and this one
+ * says nothing about where it ran.
+ */
+function placeless(): RunContext {
+  const context_ = context();
+  delete context_.branch;
+  return context_;
+}
+
+/** Reports as the rollup path hands them over, one at a time. */
+async function* replaying(reports: readonly StoredReport[]) {
+  for (const report of reports) yield report;
 }
 
 /** One stored object, built the way the relay builds one. */
@@ -131,10 +151,40 @@ describe("build", () => {
       });
     });
 
-    it("declines a fork run, whose records the fork authored", () => {
+    it("reads a fork run as a pull request", () => {
+      // See `docs/specs/test-records.md`, "Trust boundaries for
+      // consumers", for what the store's member gate leaves the fork flag
+      // meaning.
+
+      const forked = context({ branch: "fix-writes" });
+      forked.ci!.event = "pull_request";
+      forked.ci!.fork = true;
+      expect(provenance(forked, CI_NAME)).toEqual({
+        place: "pr",
+        source: "fix-writes",
+      });
+    });
+
+    it("reads a fork-marked push to main as a pull request", () => {
+      // A baseline is code the tree itself carries, and a run this
+      // repository cannot place reads as a fork, so one never stands as a
+      // baseline.
+
       const forked = context();
       forked.ci!.fork = true;
-      expect(provenance(forked, CI_NAME)).toBeUndefined();
+      expect(provenance(forked, CI_NAME)).toEqual({
+        place: "pr",
+        source: "main",
+      });
+    });
+
+    it("declines a run carrying no continuous-integration facts", () => {
+      // Where a run ran is read from those facts, so a context that is
+      // not a workstation's and carries none says nothing this can use.
+
+      const bare = context();
+      delete bare.ci;
+      expect(provenance(bare, CI_NAME)).toBeUndefined();
     });
 
     it("declines a report with no context", () => {
@@ -288,13 +338,14 @@ describe("build", () => {
       ).toEqual([]);
     });
 
-    it("reads nothing from a fork run", () => {
-      const forked = context();
+    it("reads a fork run's records", () => {
+      const forked = context({ branch: "fix-writes" });
+      forked.ci!.event = "pull_request";
       forked.ci!.fork = true;
       expect(
         readReport(stored(CI_NAME, forked, [record()]), NO_ALIASES)
-          .observations,
-      ).toEqual([]);
+          .observations.map((seen) => seen.place),
+      ).toEqual(["pr"]);
     });
 
     it("reads nothing from a lane measuring itself", () => {
@@ -372,8 +423,43 @@ describe("build", () => {
       ]);
     });
 
-    it("keeps no lane measurement from a group nothing may read", () => {
-      const forked = context();
+    it("counts a lane measurement it had to decline", () => {
+      // A lane whose run the fold cannot place records what it measured
+      // like any other lane. Counting what was declined is what tells a
+      // lane whose measurement cannot be used from a lane that has not
+      // run. A run naming no branch is the case here, because what
+      // decides a group's place is read from the run's own facts and
+      // this one says nothing about where it ran.
+      const read = readReport(
+        stored(CI_NAME, placeless(), [
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+            durationMs: 14_800,
+          }),
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+            durationMs: 92_000,
+          }),
+          record(),
+        ]),
+        NO_ALIASES,
+      );
+      expect(read.lanes).toEqual([]);
+      // The test beside them is not one, so this counts the lane's own
+      // measurements rather than everything the group held.
+      expect(read.declinedDays).toEqual(["2026-08-20", "2026-08-20"]);
+    });
+
+    it("counts nothing declined in a group it could read", () => {
+      expect(
+        readReport(stored(CI_NAME, context(), [record()]), NO_ALIASES)
+          .declinedDays,
+      ).toEqual([]);
+    });
+
+    it("keeps a fork run's measurements of itself", () => {
+      const forked = context({ branch: "fix-writes" });
+      forked.ci!.event = "pull_request";
       forked.ci!.fork = true;
       expect(
         readReport(
@@ -385,7 +471,7 @@ describe("build", () => {
           ]),
           NO_ALIASES,
         ).lanes,
-      ).toEqual([]);
+      ).toEqual([{ day: "2026-08-20", capability: "fuse", seconds: 14.8 }]);
     });
   });
 
@@ -648,6 +734,165 @@ describe("build", () => {
       expect(states.has(KEY)).toBe(true);
     });
 
+    it("counts an object once however often it is handed over", () => {
+      // The counters add rather than replace, so a second fold of one
+      // object would count every execution in it twice.
+      const report = stored(CI_NAME, context(), [record()]);
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      fold.add([report]);
+      fold.add([report]);
+      const finished = fold.finish();
+      expect(finished.observations).toBe(1);
+      const state = finished.states.get(KEY)!;
+      expect(state.runsByDay["2026-08-20"]).toBe(1);
+      expect(state.costByDay["2026-08-20"]!.count).toBe(1);
+      expect(finished.aggregate.folded).toEqual([CI_NAME]);
+    });
+
+    it("counts a declined measurement once however often it arrives", () => {
+      // The count of what was declined adds the way every other counter
+      // does, so a second fold of one object would report a lane twice
+      // over as having measured something the model was fitted without.
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      const report = stored(CI_NAME, placeless(), [
+        record({
+          test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+          durationMs: 14_800,
+        }),
+      ]);
+      fold.add([report]);
+      fold.add([report]);
+      expect(fold.declined).toBe(1);
+    });
+
+    it("counts a declined measurement in a shard once", async () => {
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      const report = stored(CI_NAME, placeless(), [
+        record({
+          test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+          durationMs: 14_800,
+        }),
+      ]);
+      await fold.addUnordered(replaying([report, report]));
+      expect(fold.declined).toBe(1);
+    });
+
+    it("passes over a declined measurement past the cost window", () => {
+      // A bootstrap reads far wider than the model is fitted across, so
+      // a count taking every day it read would offer a measurement from
+      // a day the model cannot reach as the reason it holds nothing.
+      const older = placeless();
+      older.startedAt = "2026-07-20T00:00:00.000Z";
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      fold.add([
+        stored(CI_NAME, older, [
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+            durationMs: 14_800,
+          }),
+        ]),
+      ]);
+      expect(fold.declined).toBe(0);
+    });
+
+    it("counts no declined measurement from a group with no context", () => {
+      // A group carrying no context at all says neither where it ran nor
+      // when, so its measurements are declined and dated nowhere.
+      const read = readReport({
+        objectName: CI_NAME,
+        context: undefined,
+        records: [],
+        reports: [{
+          context: undefined,
+          records: [
+            record({
+              test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+              durationMs: 14_800,
+            }),
+          ],
+        }],
+      }, NO_ALIASES);
+      expect(read.lanes).toEqual([]);
+      expect(read.declinedDays).toEqual([]);
+    });
+
+    it("counts no declined measurement it cannot put in a day", () => {
+      // The group's own start time is the only thing that dates it, and
+      // one that will not read as a time dates nothing.
+      const undated = placeless();
+      undated.startedAt = "the other day";
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      fold.add([
+        stored(CI_NAME, undated, [
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup fuse" },
+            durationMs: 14_800,
+          }),
+        ]),
+      ]);
+      expect(fold.declined).toBe(0);
+    });
+
+    it("counts an object once when one batch carries it twice", () => {
+      // The rule lives in the fold rather than in each caller, because a
+      // caller filtering by what the aggregate already holds cannot see
+      // a copy the same batch folded a moment ago.
+      const report = stored(CI_NAME, context(), [record()]);
+      const folded = foldReports(
+        emptyAggregate("2026-08-20"),
+        [report, report],
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      expect(folded.observations).toBe(1);
+      expect(folded.states.get(KEY)!.runsByDay["2026-08-20"]).toBe(1);
+      expect(folded.aggregate.folded).toEqual([CI_NAME]);
+    });
+
+    it("counts a shard once however often it is handed over", async () => {
+      const report = stored(CI_NAME, context(), [record()]);
+      const fold = new Fold(
+        emptyAggregate("2026-08-20"),
+        NO_ALIASES,
+        "2026-08-20",
+      );
+      await fold.addUnordered(replaying([report, report]));
+      const finished = fold.finish();
+      expect(finished.observations).toBe(1);
+      expect(finished.states.get(KEY)!.runsByDay["2026-08-20"]).toBe(1);
+      expect(finished.aggregate.folded).toEqual([CI_NAME]);
+    });
+
+    it("counts nothing from an object a saved aggregate already held", () => {
+      const aggregate = emptyAggregate("2026-08-20");
+      aggregate.folded.push(CI_NAME);
+      const fold = new Fold(aggregate, NO_ALIASES, "2026-08-20");
+      fold.add([stored(CI_NAME, context(), [record()])]);
+      const finished = fold.finish();
+      expect(finished.observations).toBe(0);
+      expect(finished.aggregate.folded).toEqual([CI_NAME]);
+    });
+
     it("does not fold an object it has already folded", () => {
       const aggregate = emptyAggregate("2026-08-20");
       aggregate.folded.push(CI_NAME);
@@ -696,6 +941,86 @@ describe("build", () => {
       aggregate.states[KEY] = held;
       const parsed = parseAggregate(JSON.stringify(aggregate))!;
       expect(costSeconds(parsed.states[KEY]!, "2026-08-20")).toBe(4);
+    });
+
+    it("drops an identity whose state is not one, and reads the rest", () => {
+      // The aggregate holds the catches, which no window of records
+      // rebuilds, so one identity nothing can be read out of must not
+      // cost every other identity its history. The one dropped is then
+      // read as a test with no history, which is mandatory, so it runs.
+      for (const held of ["oops", 7, null, []]) {
+        const aggregate = JSON.parse(
+          JSON.stringify(emptyAggregate("2026-08-20")),
+        );
+        const kept = emptyState();
+        kept.mainCatches = 4;
+        aggregate.states["broken"] = held;
+        aggregate.states[KEY] = kept;
+        const read = parseAggregate(JSON.stringify(aggregate));
+        expect(read?.states[KEY]?.mainCatches).toBe(4);
+        expect(Object.hasOwn(read!.states, "broken")).toBe(false);
+      }
+    });
+
+    it("reads an aggregate written in an earlier shape forward", () => {
+      // An aggregate holds every catch a test has ever been credited
+      // with, over unbounded history, and a window of records cannot
+      // give them back. Refusing one written before the newest shape
+      // would cost all of them and leave nothing to publish from until
+      // an operator ran a bootstrap by hand.
+      const aggregate = emptyAggregate("2026-08-20");
+      const held = emptyState();
+      held.mainCatches = 4;
+      aggregate.states[KEY] = held;
+      const older = {
+        ...JSON.parse(JSON.stringify(aggregate)),
+        schema: MANIFEST_SCHEMA_VERSION - 1,
+      };
+      expect(parseAggregate(JSON.stringify(older))?.states[KEY]?.mainCatches)
+        .toBe(4);
+    });
+
+    it("refuses an aggregate that does not say which shape it is", () => {
+      for (const schema of [undefined, "1", 1.5, 0, -1, null]) {
+        const object = JSON.parse(
+          JSON.stringify(emptyAggregate("2026-08-20")),
+        );
+        if (schema === undefined) delete object.schema;
+        else object.schema = schema;
+        expect(parseAggregate(JSON.stringify(object))).toBeUndefined();
+      }
+    });
+
+    it("refuses an aggregate written in a shape from further ahead", () => {
+      // A reader that does not know a field cannot know what folding on
+      // top of the rest would mean, and what it would write back is an
+      // aggregate carrying half of each.
+      const ahead = {
+        ...JSON.parse(JSON.stringify(emptyAggregate("2026-08-20"))),
+        schema: MANIFEST_SCHEMA_VERSION + 1,
+      };
+      expect(parseAggregate(JSON.stringify(ahead))).toBeUndefined();
+    });
+
+    it("reads a day a stored state holds under the stamp it carries", () => {
+      // The days in a stored state were sealed by whatever rules were in
+      // force then, and a state written before the stamps carries none,
+      // so what a reader gets back has to say which.
+      const aggregate = emptyAggregate("2026-08-20");
+      const held = emptyState();
+      held.costByDay["2026-08-20"] = samplesOf([300_000, 300_000]);
+      aggregate.states[KEY] = held;
+      const parsed = parseAggregate(JSON.stringify(aggregate))!;
+      expect(parsed.states[KEY]!.costByDay["2026-08-20"]!.rule)
+        .toBeUndefined();
+      const sealed = emptyAggregate("2026-08-20");
+      const measured = emptyState();
+      sealDay(measured, "2026-08-20", samplesOf([300_000, 300_000]));
+      sealed.states[KEY] = measured;
+      expect(
+        parseAggregate(JSON.stringify(sealed))!
+          .states[KEY]!.costByDay["2026-08-20"]!.rule,
+      ).toBe(COST_RULE);
     });
 
     it("carries what lanes measured into the next run", () => {
@@ -821,6 +1146,145 @@ describe("build", () => {
     });
   });
 
+  describe("departed()", () => {
+    /** A suite claiming nothing, holding the skips a case gives it. */
+    function empty(
+      unavailable: Suite["unavailable"] = [],
+      units: string[] = [],
+    ): Suite {
+      return {
+        id: "workspace-unit",
+        recordSurfaces: [{ kind: "unit", scope: "memory" }],
+        needs: ["deno"],
+        units,
+        unavailable,
+        locate: () => undefined,
+        command: () => Promise.resolve([]),
+      };
+    }
+
+    /** A state whose last run was on a day inside the counters' window. */
+    function ranOn(day: string): IdentityState {
+      return { ...emptyState(), runsByDay: { [day]: 4 } };
+    }
+
+    const onFile = new Map([[KEY, {
+      suite: "unit:memory",
+      unit: UNIT,
+      fromFile: true,
+    }]]);
+
+    it("drops an identity the topology lost that nothing records", () => {
+      // A deleted test keeps its records in the store, so the fold keeps
+      // reading it back. Nothing can run it, and carrying it costs a
+      // state rescored and rewritten on every publisher run.
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([KEY]);
+    });
+
+    it("keeps an identity the topology lost that is still recording", () => {
+      // A surface whose records never say which file they came from has
+      // no unit either, and it is a wiring defect rather than a test that
+      // left. The runs are what tell the two apart.
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        {
+          states: new Map([[KEY, ranOn("2026-08-19")]]),
+          surfaces: onFile,
+        },
+      )).toEqual([]);
+    });
+
+    it("keeps an identity a configuration declares unavailable", () => {
+      // The declaration is the tree saying the test is there and does not
+      // run in this configuration, so it has stopped recording on
+      // purpose and its history is waiting for the skip to be lifted.
+      expect(departed(
+        [empty([{ unit: UNIT, reason: "the surface has not landed" }])],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([]);
+    });
+
+    it("reads a skip registry against the variant that declared it", () => {
+      // The registry belongs to one configuration and names a file every
+      // configuration of the suite holds. Read across all of them, a file
+      // skipped under one variant would pin the default history of the
+      // same file for good.
+      const variant: Suite = {
+        ...empty([{ unit: UNIT, reason: "the surface has not landed" }]),
+        variant: "server-execution",
+      };
+      expect(departed(
+        [variant],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([KEY]);
+    });
+
+    it("passes over a leaf a configuration declares unavailable", () => {
+      // A leaf entry leaves its unit enumerated and running, which is
+      // what the suite here holds, so in the tree the unit is placed by
+      // its file and nothing in it reaches this. Reading such an entry
+      // as a whole unit would exempt every other test in the file.
+      expect(departed(
+        [empty([{
+          unit: UNIT,
+          leafName: "space > writes",
+          reason: "the surface has not landed",
+        }], [UNIT])],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([KEY]);
+    });
+
+    it("drops an identity whose history is older than the window", () => {
+      // The counters are aged before this reads them, so a state with
+      // catches and no days is a test that stopped running long enough
+      // ago for every window to have passed over it.
+      const old = { ...emptyState(), mainCatches: 4, lastCatch: "2026-01-02" };
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [KEY], contested: [] },
+        { states: new Map([[KEY, old]]), surfaces: onFile },
+      )).toEqual([KEY]);
+    });
+
+    it("keeps an identity more than one suite claims", () => {
+      // Two suites claiming it is a topology defect over a test the tree
+      // holds twice, and the drift guard is what fails on it. Dropping
+      // its history would answer a defect by discarding the evidence.
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [], contested: [KEY] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([]);
+    });
+
+    it("keeps an identity the topology placed", () => {
+      expect(departed(
+        [empty()],
+        { suiteLevel: [], unclaimed: [], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([]);
+    });
+
+    it("keeps an identity that measures a whole invocation", () => {
+      // Those are left out of the manifest because no lane can be asked
+      // to run one, not because the tree has lost them, and the lane
+      // cost fit reads what they measured.
+      expect(departed(
+        [empty()],
+        { suiteLevel: [KEY], unclaimed: [], contested: [] },
+        { states: new Map([[KEY, emptyState()]]), surfaces: onFile },
+      )).toEqual([]);
+    });
+  });
+
   describe("locateSurfaces()", () => {
     /** A suite claiming what a case tells it to. */
     function claiming(id: string, locate: Suite["locate"]): Suite {
@@ -901,7 +1365,8 @@ describe("build", () => {
         }]]),
       );
       expect(placed.size).toBe(0);
-      expect(unplaced).toEqual({ suiteLevel: [], unclaimed: [] });
+      expect(unplaced)
+        .toEqual({ suiteLevel: [], unclaimed: [], contested: [] });
     });
 
     it("passes over a key that names no identity", () => {
@@ -917,7 +1382,8 @@ describe("build", () => {
         }]]),
       );
       expect(placed.size).toBe(0);
-      expect(unplaced).toEqual({ suiteLevel: [], unclaimed: [] });
+      expect(unplaced)
+        .toEqual({ suiteLevel: [], unclaimed: [], contested: [] });
     });
 
     it("passes on an identity two suites claim", () => {
@@ -934,7 +1400,11 @@ describe("build", () => {
         }]]),
       );
       expect(placed.size).toBe(0);
-      expect(unplaced.unclaimed).toEqual([KEY]);
+      // Apart from an identity no suite claims: the tree holds this test
+      // twice over rather than not at all, and what is done about a test
+      // the tree has lost must not be done about one it holds.
+      expect(unplaced.unclaimed).toEqual([]);
+      expect(unplaced.contested).toEqual([KEY]);
     });
   });
 
@@ -1296,6 +1766,45 @@ describe("the days a fold keeps a lane's measurements over", () => {
         units: 4,
       },
     ]);
+  });
+});
+
+describe("a fold reading cost days another set of rules sealed", () => {
+  /** A stored aggregate holding one five-minute day under no stamp. */
+  function aggregateSealedBefore(): string {
+    const aggregate = emptyAggregate("2026-08-20");
+    const held = emptyState();
+    held.costByDay["2026-08-20"] = samplesOf([300_000, 300_000]);
+    aggregate.states[KEY] = held;
+    return JSON.stringify(aggregate);
+  }
+
+  function folded(reports: readonly ReturnType<typeof stored>[]) {
+    const fold = new Fold(
+      parseAggregate(aggregateSealedBefore())!,
+      NO_ALIASES,
+      "2026-08-20",
+    );
+    if (reports.length > 0) fold.add(reports);
+    return fold.finish();
+  }
+
+  it("charges the day it sealed once it has one", () => {
+    const run = folded([
+      stored(CI_NAME, context(), [record({ durationMs: 1000 })]),
+    ]);
+    expect(costSeconds(run.states.get(KEY)!, "2026-08-20")).toBe(1);
+    // And the aggregate it writes says so, so the next run reads it as a
+    // day these rules sealed rather than dropping it again.
+    const next = parseAggregate(JSON.stringify(run.aggregate))!;
+    expect(next.states[KEY]!.costByDay["2026-08-20"]!.rule).toBe(COST_RULE);
+  });
+
+  it("charges the day that set sealed while it has none", () => {
+    // A test that has not passed since the rules changed has nothing
+    // else to be charged, and charging it nothing is the direction that
+    // overruns a lane.
+    expect(costSeconds(folded([]).states.get(KEY)!, "2026-08-20")).toBe(300);
   });
 });
 

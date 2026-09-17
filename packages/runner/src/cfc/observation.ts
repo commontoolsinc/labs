@@ -17,7 +17,6 @@ import type { TrustResolver } from "./trust.ts";
 import {
   type CfcConfClause,
   clauseAlternatives,
-  clausesEqual,
   clauseSubsumes,
   normalizeClause,
 } from "./clause.ts";
@@ -112,14 +111,19 @@ export const uniqueCfcAtoms = (
   atoms: Iterable<unknown>,
 ): CfcAtom[] => {
   const unique: CfcAtom[] = [];
+  const references = new Set<object>();
   let groups: Map<string, CfcAtom[]> | undefined;
   for (const atom of atoms) {
+    if (typeof atom === "object" && atom !== null) {
+      if (references.has(atom)) continue;
+    }
     if (groups === undefined && unique.length > ATOM_SCAN_LIMIT) {
       groups = groupAtomsByKey(unique);
     }
     if (groups === undefined) {
       if (!unique.some((kept) => deepEqual(kept, atom))) {
         unique.push(atom as JSONValue);
+        if (typeof atom === "object" && atom !== null) references.add(atom);
       }
       continue;
     }
@@ -129,6 +133,7 @@ export const uniqueCfcAtoms = (
     }
     group.push(atom as JSONValue);
     unique.push(atom as JSONValue);
+    if (typeof atom === "object" && atom !== null) references.add(atom);
   }
   return unique;
 };
@@ -463,7 +468,7 @@ export const atomsOutsideCeiling = (
  * tightens); intersecting alternative sets never is.
  *
  * Each union clause is normalized (`normalizeClause`: dedup + canonical
- * order + singleton unwrap) and result clauses dedup via `clausesEqual`, so
+ * order + singleton unwrap) and result clauses dedup structurally, so
  * order-differing spellings of the same clause coalesce. No absorption pass:
  * a redundant wider clause may sit beside a narrower one that subsumes
  * strictly more — harmless, it admits only a subset of what the narrower
@@ -490,24 +495,20 @@ export const meetCfcObservationCeilings = (
 ): CfcObservationMaxConfidentiality => {
   if (a === undefined) return b;
   if (b === undefined) return a;
-  const met: CfcConfClause[] = [];
-  for (const clauseA of a) {
-    const alternativesA = clauseAlternatives(clauseA as CfcConfClause);
-    if (alternativesA.length === 0) continue;
-    for (const clauseB of b) {
-      const alternativesB = clauseAlternatives(clauseB as CfcConfClause);
-      if (alternativesB.length === 0) continue;
-      const union = normalizeClause({
-        anyOf: [...alternativesA, ...alternativesB],
-      });
-      if (
-        !met.some((existing) => clausesEqual(existing as CfcConfClause, union))
-      ) {
-        met.push(union);
+  function* unions(): Generator<CfcConfClause> {
+    for (const clauseA of a!) {
+      const alternativesA = clauseAlternatives(clauseA as CfcConfClause);
+      if (alternativesA.length === 0) continue;
+      for (const clauseB of b!) {
+        const alternativesB = clauseAlternatives(clauseB as CfcConfClause);
+        if (alternativesB.length === 0) continue;
+        yield normalizeClause({
+          anyOf: [...alternativesA, ...alternativesB],
+        });
       }
     }
   }
-  return met;
+  return uniqueCfcAtoms(unions());
 };
 
 export const cfcJsonPointerForPath = (

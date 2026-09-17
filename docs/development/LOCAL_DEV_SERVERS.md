@@ -348,7 +348,7 @@ bundles, which is quicker than a restart.
 
 ## Background Piece Service (Optional)
 
-The background-piece-service polls registered pieces and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled piece execution (e.g., auto-refreshing Google OAuth tokens).
+The background-piece-service polls registered pieces and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled piece execution.
 
 ### Quick Setup (Recommended)
 
