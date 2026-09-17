@@ -1035,8 +1035,16 @@ export class XAppView extends BaseView {
    * for everyone, so a name travels as far as the DID does and reads better
    * where it lands. Where either reader would take the reference for another
    * address, as {@link readsBackAs} decides, the space is written as the DID
-   * the view's space resolved to instead, and a reference that neither
-   * spelling carries intact is not offered.
+   * the view's space resolved to instead.
+   *
+   * A member is written as the address the page was opened at carries it, and
+   * a member the two readers read differently is cited by nothing. The
+   * readers differ on a member name carrying a JSON Pointer escape — `a~1b`
+   * reaches the grammar as `a/b` — and on one a URL path rewrites, and
+   * neither escaping settles it: the token that reaches the grammar as `a~1b`
+   * reaches the page as `a~01b`. Such a name is outside the grammar a
+   * collection holds its members to, and the alternative for one is an
+   * address that names a different member of the same collection.
    */
   #getPieceReference(): string | undefined {
     if (!this.#namedAMember) return;

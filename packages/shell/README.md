@@ -27,9 +27,13 @@ The shell currently supports these browser URL forms:
   name back as another space: a name holding a character the
   [cell reference grammar][space-vocabulary] reserves, or one a page URL
   rewrites, such as a name holding a space character, is written as the space's
-  DID. Where the slug names a piece rather than a collection there are no
-  members to name, so the segment is reported by name, alongside the slug, and
-  nothing opens. An address carrying segments past the member opens nothing
+  DID. The member is written as the address carries it, and a member whose name
+  the two readers read differently — one carrying a JSON Pointer escape, or one
+  a URL path rewrites — is offered no reference at all, there being no one
+  address for it; a collection holds its member names to a grammar that admits
+  no such name. Where the slug names a piece rather than a collection there are
+  no members to name, so the segment is reported by name, alongside the slug,
+  and nothing opens. An address carrying segments past the member opens nothing
   either: no segment after a member is resolved, so a nested address such as
   `/<space>/top/42/comments/7` is reported by the segments past the member.
 - `//<space-name-or-did>/...`: any of the other forms, `.embed` included (as

@@ -663,26 +663,55 @@ describe("AppView collection members", () => {
     }
   });
 
-  it("cites nothing for a member that no spelling of its space carries intact", async () => {
-    // The grammar reads a path segment as a JSON Pointer token, so it takes
-    // this member for `a/b`, and the page reader takes it as written. No
-    // choice of space makes the two agree.
+  it("cites a member the reference's two readers read alike, and no other", async () => {
+    // A member name reaches the grammar as a JSON Pointer token and the page
+    // reader as a URL segment, and the two disagree on a name carrying a
+    // pointer escape or one a URL path rewrites. No spelling settles that: a
+    // literal `a~1b` reaches the grammar as `a/b`, and the `a~01b` that
+    // reaches it as `a~1b` reaches the page reader as `a~01b`. So a member
+    // there is no one address for is cited by none, rather than by an address
+    // naming a different member of the same collection.
+    //
+    // Every name the collection-naming library issues is a canonical decimal
+    // (`isMemberName` in `packages/patterns/collection-naming/allocator.ts`),
+    // and every name the slug grammar admits is read alike by both, so the
+    // first two rows are the members a shipped collection has.
 
     const restore = installBrowserGlobals();
     try {
       const { XAppView } = await import("../src/views/AppView.ts");
-      const stub = stubRuntime({ pieceId: "fid1:member-a", pathAfter: [] });
-      const view = appViewOver(
-        XAppView as never,
-        stub,
-        viewOf({ pieceSlug: "top", pieceMember: "a~1b" }),
-      );
-
-      view._selectedPattern.run();
-      await view._selectedPattern.taskComplete;
-
-      expect(stub.started.map((call) => call[1])).toEqual(["fid1:member-a"]);
-      expect(citedReference(view)).toBeUndefined();
+      const cases = [
+        { pieceMember: "42", cited: "//naming-demo/top/42" },
+        {
+          pieceMember: "glaze-recipes",
+          cited: "//naming-demo/top/glaze-recipes",
+        },
+        { pieceMember: "a~1b", cited: undefined },
+        { pieceMember: "a b", cited: undefined },
+      ];
+      const outcomes = [];
+      for (const { pieceMember } of cases) {
+        const stub = stubRuntime({ pieceId: "fid1:member", pathAfter: [] });
+        const view = appViewOver(
+          XAppView as never,
+          stub,
+          viewOf({ pieceSlug: "top", pieceMember }),
+        );
+        view._selectedPattern.run();
+        await view._selectedPattern.taskComplete;
+        // The member is on screen either way, so what the rows differ in is
+        // the citation rather than whether the page opened.
+        outcomes.push({
+          pieceMember,
+          opened: stub.started.map((call) => call[1]),
+          cited: citedReference(view),
+        });
+      }
+      expect(outcomes).toEqual(cases.map(({ pieceMember, cited }) => ({
+        pieceMember,
+        opened: ["fid1:member"],
+        cited,
+      })));
     } finally {
       restore();
     }
