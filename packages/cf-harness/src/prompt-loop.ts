@@ -11,6 +11,7 @@ import {
 } from "@commonfabric/utils/types";
 import { isAbsolute, relative } from "@std/path";
 
+import { PIECE_TARGETING_GUIDANCE } from "./piece-targeting.ts";
 import {
   type HarnessModelProviderId,
   isHarnessModelProviderId,
@@ -1323,6 +1324,7 @@ const buildSubagentSystemPrompt = (
     "You start with a fresh context and do not know the parent conversation.",
     "Use only the task and context provided in this child run.",
     "Report missing inputs or choices to the parent through your failure-return contract; the parent owns questions to the user. Do not repeat authoring to discover a source the granted references do not hold. Unavailable, refused, or unsettled reads remain unknown, not absent.",
+    PIECE_TARGETING_GUIDANCE,
     "Do not attempt to delegate further; nested subagents are not available.",
     `Subagent profile: ${profileConfig.profile}`,
     ...(profileConfig.hostToolIds.length > 0

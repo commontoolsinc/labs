@@ -53,6 +53,7 @@ import {
 } from "./host-mounts.ts";
 import { inputCellsContextMessage } from "./input-cells.ts";
 import { patternRefsContextMessage } from "./pattern-refs.ts";
+import { PIECE_TARGETING_GUIDANCE } from "./piece-targeting.ts";
 import type { CreateHarnessPromptLoopOptions } from "./prompt-loop.ts";
 import type { DockerRunscAdditionalMountConfig } from "./sandbox/types.ts";
 import { loadHarnessSkillContext } from "./skills/registry.ts";
@@ -355,7 +356,7 @@ export interface EstablishHarnessSessionContextOptions {
  * Brings up everything a run holds before its first model turn, and returns
  * the context messages announcing it: the skill registry and any preloaded
  * skills, the well-known grants of the session's space, and the operator's
- * input cells.
+ * input cells and the guidance for selecting a piece target.
  *
  * The three differ in how they fail, and deliberately. A missing skills root
  * simply yields no messages. Grants are best-effort: a session that will not
@@ -426,12 +427,8 @@ const establishContextMessages = async (
       options.onGrantsUnavailable?.(error);
     }
   }
-  const inputCellsMessage = inputCellsContextMessage(
-    await engine.establishInputCells(),
-  );
-  if (inputCellsMessage !== undefined) {
-    messages.push(inputCellsMessage);
-  }
+  messages.push(inputCellsContextMessage(await engine.establishInputCells()));
+  messages.push(PIECE_TARGETING_GUIDANCE);
   const patternRefsMessage = patternRefsContextMessage(
     await engine.establishPatternRefs(),
   );

@@ -374,13 +374,14 @@ export const mintInputCellHandles = async (
 /**
  * The context message announcing `inputCells` to the model: one line per
  * input cell, pairing the token with the operator's name for it. An empty
- * list yields no message at all rather than an empty header.
+ * list explicitly records that this run has no attachments; conversation
+ * history may still identify a target.
  */
 export const inputCellsContextMessage = (
   inputCells: readonly HarnessInputCell[],
-): string | undefined => {
+): string => {
   if (inputCells.length === 0) {
-    return undefined;
+    return "No input cells are attached for this run. A piece unambiguously selected in the conversation can still be the target; granted registry or connector references are not attachments.";
   }
   return [
     "Input cells for this run, named by the operator:",

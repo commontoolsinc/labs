@@ -160,6 +160,36 @@ describe("research", () => {
   });
 
   describe("private tool boundaries", () => {
+    it("returns unresolved piece selection to the parent without proposing a registry crawl", async () => {
+      const model = new ScriptedModelClient([
+        () =>
+          assistant(JSON.stringify({
+            status: "incomplete",
+            summary: "The parent must identify the target piece.",
+            inputs: [],
+            rules: [],
+            sourceIds: [],
+            missing: ["target piece"],
+            selectedPatternIds: [],
+            leads: [],
+            questions: ["Which piece should be edited?"],
+          })),
+      ]);
+      await createResearchRunner({ modelClient: model })(requestFor({
+        task: "Add a total to this bills pane.",
+        purpose: "orient",
+      }));
+      const system = model.requests[0].transcript.find((message) =>
+        message.role === "system"
+      )?.content;
+      expect(system).toContain("make zero registry reads");
+      expect(system).toContain("at most one registry read");
+      expect(system).toContain("exactly one matching piece");
+      expect(system).toContain(
+        "Research and authoring children return an unresolved target to the parent",
+      );
+    });
+
     it("pairs invalid requests without admitting their outputs", async () => {
       const token = "cfh:a:available";
       const corpus = corpusWith([{

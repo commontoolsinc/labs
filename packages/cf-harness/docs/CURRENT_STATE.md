@@ -191,7 +191,11 @@ The current package provides:
   continuation availability. The live pane renders the question or reason.
   Children report blockers to the parent. Missing-input discovery distinguishes
   released evidence, absence within an enumerated granted scope, and unknown
-  reads; it stops for input rather than repeating author delegation;
+  reads; it stops for input rather than repeating author delegation. Shared
+  target-selection guidance asks for an unnamed, unattached piece without a
+  registry read, preserves established conversation targets, and permits at most
+  one registry lookup for a name the user supplied. Only a unique released match
+  allows work to proceed;
 - a session-local address handle table: deterministic `cfh:a:` tokens minted per
   run for cell addresses, recorded in `run-state.json`, and carried across
   resume; the prompt loop swaps addresses to tokens in model-bound tool output
