@@ -1,12 +1,15 @@
 import { type DID, KeyStore } from "@commonfabric/identity";
 import {
+  isAppViewEqual,
   isEmbeddedView,
   isViewingDefaultPatternView,
   replaceNavigation,
+  spaceViewRef,
   updatePageTitle,
+  urlToAppView,
 } from "@commonfabric/navigation";
 import { type NameSchema, stringSchema } from "@commonfabric/runner/schemas";
-import { renderReferenceContext } from "@commonfabric/runner/shared";
+import { parseCellReference } from "@commonfabric/runner/shared";
 import { slugIdForSpace, validateSlug } from "@commonfabric/runner/slugs";
 import {
   type Cancel,
@@ -222,18 +225,47 @@ interface ShownResolution {
 }
 
 /**
- * Whether the cell reference grammar can write `name` as a space. The grammar
- * reserves characters a space name may otherwise hold, and a name holding one
- * has no spelling there.
+ * The origin a reference is opened under when it is read as a page. Only the
+ * path is read, so which origin this is decides nothing.
  */
-function isWritableSpaceName(name: string): boolean {
-  // The grammar's own writer decides, so its reserved set is stated once.
+const PAGE_ORIGIN = "http://page.invalid";
+
+/**
+ * Whether both readers of `reference` read it as member `member` of the
+ * collection `slug` in `space`: the cell reference grammar, which `cf` reads
+ * it through, and `urlToAppView`, which opens it as a page under this shell's
+ * origin.
+ *
+ * Each reader rewrites spellings the other keeps. The grammar refuses a space
+ * name holding a character it reserves. A page URL percent-encodes some
+ * characters and resolves dot segments, and the page reader takes an escaped
+ * `@` at the head of the space for the space's mark. A name rewritten on the
+ * way in comes back out naming another space.
+ */
+function readsBackAs(
+  reference: string,
+  space: string,
+  slug: string,
+  member: string,
+): boolean {
+  // Each reader is asked rather than restated, so neither has a copy of its
+  // rules here to fall out of step with.
   try {
-    renderReferenceContext({ space: name });
-    return true;
+    const cited = parseCellReference(reference);
+    const citesMember = cited.space === space && cited.id === slug &&
+      cited.member === undefined && cited.scope === undefined &&
+      cited.pin === undefined && cited.path.length === 1 &&
+      cited.path[0] === member;
+    if (!citesMember) return false;
   } catch {
     return false;
   }
+  const named = spaceViewRef(space, undefined);
+  if (!named) return false;
+  return isAppViewEqual(
+    urlToAppView(new URL(`${PAGE_ORIGIN}${reference}`)),
+    { ...named, pieceSlug: slug, pieceMember: member },
+  );
 }
 
 export class XAppView extends BaseView {
@@ -1001,8 +1033,10 @@ export class XAppView extends BaseView {
    *
    * The space is written as the view names it: a space name derives its DID
    * for everyone, so a name travels as far as the DID does and reads better
-   * where it lands. A name holding a character the grammar reserves has no
-   * spelling in it, so that space is written as the DID the name resolved to.
+   * where it lands. Where either reader would take the reference for another
+   * address, as {@link readsBackAs} decides, the space is written as the DID
+   * the view's space resolved to instead, and a reference that neither
+   * spelling carries intact is not offered.
    */
   #getPieceReference(): string | undefined {
     if (!this.#namedAMember) return;
@@ -1010,13 +1044,19 @@ export class XAppView extends BaseView {
     if (!("pieceSlug" in view) || !view.pieceSlug) return;
     const member = "pieceMember" in view ? view.pieceMember : undefined;
     if (!member) return;
-    const space = "spaceName" in view
-      ? isWritableSpaceName(view.spaceName) ? view.spaceName : this.space
+    const named = "spaceName" in view
+      ? view.spaceName
       : "spaceDid" in view
       ? view.spaceDid
       : undefined;
-    if (!space) return;
-    return `//${space}/${view.pieceSlug}/${member}`;
+    for (const space of [named, this.space]) {
+      if (!space) continue;
+      const reference = `//${space}/${view.pieceSlug}/${member}`;
+      if (readsBackAs(reference, space, view.pieceSlug, member)) {
+        return reference;
+      }
+    }
+    return undefined;
   }
 
   #getRuntimeLoadError(): LoadError | undefined {

@@ -22,7 +22,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
-import type { AppView } from "@commonfabric/navigation";
+import { type AppView, urlToAppView } from "@commonfabric/navigation";
 
 // The reader `cf cell get` takes an address through, which is what a citation
 // the view offers has to satisfy. The CLI's package exports only its command
@@ -452,6 +452,21 @@ function citedReference(view: AppViewLike): string | undefined {
 }
 
 /**
+ * What each reader of a cited reference takes it to name: the reader `cf cell
+ * get` takes an address through, and this shell's page reader opening it
+ * under an origin, as a browser does with the reference pasted after one.
+ */
+function readBothWays(reference: string | undefined): {
+  cf: unknown;
+  page: AppView;
+} {
+  return {
+    cf: normalizeLLMFriendlyRef(String(reference)),
+    page: urlToAppView(new URL(`http://page.invalid${reference}`)),
+  };
+}
+
+/**
  * Drive `view` into the state the cases below turn on: the watch it was
  * running has been replaced, that watch's resolution is still out, and the
  * watch that replaced it is the one now resolving.
@@ -527,12 +542,15 @@ describe("AppView collection members", () => {
 
       const reference = citedReference(view);
       expect(reference).toBe("//naming-demo/top/42");
-      // `cf` reads it as the collection, the member that collection selects,
-      // and the space both are read in, with no binding of its own supplied.
-      expect(normalizeLLMFriendlyRef(String(reference))).toEqual({
-        pieceId: "top",
-        embeddedSpace: "naming-demo",
-        path: [42],
+      // Each reader takes it for the collection, the member that collection
+      // selects, and the space both are read in, with no binding supplied.
+      expect(readBothWays(reference)).toEqual({
+        cf: { pieceId: "top", embeddedSpace: "naming-demo", path: [42] },
+        page: {
+          spaceName: "naming-demo",
+          pieceSlug: "top",
+          pieceMember: "42",
+        },
       });
     } finally {
       restore();
@@ -555,10 +573,9 @@ describe("AppView collection members", () => {
 
       const reference = citedReference(view);
       expect(reference).toBe(`//${SPACE}/top/42`);
-      expect(normalizeLLMFriendlyRef(String(reference))).toEqual({
-        pieceId: "top",
-        embeddedSpace: SPACE,
-        path: [42],
+      expect(readBothWays(reference)).toEqual({
+        cf: { pieceId: "top", embeddedSpace: SPACE, path: [42] },
+        page: { spaceDid: SPACE, pieceSlug: "top", pieceMember: "42" },
       });
     } finally {
       restore();
@@ -587,11 +604,82 @@ describe("AppView collection members", () => {
 
       const reference = citedReference(view);
       expect(reference).toBe(`//${SPACE}/top/42`);
-      expect(normalizeLLMFriendlyRef(String(reference))).toEqual({
-        pieceId: "top",
-        embeddedSpace: SPACE,
-        path: [42],
+      expect(readBothWays(reference)).toEqual({
+        cf: { pieceId: "top", embeddedSpace: SPACE, path: [42] },
+        page: { spaceDid: SPACE, pieceSlug: "top", pieceMember: "42" },
       });
+    } finally {
+      restore();
+    }
+  });
+
+  it("cites a space by name only where a page address keeps the name as written", async () => {
+    // A page URL percent-encodes a space character and resolves a dot segment
+    // away, and the page reader takes an escaped `@` at the head of a space
+    // for its mark. Each of the first three names would open another space,
+    // so each is cited by the DID it resolved to. A URL keeps the escape in
+    // the last as written, and both readers read it back as the same name, so
+    // it is cited by that name.
+
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const cases = [
+        { spaceName: "demo space", cited: SPACE },
+        { spaceName: "..", cited: SPACE },
+        { spaceName: "%40demo", cited: SPACE },
+        { spaceName: "demo%20space", cited: "demo%20space" },
+      ];
+      const outcomes = [];
+      for (const { spaceName } of cases) {
+        const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+        const view = appViewOver(
+          XAppView as never,
+          stub,
+          viewOf({ spaceName, pieceSlug: "top", pieceMember: "42" }),
+        );
+        view._selectedPattern.run();
+        await view._selectedPattern.taskComplete;
+        const reference = citedReference(view);
+        outcomes.push({ spaceName, reference, read: readBothWays(reference) });
+      }
+      expect(outcomes).toEqual(cases.map(({ spaceName, cited }) => ({
+        spaceName,
+        reference: `//${cited}/top/42`,
+        read: {
+          cf: { pieceId: "top", embeddedSpace: cited, path: [42] },
+          page: {
+            ...(cited === SPACE ? { spaceDid: SPACE } : { spaceName: cited }),
+            pieceSlug: "top",
+            pieceMember: "42",
+          },
+        },
+      })));
+    } finally {
+      restore();
+    }
+  });
+
+  it("cites nothing for a member that no spelling of its space carries intact", async () => {
+    // The grammar reads a path segment as a JSON Pointer token, so it takes
+    // this member for `a/b`, and the page reader takes it as written. No
+    // choice of space makes the two agree.
+
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-a", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "a~1b" }),
+      );
+
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      expect(stub.started.map((call) => call[1])).toEqual(["fid1:member-a"]);
+      expect(citedReference(view)).toBeUndefined();
     } finally {
       restore();
     }
