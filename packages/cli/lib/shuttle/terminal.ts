@@ -384,6 +384,16 @@ class StandardTerminal implements PromptTerminal {
     this.#held = undefined;
     this.#release?.();
     this.#release = undefined;
+    // What a frame was holding, where the frame is already gone. A key typed
+    // behind the one that started the program closes the view while the
+    // terminal is held, and the giving-up that would have written those lines
+    // was dropped like every write during a hold — so nothing after this would
+    // write them either: {@link StandardTerminal.unframe} has no frame left to
+    // answer for, and the suspension that would have flushed them is not
+    // something a signal unwinds into. Where a frame is still up, the restore
+    // that follows this is what writes them, and flushing here would only put
+    // them back where they are.
+    if (this.#frame === undefined) this.#flush();
   }
 
   /**

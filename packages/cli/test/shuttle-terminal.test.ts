@@ -93,10 +93,19 @@ interface Stubs {
    * program, which is the state a signal costs the most *after* that one: the
    * program holds the terminal, so nothing this module writes goes out until
    * the hold is dropped, and the suspension that would have dropped it is not
-   * something a signal unwinds into. All four are orderings the process can
-   * really be in, and the restore has to be right from each of them.
+   * something a signal unwinds into. `onCue` delivers it nowhere on its own and
+   * hands the case the raiser instead, for an ordering that is a state rather
+   * than a call: a frame given up *during* a suspension is reached by neither
+   * a raw-mode call nor a write, both of them being what a hold suppresses.
+   * All five are orderings the process can really be in, and the restore has
+   * to be right from each of them.
    */
-  readonly raiseWhen?: "entering" | "leaving" | "framed" | "suspended";
+  readonly raiseWhen?:
+    | "entering"
+    | "leaving"
+    | "framed"
+    | "suspended"
+    | "onCue";
 
   /** The raw-mode call that fails, where one does. */
   readonly rawThrowsOn?: boolean;
@@ -115,6 +124,17 @@ interface Watched {
 
   /** Everything written, joined as the terminal would have received it. */
   written(): string;
+
+  /**
+   * What had been written when the module asked to end, and everything where
+   * it never asked.
+   *
+   * It is what a real exit would have let out. The stand-in for `Deno.exit`
+   * returns, so the run carries on and writes what a process that had gone
+   * would not have — which is the difference a case about a signal has to read
+   * against, or it passes on cleanup a person never sees.
+   */
+  writtenBeforeExit(): string;
 
   /**
    * What the run threw, and nothing where it returned.
@@ -150,7 +170,7 @@ interface Watched {
  */
 async function watching(
   stubs: Stubs,
-  body: (terminal: PromptTerminal) => Promise<void>,
+  body: (terminal: PromptTerminal, raise: () => void) => Promise<void>,
 ): Promise<Watched> {
   const raw: boolean[] = [];
   const order: string[] = [];
@@ -201,6 +221,7 @@ async function watching(
     // once, and a second delivery would be the harness inventing a case.
     if (
       stubs.raiseWhen !== "framed" && stubs.raiseWhen !== "suspended" &&
+      stubs.raiseWhen !== "onCue" &&
       mode === (stubs.raiseWhen !== "leaving") && deliver !== undefined
     ) {
       const arrived = deliver;
@@ -262,22 +283,36 @@ async function watching(
     if (stubs.releaseThrows) throw new TypeError("no such listener");
   };
   // The stand-in returns where the real one does not, which is what lets a
-  // case read what the handler did after asking to end. Nothing in the module
-  // runs after the ask, so returning changes no order a case can see.
+  // case read what the handler did after asking to end.
+  //
+  // What that costs is that the run carries on past the ask, where a process
+  // would be gone: a suspension the signal arrived inside of goes on to its
+  // own way out and writes what it owes, which a real exit never reaches. So a
+  // case about what the handler itself managed to write reads
+  // {@link Watched.writtenBeforeExit} rather than everything written, the two
+  // differing by exactly the cleanup a real exit would have cut off.
   Deno.exit = ((status?: number) => {
     exits.push(status);
     order.push(`exit ${status}`);
+    if (wroteAtExit === undefined) wroteAtExit = chunks.length;
   }) as unknown as typeof Deno.exit;
   const priorColumns = Deno.env.get("COLUMNS");
   if (stubs.columnsEnv === undefined) Deno.env.delete("COLUMNS");
   else Deno.env.set("COLUMNS", stubs.columnsEnv);
   let thrown: unknown;
+  let wroteAtExit: number | undefined;
   if (stubs.raise !== undefined) {
     const signal = stubs.raise;
     deliver = () => handlers.get(signal)?.();
   }
   try {
-    await withPromptTerminal(body);
+    await withPromptTerminal((terminal) =>
+      body(terminal, () => {
+        const arrived = deliver;
+        deliver = undefined;
+        arrived?.();
+      })
+    );
   } catch (error) {
     thrown = error;
   } finally {
@@ -296,6 +331,8 @@ async function watching(
   return {
     raw,
     written: () => chunks.join(""),
+    writtenBeforeExit: () =>
+      chunks.slice(0, wroteAtExit ?? chunks.length).join(""),
     reads: () => issued,
     thrown,
     listened,
@@ -489,6 +526,38 @@ describe("terminal", () => {
       // being able to write. It reaches the output either way in this harness,
       // for the reason above, so it is stated rather than relied on.
       expect(watched.written()).toContain("a watch said so");
+    });
+
+    it("writes what a frame held back where the frame went first", async () => {
+      // The hole the case above leaves, and a signal is the only way into it.
+      // Keys already decoded out of one read reach the prompt while a program
+      // holds the terminal, so a `q` behind the key that started an editor
+      // closes the view mid-suspension: the frame is gone, and the writing
+      // that would have flushed what it was holding was dropped like every
+      // write during a hold. Nothing later writes them either — the restore
+      // has no frame left to answer for, and the suspension that would have
+      // flushed them is not something a signal unwinds into.
+      //
+      // Kills: flushing on the way out only where a frame is still up, which
+      // strands every line the frame was holding.
+
+      const watched = await watching(
+        { raise: "SIGINT", raiseWhen: "onCue" },
+        async (terminal, raise) => {
+          terminal.frame(["a"]);
+          terminal.announce("a watch said so");
+          await terminal.suspend(() => {
+            terminal.unframe();
+            raise();
+            return Promise.resolve();
+          });
+          await Promise.resolve();
+        },
+      );
+      // Read against what the exit cut off, because the stand-in for it
+      // returns: without that bound the suspension's own way out writes these
+      // lines a moment later and the case passes either way.
+      expect(watched.writtenBeforeExit()).toContain("a watch said so");
     });
 
     it("ends with the status the shell convention gives the signal", async () => {
