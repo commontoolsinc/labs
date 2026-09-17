@@ -1013,9 +1013,16 @@ describe("terminal", () => {
       // Held across the suspension, the line lands after it; flushed inside
       // the suspension, it would land before — on the screen the frame is
       // about to repaint.
-      const gave = written.lastIndexOf("\x1b[?1049l");
+      // Two givings-up, and which one the line comes after is the whole
+      // question: the first is the suspension handing the screen to the
+      // program, the second is the frame giving it up for good. Counted rather
+      // than taken as the last of however many there are, because "after the
+      // last" is satisfied by the suspension's alone if the frame's never
+      // happens — the ordering would then say only that the line was written.
+      const gives = [...written.matchAll(/\x1b\[\?1049l/g)].map((m) => m.index);
+      expect(gives.length).toBe(2);
       expect(said).toBeGreaterThan(-1);
-      expect(said).toBeGreaterThan(gave);
+      expect(said).toBeGreaterThan(gives[1]!);
     });
 
     it("draws nothing again where no frame held the screen", async () => {
