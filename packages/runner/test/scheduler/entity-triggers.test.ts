@@ -2,8 +2,10 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import {
+  assertNoTriggerDrift,
   EntityTriggers,
   resetTriggerScanWork,
+  triggerEquivalenceEnabled,
   triggerScanWork,
 } from "../../src/scheduler/entity-triggers.ts";
 import { arraysOverlap } from "../../src/reactive-dependencies.ts";
@@ -225,6 +227,74 @@ describe("EntityTriggers", () => {
         triggers.set(reader("second"), [["value", "b"]]);
         expect(triggers.size).toBe(2);
       });
+    });
+  });
+
+  describe("registering the same reads again", () => {
+    it("leaves the index untouched when handed back the same list", () => {
+      const triggers = new EntityTriggers();
+      const action = reader("same-list");
+      const paths = [["value", "count"]];
+      triggers.set(action, paths);
+      triggers.set(action, paths);
+
+      expect(matched(triggers, ["value", "count"])).toEqual({
+        "same-list": [["value", "count"]],
+      });
+    });
+
+    it("reports a read it cannot find rather than removing another", () => {
+      // A list holding one path twice is not the compact form the type
+      // promises. Taking it out walks to that path twice, and the second walk
+      // arrives where the first pruned.
+      const triggers = new EntityTriggers();
+      const action = reader("repeated-path");
+      triggers.set(action, [["value"], ["value"]]);
+
+      expect(() => triggers.set(action, [["other"]])).toThrow(
+        "Registered read `value` is missing from the index.",
+      );
+    });
+  });
+
+  describe("assertNoTriggerDrift()", () => {
+    it("accepts an answer holding exactly the reads the write overlaps", () => {
+      const registered = [["value", "a"], ["value", "b"], ["other"]];
+      expect(() =>
+        assertNoTriggerDrift([["value", "a"]], registered, ["value", "a"])
+      ).not.toThrow();
+    });
+
+    it("names a read the answer left out", () => {
+      const registered = [["value", "a"]];
+      expect(() => assertNoTriggerDrift([], registered, ["value", "a"]))
+        .toThrow('Trigger index drift for write ["value","a"]: ["value","a"]');
+    });
+
+    it("names a read the answer invented", () => {
+      expect(() => assertNoTriggerDrift([["value", "a"]], [], ["value", "a"]))
+        .toThrow('Trigger index drift for write ["value","a"]: ["value","a"]');
+    });
+
+    it("tells a component holding a separator from two components", () => {
+      // `["a/b"]` and `["a", "b"]` are different reads, and a write to one
+      // reaches neither the other nor anything below it.
+      expect(() => assertNoTriggerDrift([["a/b"]], [["a", "b"]], ["a/b"]))
+        .toThrow('Trigger index drift for write ["a/b"]: ["a/b"]');
+    });
+  });
+
+  describe("triggerEquivalenceEnabled()", () => {
+    it("runs the check under a test environment and nowhere else", () => {
+      expect(triggerEquivalenceEnabled(() => "test")).toBe(true);
+      expect(triggerEquivalenceEnabled(() => "production")).toBe(false);
+      expect(triggerEquivalenceEnabled(() => undefined)).toBe(false);
+    });
+
+    it("stays off when the environment cannot be read", () => {
+      expect(triggerEquivalenceEnabled(() => {
+        throw new Deno.errors.NotCapable("requires env access");
+      })).toBe(false);
     });
   });
 });

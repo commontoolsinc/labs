@@ -137,4 +137,23 @@ describe("hasInvalidUpstream()", () => {
     expect(hasInvalidUpstream({ nodes, reverseDependencies }, chain[0]))
       .toBe(true);
   });
+
+  it("passes over a writer that writes nothing of its own", () => {
+    // The cone ends at a writer with no upstream edges. Something invalid
+    // elsewhere in the graph keeps the walk running rather than answering
+    // from the empty invalid set.
+    const nodes = new NodeRegistry();
+    const source: Action = () => {};
+    const reader: Action = () => {};
+    const unrelated: Action = () => {};
+    const reverseDependencies = new WeakMap<Action, Set<Action>>([
+      [reader, new Set([source])],
+    ]);
+    nodes.register(source, "computation");
+    nodes.setStatus(source, "clean");
+    nodes.register(unrelated, "computation");
+
+    expect(hasInvalidUpstream({ nodes, reverseDependencies }, reader))
+      .toBe(false);
+  });
 });

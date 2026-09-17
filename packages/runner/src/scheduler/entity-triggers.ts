@@ -30,19 +30,30 @@ export function resetTriggerScanWork(): void {
 }
 
 /**
- * Every-mutation equivalence verifier, on under `ENV=test` and off elsewhere.
+ * Whether the every-mutation equivalence verifier runs: on under `ENV=test`
+ * and off elsewhere.
+ *
  * With it on, every registration and removal asserts that the trie answers
  * what a scan of the per-action record under {@link arraysOverlap} answers,
  * which is the definition the trie implements. Drift throws naming the write
  * path and the paths the two disagree on.
+ *
+ * Takes the environment reader rather than reaching for `Deno.env` itself, so
+ * that what it decides for a given environment is a thing a test can ask.
  */
-const TRIGGER_EQUIVALENCE_CHECK: boolean = (() => {
+export function triggerEquivalenceEnabled(
+  readEnv: (name: string) => string | undefined,
+): boolean {
   try {
-    return typeof Deno !== "undefined" && Deno.env.get("ENV") === "test";
+    return readEnv("ENV") === "test";
   } catch {
     return false; // no env permission: stay disabled
   }
-})();
+}
+
+const TRIGGER_EQUIVALENCE_CHECK: boolean = triggerEquivalenceEnabled(
+  (name) => typeof Deno === "undefined" ? undefined : Deno.env.get(name),
+);
 
 /** One path in the trie, and whatever reads end at it. */
 interface PathNode {
@@ -58,6 +69,48 @@ interface PathNode {
 
 function pathNode(path: readonly MemoryAddressPathComponent[]): PathNode {
   return { path, actions: new Set(), children: new Map() };
+}
+
+/**
+ * A path written so that two different paths never read as one.
+ *
+ * A component may hold any character a property name may hold, `/` included,
+ * so joining on a separator gives `["a/b"]` and `["a", "b"]` the same text.
+ */
+function pathKey(path: readonly MemoryAddressPathComponent[]): string {
+  return JSON.stringify(path);
+}
+
+/**
+ * Throws unless `indexed` and the reads of `registered` that `writePath`
+ * overlaps are the same set of paths.
+ *
+ * This is the definition the trie implements, written out as a scan: what the
+ * trie answered on one side, and {@link arraysOverlap} over every registered
+ * read on the other. The message names the write and every path the two
+ * disagree on.
+ */
+export function assertNoTriggerDrift(
+  indexed: Iterable<readonly MemoryAddressPathComponent[]>,
+  registered: readonly (readonly MemoryAddressPathComponent[])[],
+  writePath: readonly MemoryAddressPathComponent[],
+): void {
+  const answered = new Set<string>();
+  for (const path of indexed) answered.add(pathKey(path));
+  const scanned = new Set(
+    registered.filter((path) => arraysOverlap(path, writePath)).map(pathKey),
+  );
+  const drift = [
+    ...[...answered].filter((path) => !scanned.has(path)),
+    ...[...scanned].filter((path) => !answered.has(path)),
+  ];
+  if (drift.length > 0) {
+    throw new Error(
+      `Trigger index drift for write ${pathKey(writePath)}: ${
+        drift.join(", ")
+      }`,
+    );
+  }
 }
 
 /**
@@ -204,23 +257,9 @@ export class EntityTriggers {
     const pathsMatched = triggerScanWork.pathsMatched;
     try {
       for (const writePath of [[], ...moved]) {
-        const indexed = new Set<string>();
-        this.forEachMatching(writePath, (path) => indexed.add(path.join("/")));
-        const scanned = new Set(
-          registered.filter((path) => arraysOverlap(path, writePath))
-            .map((path) => path.join("/")),
-        );
-        const drift = [
-          ...[...indexed].filter((path) => !scanned.has(path)),
-          ...[...scanned].filter((path) => !indexed.has(path)),
-        ];
-        if (drift.length > 0) {
-          throw new Error(
-            `Trigger index drift for write \`${writePath.join("/")}\`: ${
-              drift.join(", ")
-            }`,
-          );
-        }
+        const indexed: (readonly MemoryAddressPathComponent[])[] = [];
+        this.forEachMatching(writePath, (path) => indexed.push(path));
+        assertNoTriggerDrift(indexed, registered, writePath);
       }
     } finally {
       triggerScanWork.scans = scans;

@@ -99,8 +99,8 @@ async function runCollection(members: number): Promise<Row> {
   await runtime.idle();
   const row: Row = { members, memberWrite, append: work() };
 
+  // Closes the storage manager too, by default.
   await runtime.dispose();
-  await storageManager.close();
   return row;
 }
 
