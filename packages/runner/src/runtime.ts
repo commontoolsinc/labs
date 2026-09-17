@@ -2218,14 +2218,21 @@ export class Runtime {
       // before tearing down storage sessions.
       await this.scheduler.idle();
 
+      // Storage close can publish notifications while it retires providers.
+      // Retire both reactive subscribers first, so those notifications cannot
+      // schedule a read that opens a new provider behind the close.
+      this.scheduler.dispose();
+      this.runner.dispose();
+
+      // Disposal prevents new work but does not cancel a run already admitted
+      // by a notification. Let that run release storage before closing it.
+      await this.scheduler.idle();
+
       // Clear module registry
       this.moduleRegistry.clear();
 
       // Cancel all storage operations
       if (closeStorage) await this.storageManager.close();
-
-      // Wait for any pending operations
-      await this.scheduler.idle();
     } finally {
       this.#tearingDownWrites = true;
       this.#writeTeardown.abort();
