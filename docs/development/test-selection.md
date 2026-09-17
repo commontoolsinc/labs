@@ -324,7 +324,7 @@ in one place.
 
 A lane looks past such a body to the newest one behind it, over
 `MANIFESTS_LOOKED_BACK` manifests, because a lane with no manifest runs
-the whole corpus. The wall reports a fault instead and shows nothing,
+the whole corpus. The dashboard reports a fault instead and shows nothing,
 which costs a person a figure rather than costing a run its selection.
 
 **Nothing gates on it.** When the publisher fails, the previous manifest is
@@ -795,7 +795,7 @@ for, and a runner that exited zero having run none of its unit has. So a
 unit that recorded nothing fails the lane, and an excusal holds only for
 an invocation that accounted for every identity it was asked to run.
 
-## What the wall shows
+## What the dashboard shows
 
 Two tiles read the newest manifest. The flake tile reports how many tests
 are too noisy to judge a change by. The selection tile reports what share
@@ -817,7 +817,7 @@ running on main. Activity and new manifests are checked every 30 seconds.
 Activity requires the dashboard's GitHub token; the public measurements remain
 available when that lookup fails.
 
-Both follow [the wall's rules](../../packages/dashboard/README.md#philosophy-and-values):
+Both follow [the dashboard's rules](../../packages/dashboard/README.md#philosophy-and-values):
 they report on the system, they name tests, and nothing about either is
 aggregated per person.
 
@@ -952,7 +952,7 @@ itself.
   if it is not.
 
 Five properties keep this on the right side of
-[the wall's rule](../../packages/dashboard/README.md#philosophy-and-values)
+[the dashboard's rule](../../packages/dashboard/README.md#philosophy-and-values)
 that reporting is about the system and never about individuals. The
 comment's subject is a commit and a test, and no author is named. Nothing
 is counted per author, per team, or per anything, and no history is kept:

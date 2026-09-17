@@ -209,17 +209,17 @@ function renderShell(
   serverRedAgeMs: number | null = null,
   message: DashboardMessage = { text: "", updatedAt: null, revision: 0 },
 ): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Fabric wall — LIVE</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Dashboard — LIVE</title>
 ${DASHBOARD_THEME_HEAD}
 ${faviconLink(status)}
 <style>
 ${DASHBOARD_THEME_STYLES}
   body{margin:0;background:var(--page);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:18px 20px 26px;max-width:1100px;margin:0 auto}
   .top{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;align-items:center;gap:18px;margin-bottom:14px}
-  .brand b{font-size:16px;font-weight:600}.brand span{font-size:12px;color:var(--text-faint);margin-left:8px}
+  .brand{display:flex;align-items:center;gap:8px}.shortcut{font-size:12px;color:var(--text-faint)}
   .badge{font-size:11px;color:var(--status-good-text);border:1px solid ${
     statusLayer("good", 0.4)
-  };border-radius:6px;padding:2px 8px;margin-left:8px}
+  };border-radius:6px;padding:2px 8px}
   .top-actions{display:flex;align-items:center;gap:12px}.live{font-size:12px;color:var(--text-muted)}
   .message-form{position:relative;width:min(100%,480px);min-width:0;margin:0;justify-self:center;border-radius:8px}
   .message-form:focus-within{background:var(--surface);box-shadow:0 0 0 1px var(--border-hover)}
@@ -235,7 +235,7 @@ ${DASHBOARD_THEME_STYLES}
   .tile.wide{margin-bottom:12px}
 ${TILE_RULES}
   .tile.unknown,.tile.wide.unknown{border-color:var(--border-strong)}
-  /* Each status carries a texture as well as a color, so the wall reads at a
+  /* Each status carries a texture as well as a color, so the dashboard reads at a
      glance and without relying on color alone: dots for gray, waves for
      amber, zig-zags for red. The waves run across the zig-zags, a quarter turn
      from the angle the others take. The texture layer covers the tile and sits
@@ -274,10 +274,10 @@ ${TILE_RULES}
   .evarrow:hover{color:var(--text-subtle)}
   .note{font-size:11px;color:var(--text-faint);margin-top:14px}
   code{background:var(--surface-code);padding:1px 5px;border-radius:4px}
-  @media(max-width:560px){.top{grid-template-columns:minmax(0,1fr) max-content;gap:8px 12px}.brand span:last-child{display:none}.top-actions{gap:8px}.message-form{grid-column:1/-1;grid-row:2;width:100%}.message-input{font-size:14px;padding-inline:5px}}
+  @media(max-width:560px){.top{grid-template-columns:minmax(0,1fr) max-content;gap:8px 12px}.top-actions{gap:8px}.message-form{grid-column:1/-1;grid-row:2;width:100%}.message-input{font-size:14px;padding-inline:5px}}
 </style></head><body>
   <div class="top">
-    <div class="brand"><b>Fabric wall</b><span class="badge" id="livebadge">● LIVE</span><span>go/fabricwall</span></div>
+    <div class="brand"><span class="badge" id="livebadge">● LIVE</span><span class="shortcut">go/fabricwall</span></div>
     <form class="message-form" id="dashboard-message-form"><input class="message-input" id="dashboard-message" aria-label="Shared dashboard message" aria-describedby="dashboard-message-status" maxlength="${DASHBOARD_MESSAGE_MAX_LENGTH}" value="${
       escapeHtml(message.text)
     }"><span class="message-status" id="dashboard-message-status" role="status" aria-live="polite"></span></form>

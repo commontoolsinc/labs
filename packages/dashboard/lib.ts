@@ -519,7 +519,8 @@ export function clampInt(v: string | null, def: number, lo: number, hi: number):
 }
 
 // Turn a raw collector error into a short, calm tile message. The full error is
-// still logged; the wall shows a human phrase, not a stack trace or API path.
+// still logged; the dashboard shows a human phrase, not a stack trace or API
+// path.
 export function friendlyError(msg: string): string {
   const m = msg.toLowerCase();
   if (/connect|sending request|network|dns|refused|unreachable|timed ?out|timeout|econn/.test(m)) {

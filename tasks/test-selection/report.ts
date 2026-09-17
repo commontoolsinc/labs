@@ -12,17 +12,17 @@
  * measured. The gathering and the posting are in
  * `tasks/post-main-report.ts`.
  *
- * Five properties keep this on the right side of the wall's rule that
- * reporting is about the system and never about individuals, and each is
- * a constraint on what is written here rather than an observation about
- * it. The comment's subject is a commit and a test, and no author is
- * named. Nothing is counted per author, per team, or per anything, and
- * no history is kept anywhere. A test the selector declined to run is
- * described as coverage this design traded away, because the author did
- * not miss it. A test the store has seen disagreeing with itself is
- * labelled as one, with the evidence behind the label. And every note
- * says what to do, in a comment that is edited in place rather than
- * repeated.
+ * Five properties keep this on the right side of the dashboard's rule
+ * that reporting is about the system and never about individuals, and
+ * each is a constraint on what is written here rather than an
+ * observation about it. The comment's subject is a commit and a test,
+ * and no author is named. Nothing is counted per author, per team, or
+ * per anything, and no history is kept anywhere. A test the selector
+ * declined to run is described as coverage this design traded away,
+ * because the author did not miss it. A test the store has seen
+ * disagreeing with itself is labelled as one, with the evidence
+ * behind the label. And every note says what to do, in a comment that
+ * is edited in place rather than repeated.
  */
 
 import {

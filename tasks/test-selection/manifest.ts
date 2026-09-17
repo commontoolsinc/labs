@@ -1,7 +1,7 @@
 /**
  * The manifest, as the selection tooling uses it. The format itself lives
  * beside the record schema in `@commonfabric/test-support/records`,
- * because the wall reads a manifest as well as the lanes do and one
+ * because the dashboard reads a manifest as well as the lanes do and one
  * format with two validators would rot. What is here is the one part that
  * cannot live there: the dials a manifest records, which are this
  * repository's policy rather than the format.

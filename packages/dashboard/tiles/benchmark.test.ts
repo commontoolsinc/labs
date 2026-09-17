@@ -3074,7 +3074,7 @@ Deno.test("benchmark: a rejected token grays out as an auth failure", async () =
   await withApi({ status: 401 }, async () => {
     const v = await benchmark.collect(ctx({ GH_TOKEN: "wrong" }));
     assertEquals(v.status, "unknown");
-    assertEquals(v.sub, "auth failed"); // the http status is not put on the wall
+    assertEquals(v.sub, "auth failed"); // the http status is not put on the dashboard
   });
 });
 

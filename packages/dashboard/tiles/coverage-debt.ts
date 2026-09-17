@@ -14,7 +14,7 @@
  * Amber means that median is a rise. Half the days in the window have to have
  * risen for it to be one, so a day that added debt says nothing on its own. The
  * tile never turns red: nothing about coverage is a thing to act on at 2am, and
- * a red that nobody can act on costs the wall the color.
+ * a red that nobody can act on costs the dashboard the color.
  *
  * Following the dashboard's values (README.md): it reports on the system. The
  * number is the repository's, never a package's owner's and never a person's,
@@ -109,7 +109,7 @@ export function medianDailyChange(
  * inside `band` is flat, and says so rather than reporting a rate the
  * measurement cannot tell from nothing. The unit is the headline's, which sits
  * directly above: repeating it here is what pushes the window off the end of
- * the line at the width the wall lays a tile out at.
+ * the line at the width the dashboard lays a tile out at.
  */
 export function dailyChangeLabel(change: number, band: number): string {
   if (Math.abs(change) <= band) return "flat";

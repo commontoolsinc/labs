@@ -3,7 +3,12 @@
  * in the page. Pure string work — no server, no network, no subprocess.
  */
 
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertExists,
+  assertStringIncludes,
+} from "@std/assert";
 import type { Status, TileView } from "./types.ts";
 import {
   FAVICON_CRY_AFTER_MS,
@@ -215,7 +220,7 @@ Deno.test("shell: the grid and the wide tiles land in their own slots", () => {
   // Wide tiles sit after the grid, not inside it.
   assert(html.indexOf(`class="grid"`) < html.indexOf(`tile bad wide`));
   assert(html.startsWith("<!doctype html>"), "a whole page, not a fragment");
-  assertStringIncludes(html, "<title>Fabric wall — LIVE</title>");
+  assertStringIncludes(html, "<title>Dashboard — LIVE</title>");
   assertStringIncludes(
     html,
     `href="/favicon.png?status=bad&v=${FAVICON_VERSION}"`,
@@ -574,8 +579,8 @@ Deno.test("shell: the turned texture layer still covers a tile far wider than it
   // Turning a square about its center sweeps its corners inward, so the layer
   // covers the tile only while half its side still reaches the tile's corner.
   // That reach is the tile's half-diagonal. The layer is measured off the
-  // tile's width alone, so the shape that strains it is a tall narrow tile:
-  // the tightest the wall's grid gets is a tile 0.94 as tall as it is wide,
+  // tile's width alone, so the shape that strains it is a tall narrow tile: the
+  // tightest the dashboard's grid gets is a tile 0.94 as tall as it is wide,
   // and this asks for room well past that.
   const tallest = 1.5;
   const halfSide = Number(layer[1]) / 100 / 2;
@@ -692,11 +697,30 @@ Deno.test("shell: server-measured red age changes the favicon after one hour", (
   assert(!html.includes("faviconSvg"));
 });
 
-Deno.test("shell: the header names the Fabric Wall shortcut", () => {
+Deno.test("shell: the header carries the shortcut and no name of its own", () => {
   const html = shell("", "", 0, 1000, TEST_VERSION, "good");
-  assertStringIncludes(html, "<span>go/fabricwall</span>");
+  const brand = html.match(/<div class="brand">(.*?)<\/div>/s);
+  assertExists(brand, "the header's brand row");
+  assertEquals(
+    brand[1],
+    `<span class="badge" id="livebadge">● LIVE</span>` +
+      `<span class="shortcut">go/fabricwall</span>`,
+    "the badge and the shortcut, and nothing naming the page",
+  );
+  // The shortcut is the only thing in the row that says which page this is, so
+  // a narrow viewport keeps it rather than dropping it as a second label.
+  assert(
+    !/\.brand[^{]*\{[^}]*display:none/.test(html),
+    "nothing in the brand row is hidden at any width",
+  );
   assertStringIncludes(
     html,
     ".badge{font-size:11px;color:var(--status-good-text);border:1px solid color-mix(in srgb,var(--status-good) 40%,transparent)",
+  );
+  // `.shortcut` rather than `.brand span`, which would outrank `.badge` and
+  // set the badge's size and color from the shortcut's rule.
+  assertStringIncludes(
+    html,
+    ".shortcut{font-size:12px;color:var(--text-faint)}",
   );
 });
