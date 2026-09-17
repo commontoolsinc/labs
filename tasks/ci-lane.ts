@@ -54,6 +54,7 @@ import {
 import { collectRecords } from "./test-records-gather.ts";
 import { fetchManifest, type ManifestFetch } from "./test-selection/store.ts";
 import {
+  costliestUnschedulable,
   fullLaneCount,
   plan,
   type Selection,
@@ -993,9 +994,6 @@ function chosenFor(
   };
 }
 
-/** How many of the costliest identities no lane can hold are named. */
-const NAMED_UNSCHEDULABLE = 10;
-
 /**
  * Prints what the lane is about to do, for the job summary.
  *
@@ -1062,22 +1060,17 @@ export function describePlan(
     lines.push("");
     lines.push("Nothing can run these, so nothing did:");
     lines.push("");
-    // The costliest first, and only a few of them: a cost model that
-    // prices a whole suite above a lane puts every test in that suite on
-    // this list, which has run to tens of thousands. The summary has the
-    // withheld and coverage reports to hold after this one, so this one
-    // takes a fixed share of it and the count says how much there is.
-    const costliest = [...unschedulable].sort((left, right) =>
-      right.cost - left.cost
-    );
-    for (const entry of costliest.slice(0, NAMED_UNSCHEDULABLE)) {
+    // The summary has the withheld and coverage reports to hold after
+    // this one, so this one takes a fixed share of it and the count
+    // says how much there is.
+    const { named, rest } = costliestUnschedulable(unschedulable);
+    for (const entry of named) {
       lines.push(
         `- ${entry.suite}: ${testIdentityKey(entry.test)} costs ` +
           `${entry.cost.toFixed(0)}s, more than a lane can hold`,
       );
     }
-    const rest = costliest.length - NAMED_UNSCHEDULABLE;
-    if (rest > 0) lines.push(`- and ${rest} more`);
+    if (rest.length > 0) lines.push(`- and ${rest.length} more`);
   }
   say(lines);
 }

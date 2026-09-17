@@ -6,6 +6,7 @@ import {
   fit,
   say,
   SUMMARY_LIMIT,
+  writeWhole,
 } from "./step-summary.ts";
 
 const ENCODER = new TextEncoder();
@@ -42,6 +43,20 @@ function lines(count: number, width = 40): string {
   return `${rows.join("\n")}\n`;
 }
 
+/** The pieces a writer took, back as the one text they came from. */
+function concat(pieces: readonly Uint8Array[]): Uint8Array {
+  const whole = new Uint8Array(pieces.reduce((sum, at) => sum + at.length, 0));
+  let at = 0;
+  for (const piece of pieces) {
+    whole.set(piece, at);
+    at += piece.length;
+  }
+  return whole;
+}
+
+/** The line `fit` leaves in place of what it cut, as the module words it. */
+const MARKER = `${fit(lines(1000), 500).split("\n").at(-2)}\n`;
+
 describe("step-summary", () => {
   describe("fit()", () => {
     it("returns the text unchanged where it fits", () => {
@@ -75,9 +90,14 @@ describe("step-summary", () => {
 
     it("keeps a character whose bytes straddle the bound whole", () => {
       // Each line is one three-byte character, so a cut counted in bytes
-      // rather than in lines would land inside one of them.
+      // rather than in lines would land inside one of them. The room is
+      // the marker, ten of those lines, and two bytes over: enough that
+      // a byte count would take part of an eleventh, and a line count
+      // takes none of it.
       const text = `${Array(100).fill("☃").join("\n")}\n`;
-      expect(fit(text, 50)).not.toContain("�");
+      const kept = fit(text, bytes(MARKER) + 10 * 4 + 2);
+      expect(kept).not.toContain("�");
+      expect(kept.split("\n").filter((line) => line === "☃")).toHaveLength(10);
     });
 
     it("says that it cut, where it cut", () => {
@@ -95,9 +115,7 @@ describe("step-summary", () => {
     it("returns nothing where the room holds no whole line", () => {
       // What a summary already at the bound has room for. Saying it was
       // cut, over and over and with nothing between, says nothing.
-      const text = lines(1000);
-      const marker = fit(text, 500).split("\n").at(-2)!;
-      expect(fit(text, bytes(`${marker}\n`) + 10)).toBe("");
+      expect(fit(lines(1000), bytes(MARKER) + 10)).toBe("");
     });
   });
 
@@ -201,22 +219,75 @@ describe("step-summary", () => {
       }
     });
 
-    it("reads its text from standard input and writes what fits", async () => {
+    /** What the command line writes, run as the workflow step runs it. */
+    async function cli(args: string[], text: string): Promise<string> {
       const command = new Deno.Command(Deno.execPath(), {
-        args: ["run", "tasks/step-summary.ts", "--room", "200"],
+        args: ["run", "tasks/step-summary.ts", ...args],
         cwd: new URL("..", import.meta.url).pathname,
         stdin: "piped",
         stdout: "piped",
         stderr: "piped",
       }).spawn();
       const writer = command.stdin.getWriter();
-      await writer.write(ENCODER.encode(lines(1000)));
+      await writer.write(ENCODER.encode(text));
       await writer.close();
       const { code, stdout } = await command.output();
       expect(code).toBe(0);
-      const out = new TextDecoder().decode(stdout);
+      return new TextDecoder().decode(stdout);
+    }
+
+    it("writes a text of many thousands of lines whole", async () => {
+      const room = 900_000;
+      const out = await cli(["--room", `${room}`], lines(40_000));
+      expect(bytes(out)).toBeGreaterThan(500_000);
+      expect(out).toBe(fit(lines(40_000), room));
+    });
+
+    it("reads its text from standard input and writes what fits", async () => {
+      const out = await cli(["--room", "200"], lines(1000));
       expect(out).toBe(fit(lines(1000), 200));
       expect(bytes(out)).toBeLessThanOrEqual(200);
+    });
+  });
+
+  describe("writeWhole()", () => {
+    /** A writer taking `each` bytes a call, as a pipe takes what it holds. */
+    function taking(
+      each: number,
+    ): {
+      written: Uint8Array[];
+      write: (bytes: Uint8Array) => Promise<number>;
+    } {
+      const written: Uint8Array[] = [];
+      return {
+        written,
+        write(bytes: Uint8Array) {
+          const piece = bytes.subarray(0, each);
+          written.push(piece.slice());
+          return Promise.resolve(piece.length);
+        },
+      };
+    }
+
+    it("writes every byte, however little a write takes", async () => {
+      // One write takes what the reader has room for and no more, so a
+      // text past that size is delivered only if the writing goes on.
+      const text = lines(50);
+      const to = taking(7);
+      await writeWhole(to, ENCODER.encode(text));
+      expect(new TextDecoder().decode(concat(to.written))).toBe(text);
+      expect(to.written.length).toBeGreaterThan(1);
+    });
+
+    it("writes a text one write already takes whole", async () => {
+      const to = taking(1000);
+      await writeWhole(to, ENCODER.encode(lines(4)));
+      expect(to.written).toHaveLength(1);
+    });
+
+    it("throws where a write takes nothing, rather than never ending", async () => {
+      await expect(writeWhole(taking(0), ENCODER.encode(lines(4))))
+        .rejects.toThrow("wrote 0 of the");
     });
   });
 

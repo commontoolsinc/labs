@@ -97,11 +97,35 @@ export function cutToRoom(
   return { out: fit(text, room), code: 0 };
 }
 
+/**
+ * Writes the whole of `bytes`. One `write` takes only as much as the
+ * reader on the other end has room for, so a summary the size of a job
+ * log takes several, and stopping after the first would cut it where
+ * nothing decided to.
+ *
+ * Throws where a write takes nothing, which would otherwise be a loop
+ * that never ends and never writes.
+ */
+export async function writeWhole(
+  to: { write(bytes: Uint8Array): Promise<number> },
+  bytes: Uint8Array,
+): Promise<void> {
+  for (let at = 0; at < bytes.length;) {
+    const written = await to.write(bytes.subarray(at));
+    if (written <= 0) {
+      throw new Error(
+        `wrote ${written} of the ${bytes.length - at} bytes left`,
+      );
+    }
+    at += written;
+  }
+}
+
 if (import.meta.main) {
   const { out, code } = cutToRoom(
     Deno.args,
     await new Response(Deno.stdin.readable).text(),
   );
-  await (code === 0 ? Deno.stdout : Deno.stderr).write(ENCODER.encode(out));
+  await writeWhole(code === 0 ? Deno.stdout : Deno.stderr, ENCODER.encode(out));
   Deno.exit(code);
 }

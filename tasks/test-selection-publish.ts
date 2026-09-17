@@ -74,7 +74,7 @@ import {
   type CoverageBaseline,
   serializeManifest,
 } from "./test-selection/manifest.ts";
-import { plan } from "./test-selection/plan.ts";
+import { costliestUnschedulable, plan } from "./test-selection/plan.ts";
 import {
   COST_WINDOW_DAYS,
   LANE_BUDGET_SECONDS,
@@ -717,9 +717,6 @@ export async function publish(
 /** How many of the worst surfaces a summary line names. */
 const NAMED_SURFACES = 5;
 
-/** How many of the costliest identities no lane can hold are named. */
-const NAMED_UNSCHEDULABLE = 10;
-
 /**
  * The record surfaces that wrote a set of identities, worst first, as one
  * phrase. The count says how much there is to fix, and the surface says
@@ -877,20 +874,14 @@ function summarize(
     `test selection: ${selected} of ${manifest.entries.length} identities ` +
       `fit the budget`,
   );
-  // The costliest first, and only a few of them: a cost model that
-  // prices a whole suite above a lane puts every test in that suite
-  // here, which has run to tens of thousands. The count and the
-  // surfaces say how much there is and where, and the manifest carries
-  // the whole list.
-  const unschedulable = [...reference.unschedulable]
-    .sort((left, right) => right.cost - left.cost);
-  for (const entry of unschedulable.slice(0, NAMED_UNSCHEDULABLE)) {
+  // The count and the surfaces say how much there is and where.
+  const { named, rest } = costliestUnschedulable(reference.unschedulable);
+  for (const entry of named) {
     console.log(
       `test selection: unschedulable, ${entry.cost.toFixed(1)}s: ` +
         JSON.stringify(entry.test),
     );
   }
-  const rest = unschedulable.slice(NAMED_UNSCHEDULABLE);
   if (rest.length > 0) {
     console.log(
       `test selection: ${rest.length} further identities cost more than a ` +

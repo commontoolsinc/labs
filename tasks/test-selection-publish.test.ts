@@ -1599,7 +1599,7 @@ describe("publish() reporting what no lane can hold", () => {
         );
       }
     }
-    const { store } = fakeStore(objects);
+    const { store, created } = fakeStore(objects);
     const said = await saying(() =>
       publish(["--bootstrap", "--days", "1"], store, NOW, suites, noBaselines)
     );
@@ -1610,6 +1610,15 @@ describe("publish() reporting what no lane can hold", () => {
     expect(named[0]).toContain("space > writes 24");
     expect(said).toContain(
       "test selection: 15 further identities cost more than a lane can hold",
+    );
+    // What the cap holds back from the log it does not hold back from
+    // the manifest, which is where a consumer reads the whole of it.
+    const manifest = await publishedManifest(created);
+    expect(manifest.unschedulable).toHaveLength(25);
+    expect(
+      manifest.unschedulable.map((entry) => entry.test.n).sort(),
+    ).toEqual(
+      Array.from({ length: 25 }, (_, at) => `space > writes ${at}`).sort(),
     );
   });
 });

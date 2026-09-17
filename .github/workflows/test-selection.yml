@@ -152,16 +152,23 @@ jobs:
           SUMMARY_BYTES: 1000000
         run: |
           set -euo pipefail
-          # A `grep` that matched nothing is a log of only folded lines;
-          # one that could not read the file is the publish step dying
-          # before it wrote one, and says so by failing.
-          grep -v '^test selection: folded [0-9]* of ' publish.log \
-            > summary.log || [ $? -eq 1 ]
           {
             echo "## Test selection"
             echo ""
-            echo '```'
-            deno run tasks/step-summary.ts --room "$SUMMARY_BYTES" \
-              < summary.log
-            echo '```'
+            if [ -s publish.log ]; then
+              echo '```'
+              # A `grep` that matched nothing is a log of nothing but
+              # folded lines; one that could not read the file is a
+              # failure, and says so by failing.
+              grep -v '^test selection: folded [0-9]* of ' publish.log \
+                > summary.log || [ $? -eq 1 ]
+              deno run tasks/step-summary.ts --room "$SUMMARY_BYTES" \
+                < summary.log
+              echo '```'
+            else
+              # The publish step died before it printed anything, or
+              # never ran. An empty block here would read as a run with
+              # nothing to report, which is the one thing it is not.
+              echo "The publisher printed nothing. The job log has why."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
