@@ -326,26 +326,46 @@ skipped for the other.
 It charts a timed interval and writes one timed sample per size to stderr,
 carrying that operation's graph size and timing. Unlike the navigation
 benchmark's two new series it records no reads, and the reason is a measurement
-rather than a preference: a reopen completes no run that `measureTopicsReads()`
-can attribute to a lift, so it refuses the sample. Observed against a local
-toolshed with client execution, in two forms. On eight-topic boards, seeded both
-with and without citations, the reopen completed no run carrying a read sample
-at all, where a first open of the same topic ran the pivot, that topic's
-backlinks and its comment count — about fifty scheduler runs in all. On the
-hundred-topic board a reopen's runs did carry a read sample but no source
-location, which the helper refuses because a position it cannot parse says
-nothing about the run. Neither refusal hides a named lift: a lift's run marker
-carries a source location, and these runs had none. So the browser tier's reads
-come from `comment` and `backlink`, and what a reopen has to report is its graph
-and its timing.
+rather than a preference: **a reopen completes no run that
+`measureTopicsReads()` can attribute to a lift**, so it refuses the sample. On
+eight-topic boards, seeded both with and without citations, the reopen completed
+no run carrying a read sample at all, where a first open of the same topic ran
+the pivot, that topic's backlinks and its comment count — about fifty scheduler
+runs in all. On the hundred-topic board a reopen's runs did carry a read sample
+but no source location, which the helper refuses because a position it cannot
+parse says nothing about the run. Neither refusal hides a named lift: a lift's
+run marker carries a source location, and these runs had none.
+
+That refusal belongs to the operation and not to where the interval is drawn,
+which is worth stating because the plan asks the browser tier for body reads
+without qualification. Four boundaries were measured on an eight-topic board
+with citations, each of them a re-open within one live runtime client:
+
+| boundary | attributable runs |
+|---|---|
+| open a topic already opened once, from the board | none; 1 scheduler run |
+| a third visit to the same topic | none; **0** scheduler runs |
+| reopen with another topic opened in between | runs carried a read sample, but no source location |
+| the whole round trip, topic → board → topic | `lastActivityOf` once; the other three lifts not at all |
+
+Only the last yields a lift run, and it yields it for the wrong leg: measuring
+the return to the board on its own records that same single `lastActivityOf`
+run, with the same counters, while the reopen beside it records none. Widening
+the boundary that far would also charge this series for a board render, which
+the `<size>` series above already measures and which at a hundred topics costs
+an order of magnitude more than the reopen. So the reads the browser tier
+records come from `comment` and `backlink`. For this workload there are no
+producer or consumer reads to separate, and the plan's sentence asking for them
+does not hold.
 
 A reopen may run nothing in the worker at all, and the series declares
 `mayRunNothing` because that was observed rather than to quiet the check in
 advance: on a 100-topic board one iteration recorded a single scheduler run and
-a later one recorded none. What the interval times is the shell reaching a topic
-whose values are already computed, so the worker having nothing to do is the
-substance of the measurement. Each sample records the declaration beside its run
-count, so a reopen that starts doing work again is visible rather than hidden.
+a later one recorded none, and the third visit in the table above recorded none.
+What the interval times is the shell reaching a topic whose values are already
+computed, so the worker having nothing to do is the substance of the
+measurement. Each sample records the declaration beside its run count, so a
+reopen that starts doing work again is visible rather than hidden.
 
 What `reopen` does not measure is worth stating, because the plan's phrase is
 "reopen or reconnect" and only the first half of it is measured here. The page,

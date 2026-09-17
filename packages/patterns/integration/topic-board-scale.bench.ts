@@ -270,27 +270,28 @@ for (const topicCount of SIZES) {
       // Timed rather than read-accounted, and the reason is a measurement
       // rather than a preference: a reopen completes no run that
       // `measureTopicsReads()` can attribute to a lift, so it refuses the
-      // sample. Observed against a local toolshed with client execution, and
-      // the two refusals differ. On eight-topic boards, seeded both with and
-      // without citations, the reopen completed no run carrying a read sample
-      // at all, where a first open of the same topic ran the pivot, that
-      // topic's backlinks and its comment count — about fifty scheduler runs
-      // in all. On the hundred-topic board a reopen's runs did carry a read
-      // sample but no source location, which the helper refuses because a
-      // position it cannot parse says nothing about the run. Neither refusal
-      // leaves a named lift unaccounted for: a lift's run marker carries a
-      // source location, and these runs had none. The reads the browser tier
-      // records therefore come from the navigation benchmark's `comment` and
-      // `backlink` segments; graph size and timing are what a reopen has to
-      // report, and the sample below carries both.
+      // sample. That is a property of the operation rather than of where the
+      // interval is drawn. Four boundaries were measured, all of them re-opens
+      // within one live client, and the only one that yields a lift run yields
+      // it for the return to the board rather than for the reopen: measuring
+      // that return on its own records the same single `lastActivityOf` run,
+      // with the same counters, while the reopen leg beside it records none.
+      // Widening the boundary that far would also charge this series for a
+      // board render, which is what the `<size>` series above already measures.
+      // "The board scaling benchmark" in `docs/development/BENCHMARKS.md`
+      // records all four. The reads the browser tier records therefore come
+      // from the navigation benchmark's `comment` and `backlink` segments;
+      // graph size and timing are what a reopen has to report, and the sample
+      // below carries both.
       //
       // `mayRunNothing` is declared because a reopen was observed running
       // nothing at all, not to quiet a check in advance: on a 100-topic board
       // one iteration recorded a single `scheduler/run` span and a later one
-      // recorded none. That the worker may do no work is the substance of this
-      // measurement rather than an obstacle to it — what the interval times is
-      // the shell reaching a topic whose values are already computed — and
-      // each sample records the declaration alongside its run count.
+      // recorded none, and on an eight-topic board a third visit to the same
+      // topic recorded none. That the worker may do no work is the substance
+      // of this measurement rather than an obstacle to it — what the interval
+      // times is the shell reaching a topic whose values are already computed
+      // — and each sample records the declaration alongside its run count.
       const sample = await timeTopicsOperation(session.page, {
         label: `reopen ${topicCount}`,
         operation,

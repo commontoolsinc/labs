@@ -179,6 +179,8 @@ note(
   }ms; ${ITERATIONS} iterations per segment after ${WARMUP} warm-up`,
 );
 
+const commentSeedingStartedAt = performance.now();
+
 /**
  * The board the comment segment writes to, in a space of its own.
  *
@@ -191,7 +193,6 @@ note(
  * merge the two boards: nothing orders the cases within a file, so the failure
  * would depend on the order Deno happened to run them in.
  */
-const commentSeedingStartedAt = performance.now();
 const commentFixture: TopicBoardFixture = await seedTopicBoardOutOfProcess({
   apiUrl: new URL(env.API_URL),
   spaceName: `${env.SPACE_NAME}-comment`,
