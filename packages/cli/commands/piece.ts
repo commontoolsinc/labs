@@ -2595,7 +2595,9 @@ the children of system pieces, say:
 
   cf piece follow --cell <profile> system:system/profile-home.tsx
 
-Unlike 'setsrc', which detaches, the origin is recorded with the revision.`,
+Unlike 'setsrc', which detaches, the origin is recorded with the revision.
+Not served yet: against a deployment that serves piece lifecycle verbs the
+command refuses, since the served update takes no origin.`,
     ),
   )
   .example(
@@ -5084,7 +5086,16 @@ export async function followPieceSourceAction(
   }
   (deps.render ?? render)(`${config.piece} now follows ${trimmed}`);
   if (result.executionWarning !== undefined) {
-    (deps.hint ?? hint)(result.executionWarning);
+    // The transition is durable, but the piece did not come back up: said
+    // where `--quiet` cannot hide it, and exit non-zero so a script cannot
+    // read the receipt as a healthy piece — the same shape `setsrc` reports.
+    (deps.printError ?? console.error)(
+      `The follow committed, but refreshing the running piece failed: ${result.executionWarning}`,
+    );
+    (deps.setExitCode ?? ((code: number) => {
+      Deno.exitCode = code;
+    }))(1);
+    return;
   }
   (deps.hint ?? hint)(cliText(`NEXT STEPS:
   → Inspect state: cf piece inspect --cell ${config.piece} ...

@@ -19,6 +19,25 @@ const BASE_OPTIONS = {
 
 describe("cf piece follow", () => {
   describe("followPieceSource()", () => {
+    it("refuses a deployment that serves piece lifecycle verbs", async () => {
+      const config: PieceConfig = {
+        apiUrl: BASE_OPTIONS.apiUrl,
+        identity: BASE_OPTIONS.identity,
+        space: BASE_OPTIONS.space,
+        piece: "of:profile",
+      };
+      const served = {
+        runtime: { experimental: { serverExecution: true } },
+        get: () => {
+          throw new Error("must not reach the client-side repoint");
+        },
+      };
+      await expect(followPieceSource(config, "system:system/x.tsx", {
+        // deno-lint-ignore no-explicit-any
+        loadPieces: () => Promise.resolve(served as any),
+      })).rejects.toThrow(/not served yet/);
+    });
+
     it("repoints the resolved piece at the origin and reports the transition", async () => {
       const actions: unknown[] = [];
       const config: PieceConfig = {
@@ -79,6 +98,7 @@ describe("cf piece follow", () => {
     it("reports an incompatible candidate with its message and a non-zero exit", async () => {
       const codes: number[] = [];
       const rendered: unknown[] = [];
+      const errors: string[] = [];
       await followPieceSourceAction(BASE_OPTIONS, "system:system/x.tsx", {
         followPieceSource: () =>
           Promise.resolve({
@@ -88,11 +108,37 @@ describe("cf piece follow", () => {
             prepared: {} as any,
           }),
         render: (value) => rendered.push(value),
-        printError: () => {},
+        printError: (message) => errors.push(message),
         setExitCode: (code) => codes.push(code),
       });
       expect(codes).toEqual([1]);
       expect(rendered).toEqual([]);
+      expect(errors).toEqual([
+        "The source system:system/x.tsx serves now cannot replace what " +
+        "of:profile runs: argument.name: newly required argument field",
+      ]);
+    });
+
+    it("reports a follow whose piece did not come back up, with a non-zero exit", async () => {
+      const codes: number[] = [];
+      const errors: string[] = [];
+      const rendered: unknown[] = [];
+      await followPieceSourceAction(BASE_OPTIONS, "system:system/x.tsx", {
+        followPieceSource: () =>
+          Promise.resolve({
+            status: "applied",
+            executionWarning: "injected post-commit failure",
+          }),
+        render: (value) => rendered.push(value),
+        printError: (message) => errors.push(message),
+        setExitCode: (code) => codes.push(code),
+      });
+      expect(rendered).toEqual(["of:profile now follows system:system/x.tsx"]);
+      expect(errors).toEqual([
+        "The follow committed, but refreshing the running piece failed: " +
+        "injected post-commit failure",
+      ]);
+      expect(codes).toEqual([1]);
     });
 
     it("throws a `ValidationError` for a blank origin", async () => {
