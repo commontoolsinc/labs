@@ -650,6 +650,29 @@ function excused(manifest: Manifest): Manifest["withheld"] {
   return manifest.withheld.filter((held) => held.reason === "flaky");
 }
 
+/** How many of the costliest identities no lane can hold a report names. */
+export const NAMED_UNSCHEDULABLE = 10;
+
+/**
+ * The costliest identities no lane can hold, and the rest of them. A
+ * cost model pricing a whole suite above a lane puts every test in that
+ * suite on this list, which has run to tens of thousands, so a report
+ * names a few and says how many it left out. The manifest carries the
+ * whole list either way, whatever a report does with it.
+ */
+export function costliestUnschedulable(
+  entries: readonly UnschedulableEntry[],
+): {
+  named: readonly UnschedulableEntry[];
+  rest: readonly UnschedulableEntry[];
+} {
+  const costliest = [...entries].sort((left, right) => right.cost - left.cost);
+  return {
+    named: costliest.slice(0, NAMED_UNSCHEDULABLE),
+    rest: costliest.slice(NAMED_UNSCHEDULABLE),
+  };
+}
+
 /**
  * How many lanes the full run needs.
  *
@@ -682,29 +705,6 @@ function excused(manifest: Manifest): Manifest["withheld"] {
  * search stops. It terminates on that total, which cannot fall below
  * zero, and on one lane per identity being the finest packing there is.
  */
-/** How many of the costliest identities no lane can hold a report names. */
-export const NAMED_UNSCHEDULABLE = 10;
-
-/**
- * The costliest identities no lane can hold, and the rest of them. A
- * cost model pricing a whole suite above a lane puts every test in that
- * suite on this list, which has run to tens of thousands, so a report
- * names a few and says how many it left out. The manifest carries the
- * whole list either way, whatever a report does with it.
- */
-export function costliestUnschedulable(
-  entries: readonly UnschedulableEntry[],
-): {
-  named: readonly UnschedulableEntry[];
-  rest: readonly UnschedulableEntry[];
-} {
-  const costliest = [...entries].sort((left, right) => right.cost - left.cost);
-  return {
-    named: costliest.slice(0, NAMED_UNSCHEDULABLE),
-    rest: costliest.slice(NAMED_UNSCHEDULABLE),
-  };
-}
-
 export function fullLaneCount(
   input: Omit<PlanInput, "policy" | "lanes" | "mandatory">,
 ): number {
