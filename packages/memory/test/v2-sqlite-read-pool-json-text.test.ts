@@ -185,7 +185,7 @@ describe("ReadConnectionPool over a JSON-subtype column", () => {
   });
 
   describe("queryWithOrigins()", () => {
-    it("returns a string for a packed column on the `int64` connection", () => {
+    it("returns a string for a packed column", () => {
       withStore((path) => {
         withPool((pool) => {
           const { rows } = pool.queryWithOrigins(
