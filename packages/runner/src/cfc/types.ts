@@ -2,6 +2,7 @@ import type { FabricValue } from "@commonfabric/api";
 import type { CfcModulePolicyRefAtom } from "@commonfabric/api/cfc";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { Immutable } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { CellScope, JSONSchema } from "../builder/types.ts";
 import type { Metadata } from "../storage/interface.ts";
@@ -128,7 +129,7 @@ export const runtimeWritePolicyAuthorization: RuntimeWritePolicyAuthorization =
 
 /** Whether an authorization argument carries the runtime's mark. */
 export const runtimeWritePolicyAuthorized = (value: unknown): boolean =>
-  typeof value === "object" && value !== null &&
+  isObjectOrArray(value) &&
   (value as Partial<RuntimeWritePolicyAuthorization>)[
       RUNTIME_WRITE_POLICY_INPUT
     ] === true;

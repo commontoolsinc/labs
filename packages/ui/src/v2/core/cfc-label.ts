@@ -10,6 +10,7 @@
  */
 
 import type { CfcLabelView } from "@commonfabric/runner/cfc";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 export type { CfcLabelView };
 
@@ -24,11 +25,11 @@ export type CfcLabelResolvable = {
 const REPRESENTS_PRINCIPAL = "represents-principal";
 
 export const canQueryCfcLabel = (value: unknown): value is CfcLabelQueryable =>
-  typeof value === "object" && value !== null &&
+  isObjectOrArray(value) &&
   typeof (value as { getCfcLabel?: unknown }).getCfcLabel === "function";
 
 const canResolveAsCell = (value: unknown): value is CfcLabelResolvable =>
-  typeof value === "object" && value !== null &&
+  isObjectOrArray(value) &&
   typeof (value as { resolveAsCell?: unknown }).resolveAsCell === "function";
 
 /**
@@ -106,7 +107,7 @@ export const ownerPrincipalFromLabel = (
         }
         continue;
       }
-      if (typeof atom !== "object" || atom === null || Array.isArray(atom)) {
+      if (!isObjectNotArray(atom)) {
         continue;
       }
       const record = atom as Record<string, unknown>;

@@ -22,6 +22,7 @@ import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
 import { BaseDecodeAct } from "@/codec-common/BaseDecodeAct.ts";
 import { BaseEncodeAct } from "@/codec-common/BaseEncodeAct.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 /**
  * This format's tagged form. A class, so that it cannot be mistaken for a
@@ -402,7 +403,7 @@ export class ProbeDecodeAct extends BaseDecodeAct<ProbeValue> {
 
   /** @inheritDoc */
   override decodeValue(data: ProbeValue): FabricValue {
-    if ((data === null) || (typeof data !== "object")) {
+    if (!isObjectOrArray(data)) {
       return data as FabricValue;
     }
 

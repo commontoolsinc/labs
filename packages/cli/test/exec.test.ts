@@ -7,6 +7,7 @@ import {
   undeclaredVerbFieldError,
 } from "../lib/callable.ts";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   type ExecCommandSpec,
   normalizeCallableInputForExecution,
@@ -3849,10 +3850,9 @@ function createMockCell(
       if (options?.childOverrides?.[key]) {
         return options.childOverrides[key];
       }
-      const nextValue =
-        typeof value === "object" && value !== null && !Array.isArray(value)
-          ? (value as Record<string, unknown>)[key]
-          : undefined;
+      const nextValue = isObjectNotArray(value)
+        ? (value as Record<string, unknown>)[key]
+        : undefined;
       const nextSchema = getChildSchema(schema, key);
       return createMockCell(nextValue, nextSchema);
     },
@@ -3866,17 +3866,13 @@ function getChildSchema(
   key: string,
 ): JSONSchema | undefined {
   if (
-    !schema || typeof schema !== "object" || schema === null ||
-    Array.isArray(schema)
+    !schema || !isObjectNotArray(schema)
   ) {
     return undefined;
   }
 
   const properties = schema.properties;
-  if (
-    typeof properties !== "object" || properties === null ||
-    Array.isArray(properties)
-  ) {
+  if (!isObjectNotArray(properties)) {
     return undefined;
   }
 

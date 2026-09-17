@@ -1,3 +1,4 @@
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import type {
   PatternIndexListedPattern,
   PatternIndexPattern,
@@ -75,11 +76,7 @@ export const resolvePatternIndexSuccessors = (
         score: row.score,
       },
       quality: row.quality,
-      kind: pattern.argumentSchema !== null &&
-          typeof pattern.argumentSchema === "object" &&
-          !Array.isArray(pattern.argumentSchema)
-        ? "part"
-        : "app",
+      kind: isObjectNotArray(pattern.argumentSchema) ? "part" : "app",
     });
   }
   return { ...response, results };

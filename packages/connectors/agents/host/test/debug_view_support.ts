@@ -19,6 +19,7 @@ import {
   EmulatedStorageManager,
   type Options,
 } from "@commonfabric/runner/storage/cache.deno";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { fromFileUrl } from "@std/path";
 import type { RawDataProvenance } from "../../debug-view/main.tsx";
 import { createBuilder } from "../../../../runner/src/builder/factory.ts";
@@ -167,7 +168,7 @@ export function countSessionRawDataLinks(
 
 export function materializeCell(value: unknown): unknown {
   if (
-    typeof value === "object" && value !== null && "get" in value &&
+    isObjectOrArray(value) && "get" in value &&
     typeof (value as { get?: unknown }).get === "function"
   ) {
     return (value as { get: () => unknown }).get();
@@ -187,7 +188,7 @@ export function renderedNodes(
   visited = new Set<object>(),
 ): RenderedNode[] {
   const materialized = materializeCell(value);
-  if (typeof materialized !== "object" || materialized === null) return result;
+  if (!isObjectOrArray(materialized)) return result;
   if (visited.has(materialized)) return result;
   visited.add(materialized);
   if (Array.isArray(materialized)) {
@@ -208,7 +209,7 @@ export function renderedText(
   if (typeof materialized === "string" || typeof materialized === "number") {
     return String(materialized);
   }
-  if (typeof materialized !== "object" || materialized === null) return "";
+  if (!isObjectOrArray(materialized)) return "";
   if (visited.has(materialized)) return "";
   visited.add(materialized);
   if (Array.isArray(materialized)) {

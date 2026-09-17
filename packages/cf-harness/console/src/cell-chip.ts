@@ -8,6 +8,7 @@
  */
 
 import { html, LitElement, nothing, type TemplateResult } from "lit";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type {
   ConsoleCellLabelEntry,
   ConsoleCellLabels,
@@ -157,7 +158,7 @@ export const cellName = (cell: ConsoleCellFacts): string =>
 
 /** The shape a pattern declared, in as few characters as read as a shape. */
 export const schemaSummary = (schema: unknown): string | undefined => {
-  const record = typeof schema === "object" && schema !== null
+  const record = isObjectOrArray(schema)
     ? schema as { type?: unknown; properties?: Record<string, unknown> }
     : undefined;
   if (record?.properties !== undefined) {

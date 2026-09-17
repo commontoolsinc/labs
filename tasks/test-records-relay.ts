@@ -35,6 +35,7 @@ import {
   type RunContext,
   type TestRecord,
 } from "@commonfabric/test-support/records";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   ciSubmissionsPrefix,
   REPO,
@@ -60,11 +61,11 @@ export interface RunFacts {
 
 /** Extracts the run facts from a workflow_run event payload. */
 export function runFactsOfPayload(payload: unknown): RunFacts {
-  if (typeof payload !== "object" || payload === null) {
+  if (!isObjectOrArray(payload)) {
     throw new Error("the event payload is not an object");
   }
   const run = (payload as Record<string, unknown>).workflow_run ?? payload;
-  if (typeof run !== "object" || run === null) {
+  if (!isObjectOrArray(run)) {
     throw new Error("the event payload has no workflow_run");
   }
   const raw = run as Record<string, unknown>;
@@ -139,7 +140,7 @@ interface ArtifactFacts {
 }
 
 function artifactFactsOf(value: unknown): ArtifactFacts {
-  if (typeof value !== "object" || value === null) return {};
+  if (!isObjectOrArray(value)) return {};
   const raw = value as Record<string, unknown>;
   const facts: ArtifactFacts = {};
   for (

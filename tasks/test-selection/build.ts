@@ -18,6 +18,7 @@ import {
   testIdentityKey,
   testIdentityOfKey,
 } from "@commonfabric/test-support/records";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   costSeconds,
   type DaySamples,
@@ -185,7 +186,7 @@ export function parseAggregate(text: string): AggregateState | undefined {
   } catch {
     return undefined;
   }
-  if (typeof value !== "object" || value === null) return undefined;
+  if (!isObjectOrArray(value)) return undefined;
   const state = value as Record<string, unknown>;
   // An aggregate written under an older shape is read forward, field by
   // field, the way each field below says. Refusing it instead would cost
@@ -201,8 +202,7 @@ export function parseAggregate(text: string): AggregateState | undefined {
   // keyed by index. Every such key fails to name an identity, so the
   // aggregate would be read as holding nothing rather than refused.
   if (
-    typeof state.states !== "object" || state.states === null ||
-    Array.isArray(state.states)
+    !isObjectNotArray(state.states)
   ) {
     return undefined;
   }
@@ -241,7 +241,7 @@ export function parseAggregate(text: string): AggregateState | undefined {
   // and reading it wrongly would decide which identities the manifest
   // holds, so the aggregate is refused instead.
   const files = state.files === undefined ? {} : state.files;
-  if (typeof files !== "object" || files === null || Array.isArray(files)) {
+  if (!isObjectNotArray(files)) {
     return undefined;
   }
   for (const file of Object.values(files as Record<string, unknown>)) {

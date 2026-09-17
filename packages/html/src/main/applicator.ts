@@ -9,6 +9,7 @@
 import type { CellRef, RuntimeClient } from "@commonfabric/runtime-client";
 import { CellHandle, cellRefToKey } from "@commonfabric/runtime-client";
 import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
 import { CONTAINER_NODE_ID, type VDomBatch, type VDomOp } from "../vdom-ops.ts";
@@ -32,7 +33,7 @@ interface PendingChildInsert {
 }
 
 function hasNodeType(node: unknown, nodeType: number): boolean {
-  return typeof node === "object" && node !== null &&
+  return isObjectOrArray(node) &&
     (node as { nodeType?: unknown }).nodeType === nodeType;
 }
 

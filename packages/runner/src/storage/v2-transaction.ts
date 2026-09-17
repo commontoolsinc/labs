@@ -316,10 +316,7 @@ const invalidateFrozenReadsOnChain = (
 };
 
 const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
-  if (
-    value === undefined || value === null ||
-    typeof value !== "object"
-  ) {
+  if (!isObjectOrArray(value)) {
     return value;
   }
   // What isolates a read from later mutation of its source is frozen-ness,

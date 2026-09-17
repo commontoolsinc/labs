@@ -5,6 +5,7 @@
 import { ENCODING_PREFIX_TAG, type JsonCodecValue } from "./interface.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { backtickQuote } from "@commonfabric/utils/markdown";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { deepFreeze } from "@/deep-freeze.ts";
 
 /**
@@ -45,7 +46,7 @@ export function parseWireText(jsonText: string): JsonCodecValue {
  * the wire form of an encoded instance (tag-wrapped value).
  */
 export function isEncodedInstance(v: JsonCodecValue): boolean {
-  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+  if (!isObjectNotArray(v)) return false;
   const keys = Object.keys(v);
   return keys.length === 1 && keys[0]!.startsWith("/");
 }

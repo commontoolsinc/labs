@@ -15,7 +15,7 @@
  */
 
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
-import { isObjectNotArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 export interface TrustedUiDescriptor {
   /** `data-ui-pattern` / `data-ui-event-integrity` of the trusted surface. */
@@ -28,7 +28,7 @@ export interface TrustedUiDescriptor {
 export const isTrustedUiDescriptor = (
   value: unknown,
 ): value is TrustedUiDescriptor =>
-  typeof value === "object" && value !== null &&
+  isObjectOrArray(value) &&
   typeof (value as { surface?: unknown }).surface === "string" &&
   typeof (value as { action?: unknown }).action === "string";
 

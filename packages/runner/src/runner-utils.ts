@@ -145,7 +145,7 @@ export const schemaAcceptsOpaqueCellValue = (
 ): boolean => {
   if (!isCell(value)) return false;
   if (
-    typeof schema !== "object" || schema === null ||
+    !isObjectOrArray(schema) ||
     !hasOwnEnumerableDataProperty(schema, "asCell") ||
     !isAsCellEntryArray(schema.asCell)
   ) {
@@ -252,7 +252,7 @@ function extractDefaultValuesInternal(
   fullSchema: JSONSchema,
   activeSchemasByRoot: WeakMap<object, WeakSet<object>>,
 ): FabricValue | typeof NO_SCHEMA_DEFAULT {
-  if (typeof schema !== "object" || schema === null) {
+  if (!isObjectOrArray(schema)) {
     return NO_SCHEMA_DEFAULT;
   }
 
@@ -260,7 +260,7 @@ function extractDefaultValuesInternal(
   const resolved = schema.$ref
     ? resolveCfcSchemaRefs(schema, schemaRoot)
     : schema;
-  if (typeof resolved !== "object" || resolved === null) {
+  if (!isObjectOrArray(resolved)) {
     return NO_SCHEMA_DEFAULT;
   }
   const resolvedRoot = schema.$ref
@@ -271,9 +271,7 @@ function extractDefaultValuesInternal(
     : schemaRoot;
 
   const canonical = internSchema(resolved);
-  const rootKey = typeof resolvedRoot === "object" && resolvedRoot !== null
-    ? resolvedRoot
-    : canonical;
+  const rootKey = isObjectOrArray(resolvedRoot) ? resolvedRoot : canonical;
   let activeSchemas = activeSchemasByRoot.get(rootKey);
   if (activeSchemas?.has(canonical)) return NO_SCHEMA_DEFAULT;
   if (!activeSchemas) {
@@ -541,12 +539,12 @@ function mergeSchemaDefaultsInternal(
 ): unknown {
   let byDefaults: Map<unknown, DefaultMergeResult> | undefined;
   if (
-    valuePresent && value !== null && typeof value === "object" &&
-    typeof schema === "object" && schema !== null &&
+    valuePresent && isObjectOrArray(value) &&
+    isObjectOrArray(schema) &&
     acceptUnionCandidate === undefined
   ) {
     const canonicalSchema = internSchema(schema);
-    const canonicalRoot = typeof fullSchema === "object" && fullSchema !== null
+    const canonicalRoot = isObjectOrArray(fullSchema)
       ? internSchema(fullSchema)
       : canonicalSchema;
     let byRoot = context.results.get(value);
@@ -608,25 +606,23 @@ function mergeSchemaDefaultsUncached(
   context: DefaultMergeContext,
 ): unknown {
   const schemaRoot = fullSchema;
-  const resolved = typeof schema === "object" && schema !== null && schema.$ref
+  const resolved = isObjectOrArray(schema) && schema.$ref
     ? resolveCfcSchemaRefs(schema, schemaRoot)
     : schema;
-  const resolvedRoot =
-    typeof schema === "object" && schema !== null && schema.$ref
-      ? cfcSchemaResolvedRoot(
-        resolved ?? schema,
-        resolveCfcSchemaRefRoot(schema, schemaRoot),
-      )
-      : schemaRoot;
+  const resolvedRoot = isObjectOrArray(schema) && schema.$ref
+    ? cfcSchemaResolvedRoot(
+      resolved ?? schema,
+      resolveCfcSchemaRefRoot(schema, schemaRoot),
+    )
+    : schemaRoot;
 
-  const trackedValue = valuePresent && value !== null &&
-      typeof value === "object"
+  const trackedValue = valuePresent && isObjectOrArray(value)
     ? value as object
     : undefined;
-  const trackedSchema = typeof resolved === "object" && resolved !== null
+  const trackedSchema = isObjectOrArray(resolved)
     ? internSchema(resolved)
     : undefined;
-  const trackedRoot = typeof resolvedRoot === "object" && resolvedRoot !== null
+  const trackedRoot = isObjectOrArray(resolvedRoot)
     ? resolvedRoot
     : trackedSchema;
   let activeSchemas: WeakSet<object> | undefined;
@@ -655,7 +651,7 @@ function mergeSchemaDefaultsUncached(
     if (
       valuePresent &&
       (isFabricPlainObject(value as FabricValue) || Array.isArray(value)) &&
-      typeof resolved === "object" && resolved !== null &&
+      isObjectOrArray(resolved) &&
       (Array.isArray(resolved.anyOf) || Array.isArray(resolved.oneOf))
     ) {
       const {
@@ -754,7 +750,7 @@ function mergeSchemaDefaultsUncached(
 
     if (
       valuePresent && isFabricPlainObject(value as FabricValue) &&
-      typeof resolved === "object" && resolved !== null &&
+      isObjectOrArray(resolved) &&
       Array.isArray(resolved.type) && resolved.type.includes("object")
     ) {
       const { default: _unionDefault, ...objectSchema } = resolved;
@@ -789,7 +785,7 @@ function mergeSchemaDefaultsUncached(
 
     if (
       valuePresent && Array.isArray(value) &&
-      typeof resolved === "object" && resolved !== null &&
+      isObjectOrArray(resolved) &&
       Array.isArray(resolved.type) && resolved.type.includes("array")
     ) {
       const { default: _unionDefault, ...arraySchema } = resolved;
@@ -812,7 +808,7 @@ function mergeSchemaDefaultsUncached(
 
     if (
       valuePresent && Array.isArray(value) &&
-      typeof resolved === "object" && resolved !== null &&
+      isObjectOrArray(resolved) &&
       (resolved.type === "array" || resolved.items !== undefined ||
         resolved.prefixItems !== undefined)
     ) {
@@ -838,7 +834,7 @@ function mergeSchemaDefaultsUncached(
       return mergedValueEquals(result, value) ? value : result;
     }
 
-    const objectSchema = typeof resolved === "object" && resolved !== null &&
+    const objectSchema = isObjectOrArray(resolved) &&
         (resolved.type === undefined || resolved.type === "object" ||
           (Array.isArray(resolved.type) && resolved.type.includes("object")))
       ? resolved

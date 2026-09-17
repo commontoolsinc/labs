@@ -30,6 +30,7 @@ import {
   serializeRecordLine,
   type TestRecord,
 } from "@commonfabric/test-support/records";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 /** One JUnit ingestion request from the command line. */
 export interface JUnitSpec {
@@ -73,11 +74,11 @@ export function parseJUnitSpec(text: string): JUnitSpec {
 
 /** The head commit of the pull request the event describes, when any. */
 export function headCommitOfEvent(payload: unknown): string | undefined {
-  if (typeof payload !== "object" || payload === null) return undefined;
+  if (!isObjectOrArray(payload)) return undefined;
   const pr = (payload as Record<string, unknown>).pull_request;
-  if (typeof pr !== "object" || pr === null) return undefined;
+  if (!isObjectOrArray(pr)) return undefined;
   const head = (pr as Record<string, unknown>).head;
-  if (typeof head !== "object" || head === null) return undefined;
+  if (!isObjectOrArray(head)) return undefined;
   const sha = (head as Record<string, unknown>).sha;
   return typeof sha === "string" && sha.length > 0 ? sha : undefined;
 }

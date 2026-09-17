@@ -5,6 +5,7 @@
  */
 
 import type { JSONSchema } from "@commonfabric/api";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   RESEARCH_CFC_SCHEMA,
   RESEARCH_KIT_SCHEMA,
@@ -184,16 +185,15 @@ export const researchKitGuidance = (kit: HarnessResearchResult): string =>
 export const isResearchToolSuccessOutput = (
   output: unknown,
 ): output is ResearchToolSuccessOutput => {
-  if (typeof output !== "object" || output === null || Array.isArray(output)) {
+  if (!isObjectNotArray(output)) {
     return false;
   }
   const record = output as Record<string, unknown>;
   return record.status === "ok" && typeof record.outputId === "string" &&
-    typeof record.kit === "object" && record.kit !== null &&
+    isObjectOrArray(record.kit) &&
     typeof record.guidance === "string" &&
-    typeof record.cfc === "object" && record.cfc !== null &&
-    typeof record.researchRecord === "object" &&
-    record.researchRecord !== null;
+    isObjectOrArray(record.cfc) &&
+    isObjectOrArray(record.researchRecord);
 };
 
 /** Registered implementation of the `research` builtin. */

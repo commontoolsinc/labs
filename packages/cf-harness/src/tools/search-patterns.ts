@@ -13,6 +13,7 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { TRUSTED_PATTERN_PROPERTIES } from "../contracts/trusted-pattern-schema.ts";
 import { schemaToTypeString } from "@commonfabric/runner";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { TrustedPatternRecord } from "../contracts/trusted-pattern.ts";
 import type {
@@ -81,7 +82,7 @@ export type SearchPatternsToolOutput =
 const isSearchPatternsToolResult = (
   result: unknown,
 ): result is SearchPatternsToolResult => {
-  if (typeof result !== "object" || result === null || Array.isArray(result)) {
+  if (!isObjectNotArray(result)) {
     return false;
   }
   const record = result as Record<string, unknown>;
@@ -91,8 +92,7 @@ const isSearchPatternsToolResult = (
     Array.isArray(record.hashtags) &&
     record.hashtags.every((hashtag) => typeof hashtag === "string") &&
     (signals === undefined ||
-      (typeof signals === "object" && signals !== null &&
-        !Array.isArray(signals) && "uses" in signals &&
+      (isObjectNotArray(signals) && "uses" in signals &&
         typeof signals.uses === "number" && "score" in signals &&
         typeof signals.score === "number")) &&
     (record.kind === "part" || record.kind === "app") &&
@@ -112,7 +112,7 @@ const isSearchPatternsToolResult = (
 export const isSearchPatternsToolSuccessOutput = (
   output: unknown,
 ): output is SearchPatternsToolSuccessOutput => {
-  if (typeof output !== "object" || output === null || Array.isArray(output)) {
+  if (!isObjectNotArray(output)) {
     return false;
   }
   const record = output as Record<string, unknown>;

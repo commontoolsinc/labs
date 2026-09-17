@@ -46,6 +46,7 @@ import {
   resolvePieceReference,
   SlugResolutionError,
 } from "@commonfabric/piece";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
   callFromCommand,
@@ -2465,7 +2466,7 @@ async function resolveTarget(
  * is a wish that resolved to no address at all.
  */
 function addressIn(result: unknown): string | undefined {
-  if (result === null || typeof result !== "object") return undefined;
+  if (!isObjectOrArray(result)) return undefined;
   const address = (result as Record<string, unknown>)[LINK_MARKER_KEY];
   return typeof address === "string" ? address : undefined;
 }
@@ -2707,7 +2708,7 @@ function unwritableInJson(
   if (typeof value === "number" && unwritableNumber(value)) {
     return { what: numberIs(value), at };
   }
-  if (value === null || typeof value !== "object") return undefined;
+  if (!isObjectOrArray(value)) return undefined;
   if (isFabricSpecialObject(value)) {
     return { what: `a \`${classOf(value)}\``, at };
   }

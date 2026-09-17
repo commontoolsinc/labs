@@ -8,6 +8,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { toCell } from "../src/back-to-cell.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -284,7 +285,7 @@ describe("Schema - Link Resolution", () => {
 
       // ...no symbol survives anywhere in the stored tree...
       const assertNoSymbolKeys = (value: unknown): void => {
-        if (value === null || typeof value !== "object") return;
+        if (!isObjectOrArray(value)) return;
         for (const key of Reflect.ownKeys(value)) {
           expect(typeof key).toBe("string");
           assertNoSymbolKeys(

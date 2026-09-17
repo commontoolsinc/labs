@@ -17,6 +17,7 @@ import {
   type FirstPartyHttpSigner,
   signFirstPartyHttpRequest,
 } from "@commonfabric/runner/toolshed-http-auth";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { HarnessPatternIndexConfig } from "../config.ts";
 import {
   defaultHarnessFetch,
@@ -362,7 +363,7 @@ export class PatternIndexClient {
       parsed = undefined;
     }
     if (!response.ok) {
-      const error = typeof parsed === "object" && parsed !== null &&
+      const error = isObjectOrArray(parsed) &&
           typeof (parsed as { error?: unknown }).error === "string"
         ? (parsed as { error: string }).error
         : text.slice(0, 200);

@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { emittedSchemas, parseModule } from "./transformed-ast.ts";
@@ -75,7 +76,7 @@ describe("captured cell value fields", () => {
     const valueSchemas = emittedSchemas(parseModule(output)).flatMap(
       (schema) => {
         const properties = schema.properties;
-        return properties !== null && typeof properties === "object" &&
+        return isObjectOrArray(properties) &&
             "value" in properties
           ? [properties.value]
           : [];

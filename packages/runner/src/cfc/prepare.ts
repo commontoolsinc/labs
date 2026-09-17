@@ -1709,8 +1709,7 @@ export const storedSchemaCoversCandidateEnvelope = (
         return false;
       }
     }
-    return typeof stored.additionalProperties === "object" &&
-      stored.additionalProperties !== null &&
+    return isObjectOrArray(stored.additionalProperties) &&
       storedSchemaCoversCandidateEnvelope(
         stored.additionalProperties,
         candidateRest,
@@ -1748,8 +1747,8 @@ export const storedSchemaCoversCandidateEnvelope = (
   }
 
   if (
-    typeof candidate.items === "object" && candidate.items !== null &&
-    typeof stored.items === "object" && stored.items !== null
+    isObjectOrArray(candidate.items) &&
+    isObjectOrArray(stored.items)
   ) {
     return storedSchemaCoversCandidateEnvelope(stored.items, candidate.items);
   }

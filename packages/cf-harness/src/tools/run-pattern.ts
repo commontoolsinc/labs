@@ -30,7 +30,7 @@ import {
   PieceController,
   type PiecesController,
 } from "@commonfabric/piece/ops";
-import { isObjectNotArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   HARNESS_POLICY_REFUSAL_SCHEMA,
   type HarnessPolicyRefusal,
@@ -281,7 +281,7 @@ export type RunPatternToolOutput =
 export const isRunPatternToolSuccessOutput = (
   output: unknown,
 ): output is RunPatternToolSuccessOutput =>
-  typeof output === "object" && output !== null &&
+  isObjectOrArray(output) &&
   "status" in output && output.status === "ok" &&
   "resultRef" in output && typeof output.resultRef === "string" &&
   "resultRefSchema" in output;
@@ -656,7 +656,7 @@ const refusalReadInputKeys = (
 const namableRefusalAtom = (rendered: string): boolean => {
   try {
     const parsed: unknown = JSON.parse(rendered);
-    return parsed === null || typeof parsed !== "object";
+    return !isObjectOrArray(parsed);
   } catch {
     return false;
   }

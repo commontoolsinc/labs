@@ -34,6 +34,7 @@ import { UI } from "@commonfabric/runner";
 import { ValidationError } from "@cliffy/command";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { BaseFabricSpecialObject } from "@commonfabric/data-model/fabric-bases";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { pieceDataCommand } from "../commands/piece.ts";
 import {
@@ -313,7 +314,7 @@ function atScopes(documents: Record<string, unknown>): VerbDeps {
       let at: unknown = documents[config.pieceScope ?? "space"];
       for (const segment of path) {
         const key = String(segment);
-        if (at === null || typeof at !== "object" || !(key in at)) {
+        if (!isObjectOrArray(at) || !(key in at)) {
           throw new Error(
             `Cannot access path "${path.join("/")}" - property "${key}" not ` +
               `found`,

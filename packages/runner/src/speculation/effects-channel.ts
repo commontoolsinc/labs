@@ -61,6 +61,7 @@ import {
   type SessionEffectsDocValue,
 } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type { Runtime } from "../runtime.ts";
 import type { MemorySpace, URI } from "../storage/interface.ts";
 import { CoalescedDocListener } from "./doc-notification-listener.ts";
@@ -311,15 +312,12 @@ export class EffectsChannel {
     value: SessionEffectsDocValue | undefined,
   ): void {
     if (this.#closed) return;
-    if (value === null || typeof value !== "object") return;
+    if (!isObjectOrArray(value)) return;
     const entries = Array.isArray(value.entries) ? value.entries : [];
-    const acks = value.acks !== null && typeof value.acks === "object" &&
-        !Array.isArray(value.acks)
-      ? value.acks
-      : {};
+    const acks = isObjectNotArray(value.acks) ? value.acks : {};
     for (const entry of entries) {
       if (
-        entry === null || typeof entry !== "object" ||
+        !isObjectOrArray(entry) ||
         typeof entry.nonce !== "string"
       ) {
         continue;
@@ -366,7 +364,7 @@ export class EffectsChannel {
         let work: () => Promise<unknown>;
         try {
           const target = entry.args?.target;
-          if (target === null || typeof target !== "object") {
+          if (!isObjectOrArray(target)) {
             throw new Error("intent carries no target");
           }
           const targetCell = this.#runtime.getCellFromLink({

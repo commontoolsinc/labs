@@ -18,6 +18,7 @@
  * failure this whole launch path exists to prevent.
  */
 
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { HANDLE_NAME_PATTERN } from "../src/input-cells.ts";
 import { parseHandleRef } from "../src/handle-table.ts";
 import type { HarnessConnectorGrantSpec } from "../src/contracts/well-known-grants.ts";
@@ -70,9 +71,7 @@ export interface ResolvedConnectorGrants {
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
+  isObjectNotArray(value) ? value as Record<string, unknown> : undefined;
 
 const asNonEmptyString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;

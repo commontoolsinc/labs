@@ -15,6 +15,7 @@
  * artifact.
  */
 
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { type TestIdentity, testIdentityKey } from "./schema.ts";
 
 /** The inputs behind one identity's score, as a manifest records them. */
@@ -338,7 +339,7 @@ export function digestIdentities(keys: Iterable<string>): string {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return isObjectNotArray(value);
 }
 
 function isFiniteNumber(value: unknown): value is number {

@@ -299,7 +299,7 @@ const throwCfcReadOnly = (): never => {
 // Exported for tests: the bypass vectors (descriptor recovery, Map
 // iteration leaks) are pinned by unit-testing the helper directly.
 export const readOnlyCfcView = <T>(value: T): T => {
-  if (value === null || typeof value !== "object") return value;
+  if (!isObjectOrArray(value)) return value;
   if (Object.isFrozen(value)) return value;
   const cached = readOnlyCfcViews.get(value);
   if (cached !== undefined) return cached as T;

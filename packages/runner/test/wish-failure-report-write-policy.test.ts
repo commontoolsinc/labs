@@ -24,6 +24,7 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { defer } from "@commonfabric/utils/defer";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { resolveLink } from "../src/link-resolution.ts";
 import { type JSONSchema, UI } from "../src/builder/types.ts";
 import type { IStorageTransaction } from "../src/storage/interface.ts";
@@ -263,7 +264,7 @@ describe("wish commit-failure reporting", () => {
       // Render the reason a commit rejection carries: it arrives as a plain
       // record rather than an Error, and `String()` on it says nothing.
       const line = args.map((arg) =>
-        typeof arg === "object" && arg !== null && "message" in arg
+        isObjectOrArray(arg) && "message" in arg
           ? String((arg as { message: unknown }).message)
           : String(arg)
       ).join(" ");
