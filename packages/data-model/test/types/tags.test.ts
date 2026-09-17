@@ -45,6 +45,7 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { codecClasses } from "@/fabric-primitives/index.ts";
 import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FabricUnavailable } from "@/fabric-primitives/FabricUnavailable.ts";
 import {
   FabricPrimitive,
   type FabricValue,
@@ -201,6 +202,7 @@ const FABRIC_PRIMITIVE_TAGS: ReadonlyArray<
     VALUE_TAGS.FabricKeyPair,
   ],
   [new FabricRegExp(/a/), VALUE_TAGS.FabricRegExp],
+  [new FabricUnavailable("pending"), VALUE_TAGS.FabricUnavailable],
 ];
 
 /**
@@ -1070,6 +1072,7 @@ describe("tags", () => {
       FabricHash,
       FabricKeyPair,
       FabricRegExp,
+      FabricUnavailable,
     ];
 
     const objects = LAYER_CORPUS

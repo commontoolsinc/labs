@@ -16,6 +16,7 @@ import { join, normalize } from "@std/path/posix";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { createFileSystemHarnessArtifactStore } from "../src/artifacts.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+import { REVISION_VERIFICATION_GUIDANCE } from "../src/revision-verification.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import {
   createHarnessHandleTable,
@@ -1091,8 +1092,9 @@ describe("prompt-loop cross-agent address handles", () => {
       "You own the write, compile-error, fix",
     );
     expect(childSystemPrompt).toContain(
-      "Return the resultRef run_pattern gave you for the pattern you ran last",
+      "Return the resultRef of the working piece from run_pattern or revise_piece",
     );
+    expect(childSystemPrompt).toContain(REVISION_VERIFICATION_GUIDANCE);
     // The deliverable is a reference to something that ran, and source is
     // refused rather than merely discouraged: an encoding is still source.
     expect(childSystemPrompt).toContain("You never return source.");
@@ -1276,6 +1278,52 @@ describe("prompt-loop cross-agent address handles", () => {
     expect(success.ok).toBe(true);
     expect(success.resultRef).toBe(token);
   });
+
+  for (const ok of [true, false]) {
+    it(`returns a separate verification handle when the revision success is ${ok}`, async () => {
+      const runId = `run-revision-verification-${ok}`;
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-5.4",
+      });
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine,
+        allowedSubagentProfiles: ["pattern-author"],
+        fetchFn: scriptedFetch([
+          delegateCallTurn("call-verify", {
+            goal: "Verify the requested revision.",
+            profile: "pattern-author",
+          }),
+          finalTurn(JSON.stringify({
+            ...(ok
+              ? { ok: true, resultRef: URI_A, describes: "Revised the rule" }
+              : { ok: false, code: "other" }),
+            verificationRef: URI_B,
+          })),
+          finalTurn("Verification received."),
+        ]),
+      });
+      const result = await loop.runPrompt({
+        prompt: "Revise the filter.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
+      const returned = result.runState.subagentRuns?.[0]?.structuredReturn;
+      const value = returned?.value as Record<string, unknown>;
+      expect(returned?.status).toBe("valid");
+      expect(value.ok).toBe(ok);
+      const verification = result.runState.handleTable?.entries.find(
+        (entry) => entry.token === value.verificationRef,
+      );
+      expect(verification?.ref).toContain(URI_B);
+      if (ok) {
+        expect(value.resultRef).not.toBe(value.verificationRef);
+      } else {
+        expect(value).not.toHaveProperty("resultRef");
+      }
+    });
+  }
 
   it("reports a well-formed failure branch as the child's answer rather than as a broken return", async () => {
     const runId = "run-subagent-pattern-author-valid-failure";

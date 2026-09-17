@@ -2664,21 +2664,20 @@ export class StorageManager implements IStorageManager {
       releaseLoad(error);
       throw error;
     }
-    return work.then(
-      (result) => {
-        // Same silent-collapse hazard as syncCell: a link-target pull that
-        // resolves while carrying an error reads as an absent target.
-        if (result.error !== undefined) {
-          this.#logSyncLoadFailure(address.space, address.id, result.error);
-        }
-        releaseLoad(result.error);
-        return result;
-      },
-      (error) => {
-        releaseLoad(error);
-        throw error;
-      },
-    );
+    const failLoad = (error: unknown): never => {
+      releaseLoad(error);
+      throw error;
+    };
+
+    return work.then((result) => {
+      // Same silent-collapse hazard as syncCell: a link-target pull that
+      // resolves while carrying an error reads as an absent target.
+      if (result.error !== undefined) {
+        this.#logSyncLoadFailure(address.space, address.id, result.error);
+      }
+      releaseLoad(result.error);
+      return result;
+    }, failLoad);
   }
 
   #resolveCrossSpace(resolve: () => void): Promise<void> {

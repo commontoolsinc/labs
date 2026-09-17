@@ -620,6 +620,52 @@ was the arm, and each of them waits for the process to go in a different way.
 follows the single line from the group-level `+1` down to the one call in
 twenty-seven that covered it.
 
+### A line two callbacks share
+
+A seventh shape is not a branch only some runs take. Both arms run on every
+run. What moves is whether one measurement ran both of them.
+
+Two callbacks passed one after another to the same call share a line. An
+uncalled function's range reaches past its own text, so the line where one
+callback ends and the next begins is reported uncovered unless both callbacks
+ran in the measurement being read.
+[deno coverage: one-line guard reported uncovered when its branch is not taken](deno-coverage-guard-line-artifact.md)
+holds the mechanics and a reproduction, under "A line two adjacent callbacks
+share".
+
+The gate merges the coverage artifacts a run uploads by adding each line's
+counts together, so a line one shard reaches is covered however many shards
+missed it. A shared line is not settled that way. It needs one artifact in
+which both callbacks ran, and which test files an artifact holds is decided by
+how the suite was split across shards. Nothing asserts that split, and it is
+repacked whenever a test file is added or removed: the runner suite's shards
+come from `tasks/select-runner-test-files.ts`, which packs the weighted list of
+test files into bins, so one new file moves whatever lands after it.
+
+Any two adjacent callback arguments sit in this position. The pair that
+produced it here is a request's two endings — the work to start once the
+request commits, and the ending for a request refused before it starts — which
+is the shape of each `enqueuePostCommitLLMWork()` call in
+`packages/runner/src/builtins/llm.ts` and of the served compile path in
+`packages/runner/src/builtins/compile-and-run.ts`. Neither file is where the
+shape comes from, so a search for it goes by the call sites rather than by what
+they call.
+
+Give the second callback a name of its own, declared above the call. Each
+function's lines are then its own — covered wherever that function runs — and
+no line needs two arms in one measurement. That is what `announce` and
+`reportCreated` in `compileAndRun()` are, and what `settleRefused` is at three
+of the `enqueuePostCommitLLMWork()` calls; where the callback only forwards
+to a function already in hand, pass that function instead, as the direct
+`generateObject` path passes `settleAbandoned`.
+
+Driving both arms from one test file settles the count as well, since a file is
+what the shard split moves. Prefer the name: nothing keeps two cases in one
+file, and the next person to split an 800-line test suite has no way to know
+that a count depends on it.
+[The investigation record](../history/development/coverage-flake-shared-callback-line-2026-09-16.md)
+follows three such lines down to the shards that held the arms apart.
+
 ### Checks the layer below already makes
 
 Not every line that moves deserves a test. Sometimes a line decides nothing:

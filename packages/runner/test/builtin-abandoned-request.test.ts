@@ -693,6 +693,76 @@ describe("a builtin whose staged request is abandoned", () => {
       expect(result.withTx().key("error").get()).toBeUndefined();
     });
 
+    it("sends generateObject's tools request and lands its result", async () => {
+      // The control for the tool-calling refusal above: the same request,
+      // with nothing in it for the ceiling to refuse, reaches the model and
+      // lands the object the tool presented.
+
+      const { pattern, generateObject, Cell: BuilderCell } = commonfabric;
+      const dummyPattern = pattern<Record<string, never>, { ok: boolean }>(
+        () => ({
+          ok: true,
+        }),
+      );
+      addMockResponse(() => true, {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call_presentResult_control",
+            toolName: "presentResult",
+            input: { ok: true },
+          },
+        ],
+        id: "abandoned-control-generate-object-tools",
+      });
+      const testPattern = pattern<Record<string, never>>(() => {
+        const messages = BuilderCell.of([{
+          role: "user",
+          content: "a briefing nothing labels",
+        }], {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        });
+        return generateObject({
+          messages,
+          schema: {
+            type: "object",
+            properties: { ok: { type: "boolean" } },
+            required: ["ok"],
+            additionalProperties: false,
+          },
+          tools: {
+            dummy: {
+              description: "a tool, so the request takes the tool-calling path",
+              pattern: dummyPattern,
+            },
+          },
+          // deno-lint-ignore no-explicit-any
+        } as any);
+      });
+      const resultCell = runtime.getCell(
+        space,
+        "generateObject-tools-sent",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+
+      const settled = await waitForCellValue<{ pending?: boolean }>(
+        runtime,
+        result,
+        (value) => value?.pending === false,
+      );
+      await runtime.settled();
+
+      expect(settled.pending).toBe(false);
+      expect(result.withTx().key("error").get()).toBeUndefined();
+      expect(result.withTx().key("result").get()).toEqual({ ok: true });
+    });
+
     it("sends generateText's request and lands its result", async () => {
       const { pattern, generateText } = commonfabric;
       addMockResponse(() => true, {

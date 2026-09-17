@@ -8,6 +8,7 @@
 
 import { fabricFromRealmValue } from "@/codecs.ts";
 import type { RealmEncodedValue } from "@/codec-realm/interface.ts";
+import { UNAVAILABLE_SYNCING } from "@/fabric-primitives/FabricUnavailable.ts";
 
 /** What the worker reports back about one decoded value. */
 export type EchoReport = {
@@ -124,6 +125,21 @@ self.onmessage = (ev: MessageEvent) => {
             ? value.lookalike[1]
             : undefined,
           keyPair: keyPairFacts(value.keyPair),
+          unavailableParts: (value.unavailable as
+              | {
+                reason: string;
+                errorKind: string | null;
+                rawErrorMessage: string | null;
+              }
+              | undefined)
+            ? [
+              (value.unavailable as { reason: string }).reason,
+              (value.unavailable as { errorKind: string | null }).errorKind,
+              (value.unavailable as { rawErrorMessage: string | null })
+                .rawErrorMessage,
+            ]
+            : undefined,
+          prefabIsThatRealmsPrefab: value.prefab === UNAVAILABLE_SYNCING,
         },
       } satisfies EchoReport,
     );

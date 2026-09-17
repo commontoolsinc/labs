@@ -11,6 +11,7 @@ import {
 } from "../../console/server.ts";
 import { ConsoleHealth, type ConsoleHealthRow } from "../../console/health.ts";
 import { harnessSessionChatPolicy } from "../../src/session-assembly.ts";
+import type { CfHarnessEngine } from "../../src/engine.ts";
 import type { ConsoleSessionListing } from "../../console/sessions.ts";
 import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../../src/pattern-index/client.ts";
@@ -1330,6 +1331,20 @@ describe("console/server", () => {
         await config(),
         (onEvent) =>
           new HarnessInteractiveChatService({
+            basePromptLoopOptions: {
+              engine: {
+                config: {},
+                fabricSessionAvailable: false,
+                startRun: () => undefined,
+                establishInputCells: () =>
+                  Promise.resolve([{
+                    name: "itinerary",
+                    token: "cfh:a:itinerary",
+                    ref: `/${CELL_ID}/days`,
+                  }]),
+                establishPatternRefs: () => Promise.resolve([]),
+              } as unknown as CfHarnessEngine,
+            },
             createPromptLoop: (options) => {
               loopOptions.push(options);
               return answeringLoop(options);

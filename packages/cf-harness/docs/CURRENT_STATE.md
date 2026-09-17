@@ -1,7 +1,8 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-09-17
+Last verified: 2026-09-18\
+Revision: `0cccfd338e+revision-verification`
 
 The [system map](system-map/README.md) moves in lockstep with this current-state
 reference.
@@ -191,7 +192,11 @@ The current package provides:
   continuation availability. The live pane renders the question or reason.
   Children report blockers to the parent. Missing-input discovery distinguishes
   released evidence, absence within an enumerated granted scope, and unknown
-  reads; it stops for input rather than repeating author delegation;
+  reads; it stops for input rather than repeating author delegation. Shared
+  target-selection guidance asks for an unnamed, unattached piece without a
+  registry read, preserves established conversation targets, and permits at most
+  one registry lookup for a name the user supplied. Only a unique released match
+  allows work to proceed;
 - a session-local address handle table: deterministic `cfh:a:` tokens minted per
   run for cell addresses, recorded in `run-state.json`, and carried across
   resume; the prompt loop swaps addresses to tokens in model-bound tool output
@@ -441,16 +446,25 @@ The current package provides:
   child computes over references it cannot read out. It runs on its own turn
   budget of 24 rather than the default subagent cap of 8, since each
   compile-error iteration costs a turn, and it carries a return contract — a
-  discriminated union of `{ ok: true, resultRef, describes, hashtags? }` and
-  `{ ok: false, code, detail? }` — which is the profile's own rather than a
-  default: a `pattern-author` delegation that declares a `returnSchema` of its
-  own is refused, naming the field, because a channel this narrow cannot be left
-  caller-writable. A failure and a success are different shapes, and only the
-  success branch carries a reference; there is no field on it for source under
-  any name. The failure `code` comes from a fixed inert vocabulary, so a parent
-  learns why without declassifying anything, and any child return saying
-  `ok: false` reaches the parent as a coded failure rather than as a schema
-  complaint.
+  discriminated union of
+  `{ ok: true, resultRef, describes, hashtags?, verificationRef? }` and
+  `{ ok: false, code, detail?, verificationRef? }` — which is the profile's own
+  rather than a default: a `pattern-author` delegation that declares a
+  `returnSchema` of its own is refused, naming the field, because a channel this
+  narrow cannot be left caller-writable. A failure and a success are different
+  shapes, and only the success branch carries a piece result reference; there is
+  no field on it for source under any name. The failure `code` comes from a
+  fixed inert vocabulary, so a parent learns why without declassifying anything,
+  and any child return saying `ok: false` reaches the parent as a coded failure
+  rather than as a schema complaint.
+- revision verification guidance uses `read_piece_source.inputRef` for the
+  piece's bound arguments and ordinary `run_pattern` for an old/new rule check
+  over one bounded sample. The child's separate `verificationRef` carries no
+  values into the parent; comparison fields use the existing release path. Zero
+  effect, an empty sample, or unavailable evidence calls for a question instead
+  of a completed revision. Styling without a computed-surface observation is
+  explicitly reported as not checked. This is guidance, not a host proof of
+  arbitrary rule semantics.
 
 Run the capability probe instead of copying this list into adapters:
 

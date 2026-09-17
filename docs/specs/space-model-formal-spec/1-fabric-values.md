@@ -137,6 +137,7 @@ type FabricValue =
   | FabricBytes
   | FabricKeyPair
   | FabricRegExp
+  | FabricUnavailable
 
   // (c) Branded fabric types (custom types implementing the fabric protocol)
   //     This arm covers:
@@ -389,8 +390,9 @@ content-level identity (see Section 6.3), but it is a `FabricPrimitive`, not a
 `FabricInstance`.
 
 The **special primitive** types (`FabricEpochNsec`, `FabricEpochDay`,
-`FabricHash`, `FabricBytes`, `FabricKeyPair`, `FabricRegExp`) are **not**
-`FabricInstance`s — they are `FabricPrimitive` subclasses (Section 1.4.6).
+`FabricHash`, `FabricBytes`, `FabricKeyPair`, `FabricRegExp`,
+`FabricUnavailable`) are **not** `FabricInstance`s — they are `FabricPrimitive`
+subclasses (Section 1.4.6).
 `FabricPrimitive` is an arm of the `FabricValue` union, so all
 `FabricPrimitive` subclasses are implicitly members of `FabricValue`. They are always-frozen value types that
 bypass the `freeze` option in conversion functions. Each hosts its own codec for
@@ -483,10 +485,10 @@ wrapper types.
 
 Unlike the wrappers above, the special primitive types (`FabricEpochNsec`,
 `FabricEpochDay`, `FabricHash`, `FabricBytes`, `FabricKeyPair`,
-`FabricRegExp`) are **`FabricPrimitive` subclasses** and do not extend
-`FabricInstance`. They are included in `FabricValue` via the
+`FabricRegExp`, `FabricUnavailable`) are **`FabricPrimitive` subclasses** and
+do not extend `FabricInstance`. They are included in `FabricValue` via the
 `FabricPrimitive` arm of the union (Section 1.4.6). See Sections 1.4.5
-through 1.4.11.
+through 1.4.12.
 
 | Special Primitive Type | Extends | Wire Tag | Stored Value | Notes |
 |------------------------|---------|----------|--------------|-------|
@@ -496,6 +498,7 @@ through 1.4.11.
 | `FabricBytes` | `FabricPrimitive` | `Bytes@1` | `Uint8Array` (private byte storage) | Immutable byte sequence. The instance owns its bytes outright: input is copied at construction time, unless the caller cedes it with `transfer`. Callers access bytes via `slice()`, `sliceBuffer()`, `copyInto()`, and `length`. |
 | `FabricKeyPair` | `FabricPrimitive` | `KeyPair@1` | Either two `CryptoKey` handles, or an algorithm name and the two keys' bytes | Asymmetric key pair. Which of the two states it holds decides what it can do: only the material state has a JSON encoding or a hash, and only the handle state can hand back a `CryptoKeyPair` (see Section 1.4.11). |
 | `FabricRegExp` | `FabricPrimitive` | `RegExp@1` | `source` / `flags` / `flavor` strings | Regular-expression value. `source` is the pattern string (`regex.source`); `flags` is the flag string (`regex.flags`); `flavor` is the regex dialect identifier (e.g. `"es2025"`). Stores strings only; `value` returns a fresh JS `RegExp` clone per call. Extra enumerable properties on a JS `RegExp` cause rejection. |
+| `FabricUnavailable` | `FabricPrimitive` | `Unavailable@1` | `reason` string; for reason `error`, an `errorKind` string and an optional `errorMessage` string | Marker standing in for data that is not available, saying why: `pending`, `syncing`, or `error`, the last sorted by a kind. Only the `error` reason carries a kind and a message. Wire state is `{ reason }`, `{ reason, errorKind }`, or `{ reason, errorKind, errorMessage }` (see Section 1.4.12). |
 
 #### Extra Enumerable Properties
 
@@ -955,7 +958,7 @@ that form the `FabricPrimitive` arm of `FabricValue`.
   that preserve a type tag alongside their state (Section 3.2).
 - `FabricPrimitive` is the base for types that behave like primitives but
   need a class wrapper (`FabricEpochNsec`, `FabricEpochDay`, `FabricHash`,
-  `FabricBytes`, `FabricRegExp`).
+  `FabricBytes`, `FabricRegExp`, `FabricUnavailable`).
 
 ```typescript
 // Shown for illustration only.
@@ -1382,7 +1385,188 @@ holding handles reach a durable structured-clone store (Section 1.2 of
 [4-realm-encoding.md](./4-realm-encoding.md)) while staying unrepresentable in
 JSON.
 
-#### 1.4.12 `FabricLink`
+#### 1.4.12 `FabricUnavailable`
+
+`FabricUnavailable` is a marker standing in for data that is not available,
+saying why. It holds no data of its own: the reason, and for one reason the
+kind of error and a message, are the whole of what it says, which is what
+makes it a `FabricPrimitive` rather than a container. A consumer reading a
+slot that holds one learns that the value it wanted is not there and why,
+rather than reading `undefined` and having to guess among the situations that
+could have produced it.
+
+```typescript
+// Shown at module scope.
+// file: packages/data-model/src/api.ts
+
+/**
+ * Why a `FabricUnavailable` stands where data would otherwise be. The two
+ * transient reasons say the data is on its way; `error` says producing it
+ * failed, and is the one reason that carries a kind and a message.
+ */
+type UnavailableReason = "pending" | "syncing" | "error";
+
+/**
+ * The kinds of failure a `FabricUnavailable` with reason `error` sorts into.
+ * `general` is the kind for a failure none of the others describes.
+ */
+type UnavailableErrorKind =
+  | "general"
+  | "schemaMismatch"
+  | "invalidInput"
+  | "network"
+  | "decode"
+  | "compile"
+  | "provider"
+  | "sync";
+```
+
+The reasons split along one axis, which `isTransient()` reports:
+
+* `pending` — the value is being produced and has not arrived yet.
+* `syncing` — the value exists but has not reached this runtime yet.
+* `error` — producing the value failed. `errorKind` says how, and
+  `errorMessage` says more.
+
+The kinds sort a failure by what failed, so that a consumer can tell a broken
+service from a violated data contract without parsing a message:
+
+* `general` — a failure none of the other kinds describes.
+* `schemaMismatch` — a value was produced but does not satisfy the schema it
+  was read through.
+* `invalidInput` — an input was locally complete but not usable, an empty
+  URL or a program with no files among them.
+* `network` — a network request failed.
+* `decode` — a response arrived but could not be decoded.
+* `compile` — a program failed to compile.
+* `provider` — an external provider reported a failure.
+* `sync` — synchronization with stored data failed.
+
+```typescript
+// Shown at module scope.
+// file: packages/data-model/src/fabric-primitives/FabricUnavailable.ts
+
+/**
+ * A marker standing in for data that is not available, saying why.
+ * Extends `FabricPrimitive` (not a `FabricInstance`).
+ *
+ * Only the `error` reason carries a kind, and it always does; only the
+ * `error` reason may carry a message. The constructor refuses the other
+ * pairings.
+ */
+export class FabricUnavailable extends FabricPrimitive {
+  readonly #reason: UnavailableReason;
+  readonly #errorKind: UnavailableErrorKind | null;
+  readonly #errorMessage: string | null;
+
+  constructor(
+    reason: UnavailableReason,
+    errorKind: UnavailableErrorKind | null = null,
+    errorMessage: string | null = null,
+  ) {
+    super();
+    if (reason === "error") {
+      if (errorKind === null) {
+        throw new Error("Reason `error` requires an `UnavailableErrorKind`.");
+      }
+    } else if (errorKind !== null || errorMessage !== null) {
+      throw new Error(
+        `Reason \`${reason}\` takes neither an \`errorKind\` nor an ` +
+          "`errorMessage`.",
+      );
+    }
+    this.#reason = reason;
+    this.#errorKind = errorKind;
+    // A message equal to the kind's default is stored as none.
+    this.#errorMessage = (errorMessage === defaultMessageFor(errorKind))
+      ? null
+      : errorMessage;
+  }
+
+  get reason(): UnavailableReason {
+    return this.#reason;
+  }
+
+  get errorKind(): UnavailableErrorKind | null {
+    return this.#errorKind;
+  }
+
+  /** The message, or the kind's default when none was stored. */
+  get errorMessage(): string | null {
+    return this.#errorMessage ?? defaultMessageFor(this.#errorKind);
+  }
+
+  /** The message as stored, with no default supplied. */
+  get rawErrorMessage(): string | null {
+    return this.#errorMessage;
+  }
+
+  isPending(): boolean {
+    return this.#reason === "pending";
+  }
+
+  isSyncing(): boolean {
+    return this.#reason === "syncing";
+  }
+
+  /** Narrows the two error members to what the `error` reason carries. */
+  isError(): this is {
+    readonly errorKind: UnavailableErrorKind;
+    readonly errorMessage: string;
+  } {
+    return this.#reason === "error";
+  }
+
+  isTransient(): boolean {
+    return this.#reason !== "error";
+  }
+}
+
+declare function defaultMessageFor(
+  kind: UnavailableErrorKind | null,
+): string | null;
+```
+
+**The pairing of the error members with the reason is an invariant of the
+class**, held by the constructor: reason `error` without a kind, or a
+transient reason with a kind or a message, is refused. A wire state carrying
+either pairing is therefore one the class never wrote, and decoding it
+produces a `ProblematicValue` (Section 3.5) rather than an instance.
+
+**The message has a default, and the default is not state.** `errorMessage`
+returns the stored message, or a fixed message for the kind when none is
+stored; `rawErrorMessage` returns the stored message alone, `null` when there
+is none. A message given at construction that equals its kind's default is
+stored as no message at all, so the two ways of arriving at the default are
+one state: they encode alike, hash alike, and are equal by content. The
+default text is presentation, never encoded or hashed, and may change without
+a format change.
+
+**Prefab instances.** The two transient reasons each have one exported
+instance, `UNAVAILABLE_PENDING` and `UNAVAILABLE_SYNCING`, and both wire
+formats decode a state naming one of those reasons alone to that instance
+rather than to a fresh one. Nothing turns on the identity: two instances with
+the same state are equal by content (Section 6), and hash the same, however
+they were made. The prefabs exist so that the common case allocates nothing.
+
+**Wire state** is `{ reason }` for a transient reason, and for `error`
+`{ reason, errorKind }` or `{ reason, errorKind, errorMessage }`, the message
+present exactly when `rawErrorMessage` is not `null`, under the tag
+`Unavailable@1`. A field with nothing to say is absent from the state rather
+than present as `null`. The state is a record of strings, so it is a
+`FabricValue` and a realm-crossing value alike: the JSON codec is nonterminal
+over it and the realm codec terminal, as for `FabricRegExp` (Section 3.4 of
+[4-realm-encoding.md](./4-realm-encoding.md)). The hashing layer feeds the
+reason, the kind or `null`, and the raw message or `null`, under the dedicated
+`TAG_UNAVAILABLE` (Section 4.18 of
+[2-hash-byte-format.md](./2-hash-byte-format.md)).
+
+What flows where — which built-ins produce one and under which kind, how a
+computation reacts to one arriving as an input, what a renderer shows while a
+value is pending — is the runtime's contract, not the type's, and is
+specified where those consumers are.
+
+#### 1.4.13 `FabricLink`
 
 `FabricLink` is a fabric-native `FabricInstance` — like the wrapper classes of
 Sections 1.4.2–1.4.4, but not wrapping any convertible JS type — that represents
@@ -1437,7 +1621,7 @@ export class FabricLink extends BaseFabricInstance {
 }
 ```
 
-#### 1.4.13 `bigint` — Not Wrapped
+#### 1.4.14 `bigint` — Not Wrapped
 
 `bigint` is a JavaScript primitive (`typeof x === 'bigint'`), not an object. It
 rides through the `FabricValue` layer directly, like `undefined`. No
@@ -1445,7 +1629,7 @@ rides through the `FabricValue` layer directly, like `undefined`. No
 standalone codec (`BigIntCodec`, analogous to `UndefinedCodec` — there is no
 owned class to host a `[CODEC]`); see Section 4.5.
 
-#### 1.4.14 Design Notes
+#### 1.4.15 Design Notes
 
 > **Why wrapper classes instead of inline encoder branches?** Each wrapper
 > genuinely implements `FabricInstance` and hosts its own `[CODEC]`, so the
@@ -1466,7 +1650,8 @@ owned class to host a `[CODEC]`); see Section 4.5.
 > wrappers `FabricError`, `FabricMap`, `FabricSet` and the explicit-tag-value
 > family) under `packages/data-model/fabric-instances/`; the `FabricPrimitive`
 > subclasses (`FabricEpochNsec`, `FabricEpochDay`, `FabricHash`, `FabricBytes`,
-> `FabricRegExp`) under `packages/data-model/fabric-primitives/`.
+> `FabricRegExp`, `FabricUnavailable`) under
+> `packages/data-model/fabric-primitives/`.
 
 ### 1.5 Plain Containers
 
@@ -3485,6 +3670,7 @@ four categories by high nibble:
 | `TAG_SYMBOL`      | `0x2A` | 42      | `symbol` (registry-interned only) |
 | `TAG_REGEXP`      | `0x2B` | 43      | `FabricRegExp`                    |
 | `TAG_KEY_PAIR`    | `0x2C` | 44      | `FabricKeyPair` (holding material) |
+| `TAG_UNAVAILABLE` | `0x2D` | 45      | `FabricUnavailable`               |
 
 **Optimized tags (`0xFN`)** — hash-level substitutes that replace the raw
 payload of a primitive type with a digest, when doing so shortens the byte
@@ -3628,6 +3814,7 @@ export function hashOf(value: unknown): FabricHash {
   // - `FabricRegExp` uses TAG_REGEXP (dedicated primitive tag).
   // - `FabricKeyPair` uses TAG_KEY_PAIR (dedicated primitive tag), and only
   //   when it holds material; hashing one that holds handles throws.
+  // - `FabricUnavailable` uses TAG_UNAVAILABLE (dedicated primitive tag).
   //
   // Examples (existing type tags are all short enough for the direct
   // string form, so `hashStr(tag)` below expands to
@@ -3645,6 +3832,9 @@ export function hashOf(value: unknown): FabricHash {
   //                               hashStr(flavor))
   // - `FabricKeyPair`:    hash(TAG_KEY_PAIR, hashStr(algorithm),
   //                               hashOf(publicKey), hashOf(privateKey))
+  // - `FabricUnavailable`: hash(TAG_UNAVAILABLE, hashStr(reason),
+  //                               hashOf(errorKind), hashOf(rawErrorMessage))
+  //                         where each of the last two is a string or `null`
   //
   // Each type is tagged to prevent collisions between types with
   // identical content representations. In particular, holes (TAG_HOLE),

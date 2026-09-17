@@ -15,8 +15,19 @@ the rendered board read one derivation rather than two.
 The board also **names its members**. It owns a namespace of decimal names,
 dense from `1` and never reused, through the library in
 [`collection-naming/`](../collection-naming/README.md); a topic is cited as
-`top/42`, and the number renders as a badge beside its title rather than in
-place of it.
+`top/42`.
+
+**Topics shows no topic's number for now.** `SHOW_TOPIC_NUMBERS` in `topic.tsx`
+is off while only some topics have a number, and a topic then publishes no
+`shortName`. That one absence covers every place a number shows, because every
+one of them reads that property: the topic's header, the board's cards, the
+survey rows, and the entries of whatever mention universe a topic's editor
+completes over — the board's derived copies, or the topics themselves where a
+topic is not yet rewired to that universe. So no pill shows a number and `#42`
+offers no topic either way. The numbers themselves are untouched: the board
+allocates one on every create, records it in `names`, lists it beside its topic
+in `namesTable`, and `top/42` resolves. Wherever numbers are shown, a number
+renders as a badge beside its topic's title rather than in place of it.
 
 Topics reference each other. A reference is a **cell**, not a string: picking a
 completion in the body editor stores the destination piece itself, and a link
@@ -101,16 +112,19 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   `names: { "42": <topic> }`, written one key at a time and holding each topic
   as an unread reference, so surveying its keys expands no topic. A topic reads
   its own row out of the board's `namesTable` by identity and publishes the
-  result as `shortName` — one derivation — and the survey row, the mention
-  universe row, and a mention's pill all read that one property. `backfillNames`
-  names what the board held before it numbered anything, in filing order,
-  skipping what is already named; it writes the namespace and nothing else, so
-  on a board whose topics were filed past `addTopic` it has to be paired with a
-  one-time link-bind of `namesTable` onto each of them, the same operator step
-  `mentionable` states for itself. Until that bind the topic is named — `names`
-  and `namesTable` carry it — and its row still carries no name. `naming` is
-  what the board declares about those names, so a consumer reads the promise
-  rather than assuming one.
+  result as `shortName` — one derivation — and every reader reaches the number
+  through that one property: the survey row, the card badge, and the mention
+  universe row, which a mention's pill and a `#42` query read. A topic publishes
+  it only while `SHOW_TOPIC_NUMBERS` is on, so while that is off none of them
+  carries a number and the name is read from `namesTable` instead.
+  `backfillNames` names what the board held before it numbered anything, in
+  filing order, skipping what is already named; it writes the namespace and
+  nothing else, so on a board whose topics were filed past `addTopic` it has to
+  be paired with a one-time link-bind of `namesTable` onto each of them, the
+  same operator step `mentionable` states for itself. Until that bind the topic
+  is named — `names` and `namesTable` carry it — and its row still carries no
+  name. `naming` is what the board declares about those names, so a consumer
+  reads the promise rather than assuming one.
 
   Every demand for that property is declared OPTIONAL rather than defaulted, and
   the spelling is what lets the whole graft be applied over a board deployed
@@ -131,7 +145,9 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   of every reader paying it on every load. The lift and its row type are shared
   with the collection-naming exemplar (`../collection-naming/mentionable.ts`):
   both boards derive their universe through the one derivation, so a member's
-  number reads the same on either.
+  number reads the same on either. A Topics row carries the empty name while
+  Topics shows no numbers, because the copy is taken off a topic that publishes
+  none.
 
   The reference is what a picked completion stores, and it is deliberately
   outside the demand a topic declares over the universe: a property that demand
@@ -384,15 +400,16 @@ readback, and every name a verb's result publishes is permanent, so the create
 hands back the survey row plus the write-time facts only the pattern could
 resolve (`createdAt`, `createdBy`). `name` rides beside it — the name the create
 allocated, as written to the namespace — because the topic's own `shortName` is
-a lookup that may not have produced a value when the call returns, and a caller
-must not have to wait for a derivation to learn what it just allocated.
-`backfillNames` returns the names it wrote, in filing order, and `[]` on a
-second run. `addComment` and `addLink` return the appended record, `setBody` the
-persisted body plus the attribution it wrote, `setTitle` the persisted title
-plus its attribution; each carries fields the pattern resolved that a caller
-cannot compute for itself. Counts are deliberately not returned: these appends
-are mergeable ops, so a length observed inside one handling is not a fact about
-the resulting list — read `commentCount` when you want the count.
+a lookup that may not have produced a value when the call returns — and produces
+none at all while numbers are hidden — and a caller must not have to wait for a
+derivation to learn what it just allocated. `backfillNames` returns the names it
+wrote, in filing order, and `[]` on a second run. `addComment` and `addLink`
+return the appended record, `setBody` the persisted body plus the attribution it
+wrote, `setTitle` the persisted title plus its attribution; each carries fields
+the pattern resolved that a caller cannot compute for itself. Counts are
+deliberately not returned: these appends are mergeable ops, so a length observed
+inside one handling is not a fact about the resulting list — read `commentCount`
+when you want the count.
 
 A returned value reaches the caller through the handling's receipt. A result
 carrying a piece (`addTopic`) travels the result-pattern projection path; the

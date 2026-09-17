@@ -3673,7 +3673,9 @@ export class SpaceServer implements TransactionSealDestination {
    *   consequenced.
    *
    * Returns the number of events queued (the re-arm belt keys on it), or
-   * undefined when the serving tenure ends during a visibility wait.
+   * undefined when the serving tenure ends during any of the pass's own
+   * waits: a sidecar load, the visibility barrier's publication and
+   * response, or the stream document's load.
    */
   async #drainStreamEvents(runtime: Runtime): Promise<number | undefined> {
     if (!this.#eventScanOwed) return 0;
@@ -4015,6 +4017,7 @@ export class SpaceServer implements TransactionSealDestination {
         } catch {
           // A cold stream doc defers like a cold piece load below.
         }
+        if (!this.#active || this.#runtime !== runtime) return undefined;
         // The load-park barrier's OTHER half, and it sits HERE — past
         // every await in the iteration, immediately before the queue —
         // on purpose. The scheduler-side barrier

@@ -17,6 +17,7 @@ import { FabricEpochNsec } from "./FabricEpochNsec.ts";
 import { FabricHash } from "./FabricHash.ts";
 import { FabricKeyPair } from "./FabricKeyPair.ts";
 import { FabricRegExp } from "./FabricRegExp.ts";
+import { FabricUnavailable } from "./FabricUnavailable.ts";
 
 export { FabricBytes } from "./FabricBytes.ts";
 export { FabricRegExp } from "./FabricRegExp.ts";
@@ -24,6 +25,13 @@ export { FabricHash } from "./FabricHash.ts";
 export { FabricKeyPair } from "./FabricKeyPair.ts";
 export { FabricEpochNsec } from "./FabricEpochNsec.ts";
 export { FabricEpochDay } from "./FabricEpochDay.ts";
+export {
+  FabricUnavailable,
+  UNAVAILABLE_ERROR_KINDS,
+  UNAVAILABLE_PENDING,
+  UNAVAILABLE_REASONS,
+  UNAVAILABLE_SYNCING,
+} from "./FabricUnavailable.ts";
 
 /**
  * The concrete primitive classes whose instances are available over the wire,
@@ -50,4 +58,5 @@ const CODEC_CLASSES: readonly Constructor[] = Object.freeze([
   FabricEpochNsec,
   FabricEpochDay,
   FabricRegExp,
+  FabricUnavailable,
 ]);

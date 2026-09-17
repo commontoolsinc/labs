@@ -1541,7 +1541,7 @@ describe("publish() over a store that answers badly", () => {
 describe("publish() reporting what no lane can hold", () => {
   const NOW = new Date("2026-08-20T12:00:00.000Z");
 
-  it("names each one, with the cost the bound was judged against", async () => {
+  it("names it with the cost the bound was judged against", async () => {
     const slow = (commit: string, at: string) => {
       const body = object(commit, "pass", at);
       // One execution taking longer than a lane's whole hard bound.
@@ -1572,6 +1572,54 @@ describe("publish() reporting what no lane can hold", () => {
     expect(line).toBeDefined();
     expect(line).toContain("space > writes");
     expect(line).toContain("400.0s");
+  });
+
+  it("names the costliest few and counts the rest", async () => {
+    // A cost model charging a whole suite more than a lane can hold puts
+    // every test in that suite on this list, which has run to tens of
+    // thousands. One line each is more than a job summary holds, and
+    // GitHub drops a summary past its bound whole.
+    const objects: Record<string, string> = {};
+    for (let test = 0; test < 25; test++) {
+      for (const attempt of ["a", "b"]) {
+        const commit = `c${test}-${attempt}`;
+        const body = object(
+          commit,
+          "pass",
+          "2026-08-20T01:00:00.000Z",
+          "main",
+          undefined,
+          `space > writes ${test}`,
+        );
+        // The last of them is the slowest, so the order the lines come
+        // in is visible in what they say.
+        objects[CI(DAY, commit)] = body.replace(
+          '"durationMs":40',
+          `"durationMs":${400000 + test * 1000}`,
+        );
+      }
+    }
+    const { store, created } = fakeStore(objects);
+    const said = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, suites, noBaselines)
+    );
+    const named = said.split("\n").filter((line) =>
+      line.includes("test selection: unschedulable,")
+    );
+    expect(named.length).toBe(10);
+    expect(named[0]).toContain("space > writes 24");
+    expect(said).toContain(
+      "test selection: 15 further identities cost more than a lane can hold",
+    );
+    // What the cap holds back from the log it does not hold back from
+    // the manifest, which is where a consumer reads the whole of it.
+    const manifest = await publishedManifest(created);
+    expect(manifest.unschedulable).toHaveLength(25);
+    expect(
+      manifest.unschedulable.map((entry) => entry.test.n).sort(),
+    ).toEqual(
+      Array.from({ length: 25 }, (_, at) => `space > writes ${at}`).sort(),
+    );
   });
 });
 

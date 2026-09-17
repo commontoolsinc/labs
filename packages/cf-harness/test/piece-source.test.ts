@@ -213,6 +213,46 @@ describe("piece-source", () => {
       expect(Array.isArray(output.labels)).toBe(true);
     });
 
+    it("verifies through the piece's bound arguments without exposing their values in the source read", async () => {
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      const result = await engine.invokeBuiltinTool("read_piece_source", {
+        token: created.resultRef,
+      });
+      const source = result.output as ReadPieceSourceToolSuccessOutput;
+      const piece = await pieces.getPieceCell(created.pieceId);
+      expect(source.inputRef).toBe(createLLMFriendlyLink(
+        pieces.getArgument(piece).getAsNormalizedFullLink(),
+        pieces.getSpace(),
+      ));
+      expect(source).not.toHaveProperty("inputs");
+
+      const verification = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: [
+          "import { computed, pattern } from 'commonfabric';",
+          "interface Input { original: { n: number }; }",
+          "interface Output { before: number; after: number; }",
+          "export default pattern<Input, Output>(({ original }) => ({",
+          "  before: computed(() => original.n * 2),",
+          "  after: computed(() => original.n * 3),",
+          "}));",
+        ].join("\n"),
+        inputs: { original: source.inputRef },
+        resultSchema: {
+          type: "object",
+          properties: {
+            before: { type: "number" },
+            after: { type: "number" },
+          },
+          required: ["before", "after"],
+        },
+      });
+      const output = verification.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ before: 42, after: 63 });
+      expect(output.resultRef).not.toBe(created.resultRef);
+    });
+
     it("refuses a reference to another space without naming what it found", async () => {
       // The session's authority ends at its space, the same boundary
       // run_pattern draws over its inputs.

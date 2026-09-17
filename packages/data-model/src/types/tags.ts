@@ -18,6 +18,7 @@ export const FABRIC_PRIMITIVE_VALUE_TAGS = Object.freeze(
     FabricBytes: "FabricBytes",
     FabricKeyPair: "FabricKeyPair",
     FabricRegExp: "FabricRegExp",
+    FabricUnavailable: "FabricUnavailable",
   } as const,
 );
 

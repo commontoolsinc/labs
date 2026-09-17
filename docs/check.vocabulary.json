@@ -11,6 +11,7 @@
     "FabricKeyPair",
     "FabricPrimitive",
     "FabricSpecialObject",
+    "FabricUnavailable",
     "NAME",
     "Stream",
     "TESTS",
@@ -68,6 +69,8 @@
     "SqliteDatabase",
     "SqliteDb",
     "SqliteTableSchemas",
+    "UnavailableErrorKind",
+    "UnavailableReason",
     "VNode"
   ],
   "collections": [],

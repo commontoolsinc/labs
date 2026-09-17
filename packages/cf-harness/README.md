@@ -438,6 +438,26 @@ transcript result, then ends the loop without another provider request.
 Malformed or withheld calls remain recoverable tool errors. Children retain
 their failure-return contract and cannot call `finish_task`.
 
+For a request about an existing piece, the parent first uses an explicit
+attachment, a user-supplied reference, or an unambiguous target established in
+the conversation. With none of those and no piece name from the user, it asks
+which piece to use with zero registry reads. A user-supplied name permits at
+most one registry read across the parent and its children, proceeding only on
+exactly one released match. An ambiguous, missing, or unreadable match leads to
+a question, without candidate inspection, retrying discovery through another
+delegation, or replacement authoring. The one lookup must return the match count
+and usable reference or requested data together; a lost reference or missing
+requested value is a reason to ask for an attachment, not to reread the registry
+or infer a value from the piece name. This is shared model guidance, not a
+runtime quota, and does not limit an explicit request to list or analyze the
+space.
+
+Private research receives the same explicit input-cell names and tokens as the
+parent, separately from the general handle inventory. Registry and connector
+grants therefore do not stand in for attachments, and a piece attachment stays
+identifiable even when its schema describes the piece's result. The bound
+reference behind the attachment remains private.
+
 These dispositions keep the run lifecycle `completed` and the conversation
 reusable. `run-report.json` records `taskOutcome`, a union discriminated by
 `outcome: "completed" | "question" | "gave-up"`; only a question carries
@@ -917,10 +937,12 @@ What the model receives is a token and fixed prose, never data. Reading anything
 behind the token means running a pattern over it, where the CFC boundary rules
 as it does for every other flow — in particular, a piece's `$NAME` is a value,
 and a name computed from labeled data taints a name-listing pattern's result,
-which strict enforcement refuses whole. The announcement says so and names the
-fallback: a pattern that returns the entry references without reading any
-values, which cannot taint and whose addresses come back as tokens through the
-ordinary outbound swap.
+which strict enforcement refuses whole. A refused name read leaves the name
+unknown. For an explicit reference-listing task, a pattern can return entry
+references without reading values, with addresses returned as tokens through the
+ordinary outbound swap. This does not authorize crawling references to identify
+an unspecified edit target; the shared target-selection guidance applies to the
+registry announcement too.
 
 The grants are recorded in run state (`wellKnownGrants`), replayed rather than
 re-minted on resume, and reported in the operator summary as `fabricGrants:`. A
@@ -2315,6 +2337,35 @@ skill registry, the child preloads the `pattern-dev`, `pattern-schema`, and
 root does not carry them, or that resolved no skills root at all, still gets the
 same child with the same tools, just without the preloaded guidance.
 
+For an existing piece, `read_piece_source` returns its current source and
+revision, plus an opaque `inputRef` to its bound arguments. The author wires
+that reference into `run_pattern` to check the inputs the piece actually uses.
+`revise_piece` applies a compatible revision in place; a successful receipt
+establishes the source update, not the behavior the user asked for.
+
+For a classifier or filter change, the child is instructed to evaluate the old
+and new predicates over the same bounded sample before applying the revision.
+The check retains the existing readers, session scope, and filters. Its result
+reports `ready`, `sampleSize`, `beforeCount`, `afterCount`, and `changedCount`;
+the last counts rows whose inclusion changes, rather than subtracting totals.
+Pending reads, errors, and `outputConcerns` must be resolved before treating any
+counts as evidence. Sampling establishes the effect on that sample only.
+
+Either branch of the child return can carry an opaque `verificationRef` to that
+comparison. The parent reads it through ordinary `run_pattern` and
+`resultSchema`, under the existing release rules. The actual revised piece stays
+in `resultRef`; comparison counts, rows, and sender names get no new return
+channel. A zero delta, empty sample, or unavailable check leads to a
+`finish_task` question with the released finding and what the user can clarify.
+The rule remains unchanged. A nonzero check supports applying the tested rule
+and reporting its sampled delta, subject to any refresh warning.
+
+For styling, a supplied computed-surface observation can establish the pane
+background. Source colors alone cannot. Without that observation or a permitted
+tool to obtain it, the response says that the rendered appearance was not
+checked. These are model instructions, not host validation of arbitrary rule
+semantics or a new browser inspection capability.
+
 The child's job is author, run, and hand back a reference: a pattern it did not
 run is not an answer, and source never crosses back in any form. Its guidance
 says so as a refusal rather than a preference — a delegation that asks for
@@ -2358,6 +2409,7 @@ it hands back is the point of the profile.
       "properties": {
         "ok": { "type": "boolean", "const": true },
         "resultRef": { "type": "string" },
+        "verificationRef": { "type": "string" },
         "describes": { "type": "string" },
         "hashtags": {
           "type": "array",
@@ -2382,7 +2434,8 @@ it hands back is the point of the profile.
             "other"
           ]
         },
-        "detail": { "type": "string" }
+        "detail": { "type": "string" },
+        "verificationRef": { "type": "string" }
       },
       "required": ["ok", "code"],
       "additionalProperties": false
@@ -2396,7 +2449,9 @@ cannot produce a working pattern — the compile loop does not converge, the tas
 is impossible against the references it holds, its turns run out — returns the
 failure branch, and a failure carries no `resultRef` at all. That is what stops
 a failed delegation from being answered with some other step's reference: the
-parent reads `ok`, and a reference exists only on the branch that produced one.
+parent reads `ok`, and the piece's `resultRef` exists only on the success
+branch. An optional `verificationRef` on either branch points to a separate
+check and does not represent a completed revision.
 
 The failure branch says why in a fixed vocabulary rather than in prose. A `code`
 is inert by construction — one of a closed set, carrying nothing read out of a
