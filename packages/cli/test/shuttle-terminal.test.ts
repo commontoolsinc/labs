@@ -1015,14 +1015,18 @@ describe("terminal", () => {
       // about to repaint.
       // Two givings-up, and which one the line comes after is the whole
       // question: the first is the suspension handing the screen to the
-      // program, the second is the frame giving it up for good. Counted rather
-      // than taken as the last of however many there are, because "after the
-      // last" is satisfied by the suspension's alone if the frame's never
-      // happens — the ordering would then say only that the line was written.
-      const gives = [...written.matchAll(/\x1b\[\?1049l/g)].map((m) => m.index);
-      expect(gives.length).toBe(2);
+      // program, the second is the frame giving it up for good. Both are
+      // located, and a third is refused, because "after the last of however
+      // many there are" is satisfied by the suspension's alone if the frame's
+      // never happens — the ordering would then say only that the line was
+      // written, which the bound above it already says.
+      const first = written.indexOf(LEAVE_ALT);
+      const second = written.indexOf(LEAVE_ALT, first + LEAVE_ALT.length);
+      expect(first).toBeGreaterThan(-1);
+      expect(second).toBeGreaterThan(-1);
+      expect(written.indexOf(LEAVE_ALT, second + LEAVE_ALT.length)).toBe(-1);
       expect(said).toBeGreaterThan(-1);
-      expect(said).toBeGreaterThan(gives[1]!);
+      expect(said).toBeGreaterThan(second);
     });
 
     it("draws nothing again where no frame held the screen", async () => {
