@@ -498,7 +498,10 @@ export type ServingLoopStats = {
 
     /** Delivery-failure backstops scheduled at a failed checkpoint's budget
      * boundary. One wake stands per event at a time: re-deriving a
-     * checkpoint cancels the wake it replaces and arms another. */
+     * checkpoint cancels the wake it replaces and arms another, so this
+     * counts arming passes and runs above the wakes standing. Its sibling
+     * `deferredRescansArmed` counts distinct backstops, since a deferred
+     * rescan with a timer standing arms nothing further. */
     deliveryFailureWakesArmed: number;
 
     /** Delivery-failure backstops that fired during an active serving

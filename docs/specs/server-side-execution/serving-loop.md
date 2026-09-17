@@ -1523,13 +1523,17 @@ the backstops an active tenure scheduled and the callbacks that ran, across all
 transient drain outcomes. Only a serving tenure arms one: a park clears the
 armed backstop, and a deferral reaching a parked tenure arms none, so the
 pending entries wait for the next activation's own scan.
-`deliveryFailureWakesArmed` and `deliveryFailureWakesFired` count the same two
-facts for the delivery-failure backstop — the one wake a failed checkpoint arms
-at its budget boundary — and the same tenure discipline holds for it: a park
-clears the timers its tenure holds, and the next activation arms afresh from the
-checkpoints step 4 replays. An armed timer can be unnecessary if input wakes the
-drain first; these counters do not equate each deferral with an elapsed timer
-interval or each cycle with a durable commit.
+`deliveryFailureWakesArmed` and `deliveryFailureWakesFired` are the
+delivery-failure backstop's pair — the wake a failed checkpoint arms at its
+budget boundary — and that same tenure discipline holds for it. The two `Armed`
+counters read differently, because the two backstops re-arm differently: a
+deferred rescan with a timer standing arms nothing further, so
+`deferredRescansArmed` counts distinct backstops, while a re-derived delivery
+checkpoint cancels the wake it replaces and arms another, so
+`deliveryFailureWakesArmed` counts the passes that reached the entry rather than
+the one wake standing for it. An armed timer can be unnecessary if input wakes
+the drain first; these counters do not equate each deferral with an elapsed
+timer interval or each cycle with a durable commit.
 
 Exposed via the existing `/api/health/stats` shape, replacing v1's pool
 block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
