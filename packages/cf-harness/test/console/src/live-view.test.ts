@@ -70,6 +70,9 @@ describe("console/src/live-view", () => {
     kind: "turn_completed",
     turnId: "turn-1",
     result: {
+      outcome: "completed" as const,
+      sessionId: "session-1",
+      continuable: true,
       looms: [],
       pieces: [{
         slug: "reading-list",
@@ -82,6 +85,9 @@ describe("console/src/live-view", () => {
 
   /** The result a completed turn carries when it named no piece. */
   const EMPTY_RESULT = {
+    outcome: "completed" as const,
+    sessionId: "session-1",
+    continuable: true,
     looms: [],
     pieces: [],
     spaceName: "console-test",
@@ -341,6 +347,9 @@ describe("console/src/live-view", () => {
         turnId: "turn-1",
         finalText: "built it",
         result: {
+          outcome: "completed" as const,
+          sessionId: "session-1",
+          continuable: true,
           looms: [],
           pieces: [{ slug: "reading-list", url: "http://localhost:8000/s/r" }],
           spaceName: "s",
@@ -355,6 +364,7 @@ describe("console/src/live-view", () => {
         key: "1",
         turnId: "turn-1",
         status: "completed",
+        outcome: "completed",
         pieces: [{ slug: "reading-list", url: "http://localhost:8000/s/r" }],
         spaceName: "s",
       });
@@ -1349,6 +1359,33 @@ describe("console/src/live-view", () => {
       expect(text).not.toContain("denied");
     });
 
+    for (const outcome of ["question", "gave-up"] as const) {
+      it(`renders a ${outcome} as a normal terminal with the user-facing sentence`, () => {
+        const text = outcome === "question"
+          ? "Which mailbox should I use?"
+          : "This source is unavailable under the current permissions.";
+        const disposition = outcome === "question"
+          ? { outcome, question: { text } }
+          : { outcome, reason: text };
+        const view = new TestConsoleLive();
+        view.entries = consoleLiveEntries(log({
+          kind: "turn_completed",
+          turnId: "turn-1",
+          ...disposition,
+          result: { ...EMPTY_RESULT, ...disposition, finalText: text },
+        }));
+        const rendered = templateText(view.view());
+        expect(rendered).toContain(text);
+        expect(rendered).toContain(
+          outcome === "question" ? "question" : "stopped",
+        );
+        expect(rendered).not.toContain("badge denied");
+        expect(consoleLiveState(view.entries)).toBe(
+          outcome === "question" ? "waiting for your answer" : "stopped",
+        );
+      });
+    }
+
     it("renders a turn line, prose, a subagent and the piece link it ended with", () => {
       const view = new TestConsoleLive();
       view.entries = consoleLiveEntries(log(
@@ -1366,6 +1403,9 @@ describe("console/src/live-view", () => {
           kind: "turn_completed",
           turnId: "turn-1",
           result: {
+            outcome: "completed" as const,
+            sessionId: "session-1",
+            continuable: true,
             looms: [],
             pieces: [{
               slug: "reading-list",

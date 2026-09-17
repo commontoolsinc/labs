@@ -14,6 +14,7 @@ import {
   DEFAULT_SUBAGENT_PROFILE,
   type HarnessSubagentProfile,
 } from "./subagent.ts";
+import type { HarnessTaskOutcome } from "./task-outcome.ts";
 import type { HarnessModelUsage } from "../model/client.ts";
 
 export const HARNESS_CHAT_PROTOCOL_VERSION = 1 as const;
@@ -473,7 +474,7 @@ export type HarnessChatStructuredEvent =
     turnId: string;
     finalText?: string;
     usage?: HarnessChatGatewayUsage;
-  }
+  } & (HarnessTaskOutcome | { outcome?: undefined })
   | {
     kind: "turn_failed";
     turnId: string;

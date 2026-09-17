@@ -210,6 +210,7 @@ import {
   type EditFileToolInput,
   type EditFileToolOutput,
 } from "./tools/edit-file.ts";
+import type { FinishTaskInput, FinishTaskOutput } from "./tools/finish-task.ts";
 import {
   type ReadFileToolInput,
   type ReadFileToolOutput,
@@ -282,6 +283,7 @@ export interface BuiltinToolInputMap {
   revise_piece: RevisePieceToolInput;
   assign_slug: AssignSlugToolInput;
   describe_handle: DescribeHandleToolInput;
+  finish_task: FinishTaskInput;
   search_patterns: SearchPatternsToolInput;
   record_feedback: RecordFeedbackToolInput;
   search_skills: SearchSkillsToolInput;
@@ -308,6 +310,7 @@ export interface BuiltinToolOutputMap {
   revise_piece: RevisePieceToolOutput;
   assign_slug: AssignSlugToolOutput;
   describe_handle: DescribeHandleToolOutput;
+  finish_task: FinishTaskOutput;
   search_patterns: SearchPatternsToolOutput;
   record_feedback: RecordFeedbackToolOutput;
   search_skills: SearchSkillsToolOutput;

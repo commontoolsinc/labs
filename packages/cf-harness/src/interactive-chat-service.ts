@@ -1627,6 +1627,7 @@ export class HarnessInteractiveChatService {
       await this.#emit(session.sessionId, turnId, {
         kind: "turn_completed",
         turnId,
+        ...(result.taskOutcome ?? { outcome: "completed" as const }),
         finalText: result.finalAssistantText,
         ...((result.totalUsage ?? result.usage) !== undefined
           ? { usage: result.totalUsage ?? result.usage }

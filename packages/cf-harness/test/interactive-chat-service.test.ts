@@ -173,6 +173,7 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
   );
   assertEquals(service.events("session-1").at(-1)?.event, {
     kind: "turn_completed",
+    outcome: "completed",
     turnId: "turn-1",
     finalText: "Done.",
     usage: {
@@ -199,6 +200,7 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
       "write_file",
       "delegate_task",
       "describe_handle",
+      "finish_task",
     ],
     allowedSubagentProfiles: ["default"],
   });

@@ -70,6 +70,10 @@ export type ConsoleLiveEntry =
     key: string;
     turnId: string;
     status: "completed" | "failed" | "canceled";
+
+    /** Task disposition inside a successfully ended turn. */
+    outcome?: "completed" | "question" | "gave-up";
+
     text?: string;
     pieces: readonly ConsoleTurnResultPiece[];
 
@@ -389,14 +393,19 @@ export const consoleLiveEntries = (
         break;
       }
       case "turn_completed": {
-        // A completed turn's final text is its last assistant message, which
-        // the feed has already rendered; what the closing block adds is the
-        // links the turn produced.
+        // Normal final answers already appear in the assistant feed. A
+        // finish_task question or reason lives in a tool result, so the
+        // closing block renders that sentence alongside any piece links.
         entries.push({
           kind: "ended",
           key: named.key,
           turnId: event.turnId,
           status: "completed",
+          outcome: event.result.outcome ?? "completed",
+          ...(event.result.outcome === "question" ||
+              event.result.outcome === "gave-up"
+            ? { text: event.result.finalText }
+            : {}),
           pieces: event.result.pieces,
           spaceName: event.result.spaceName,
         });
@@ -498,7 +507,13 @@ export const consoleLiveState = (
 ): string => {
   for (const entry of [...entries].reverse()) {
     if (entry.kind === "ended") {
-      return entry.status === "completed" ? "done" : entry.status;
+      return entry.outcome === "question"
+        ? "waiting for your answer"
+        : entry.outcome === "gave-up"
+        ? "stopped"
+        : entry.status === "completed"
+        ? "done"
+        : entry.status;
     }
     if (entry.kind === "tool" && entry.status === "running") {
       return entry.toolName;
@@ -791,7 +806,11 @@ export class ConsoleLive extends LitElement {
             <div class="live-head">
               <span class="badge ${entry.status === "completed"
                 ? "ok"
-                : "denied"}">${entry.status}</span>
+                : "denied"}">${entry.outcome === "question"
+                ? "question"
+                : entry.outcome === "gave-up"
+                ? "stopped"
+                : entry.status}</span>
             </div>
             ${entry.text === undefined ? nothing : html`
               <div class="live-final">${entry.text}</div>

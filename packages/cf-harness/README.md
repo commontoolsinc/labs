@@ -128,6 +128,8 @@ What works today:
   - `edit_file`
   - `write_file`
   - `delegate_task`
+  - `finish_task` (parent-only question or reason the task cannot proceed; ends
+    the turn through ordinary policy and artifacts)
   - `describe_handle` (shape and labels of a handle's referent, and the tables
     of one that is a database together with how full each of them is, never its
     data; see [Inspecting a handle's shape](#inspecting-a-handles-shape))
@@ -426,6 +428,35 @@ descendants. The batch result JSON carries that total usage object. `costUsd`,
 when present, came from the provider; `estimatedCostUsd` is an estimate based on
 the public OpenAI GPT-5.6 price schedule and is not an invoice or a subscription
 quota conversion.
+
+The parent ends a successful task with its normal final answer. When a missing
+input or choice blocks the goal, it calls `finish_task` with
+`{ "outcome": "question", "message": "…" }`; when it cannot proceed, it uses
+`"gave-up"` and a concrete reason. The call must stand alone in its model turn.
+An admitted call persists its ordinary policy decision, artifact, and paired
+transcript result, then ends the loop without another provider request.
+Malformed or withheld calls remain recoverable tool errors. Children retain
+their failure-return contract and cannot call `finish_task`.
+
+These dispositions keep the run lifecycle `completed` and the conversation
+reusable. `run-report.json` records `taskOutcome`, a union discriminated by
+`outcome: "completed" | "question" | "gave-up"`; only a question carries
+`question: { text }`, and only a give-up carries `reason`. The human sentence
+remains in `finalAssistantText`, read from the admitted tool result before
+model-bound handle substitution. The transcript's tool result still carries
+tokens for model context. Older reports without `taskOutcome` mean `completed`.
+The console projects that union into its HTTP 200 result and `turn_completed`
+event, with the session identity and current continuation availability described
+in [the console contract](console/README.md). Execution errors and cancellation
+keep their distinct lifecycle and HTTP results.
+
+Missing-input discovery uses the current grants and safe handle metadata.
+"Found" needs released evidence; "absent" is limited to the granted scope
+actually enumerated. Refused, unread, or unsettled sources remain "unknown". An
+empty result or `outputConcerns` does not establish global absence. The parent
+asks for the blocking input in the user's terms, or explains the limitation,
+instead of repeatedly authoring or delegating probes. Repair and verification
+loops address code defects, not unavailable data or authority.
 
 The API gateway's default cache mode remains the provider's implicit mode.
 Explicit mode pins a breakpoint to the first user-message prefix, which is
@@ -858,15 +889,16 @@ The prompt/tool loop applies the swaps at three seams. Successful tool output
 bound for model context carries tokens, while the persisted tool-output artifact
 keeps the raw addresses. Model-authored tool arguments resolve tokens back to
 canonical references before policy evaluation, summarization, and dispatch —
-except for `delegate_task`, whose `goal` and `context` reach the child verbatim,
-so a token there is inert text to the parent boundary. Its `skillHandle` and
-`patternRefs` fields are resolved separately on the trusted side: materializing
-stored skill text and rebuilding selected pattern-search records are those
-parameters' whole point (see "Skill by handle" and "Pattern references by search
-record" below). And a sealed subagent structured-return string whose raw value
-names an address comes back as a token rather than an opaque `@link` object; the
-return's `linkedStringCount` counts only the positions still sealed. Denial-path
-tool messages are not swapped; that coverage, value handles, and an explicit
+except for `finish_task`, whose user-facing sentence remains text, and
+`delegate_task`, whose `goal` and `context` reach the child verbatim, so a token
+there is inert text to the parent boundary. Its `skillHandle` and `patternRefs`
+fields are resolved separately on the trusted side: materializing stored skill
+text and rebuilding selected pattern-search records are those parameters' whole
+point (see "Skill by handle" and "Pattern references by search record" below).
+And a sealed subagent structured-return string whose raw value names an address
+comes back as a token rather than an opaque `@link` object; the return's
+`linkedStringCount` counts only the positions still sealed. Denial-path tool
+messages are not swapped; that coverage, value handles, and an explicit
 release/readback mechanism are listed in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 #### Well-known grants
