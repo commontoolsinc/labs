@@ -36,6 +36,29 @@ describe("ConsumedLabelIndex", () => {
       .toEqual([0, 1, 2, 3, 4]);
   });
 
+  it("limits a trailing wildcard cover to its child depth while retaining ancestor sources", () => {
+    const entries = [
+      ["root", "child", "deep"],
+      ["*"],
+      ["root", "*"],
+      ["root", "sibling"],
+      ["root"],
+      ["elsewhere", "*"],
+      ["root", "*", "deep"],
+      [],
+      ["*", "*"],
+    ].map(entry);
+    const index = new ConsumedLabelIndex(entries, { canonicalPaths: true });
+    for (const descendants of [true, false]) {
+      const query = ["root", "*"];
+      expect(index.overlapping(query, descendants).map(({ entry }) => entry))
+        .toEqual(entries.filter(({ path }) =>
+          isPrefix(path, query) ||
+          (descendants && isPrefix(query, path))
+        ));
+    }
+  });
+
   for (const { size, fraction } of PATH_INDEX_GRID) {
     it(`retains scan order for ${size} sources with ${fraction} wildcard fraction`, () => {
       const { sources, queries } = pathIndexCorpus(size, fraction);

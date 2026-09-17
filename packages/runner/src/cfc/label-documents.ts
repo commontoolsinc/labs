@@ -84,10 +84,13 @@ export const isInlineCfcLabelShape = (value: unknown): value is IFCLabel =>
   );
 
 /**
- * Whether `value` has the shape of a stored version-2 entry: a record
- * with a `path` of strings and a `label` that is either a reference or an
- * inline label. An entry of any other shape is one no reader can produce
- * a label from, and the envelope holding it is unreadable.
+ * Whether `value` has the shape of a stored entry: a record with a `path`
+ * of strings and a `label` that is either a reference or an inline label.
+ * An entry of any other shape is one no reader can produce a label from,
+ * and the envelope holding it is unreadable. A member beyond those is not
+ * such a shape: the spec's entry carries view-specific refinements beside
+ * the label (spec §4.6.4), so an entry this build reads fewer members of
+ * is one it still reads the label of.
  */
 export const isStoredLabelMapEntry = (
   value: unknown,

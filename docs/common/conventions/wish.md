@@ -347,18 +347,15 @@ fine clock (see `docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md`).
 
 **What a `#now/N` tick cannot do: trigger a handler.** A tick is a cell flip.
 Reactive code (lifts, computeds, the pattern body) cannot emit an event, so there
-is no way to make a `#now/N` tick *fire a handler* on a timer. That rules out
-timer-driven *imperative* work — the sequenced multi-request OAuth flows, token
-refreshes, and mutations that the email/calendar clients run inside handlers.
-Those still need a user action (a "Refresh" button, a visit) to start. Periodic
-work that can be expressed as "re-derive this value / re-read this source" fits
-the reactive-fetch shape above; periodic work that must *push* (send a reply,
-write to a remote mailbox) on a timer is deliberately not expressible, because an
-unattended background side-effect is a larger capability than a background read.
+is no way to make a `#now/N` tick *fire a handler* on a timer. Periodic work that
+can be expressed as "re-derive this value / re-read this source" fits the
+reactive-fetch shape above; periodic work that must *push* on a timer is
+deliberately not expressible, because an unattended background side-effect is a
+larger capability than a background read.
 
 ## Intended Usage
 
-Keep a handle to important information in a piece, e.g. google auth, user
+Keep a handle to important information in a piece, e.g. user
 preferences/biography, cross-cutting data (calendar).
 
 ### Adding Pieces via `#default`

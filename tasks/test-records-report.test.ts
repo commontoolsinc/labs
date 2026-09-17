@@ -217,7 +217,7 @@ describe("test-records-report", () => {
   describe("runReport()", () => {
     const NOW = Date.parse("2026-08-18T12:00:00Z");
 
-    // One day's listing with two objects: a trusted report and a
+    // One day's listing with two objects: a same-repository report and a
     // fork-authored one carrying an over-sixty-seconds record.
     function reportFetch(bodies: Record<string, string>): typeof fetch {
       return ((input: URL | RequestInfo) => {
@@ -259,7 +259,10 @@ describe("test-records-report", () => {
         records.map((entry) => JSON.stringify(entry)).join("\n") + "\n";
     }
 
-    it("excludes fork-authored reports from the ratchet", async () => {
+    it("fails the gate for an over-sixty-seconds record from a fork run", async () => {
+      // See `docs/specs/test-records.md`, "Trust boundaries for consumers",
+      // for what the store's member gate leaves the fork flag meaning.
+
       const gateFailed = await runReport({
         days: 1,
         gate: true,
@@ -267,14 +270,14 @@ describe("test-records-report", () => {
         prefix: "p",
         now: NOW,
         fetchImpl: reportFetch({
-          "trusted.ndjson": ciBody(false, [record("fast", "pass", 5)]),
+          "same-repository.ndjson": ciBody(false, [record("fast", "pass", 5)]),
           "forked.ndjson": ciBody(true, [record("slow", "fail", 90_000)]),
         }),
       });
-      expect(gateFailed).toBe(false);
+      expect(gateFailed).toBe(true);
     });
 
-    it("fails the gate for an over-sixty-seconds trusted record", async () => {
+    it("fails the gate for an over-sixty-seconds record", async () => {
       const gateFailed = await runReport({
         days: 1,
         gate: true,
@@ -282,7 +285,9 @@ describe("test-records-report", () => {
         prefix: "p",
         now: NOW,
         fetchImpl: reportFetch({
-          "trusted.ndjson": ciBody(false, [record("slow", "pass", 61_000)]),
+          "same-repository.ndjson": ciBody(false, [
+            record("slow", "pass", 61_000),
+          ]),
         }),
       });
       expect(gateFailed).toBe(true);
@@ -296,7 +301,9 @@ describe("test-records-report", () => {
         prefix: "p",
         now: NOW,
         fetchImpl: reportFetch({
-          "trusted.ndjson": ciBody(false, [record("slow", "pass", 61_000)]),
+          "same-repository.ndjson": ciBody(false, [
+            record("slow", "pass", 61_000),
+          ]),
         }),
       });
       expect(gateFailed).toBe(false);

@@ -451,6 +451,26 @@ interface EventAttentionResolveRequest {
 
 Per-commit invocation / authorization persistence is deferred in this pass.
 
+#### Record positions in an envelope
+
+Every position where a message names fields holds a plain object. Those
+positions are the message itself, and within it `session`, `invocation`,
+`commit`, `query`, `db`, `db.tables`, each entry of `holdings`, and a
+`hello` message's `flags`. Both sides refuse anything else there, and the
+refusal is the one a string or a number in that position gets.
+
+The value codec that decodes a frame builds class instances as well as
+records: a `FabricBytes`, a `FabricLink`, a `FabricRegExp`, a
+`FabricError`. None of those carries properties, so reading named fields
+off one reads nothing at all. The shape check at the position is what
+settles whether a value belongs there; the field checks that follow it
+cannot.
+
+An instance is a value, and what a record position *contains* may be one.
+The `signature` of a `session.open` authorization is a `FabricBytes`, and
+a `transact` commit carries links inside the documents it writes. The
+requirement is on the container, not on what the container holds.
+
 ### 4.2.2 Server → Client: Response and Session Effect
 
 The server sends:

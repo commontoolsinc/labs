@@ -257,6 +257,11 @@ test-selection publisher rather than by anything recording:
 <repo>/test-selection/v1/state/<yyyy-mm-dd>-<ULID>.json.gz
 ```
 
+The segment between the two names the area rather than the shape of what
+is stored there, and does not move when that shape changes: a reader
+reads an older shape forward, and the state a moved area would leave
+behind holds history no window of records could give back.
+
 The timestamp leading a manifest's name is the moment its publisher
 generated it, which keeps a listing chronologically readable but is not
 what a reader compares. A publisher names its manifest when it starts and
@@ -293,8 +298,9 @@ below. The whole dataset is readable by `allUsers`. Writers hold
 `roles/storage.objectCreator` pinned to their own folder. That
 identity-specific writer grant cannot overwrite or delete, while the public
 reader grant separately lets every principal read and list. Nothing already
-stored can be modified by any append credential. An incompatible schema writes
-under `v2/` and readers migrate at their own pace.
+stored can be modified by any append credential, which is why the area a
+reader lists is named rather than numbered: what is stored cannot be moved
+to a differently named one.
 
 Four writer principals exist, three of them recording. The **relay** —
 the only one that writes what CI produced — holds create on
@@ -421,8 +427,12 @@ an infra-managed variable of numeric actor ids): team members work from
 personal forks, so this keeps the team's own fork data while the
 public, immutable store accepts nothing authored by anyone else. A fork
 run by an unlisted actor, a fork run with no readable actor, and any
-fork run under an empty or missing list ship nothing. For runs that do
-ship, the relay composes each artifact's context (run identity and
+fork run under an empty or missing list ship nothing. A run is a fork run
+when the payload names both repositories and they differ, and when the
+payload names fewer than both, so a run this relay cannot place is gated
+as a fork and carries the flag that keeps it out of a consumer's
+baselines. For runs that do ship, the relay composes each artifact's
+context (run identity and
 provenance from the trusted event payload; the checked-out commit, job
 display name, and machine facts from the artifact's own `job.json`,
 which the payload does not carry) and creates one object per artifact.

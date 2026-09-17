@@ -88,10 +88,14 @@ compares across jobs. Adding a bench file to the list does not place it, so
 neither the calibration's position nor any other file's can be arranged from
 here.
 
-Benchmark numbers are not gated, and neither is CI wall time. The only per-PR
-gate is the coverage-debt ratchet (`tasks/coverage-check.ts`), which never
-ingests benchmark results, so a bench regression shows up as trend drift on the
-dashboard rather than as a failing check.
+Benchmark results are not gated, and neither is CI wall time. The counts gated
+on every pull request include the coverage-debt ratchet
+(`tasks/coverage-check.ts`, in the Coverage Check job), the read limits of the
+headless lunch-poll render fixtures
+([below](#headless-render-read-limits), in Pattern Unit Tests), and the Topics
+read and graph limits ([below](#the-read-budget), in Pattern Integration
+Tests). None of them ingests benchmark results, so a bench regression shows up
+as trend drift on the dashboard rather than as a failing check.
 
 Most packages with benches define a `bench` task for running them locally
 (see `packages/runner/deno.jsonc`); otherwise invoke `deno bench` on a
@@ -666,6 +670,9 @@ The options select what runs:
   back.
 - `--max-old-space-size=<megabytes>` sets the heap each case's process runs
   under.
+- `--derive-limits` runs the read-budget cases instead and prints their limits,
+  as [the read budget](#the-read-budget) describes. It takes no other option
+  but `--max-old-space-size`.
 
 ### The heap the 512-topic cases need
 
@@ -683,9 +690,11 @@ deno run -A --frozen scripts/topics-computation-cost.ts --max-old-space-size=819
 
 The pivot cases hold 32, 128, and 512 topics under the `low-degree`,
 `high-degree`, and `single-bucket` mention graphs, at four mentions per source.
-At 128 topics a sweep varies mentions per source over 0, 1, 4, and 16, where 0
-is the `none` graph. The small pivot cases hold 4 topics, with as many mentions
-per source, up to four, as each graph allows. The fixture's documentation of
+At 32 and at 128 topics a sweep varies mentions per source over 0, 1, 4, and
+16, where 0 is the `none` graph: 32 topics is the size the read budget gates,
+and 128 is the size the probe reports the effect of mention degree at. The
+small pivot cases hold 4 topics, with as many mentions per source, up to four,
+as each graph allows. The fixture's documentation of
 `MentionGraph` says how each graph spreads its mentions.
 
 The thread cases hold four topics, each with 10, 100, or 1,000 comments and
@@ -718,11 +727,12 @@ not measured.
 
 The thread cases are measured under one workload, `aggregates`, which demands
 every topic's present comment count and last activity and nothing else. Those
-are the two lifts that read a topic's comments and links, which the thread cases
-scale, and no pivot workload demands a topic's last activity. The browser ran
-them one topic at a time, the comment count on opening a topic and its last
-activity on returning to the board; `aggregates` runs every topic's, so it is
-not what a board in use demands either.
+are the lifts that read a topic's comments, which the thread cases scale, and of
+the two the last activity reads the topic's links as well; no pivot workload
+demands a topic's last activity. The browser ran them only for the topic it
+opened, the comment count on opening that topic and its last activity on
+returning to the board; `aggregates` runs every topic's, so it is not what a
+board in use demands either.
 
 A case's ID names all of that, as
 `pivot/<graph>/mentions-<count>/topics-<count>/<workload>` or
@@ -773,8 +783,10 @@ A phase the fixture cannot give records `measured: false` and a `reason` saying
 why; every other phase record carries `measured: true`. After every phase the
 probe checks that the measurement holds exactly the outputs its workload demands
 and checks each of them, the pivot when demanded included, against values
-computed from the fixture data. It fails the run on a mismatch or on an error
-the runtime reports.
+computed from the fixture data. It also checks that no lift outside the
+workload's demand completed an action in the phase. It fails the run on a
+mismatch, on a lift outside the demand completing an action, or on an error the
+runtime reports.
 
 ### The output
 
@@ -833,6 +845,116 @@ The complete settled operation is the unit a comparison decides on:
 `bodies.total` and `attempts.total` cover all of it, and the role groups show
 where the work sits. Elapsed times are local wall-clock samples, for comparison
 across `--repeat` rounds; nothing gates on them.
+
+### The read budget
+
+The read-budget tests hold a fixed set of probe cases to limits on their read
+and graph counts, in continuous integration. Each case is measured in the test's
+own process through the same fixture, phases, checks, and phase records the
+probe uses, with no browser and no server.
+`packages/patterns/integration/topics-read-budget.ts` names the cases and holds
+the rules below, and `topics-read-budget-limits.ts` beside it holds the limits.
+The cases are divided into groups, and each group runs in a test file of its
+own, `topics-read-budget-<group>.test.ts`, so that no one file takes too large a
+share of a pattern integration job.
+
+The gated cases are:
+
+- the 4-topic `low-degree` pivot cases under `topic-open` and `all-backlinks`;
+- the 32-topic pivot cases under both workloads for the `high-degree` and
+  `single-bucket` graphs at four mentions per source, and for the `low-degree`
+  graph at 16;
+- the thread cases with one comment and one link, with 100 comments, and with
+  100 links.
+
+No `board` case is gated, since the probe measures none. Every gated pivot
+case holds 32 topics or the small case's 4, and no gated thread case holds more
+than 100 comments or links; the larger sizes run only from the probe. A
+regression that appears only above 32 topics is one the probe finds, not
+continuous integration.
+
+Every measured phase of a gated case has a limit on each of five counts, read
+from its phase record:
+
+| Count          | Phase record field                 | What it counts                                                                                                                       |
+| -------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `attemptTotal` | `attempts.total.proxyAccesses`     | Proxy accesses of every transaction attempt from the start of the phase through settlement, each counted through its commit or abort |
+| `bodyTotal`    | `bodies.total.proxyAccesses`       | Proxy accesses of every reactive body that completed in the phase, each counted from the start of the body to its end                |
+| `bodyPerRun`   | `bodies.total.maxRunProxyAccesses` | The most proxy accesses any one of those bodies made                                                                                 |
+| `graphNodes`   | `graph.nodes`                      | The scheduler graph's nodes once the phase settled                                                                                   |
+| `graphEdges`   | `graph.edges`                      | The scheduler graph's edges once the phase settled                                                                                   |
+
+The two read boundaries are the attempt and body boundaries that
+[read accounting](../features/read-accounting.md#execution-boundary) defines,
+and each count covers the complete settled operation: the pivot, lookup,
+aggregate, and every other run together. A limit is the largest count five runs
+of the case observed, plus 10%, rounded up to an integer. A phase in which the
+case read nothing has a limit of zero on that count: the unrelated sibling edit
+is such a phase in every gated case, since no measured lift reads a title. A
+change that adds any read there exceeds the limit.
+
+Each limit has a negative control: a regression variant that grows the count the
+limit gates, and that must exceed it. `--derive-limits` runs the controls, on
+the limits it has just derived, so that every limit is shown to gate a count a
+regression grows. The variants are built in `topics-read-budget-variants.ts`
+over the unmodified Topics sources, and each starts its work beside the demanded
+lifts, in the same transaction:
+
+- `scan`, assigned every read count, is one lift over the board that reads each
+  topic's title, the titles of the topics it mentions, and every stamp on its
+  comments and links. Each warm update writes one of those, so the scan runs
+  again in every phase.
+- `duplicate-demand`, assigned the graph counts of the pivot cases, starts a
+  second instance of each demanded lift, the pivot among them.
+- `per-record`, assigned the graph counts of the thread cases, starts a lift
+  for each comment position and each link position on every topic.
+
+A case's test fails when a count exceeds its limit, when a measured count has no
+limit, or when a limit names a phase the case did not record. The failure names
+the workload, case, phase, count, observed value, and limit. Run one group from
+`packages/patterns` with:
+
+```sh
+deno test --v8-flags=--max-old-space-size=4096 -A \
+  ./integration/topics-read-budget-high-degree.test.ts
+```
+
+Continuous integration runs the files in the Pattern Integration Tests job, each
+with a weight in `tasks/select-pattern-integration-files.ts`.
+
+To derive the limits again, run from the repository root:
+
+```sh
+deno run -A --frozen scripts/topics-computation-cost.ts --derive-limits \
+  > topics-read-budget-limits.derived &&
+  mv topics-read-budget-limits.derived \
+    packages/patterns/integration/topics-read-budget-limits.ts
+```
+
+The command runs every gated case five times, in rounds, each run in a process
+of its own as the probe runs a case, and prints the limits module. It imports
+the module it prints, through the read-budget rules, so its output goes to a
+file of its own and replaces the table only once the command succeeds;
+redirecting it straight into the table empties the table before the command
+can load it. A count that does not repeat identically across the five runs is
+printed as ungated, with the value each run observed, and is not checked; the
+command then fails, naming it, and leaves `topics-read-budget-limits.derived`
+holding what it printed. `.gitignore` covers that file; delete it once you have
+read it.
+
+The control pass runs only when every count repeated. The command then runs
+each gated case once more under every variant its limits are assigned to, and
+fails when a variant leaves one of those limits unexceeded, naming the workload,
+case, phase, count, variant, observed value, and limit of each.
+
+A failing read-budget test has found a count that grew. Attribute the added
+reads or graph size to a phase and a role in the probe's records before
+changing anything else. A limit moves only when the table is derived again, and
+not to let a change pass: as
+[the plan's measurement protocol](../plans/topics-computation-cost.md#measurement-and-acceptance)
+says, a candidate that exceeds a limit is revised or deferred rather than the
+limit moved, and a new tradeoff needs a documented decision and rationale.
+Nothing here limits startup time or latency.
 
 ## JSON Pointer encoding
 

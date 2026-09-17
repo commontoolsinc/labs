@@ -2817,6 +2817,9 @@ Deno.test("runCfHarnessCli announces operator input cells to the model and the o
           {
             pieces: {
               getSpace: () => cellSpace,
+              // This double names no space: the cells here are plain
+              // references, which resolve without one.
+              getSpaceName: () => undefined,
               getDefaultPattern: (_runIt: boolean) =>
                 Promise.resolve(undefined),
             },

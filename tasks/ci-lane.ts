@@ -39,6 +39,7 @@ import {
 } from "@commonfabric/test-support/records";
 import {
   type CapabilityId,
+  logTail,
   openCapabilities,
   takeGithubToken,
 } from "./ci-capabilities.ts";
@@ -891,6 +892,30 @@ export function describeAccounting(
   if (lines.length > 0) say(lines);
 }
 
+/**
+ * Prints the end of every log the opened capabilities named.
+ *
+ * A capability runs outside the test process, so a failure on its side is
+ * the half no test record describes, and the directory it wrote to goes
+ * when the lane ends. The lane's own output is what survives that — a
+ * continuous-integration job keeps it, and a person running a lane is
+ * reading it already — so the evidence goes there rather than into an
+ * artifact the lane would have to invent a way to upload.
+ *
+ * Not through `say`: the job summary is rendered prose with a size of its
+ * own to keep, and this is a log.
+ */
+export async function describeCapabilityLogs(
+  logs: readonly { capability: string; path: string }[],
+  read: (path: string) => Promise<string> = Deno.readTextFile,
+): Promise<void> {
+  for (const { capability, path: at } of logs) {
+    console.log(`\n--- ${capability} log ---`);
+    console.log(await logTail(at, read));
+    console.log(`--- end of ${capability} log ---`);
+  }
+}
+
 /** Says something both on the lane's output and in the job summary. */
 function say(lines: readonly string[]): void {
   const text = `${lines.join("\n")}\n`;
@@ -1341,7 +1366,18 @@ export async function runLane(
         failedUnits.add(`${batch.suite.id}\t${unit}`);
       }
     }
+  } catch (error) {
+    // A lane whose loop threw has failed, whatever the batches it got
+    // through said, and it is the one that most needs what the server
+    // wrote. Recorded before the finally below reads it.
+    ok = false;
+    throw error;
   } finally {
+    // Read while the servers are still up: closing one signals it and
+    // returns, so a read after that races a shutdown still writing.
+    // Only for a lane that failed -- a green run has nothing to explain,
+    // and the logs are large.
+    if (!ok) await describeCapabilityLogs(opened.logs);
     await opened.close();
     // The lane owns this directory and nothing outside the lane reads
     // it, so it goes whether the batches passed, failed, or never ran.

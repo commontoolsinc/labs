@@ -433,6 +433,16 @@ describe("opening a capability on a machine that answers", () => {
     return { asked, envs, exec };
   }
 
+  /** The message `work` rejects with; fails the test if it resolves. */
+  async function rejectionMessage(work: Promise<unknown>): Promise<string> {
+    try {
+      await work;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+    throw new Error("Expected the call to throw, and it returned instead.");
+  }
+
   /** The environment the machine was given for the call naming `match`. */
   function envOf(m: ReturnType<typeof machine>, match: string) {
     return m.envs[m.asked.findIndex((line) => line.includes(match))];
@@ -474,6 +484,62 @@ describe("opening a capability on a machine that answers", () => {
       await Deno.remove(root, { recursive: true }).catch(() => {});
     }
   }
+
+  it("names the log its server writes, so a failed lane can print it", async () => {
+    const m = machine({ toolshed: "listening (pid 999999). Logs: x\n" });
+    const root = await Deno.makeTempDir({ prefix: "capability-" });
+    try {
+      const opened = await openCapabilities(["toolshed"], {
+        root,
+        dryRun: false,
+        workDir: root,
+        exec: m.exec,
+        fetch: serving("default"),
+      }, CAPABILITIES);
+      await opened.close();
+
+      // The one the launch was told to write, and the one the lane would
+      // have nothing of once its work directory goes.
+      const told = m.asked.find((line) => line.includes("--log-file="))!;
+      const wanted = /--log-file=(\S+)/.exec(told)![1];
+      expect(opened.logs).toEqual([{ capability: "toolshed", path: wanted }]);
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+  });
+
+  it("carries the server's log in a posture failure, which opens nothing", async () => {
+    // The capability never opens, so nothing downstream is holding the
+    // path: the log leaves in the throw or it goes with the work directory
+    // unread. The probe is what fails, the server having started.
+    const m = machine({ toolshed: "listening (pid 999999). Logs: x\n" });
+    const root = await Deno.makeTempDir({ prefix: "capability-" });
+    try {
+      const refused = await rejectionMessage(
+        openCapabilities(["toolshed"], {
+          root,
+          dryRun: false,
+          workDir: root,
+          exec: async (command, args, options) => {
+            const line = [command, ...args].join(" ");
+            const wrote = /--log-file=(\S+)/.exec(line);
+            // What the server would have written before the posture went
+            // wrong, at the path the launch was told to write it to.
+            if (wrote) {
+              await Deno.writeTextFile(wrote[1], "a line the log holds\n");
+            }
+            return await m.exec(command, args, options);
+          },
+          // A server on the arm this lane did not ask for.
+          fetch: serving("opposite"),
+        }, CAPABILITIES),
+      );
+      expect(refused).toContain("toolshed log:");
+      expect(refused).toContain("a line the log holds");
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+  });
 
   it("installs the FUSE packages only where one is missing", async () => {
     // Every probe answering means the packages are already there, and

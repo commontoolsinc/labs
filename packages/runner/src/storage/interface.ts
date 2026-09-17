@@ -66,6 +66,7 @@ import type {
   CfcLabelMetadataObservation,
   CfcLabelMetadataProtectionMode,
   CfcPolicyEvaluationMode,
+  CfcPreparationWork,
   CfcRefusalDetail,
   CfcTriggerReadGating,
   CfcTxState,
@@ -1418,6 +1419,20 @@ export interface IStorageTransaction {
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
 
   /**
+   * Optional write details narrowed to one document.
+   *
+   * Boundary verification reconstructs several paths for each written
+   * document. Transactions that can address their document table directly
+   * avoid rescanning every write in the space for each reconstruction.
+   */
+  getWriteDetailsForTarget?(target: {
+    space: MemorySpace;
+    id: URI;
+    scope?: CellScope;
+    path?: readonly PropertyKey[];
+  }): Iterable<TransactionWriteDetail>;
+
+  /**
    * Retains the exact-instance commit basis of an elided write when its target
    * has pending state. The dependency adds neither a scheduling subscription
    * nor CFC value taint. Transactions without optimistic pending layers may
@@ -2236,6 +2251,9 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
 
   /** Counts a full consumed-label collection without changing CFC state. */
   noteCfcConsumedLabelWalk(): void;
+
+  /** Counts prepare work without changing relevance or digest state. */
+  noteCfcPreparationWork(kind: CfcPreparationWork, count?: number): void;
 
   /**
    * The trusted policy-writer path for CFC grant documents (§8.12.7 route

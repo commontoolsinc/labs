@@ -136,7 +136,9 @@ What works today:
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
     reports each one's kind, evidence quality, declared shapes, and import
-    specifier, never its source)
+    specifier, never its source; discovery follows published successors as
+    described in
+    [Pattern generations in search](#pattern-generations-in-search))
   - `record_feedback` (under the same pattern-index gate; votes a pattern up or
     down so the index learns which ones were worth offering)
   - `search_skills` (present only on the parent surface when the run configures
@@ -161,11 +163,18 @@ What works today:
   compiles each named pattern into the space before compiling the source that
   imports it, so composition costs the import line and nothing else — and no
   part of an imported pattern's source reaches the conversation
-- publishing back to that index: a pattern the model authored and ran
-  successfully is recorded under the identity its compile recorded, with the
-  `description` and `hashtags` the `run_pattern` call named, unless the run was
-  started with `--no-pattern-index-publish`; it is not offered to search until
-  evidence earns discoverability. Curated seeding may opt in with
+- publishing back to that index: when publication is enabled, a pattern the
+  model authored and ran successfully with a non-empty `description` and a
+  durable content-addressed identity is queued under that identity, with the
+  `description` and `hashtags` the `run_pattern` call named. A run with no
+  index, disabled publication (`--no-pattern-index-publish`), an empty
+  description, or no durable pattern identity queues nothing. The tool's
+  `patternPublication` reports `status: "queued"`: the index has not confirmed
+  publication at tool return. The session flush sends its retained contributions
+  when it ends; index refusals and other publication failures are logged without
+  failing the pattern run. Saved tool results remain a record of what was known
+  at tool return. Accepted entries stay out of search until evidence earns
+  discoverability. Curated seeding may opt in with
   `CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE=1`
 - targeted exact-string edits plus whole-file replace/create and append writes
 - initial and in-run image attachments for model vision-capable flows
@@ -901,12 +910,28 @@ live — and `describe_handle` answers from that declaration, so there is one
 source of truth and nothing an operator-written view could drift from or quietly
 claim.
 
+A `<link>` may also be a piece's NAME: `pattern:<space>/<slug>`, or the bare
+`<slug>` meaning a piece in the session's own space. That is what a surface
+holding a rendered piece has — the id a piece sits at does not cross to a client
+— so the session resolves the name to the piece's address before it mints, and
+what the handle table holds is the address either way. The model is told no more
+than it is told for a reference. It names a piece, not a cell inside one: a path
+after the slug is refused, and the general cell case is CT-2319's. The retired
+`piece:` spelling is not read as an address.
+
+A qualified name is resolved in the session's own space or not at all. A space
+the session cannot check the name of — one configured by `did:key`, which
+carries no name — refuses the qualified form rather than answering with this
+space's same-slug piece, because the same slug in another space is a different
+piece. A bare slug is unaffected: it names no space to disagree about.
+
 Unlike a grant, an input cell is explicit configuration, so failure is closed
 and loud rather than tolerated: a malformed argument is a usage error, and a
-reference that does not parse, targets another space, or arrives on a run
-without a fabric session fails the run before the model is involved. The cells
-are recorded in run state (`inputCells`), replayed rather than re-minted on
-resume, and reported in the operator summary as `inputCells:`.
+reference that does not parse, targets another space, names a piece the space
+does not hold, or arrives on a run without a fabric session fails the run before
+the model is involved. The cells are recorded in run state (`inputCells`),
+replayed rather than re-minted on resume, and reported in the operator summary
+as `inputCells:`.
 
 #### Inspecting a handle's shape
 
@@ -1305,6 +1330,34 @@ channels of one conceptual kind: an id names hashed information stored
 somewhere, attached metadata accompanies it, and trusted-side code resolves it.
 They deliberately remain separate until experience supplies a concrete reason to
 unify them.
+
+### Pattern generations in search
+
+The shared index client resolves discovery for `search_patterns`, private
+research, and the console's Index search. It reads the discoverable catalog and
+follows each entry's `priorPatternId` to find replacements, including a
+successor outside the original query's result limit. Only same-owner links
+participate. An unambiguous chain contributes its final generation once, at the
+earliest matching position. A penalized final generation removes that chain from
+the answer; a branch or cycle fails the affected search instead of choosing a
+generation arbitrarily.
+
+Replacement metadata, schemas, quality, and signals describe the successor.
+Where the index supports generation evidence, its combined signal summary
+includes an attributed `inherited` portion: predecessor ID, publication cutoff,
+event counts, and score. The harness preserves that attribution; a proven tier
+can come entirely from predecessor evidence before the successor has run. Older
+deployments supply only that generation's own event counts and score. Query-term
+counts are omitted on a replacement because the index measured them against the
+predecessor. The catalog is refreshed for every nonempty search; create-only
+metadata is cached by identity within the client, and failed reads are not
+cached. This requires one metadata read per catalog entry on the first search
+and for each newly discovered identity thereafter. No source is requested. An
+unavailable catalog or metadata read fails discovery explicitly.
+
+`getPattern`, attached pattern references, and `cf:pattern:` imports continue to
+resolve the exact requested identity. Search resolution changes recommendations,
+not existing compositions or the index's stored event history.
 
 ### Researching Common Fabric
 
@@ -1758,6 +1811,66 @@ inbound swap resolves such a token passed back through `inputs`; the tool itself
 carries no handle code. The persisted tool-output artifact keeps the raw
 reference, the raw result value, and the `pieceId` — a bare fabric identifier
 the handle boundary never swaps, so it stays out of the model-facing rendering.
+
+`outputConcerns` is what the run's own outputs say about the reads behind them,
+and it is a DISCLOSURE rather than a refusal: the run succeeded, the piece
+stands, and this is the reason to look at it. A composed reader exposes its
+failure and its emptiness as outputs — an `errorMessage` beside its `rows` — and
+a pattern composing it is free to pass neither on, which is how a run answers
+`ok` over a result whose every figure is zero. So every pattern the run
+materialized is read where it stands, the run's own root included, and each
+output reporting a failure (a non-empty `error` or `errorMessage`, or any string
+carrying the `sqlite:` prefix the runtime writes its own SQLite failures under)
+or holding no rows (an empty list) is named: the output's key, the identity of
+the pattern that produced it — which for a composed one is the id its own
+`cf:pattern:` import addresses — and fixed text saying what to do about it.
+Absent when there is nothing to say, and one entry per pattern, output and kind
+however many times a pattern was materialized.
+
+Two bounds decide what a concern may be read from, and both fail closed. Only an
+output the pattern's own schema DECLARES at its top level is read: a property
+name is a channel, a name computed from what a pattern read would publish that
+data through the name, and nothing here goes through a release measurement,
+while a declared name is a constant of the source the model composed. And an
+emptiness is read only off a result that reports a read — one declaring an error
+branch or a `pending` flag — because an empty list is an ordinary shape for a
+result to hold, and calling every one of them a read that returned nothing would
+say "no rows" about a selection nobody has made yet. A failure is read off any
+result, since a string reporting one is not an ordinary shape.
+
+So the report UNDER-reports rather than over-reports, and is best-effort by
+construction. An output reached through a `$ref` or a combinator is not read, a
+nested one is not read, an instance the recorder's bounded buffer has evicted is
+not read, and an instance that will not read back is dropped while the rest of
+the report stands. Each of those costs a reason to look at something; none of
+them reports something that is not there, which is the direction to fail in for
+a disclosure sitting beside a result the run already returned.
+
+A result reporting itself `pending` has its emptiness passed over, and only its
+emptiness. A read still in flight is empty because it has not landed, and a
+query over a served store is in flight for the whole of the run that issued it —
+so an empty output read then is a fact about the clock rather than about the
+data, while a failure read then is a failure either way. That the rows land on
+the PIECE rather than in this call's answer is the same fact from the other
+side: a reader composed here reports no error and no rows in one breath, and it
+is the absent error that says the read is sound.
+
+The failure's own TEXT does not travel in the result. A concern names what the
+model already holds: it wrote the composition, and a composed instance's outputs
+went through no release measurement, so the text is treated as every other
+thrown message this tool withholds is. What a model does with a named output is
+expose it under its own result schema and render it, where the release boundary
+measures it like any other value.
+
+The text is kept in the artifact's `rawCauseMessage`, on the terms that field
+already states for thrown text: a composed instance is not something the model
+can address, so an operator reading the run back has nothing else to debug from,
+and the text cannot be recovered any other way. Each line names the same
+position the model was told about, so the two reports line up. That artifact is
+no stronger a boundary than the field it rides in — its root is readable through
+`bash`, as that field's own documentation records, and CT-2117 carries the
+structural fix — so what the sentence above claims is about the result rather
+than about the machine.
 
 What the answer's values may carry is measured against the ceiling a model's
 context has, which admits nothing: a model's context is outside every space, so

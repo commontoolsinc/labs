@@ -8,7 +8,7 @@
  * rather than one inside each of them.
  */
 
-import { constructorOfPrototype } from "@commonfabric/utils/objects";
+import { constructorOfObject } from "@commonfabric/utils/objects";
 import { isPlainObject, typeOfIncludingNull } from "@commonfabric/utils/types";
 
 import {
@@ -72,6 +72,59 @@ export function tagOfFabricPrimitiveElseNull(
 }
 
 /**
+ * Maps an arbitrary value to a `FabricValueTag`, based on a shallow evaluation
+ * of its type as a possibly-valid `FabricValue`, `FabricValueLayer`, or `*Plus`
+ * version of same. This returns `null` if it determines that the given value
+ * cannot possibly be valid. To get a `PlusType` return value, a corresponding
+ * type predicate must be passed as the second argument, and that function is
+ * used to make a determination if the value would otherwise be considered
+ * invalid.
+ *
+ * This function is intentionally not `export`ed, as the two cases it covers are
+ * better handled by the `export`ed ones. The point of this function is to help
+ * keep this file DRY.
+ */
+function tagOfUnknownElseNull(
+  value: unknown,
+): FabricValueTag | null;
+function tagOfUnknownElseNull<PlusType = never>(
+  value: unknown,
+  isPlusType: PlusTypePredicate<PlusType> | undefined,
+): FabricValuePlusTag | null;
+function tagOfUnknownElseNull<PlusType = never>(
+  value: unknown,
+  isPlusType?: PlusTypePredicate<PlusType> | undefined,
+): FabricValuePlusTag | null {
+  const jsType = typeOfIncludingNull(value);
+
+  if (jsType === VALUE_TAGS.function) {
+    return isPlusType?.(value) ? VALUE_TAGS.PlusType : null;
+  } else if (jsType !== "object") {
+    return jsType;
+  } else if (Array.isArray(value)) {
+    return VALUE_TAGS.Array;
+  } else if (isPlainObject(value)) {
+    return VALUE_TAGS.Object;
+  } else if (value instanceof FabricPrimitive) {
+    // Note: If `value` turns out to be an invalid `FabricPrimitive`, this will
+    // return `null` instead of falling through to an `isPlusType()` check. The
+    // reasoning here is that the full class hierarchy under `FabricPrimitive`
+    // is meant to be controlled by the `data-model`, and so any invalid
+    // `FabricPrimitive` is de facto a bug in the `data-model`, and that makes
+    // it _more correct_ to return `null` here compared to blithely calling
+    // through to an `isPlusType()` predicate which should never have been
+    // called with such a value.
+    return tagOfFabricPrimitiveElseNull(value);
+  } else if (value instanceof FabricInstance) {
+    return VALUE_TAGS.FabricInstance;
+  } else if (isPlusType?.(value)) {
+    return VALUE_TAGS.PlusType;
+  } else {
+    return null;
+  }
+}
+
+/**
  * Maps a presumed valid `FabricValue`, `FabricValueLayer`, or corresponding
  * `*Plus` value to its tag, based on a shallow evaluation of its type. This
  * `throw`s if it determines that the given value cannot possibly be valid. For
@@ -82,13 +135,15 @@ export function tagOfFabricPrimitiveElseNull(
 export function tagOfFabricValue(value: FabricValueLayer): FabricValueTag;
 export function tagOfFabricValue<PlusType = never>(
   value: NoInfer<FabricValuePlusLayer<PlusType>>,
-  isPlusType: PlusTypePredicate<PlusType>,
+  isPlusType: PlusTypePredicate<PlusType> | undefined,
 ): FabricValuePlusTag;
 export function tagOfFabricValue<PlusType = never>(
   value: FabricValuePlusLayer<PlusType>,
   isPlusType?: PlusTypePredicate<PlusType> | undefined,
 ): FabricValuePlusTag {
-  const result = tagOfFabricValueElseNull(value, isPlusType);
+  // For rationale, see comment on the similar call in
+  // `tagOfFabricValueElseNull()`, below.
+  const result = tagOfUnknownElseNull(value, isPlusType);
 
   if (result !== null) {
     return result;
@@ -117,113 +172,85 @@ export function tagOfFabricValueElseNull<PlusType = never>(
   value: FabricValuePlusLayer<PlusType>,
   isPlusType?: PlusTypePredicate<PlusType> | undefined,
 ): FabricValuePlusTag | null {
-  const jsType = typeOfIncludingNull(value);
-
-  if (jsType === VALUE_TAGS.function) {
-    return isPlusType?.(value) ? VALUE_TAGS.PlusType : null;
-  } else if (jsType !== "object") {
-    return jsType;
-  }
-
-  if (Array.isArray(value)) {
-    return VALUE_TAGS.Array;
-  } else if (isPlainObject(value)) {
-    return VALUE_TAGS.Object;
-  } else if (value instanceof FabricPrimitive) {
-    // Note: If `value` turns out to be an invalid `FabricPrimitive`, this will
-    // return `null` instead of falling through to an `isPlusType()` check. The
-    // reasoning here is that the full class hierarchy under `FabricPrimitive`
-    // is meant to be controlled by the `data-model`, and so any invalid
-    // `FabricPrimitive` is de facto a bug in the `data-model`, and that makes
-    // it _more correct_ to return `null` here compared to blithely calling
-    // through to an `isPlusType()` predicate which should never have been
-    // called with such a value.
-    return tagOfFabricPrimitiveElseNull(value);
-  } else if (value instanceof FabricInstance) {
-    return VALUE_TAGS.FabricInstance;
-  } else if (isPlusType?.(value)) {
-    return VALUE_TAGS.PlusType;
-  } else {
-    return null;
-  }
+  // The point of this arrangement -- instead of having an `unknown` overload on
+  // this function -- is so that the `unknown` argument doesn't get
+  // inadvertently bound when code is trying to have proper type hygiene.
+  return tagOfUnknownElseNull(value, isPlusType);
 }
 
 /**
- * Maps a presumed `FabricConvertibleJsValue` to its tag, based on a shallow
- * evaluation of its type. Returns the tag of a primitive, or that of a
- * recognized convertible JS instance, or `null` for a function and for
- * any other object. To be clear, this function does not go out of its way to
- * make a validity determination.
+ * Maps a possible `FabricConvertibleJsValue` to its tag, based on a shallow
+ * evaluation of its type. This returns `null` if it determines that the given
+ * value isn't possibly either a valid `FabricValue` or an instance of one of
+ * the members of `FabricConvertibleJsObject`.
  *
- * An array is tagged `Array` before anything else is consulted.
- * `Array.isArray()` is realm-agnostic and sees through both a subclass and a
- * severed prototype, so every array reaches array handling and is decided by
- * the array rule, which alone decides what an array may be.
+ * Note: Instances of `Error` are _only_ detected in this function using
+ * `Error.isError()` and _not_ by looking at the prototype chain.
  *
- * A plain object, an array, and an error are each decided by a test that
- * reads the value itself rather than its prototype: `Object.prototype` or a
- * null prototype, `Array.isArray()`, and `Error.isError()`. An object merely
- * built on one of those prototypes is none of them, and comes back `null`.
- * The remaining builtins are recognized by the identity of the class the
- * prototype names. Answering that needs no class this system defines, and
- * this module holds none: a concrete fabric class reaches the codecs and,
- * through them, the instance bases, so a module holding one in order to
- * recognize it would close a cycle with everything layered below those bases.
- * A fabric primitive is recognized by the tag its instance carries instead.
- *
- * Constructor identity is a per-realm question: another realm's `Date` is a
- * different `Date`, and is not this one. Values from another realm are
- * outside what this is asked about, so no brand check stands behind the
- * identity comparison. A cross-realm value that did arrive would come back
- * `null` -- unrecognized rather than misidentified, which is the direction an
- * unhandled case should fail in.
+ * Note: The other `FabricConvertibleJsObject` classes are recognized by
+ * constructor identity, which is a per-realm question: another realm's `Map`
+ * is a different `Map`, and is not this one. Such a value comes back `null`,
+ * unrecognized rather than misidentified.
  */
 export function tagOfConvertibleJsValueElseNull(
   value: unknown,
 ): ConvertibleJsValueTag | null {
-  const jsType = typeOfIncludingNull(value);
+  // Note: This function is written to prioritize DRYness over avoiding
+  // redundant work, especially in that (a) the redundancy is minimal generally
+  // speaking, and (b) in the context of doing value conversion, the redundancy
+  // rounds to basically nothing. The one thing worth mentioning is that in the
+  // code here _might_ get the prototype of a given value twice, and in the case
+  // of a buggy `Proxy`, that answer might not be the same both times. We accept
+  // that possibility here, for the usual reason in this codebase: The code's
+  // job is to produce correct results in the face of non-buggy input and not to
+  // detect all possible bugs.
 
-  if (jsType === VALUE_TAGS.function) {
-    // A function is no `FabricConvertibleJsValue`, so its tag is not one this
-    // returns.
-    return null;
-  } else if (jsType !== "object") {
-    return jsType;
-  }
-
-  // Arrays first, and unconditionally: see above.
-  if (Array.isArray(value)) {
-    return VALUE_TAGS.Array;
-  }
-
-  const proto = Object.getPrototypeOf(value);
-
-  if (proto === Object.prototype) {
-    return VALUE_TAGS.Object;
-  } else if (Error.isError(value)) {
+  if (Error.isError(value)) {
     return VALUE_TAGS.JsError;
-  } else if (proto === null) {
-    // After the `isError()` check above, the only recognized possibility of a
-    // null-proto object is a plain object.
-    return VALUE_TAGS.Object;
-  } else if (value instanceof FabricPrimitive) {
-    return tagOfFabricPrimitiveElseNull(value);
-  } else if (value instanceof FabricInstance) {
-    return VALUE_TAGS.FabricInstance;
   }
 
-  // The class is read from the PROTOTYPE, not from the value. What is being
-  // asked is which class the value is an instance of, and that is a fact about
-  // its prototype; an own `constructor` property is ordinary data that happens
-  // to share the name, and must not decide the value's type. Reading it off
-  // the value would let `{constructor: Error}` -- a plain record -- be tagged
-  // `Error` and silently rebuilt as one.
-  const ctor = constructorOfPrototype(proto);
+  const result = tagOfUnknownElseNull(value);
 
-  // A `switch` on constructor identity, rather than sequential `instanceof`
-  // checks. A prototype naming no callable constructor at all reaches the
-  // default arm.
-  switch (ctor) {
+  if (result !== null) {
+    return result;
+  }
+
+  switch (typeof value) {
+    case "function": {
+      // Functions are not allowed as `FabricConvertibleJsValue`s. That said,
+      // the `typeof` test here is covering a pretty oddball case, namely when a
+      // value of type `function` is observed to have a `prototype` which
+      // matches one of the recognized convertible classes. This is in the zone
+      // of intentional misbehavior (at worst) or a _very_ surprising bug at
+      // best. However, in the context of value conversion, the test is pretty
+      // cheap and so reasonably worth doing.
+      return null;
+    }
+
+    case "object": {
+      // As of this writing, `value` must be a non-null value of type `object`
+      // here due to how `tagOfUnknownElseNull()` works. This is more of a
+      // defense-in-depth or separation of concerns.
+      if (value === null) {
+        // deno-coverage-ignore-start
+        return null;
+      }
+      // deno-coverage-ignore-stop
+
+      // Otherwise handled below.
+      break;
+    }
+
+    default: {
+      // deno-coverage-ignore-start -- See the comment on `object` above.
+      return null;
+    }
+      // deno-coverage-ignore-stop
+  }
+
+  const constructor = constructorOfObject(value);
+
+  switch (constructor) {
     case Map: {
       return VALUE_TAGS.JsMap;
     }

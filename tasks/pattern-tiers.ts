@@ -47,7 +47,6 @@ export const TIER_MARKERS: Readonly<Record<MarkedTier, string>> = {
  */
 export const TIER_DIRECTORIES: Readonly<Record<string, MarkedTier>> = {
   "factory-outputs/": "legacy",
-  "google/WIP/": "legacy",
   "gideon-tests/": "fixture",
   "plain-array-callback-locals/": "fixture",
   "scope-bug-computed-vnode-blank/": "fixture",

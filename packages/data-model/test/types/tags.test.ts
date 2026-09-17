@@ -30,7 +30,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import type { JsTypeTagIncludingNull } from "@commonfabric/utils/types";
+import type { JsTypeTagIncludingNull, Same } from "@commonfabric/utils/types";
 
 import {
   BaseFabricPrimitive,
@@ -280,9 +280,6 @@ describe("tags", () => {
     });
 
     it("is the `typeOfIncludingNull()` vocabulary, less `object`", () => {
-      type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
-        : false;
-
       const _same: Same<JsTypeValueTag | "object", JsTypeTagIncludingNull> =
         true;
     });
@@ -300,9 +297,6 @@ describe("tags", () => {
     });
 
     it("is the `FabricValue` vocabulary plus `PlusType`, in the type system, and `PlusType` is no convertible-JS tag", () => {
-      type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
-        : false;
-
       const _plus: Same<FabricValuePlusTag, FabricValueTag | "PlusType"> = true;
       const _convertible: Same<
         Extract<ConvertibleJsValueTag, "PlusType">,
@@ -560,9 +554,6 @@ describe("tags", () => {
           value: FabricValuePlus<PlusProbe>,
           plain: FabricValue,
         ): void {
-          type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
-            : false;
-
           // @ts-expect-error a plus value matches no overload without its predicate
           tagOfFabricValue(value);
           // @ts-expect-error the predicate must be for the value's own `PlusType`
@@ -683,9 +674,6 @@ describe("tags", () => {
           value: FabricValuePlus<PlusProbe>,
           plain: FabricValue,
         ): void {
-          type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
-            : false;
-
           // @ts-expect-error a plus value matches no overload without its predicate
           tagOfFabricValueElseNull(value);
           // @ts-expect-error the predicate must be for the value's own `PlusType`
@@ -750,6 +738,22 @@ describe("tags", () => {
       expect(tagOfConvertibleJsValueElseNull(() => {})).toBe(null);
     });
 
+    it("returns `null` for a function whatever its prototype names", () => {
+      // The class switch is never reached by a function, so a prototype
+      // re-pointed at a recognized builtin's does not make one a builtin.
+
+      expect(
+        tagOfConvertibleJsValueElseNull(
+          Object.setPrototypeOf(() => {}, Map.prototype),
+        ),
+      ).toBe(null);
+      expect(
+        tagOfConvertibleJsValueElseNull(
+          Object.setPrototypeOf(() => {}, Date.prototype),
+        ),
+      ).toBe(null);
+    });
+
     it("returns `JsError` tag for standard `Error` subclasses", () => {
       const cases: [string, Error][] = [
         ["Error", new Error("test")],
@@ -776,6 +780,23 @@ describe("tags", () => {
       // Recognized at the value level: `Error.isError()` reads the internal
       // slot, so an `Error` subclass is tagged before any class is read.
       expect(tagOfConvertibleJsValueElseNull(exotic)).toBe(VALUE_TAGS.JsError);
+    });
+
+    it("returns `JsError` tag for an `Error` whatever its prototype names", () => {
+      // `Error.isError()` reads the internal slot and is asked before the
+      // prototype is, so neither a plain object's prototype nor a recognized
+      // builtin's changes the answer.
+
+      expect(
+        tagOfConvertibleJsValueElseNull(
+          Object.setPrototypeOf(new Error("x"), Object.prototype),
+        ),
+      ).toBe(VALUE_TAGS.JsError);
+      expect(
+        tagOfConvertibleJsValueElseNull(
+          Object.setPrototypeOf(new Error("x"), Map.prototype),
+        ),
+      ).toBe(VALUE_TAGS.JsError);
     });
 
     it("returns `JsError` tag for an `Error` whose prototype was severed", () => {

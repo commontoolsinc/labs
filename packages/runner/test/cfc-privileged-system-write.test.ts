@@ -594,15 +594,13 @@ describe("CFC privileged system write (S18)", () => {
   });
 
   it("refuses the commit as a preparation crash when the stored `cfc` member cannot be walked", async () => {
-    // A record at the reserved position with no `version` is one
-    // `readStoredCfcMetadata` reports as absent, so the erasure lands in
-    // `unprivilegedSystemWrites` like the shapes above. Prepare reads the same
-    // member through `storedMetadataFor`, which refuses a record it cannot
-    // walk, and that refusal replaces every reason the pass had collected, the
-    // S18 verdict among them. `CommitPreparationError` is not a terminal
-    // rejection, so the scheduler spends its bounded retry budget on a commit
-    // that refuses identically every time, where the verdict would have
-    // stopped it at the first attempt.
+    // A record at the reserved position with no `version` is one no reader
+    // can produce labels from, so — like the unknown version below — it is
+    // not an erasure and the S18 arm does not fire. Prepare reads the same
+    // member and refuses it, so the write is rejected there instead.
+    // `CommitPreparationError` is not a terminal rejection, so the scheduler
+    // spends its bounded retry budget on a commit that refuses identically
+    // every time.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -618,9 +616,7 @@ describe("CFC privileged system write (S18)", () => {
         value: { note: "two" },
         cfc: { labelMap: { version: 1, entries: [] } },
       });
-      expect(tx.getCfcState().unprivilegedSystemWrites).toEqual([
-        `${address.id}/cfc`,
-      ]);
+      expect(tx.getCfcState().unprivilegedSystemWrites).toEqual([]);
 
       const { reasons, result } = await prepareAndCommit(tx);
       expect(reasons.join(" ")).toContain(

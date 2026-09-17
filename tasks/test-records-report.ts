@@ -191,7 +191,6 @@ export async function runReport(options: ReportOptions): Promise<boolean> {
     `${names.length} object(s) under ${prefix} in the last ${days} day(s).`,
   );
   const reports: StoredReport[] = [];
-  let forkReports = 0;
   for (const objectName of names) {
     const readOptions: Parameters<typeof readObject>[0] = {
       bucket,
@@ -199,16 +198,7 @@ export async function runReport(options: ReportOptions): Promise<boolean> {
     };
     if (options.fetchImpl !== undefined) readOptions.fetch = options.fetchImpl;
     const report = await readObject(readOptions);
-    // Fork-authored reports never feed decisions — this report's numbers
-    // and its ratchet gate among them (docs/specs/test-records.md).
-    if (report.context?.ci?.fork === true) {
-      forkReports++;
-      continue;
-    }
     reports.push(report);
-  }
-  if (forkReports > 0) {
-    console.log(`${forkReports} fork-authored object(s) excluded.`);
   }
   const runs = new Set(
     reports.map((report) => report.context?.ci?.workflowRunId ?? ""),

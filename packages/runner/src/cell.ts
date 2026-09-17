@@ -76,7 +76,6 @@ import {
   type HKT,
   type ICell,
   isReactiveMarker,
-  isStreamValue,
   type IsThisObject,
   type IStreamable,
   type JSONSchema,
@@ -89,6 +88,7 @@ import {
   type Schema,
   SELF,
   type Stream,
+  STREAM_MARKER_KEY,
   type StripDefaultBrand,
 } from "./builder/types.ts";
 import type { AggregateOperation } from "./builtins/aggregate.ts";
@@ -184,6 +184,7 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IReadOptions,
+  Metadata,
 } from "./storage/interface.ts";
 import { usesLocalReads } from "./storage/local-read-policy.ts";
 import {
@@ -191,6 +192,7 @@ import {
   internalVerifierRead,
   markReadAsAttemptedWrite,
   mergeableOpRead,
+  writeDestinationRead,
 } from "./storage/reactivity-log.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
 
@@ -1317,7 +1319,16 @@ export class CellImpl<T extends FabricValue>
    * name yields undefined rather than throwing, so every stream would
    * quietly stop being recognized as one.
    */
-  private isStream(resolvedToValueLink?: NormalizedFullLink): boolean {
+  private isStream(
+    resolvedToValueLink?: NormalizedFullLink,
+    /**
+     * Metadata for the marker read. `set()` passes
+     * {@link writeDestinationRead} beside the default, because there the
+     * probe is the write path asking which of two ways to write; `sink()`
+     * takes the default, where the probe is an ordinary observation.
+     */
+    markerReadMeta: Metadata = ignoreReadForScheduling,
+  ): boolean {
     if (this.#kind === "stream") return true;
 
     const tx = this.runtime.readTx(this.tx);
@@ -1341,10 +1352,20 @@ export class CellImpl<T extends FabricValue>
       return true;
     }
 
-    const value = tx.readValueOrThrow(resolvedToValueLink, {
-      meta: ignoreReadForScheduling,
+    // The marker is a scalar at one known path, and this reads that path.
+    // What a read consumes is the labels resolving at the path it names, so
+    // asking the question this narrowly keeps the labels of the fields
+    // beside the marker out of the reading transaction's flow join. A label
+    // the document declares at its root resolves at the marker too, which is
+    // what `markerReadMeta` answers on the write path.
+    const marker = tx.readValueOrThrow({
+      ...resolvedToValueLink,
+      path: [...resolvedToValueLink.path, STREAM_MARKER_KEY],
+      schema: undefined,
+    }, {
+      meta: markerReadMeta,
     });
-    return isStreamValue(value);
+    return marker === true;
   }
 
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>> {
@@ -1728,7 +1749,12 @@ export class CellImpl<T extends FabricValue>
     );
 
     // Check if we're dealing with a stream
-    if (this.isStream(resolvedToValueLink)) {
+    if (
+      this.isStream(resolvedToValueLink, {
+        ...ignoreReadForScheduling,
+        ...writeDestinationRead,
+      })
+    ) {
       // Stream behavior
 
       // A lift (reactive computation) must be pure: emitting an event from a

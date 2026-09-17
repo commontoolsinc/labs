@@ -1167,8 +1167,8 @@ no lane can be asked to run is not recorded, so a recording step whose
 identity no suite claims is a defect either way round: the step should
 be registered, or it should not be recording.
 
-The **store half** runs on `main`. It reads the most recent successful
-`main` build's records and fails if any recorded identity is one that no
+The **store half** runs on `main`, after the full run has finished, over
+that run's own records. It fails if any recorded identity is one that no
 suite's `locate()` claims, or that more than one suite claims. A claim names
 either one item or the suite-level measurement set. The match uses the
 complete identity, including an optional variant. This catches the subtler
@@ -1176,6 +1176,19 @@ case: a surface that is registered and whose files enumerate, but whose
 recorded names or configuration do not map back to the topology — which
 would leave those tests running in the full run and never selectable on a
 pull request.
+
+The records have to be the ones this tree produced, and the half is given
+the commit to hold them to: records from another commit are refused
+rather than judged. A tree read against an earlier build's records
+disagrees with them over every test the change between the two deleted,
+because the topology has no unit for a test the tree no longer holds. The
+same goes for a rename, since an alias applies to records from days
+strictly before its date and the earlier build's records are from today.
+Both are the repository working as intended, so a half that read them as
+disagreements would fail `main` for deleting a test. That is also why the
+half runs after the lanes rather than inside one: a gate running in a lane
+cannot see the records of the run it is part of, because they have not
+shipped yet.
 
 The reverse direction is reported rather than failed: an available item
 that `enumerate()` returns and that no run has ever produced a record for
@@ -1484,7 +1497,10 @@ publisher computes:
   arrives in combine into the percentile of the whole. Only passing
   executions are measured: a failure ended where the failure was
   reached, and where a wait's safety net ended it, its duration is that
-  net's bound.
+  net's bound. A day records the set of cost rules that sealed it, or
+  carries no record where it was sealed before any were kept, and a day
+  an earlier set sealed answers only until the rules in force have
+  sealed one for that test.
 
 Variants never fold into one another for scoring. A default test and its
 `server-execution` counterpart have independent catches, flake rates, and
@@ -1757,6 +1773,83 @@ fired on every rename would be noise nobody reads. A gate that fires only
 when real history is about to be discarded would be rare and
 proportionate — but it is still a new way to be red, and the honest order
 is to see how well the suggestion works before reaching for one.
+
+### Removals, and what the aggregate forgets
+
+A deletion is not a rename with a missing half. Nothing has to be
+declared for one, and nothing should be: what says a test is gone is the
+tree not holding it, which is the same thing that says where every other
+test runs. An alias would be wrong — there is no name for the history to
+join to, and a bridge to another test's name would credit that test with
+a record it did not earn.
+
+Nothing selects a deleted test. No suite claims its identity, so the
+publisher leaves it out of the manifest, and a manifest published before
+the deletion is reconciled against the tree before anything is packed,
+which drops the entry there too. The suggestion the reporter makes for a
+rename is not made for a deleted file either: a departing identity is
+only paired with an arriving one when the unit it lived in produced
+records in this run, and a deleted file's unit produces none. One `it`
+deleted from a file that still runs is not covered by that, and is held
+instead by what a suggestion costs when it is wrong, which is nothing:
+nobody appends the line.
+
+What is left is the publisher's rolling aggregate, which reads the store
+and the store keeps every record forever. Without a rule for forgetting,
+a test deleted three years ago still has its state read, scored and
+written back on every run, and still counts against the identities the
+topology has no unit for — which is the count that says a surface is
+recording without saying where it runs, and a count polluted by every
+test ever deleted is one nobody can read.
+
+So an identity leaves the aggregate on two conditions together. No suite
+claims it. And no run of it has been recorded inside the longest window a
+state keeps counters for, which is `lastRun` having no answer. The
+default branch runs every test the tree holds, so a test that is still
+there and still runs records inside that window whether or not a change
+selects it.
+
+Neither condition is enough alone, and requiring both is what makes this
+safe. A suite whose units are files places a record by the file the
+record names, so an identity whose records never name one is claimed by
+nobody and is running every day; dropping it would throw away the history
+of a live test and hide the wiring defect that is worth acting on. A
+suite whose units are not files reads the recorded name instead and is
+untouched by that. A topology that misreads the tree — a suite whose
+scope was renamed without the alias that bridges it — stops claiming
+tests that are running, whichever kind of suite it is, and every one of
+those is held by the second condition.
+
+An identity more than one suite claims is not a departure at all. The
+tree holds that test twice over, which is a defect in the topology rather
+than in the tree, and the drift guard is what fails on it; dropping its
+history would answer a defect by discarding the evidence. So the two are
+counted apart, and only the unclaimed one is a candidate for leaving.
+
+A unit a configuration declares unavailable is kept, under the variant
+that declared it, for the same reason the drift guard and `plan --verify`
+both pass over one: the declaration is the tree saying the test is there
+and does not run in this configuration. The exemption is read a unit at a
+time. A declaration naming one leaf inside a unit leaves that unit
+enumerated and running, so its identities are placed by their file and
+never reach this.
+
+A skip is the one outcome a state records nothing for, so a test the tree
+holds that nothing ever runs meets the second condition as well. Where
+nothing claims it either, it is dropped like a deleted one; what that
+costs is catches from before the window, since every counter inside it is
+empty either way. Most skipped tests are in neither position: a whole
+unit declared unavailable is exempt, a declared leaf leaves its unit
+enumerated and placed, and a test skipped inside a unit some suite claims
+is claimed with it.
+
+The longest window is the longer of `CHURN_WINDOW_DAYS` and
+`FLAKE_WINDOW_DAYS`, sixty days today, so that is how long a deletion
+takes to settle. Until then the deleted test is counted with the identities that
+have no unit and have run, which is right: it did run inside the window.
+The two counts are reported separately, so the one that stays large run
+after run is a suite that has stopped recording rather than a set of
+tests somebody deleted.
 
 ### The exploration draw
 
@@ -2456,16 +2549,18 @@ The manifest is one gzipped JSON object per publisher run, created —
 never overwritten — under a new dataset area beside the records:
 
 ```text
-labs/test-selection/v<schema>/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
-labs/test-selection/v<schema>/state/<yyyy-mm-dd>-<ULID>.json.gz
+labs/test-selection/<area>/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
+labs/test-selection/<area>/state/<yyyy-mm-dd>-<ULID>.json.gz
 ```
 
-The schema segment is `MANIFEST_SCHEMA_VERSION`, so a format a reader
-cannot understand is one it never lists: an incompatible change moves the
-segment and leaves what came before where it is, and readers of either
-version see only their own manifests and their own state. What that costs
-is the state, since the publisher has none to carry forward under the new
-segment and stops asking for a bootstrap.
+The segment is `SELECTION_AREA`, a name rather than a number, and it does
+not move when the shape of what is stored does. A reader lists the one
+area and reads forward anything written in a shape behind its own,
+passing over anything ahead of it and taking the newest it knows. Moving
+the segment instead would leave the state behind in the old area, and
+the state is where every catch lives: the publisher would have none to
+carry forward and would stop and ask for a bootstrap, with nothing
+published in between and every consumer running the whole corpus.
 
 Write-once naming is not a stylistic choice: the store's writer
 credentials hold `objectCreator` and nothing else, cannot overwrite, and
@@ -2528,9 +2623,9 @@ fourth part only when a variant is present.
 
 The manifest is untrusted input to the lane runner, and is validated the
 same way record lines are: a malformed manifest is rejected whole, and a
-manifest whose schema version the runner does not know is treated as
-absent. Retention is a bucket lifecycle rule deleting manifests after 45
-days.
+manifest declaring a shape from further ahead than the runner is treated
+as absent, the runner taking the newest one behind it instead. Retention
+is a bucket lifecycle rule deleting manifests after 45 days.
 
 ## The publisher
 
@@ -3102,7 +3197,6 @@ list is what it is today:
 | --- | --- |
 | `packages/generated-patterns` | Its test task is `echo 'No tests defined.'`. Its test files run in the generated-patterns integration job. |
 | `packages/home-schemas` | It has no tests. |
-| `packages/patterns/auth` | Its test task is `echo 'No tests defined.'`. |
 | `packages/patterns` | Authored pattern code is measured by transformer instrumentation in the pattern unit and integration jobs. The package's own `deno test` ignores the pattern files deliberately. |
 | `packages/runner` | Its whole set is past what all five lanes hold together: about 1,600 seconds of test steps in the reference build, against a budget of 1,150. |
 | `packages/cli` | The command line's real coverage comes from the integration script rather than from these tests, so gating on them would ratchet the wrong number. |
@@ -3537,7 +3631,8 @@ is pinned to the commit's date. And if none of that settles it,
 | A selected item no longer exists in the tree | Dropped with a line in the summary. A renamed test is simultaneously an unknown item, so it runs anyway. |
 | A new test surface nobody registered | `check-test-topology` fails on the next `main` run and names the unclaimed identities. |
 | A gate wired into a workflow job and into no suite | The workflow half of the drift guard fails on the pull request that adds the step, before the gate has ever run. |
-| A record's variant or record surface contradicts its batch | Kept as written and named in the lane summary. The identity then belongs to no suite, so the store half of the drift guard fails on the next `main` run. |
+| A record's variant or record surface contradicts its batch | Kept as written and named in the lane summary. The identity then belongs to no suite, so the store half of the drift guard fails on that `main` run. |
+| A test is deleted | Nothing has to be declared. The topology stops enumerating it, so the manifest leaves it out and the reconciliation against the tree drops the entry a manifest published earlier still names. The store keeps its records, and the publisher's aggregate stops carrying its state once no run has recorded it inside the longest window a state keeps counters for. The store half of the drift guard judges the run's own records, so the deletion is not read as a disagreement. |
 | A suite gains a new variant with no records | Every available item in that variant is mandatory until a successful full `main` run accounts for every enumerated item under that exact variant, the store drift guard passes, and the next publisher cycle includes the run. Other variants do not stand in for it. |
 | A variant deliberately skips a file or leaf | The topology reads the existing skip registry and the manifest reports the test as unavailable with its phase and reason. It is not unknown. Removing the skip makes it mandatory until `main` records it. |
 | One item is bigger than a lane's planned budget | It gets a lane to itself, up to the hard five-minute bound. Bigger than that, a mandatory item is still placed and its lane over-runs, while a discretionary one is listed as unschedulable in the manifest and reported; the 60-second ratchet is the fix. |
@@ -3798,9 +3893,9 @@ The other pre-merge checks are all offline or read-only:
 
 - `plan --verify` compares the identity set the topology produces against
   what the old matrix ran, from the store rather than by eye.
-- The store half of the drift guard runs on the branch against the most
-  recent `main` run's records, which is the same comparison it will make
-  after merging.
+- The store half of the drift guard runs against the `ci: full` run on
+  the branch, over that run's own records, which is the same comparison
+  it will make after merging.
 - `plan --dry-run` over the reference records is a pure function over
   recorded data and needs nothing live.
 
@@ -3866,6 +3961,11 @@ answers somewhere people can see them.
       rollup of the shared area cannot say a day is accounted for and
       take that day's local submissions with it. Local records stay on
       their raw path until they have rollups of their own.
+- [x] The aggregate forgets a test the tree has lost, on the two
+      conditions [removals](#removals-and-what-the-aggregate-forgets)
+      names. Without it the store's whole history of deleted tests is
+      read, scored and written back forever, and the count of identities
+      the topology has no unit for cannot be read.
 - [x] The one-off bootstrap dispatch. On 2026-09-06, [run
       34020738350](https://github.com/commontoolsinc/labs/actions/runs/34020738350)
       on `main` folded 12 rollup days and 67,463,235 executions, then created
@@ -3950,7 +4050,10 @@ exercised on the branch on its own.
       would be found only on `main`.
 - [x] `tasks/check-test-topology.ts`, tree, workflow and store, wired into
       `repo-gates`, with exact variant matching and one source-item claim
-      allowed per variant. Eight paths that look like tests and are not
+      allowed per variant. The store half is given the commit its records
+      were produced at and refuses records from any other, so that a tree
+      is judged by what that tree recorded rather than by what a build
+      before a deletion did. Eight paths that look like tests and are not
       are declared as the fixtures they are: the five projects under
       `packages/deno-web-test/test/` that the harness drives, and the
       three command-line tours the verb-session gate holds the
@@ -3968,6 +4071,11 @@ exercised on the branch on its own.
       rather than its `.lcov` files: a measured set the lane saw fail is
       marked by a file beside the report, and a glob over one extension
       would drop it and publish the baseline anyway.
+- [ ] The store half of the drift guard runs on `main` in the job that
+      ships the run's records, over those records and against that run's
+      commit. It cannot be a gate inside a lane: a lane's records have not
+      shipped when its gates run, so the half would be reading an earlier
+      build's records and failing on every test this run deleted.
 - [x] The full run's treatment of a test too flaky for pull requests.
       The count is placed already: `tasks/test-selection/plan.ts` gives
       every mandatory identity the count `executionsFor` returns for its
@@ -4047,9 +4155,10 @@ exercised on the branch on its own.
       something with coverage on.
 - [ ] Before merging: `plan --verify` against the last `main` run, proving
       the manifest accounts for every item the topology enumerates under
-      its exact variant, apart from explicitly unavailable skip entries,
-      and the store half of the drift guard passes against the same run.
-      Compare from the store rather than by eye.
+      its exact variant, apart from explicitly unavailable skip entries.
+      Compare from the store rather than by eye. The store half of the
+      drift guard is proved against the `ci: full` run below instead,
+      since it judges a tree by the records that tree produced.
 - [ ] Before merging: at least one `ci: full` run on the branch, green,
       accounting for every item the topology enumerates under its exact
       variant apart from explicit unavailable entries. This is what

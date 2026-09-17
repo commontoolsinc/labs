@@ -370,7 +370,16 @@ export class ConsoleIndexView extends LitElement {
                   </span>`
                   )}
                 </td>
-                <td>${pattern.score ?? 0}</td>
+                <td>
+                  ${pattern.score ?? 0}
+                  ${pattern.signals?.inherited
+                    ? html`<div class="muted">
+                      Includes ${pattern.signals.inherited.score} inherited from
+                      ${this.#idCell(pattern.signals.inherited.priorPatternId)}
+                      as of ${formatIndexTime(pattern.signals.inherited.asOf)}
+                    </div>`
+                    : nothing}
+                </td>
                 <td class="muted">${formatIndexTime(pattern.createdAt)}</td>
               </tr>
               ${this.open?.patternId === pattern.patternId

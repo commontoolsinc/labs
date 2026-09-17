@@ -4058,7 +4058,10 @@ describe("memory-v2-stacked-commit", () => {
         // …and traced. A commit that never dialed a session still opens and
         // closes a push span, carrying the join keys every other push span
         // carries, so the suppressed population stays countable where the
-        // errored `memory.transact` spans were counted.
+        // errored `memory.transact` spans were counted. The error marker also
+        // says what was refused: the message names this a cascade behind the
+        // loser rather than a conflict of its own, and the reads and writes are
+        // the follower's.
         const followerOpId = `push:${space}:${follower.localSeq}`;
         expect(
           harness.telemetryMarkers.filter((marker) =>
@@ -4076,6 +4079,9 @@ describe("memory-v2-stacked-commit", () => {
             type: "storage.push.error",
             id: followerOpId,
             error: "ConflictError",
+            message: `pending dependency rejected: localSeq=${loser.localSeq}`,
+            reads: [`${DOCS.A}/value`],
+            writes: [DOCS.D],
           },
         ]);
       } finally {

@@ -18,8 +18,8 @@ export interface HarnessResearchKitProjection {
   artifactOnlyPointers: readonly string[];
 }
 
-/** Exact host records needed to reopen, import, and bind selected components. */
-const PATTERN_IDENTITY_FIELDS = [
+/** Host-provided identity, type, and ranking records for indexed components. */
+const PATTERN_HOST_FIELDS = [
   "patternId",
   "importHint",
   "ownerDid",
@@ -32,6 +32,7 @@ const PATTERN_IDENTITY_FIELDS = [
   "dependencies",
   "argumentType",
   "resultType",
+  "signals",
 ] as const satisfies readonly (keyof HarnessResearchPatternRecord)[];
 
 /** Host records and their positions within a raw research artifact. */
@@ -61,7 +62,7 @@ export const projectHarnessResearchKitForModel = (
   const artifactOnlyPointers: string[] = [];
   const identities = patternPositions(candidate).map(({ pattern, pointer }) => {
     const identity: Partial<HarnessResearchPatternRecord> = {};
-    for (const field of PATTERN_IDENTITY_FIELDS) {
+    for (const field of PATTERN_HOST_FIELDS) {
       if (Object.hasOwn(pattern, field)) {
         Object.assign(identity, { [field]: pattern[field] });
         delete pattern[field];
