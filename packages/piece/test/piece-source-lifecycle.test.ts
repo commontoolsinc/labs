@@ -821,6 +821,61 @@ describe("piece source lifecycle", () => {
     }
   });
 
+  it("applies compiled boolean argument widening while retaining both stored values", async () => {
+    const program = (stateType: string): RuntimeProgram => ({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+          import { pattern } from "commonfabric";
+          export default pattern<{ state: ${stateType} }, { active: boolean }>(
+            ({ state }) => ({ active: state === true }),
+          );
+        `,
+      }],
+    });
+    const narrower = program("boolean");
+    const wider = program('boolean | "auto"');
+    for (const value of [false, true]) {
+      const piece = await pieces.create(narrower, { input: { state: value } });
+      await piece.setPattern(wider);
+      expect(await piece.input.get(["state"])).toBe(value);
+      expect(await piece.result.get(["active"])).toBe(value);
+      const state = await readPieceSourceState(runtime, piece.getCell());
+      expect(state.history.at(-1)?.operation).toBe("edit");
+      await expect(piece.setPattern(narrower)).rejects.toThrow(
+        "Pattern schemas are not backward compatible",
+      );
+    }
+  });
+
+  it("applies compiled boolean result narrowing and refuses its reverse", async () => {
+    const program = (stateType: string, value: boolean): RuntimeProgram => ({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+          import { pattern } from "commonfabric";
+          export default pattern<{ seed: number }, { state: ${stateType} }>(
+            () => ({ state: ${value} }),
+          );
+        `,
+      }],
+    });
+    for (const value of [false, true]) {
+      const wider = program('boolean | "auto"', value);
+      const piece = await pieces.create(wider, { input: { seed: 42 } });
+      await piece.setPattern(program("boolean", value));
+      expect(await piece.input.get(["seed"])).toBe(42);
+      expect(await piece.result.get(["state"])).toBe(value);
+      const state = await readPieceSourceState(runtime, piece.getCell());
+      expect(state.history.at(-1)?.operation).toBe("edit");
+      await expect(piece.setPattern(wider)).rejects.toThrow(
+        "Pattern schemas are not backward compatible",
+      );
+    }
+  });
+
   it("applies a compiled union widening that retains a mixed-enum cell branch", async () => {
     const program = (stateType: string): RuntimeProgram => ({
       main: "/main.tsx",

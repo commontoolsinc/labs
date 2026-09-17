@@ -3140,6 +3140,97 @@ describe("piece schema compatibility", () => {
       }
     });
 
+    it("accepts a boolean type against an enum admitting both boolean values", () => {
+      for (
+        const source of [{ type: "boolean" }, { type: ["boolean"] }] as const
+      ) {
+        for (
+          const target of [
+            { enum: [false, true] },
+            { enum: [false, true, "auto"] },
+            { type: "boolean", enum: [false, true, "auto"] },
+          ] satisfies JSONSchema[]
+        ) {
+          expect(() => assertSchemaSubset(source, target)).not.toThrow();
+        }
+      }
+    });
+
+    it("refuses a boolean target enum or const that omits either boolean value", () => {
+      for (const value of [false, true]) {
+        for (const target of [{ enum: [value, "auto"] }, { const: value }]) {
+          expect(() => assertSchemaSubset({ type: "boolean" }, target))
+            .toThrow(/enum\/const/);
+        }
+      }
+      expect(() =>
+        assertSchemaSubset(
+          { type: "boolean" },
+          { type: "string", enum: [false, true, "auto"] },
+        )
+      ).toThrow(/enum\/const/);
+    });
+
+    it("checks sibling constraints after proving boolean enum membership", () => {
+      expect(() =>
+        assertSchemaSubset(
+          { type: "boolean" },
+          { enum: [false, true], not: { const: false } },
+        )
+      ).toThrow(/not changed/);
+    });
+
+    it("retains a boolean source's explicit enum and const restrictions", () => {
+      for (const value of [false, true]) {
+        for (
+          const source of [
+            { type: "boolean", enum: [value] },
+            { type: "boolean", const: value },
+            { type: "boolean", const: value, enum: [false, true] },
+          ] satisfies JSONSchema[]
+        ) {
+          expect(() => assertSchemaSubset(source, { const: value })).not
+            .toThrow();
+          expect(() => assertSchemaSubset(source, { const: !value })).toThrow(
+            /enum\/const/,
+          );
+        }
+      }
+    });
+
+    it("permits boolean argument widening and result narrowing through unions", () => {
+      const wider: JSONSchema = { enum: [false, true, null, "auto"] };
+      for (
+        const narrower of [
+          { type: "boolean" },
+          { type: ["boolean", "null"] },
+          { anyOf: [{ type: "boolean" }, { type: "null" }] },
+          { anyOf: [{ anyOf: [{ type: "boolean" }, { type: "null" }] }] },
+        ] satisfies JSONSchema[]
+      ) {
+        expect(() => assertSchemaSubset(narrower, wider)).not.toThrow();
+        expect(() => assertSchemaSubset(wider, narrower)).toThrow();
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(narrower, wider),
+            pattern(wider, narrower),
+          )
+        ).not.toThrow();
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(wider, true),
+            pattern(narrower, true),
+          )
+        ).toThrow(/argument:/);
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(true, narrower),
+            pattern(true, wider),
+          )
+        ).toThrow(/result:/);
+      }
+    });
+
     it("permits nullable literal argument widening and result narrowing", () => {
       const wider: JSONSchema = { enum: ["open", "closed", null] };
       for (
