@@ -459,9 +459,17 @@ describe("the session remount (profile-starvation fifth face)", () => {
     // revocation, which the remount does not cause — but "the session is
     // re-established" has to mean the replica can read again, including
     // what it was already watching. So the remount drops the tracker.
-    const stranger = LoopbackStorageManager.connect(server, {
-      as: strangerSigner,
-    });
+    /** This session's own revocation, reported once the session has taken
+     * the frame. The remount latch is consumed only against a session the
+     * revocation has already terminated. */
+    const revocations = new ArrivalLog<void>();
+    const stranger = LoopbackStorageManager.connect(
+      server,
+      { as: strangerSigner },
+      (frame) => {
+        if (frame.includes('"session/revoked"')) revocations.record();
+      },
+    );
     cleanups.push(() => stranger.close());
 
     // Authorized from the start, so the doc is read SUCCESSFULLY and its
@@ -478,6 +486,10 @@ describe("the session remount (profile-starvation fifth face)", () => {
     // session is revoked and stops receiving pushes. Nothing pulls in this
     // window, so the tracker still holds the doc's selector as covered.
     await revokeAcl(homeSigner, homeSpace, strangerSigner.did());
+    // The revocation has reached THIS client: the latch below is consumed
+    // only against a session whose termination has landed, and a probe
+    // that runs first reads the tracker and answers the stale value.
+    await revocations.reached(1);
     // The value moves while the replica is deaf to it.
     await writeDoc(homeSigner, homeSpace, "tracker-stale", "v2");
 
@@ -488,9 +500,6 @@ describe("the session remount (profile-starvation fifth face)", () => {
     });
     (stranger as AclChangeNotifier).noteSpaceAclChanged?.(homeSpace);
 
-    // The pin: this read must reach the wire on the remounted session and
-    // come back with v2. Pre-fix it returned ok immediately from the
-    // tracker and the replica still read "v1" — a silent stale answer.
     // The pin, and note WHAT it asserts: not that the read errors, but
     // that it returns the CURRENT value. Pre-fix the pull returned
     // `{ok:{}}` — a successful read — while the replica still held "v1".
