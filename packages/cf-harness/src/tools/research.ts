@@ -249,6 +249,7 @@ export const researchTool: HarnessToolDefinition<
           ? { getPatternIndex: context.getPatternIndexClient }
           : {}),
         handleTokens: generalTokens,
+        inputCells: context.inputCells ?? [],
         describeHandle: async (token) =>
           await describeHandleForResearch(context, { token }),
         ...(context.researchTaskCfcLabel !== undefined
