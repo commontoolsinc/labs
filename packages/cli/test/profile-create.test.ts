@@ -96,7 +96,7 @@ describe("createProfile()", () => {
   });
 
   afterEach(async () => {
-    await runtime.dispose();
+    await runtime.dispose({ closeStorage: false });
     await manager.close();
   });
 
@@ -116,6 +116,12 @@ describe("createProfile()", () => {
     );
     expect(second.name).toBe("Alan Turing");
     expect(second.space).not.toBe(first.space);
+  });
+
+  it("refuses a name carrying a control character", async () => {
+    await expect(createProfile({ ...CONFIG, name: "Ada\u001bLovelace" }, {
+      loadPieces,
+    })).rejects.toThrow(/control characters/);
   });
 
   it("trims the name and refuses a blank one before connecting", async () => {
