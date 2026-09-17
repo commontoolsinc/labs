@@ -115,8 +115,9 @@ ruled. A later reversal is a decision recorded here, not a discovery.
    qualified citation is `#//topics-dev/top/42`. The spec's `#@space/...`
    spelling is amended when that grammar lands. Part 1 of the spec, which
    governs addressing, is unaffected. #6814 records that decision and changes
-   no parser, so until one accepts `//<space>/...` the spelling that resolves
-   is `/@<space>/...`, and that is what a stage builds and demonstrates. A
+   no parser. The reference parser reads `//<space>/...` and refuses
+   `/@<space>/...` for a named space, so the spelling that resolves is
+   `//<space>/...`, and that is what a stage builds and demonstrates. A
    criterion's examples mean whichever spelling the reference parser accepts
    when the criterion is checked, so the switch follows that parser rather
    than any pull request.
