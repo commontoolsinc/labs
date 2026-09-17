@@ -8,7 +8,9 @@
  * source group the PR changed, the count of uncovered lines must not rise above
  * the count from the `main` run for the base-branch commit this run merged,
  * unless the PR description accepts the increase. Fails (exit 1) when a changed
- * group regresses.
+ * group regresses, and when the workflow's run listing, which is where that
+ * `main` run is found, turns out not to be current. A changed group with no
+ * baseline to be held against passes, and the run says so wherever it reports.
  *
  * Environment:
  *   GITHUB_TOKEN        - Required.
@@ -31,17 +33,23 @@ import {
   type BaselineSample,
   buildCoverageDebtSuggestionComment,
   buildCoverageDebtUnattributedComment,
+  buildCoverageNotGatedComment,
   CACHE_STATE_ARTIFACT_PREFIX,
   COMPILE_CACHE_FAMILIES,
   type CompileCacheStates,
   COVERAGE_BASELINE_RESET_MARKER,
   COVERAGE_COMMENT_FILE,
+  COVERAGE_NOT_GATED_HEADLINE,
   type CoverageBaselineDetailed,
   type CoverageCommentPayload,
   coverageGroupForChangedFile,
   coverageGroupsForChangedFiles,
   type CoverageMeasurement,
   coverageMetricGroupName,
+  type CoverageNotGatedGroup,
+  type CoverageNotGatedInput,
+  coverageNotGatedNotice,
+  type CoverageNotGatedReason,
   type CoverageResolvedGroup,
   type CoverageRunIdentity,
   type CoverageSuggestionFileLines,
@@ -54,6 +62,7 @@ import {
   fetchPRFiles,
   formatOverrideSuggestion,
   githubGet,
+  isBaselineCandidateRun,
   newestArtifactsByName,
   parseAddedLinesFromPatch,
   parseBaselineOverrides,
@@ -65,9 +74,11 @@ import {
   readAndParseEvent,
   REPO,
   shouldGateCoverageDebtMetric,
+  sleep,
   unknownAcceptedMetrics,
+  WORKFLOW_RUNS_PAGE_SIZE,
   type WorkflowRun,
-  workflowRunsPathForBaseline,
+  workflowRunsPagePath,
   workflowRunUrl,
   writeCoverageBaselineFile,
 } from "./ci-check-lib.ts";
@@ -88,8 +99,20 @@ import {
   UNLAUNCHED_MEMBERS_FILE,
 } from "./unlaunched-members.ts";
 
-/** How many recent main-branch runs to scan for the coverage baseline. */
+/**
+ * How many `main` runs the walk reads, nearest the base-branch commit first,
+ * before it leaves the metrics still without a baseline as they are.
+ */
 const BASELINE_RUNS = 20;
+
+/** How many pages of the workflow's run listing one check reads at most. */
+const RUN_LISTING_MAX_PAGES = 10;
+
+/** How many times the listing is read before it is judged not current. */
+const RUN_LISTING_ATTEMPTS = 3;
+
+/** The wait before the listing's second reading; each later wait doubles. */
+const RUN_LISTING_RETRY_DELAY_MS = 2_000;
 
 export function currentWorkflowRunFromEvent(
   event: object | undefined,
@@ -187,55 +210,202 @@ export function parseMergedBaselineOverrides(
   }
 }
 
-export interface BaselineMainHeadValidation {
-  ok: boolean;
-  issues: string[];
-}
-
-export function validateBaselineRunsForMainHead(
-  runs: Pick<WorkflowRun, "id" | "head_sha" | "created_at">[],
-  mainHeadSha: string,
-): BaselineMainHeadValidation {
-  const issues: string[] = [];
-
-  if (runs.length === 0) {
-    issues.push("No successful main-branch runs were returned.");
-    return { ok: false, issues };
-  }
-
-  if (!/^[0-9a-f]{40}$/i.test(mainHeadSha)) {
-    issues.push(`Current main head SHA is invalid: ${mainHeadSha}`);
-    return { ok: false, issues };
-  }
-
-  const newest = runs[0];
-  if (newest.head_sha !== mainHeadSha) {
-    issues.push(
-      `Newest successful baseline run ${newest.id} (${newest.created_at}) is for ${newest.head_sha}, but current main is ${mainHeadSha}.`,
-    );
-  }
-
-  return { ok: issues.length === 0, issues };
-}
-
-export async function fetchMainHeadSha(): Promise<string> {
-  const branch = await githubGet<{ commit: { sha: string } }>(
-    `/repos/${REPO}/branches/main`,
+/** Reads one page of the workflow's runs, newest first; `1` is the first. */
+export async function fetchWorkflowRunsPage(
+  page: number,
+): Promise<WorkflowRun[]> {
+  const data = await githubGet<{ workflow_runs: WorkflowRun[] }>(
+    workflowRunsPagePath(page),
   );
-  return branch.commit.sha;
+  return data.workflow_runs;
 }
 
 /**
  * The head SHA of the latest prior baseline run — the run whose compile cache
  * the current main push would have restored. Used to fingerprint-classify a
- * main push that carries no recorded cache state. Undefined when there is no
- * prior baseline run (e.g. an empty run history).
+ * main push that carries no recorded cache state. Undefined when the newest
+ * page of the run listing holds no baseline run (e.g. an empty run history).
  */
 export async function fetchLatestBaselineRunSha(): Promise<string | undefined> {
-  const recent = await githubGet<{ workflow_runs: WorkflowRun[] }>(
-    workflowRunsPathForBaseline(1),
+  const newest = await fetchWorkflowRunsPage(1);
+  return newest.find(isBaselineCandidateRun)?.head_sha;
+}
+
+/** What reading the workflow's run listing found. */
+export interface BaselineRunListing {
+  /**
+   * Whether the listing names the workflow's newest runs. It does not when it
+   * leaves out the run asking for it: that run was created before the listing
+   * was read, so a listing without it is an older one, and every `main` run it
+   * fails to name is a baseline the ratchet would wrongly report as missing.
+   */
+  current: boolean;
+
+  /**
+   * Whether the pages read got as far back as the run asking. False for a run
+   * created longer ago than the listing is read, where the `main` runs for the
+   * commit it merges are older still and so out of reach as well.
+   */
+  reachedCurrentRun: boolean;
+
+  /** Successful `main` push runs on the pages read so far, newest first. */
+  candidates: WorkflowRun[];
+
+  /** The newest run the listing returned, whatever triggered it. */
+  newest: WorkflowRun | undefined;
+
+  /** How many pages it took to find the run asking, or to give up. */
+  pagesRead: number;
+
+  /**
+   * Reads the next older page and returns the baseline candidates on it.
+   * Returns null once the listing has ended or the page budget is spent.
+   */
+  older: () => Promise<WorkflowRun[] | null>;
+}
+
+/** What {@link readBaselineRunListing} reads, and how far it goes. */
+export interface ReadBaselineRunListingOptions {
+  /** The run asking, which a current listing shows. */
+  currentRunId: number;
+
+  /** Reads one page of the listing; `fetchWorkflowRunsPage()` by default. */
+  fetchPage?: (page: number) => Promise<WorkflowRun[]>;
+
+  /** Waits between two readings of the listing. */
+  wait?: (ms: number) => Promise<void>;
+
+  /** The most pages one reading takes, older pages included. */
+  maxPages?: number;
+
+  /** How many times the listing is read before it is judged not current. */
+  attempts?: number;
+
+  log?: (message: string) => void;
+  warn?: (message: string) => void;
+}
+
+/** How a log line names a run: its id, when it was created, and its commit. */
+function describeRun(run: WorkflowRun | undefined): string {
+  return run === undefined
+    ? "nothing"
+    : `run ${run.id} (${run.created_at}) for ${run.head_sha.slice(0, 8)}`;
+}
+
+/**
+ * Reads the workflow's run listing, newest first, as far back as the run
+ * asking, and says whether the listing is current.
+ *
+ * The listing is the only place a `main` run is found by the commit it
+ * measured, and GitHub can return an old one without saying so. What tells the
+ * two apart is the run asking: it exists, so a current listing shows it, ahead
+ * of every run created before it. Run ids grow with creation and the listing is
+ * newest first, so a run with a smaller id is an older one. A page of older
+ * runs followed by a page that still lacks this run, or a listing that ends
+ * without it, is therefore not current. One page of grace covers two runs
+ * created together whose order puts a page boundary between them.
+ *
+ * A listing that is not current is read again, up to `attempts` times in all,
+ * because a later request can be served a current one. The last reading
+ * stands.
+ */
+export async function readBaselineRunListing(
+  options: ReadBaselineRunListingOptions,
+): Promise<BaselineRunListing> {
+  const fetchPage = options.fetchPage ?? fetchWorkflowRunsPage;
+  const wait = options.wait ?? sleep;
+  const maxPages = options.maxPages ?? RUN_LISTING_MAX_PAGES;
+  const attempts = options.attempts ?? RUN_LISTING_ATTEMPTS;
+  const log = options.log ?? console.log;
+  const warn = options.warn ?? console.warn;
+
+  for (let attempt = 1;; attempt++) {
+    const seen = new Set<number>();
+    const candidates: WorkflowRun[] = [];
+    let newest: WorkflowRun | undefined;
+    let ended = false;
+    let pagesRead = 0;
+
+    // Reads the next page, and returns every run on it alongside the baseline
+    // candidates no earlier page already held. A run slides onto the next page
+    // when a new one is created between two reads.
+    const readPage = async () => {
+      const runs = await fetchPage(++pagesRead);
+      ended = runs.length < WORKFLOW_RUNS_PAGE_SIZE;
+      const fresh = runs.filter((run) => !seen.has(run.id));
+      for (const run of fresh) seen.add(run.id);
+      return { runs, fresh: fresh.filter(isBaselineCandidateRun) };
+    };
+
+    let shown = false;
+    let olderRunSeen = false;
+    while (!shown && !ended && pagesRead < maxPages) {
+      const graceSpent = olderRunSeen;
+      const { runs, fresh } = await readPage();
+      newest ??= runs[0];
+      candidates.push(...fresh);
+      shown = runs.some((run) => run.id === options.currentRunId);
+      if (graceSpent) break;
+      olderRunSeen = runs.some((run) => run.id < options.currentRunId);
+    }
+
+    const current = shown || (!olderRunSeen && !ended);
+    if (!current && attempt < attempts) {
+      warn(
+        `  Warning: the workflow's run listing left out this run, ` +
+          `${options.currentRunId}; the newest it named is ` +
+          `${describeRun(newest)}. Reading it again (attempt ${attempt + 1} ` +
+          `of ${attempts}).`,
+      );
+      await wait(RUN_LISTING_RETRY_DELAY_MS * 2 ** (attempt - 1));
+      continue;
+    }
+
+    return {
+      current,
+      reachedCurrentRun: shown,
+      candidates,
+      newest,
+      pagesRead,
+      older: async () => {
+        if (ended || pagesRead >= maxPages) return null;
+        log(`Reading page ${pagesRead + 1} of the workflow's run listing.`);
+        return (await readPage()).fresh;
+      },
+    };
+  }
+}
+
+/** Says what the run listing held, and how far a baseline can be sought. */
+export function reportBaselineRunListing(
+  listing: BaselineRunListing,
+  currentRunId: number,
+  log: (message: string) => void = console.log,
+  warn: (message: string) => void = console.warn,
+): void {
+  const pages = pluralize(listing.pagesRead, "page");
+  if (!listing.current) {
+    warn(
+      `  Warning: the workflow's run listing is not current: ${pages} of it ` +
+        `never showed this run, ${currentRunId}, and the newest run it named ` +
+        `is ${describeRun(listing.newest)}.`,
+    );
+    return;
+  }
+
+  log(
+    `Read ${pages} of the workflow's run listing: the newest run is ` +
+      `${describeRun(listing.newest)}, and ${
+        pluralize(listing.candidates.length, "successful `main` push run")
+      } so far could be a baseline.`,
   );
-  return recent.workflow_runs[0]?.head_sha;
+  if (!listing.reachedCurrentRun) {
+    warn(
+      `  Warning: this run, ${currentRunId}, was created longer ago than ` +
+        `${pages} of the run listing reach, so the \`main\` runs for the ` +
+        "commit it merges are out of reach too.",
+    );
+  }
 }
 
 function pluralize(value: number, unit: string): string {
@@ -356,6 +526,16 @@ export interface WalkBaselineRunsOptions {
   /** Recent `main` runs, newest first. */
   runs: WorkflowRun[];
 
+  /**
+   * Reads the next older page of `main` runs, or returns null when there is
+   * none. Asked only once the runs in hand have been walked and a metric still
+   * has no baseline.
+   */
+  olderRuns?: () => Promise<WorkflowRun[] | null>;
+
+  /** The most runs the walk reads; `BASELINE_RUNS` when left out. */
+  maxRunsRead?: number;
+
   /** Reads one run. Called only for the runs the walk reaches. */
   readRun: (run: WorkflowRun) => Promise<BaselineRunReading>;
 
@@ -396,7 +576,11 @@ export interface WalkBaselineRunsOptions {
  *
  * Runs are read one at a time in the order `baselineWalkOrder()` gives, and the
  * walk stops as soon as every metric has its baseline, so a run that measured
- * every metric is the only one read.
+ * every metric is the only one read. When the runs in hand are spent first, the
+ * walk asks `olderRuns()` for the next page and carries on through it: a page
+ * further back holds runs created earlier, which are the ones for commits
+ * further from the base-branch commit. It gives up after `maxRunsRead` runs, so
+ * a metric no `main` run has measured costs a bounded number of reads.
  */
 export async function walkBaselineRuns(
   options: WalkBaselineRunsOptions,
@@ -404,27 +588,40 @@ export async function walkBaselineRuns(
   const pending = new Set(options.metrics);
   const chosen = new Map<string, BaselineSample>();
   const coldFallback = new Map<string, BaselineSample>();
+  const maxRunsRead = options.maxRunsRead ?? BASELINE_RUNS;
+  let runsRead = 0;
 
-  for (const run of baselineWalkOrder(options.runs, options.ancestorRank)) {
-    if (pending.size === 0) break;
+  let page: WorkflowRun[] | null = options.runs;
+  while (page !== null) {
+    for (const run of baselineWalkOrder(page, options.ancestorRank)) {
+      if (pending.size === 0 || runsRead >= maxRunsRead) break;
 
-    const reading = await options.readRun(run);
+      const reading = await options.readRun(run);
+      runsRead++;
 
-    for (const metric of [...pending]) {
-      const sample = reading.samples.get(metric);
-      if (sample === undefined) continue;
+      for (const metric of [...pending]) {
+        const sample = reading.samples.get(metric);
+        if (sample === undefined) continue;
 
-      if (!reading.cold) {
-        chosen.set(metric, sample);
-        pending.delete(metric);
-        continue;
-      }
-      if (!coldFallback.has(metric)) coldFallback.set(metric, sample);
+        if (!reading.cold) {
+          chosen.set(metric, sample);
+          pending.delete(metric);
+          continue;
+        }
+        if (!coldFallback.has(metric)) coldFallback.set(metric, sample);
 
-      if (reading.overrides && acceptsCoverageDebt(reading.overrides, metric)) {
-        pending.delete(metric);
+        if (
+          reading.overrides && acceptsCoverageDebt(reading.overrides, metric)
+        ) {
+          pending.delete(metric);
+        }
       }
     }
+
+    const settled = pending.size === 0 || runsRead >= maxRunsRead;
+    page = settled || options.olderRuns === undefined
+      ? null
+      : await options.olderRuns();
   }
 
   for (const [metric, sample] of coldFallback) {
@@ -434,10 +631,10 @@ export async function walkBaselineRuns(
 }
 
 /**
- * The order the walk reads runs in: the run for the base-branch commit itself
- * first, then its ancestors from nearest to furthest, and runs whose commit is
- * not an ancestor left out entirely. Two runs for one commit read oldest first,
- * matching how a ranked search settles that tie.
+ * The order the walk reads one page of runs in: the run for the base-branch
+ * commit itself first, then its ancestors from nearest to furthest, and runs
+ * whose commit is not an ancestor left out entirely. Two runs for one commit
+ * read oldest first, matching how a ranked search settles that tie.
  *
  * Ranking rather than trusting the order the runs arrive in matters because the
  * walk takes the first answer it finds and stops. Run creation follows the push
@@ -555,6 +752,9 @@ export interface SelectBaselinesOptions {
   /** Recent `main` runs, newest first. */
   runs: WorkflowRun[];
 
+  /** Reads the next older page of `main` runs; see the walk's option. */
+  olderRuns?: () => Promise<WorkflowRun[] | null>;
+
   /** Reads one baseline run; called only for the runs the walk reaches. */
   readRun: (run: WorkflowRun) => Promise<BaselineRunReading>;
 
@@ -611,9 +811,12 @@ export async function selectBaselines(
     () => fetchRanks(baseSha),
   );
 
+  const olderRuns = options.olderRuns;
   const baselines = await walkBaselineRuns({
     metrics: options.metrics,
     runs: options.runs,
+    olderRuns: olderRuns &&
+      (() => guard("reading an older page of the run listing", olderRuns)),
     readRun: options.readRun,
     ancestorRank,
   });
@@ -756,57 +959,6 @@ export async function fetchArtifactsForRunBestEffort(
     warn(`  Warning: could not fetch artifacts for run ${run.id}: ${error}`);
     return [];
   }
-}
-
-export async function fetchBaselineRunsForCheck(
-  artifact: PerfMetricsArtifact,
-  baselineRunCount = BASELINE_RUNS,
-  log: (message: string) => void = console.log,
-): Promise<{ mainHeadSha: string; baselineRuns: WorkflowRun[] }> {
-  log("Fetching current main branch head...");
-  const mainHeadSha = await githubApiOrSkip(
-    "fetching current main branch head",
-    () => fetchMainHeadSha(),
-    artifact,
-  );
-  log(`Current main head is ${mainHeadSha}.`);
-  log("Fetching recent main-branch runs for baseline...");
-  const baselineData = await githubApiOrSkip(
-    "fetching recent main-branch runs for baseline",
-    () =>
-      githubGet<{ workflow_runs: WorkflowRun[] }>(
-        workflowRunsPathForBaseline(baselineRunCount),
-      ),
-    artifact,
-  );
-  return { mainHeadSha, baselineRuns: baselineData.workflow_runs };
-}
-
-export function reportBaselineRunAvailability(
-  baselineRuns: WorkflowRun[],
-  mainHeadSha: string,
-  warn: (message: string) => void = console.warn,
-): BaselineMainHeadValidation {
-  const baselineMainHead = validateBaselineRunsForMainHead(
-    baselineRuns,
-    mainHeadSha,
-  );
-  if (!baselineMainHead.ok) {
-    warn(
-      "Warning: newest successful baseline run is not for the current main head.",
-    );
-    for (const issue of baselineMainHead.issues) {
-      warn(`  Warning: ${issue}`);
-    }
-  }
-
-  if (baselineRuns.length === 0) {
-    warn(
-      "  Warning: no baseline runs available; coverage debt will bootstrap from this run.",
-    );
-  }
-
-  return baselineMainHead;
 }
 
 export interface BuildBaselineRunContextOptions {
@@ -1218,6 +1370,22 @@ export interface CoverageRows {
 
   /** Groups whose baseline could not be held against this run. */
   ungatedGroups: Set<string>;
+
+  /**
+   * The subset of those groups the gate applied to, each with why it went
+   * ungated: the groups where a regression would have passed unseen. A group
+   * the pull request left alone is not one, since it is never gated, and
+   * neither is one whose debt the description accepted.
+   */
+  notGated: CoverageNotGatedGroup[];
+}
+
+/** Why a metric the gate applied to was held against no baseline. */
+function notGatedReason(
+  baseline: MetricBaseline | undefined,
+): CoverageNotGatedReason {
+  if (baseline?.baseSha === undefined) return "no-base-commit";
+  return baseline.sample === undefined ? "no-baseline" : "base-branch-moved";
 }
 
 /**
@@ -1239,6 +1407,7 @@ export function buildCoverageRows(
   const rows: Row[] = [];
   const failures: Row[] = [];
   const ungatedGroups = new Set<string>();
+  const notGated: CoverageNotGatedGroup[] = [];
 
   for (const [metric, currentSample] of options.currentMetrics) {
     const current = currentSample.uncoveredLines;
@@ -1258,12 +1427,23 @@ export function buildCoverageRows(
     const acceptedRise = options.overrides.metrics.get(metric);
     const coverageReset = options.overrides.coverageBaselineReset;
     const comparable = resolvedBaseline?.comparable ?? false;
-    if (!comparable) {
-      const group = coverageMetricGroupName(metric);
-      if (group !== null) ungatedGroups.add(group);
-    }
-    const shouldGateCoverage = comparable &&
-      shouldGateCoverageDebtMetric(metric, options.changedCoverageGroups);
+    const group = coverageMetricGroupName(metric);
+    if (!comparable && group !== null) ungatedGroups.add(group);
+    const gateApplies = shouldGateCoverageDebtMetric(
+      metric,
+      options.changedCoverageGroups,
+    );
+    const shouldGateCoverage = comparable && gateApplies;
+    // Called where a row is excluded: a gate that applied and compared nothing
+    // is the state a reader has to be told about.
+    const noteIfNotGated = () => {
+      if (comparable || !gateApplies || group === null) return;
+      notGated.push({
+        group,
+        reason: notGatedReason(resolvedBaseline),
+        baselineSha: baselineSample?.sha,
+      });
+    };
 
     if (latestBaseline === undefined) {
       // With no baseline the ratchet holds the metric to zero, as the gating
@@ -1274,6 +1454,7 @@ export function buildCoverageRows(
         rows.push({ ...measured, status: "ovrd" });
       } else if (!shouldGateCoverage) {
         rows.push({ ...measured, status: "excl" });
+        noteIfNotGated();
       } else if (current > 0) {
         const row: Row = {
           ...measured,
@@ -1313,6 +1494,7 @@ export function buildCoverageRows(
 
     if (!shouldGateCoverage) {
       rows.push({ ...measured, status: "excl", ...stats });
+      noteIfNotGated();
       continue;
     }
 
@@ -1325,7 +1507,7 @@ export function buildCoverageRows(
     }
   }
 
-  return { rows, failures, ungatedGroups };
+  return { rows, failures, ungatedGroups, notGated };
 }
 
 export function printMetricTable(rows: Row[], includeStatus = false): void {
@@ -1511,10 +1693,14 @@ function coverageCommentOutputPath(): string {
 
 /**
  * Decide and write the coverage-debt comment payload for a PR. A coverage
- * regression writes a "regressed" body; an acceptable run writes a "resolved"
+ * regression writes a "regressed" body; a run that held a changed group against
+ * no baseline writes an "ungated" one; any other run writes a "resolved"
  * payload so the poster can collapse any earlier comment. Done for every real PR
  * run, pass or fail, so a fixed regression is reflected even when the run still
  * fails for other reasons.
+ *
+ * A regression comes first because it is what the author has to act on, and the
+ * run after the fix reports whatever is still ungated then.
  */
 export async function writeCoverageComment(
   prNumber: number,
@@ -1522,6 +1708,7 @@ export async function writeCoverageComment(
   coverageRows: Row[],
   prFiles: PRFile[],
   lcov: string,
+  notGated?: CoverageNotGatedInput,
 ): Promise<void> {
   if (coverageFailures.length > 0) {
     await writeCoverageDebtSuggestion(
@@ -1530,22 +1717,51 @@ export async function writeCoverageComment(
       prFiles,
       lcov,
     );
+  } else if (notGated !== undefined && notGated.groups.length > 0) {
+    await writeCoverageNotGated(prNumber, notGated);
   } else {
     await writeCoverageResolved(prNumber, coverageRows, prFiles, lcov);
   }
 }
 
 /**
- * Where the failing counts were measured. Every row comes from the same run
+ * Writes the "ungated" coverage-comment payload, for the poster to post or to
+ * rewrite the pull request's one coverage comment with. Never throws — this is
+ * best-effort, like the regression path.
+ */
+export async function writeCoverageNotGated(
+  prNumber: number,
+  notGated: CoverageNotGatedInput,
+): Promise<void> {
+  try {
+    const payload: CoverageCommentPayload = {
+      prNumber,
+      state: "ungated",
+      body: buildCoverageNotGatedComment(notGated),
+    };
+    const outputFile = coverageCommentOutputPath();
+    await Deno.writeTextFile(outputFile, JSON.stringify(payload, null, 2));
+    console.log(
+      `Wrote ${outputFile} (not gated) for PR #${prNumber}; the coverage-comment workflow will post or update it.`,
+    );
+  } catch (error) {
+    console.warn(
+      `  Warning: could not write the not-gated coverage comment for PR #${prNumber}: ${error}`,
+    );
+  }
+}
+
+/**
+ * Where the counts in `rows` were measured. Every row comes from the same run
  * and the same base-branch commit, so the first row that names each speaks for
  * all of them, and a row that names neither leaves both out.
  */
-function measurementFromFailures(failures: Row[]): CoverageMeasurement {
-  const runId = failures.find((failure) => failure.measuredRunId !== undefined)
+function measurementFromRows(rows: Row[]): CoverageMeasurement {
+  const runId = rows.find((row) => row.measuredRunId !== undefined)
     ?.measuredRunId;
   return {
     runUrl: runId === undefined ? undefined : workflowRunUrl(runId),
-    baseSha: failures.find((failure) => failure.baseSha)?.baseSha,
+    baseSha: rows.find((row) => row.baseSha)?.baseSha,
   };
 }
 
@@ -1656,7 +1872,7 @@ export async function buildUnattributedRegressionBody(
       baseline: baselineByGroup.get(group.group),
     })),
     files,
-    measurement: measurementFromFailures(options.coverageFailures),
+    measurement: measurementFromRows(options.coverageFailures),
   });
 }
 
@@ -1893,6 +2109,212 @@ export async function writeCoverageResolved(
 }
 
 //
+// Reporting an outcome
+//
+
+/** Escapes the message of a workflow command the way the runner reads it. */
+function escapeCommandMessage(value: string): string {
+  return value.replaceAll("%", "%25").replaceAll("\r", "%0D")
+    .replaceAll("\n", "%0A");
+}
+
+/**
+ * Formats a workflow command that GitHub Actions turns into an annotation on
+ * the run's page and on the pull request's checks. Outside Actions it is an
+ * ordinary log line.
+ */
+export function workflowAnnotation(
+  level: "warning" | "error",
+  title: string,
+  message: string,
+): string {
+  const property = escapeCommandMessage(title).replaceAll(":", "%3A")
+    .replaceAll(",", "%2C");
+  return `::${level} title=${property}::${escapeCommandMessage(message)}`;
+}
+
+/**
+ * Appends Markdown to the job summary GitHub Actions shows on the run's page.
+ * Does nothing outside Actions, where no summary file is named, and never
+ * throws: the summary repeats what the log already says.
+ */
+export async function appendJobSummary(
+  markdown: string,
+  warn: (message: string) => void = console.warn,
+): Promise<void> {
+  const file = Deno.env.get("GITHUB_STEP_SUMMARY");
+  if (!file) return;
+
+  try {
+    await Deno.writeTextFile(file, `${markdown}\n`, { append: true });
+  } catch (error) {
+    warn(`  Warning: could not write the job summary: ${error}`);
+  }
+}
+
+/**
+ * Says in the log, loudly, that the gate held one or more changed source groups
+ * against no baseline, and annotates the run with it. Says nothing when every
+ * group the gate applied to was compared.
+ */
+export function reportNotGated(
+  notGated: CoverageNotGatedInput,
+  log: (message: string) => void = console.log,
+): void {
+  if (notGated.groups.length === 0) return;
+
+  const groups = notGated.groups.map((group) => group.group).sort();
+  log(
+    "\n!!!" +
+      `\n!!! COVERAGE WAS NOT GATED for ${groups.length} changed source ` +
+      `group(s): ${groups.join(", ")} !!!` +
+      "\n!!!\n",
+  );
+  for (const line of coverageNotGatedNotice(notGated)) log(line);
+  log(
+    workflowAnnotation(
+      notGated.failed ? "error" : "warning",
+      COVERAGE_NOT_GATED_HEADLINE,
+      `No baseline was held against: ${groups.join(", ")}. ` +
+        "See the Coverage Check job's summary for why.",
+    ),
+  );
+}
+
+/** The line a run that failed nothing ends its log on. */
+export function coverageOutcomeLine(notGated: CoverageNotGatedGroup[]): string {
+  if (notGated.length === 0) {
+    return "Coverage debt within the ratchet for every changed group.";
+  }
+  return `Coverage debt was NOT gated for ${
+    notGated.map((group) => group.group).sort().join(", ")
+  }; every other changed group is within the ratchet.`;
+}
+
+/** What the job summary reports: the rows scored, and what went ungated. */
+export interface CoverageJobSummaryInput {
+  /** Every metric's row; the summary tables the ones that were compared. */
+  rows: Row[];
+
+  /** The subset of `rows` that fails the gate. */
+  failures: Row[];
+
+  /** The changed groups the gate compared against nothing. */
+  notGated: CoverageNotGatedGroup[];
+
+  /** The run that measured the rows, and the base-branch commit it merged. */
+  measurement?: CoverageMeasurement;
+
+  /** True when the ungated state failed the job; see the comment's input. */
+  failed?: boolean;
+}
+
+/**
+ * Builds the job summary: whether the gate compared anything, what regressed,
+ * and where each source group it compared or accepted ended up.
+ */
+export function buildCoverageJobSummary(
+  input: CoverageJobSummaryInput,
+): string {
+  const out: string[] = ["## Coverage Check", ""];
+
+  if (input.notGated.length > 0) {
+    out.push(`### ⚠️ ${COVERAGE_NOT_GATED_HEADLINE}`, "");
+    out.push(
+      ...coverageNotGatedNotice({
+        groups: input.notGated,
+        measurement: input.measurement,
+        failed: input.failed ?? false,
+      }),
+      "",
+    );
+  }
+
+  if (input.failures.length > 0) {
+    out.push(
+      `### Coverage debt regressed in ${input.failures.length} source group(s)`,
+      "",
+    );
+  } else if (input.notGated.length === 0) {
+    out.push(
+      "Coverage debt is within the ratchet for every changed group.",
+      "",
+    );
+  }
+
+  const compared = input.rows.filter((row) =>
+    row.status === "OVER" || row.status === "OK" || row.status === "ovrd"
+  );
+  if (compared.length > 0) {
+    out.push("| Status | Baseline | This run | Change | Source group |");
+    out.push("| --- | ---: | ---: | ---: | --- |");
+    for (const cells of metricTableRows(compared, true)) {
+      out.push(`| ${cells.join(" | ")} |`);
+    }
+    out.push("");
+  }
+
+  return out.join("\n");
+}
+
+/**
+ * Ends a check whose run listing is not current. No `main` run found through
+ * such a listing can be trusted, so nothing is compared. A pull request the
+ * gate applies to fails, because reading the listing again is the remedy and a
+ * pass would say its coverage had been checked. A run the gate compares nothing
+ * for passes with the warning: a `main` run, a pull request that changed no
+ * source group, and one whose description resets the baseline.
+ */
+async function reportListingNotCurrent(
+  input: CoverageRatchetInput,
+  listing: BaselineRunListing,
+): Promise<number> {
+  const groups: CoverageNotGatedGroup[] = input.prOverrides
+      .coverageBaselineReset
+    ? []
+    : [...input.perfArtifact.metrics.keys()]
+      .filter((metric) =>
+        shouldGateCoverageDebtMetric(metric, input.changedCoverageGroups)
+      )
+      .map((metric) => coverageMetricGroupName(metric))
+      .filter((group): group is string => group !== null)
+      .sort()
+      .map((group) => ({ group, reason: "listing-not-current" as const }));
+
+  if (input.prNumber === null || groups.length === 0) {
+    console.warn(
+      "  Warning: skipping the baseline comparison, which this run would " +
+        "not have been gated on.",
+    );
+    return 0;
+  }
+
+  const notGated: CoverageNotGatedInput = {
+    groups,
+    measurement: { runUrl: workflowRunUrl(input.currentRunId) },
+    failed: true,
+  };
+  reportNotGated(notGated, console.error);
+  await writeCoverageNotGated(input.prNumber, notGated);
+  await appendJobSummary(
+    buildCoverageJobSummary({
+      rows: [],
+      failures: [],
+      notGated: groups,
+      measurement: notGated.measurement,
+      failed: true,
+    }),
+  );
+  console.error(
+    "\nFailing because the workflow's run listing is not current, so no " +
+      `baseline it named can be trusted (newest: ${
+        describeRun(listing.newest)
+      }). Re-run this job to read the listing again.`,
+  );
+  return 1;
+}
+
+//
 // Main
 //
 
@@ -2100,21 +2522,95 @@ export async function main() {
     Deno.exit(1);
   }
 
-  // 3. Fetch recent main-branch push runs for baseline
-  const { mainHeadSha, baselineRuns } = await fetchBaselineRunsForCheck(
+  Deno.exit(
+    await runCoverageRatchet({
+      prNumber: prNumber ? parseInt(prNumber) : null,
+      currentRunId: runIdNum,
+      perfArtifact,
+      prOverrides,
+      changedCoverageGroups,
+      prFiles,
+      coverageLcov,
+    }),
+  );
+}
+
+/** What {@link runCoverageRatchet} holds against the baselines, and how. */
+export interface CoverageRatchetInput {
+  /** The pull request under check, or null for an informational `main` run. */
+  prNumber: number | null;
+
+  /** The run this check belongs to, which a current run listing shows. */
+  currentRunId: number;
+
+  /** What this run measured, and the compile cache states stamped on it. */
+  perfArtifact: PerfMetricsArtifact;
+
+  /** What the pull request description accepts. */
+  prOverrides: BaselineOverrides;
+
+  /** Undefined when the PR's changed files could not be read. */
+  changedCoverageGroups: Set<string> | undefined;
+
+  /** The files the pull request changed, for attributing a regression. */
+  prFiles: PRFile[];
+
+  /** This run's combined LCOV report, for attributing a regression. */
+  coverageLcov: string;
+
+  /** Reads the workflow's run listing; `readBaselineRunListing()` by default. */
+  readListing?: (
+    options: ReadBaselineRunListingOptions,
+  ) => Promise<BaselineRunListing>;
+
+  /** Reads one baseline run; from its artifacts and merged PR by default. */
+  readBaselineRun?: (run: WorkflowRun) => Promise<BaselineRunReading>;
+
+  /** How the base-branch commit, its ancestry and its changes are read. */
+  baselineReads?: Pick<
+    SelectBaselinesOptions,
+    "readBaseSha" | "fetchRanks" | "fetchChangedGroups"
+  >;
+}
+
+/**
+ * Holds what this run measured against its ratchet baselines, reports the
+ * result to the log, the job summary and the pull request comment, and returns
+ * the exit code the job ends on.
+ *
+ * A changed source group regressing fails a pull request, and so does a run
+ * listing that is not current, since no baseline found through one can be
+ * trusted. A changed group with no comparable baseline passes, and says so on
+ * every surface it reports to. A `main` run is informational and always passes.
+ */
+export async function runCoverageRatchet(
+  input: CoverageRatchetInput,
+): Promise<number> {
+  const { prNumber, perfArtifact, prOverrides, changedCoverageGroups } = input;
+  const currentMetrics = perfArtifact.metrics;
+  const currentCacheStates = perfArtifact.compileCacheStates ?? {};
+  const informationalOnly = prNumber === null;
+  const readListing = input.readListing ?? readBaselineRunListing;
+
+  // 3. Read the workflow's run listing, which is where a `main` run is found by
+  // the commit it measured.
+  const listing = await githubApiOrSkip(
+    "reading the workflow's run listing",
+    () => readListing({ currentRunId: input.currentRunId }),
     perfArtifact,
   );
-  reportBaselineRunAvailability(baselineRuns, mainHeadSha);
+  reportBaselineRunListing(listing, input.currentRunId);
 
-  console.log(
-    `Scanning up to ${baselineRuns.length} main-branch runs for the baseline.`,
-  );
+  if (!listing.current) {
+    return await reportListingNotCurrent(input, listing);
+  }
 
-  // 4. Read recent main runs, newest first, until every metric has a ratchet
-  // baseline. A run's artifacts, compile cache state and merged-PR acceptances
-  // are fetched only when the walk reaches it, so a run whose newest baseline
-  // serves every metric reads one run rather than all of them.
-  const runsNewestFirst = [...baselineRuns].sort((a, b) =>
+  // 4. Read `main` runs, nearest the base-branch commit first, until every
+  // metric has a ratchet baseline. A run's artifacts, compile cache state and
+  // merged-PR acceptances are fetched only when the walk reaches it, so a run
+  // whose nearest baseline serves every metric reads one run rather than all of
+  // them.
+  const runsNewestFirst = [...listing.candidates].sort((a, b) =>
     b.created_at.localeCompare(a.created_at) || b.id - a.id
   );
 
@@ -2131,42 +2627,45 @@ export async function main() {
   const visitedContexts: BaselineRunContext[] = [];
   let acceptingRuns = 0;
 
-  const readBaselineRun = (run: WorkflowRun): Promise<BaselineRunReading> =>
-    githubApiOrSkip("reading a baseline run", async () => {
-      const context = await buildBaselineRunContext({ run });
-      visitedContexts.push(context);
+  const readBaselineRun = input.readBaselineRun ??
+    ((run: WorkflowRun): Promise<BaselineRunReading> =>
+      githubApiOrSkip("reading a baseline run", async () => {
+        const context = await buildBaselineRunContext({ run });
+        visitedContexts.push(context);
 
-      const baseline = await parseCoverageBaselineFromArtifacts(
-        context.artifacts,
-      );
-      if (baseline?.compileCacheStates) {
-        cacheStatesByRunId.set(run.id, baseline.compileCacheStates);
-      }
+        const baseline = await parseCoverageBaselineFromArtifacts(
+          context.artifacts,
+        );
+        if (baseline?.compileCacheStates) {
+          cacheStatesByRunId.set(run.id, baseline.compileCacheStates);
+        }
 
-      const overrides = context.pr
-        ? parseMergedBaselineOverrides(context.pr)
-        : null;
-      if (
-        overrides &&
-        (overrides.metrics.size > 0 || overrides.coverageBaselineReset)
-      ) {
-        acceptingRuns++;
-      }
+        const overrides = context.pr
+          ? parseMergedBaselineOverrides(context.pr)
+          : null;
+        if (
+          overrides &&
+          (overrides.metrics.size > 0 || overrides.coverageBaselineReset)
+        ) {
+          acceptingRuns++;
+        }
 
-      return {
-        samples: baseline?.metrics ?? new Map(),
-        overrides,
-        cold: isRunCold(run.id),
-      };
-    }, perfArtifact);
+        return {
+          samples: baseline?.metrics ?? new Map(),
+          overrides,
+          cold: isRunCold(run.id),
+        };
+      }, perfArtifact));
 
   // 5. Compare the current run's coverage debt against the ratchet baseline.
 
   // Reported in `finally` so a baseline run that could not be read still says
   // which runs it got to before it gave up.
   const baselineByMetric = await selectBaselines({
+    ...input.baselineReads,
     metrics: [...currentMetrics.keys()],
     runs: runsNewestFirst,
+    olderRuns: listing.older,
     readRun: readBaselineRun,
     isPullRequest: prNumber !== null,
     guard: (description, operation) =>
@@ -2183,14 +2682,16 @@ export async function main() {
     (baseline) => baseline.sample !== undefined,
   );
 
-  const { rows, failures, ungatedGroups } = buildCoverageRows({
+  const { rows, failures, ungatedGroups, notGated } = buildCoverageRows({
     currentMetrics,
     baselineByMetric,
     overrides: prOverrides,
     changedCoverageGroups,
   });
+  const measurement = measurementFromRows(rows);
 
   reportUngatedGroups(ungatedGroups);
+  reportNotGated({ groups: notGated, measurement, failed: false });
 
   // 6. Report results
 
@@ -2287,23 +2788,27 @@ export async function main() {
   // (fork PRs get a read-only token on pull_request and cannot comment here).
   // Done before the exit branches so it runs whether the run passes or fails for
   // other reasons.
-  if (prNumber) {
+  if (prNumber !== null) {
     await writeCoverageComment(
-      parseInt(prNumber),
+      prNumber,
       failures,
       rows,
-      prFiles,
-      coverageLcov,
+      input.prFiles,
+      input.coverageLcov,
+      { groups: notGated, measurement, failed: false },
+    );
+    await appendJobSummary(
+      buildCoverageJobSummary({ rows, failures, notGated, measurement }),
     );
   }
 
   if (failures.length === 0) {
-    console.log("\nCoverage debt within the ratchet for every changed group.");
-    Deno.exit(0);
+    console.log(`\n${coverageOutcomeLine(notGated)}`);
+    return 0;
   } else if (informationalOnly) {
     console.log("\nOne or more changed groups regressed coverage debt.");
     console.log("This build would fail if it were a PR.");
-    Deno.exit(0);
+    return 0;
   }
 
   const verb = coverageBaselineAvailable ? "reset" : "bootstrap";
@@ -2321,7 +2826,7 @@ export async function main() {
   }
   console.log("---END COPY-PASTE---");
 
-  Deno.exit(1);
+  return 1;
 }
 
 if (import.meta.main) {
