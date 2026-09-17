@@ -1073,10 +1073,13 @@ option of `MarkInvalidOptions`; the §7.7 backoff stays). The refused run left
 nothing durable and its wait was its delay. Held behind the debounce, such a
 retry would count as a deferred re-run of an already-ran computation, which is
 not idle work and gets its expiry wake only from a live demander — a one-shot
-`pull()` has none once it resolves, so the retry would never run. A re-queue
-that waited on
-nothing (a local inconsistency, a transport error) keeps its gates: there the
-debounce is the spacing between the re-run and the local writer it raced.
+`pull()` has none once it resolves, so the retry would never run. An empty
+reactive commit rejected for changed scheduling dependencies also releases
+debounce and throttle: it owes the pull a computation over current inputs.
+Its validation compares only the deep and shallow reads that wake the node,
+so unrelated document changes do not cause retries. Other local
+inconsistencies and transport errors keep their gates: there the debounce is
+the spacing between the re-run and the local writer it raced.
 
 ### 8.4 One wake timer
 

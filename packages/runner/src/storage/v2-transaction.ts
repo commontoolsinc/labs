@@ -3338,8 +3338,8 @@ export class V2StorageTransaction implements IStorageTransaction {
    * rejecting that stale snapshot lets its normal retry observe the change.
    */
   #finishEmptyCommit(): Result<Unit, CommitError> {
-    if ((this as IStorageTransaction).sourceAction !== undefined) {
-      const validation = this.#validate();
+    if ((this as IStorageTransaction).validateReactiveReads) {
+      const validation = this.#validateReactiveReads();
       if (validation.error) {
         // Retain the read activity so the scheduler can subscribe and retry.
         this.#state = { status: "done", result: validation };
@@ -3349,6 +3349,60 @@ export class V2StorageTransaction implements IStorageTransaction {
     const result = { ok: {} } satisfies Result<Unit, CommitError>;
     this.#finish(result);
     return result;
+  }
+
+  /** Checks exactly the deep and shallow reads that wake a reactive run. */
+  #validateReactiveReads(): Result<Unit, IStorageTransactionInconsistent> {
+    const routes = this.validateReplicaRoutes();
+    if (routes.error) return routes;
+    const log = this.getReactivityLog();
+    for (
+      const [reads, shallow] of [
+        [log.reads, false],
+        [log.shallowReads, true],
+      ] as const
+    ) {
+      for (const address of reads) {
+        const branch = this.#branches.get(address.space)!;
+        const doc = branch.docs.get(this.#docKey(address))!;
+        const replica = branch.replica;
+        const current = toTransactionDocumentValue(
+          isDurableReadTx(this) && replica.getNonSpeculativeDocument
+            ? replica.getNonSpeculativeDocument(
+              address.id,
+              address.scope,
+              this.#scopeKeyIdentity,
+            )
+            : replica.getDocument(
+              address.id,
+              address.scope,
+              this.#scopeKeyIdentity,
+            ),
+        );
+        const expected = readValueAtPath(doc.initial.value, address.path, {
+          allowArrayLength: true,
+        });
+        const actual = readValueAtPath(current, address.path, {
+          allowArrayLength: true,
+        });
+        if (
+          shallow
+            ? shallowStructureChanged(expected, actual)
+            : !valueEqual(expected, actual)
+        ) {
+          return {
+            error: StateInconsistency({
+              address,
+              space: address.space,
+              expected,
+              actual,
+              emptyReactiveCommit: true,
+            }),
+          };
+        }
+      }
+    }
+    return { ok: {} };
   }
 
   /**

@@ -1107,8 +1107,9 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   / the transaction-layer kick / `ensureLinkedDocLoaded` / the served
   event's presync+preflight as its actor); the writer and
   materializer indexes are NAME-keyed by design (the one fan-in);
-  the N-run loop resubscribes once to the union of its instance logs
-  (the last-instance-wins replacement gone); S4 keys basis rows by
+  the N-run loop resubscribes to the union of its instance logs after
+  each instance (including while later instances run, pinned by
+  `scheduler-empty-reactive-reads.test.ts`); S4 keys basis rows by
   the run's FULL instance address and clears the stranded stamp and
   broader-chain keys in both directions (the RAGGED amendment,
   scopes.md §2 — narrowing below the space→user hop is per

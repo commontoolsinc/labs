@@ -135,13 +135,16 @@ path of `v2-transaction.ts`, and the local rejection is
 retryable. The two forms are equivalent in what reaches the server; they
 differ in when a change under an open transaction is discovered.
 
-A reactive run also checks its snapshots when it has no effective writes,
-before accepting an empty commit or seal. Its caller installs the run's read
-subscriptions at commit time; a change that arrived before those subscriptions
-must reject the stale run so the scheduler recomputes it. An unchanged output
-does not establish that the inputs are current. An empty transaction without a
-`sourceAction` can finish without this check because it has no reactive result
-to keep current.
+A reactive computation opts into `validateReactiveReads`, which checks its
+scheduling dependencies before accepting an empty commit or seal. Deep reads
+compare the value at the read path; shallow reads compare container structure.
+Changes to unrelated fields do not reject an empty computation. The scheduler
+installs subscriptions in the same synchronous turn, including the union of
+instance reads after each fan-out instance, so changes during later instances
+remain observed. A rejected empty computation carries `emptyReactiveCommit`
+and retries past debounce and throttle to finish a one-shot pull's work.
+Event handlers also carry `sourceAction`, but do not opt into this check:
+their empty commits retain ordinary completion and post-commit effects.
 
 ## 3.4 Commit Structure
 

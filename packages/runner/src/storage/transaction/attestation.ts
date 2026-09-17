@@ -407,6 +407,7 @@ export const StateInconsistency = (source: {
   expected?: FabricValue;
   actual?: FabricValue;
   space?: MemorySpace;
+  emptyReactiveCommit?: true;
 }): IStorageTransactionInconsistent => {
   const { address, space, expected, actual } = source;
   const message = [
@@ -424,6 +425,9 @@ export const StateInconsistency = (source: {
     name: "StorageTransactionInconsistent",
     message,
     address,
+    ...(source.emptyReactiveCommit
+      ? { emptyReactiveCommit: true as const }
+      : {}),
     from(newSpace: MemorySpace) {
       return StateInconsistency({
         ...source,

@@ -1139,10 +1139,15 @@ export interface IStorageTransaction {
    * P5). Change records derived from this transaction must not re-trigger this
    * action. Compared by OBJECT IDENTITY — diagnostic action ids may collide
    * across instances.
-   * Reactive transactions validate their local read snapshots even when their
-   * writes are all no-ops, so a change preceding subscription setup retries.
    */
   sourceAction?: object;
+
+  /**
+   * Check scheduling dependencies before accepting an empty commit or seal.
+   * Set by reactive computations, whose subscriptions must cover changes since
+   * their reads. Event handlers retain ordinary empty-commit behavior.
+   */
+  validateReactiveReads?: boolean;
 
   /**
    * The scope INSTANCE identity this transaction's scoped reads and writes
@@ -2567,6 +2572,9 @@ export interface IStorageTransactionInconsistent extends IStorageError {
   readonly name: "StorageTransactionInconsistent";
 
   readonly address: IMemoryAddress;
+
+  /** An empty reactive commit needs a fresh run past debounce and throttle. */
+  readonly emptyReactiveCommit?: true;
 
   from(space: MemorySpace): IStorageTransactionInconsistent;
 }
