@@ -138,6 +138,7 @@ import { type LastNode, resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,
   createSigilLinkFromParsedLink,
+  declareStreamSchema,
   isCellLink,
   KeepAsCell,
   type NormalizedFullLink,
@@ -3269,6 +3270,19 @@ export class CellImpl<T extends FabricValue>
     return this.#link;
   }
 
+  /**
+   * The link a serialized reference to this cell is built from. A stream
+   * handle's own link carries the event schema, and what says it is a stream
+   * is the handle's kind, which a reference does not carry. The reference
+   * outlives the handle, and the document it names holds nothing, so the
+   * declaration goes onto the reference's schema.
+   */
+  #linkForReference(): NormalizedFullLink {
+    return this.#kind === "stream"
+      ? { ...this.#link, schema: declareStreamSchema(this.#link.schema) }
+      : this.#link;
+  }
+
   getAsLink(
     options?: {
       base?: Cell<any>;
@@ -3277,7 +3291,7 @@ export class CellImpl<T extends FabricValue>
       keepAsCell?: KeepAsCell;
     },
   ): SigilLink {
-    return createSigilLinkFromParsedLink(this.#link, {
+    return createSigilLinkFromParsedLink(this.#linkForReference(), {
       ...options,
       overwrite: "this",
     });
@@ -3291,7 +3305,7 @@ export class CellImpl<T extends FabricValue>
       keepAsCell?: KeepAsCell;
     },
   ): SigilWriteRedirectLink {
-    return createSigilLinkFromParsedLink(this.#link, {
+    return createSigilLinkFromParsedLink(this.#linkForReference(), {
       ...options,
       overwrite: "redirect",
     }) as SigilWriteRedirectLink;

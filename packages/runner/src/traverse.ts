@@ -71,7 +71,10 @@ import type {
   SchemaScope,
 } from "./builder/types.ts";
 import { isOpaqueReference, opaqueReference } from "./back-to-cell.ts";
-import { ContextualFlowControl } from "./cfc.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
 import { cfcEnvelopeLabelDocumentHashes } from "./cfc/label-documents.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
@@ -3047,6 +3050,13 @@ export function combineSchema(
  * reader's (including a default-only reader's, which is otherwise a true
  * schema) stands.
  *
+ * A stream declaration crosses it as well, whole. A reader's shape describes
+ * the value it expects at the target, and a stream's document holds none, so
+ * a shape that does not itself declare the stream has nothing there to
+ * describe: read as it stands, it finds the position empty and drops it, and
+ * whatever requires it with it. The link's declaration is the only thing that
+ * says what the position is, so it governs, and the reader gets the stream.
+ *
  * A discarded link schema's `ifc` does NOT ride onto the result. Write
  * policy consumes declared schemas verbatim (`recordSchemaWritePolicyInput`),
  * so transplanting flow-control clauses between schemas corrupts the
@@ -3073,6 +3083,20 @@ export function combineSchemaForLink(
   }
   if (ContextualFlowControl.isFalseSchema(parentSchema)) {
     return parentSchema;
+  }
+  // A link that declares a stream governs a shaped reader that does not: the
+  // target holds no value for the reader's shape to describe. A true reader
+  // adopts the link schema below in any case. The declaration is handed on
+  // in its structural form, since a link's schema can be a content-addressed
+  // reference and what follows reads `asCell` off the schema it is given.
+  if (
+    !ContextualFlowControl.isTrueSchema(parentSchema) &&
+    ContextualFlowControl.declaresStream(linkSchema) &&
+    !ContextualFlowControl.declaresStream(parentSchema)
+  ) {
+    return isObjectNotArray(linkSchema)
+      ? resolveExternalRootRefForStructure(linkSchema)
+      : linkSchema;
   }
   // A value's `default` is inherited from the last crossed schema that
   // declares one: each hop's stored schema describes that hop's target, so

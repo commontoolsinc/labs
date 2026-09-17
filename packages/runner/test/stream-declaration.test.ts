@@ -6,9 +6,13 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isStream } from "../src/cell.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
 import {
+  createLLMFriendlyLink,
   getDerivedInternalCell,
   getMetaLink,
+  KeepAsCell,
+  ownerDeclaresStream,
   parseLink,
 } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -171,6 +175,117 @@ describe("stream declaration", () => {
     (pick as unknown as { send: (event: unknown) => void }).send({ id: "a" });
     await cell.pull();
     expect(cell.key("picked").get()).toEqual(["a"]);
+  });
+
+  it("keeps a handle re-created from its serialized reference a stream", async () => {
+    // A client holds a stream as the reference the handle serialized to, and
+    // sends by re-creating a cell from it: nothing of the handle's kind
+    // survives the trip, only the reference's schema.
+    const { cell } = await runProgram(COUNTER, "counter-reference");
+    const view = cell.asSchema({
+      type: "object",
+      properties: {
+        count: { type: "number" },
+        bump: { asCell: ["stream"] },
+      },
+    }).get() as unknown as { bump: Cell<unknown> };
+    const reference = view.bump.getAsLink({
+      includeSchema: true,
+      keepAsCell: KeepAsCell.All,
+    });
+
+    const recreated = rt.getCellFromLink(parseLink(reference, cell)!);
+    expect(isStream(recreated)).toBe(true);
+    const before = countOf(cell);
+    const tx = rt.edit();
+    recreated.withTx(tx).send({});
+    await tx.commit();
+    await cell.pull();
+    expect(countOf(cell)).toBe(before + 1);
+    expect(recreated.getRaw()).toBeUndefined();
+    await rt.storageManager.synced();
+  });
+
+  describe("a reader whose schema types a stream's position as something else", () => {
+    // A consumer that types another piece's handler loosely still reaches it
+    // to send: the link that names a stream declares it whatever shape the
+    // reader brought, since the document behind it holds nothing to shape.
+    for (
+      const [label, position] of [
+        ["`unknown`", { type: "unknown" }],
+        ["an object", { type: "object" }],
+      ] as const
+    ) {
+      it(`hands a reader typing it as ${label} the stream`, async () => {
+        const { cell } = await runProgram(COUNTER, `counter-typed-${label}`);
+        const view = cell.asSchema({
+          type: "object",
+          properties: { count: { type: "number" }, bump: position },
+          required: ["bump"],
+        } as JSONSchema).get() as unknown as { bump: Cell<unknown> };
+
+        expect(view).toBeDefined();
+        expect(isStream(view.bump)).toBe(true);
+        const before = countOf(cell);
+        view.bump.send({});
+        await cell.pull();
+        expect(countOf(cell)).toBe(before + 1);
+        await rt.storageManager.synced();
+      });
+    }
+  });
+
+  describe("an address that names a stream's document alone", () => {
+    const streamDocumentOf = async (cause: string) => {
+      const { pattern, cell } = await runProgram(COUNTER, cause);
+      const descriptor = (pattern.derivedInternalCells ?? []).find((
+        candidate,
+      ) => asCellKindOf(candidate.schema) === "stream");
+      const { id } = getDerivedInternalCell(cell, descriptor!)
+        .getAsNormalizedFullLink();
+      return { cell, bare: rt.getCellFromLink({ id, space, path: [] }) };
+    };
+
+    it("is declared a stream by its owner's manifest", async () => {
+      const { cell, bare } = await streamDocumentOf("counter-bare");
+      // No stored link hop, no caller schema, and nothing in the document.
+      expect(isStream(bare)).toBe(false);
+      expect(ownerDeclaresStream(bare)).toBe(true);
+      // The piece's result document names an owner for nothing.
+      expect(ownerDeclaresStream(cell)).toBe(false);
+    });
+
+    it("is invoked, not read, when a tool call names it", async () => {
+      const { cell, bare } = await streamDocumentOf("counter-tool");
+      const path = createLLMFriendlyLink(
+        bare.getAsNormalizedFullLink(),
+        space,
+      );
+      const catalog = { llmTools: {}, dynamicToolCells: new Map() };
+      const callNamed = (toolName: string) =>
+        llmDialogTestHelpers.resolveToolCall(rt, space, {
+          type: "tool-call",
+          toolCallId: toolName,
+          toolName,
+          input: { path },
+        }, catalog);
+
+      expect(() => callNamed("read")).toThrow("use invoke() instead");
+      const resolved = callNamed("invoke") as unknown as {
+        type: string;
+        handler: Cell<unknown>;
+      };
+      expect(resolved.type).toBe("invoke");
+
+      const before = countOf(cell);
+      const tx = rt.edit();
+      resolved.handler.withTx(tx).send({});
+      await tx.commit();
+      await cell.pull();
+      expect(countOf(cell)).toBe(before + 1);
+      expect(bare.getRaw()).toBeUndefined();
+      await rt.storageManager.synced();
+    });
   });
 
   for (const field of ["viaIfElse", "viaWhen", "viaUnless"] as const) {

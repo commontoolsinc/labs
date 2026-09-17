@@ -420,20 +420,38 @@ export function createSigilLinkFromParsedLink(
  * kinds in. A schema whose front entry is already `stream` is returned as it
  * is. This is the declaration every link to a stream carries, since the
  * document behind a stream holds nothing that says what the position is.
+ *
+ * The result is interned and remembered per input schema, so a stream
+ * serialized again and again hands link serialization the same frozen
+ * schema each time, which is what its own caches key on.
  */
 export function declareStreamSchema(
   schema: JSONSchema | undefined,
 ): JSONSchema {
   if (schema === undefined || schema === true) {
-    return { asCell: ["stream"] };
+    return UNTYPED_STREAM_SCHEMA;
   }
   if (schema === false) {
-    return { not: true, asCell: ["stream"] };
+    return EVENTLESS_STREAM_SCHEMA;
   }
   if (ContextualFlowControl.declaresStream(schema)) return schema;
+  const remembered = declaredStreamSchemas.get(schema);
+  if (remembered !== undefined) return remembered;
   const entries = Array.isArray(schema.asCell) ? schema.asCell : [];
-  return { ...schema, asCell: ["stream", ...entries] };
+  const declared = internSchema({
+    ...schema,
+    asCell: ["stream", ...entries],
+  });
+  declaredStreamSchemas.set(schema, declared);
+  return declared;
 }
+
+const UNTYPED_STREAM_SCHEMA = internSchema({ asCell: ["stream"] });
+const EVENTLESS_STREAM_SCHEMA = internSchema({
+  not: true,
+  asCell: ["stream"],
+});
+const declaredStreamSchemas = new WeakMap<object, JSONSchema>();
 
 /**
  * Controls which `asCell` schema entries survive {@link sanitizeSchemaForLinks}.
@@ -996,4 +1014,35 @@ export function getMetaLink(
   if (linkObj === undefined) return undefined;
   const link = parseLink(linkObj, resultCell);
   return link;
+}
+
+/**
+ * Whether the owner of the document `cell` names declares it a stream.
+ *
+ * A stream's document holds only the `result` back-link setup writes onto
+ * it, so an address that names the document alone says nothing about it:
+ * there is no stored link hop to carry a declaration, and the caller brought
+ * no schema. The declaration is on the owner, in the manifest link its result
+ * document keeps for each derived internal cell, and this follows the
+ * back-link to read it there. A cell below a document's root, or one whose
+ * document names no owner, is declared by no one.
+ */
+export function ownerDeclaresStream(cell: Cell<unknown>): boolean {
+  const target = cell.getAsNormalizedFullLink();
+  if (target.path.length > 0) return false;
+  const ownerLink = getMetaLink(cell, "result");
+  if (ownerLink === undefined) return false;
+  const owner = cell.runtime.getCellFromLink(
+    { ...ownerLink, path: [], schema: undefined },
+    undefined,
+    cell.tx,
+  );
+  const manifest = owner.getMetaRaw("internal", META_READ_OPTIONS);
+  if (!Array.isArray(manifest)) return false;
+  return manifest.some((entry) => {
+    if (!isObjectNotArray(entry)) return false;
+    const link = parseLink(entry.link, owner);
+    return link !== undefined && areNormalizedLinksSame(link, target) &&
+      ContextualFlowControl.declaresStream(link.schema);
+  });
 }

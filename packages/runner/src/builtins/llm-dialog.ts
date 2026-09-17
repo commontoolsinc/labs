@@ -100,6 +100,7 @@ import {
   getMetaLink,
   matchLLMFriendlyLink,
   type NormalizedFullLink,
+  ownerDeclaresStream,
   parseLink,
   parseLLMFriendlyLink,
   sanitizeSchemaForLinks,
@@ -2062,9 +2063,18 @@ function resolveToolCall(
       };
     }
 
+    // A path through a piece's result reaches a handler over a stored link
+    // that declares the stream. A path an observation handed out names the
+    // stream's document itself, which holds nothing and arrives with no
+    // schema, so its owner's manifest says what it is.
+    const resolvedRef = cellRef.resolveAsCell();
+    const namesStreamDocument = !isStream(resolvedRef) &&
+      ownerDeclaresStream(resolvedRef);
+    const targetsStream = namesStreamDocument || isStream(resolvedRef);
+
     if (name === READ_TOOL_NAME) {
       // Get cell reference from the link - works for any valid handle
-      if (isStream(cellRef.resolveAsCell())) {
+      if (targetsStream) {
         throw new Error(`Path resolves to a handler; use invoke() instead.`);
       }
 
@@ -2075,10 +2085,14 @@ function resolveToolCall(
       };
     }
 
-    if (isStream(cellRef.resolveAsCell())) {
+    if (targetsStream) {
       return {
         type: "invoke",
-        handler: cellRef as unknown as Stream<any>,
+        // A send decides stream or write off the handle, so a handle on the
+        // bare document declares the stream itself.
+        handler: (namesStreamDocument
+          ? cellRef.asSchema({ asCell: ["stream"] })
+          : cellRef) as unknown as Stream<any>,
         call: {
           id,
           name,
@@ -2595,6 +2609,7 @@ export const llmDialogTestHelpers = {
   simplifySchemaForContext,
   prepareSchemaForLLM,
   resolveRefsForLLM,
+  resolveToolCall,
   toolAllowsObservedConfidentiality,
 };
 
