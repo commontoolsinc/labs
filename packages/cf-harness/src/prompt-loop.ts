@@ -194,6 +194,7 @@ import {
   researchPatternRecords,
   selectResearchContext,
 } from "./research/context.ts";
+import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
 import { projectHarnessResearchKitForModel } from "./research/model-projection.ts";
 import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
@@ -1447,11 +1448,12 @@ const buildSubagentSystemPrompt = (
         "Use describe_handle on a reference you were given to see its shape before authoring against it. It returns a shape, and for a database its tables and how full each of them is, never the data itself.",
         "The references you were granted are the only data sources this run has, and there is nowhere to look another one up: a task or a part naming data you hold no reference for is not runnable, so return the failure branch naming the input you are missing rather than standing a different reference in its place. Before you build on a source, check what it holds — describe_handle reports each table's rows and how many of them each column is non-NULL on, and a pattern that counts rows settles it where that is absent — because an empty result is data rather than a failure: the query settles, everything derived from it is empty in turn, and nothing reports a problem. A query result also carries an `error`, and a refused read arrives there rather than as rows — a table describe_handle reports `rowLabelReads` for refuses any query that does not select those columns, naming the one it wants — so read `error` before you treat a result as empty, and render what it says instead of an empty state, which would report as a fact about the data something no read established.",
         'To read what the pattern computed, pass run_pattern a `resultSchema` describing the fields you want; without one you get a reference and no value at all. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. Numbers, booleans and enum strings come back as themselves; unconstrained strings and anything the schema does not model are withheld as text and come back as reference tokens addressing those positions, which you can describe_handle or wire into a later pattern. You do not need to declare $NAME or $UI.',
-        `Return the resultRef run_pattern gave you for the pattern you ran last and the one-line \`describes\`${
+        REVISION_VERIFICATION_GUIDANCE,
+        `Return the resultRef of the working piece from run_pattern or revise_piece and the one-line \`describes\`${
           profileConfig.allowedToolIds.includes("search_patterns")
             ? ", plus the `hashtags` you published it under"
             : ""
-        }. Do not return the data, sample rows, counts, names, or any other content read out of the space, and do not return source under any of those names.`,
+        }. A verification probe is separate: return its reference as verificationRef, not as the piece. Do not return the data, sample rows, counts, names, or any other content read out of the space, and do not return source under any of those names.`,
         `When you cannot produce a working pattern — the compile loop does not converge, the task is impossible against the references you hold, or you are running out of turns — return the failure branch of your return schema: {"ok": false, "code": <one of ${
           SUBAGENT_FAILURE_REASON_CODES.join(", ")
         }>} with an optional free-text "detail".`,

@@ -53,6 +53,7 @@ import {
 } from "./host-mounts.ts";
 import { patternRefsContextMessage } from "./pattern-refs.ts";
 import { pieceTargetingContextMessages } from "./piece-targeting.ts";
+import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
 import type { CreateHarnessPromptLoopOptions } from "./prompt-loop.ts";
 import type { DockerRunscAdditionalMountConfig } from "./sandbox/types.ts";
 import { loadHarnessSkillContext } from "./skills/registry.ts";
@@ -435,5 +436,6 @@ const establishContextMessages = async (
   if (patternRefsMessage !== undefined) {
     messages.push(patternRefsMessage);
   }
+  messages.push(REVISION_VERIFICATION_GUIDANCE);
   return messages;
 };
