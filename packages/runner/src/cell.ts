@@ -135,6 +135,7 @@ import {
 } from "./data-uri.ts";
 import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
 import { type LastNode, resolveLink } from "./link-resolution.ts";
+import { areNormalizedLinksSame } from "./link-types.ts";
 import {
   areLinksSame,
   createSigilLinkFromParsedLink,
@@ -1402,13 +1403,29 @@ export class CellImpl<T extends FabricValue>
     }
 
     logger.timeStart("cell", "get");
-    const value = validateAndTransform(
+    const read = validateAndTransform(
       this.runtime,
       this.tx,
       this.#viewRef,
       [],
       { ...options, synced: this.#synced },
     );
+    // A stream holds no value, so a read of a stream handle returns the
+    // stream. The read finds that out rather than assuming it, because the
+    // kind alone does not decide: a union that offers both `cell` and `stream`
+    // hands a stream handle to a position that holds a value, and that value
+    // is what its read returns. Two outcomes say there is none. The read
+    // finds nothing. Or the handle's own schema names a further handle kind
+    // behind the stream's, as a view node's prop schema leaves `opaque`
+    // there, and the read mints that handle on the very location the stream
+    // names: a handle carrying nothing that says stream, whose `send()` would
+    // write the event into the stream's document.
+    const holdsNoValue = read === undefined ||
+      (isCell(read) &&
+        areNormalizedLinksSame(read.getAsNormalizedFullLink(), this.#link));
+    const value = this.#kind === "stream" && holdsNoValue
+      ? this as unknown as typeof read
+      : read;
     const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
       logger.warn(

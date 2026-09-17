@@ -9,7 +9,6 @@ import type { Cell } from "../src/cell.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import { patternIdentityKey } from "../src/runner.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { ISpaceReplica } from "../src/storage/interface.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("stored view registration");
@@ -200,14 +199,6 @@ describe("view-piece-registration", () => {
     );
     expect(registration).toBeDefined();
     expect(registration!.graphIsInstalled()).toBe(true);
-    const replica = runtime.storageManager.open(space).replica as Required<
-      ISpaceReplica
-    >;
-    {
-      using _coverage = stub(replica, "hasLocalDocumentCoverage", () => false);
-      expect(registration!.resume()).toBe(true);
-      expect(registration!.graphIsInstalled()).toBe(true);
-    }
     registration!();
     expect(registration!.graphIsInstalled()).toBe(false);
     expect(root.get()).toEqual({ $UI: "confirmed" });

@@ -417,6 +417,20 @@ const declaredDefault = (schema: JSONSchema): FabricValue | undefined => {
 };
 
 /**
+ * Whether `schema` declares a stream, read the way `declaredDefault` reads a
+ * default: through a `$ref` into the enclosing schema's own `$defs`, which a
+ * child schema carries along. A stream position holds no value, so this is
+ * what stands in for an absent key there.
+ */
+const declaredStream = (schema: JSONSchema): boolean => {
+  if (ContextualFlowControl.declaresStream(schema)) return true;
+  if (!isObjectOrArray(schema) || typeof schema.$ref !== "string") return false;
+  return ContextualFlowControl.declaresStream(
+    ContextualFlowControl.resolveSchemaRefs(schema),
+  );
+};
+
+/**
  * The default that stands in for a value which is not there.
  *
  * Only one the schema declares at its own top level, which is the rule an eager
@@ -595,7 +609,7 @@ export function materializeSchemaView(
       // minted from the schema alone.
       if (
         declaredDefault(narrowed) !== undefined ||
-        ContextualFlowControl.declaresStream(narrowed)
+        declaredStream(narrowed)
       ) continue;
       return mismatch(`missing required property ${JSON.stringify(key)}`);
     }
@@ -640,7 +654,7 @@ const visibleKeys = (
       const narrowed = childSchema(schema, key);
       if (
         declaredDefault(narrowed) === undefined &&
-        !ContextualFlowControl.declaresStream(narrowed)
+        !declaredStream(narrowed)
       ) continue;
       keys.push(key);
     }
@@ -737,7 +751,7 @@ function createObjectView(
       // a refusal carries, for the case that is not a refusal: the schema does
       // not require this key, so reading it is an ordinary miss, not a mismatch.
       tx.readValueOrThrow({ ...link, path: [...link.path, key] });
-      if (ContextualFlowControl.declaresStream(narrowed)) {
+      if (declaredStream(narrowed)) {
         return readChild(
           runtime,
           tx,

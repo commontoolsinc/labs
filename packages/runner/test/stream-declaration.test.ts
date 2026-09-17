@@ -86,6 +86,41 @@ const GATED = [
   "",
 ].join("\n");
 
+// A builtin's handler, exposed under another name.
+const DIALOG = [
+  "import { Writable, llmDialog, pattern } from 'commonfabric';",
+  "export default pattern<Record<string, never>>(() => {",
+  "  const messages = new Writable<any[]>([]).for('messages');",
+  "  const dialog = llmDialog({ messages });",
+  "  return { cancel: dialog.cancelGeneration };",
+  "});",
+  "",
+].join("\n");
+
+// The same three builtins selecting the pattern's own handler, whose stream
+// is one hop from the builtin's inputs with no stored result link between.
+const GATED_OWN = [
+  "import {",
+  "  Writable, handler, ifElse, pattern, unless, when,",
+  "} from 'commonfabric';",
+  "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
+  "  count.set((count.get() ?? 0) + 1);",
+  "});",
+  "export default pattern<Record<string, never>>(() => {",
+  "  const on = new Writable<boolean>(true).for('on');",
+  "  const off = new Writable<boolean>(false).for('off');",
+  "  const count = new Writable<number>(0).for('count');",
+  "  const own = bump({ count });",
+  "  return {",
+  "    count,",
+  "    viaIfElse: ifElse(on, own, undefined),",
+  "    viaWhen: when(on, own),",
+  "    viaUnless: unless(off, own),",
+  "  };",
+  "});",
+  "",
+].join("\n");
+
 const programOf = (contents: string): RuntimeProgram => ({
   main: "/main.tsx",
   files: [{ name: "/main.tsx", contents }],
@@ -233,6 +268,78 @@ describe("stream declaration", () => {
         await rt.storageManager.synced();
       });
     }
+
+    it("refuses a reader asking for a plain cell", async () => {
+      // The reader named the kind of endpoint it wants, and a stream is not
+      // one: a mismatch, which drops an optional position, and not a reason to
+      // hand over a stream of cells. `combine-schema.test.ts` holds the rule
+      // itself, for both spellings of the reader.
+      const { cell } = await runProgram(COUNTER, "counter-cell");
+      const view = cell.asSchema({
+        type: "object",
+        properties: {
+          count: { type: "number" },
+          bump: { asCell: ["cell"] },
+        },
+      } as JSONSchema).get() as unknown as { count: number; bump: unknown };
+
+      expect(view.count).toBe(0);
+      expect(view.bump).toBeUndefined();
+    });
+
+    it("hands a reader that declares the stream its handle", async () => {
+      const { cell } = await runProgram(COUNTER, "counter-declared");
+      const view = cell.asSchema({
+        type: "object",
+        properties: {
+          count: { type: "number" },
+          bump: { asCell: ["stream"] },
+        },
+        required: ["bump"],
+      } as JSONSchema).get() as unknown as { bump: Cell<unknown> };
+
+      expect(isStream(view.bump)).toBe(true);
+    });
+  });
+
+  describe("a required stream the data does not name", () => {
+    // A stream position is absent from stored data by design, so a reader
+    // that requires one reads an object that lacks the key. Both read modes
+    // have to stand the declaration in for it, however it is spelled.
+    const inline = {
+      type: "object",
+      required: ["events"],
+      properties: { events: { asCell: ["stream"], type: "number" } },
+    } as JSONSchema;
+    const referenced = {
+      type: "object",
+      required: ["events"],
+      properties: { events: { $ref: "#/$defs/Event" } },
+      $defs: { Event: { asCell: ["stream"], type: "number" } },
+    } as JSONSchema;
+
+    for (
+      const [spelling, schema] of [
+        ["inline", inline],
+        ["through a local `$ref`", referenced],
+      ] as const
+    ) {
+      for (const mode of ["eager", "lazy"] as const) {
+        it(`materializes its handle, declared ${spelling}, on ${mode === "lazy" ? "a lazy" : "an eager"} read`, async () => {
+          const holder = rt.getCell(space, `holder-${spelling}-${mode}`);
+          await rt.editWithRetry((tx) => holder.withTx(tx).setRaw({}));
+
+          const tx = rt.edit();
+          if (mode === "lazy") tx.markLazyMaterialize(true);
+          const view = holder.withTx(tx).asSchema(schema).get() as unknown as {
+            events: unknown;
+          };
+          expect(view).toBeDefined();
+          expect(isStream(view.events)).toBe(true);
+          tx.abort();
+        });
+      }
+    }
   });
 
   describe("an address that names a stream's document alone", () => {
@@ -288,17 +395,121 @@ describe("stream declaration", () => {
     });
   });
 
-  for (const field of ["viaIfElse", "viaWhen", "viaUnless"] as const) {
-    it(`keeps a sub-pattern's stream dispatchable when \`${field}\` selects it`, async () => {
-      const { cell } = await runProgram(GATED, `gated-${field}`);
-      await rt.idle();
-      const selected = cell.key(field);
-      expect(isStream(selected)).toBe(true);
-      const before = countOf(cell);
-      (selected as unknown as { send: (event: unknown) => void }).send({});
-      await cell.pull();
-      expect(countOf(cell)).toBe(before + 1);
-      await rt.storageManager.synced();
+  it("invokes a builtin's handler through the address an observation gave out", async () => {
+    // A dialog's handlers are fields of the builtin's own result document,
+    // not documents with an owner to ask. The address an observation hands
+    // out is that document and a path, with no schema; the document's result
+    // schema is what types it.
+    const { cell } = await runProgram(DIALOG, "dialog");
+    await rt.idle();
+    const cancel = cell.key("cancel");
+    expect(isStream(cancel)).toBe(true);
+
+    const observed = llmDialogTestHelpers.serializeForLLMObservation({
+      value: cancel,
+      contextSpace: space,
+    }).value as { "@link": string };
+    expect(typeof observed["@link"]).toBe("string");
+    await rt.storageManager.synced();
+
+    // A second runtime over the same storage holds none of the first one's
+    // handles, only what was stored.
+    const fresh = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
     });
+    try {
+      const target = fresh.getCellFromLink(
+        llmDialogTestHelpers.parseLLMFriendlyLink(observed["@link"], space),
+      );
+      await target.sync();
+      const callNamed = (toolName: string) =>
+        llmDialogTestHelpers.resolveToolCall(fresh, space, {
+          type: "tool-call",
+          toolCallId: toolName,
+          toolName,
+          input: { path: observed["@link"] },
+        }, { llmTools: {}, dynamicToolCells: new Map() });
+
+      expect(() => callNamed("read")).toThrow("use invoke() instead");
+      const resolved = callNamed("invoke") as unknown as {
+        type: string;
+        handler: Cell<unknown>;
+      };
+      expect(resolved.type).toBe("invoke");
+      expect(isStream(resolved.handler)).toBe(true);
+    } finally {
+      await fresh.dispose();
+    }
+  });
+
+  it("reads an object whose required stream is declared through a local `$ref`", async () => {
+    // `extra` is a stream the data does not name, required, and declared in
+    // the schema's own `$defs`. The union's prefilter and the object
+    // traversal both have to see the declaration through the reference: one
+    // exempts the key from `required`, the other mints its handle.
+    const { cell } = await runProgram(COUNTER, "counter-ref-required");
+    const view = cell.asSchema({
+      $defs: { Extra: { asCell: ["stream"] } },
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            count: { type: "number" },
+            extra: { $ref: "#/$defs/Extra" },
+          },
+          required: ["count", "extra"],
+        },
+        { type: "null" },
+      ],
+    } as JSONSchema).get() as unknown as { count: number; extra: unknown };
+
+    expect(view).toBeDefined();
+    expect(view).not.toBeNull();
+    expect(view.count).toBe(0);
+    expect(isStream(view.extra)).toBe(true);
+  });
+
+  it("returns the stream from a read of a stream handle", async () => {
+    // A view node's prop schema leaves an `opaque` entry behind the stream's
+    // on the handle's own schema. A read that minted that handle would hand
+    // back one nothing marks as a stream, on the stream's own document.
+    const { cell } = await runProgram(COUNTER, "counter-read");
+    const view = cell.asSchema({
+      type: "object",
+      properties: {
+        count: { type: "number" },
+        bump: { asCell: ["stream", "opaque"] },
+      },
+    } as JSONSchema).get() as unknown as { bump: Cell<unknown> };
+    const read = view.bump.get() as unknown as Cell<unknown>;
+
+    expect(isStream(read)).toBe(true);
+    const before = countOf(cell);
+    read.send({});
+    await cell.pull();
+    expect(countOf(cell)).toBe(before + 1);
+    await rt.storageManager.synced();
+  });
+
+  for (
+    const [owner, program] of [
+      ["a sub-pattern's", GATED],
+      ["the pattern's own", GATED_OWN],
+    ] as const
+  ) {
+    for (const field of ["viaIfElse", "viaWhen", "viaUnless"] as const) {
+      it(`keeps ${owner} stream dispatchable when \`${field}\` selects it`, async () => {
+        const { cell } = await runProgram(program, `gated-${owner}-${field}`);
+        await rt.idle();
+        const selected = cell.key(field);
+        expect(isStream(selected)).toBe(true);
+        const before = countOf(cell);
+        (selected as unknown as { send: (event: unknown) => void }).send({});
+        await cell.pull();
+        expect(countOf(cell)).toBe(before + 1);
+        await rt.storageManager.synced();
+      });
+    }
   }
 });

@@ -1205,7 +1205,12 @@ export function normalizeAndDiff(
     const seedDefault = isObjectOrArray(cellSchema)
       ? cellSchema.default
       : undefined;
-    const seedTarget = seedDefault !== undefined
+    // A descriptor from before streams were declared by schema spells the
+    // declaration as a default of `{ $stream: true }`. That is not a value a
+    // stream holds, and a stream's document holds none, so it seeds nothing.
+    const seedTarget = seedDefault !== undefined &&
+        !(isObjectOrArray(seedDefault) &&
+          (seedDefault as Record<string, unknown>).$stream === true)
       ? newValue.getAsNormalizedFullLink()
       : undefined;
     if (

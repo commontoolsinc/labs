@@ -107,6 +107,7 @@ import {
 } from "../link-utils.ts";
 import type { RawBuiltinResult } from "../module.ts";
 import { getResultCellWithSourceSchema } from "../piece-helpers.ts";
+import { writeResultSchemaMeta } from "../result-schema-meta.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -2063,14 +2064,18 @@ function resolveToolCall(
       };
     }
 
-    // A path through a piece's result reaches a handler over a stored link
-    // that declares the stream. A path an observation handed out names the
-    // stream's document itself, which holds nothing and arrives with no
-    // schema, so its owner's manifest says what it is.
-    const resolvedRef = cellRef.resolveAsCell();
-    const namesStreamDocument = !isStream(resolvedRef) &&
-      ownerDeclaresStream(resolvedRef);
-    const targetsStream = namesStreamDocument || isStream(resolvedRef);
+    // A path arrives as an address with no schema, and a stream holds nothing,
+    // so something stored has to say what the target is. Three things can. A
+    // path through a piece's result crosses a stored link that declares the
+    // stream. A path into a result document that keeps its result schema (a
+    // builtin's handlers are fields of its own result document) is typed from
+    // that schema. A path an observation handed out names a stream's own
+    // document, and its owner's manifest declares it.
+    const typedRef = getResultCellWithSourceSchema(cellRef);
+    const declaredBySchema = isStream(typedRef.resolveAsCell());
+    const namesStreamDocument = !declaredBySchema &&
+      ownerDeclaresStream(cellRef.resolveAsCell());
+    const targetsStream = declaredBySchema || namesStreamDocument;
 
     if (name === READ_TOOL_NAME) {
       // Get cell reference from the link - works for any valid handle
@@ -2088,11 +2093,11 @@ function resolveToolCall(
     if (targetsStream) {
       return {
         type: "invoke",
-        // A send decides stream or write off the handle, so a handle on the
-        // bare document declares the stream itself.
+        // A send decides stream or write off the handle, so the handle
+        // carries the declaration that was found for it.
         handler: (namesStreamDocument
           ? cellRef.asSchema({ asCell: ["stream"] })
-          : cellRef) as unknown as Stream<any>,
+          : typedRef) as unknown as Stream<any>,
         call: {
           id,
           name,
@@ -3923,6 +3928,11 @@ export function llmDialog(
       ...result.withTx(tx).getRaw(),
       pinnedCells: result.withTx(tx).key("pinnedCells").get() ?? [],
     } as FabricValue);
+    // The dialog's handlers are fields of this document, and a stream holds
+    // nothing, so the document keeps its result schema the way a piece's
+    // result document does: an address into it that arrives with no schema,
+    // as a tool call's does, is typed from there.
+    writeResultSchemaMeta(result.withTx(tx), resultSchema);
 
     sendResult(tx, result);
     recordPublication(

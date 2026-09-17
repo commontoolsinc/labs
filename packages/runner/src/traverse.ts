@@ -739,14 +739,35 @@ function requiredValueProperties(
   ) {
     return undefined;
   }
-  const properties = isObjectNotArray(resolved.properties)
-    ? resolved.properties
-    : undefined;
   return (resolved.required as readonly string[]).filter((name) =>
-    !ContextualFlowControl.declaresStream(
-      properties?.[name] as JSONSchema | undefined,
-    )
+    !propertyDeclaresStream(resolved, name)
   );
+}
+
+/**
+ * Whether the property `name` of `resolved` declares a stream, read the way
+ * the object traversal reads it when it mints an absent stream's handle: a
+ * property written as a `$ref` into the schema's own `$defs` declares what
+ * its definition declares. The two have to agree, or a branch requiring such
+ * a stream is rejected for lacking a key the traversal would have supplied.
+ */
+function propertyDeclaresStream(
+  resolved: JSONSchemaObj,
+  name: string,
+): boolean {
+  const property = isObjectNotArray(resolved.properties)
+    ? resolved.properties[name] as JSONSchema | undefined
+    : undefined;
+  if (ContextualFlowControl.declaresStream(property)) return true;
+  // Only a reference can declare more than the property shows by itself.
+  if (!isObjectNotArray(property) || typeof property.$ref !== "string") {
+    return false;
+  }
+  const atPath = ContextualFlowControl.getSchemaAtPath(resolved, [name]);
+  return isObjectOrArray(atPath) &&
+    ContextualFlowControl.declaresStream(
+      ContextualFlowControl.resolveSchemaRefs(atPath),
+    );
 }
 
 /**
@@ -3057,6 +3078,14 @@ export function combineSchema(
  * whatever requires it with it. The link's declaration is the only thing that
  * says what the position is, so it governs, and the reader gets the stream.
  *
+ * A reader that asks for a plain `cell` handle is the exception: it named the
+ * kind of endpoint it wants, a stream is not one, and the combination is
+ * `false`, a mismatch. It is not read as `asCell: ["stream", "cell"]`, which
+ * would mean a stream of cells and move the reader's wrapper into the event.
+ * A reader wanting that declares it. The reader's schema is judged in its
+ * structural form, so one spelled as a content-addressed reference gets the
+ * same verdict as one spelled inline.
+ *
  * A discarded link schema's `ifc` does NOT ride onto the result. Write
  * policy consumes declared schemas verbatim (`recordSchemaWritePolicyInput`),
  * so transplanting flow-control clauses between schemas corrupts the
@@ -3084,16 +3113,24 @@ export function combineSchemaForLink(
   if (ContextualFlowControl.isFalseSchema(parentSchema)) {
     return parentSchema;
   }
-  // A link that declares a stream governs a shaped reader that does not: the
-  // target holds no value for the reader's shape to describe. A true reader
-  // adopts the link schema below in any case. The declaration is handed on
-  // in its structural form, since a link's schema can be a content-addressed
-  // reference and what follows reads `asCell` off the schema it is given.
+  // A link that declares a stream governs a reader that does not: the target
+  // holds no value for the reader's shape to describe. Decided before the
+  // reader is sorted into true or shaped, and on its structural form, so a
+  // reader spelled as a content-addressed reference gets the same answer as
+  // one spelled inline. The declaration is handed on in structural form too,
+  // since what follows reads `asCell` off the schema it is given.
   if (
-    !ContextualFlowControl.isTrueSchema(parentSchema) &&
     ContextualFlowControl.declaresStream(linkSchema) &&
     !ContextualFlowControl.declaresStream(parentSchema)
   ) {
+    const reader = isObjectNotArray(parentSchema)
+      ? resolveExternalRootRefForStructure(parentSchema)
+      : parentSchema;
+    const readerKind = ContextualFlowControl.getAsCellKind(
+      ContextualFlowControl.getAsCellValues(reader).at(0),
+    );
+    // A plain readable cell was asked for, and a stream is not one.
+    if (readerKind === "cell") return false;
     return isObjectNotArray(linkSchema)
       ? resolveExternalRootRefForStructure(linkSchema)
       : linkSchema;
