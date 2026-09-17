@@ -372,7 +372,11 @@ writes.
    origin whose releases this deployment gates adopts its candidate as it
    stands; from any other origin it adopts one only if the candidate is an
    acceptable replacement for what the piece runs, and otherwise leaves the
-   piece unchanged and offers its owner the candidate to accept. A manual
+   piece unchanged and offers its owner the candidate to accept. An
+   unattended update from a gated origin also carries the writer delegation
+   a manual replacement derives — the successor may write what the
+   predecessor's handlers protected (SC-22) — and one from any other origin
+   carries none. A manual
    replacement rejects invalid or unverifiable source, and rejects a candidate
    that cannot use the piece's actual retained input. It may apply an
    incompatible pattern contract or retained link after the user explicitly
