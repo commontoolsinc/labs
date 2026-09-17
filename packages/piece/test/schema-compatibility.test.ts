@@ -14,6 +14,7 @@ import {
   FabricHash,
   FabricKeyPair,
   FabricRegExp,
+  FabricUnavailable,
 } from "@commonfabric/data-model/fabric-primitives";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "@commonfabric/runner/fabric-special-object-brand";
 import {
@@ -70,6 +71,7 @@ const FABRIC_PRIMITIVE_VALUES = {
     new Uint8Array([2]),
   ),
   FabricRegExp: new FabricRegExp(/a/),
+  FabricUnavailable: new FabricUnavailable("pending"),
 } satisfies Record<FabricPrimitiveSchemaType, FabricPrimitive>;
 
 /**
