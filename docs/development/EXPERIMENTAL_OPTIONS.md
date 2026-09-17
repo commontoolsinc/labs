@@ -856,11 +856,12 @@ the per-epic implementation notes).
   labeled collection an attributed writer maintains still grows per element.
   Propagation runs only when the enforcement mode is at least `observe`; it
   derives and stores labels but never rejects on its own.
-- **Current default and planned end state.** `off` by default. The target is to
-  move toward `persist` as the downstream egress gates (render ceiling, sink
-  ceilings, and the LLM path) come online.
-- **Status on 2026-07-08.** Implemented and in staged rollout; the core
-  propagation work is done and further stages are tracked in the S16 design doc.
+- **Current default and planned end state.** `persist` by default, which is
+  where the dial rests: the downstream egress gates it waited on — the render
+  ceiling, the sink ceilings, and the LLM path — are online. A deployment that
+  wants diagnostics without writes states `observe`.
+- **Status on 2026-09-17.** Implemented and rolled out; the core
+  propagation work is done and the dial rests at `persist`.
 - **Path to removal.** Flow-label propagation is load-bearing for the S16 audit
   transition, so the dial is not expected to be removed; it will settle on
   `persist` as its steady state.
@@ -879,10 +880,10 @@ the per-epic implementation notes).
   `enforce` records a rejection reason when a write's integrity falls below the
   floor. The floor tests the integrity of the written value, not of the reads
   that produced it.
-- **Current default and planned end state.** `off` by default. The target is to
-  move toward `enforce` once field testing confirms the floor does not
-  over-reject legitimate writes.
-- **Status on 2026-08-19.** Implemented and in staged rollout.
+- **Current default and planned end state.** `enforce` by default, which is
+  where the dial rests. A deployment that wants the floor measured rather than
+  applied states `observe`.
+- **Status on 2026-09-17.** Implemented and rolled out.
 - **Path to removal.** Once integrity propagation is complete and the floor is
   proven safe, the check could fold into the base enforcement ladder and the
   separate dial could be retired.
@@ -898,10 +899,9 @@ the per-epic implementation notes).
   and the input-requirement gates quantify over, so the rerun cannot leak
   information through the mere fact that it was triggered. It fails closed and
   costs extra metadata resolution per commit prepare.
-- **Current default and planned end state.** `false` by default. The target is
-  to move toward `true` once the per-commit metadata resolution cost is
-  acceptable.
-- **Status on 2026-07-08.** Implemented and in staged rollout.
+- **Current default and planned end state.** `true` by default, which is where
+  the dial rests; the per-commit metadata resolution it costs is paid.
+- **Status on 2026-09-17.** Implemented and rolled out.
 - **Path to removal.** Once the cost is acceptable (or metadata caching removes
   it), the default could flip to `true` and the gating could become
   unconditional, retiring the dial.
@@ -983,10 +983,9 @@ the per-epic implementation notes).
   labels to a fixpoint and emits diagnostics while still deciding on the
   un-rewritten label; `enforce` decides on the rewritten label and fails closed
   when the evaluation runs out of fuel.
-- **Current default and planned end state.** `off` by default. The target is to
-  move toward `enforce` once the policy rule sets and deployment policies are
-  stable.
-- **Status on 2026-07-08.** Implemented and in staged rollout.
+- **Current default and planned end state.** `enforce` by default, which is
+  where the dial rests.
+- **Status on 2026-09-17.** Implemented and rolled out.
 - **Path to removal.** Once policy evaluation is the norm, the dial could settle
   on `enforce` and be retired.
 
@@ -1007,11 +1006,11 @@ the per-epic implementation notes).
   replace disciplines. The per-transaction privileged widening exemption
   (`setCfcDeclaredWideningExemption`, trusted-builtin only) is the seam for the
   future §8.12.7 route 2b declassification event.
-- **Current default and planned end state.** `off` by default. The target is
-  `observe`, then `enforce` after soak — the route 2b rewrite event must not
-  ship before this gate is enforced
+- **Current default and planned end state.** `observe` by default. The target
+  is `enforce` after soak — the route 2b rewrite event must not ship before
+  this gate is enforced
   (`docs/specs/cfc-persisted-declassification.md` §4–§5).
-- **Status on 2026-07-09.** Implemented, off by default.
+- **Status on 2026-09-17.** Implemented, observing.
 - **Path to removal.** Not planned for removal: monotonicity is a permanent
   store invariant. Once `enforce` has soaked, the dial could settle there and
   the `off`/`observe` rungs remain for diagnostics, mirroring the enforcement
@@ -1067,10 +1066,10 @@ the per-epic implementation notes).
   digests the candidate; exchange patterns digest-match concrete values and
   refuse to bind variables over committed fields). Same-space-only labels always
   persist verbatim.
-- **Current default and planned end state.** `off` by default. Target is
-  `observe` to count divergences, then `enforce`
+- **Current default and planned end state.** `enforce` by default, which is
+  where the dial rests
   (`docs/specs/cfc-label-metadata-confidentiality.md` §5, SC-25).
-- **Status on 2026-07-09.** Implemented, staged rollout.
+- **Status on 2026-09-17.** Implemented and rolled out.
 - **Path to removal.** Not planned for removal: the representation rule is a
   permanent inv-12 obligation; once `enforce` soaks the dial settles there with
   the lower rungs kept for diagnostics, like the other CFC ladders.

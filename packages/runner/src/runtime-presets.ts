@@ -66,7 +66,9 @@
  * |                            | and remoteClient / browserWorker delta           |
  * |                            | (host-controlled rollout)                        |
  * | cfcWriteFloor              | core-pinned `"enforce"`; remoteClient delta      |
- * |                            | (host-controlled)                                |
+ * |                            | (host-controlled); drops to `observe` where a    |
+ * |                            | caller puts cfcFlowLabels below `persist`, so    |
+ * |                            | the floor never outruns the flow meet            |
  * | cfcTriggerReadGating       | core-pinned `true`                               |
  * | cfcDecomposedEnvelopes     | core-default (off) — flip after every deployed   |
  * |                            | reader resolves stored roots' references         |
@@ -721,6 +723,15 @@ export const presetCfcOptions = (
     : {}),
   ...(params.cfcFlowLabels !== undefined
     ? { cfcFlowLabels: params.cfcFlowLabels }
+    : {}),
+  // The floor credits the flow meet only where labels persist; below that
+  // rung it credits nothing and turns away writes the join would have
+  // endorsed (ordering constraint 3,
+  // docs/specs/cfc-enforcement-matrix.md §2). A caller that lowers the flow
+  // dial lowers the floor with it, so the two stay a complete pair and the
+  // floor still reports what it would have refused.
+  ...(params.cfcFlowLabels !== undefined && params.cfcFlowLabels !== "persist"
+    ? { cfcWriteFloor: "observe" as const }
     : {}),
 });
 

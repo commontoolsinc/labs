@@ -72,8 +72,8 @@ describe("cfc spec gallery integration test", () => {
       identity,
       // The subject is what each trusted surface declares for itself. The
       // render ceiling denies author-supplied declassification, so this case
-      // runs the profile without it; the case below runs the same page with
-      // it.
+      // runs the profile without it; the render-ceiling case below runs the
+      // same page with it.
       renderCeiling: false,
     });
 

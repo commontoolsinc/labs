@@ -23,6 +23,7 @@ class FakeStorage {
     this.map.set(key, value);
   }
   removeItem(key: string): void {
+    if (this.throwOnWrite) throw new Error("write blocked");
     this.map.delete(key);
   }
 }
@@ -181,10 +182,7 @@ describe("commonfabric.cfcRenderCeiling", () => {
     }
   });
 
-  it("logs and bails out when persistence fails", () => {
-    // Disabling is the direction that writes, so it is the direction a
-    // storage that refuses writes can fail in.
-
+  it("logs and bails out when persisting the opt-out fails", () => {
     const h = setup();
     try {
       setupCfcRenderCeilingToggle();
@@ -193,6 +191,26 @@ describe("commonfabric.cfcRenderCeiling", () => {
       expect(h.errors.join("\n")).toContain("Could not persist");
       // The "enabled"/"disabled" confirmation is not logged on failure.
       expect(h.info.join("\n")).not.toContain("disabled");
+    } finally {
+      h.restore();
+    }
+  });
+
+  it("logs and bails out when clearing the opt-out fails", () => {
+    // Enabling clears the key rather than writing one, so a storage that
+    // refuses writes fails this direction too, and on the branch the
+    // disabling case never reaches.
+
+    const h = setup();
+    try {
+      setupCfcRenderCeilingToggle();
+      h.storage.map.set(STORAGE_KEY, "false");
+      h.storage.throwOnWrite = true;
+      command()();
+      expect(h.errors.join("\n")).toContain("Could not persist");
+      expect(h.info.join("\n")).not.toContain("enabled");
+      // The opt-out the clear could not remove is still recorded.
+      expect(h.storage.map.get(STORAGE_KEY)).toBe("false");
     } finally {
       h.restore();
     }
