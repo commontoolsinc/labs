@@ -5,9 +5,10 @@
  * It answers to the key table `views.md` gives a view, less the two that drill:
  * the motions and the two ways out, `/` with `n`/`N` to find text in the
  * rendering, `:` to run a shuttle line without leaving the frame, and `e` to
- * open the watched cell in an editor. `enter` and `backspace` want a row to
- * drill from, which a rendering of a value does not have, and they arrive with
- * the view that does (`docs/plans/shuttle/build-sequence.md`). What the frame
+ * open the watched cell in an editor. `enter` and `backspace` need a cursor —
+ * the row a view stands on — and this one has a scroll position instead, so
+ * they arrive with the view that carries one
+ * (`docs/plans/shuttle/build-sequence.md`). What the frame
  * offers along its bottom edge is what it answers to, so the two cannot part —
  * and the edge therefore says something different in each state this is in.
  *
@@ -48,34 +49,57 @@ const NOT_SETTLED = marker("nothing has settled yet");
 const SEPARATOR = " · ";
 
 /**
- * The keys the bottom edge offers, one phrase each.
+ * The keys the bottom edge offers, one phrase each, and what it says about the
+ * watch behind them.
  *
  * They are ordered on the edge by what a reader can least do without, because
- * a narrow terminal drops phrases from the right: the way out comes first and
- * the keys that open a line come last.
- */
-const BACK = "q back";
-const SCROLL = "j/k scroll";
-const ENDS = "g/G ends";
-const SEARCH = "/ search";
-const NEXT = "n/N next";
-const COMMAND = ": command";
-const EDIT = "e edit";
-const STOP = "ctrl-c stop";
-const RUN = "enter run";
-const FIND = "enter search";
-const CANCEL = "ctrl-c cancel";
-
-/**
- * What the bottom edge says about the watch behind the frame, after the keys.
+ * a narrow terminal drops phrases from the right: the way out comes first, the
+ * keys that open a line come last, and the one phrase that is not a key at all
+ * comes after those. That last is what a person is least sure of on the way
+ * out — the two lifetimes are separate, and `q` ends only the lens's
+ * (`watch.ts`) — so a terminal narrow enough to drop a phrase drops it before
+ * it drops anything the frame answers to.
  *
- * It is last because it is not a key: every phrase before it is something the
- * frame answers to, and a terminal narrow enough to drop one should drop this
- * before it drops any of those. What it says is the thing a person is least
- * sure of on the way out — the two lifetimes are separate, and `q` ends only
- * this one (`watch.ts`).
+ * One record rather than a const each, so that the ordering above is a fact
+ * about one declaration rather than a comment reaching over eleven.
  */
-const ARMED = "(q leaves the watch armed)";
+const PHRASE = {
+  /** The way out of the frame. */
+  back: "q back",
+
+  /** The two motions, and the arrows that double for them. */
+  scroll: "j/k scroll",
+
+  /** The two ends of the value. */
+  ends: "g/G ends",
+
+  /** Opens the line that finds text in the rendering. */
+  search: "/ search",
+
+  /** Offered only once a search is standing, which is what `n` steps. */
+  next: "n/N next",
+
+  /** Opens the line that runs a shuttle command. */
+  command: ": command",
+
+  /** Opens the watched cell in an editor, through the `edit` verb. */
+  edit: "e edit",
+
+  /** Stops the line the frame asked for, offered only while one is running. */
+  stop: "ctrl-c stop",
+
+  /** Takes the shuttle line that is being typed. */
+  run: "enter run",
+
+  /** Takes the search that is being typed. */
+  find: "enter search",
+
+  /** Abandons whichever line is being typed. */
+  cancel: "ctrl-c cancel",
+
+  /** Not a key: what `q` leaves behind it. */
+  armed: "(q leaves the watch armed)",
+} as const;
 
 /** What the modeline says where a search found nothing. */
 const NO_MATCH = "no match";
@@ -266,8 +290,8 @@ export class ValueLens {
    * the loop's, which is what holds that line (`prompt.ts`).
    *
    * Everything else does nothing, and does nothing silently. That covers a key
-   * this view has yet to grow — `enter` and `backspace` drill, and arrive with
-   * the view that has rows (`docs/plans/shuttle/build-sequence.md`) — and one
+   * this view has yet to grow — `enter` and `backspace` drill from a cursor
+   * this one does not carry (`docs/plans/shuttle/build-sequence.md`) — and one
    * nothing takes at all. A frame offering only what it answers to is what
    * tells a reader which is which.
    */
@@ -482,6 +506,11 @@ export class ValueLens {
    * what `enter` at an empty prompt does. An empty search is the exception and
    * is the way to put a search away: it takes the pattern with it, and the
    * bottom edge stops offering `n` and `N` in the same drawing.
+   *
+   * What counts as empty differs, and it differs because the two read what was
+   * typed differently. A shuttle line of nothing but spaces is a line with no
+   * verb in it, so it is empty; a search of one space is a search for a space,
+   * which the indentation of a rendering is full of.
    */
   #submits(typing: Typing): void {
     const line = typing.buffer.text();
@@ -578,11 +607,16 @@ export class ValueLens {
    * the other three cover over.
    *
    * The two that are neither being typed nor in flight take the row in the
-   * order they happened rather than by rank, and each clears the other as it
-   * arrives: a line that said something leaves the search showing nothing, and
-   * a search leaves nothing said. That is one field fewer than a flag saying
-   * which of them is the newer, and a flag is a state that can disagree with
-   * both of them.
+   * order they happened rather than by rank, and that ordering is kept without
+   * a flag saying which of them is the newer — a flag being a state that can
+   * disagree with both. A search leaves nothing said, so it takes the row from
+   * a line that spoke before it; a line that says something takes the row back
+   * by being said.
+   *
+   * The two are not symmetrical, and the difference is what a reader acts on.
+   * A search that loses the row is still standing: `n` and `N` go on stepping
+   * it and the edge goes on offering them, because what a line said covers the
+   * search rather than putting it away. Only an empty `/` puts one away.
    */
   #modeline(inner: number): string | undefined {
     if (this.#typing !== undefined) return this.#typedRow(inner).text;
@@ -661,18 +695,21 @@ export class ValueLens {
    */
   #keys(): readonly string[] {
     if (this.#typing !== undefined) {
-      return [this.#typing.opening === ":" ? RUN : FIND, CANCEL];
+      return [
+        this.#typing.opening === ":" ? PHRASE.run : PHRASE.find,
+        PHRASE.cancel,
+      ];
     }
     const running = this.#running !== undefined;
     return [
-      ...(running ? [STOP] : []),
-      BACK,
-      SCROLL,
-      ENDS,
-      SEARCH,
-      ...(this.#search === undefined ? [] : [NEXT]),
-      ...(running ? [] : [COMMAND, EDIT]),
-      ARMED,
+      ...(running ? [PHRASE.stop] : []),
+      PHRASE.back,
+      PHRASE.scroll,
+      PHRASE.ends,
+      PHRASE.search,
+      ...(this.#search === undefined ? [] : [PHRASE.next]),
+      ...(running ? [] : [PHRASE.command, PHRASE.edit]),
+      PHRASE.armed,
     ];
   }
 
@@ -752,8 +789,10 @@ export class ValueLens {
  * is worse than none of it on an edge that is read as a list of what the frame
  * answers to: a key cut in two offers nothing, and the separator left hanging
  * after it promises a phrase that is not there. Where not even the first
- * phrase fits it is cut, there being nothing else to show and a cut title
- * still naming the cell.
+ * phrase fits it is cut, there being nothing else to show: a cut title still
+ * names the cell, and a cut key is what a frame too narrow for its shortest
+ * phrase has instead of an empty edge — the width being what a frame promises
+ * before it promises anything it says.
  */
 function edge(
   opening: string,

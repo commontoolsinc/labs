@@ -320,10 +320,15 @@ class StandardTerminal implements PromptTerminal {
   /**
    * @inheritDoc
    *
-   * The screen is taken on the first call and held until
-   * {@link StandardTerminal.unframe}, so a redraw is a redraw rather than a
-   * second taking: entering the alternate screen twice would save the
+   * The screen is taken on the first call, so a redraw is a redraw rather than
+   * a second taking: entering the alternate screen twice would save the
    * transcript's position over itself and leave nothing to go back to.
+   *
+   * It is held until {@link StandardTerminal.unframe} but for one stretch:
+   * {@link StandardTerminal.suspend} gives it back to a program and takes it
+   * again afterwards, a terminal keeping no stack of alternate screens. The
+   * frame is this object's throughout, which is why what was drawn is kept and
+   * drawn again rather than taken a second time from nothing.
    */
   frame(rows: readonly string[], cursor?: FrameCursor): void {
     // Held before it is taken, and the order is what a signal turns on: the

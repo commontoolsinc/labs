@@ -167,9 +167,16 @@ export interface PromptTerminal {
    * after, whatever the program did, and only what opened the terminal knows
    * what it is holding.
    *
-   * What was drawn before is not drawn again on the way out. The program had
-   * the screen, so the next line is drawn where the cursor stands rather than
-   * over a line that may no longer be there.
+   * A line drawn before is not drawn again on the way out. The program had the
+   * screen, so the next line is drawn where the cursor stands rather than over
+   * a line that may no longer be there.
+   *
+   * A frame is the exception, and it is one because a frame is the whole
+   * screen rather than a line on it. An implementation that has one gives the
+   * screen back before the program and takes it again after, and draws the
+   * frame again on the screen it took — so what the program left goes with the
+   * screen it was drawn on, and the frame a reader was looking at is the frame
+   * they get back.
    */
   suspend<T>(body: () => Promise<T>): Promise<T>;
 }
