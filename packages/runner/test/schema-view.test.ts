@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { getLogger } from "@commonfabric/utils/logger";
 import { Runtime } from "../src/runtime.ts";
 import { isSchemaMismatchError } from "../src/schema-view.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -1125,6 +1126,104 @@ describe("schema-view", () => {
         await eager.tx.commit();
         await lazy.tx.commit();
       }
+    });
+  });
+
+  describe("a key the data carries and the schema leaves unnamed", () => {
+    // Such a key reads as `undefined`, which is what a key that is not there
+    // reads as, so the view counts the read under a warning key of its own.
+    // The pattern test runner fails a test on any warning a run counts. Each
+    // case compares the count either side of its reads, since the logger and
+    // its counts are shared by the whole process.
+
+    const ROW: JSONSchema = {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+    };
+
+    const unselectedReads = (): number =>
+      getLogger("schema-view").countsByKey["unselected-key-read"]?.warn ?? 0;
+
+    it("returns `undefined` for the key and counts the read", async () => {
+      const read = await seeded(
+        "unselected-own",
+        { id: "a", driver: "x" },
+        ROW,
+      );
+      const view = read(true).get() as Record<string, unknown>;
+
+      const before = unselectedReads();
+      expect(view.driver).toBeUndefined();
+      expect(unselectedReads() - before).toBe(1);
+    });
+
+    it("counts nothing for a key the schema selects", async () => {
+      const read = await seeded("unselected-selected", {
+        id: "a",
+        driver: "x",
+      }, ROW);
+      const view = read(true).get() as Record<string, unknown>;
+
+      const before = unselectedReads();
+      expect(view.id).toBe("a");
+      expect(unselectedReads() - before).toBe(0);
+    });
+
+    it("counts nothing for a key the data does not carry", async () => {
+      const read = await seeded("unselected-absent", { id: "a" }, ROW);
+      const view = read(true).get() as Record<string, unknown>;
+
+      const before = unselectedReads();
+      expect(view.driver).toBeUndefined();
+      expect(unselectedReads() - before).toBe(0);
+    });
+
+    it("counts nothing for a key the schema turns down", async () => {
+      const read = await seeded("unselected-turned-down", {
+        id: "a",
+        driver: "x",
+        owner: "o",
+      }, {
+        ...(ROW as object),
+        properties: { id: { type: "string" }, driver: false },
+        additionalProperties: false,
+      } as JSONSchema);
+      const view = read(true).get() as Record<string, unknown>;
+
+      const before = unselectedReads();
+      // `driver` is declared `false`; `owner` is refused by a schema that
+      // refuses what it does not name.
+      expect(view.driver).toBeUndefined();
+      expect(view.owner).toBeUndefined();
+      expect(unselectedReads() - before).toBe(0);
+    });
+
+    it("counts nothing for the keys JavaScript probes on any object", async () => {
+      const read = await seeded("unselected-machinery", {
+        id: "a",
+        then: "later",
+        toJSON: "text",
+      }, ROW);
+      const view = read(true).get() as Record<string, unknown>;
+
+      const before = unselectedReads();
+      expect(view.then).toBeUndefined();
+      expect(view.toJSON).toBeUndefined();
+      expect(unselectedReads() - before).toBe(0);
+    });
+
+    it("counts nothing on an eager read, which hands back a plain object", async () => {
+      const read = await seeded(
+        "unselected-eager",
+        { id: "a", driver: "x" },
+        ROW,
+      );
+      const value = read(false).get() as Record<string, unknown>;
+
+      const before = unselectedReads();
+      expect(value.driver).toBeUndefined();
+      expect(unselectedReads() - before).toBe(0);
     });
   });
 

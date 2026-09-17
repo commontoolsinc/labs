@@ -109,6 +109,31 @@ wrong. Six rules exist only to hold that:
   the first mismatch would leave the reader depending on the elements up to it,
   and nothing would wake it when the rest arrived.
 
+## Reading a key the schema does not select
+
+A schema is a selection, so a key the data carries and the schema leaves unnamed
+is absent to a reader. A view returns `undefined` for it, which is what the
+object an eager read filters gives, and nothing at the read tells that apart
+from a key that is not there. A reader in that position has a schema that
+selects less than its body reads: one written by hand narrower than the code, or
+a builder's input schema shrunk past a read the capability analysis did not see.
+
+A view counts such a read as a warning on the `schema-view` logger, under the
+key `unselected-key-read`. The logger is disabled by default, so nothing prints
+and the count is kept regardless. The pattern test runner fails a test on any
+warning its run counts, so a pattern test whose lift reads an unselected key
+fails, and the failure names the logger and the key. Enabling the logger prints
+which key was read and at which link.
+
+Three reads are not counted:
+
+- A key the schema turned down on purpose, as in the rule above. That is a
+  deliberate absence.
+- `then` and `toJSON`, which promise adoption and `JSON.stringify` probe on any
+  object they are handed, whatever the reader's body asked for.
+- A read through an eager value. An eager read hands back a plain object with
+  the key already gone, so a handler, which stays eager, is not covered.
+
 ## The refusal, and how the runner disposes of it
 
 A `SchemaMismatchError` carries the link and which check failed. Throwing alone
