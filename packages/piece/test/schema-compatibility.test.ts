@@ -3214,6 +3214,68 @@ describe("piece schema compatibility", () => {
       });
     }
 
+    for (
+      const [name, metadata] of [
+        ["asCell", { asCell: ["cell"] }],
+        ["readOnly", { readOnly: true }],
+        ["default", { default: "open" }],
+      ] satisfies [string, Exclude<JSONSchema, boolean>][]
+    ) {
+      it(`accepts mixed-enum widening in a branch retaining its \`${name}\``, () => {
+        const withValues = (values: string[]): JSONSchema => ({
+          anyOf: [
+            { type: "number" },
+            { enum: [...values, null], ...metadata },
+          ],
+        });
+        const narrower = withValues(["open", "closed"]);
+        const wider = withValues(["open", "closed", "archived"]);
+        expect(() => assertSchemaSubset(narrower, wider)).not.toThrow();
+        expect(() => assertSchemaSubset(wider, narrower)).toThrow(
+          /schema alternative accepted previously/,
+        );
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(narrower, wider),
+            pattern(wider, narrower),
+          )
+        ).not.toThrow();
+      });
+    }
+
+    it("accepts an unchanged type-list sibling while widening a mixed enum", () => {
+      const withValues = (values: string[]): JSONSchema => ({
+        anyOf: [
+          { type: ["null", "number"] },
+          { enum: [...values, 1] },
+        ],
+      });
+      const narrower = withValues(["open"]);
+      const wider = withValues(["open", "closed"]);
+      expect(() => assertSchemaSubset(narrower, wider)).not.toThrow();
+      expect(() => assertSchemaSubset(wider, narrower)).toThrow(
+        /schema alternative accepted previously/,
+      );
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(narrower, wider),
+          pattern(wider, narrower),
+        )
+      ).not.toThrow();
+    });
+
+    it("compares a referenced mixed enum against the whole target enum", () => {
+      const source: JSONSchema = {
+        anyOf: [{ $ref: "#/$defs/state" }],
+        $defs: { state: { enum: ["open", null] } },
+      };
+      expect(() =>
+        assertSchemaSubset(source, { enum: ["open", "closed", null] })
+      ).not.toThrow();
+      expect(() => assertSchemaSubset(source, { enum: ["open", "closed"] }))
+        .toThrow(/schema alternative accepted previously/);
+    });
+
     it("retains sibling constraints and branch extensions when splitting enums", () => {
       const source: JSONSchema = {
         enum: ["open", null],
@@ -3224,13 +3286,30 @@ describe("piece schema compatibility", () => {
       };
       expect(validateSchemaValue(source, "open", source)).toBeUndefined();
       expect(validateSchemaValue(target, "open", target)).toBeDefined();
-      expect(() => assertSchemaSubset(source, target)).toThrow();
+      expect(() => assertSchemaSubset(source, target)).toThrow(
+        /schema alternative accepted previously/,
+      );
       expect(() =>
         assertSchemaSubset(
           { anyOf: [{ enum: ["open", null], readOnly: true }] },
           { type: ["string", "null"] },
         )
-      ).toThrow();
+      ).toThrow(/schema alternative accepted previously/);
+    });
+
+    it("leaves mixed enums containing an unclassified value whole", () => {
+      const value = FABRIC_PRIMITIVE_VALUES.FabricBytes;
+      const source = { enum: ["open", value] } as unknown as JSONSchema;
+      const target = {
+        anyOf: [{ type: "string" }, { enum: [value] }],
+      } as unknown as JSONSchema;
+      for (const admitted of ["open", value]) {
+        expect(validateSchemaValue(source, admitted, source)).toBeUndefined();
+        expect(validateSchemaValue(target, admitted, target)).toBeUndefined();
+      }
+      expect(() => assertSchemaSubset(source, target)).toThrow(
+        /schema alternative accepted previously/,
+      );
     });
 
     it("retains `FabricPrimitive` values while splitting a declared type list", () => {

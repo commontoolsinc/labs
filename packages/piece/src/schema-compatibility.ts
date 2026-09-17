@@ -1737,41 +1737,43 @@ function schemaMayProduceType(
  * the parent node's default and extensions, including for a single-type node.
  * Branch and descendant schemas retain their own defaults and extensions.
  *
- * Source enums expand by type through {@link sourceEnumAlternatives}, including
- * beside a `type` list or inside `anyOf`. Target enums stay whole: a source
- * alternative has to fit inside a single target alternative, and one listing
- * values of several types can fit the whole enum.
+ * Source enums expand by type through {@link ownEnumPartitions} and
+ * {@link sourceEnumAlternatives}, including beside a `type` list or inside
+ * `anyOf`. Branch partitions stay beside their base in the conjunction, so
+ * their node-level keywords are compared at the branch boundary. Target enums
+ * stay whole: a source alternative has to fit inside a single target
+ * alternative, and one listing values of several types can fit the whole enum.
  */
 function schemaAlternatives(
   schema: SchemaObject,
   side: "source" | "target",
 ): JSONSchema[][] {
-  const fragment = withoutNodeLevelKeywords(schema);
-  if (side === "source") {
-    const alternatives = sourceEnumAlternatives(fragment);
-    if (alternatives.length > 1) {
-      return alternatives.map((alternative) => [alternative]);
+  const whole = withoutNodeLevelKeywords(schema);
+  const fragments = side === "source" ? ownEnumPartitions(whole) : [whole];
+  return fragments.flatMap((fragment): JSONSchema[][] => {
+    if (fragment.anyOf) {
+      const { anyOf, ...base } = fragment;
+      const branches = side === "source"
+        ? anyOf.flatMap(sourceEnumAlternatives)
+        : anyOf;
+      return branches.map((alternative) => [base, alternative]);
     }
-  }
-  if (fragment.anyOf) {
-    const { anyOf, ...base } = fragment;
-    return anyOf.map((alternative) => [base, alternative]);
-  }
-  if (Array.isArray(fragment.type)) {
-    const { type: types, ...untyped } = fragment;
-    if (!types.includes("object")) {
-      return types.map((type) => [{ ...fragment, type }]);
+    if (Array.isArray(fragment.type)) {
+      const { type: types, ...untyped } = fragment;
+      if (!types.includes("object")) {
+        return types.map((type) => [{ ...fragment, type }]);
+      }
+      // The runtime checks `required` on a `FabricPrimitive` when the type list
+      // includes `object`, and would not check it under a branch typed by a
+      // `FabricPrimitive` name or by `unknown` alone. `object` admits every
+      // `FabricPrimitive` already, so those names add no branch of their own,
+      // and `unknown` becomes the untyped branch, which admits every value and
+      // is checked.
+      return types.filter((type) => !isFabricPrimitiveSchemaType(type))
+        .map((type) => [type === "unknown" ? untyped : { ...untyped, type }]);
     }
-    // The runtime checks `required` on a `FabricPrimitive` when the type list
-    // includes `object`, and would not check it under a branch typed by a
-    // `FabricPrimitive` name or by `unknown` alone. `object` admits every
-    // `FabricPrimitive` already, so those names add no branch of their own,
-    // and `unknown` becomes the untyped branch, which admits every value and
-    // is checked.
-    return types.filter((type) => !isFabricPrimitiveSchemaType(type))
-      .map((type) => [type === "unknown" ? untyped : { ...untyped, type }]);
-  }
-  return [[fragment]];
+    return [[fragment]];
+  });
 }
 
 /**
@@ -1791,6 +1793,15 @@ function sourceEnumAlternatives(
       return branches.map((branch) => ({ ...schema, anyOf: [branch] }));
     }
   }
+  return ownEnumPartitions(schema);
+}
+
+/**
+ * Helper for source alternative expansion, which partitions this node's enum
+ * by admitted literal type while keeping its other keywords intact. An enum
+ * containing an unclassified value stays whole for the ordinary object proof.
+ */
+function ownEnumPartitions(schema: SchemaObject): SchemaObject[] {
   const listed = schema.enum;
   const values = allowedLiteralValues(schema);
   if (listed !== undefined && values !== undefined) {
