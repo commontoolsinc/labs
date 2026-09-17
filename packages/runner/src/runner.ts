@@ -6021,6 +6021,31 @@ export class Runner {
   }
 
   /**
+   * Whether the document `link` names is on this replica, probed through
+   * `readTx`. A document is here when it holds a value. A stream's document
+   * never holds one, so for a link that declares a stream the record is
+   * probed instead: setup writes the `result` back-link onto it. Any other
+   * document that has its metadata and no value — a computed cell nothing
+   * has computed yet — reads absent.
+   */
+  #documentPresent(
+    readTx: IExtendedStorageTransaction,
+    link: NormalizedFullLink,
+  ): boolean {
+    return readTx.readOrThrow(
+      {
+        space: link.space,
+        id: link.id,
+        path: ContextualFlowControl.declaresStream(link.schema)
+          ? []
+          : ["value"],
+        ...(link.scope !== undefined && { scope: link.scope }),
+      },
+      { meta: ignoreReadForScheduling },
+    ) !== undefined;
+  }
+
+  /**
    * Whether a swap of `resultCell` to `pattern` would read a document this
    * replica lacks: the argument document `argumentLink` names, which the
    * swap's setup reads whole, or an owned cell the stored manifest lists —
@@ -6035,18 +6060,8 @@ export class Runner {
     resultCell: Cell<any>,
   ): boolean {
     const readTx = this.#familyReadTx(resultCell.tx?.tx.scopeKeyIdentity);
-    // The document record is what is probed, not its value: a stream's
-    // document carries metadata and no value at all.
     const present = (link: NormalizedFullLink): boolean =>
-      readTx.readOrThrow(
-        {
-          space: link.space,
-          id: link.id,
-          path: [],
-          ...(link.scope !== undefined && { scope: link.scope }),
-        },
-        { meta: ignoreReadForScheduling },
-      ) !== undefined;
+      this.#documentPresent(readTx, link);
     if (!present(argumentLink)) return true;
     const cell = resultCell.withTx(readTx);
     const manifest = convertibleJsFromFabricValue(
@@ -6090,13 +6105,12 @@ export class Runner {
     // Presence probes on a read transaction of their own, so an absent
     // document enters neither the caller's dependencies nor its commit's
     // read set: the run that follows the name-sync reads these for real.
-    // The document record itself is what is probed, not a value read
-    // through a schema, which returns the schema's default for an absent
-    // document, and not the value alone, which a stream's document never
-    // holds. A cell nothing has written at all — a derived cell no setup has
-    // materialized — reads absent here, and holds the run once; the probes
-    // stop at a budget (`NAMING_PROBE_BUDGET`), and a budget spent reads
-    // absent as well: a hold costs one name-sync, a wrong local verdict
+    // The document itself is what is probed (`#documentPresent`), not a
+    // value read through a schema, which returns the schema's default for an
+    // absent document. A cell nothing has written yet — a derived cell whose
+    // producer never ran — reads absent here too, and holds the run once; the
+    // probes stop at a budget (`NAMING_PROBE_BUDGET`), and a budget spent
+    // reads absent as well: a hold costs one name-sync, a wrong local verdict
     // costs a conflicting commit.
     const readTx = this.#familyReadTx(identity);
     const cell = resultCell.withTx(readTx);
@@ -6108,15 +6122,7 @@ export class Runner {
         return false;
       }
       probes--;
-      return readTx.readOrThrow(
-        {
-          space: link.space,
-          id: link.id,
-          path: [],
-          ...(link.scope !== undefined && { scope: link.scope }),
-        },
-        { meta: ignoreReadForScheduling },
-      ) !== undefined;
+      return this.#documentPresent(readTx, link);
     };
     // The hold, with what decided it: a document of `stage` read absent, or
     // the budget ran out on a probe of that stage — the case worth a log,
