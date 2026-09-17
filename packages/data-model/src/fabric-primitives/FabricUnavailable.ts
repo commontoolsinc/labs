@@ -456,6 +456,23 @@ export class FabricUnavailable extends BaseFabricPrimitive
   }
 
   /**
+   * Helper for `#instanceForState()`, which returns the prefab instance for
+   * a transient reason. The `switch` is exhaustive with no default, so a
+   * transient reason added without a prefab stops this file compiling.
+   */
+  static #prefabFor(reason: TransientReason): FabricUnavailable {
+    switch (reason) {
+      case UNAVAILABLE_REASONS.pending: {
+        return UNAVAILABLE_PENDING;
+      }
+
+      case UNAVAILABLE_REASONS.syncing: {
+        return UNAVAILABLE_SYNCING;
+      }
+    }
+  }
+
+  /**
    * Helper for both codecs' `decode()`, which returns the instance a decoded
    * state stands for: the prefab for a state that is a transient reason alone, and a fresh instance otherwise. Throws as
    * the constructor does when the fields present do not belong with the reason.
@@ -477,7 +494,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
       FabricUnavailable.#isTransientReason(reason) &&
       (errorKind === undefined) && (errorMessage === undefined)
     ) {
-      return PREFABS_BY_REASON[reason];
+      return FabricUnavailable.#prefabFor(reason);
     }
 
     return new FabricUnavailable(
@@ -497,17 +514,6 @@ export const UNAVAILABLE_PENDING = new FabricUnavailable(
 export const UNAVAILABLE_SYNCING = new FabricUnavailable(
   UNAVAILABLE_REASONS.syncing,
 );
-
-/**
- * The prefab instance for each transient reason, keyed by reason, for the
- * codecs to decode to. The type is what holds "one per transient reason": a
- * reason added without a prefab stops this file compiling.
- */
-const PREFABS_BY_REASON: Readonly<Record<TransientReason, FabricUnavailable>> =
-  Object.freeze({
-    pending: UNAVAILABLE_PENDING,
-    syncing: UNAVAILABLE_SYNCING,
-  });
 
 // Compile-time check that the exported `FabricUnavailable` constructor matches
 // the `FabricUnavailableConstructor` declared in `@/api.ts`. This catches a
