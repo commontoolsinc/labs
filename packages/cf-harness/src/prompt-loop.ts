@@ -3711,6 +3711,12 @@ export class CfHarnessPromptLoop {
         options.signal?.throwIfAborted();
         const toolCalls = assistantMessage.toolCalls ?? [];
         if (toolCalls.length === 0) {
+          if (assistantMessage.content.trim().length === 0) {
+            throw new HarnessControlError(
+              "provider-unavailable",
+              "The model returned an empty assistant response with no tool calls",
+            );
+          }
           finalAssistantText = assistantMessage.content;
           break;
         }
