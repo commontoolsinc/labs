@@ -146,7 +146,6 @@ export const WORKSPACE_TEST_WEIGHTS: Readonly<Record<string, number>> = {
   llm: 1,
   memory: 49.8,
   patterns: 6.2,
-  "patterns/auth": 1,
   "piece (1/3)": 60,
   "piece (2/3)": 60,
   "piece (3/3)": 60,

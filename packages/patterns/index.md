@@ -110,14 +110,13 @@ profile roster — every participant's cross-space profile badge), `self.tsx`,
 `self-improving-classifier.tsx`, `shopping-list.tsx`, `store-mapper.tsx`,
 `text-swapper.tsx`.
 
-App and integration directories: `activity-log/`, `agent/`, `airtable/`,
-`auth/`, `base/`, `battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,
+App and integration directories: `activity-log/`, `agent/`, `base/`,
+`battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,
 `collection-naming/` (the member-naming library and the board that exercises it;
 the library is the reference, the board is a demo), `contacts/`, `cozy-poll/`,
 `examples/`, `experimental/` (explicitly unhardened explorations), `file-share/`
 (a minimal file-sharing example: bytes go to the blob store, cells hold
-descriptors), `google/` (the `core/` tree; `google/WIP/` is legacy),
-`habit-tracker/`, `lobby/`, `lunch-poll/`, `profile-group-chat/`,
+descriptors), `habit-tracker/`, `lobby/`, `lunch-poll/`, `profile-group-chat/`,
 `project-list/`, `router/`, `scoped-group-chat/`, `scoped-user-directory/`,
 `scrabble/`, `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
 `weekly-calendar/`.
@@ -157,7 +156,6 @@ The remaining legacy patterns each carry the legacy marker:
   pattern-factory outputs, kept with their eval scores and never intended as
   style references. `parking-coordinator/main.tsx` is also a live integration
   and capability-gate fixture, which is why it stays.
-- `google/WIP/` — parked work that never graduated into `google/core/`.
 
 The registry/`MODULE_METADATA` composition system — `record/`, `record.tsx`, its
 backup and icon companions, `container-protocol.ts`, and the two dozen attribute

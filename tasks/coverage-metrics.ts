@@ -174,8 +174,8 @@ export interface MeasuredSetDebtOptions {
   /**
    * Every workspace member, so that a file belonging to a member nested
    * inside this one is charged to that member's set instead of to this
-   * one. `packages/patterns/auth` sits inside `packages/patterns`, and a
-   * line of it belongs to one of the two rather than to both.
+   * one. A line under such a member belongs to one of the two rather than
+   * to both.
    */
   members: readonly string[];
 }

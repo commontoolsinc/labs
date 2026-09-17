@@ -238,6 +238,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
   the verb flags and result shapes that offer none, the source `--space` needs
   before any of it is reachable by name, and the gate that keeps completion
   from falling behind the command tree again.
+- [Handler-callable egress](handler-callable-egress.md) records the capability
+  a pattern does not have: a network request a handler can issue and await,
+  which the runtime records and gates the way it records and gates a node
+  factory's request. It carries the shape of program that has no home without
+  one, the two routes a design could take and what each gives up, and the
+  provider-side stack left standing in the meantime.
 
 ## Concepts not planned for deployment
 

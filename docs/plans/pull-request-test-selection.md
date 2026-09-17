@@ -3197,7 +3197,6 @@ list is what it is today:
 | --- | --- |
 | `packages/generated-patterns` | Its test task is `echo 'No tests defined.'`. Its test files run in the generated-patterns integration job. |
 | `packages/home-schemas` | It has no tests. |
-| `packages/patterns/auth` | Its test task is `echo 'No tests defined.'`. |
 | `packages/patterns` | Authored pattern code is measured by transformer instrumentation in the pattern unit and integration jobs. The package's own `deno test` ignores the pattern files deliberately. |
 | `packages/runner` | Its whole set is past what all five lanes hold together: about 1,600 seconds of test steps in the reference build, against a budget of 1,150. |
 | `packages/cli` | The command line's real coverage comes from the integration script rather than from these tests, so gating on them would ratchet the wrong number. |

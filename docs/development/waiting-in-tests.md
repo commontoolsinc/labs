@@ -1398,22 +1398,6 @@ exception as a detail record, and stringifying one yields `[object Object]`.
 exception's description, and for anything else points at the cause, which the
 thrower attaches and Deno prints below the message.
 
-### A human-in-the-loop flow that no CI lane runs
-
-`packages/patterns/google/core/integration/google-calendar-importer.test.ts`
-drives the Google OAuth consent flow end to end, and a person has to complete
-that flow in a real browser. The test prints instructions to the console and then
-allows two minutes for the account selection and the scope approval. It cannot
-run unattended, and no CI lane runs it: the `patterns` package's `test` task
-ignores `google/core/integration`, and its `integration` tasks run only the
-`integration/` and `integration/reload/` directories. The check still sees the
-file, because the scan walks every `integration/` directory beneath `packages/`,
-so it needs an allowlist entry.
-
-Its waits are ordinary DOM and text conditions that `waitForCondition` would
-express. They stay a poll because nothing automated exercises this file, so
-converting it churns code that no run covers.
-
 ### A shell script observing another process through a kernel mount
 
 `packages/cli/integration/fuse-exec.sh` drives the FUSE daemon as a separate
