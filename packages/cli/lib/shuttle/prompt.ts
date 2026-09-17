@@ -150,6 +150,9 @@ export interface PromptTerminal {
    * writing is a record: a pattern's console output and an armed watch's event
    * lines go on arriving while a frame is up, and a transcript missing them
    * would be missing exactly the changes a person opened the frame to watch.
+   * Kept is the promise rather than written here: an implementation that hands
+   * the terminal to a program ({@link PromptTerminal.suspend}) can reach no
+   * screen while it does, and owes those lines when it can write again.
    */
   unframe(): void;
 

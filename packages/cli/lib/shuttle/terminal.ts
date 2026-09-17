@@ -347,6 +347,11 @@ class StandardTerminal implements PromptTerminal {
    * line under the cursor, and the next drawing repaints it as any drawing
    * repaints the one before, climbing to its first row. A suspension is where
    * that differs, another program having drawn on this screen in between.
+   *
+   * What the frame was holding back is written here, except where a program
+   * holds the terminal: nothing sent then arrives, so those lines wait for
+   * {@link StandardTerminal.suspend} to let the hold go rather than being
+   * written into a drop.
    */
   unframe(): void {
     if (this.#frame === undefined) return;
@@ -415,12 +420,21 @@ class StandardTerminal implements PromptTerminal {
    * The submit is held back, so such a key may appear in a line and may never
    * run one.
    *
-   * What was drawn is forgotten across the trip. The program had the screen
-   * and may have left anything on it, so where the last line was drawn says
-   * nothing about where the cursor is now; drawing the next line as a repaint
-   * of that one would clear whatever the program left above it. Forgetting
-   * leaves the next drawing an ordinary first one, written where the cursor
-   * stands.
+   * The line drawn before the trip is forgotten and a frame is not, and the
+   * asymmetry is what each of them is. The program had the screen and may
+   * have left anything on it, so where the last line was drawn says nothing
+   * about where the cursor is now; drawing the next line as a repaint of that
+   * one would clear whatever the program left above it. Forgetting leaves the
+   * next drawing an ordinary first one, written where the cursor stands.
+   *
+   * A frame is the whole screen rather than a line on it, so it is neither
+   * forgotten nor repainted over what the program left: the alternate screen
+   * goes back before the program and is taken again after, and what the
+   * program drew leaves with the screen it was drawn on. The frame is then
+   * drawn again from what it was last given, which is why it is kept
+   * ({@link StandardTerminal.#frame}). Whether it is taken back is decided on
+   * the way out rather than remembered from the way in, because a frame can be
+   * given up while the program runs.
    */
   async suspend<T>(body: () => Promise<T>): Promise<T> {
     // The alternate screen is given back before the program and taken again
