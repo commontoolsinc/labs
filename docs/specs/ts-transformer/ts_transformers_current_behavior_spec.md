@@ -1644,7 +1644,11 @@ adjustments:
   assigned to anything but a local its own function declares, or handed to a
   callee with no summary, it is read wherever it lands by members the analysis
   never sees, so a member the body did read on the way must not narrow it to
-  that member. A primitive has nothing below it to keep and is left alone. A
+  that member. The left operand of `??` and `||` is the expression's value
+  whenever it is there, so it leaves when the expression does. A helper's
+  summary carries what the helper let leave whole, and the caller charges it to
+  the argument it passed. A primitive has nothing below it to keep and is left
+  alone. A
   value bound to a local or written into a local collection stays tracked and
   narrows as its reads say. So does a value handed on by reference, which the
   runtime stores as a link so that whatever reads through it does so under a

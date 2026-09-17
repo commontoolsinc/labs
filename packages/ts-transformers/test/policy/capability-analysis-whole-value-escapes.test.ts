@@ -40,6 +40,9 @@ type Index = {
 
 declare function driverOf(s: Source): string;
 
+const collect = (index: Index): Source[] =>
+  index.sources.flatMap((s) => s?.id ? [s] : []);
+
 declare class Box {
   constructor(row: Source | undefined);
   readonly row: Source | undefined;
@@ -264,6 +267,52 @@ describe("capability-analysis-whole-value-escapes", () => {
       expect(elementPropertyNames(schema)).toEqual(WHOLE);
     });
 
+    it("keeps every element property when a helper the body calls lets the element leave whole", async () => {
+      // The helper's summary carries the full-shape read; the caller charges
+      // it to the argument it passed.
+      const schema = await liftInputSchema(
+        "collect(index).map((s) => `${s.id}:${s.driver}`)",
+        "string[]",
+      );
+      expect(elementPropertyNames(schema)).toEqual(WHOLE);
+    });
+
+    it("keeps every element property when the left of `??` carries the element out", async () => {
+      const schema = await liftInputSchema(
+        `index.sources.map((s) => ({
+          row: s ?? { id: "fallback", driver: "fallback" },
+          id: s?.id,
+        })).map((entry) => entry.row.driver)`,
+        "string[]",
+      );
+      expect(elementPropertyNames(schema)).toEqual(WHOLE);
+    });
+
+    it("keeps every element property when the left of `||` carries the element out", async () => {
+      const schema = await liftInputSchema(
+        `index.sources.map((s) => ({
+          row: s || { id: "fallback", driver: "fallback" },
+          id: s?.id,
+        })).map((entry) => entry.row.driver)`,
+        "string[]",
+      );
+      expect(elementPropertyNames(schema)).toEqual(WHOLE);
+    });
+
+    it("keeps every element property when a destructuring assignment writes the element to a variable the callback does not declare", async () => {
+      const schema = await liftInputSchema(
+        `{
+          let last: Source | undefined;
+          index.sources.forEach((s) => {
+            if (s?.id) ({ row: last } = { row: s });
+          });
+          return last ? last.driver : "";
+        }`,
+        "string",
+      );
+      expect(elementPropertyNames(schema)).toEqual(WHOLE);
+    });
+
     it("keeps every property of a member that leaves the callback in an array", async () => {
       const schema = await liftInputSchema(
         `index.wrapped.flatMap((w) => w.row?.id ? [w.row] : []).map((r) => r.driver)`,
@@ -327,6 +376,17 @@ describe("capability-analysis-whole-value-escapes", () => {
         "string[]",
       );
       expect(wrappedRowPropertyNames(schema)).toEqual(["id"]);
+    });
+
+    it("narrows to the member read through a local bound to a fallback", async () => {
+      const schema = await liftInputSchema(
+        `index.sources.flatMap((s) => {
+          const x = s ?? { id: "", driver: "" };
+          return x.id ? [x.id] : [];
+        })`,
+        "string[]",
+      );
+      expect(elementPropertyNames(schema)).toEqual(["id"]);
     });
 
     it("narrows to the member read through a local object literal", async () => {

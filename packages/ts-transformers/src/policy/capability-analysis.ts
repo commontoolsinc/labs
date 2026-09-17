@@ -819,11 +819,12 @@ function isPassThroughIdentifierUsage(node: ts.Identifier): boolean {
 /**
  * The outermost expression whose value is `node`'s own, reached by climbing
  * every parent that forwards an operand's value unchanged: a transparent
- * wrapper, either branch of a conditional, and the right operand of `??`,
- * `||`, `&&` or a comma. The left operand of `??` and `||` is not climbed:
- * that position is read as a presence check (`isBooleanConditionUsage`), and
- * what it forwards is followed by alias resolution through
- * `FALLBACK_OPERATORS`.
+ * wrapper, either branch of a conditional, either operand of `??` and `||`,
+ * and the right operand of `&&` or a comma. The left operand of `??` and `||`
+ * is the value the expression takes whenever it is there at all, so it
+ * travels as far as the expression does. The left operand of `&&` is not
+ * climbed: the expression takes it only when it is falsy, and a falsy value
+ * has no members to lose.
  */
 function outermostValueForwarder(node: ts.Expression): ts.Expression {
   let current: ts.Expression = node;
@@ -841,13 +842,16 @@ function outermostValueForwarder(node: ts.Expression): ts.Expression {
       current = parent;
       continue;
     }
-    if (ts.isBinaryExpression(parent) && parent.right === current) {
+    if (ts.isBinaryExpression(parent)) {
       const kind = parent.operatorToken.kind;
-      if (
-        kind === ts.SyntaxKind.QuestionQuestionToken ||
-        kind === ts.SyntaxKind.BarBarToken ||
+      const fallback = kind === ts.SyntaxKind.QuestionQuestionToken ||
+        kind === ts.SyntaxKind.BarBarToken;
+      const forwardsRight = fallback ||
         kind === ts.SyntaxKind.AmpersandAmpersandToken ||
-        kind === ts.SyntaxKind.CommaToken
+        kind === ts.SyntaxKind.CommaToken;
+      if (
+        (parent.right === current && forwardsRight) ||
+        (parent.left === current && fallback)
       ) {
         current = parent;
         continue;
@@ -920,6 +924,54 @@ function isDeclaredByEnclosingFunction(name: string, from: ts.Node): boolean {
 }
 
 /**
+ * Whether every target an assignment pattern writes is a local the function
+ * directly enclosing `from` declares. A target that is a member
+ * (`holder.row`), or a variable of an enclosing function, takes the value
+ * somewhere alias resolution stops following it.
+ */
+function assignmentTargetsAreOwnLocals(
+  pattern: ts.Expression,
+  from: ts.Node,
+): boolean {
+  const target = unwrapExpression(pattern);
+  if (ts.isIdentifier(target)) {
+    return isDeclaredByEnclosingFunction(target.text, from);
+  }
+  if (ts.isObjectLiteralExpression(target)) {
+    return target.properties.every((property) => {
+      if (ts.isShorthandPropertyAssignment(property)) {
+        return isDeclaredByEnclosingFunction(property.name.text, from);
+      }
+      if (ts.isPropertyAssignment(property)) {
+        return assignmentTargetsAreOwnLocals(property.initializer, from);
+      }
+      if (ts.isSpreadAssignment(property)) {
+        return assignmentTargetsAreOwnLocals(property.expression, from);
+      }
+      return false;
+    });
+  }
+  if (ts.isArrayLiteralExpression(target)) {
+    return target.elements.every((element) =>
+      ts.isOmittedExpression(element) ||
+      assignmentTargetsAreOwnLocals(
+        ts.isSpreadElement(element) ? element.expression : element,
+        from,
+      )
+    );
+  }
+  // A target with a default, `{ row: last = fallback }`, is written as an
+  // assignment whose left side is the target.
+  if (
+    ts.isBinaryExpression(target) &&
+    target.operatorToken.kind === ts.SyntaxKind.EqualsToken
+  ) {
+    return assignmentTargetsAreOwnLocals(target.left, from);
+  }
+  return false;
+}
+
+/**
  * Where a value used whole ends up, once every value-forwarding parent and
  * every enclosing object literal that alias resolution models has been
  * climbed. A parent link that stops short — a synthesized node — answers
@@ -979,10 +1031,7 @@ function wholeValueDestination(
       isAssignmentOperator(parent.operatorToken.kind)
     ) {
       const local = parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-        (ts.isIdentifier(parent.left)
-          ? isDeclaredByEnclosingFunction(parent.left.text, parent)
-          : ts.isObjectLiteralExpression(parent.left) ||
-            ts.isArrayLiteralExpression(parent.left));
+        assignmentTargetsAreOwnLocals(parent.left, parent);
       return { kind: local ? "tracked" : "escaped" };
     }
     if (
@@ -3018,6 +3067,15 @@ export function analyzeFunctionCapabilities(
               markPassthrough(leftRef.root);
             } else {
               trackReadRef(leftRef);
+              // The identifier or member on the left is never visited, so
+              // this is where it is asked whether its value, which is the
+              // fallback expression's whenever it is there, leaves whole.
+              if (
+                !isPrimitiveLikeExpression(node.left) &&
+                escapesWhole(node.left)
+              ) {
+                trackFullShapeReadRef(leftRef);
+              }
             }
             // Resolving the ref stood in for walking the operand, so a call on
             // its spine has gone unvisited and the reads inside that call's
@@ -3405,6 +3463,15 @@ export function analyzeFunctionCapabilities(
 
             for (const readPath of paramSummary.readPaths) {
               trackRead(source.root, [...source.path, ...readPath]);
+            }
+            // What the callee let leave whole leaves the caller's value whole
+            // too: its own members the caller never sees are read wherever
+            // the callee sent them.
+            for (const fullShapePath of paramSummary.fullShapePaths ?? []) {
+              trackFullShapeRead(source.root, [
+                ...source.path,
+                ...fullShapePath,
+              ]);
             }
             for (const writePath of paramSummary.writePaths) {
               trackWrite(source.root, [...source.path, ...writePath]);
