@@ -2,15 +2,12 @@ import {
   FabricPrimitive,
   isWalkableObjectOrArray,
 } from "@commonfabric/data-model";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { readStatsActive, recordProxyAccess } from "./read-stats.ts";
 import { isStreamValue } from "./builder/types.ts";
 import { type BackToCellInternals, toCell } from "./back-to-cell.ts";
-import {
-  ContextualFlowControl,
-  resolveExternalRootRefForStructure,
-} from "./cfc.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { resolveLinkTracingDereferences } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell } from "./cell.ts";
@@ -340,14 +337,7 @@ function createViewProxy<T>(
   // puts on a stream's alias, which the stored redirect carries onto the
   // resolved link. The handle is minted from that alone, since the document
   // behind a stream holds no value to read.
-  const linkSchema = isObjectNotArray(link.schema)
-    ? resolveExternalRootRefForStructure(link.schema)
-    : link.schema;
-  if (
-    ContextualFlowControl.getAsCellKind(
-      ContextualFlowControl.getAsCellValues(linkSchema).at(0),
-    ) === "stream"
-  ) {
+  if (ContextualFlowControl.declaresStream(link.schema)) {
     return remember(
       createCell(runtime, link, tx, false, "stream", cfcLabelView) as T,
     );

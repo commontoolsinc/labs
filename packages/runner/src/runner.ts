@@ -12,7 +12,6 @@ import {
   toCompactDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
-import { SCHEMA_META_MEMBER } from "@commonfabric/data-model-schema/schema-refs";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -103,10 +102,7 @@ import {
   type RawNodeCause,
 } from "./module.ts";
 import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
-import {
-  resultSchemaMetaSpelling,
-  writeResultSchemaMeta,
-} from "./result-schema-meta.ts";
+import { writeResultSchemaMeta } from "./result-schema-meta.ts";
 import {
   canResolveScopeKey,
   resolveScopeKey,
@@ -3073,18 +3069,6 @@ export class Runner {
         link: derivedSigilLink,
       });
       setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
-      const streamSchema = declaredStreamSchema(descriptor);
-      if (streamSchema !== undefined) {
-        // A stream's document holds no value, so its `schema` metadata is
-        // what lets a reader of the document alone tell that it is a stream.
-        // Written blind on every setup, as the back-link above is, so a
-        // cold-cache resume pays no probe read for it.
-        derivedCell.setMetaRaw(
-          SCHEMA_META_MEMBER,
-          resultSchemaMetaSpelling(streamSchema),
-          rawMetaWriteAuthorization,
-        );
-      }
       if (manifestMatch === -1) {
         // Seed the build-time default for the freshly created cell. The
         // manifest entry and this default are written together in one
@@ -6091,8 +6075,8 @@ export class Runner {
     // document enters neither the caller's dependencies nor its commit's
     // read set: the run that follows the name-sync reads these for real.
     // The document record itself is what is probed, not a value read
-    // through a schema, which answers an absent document with the schema's
-    // default, and not the value alone, which a stream's document never
+    // through a schema, which returns the schema's default for an absent
+    // document, and not the value alone, which a stream's document never
     // holds. A cell nothing has written at all — a derived cell no setup has
     // materialized — reads absent here, and holds the run once; the probes
     // stop at a budget (`NAMING_PROBE_BUDGET`), and a budget spent reads
@@ -8090,10 +8074,11 @@ export class Runner {
             schemaWithoutEventSlot(plan.module.argumentSchema),
           ),
         ];
-        // A handler node's `$event` slot names its stream document, which
-        // instantiation reads the stream marker off after following the
-        // slot's whole redirect chain. Every hop is named whole: it is the
-        // event log, not a value the module schema describes.
+        // A handler node's `$event` slot names its stream's document through
+        // a redirect chain. Instantiation registers on the slot's link and
+        // reads nothing behind it; a send resolves every hop, so each is
+        // named here, and named whole: it is not a value the module schema
+        // describes.
         if (isObjectOrArray(plan.inputs) && "$event" in plan.inputs) {
           for (
             const streamLink of findAllWriteRedirectCells(
@@ -8239,8 +8224,8 @@ export class Runner {
    * A coordinator resumes its durable children from inside its own
    * scheduler run, synchronously: `run()` instantiates the child in the
    * coordinator's transaction, and instantiation reads the child's
-   * execution family — its argument document, its derived internal cells,
-   * a handler's `$event` stream marker among them. A child a subscription
+   * execution family — its argument document and its derived internal
+   * cells among them. A child a subscription
    * merely reached arrives without that family, so the family is named
    * here, where every other resume dependency is: naming a child's result
    * document delivers the family, and the coordinator's synchronous start
@@ -8542,7 +8527,7 @@ export class Runner {
   /**
    * Whether a graph is registered for `resultCell`'s document: the piece is
    * running, and a start would return on its fast path without touching the
-   * stored doc. A subpath cell answers for its root document.
+   * stored doc. A subpath cell stands for its root document.
    */
   isRunning<T>(resultCell: Cell<T>): boolean {
     const link = resultCell.getAsNormalizedFullLink();
@@ -11924,19 +11909,6 @@ function getTxDebugActionId(
   tx?: IExtendedStorageTransaction,
 ): string | undefined {
   return tx ? (tx.tx as { debugActionId?: string }).debugActionId : undefined;
-}
-
-/**
- * The schema of a derived internal cell its pattern declares as a stream, or
- * `undefined` for one it declares as a value cell.
- */
-function declaredStreamSchema(
-  descriptor: { readonly schema?: JSONSchema },
-): JSONSchema | undefined {
-  const entry = ContextualFlowControl.getAsCellValues(descriptor.schema).at(0);
-  return ContextualFlowControl.getAsCellKind(entry) === "stream"
-    ? descriptor.schema
-    : undefined;
 }
 
 /**

@@ -834,11 +834,16 @@ export class ContextualFlowControl {
   /**
    * Whether `schema` declares a stream position: its outermost `asCell` entry
    * is of kind `stream`. Such a position holds no value, and its handle is
-   * minted from the schema alone.
+   * minted from the schema alone. A link's schema can ride as a
+   * content-addressed reference, and the declaration then lives on the
+   * document that reference names, so the reference is resolved first.
    */
   static declaresStream(schema: JSONSchema | undefined): boolean {
+    const structural = isObjectNotArray(schema)
+      ? resolveExternalRootRefForStructure(schema as JSONSchemaObj)
+      : schema;
     return ContextualFlowControl.getAsCellKind(
-      ContextualFlowControl.getAsCellValues(schema).at(0),
+      ContextualFlowControl.getAsCellValues(structural).at(0),
     ) === "stream";
   }
 

@@ -413,9 +413,6 @@ export function createSigilLinkFromParsedLink(
 }
 
 /**
- * Controls which `asCell` schema entries survive {@link sanitizeSchemaForLinks}.
- */
-/**
  * Returns `schema` stamped as a stream position: a `stream` entry at the
  * front of its `asCell` list, over the event schema the stream accepts. An
  * `asCell` entry the event schema already carries describes the event and
@@ -433,13 +430,14 @@ export function declareStreamSchema(
   if (schema === false) {
     return { not: true, asCell: ["stream"] };
   }
+  if (ContextualFlowControl.declaresStream(schema)) return schema;
   const entries = Array.isArray(schema.asCell) ? schema.asCell : [];
-  const front = entries[0];
-  const frontKind = typeof front === "string" ? front : front?.kind;
-  if (frontKind === "stream") return schema;
   return { ...schema, asCell: ["stream", ...entries] };
 }
 
+/**
+ * Controls which `asCell` schema entries survive {@link sanitizeSchemaForLinks}.
+ */
 export enum KeepAsCell {
   // Strip all asCell entries (cell, opaque, and stream).
   None = "None",

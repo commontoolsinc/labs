@@ -6,8 +6,11 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isStream } from "../src/cell.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { getDerivedInternalCell, getMetaLink } from "../src/link-utils.ts";
-import { readResultSchemaMeta } from "../src/result-schema-meta.ts";
+import {
+  getDerivedInternalCell,
+  getMetaLink,
+  parseLink,
+} from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
@@ -48,6 +51,33 @@ const PICKER = [
   "  const rows = new Writable<Row[]>([{ id: 'a' }, { id: 'b' }]).for('rows');",
   "  const onPick = pick({ picked });",
   "  return { picked, items: rows.map((row) => Item({ row, onPick })) };",
+  "});",
+  "",
+].join("\n");
+
+// Each conditional builtin selects a handler that belongs to a sub-pattern,
+// so the stream is reached through that sub-pattern's stored result link.
+const GATED = [
+  "import {",
+  "  Writable, handler, ifElse, pattern, unless, when,",
+  "} from 'commonfabric';",
+  "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
+  "  count.set((count.get() ?? 0) + 1);",
+  "});",
+  "const Counter = pattern<Record<string, never>>(() => {",
+  "  const count = new Writable<number>(0).for('count');",
+  "  return { count, bump: bump({ count }) };",
+  "});",
+  "export default pattern<Record<string, never>>(() => {",
+  "  const on = new Writable<boolean>(true).for('on');",
+  "  const off = new Writable<boolean>(false).for('off');",
+  "  const counter = Counter({});",
+  "  return {",
+  "    count: counter.count,",
+  "    viaIfElse: ifElse(on, counter.bump, undefined),",
+  "    viaWhen: when(on, counter.bump),",
+  "    viaUnless: unless(off, counter.bump),",
+  "  };",
   "});",
   "",
 ].join("\n");
@@ -99,7 +129,7 @@ describe("stream declaration", () => {
   const countOf = (cell: Cell<Record<string, unknown>>) =>
     (cell.getAsQueryResult() as { count: number }).count;
 
-  it("declares a handler's stream in its links and metadata, with no stored value", async () => {
+  it("declares a handler's stream in its owner's manifest link, and leaves the stream's document with only its back-link", async () => {
     const { pattern, cell } = await runProgram(COUNTER, "counter");
     const descriptor = (pattern.derivedInternalCells ?? []).find((candidate) =>
       asCellKindOf(candidate.schema) === "stream"
@@ -108,7 +138,15 @@ describe("stream declaration", () => {
     const stream = getDerivedInternalCell(cell, descriptor!);
     expect(stream.getRaw()).toBeUndefined();
     expect(getMetaLink(stream, "result")).toBeDefined();
-    expect(asCellKindOf(readResultSchemaMeta(stream))).toBe("stream");
+    expect(stream.getMetaRaw("schema")).toBeUndefined();
+
+    const manifest = cell.getMetaRaw("internal") as { link: unknown }[];
+    const streamId = stream.getAsNormalizedFullLink().id;
+    const entry = manifest
+      .map(({ link }) => parseLink(link, cell))
+      .find((link) => link?.id === streamId);
+    expect(entry).toBeDefined();
+    expect(ContextualFlowControl.declaresStream(entry!.schema)).toBe(true);
   });
 
   it("resolves a result field to a stream through its stored link alone", async () => {
@@ -134,4 +172,18 @@ describe("stream declaration", () => {
     await cell.pull();
     expect(cell.key("picked").get()).toEqual(["a"]);
   });
+
+  for (const field of ["viaIfElse", "viaWhen", "viaUnless"] as const) {
+    it(`keeps a sub-pattern's stream dispatchable when \`${field}\` selects it`, async () => {
+      const { cell } = await runProgram(GATED, `gated-${field}`);
+      await rt.idle();
+      const selected = cell.key(field);
+      expect(isStream(selected)).toBe(true);
+      const before = countOf(cell);
+      (selected as unknown as { send: (event: unknown) => void }).send({});
+      await cell.pull();
+      expect(countOf(cell)).toBe(before + 1);
+      await rt.storageManager.synced();
+    });
+  }
 });
