@@ -6668,10 +6668,16 @@ export class Runner {
     inputs: FabricValue,
     markCreateOnlyResult = false,
     speculativeConsequence?: { eventId: string },
+    parentPieceRootId?: string,
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const startLifecycleEpoch = this.#lifecycleEpoch;
     const ownership = this.#createDeferredStartOwnership(resultCell);
+    // The piece this result belongs to is known now and not at the deferred
+    // start, and a child the result instantiates asks for it by the chain
+    // (`#ancestorSystemOrigin`), so the chain is recorded ahead of the start
+    // exactly as the immediate path's start records it.
+    this.#demandRootChainFor(resultLink.id, parentPieceRootId);
     tx.addCommitCallback((_committedTx, result) => {
       if (result.error) {
         // Settled here for the same reason as the start above: this callback
@@ -6718,6 +6724,7 @@ export class Runner {
           pattern,
           inputs,
           committedResultCell,
+          parentPieceRootId === undefined ? {} : { parentPieceRootId },
         ).installedCancel;
         if (ownership.markInstalled(installedRegistration)) {
           startTx.abort("Deferred runner start was cancelled");
@@ -9931,6 +9938,7 @@ export class Runner {
         undefined,
         true,
         speculativeConsequence,
+        patternResultCell.getAsNormalizedFullLink().id,
       );
       addCancel(cancelDeferredStart);
       this.#runtime.scheduler.lineage.recordPieceStop(
@@ -9951,6 +9959,7 @@ export class Runner {
           cause,
           true,
           speculativeConsequence,
+          patternResultCell.getAsNormalizedFullLink().id,
         );
         cancelDeferredStart = setup.cancelDeferredStart;
         return setup.resultCell;
@@ -10096,12 +10105,20 @@ export class Runner {
     cause: Record<string, any>,
     markCreateOnlyResult = false,
     speculativeConsequence?: { eventId: string },
+    parentPieceRootId?: string,
   ): DeferredStartResult<any> {
     const resultCell = this.#runtime.getCell(
       resultSpace,
       { resultFor: cause },
       undefined,
       tx,
+    );
+    // Recorded before the setup instantiates the result's children: a child
+    // asks the chain for the piece its handler belongs to
+    // (`#ancestorSystemOrigin`), and the deferred start comes too late for it.
+    this.#demandRootChainFor(
+      resultCell.getAsNormalizedFullLink().id,
+      parentPieceRootId,
     );
     const resultSetup = this.#setupInternal(
       tx,
@@ -10123,7 +10140,7 @@ export class Runner {
         tx,
         resultCell,
         resultSetup.pattern,
-        {},
+        parentPieceRootId === undefined ? {} : { parentPieceRootId },
         speculativeConsequence,
       )
       : undefined;
