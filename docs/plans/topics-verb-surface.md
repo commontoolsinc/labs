@@ -41,7 +41,7 @@ directory, and details come from navigating to the topic.
 ## The demand
 
 `TopicDemand` in `packages/patterns/topics/main.tsx` is what the board requires
-of a stored topic. Eight members, no verbs:
+of a stored topic. Nine members, no verbs:
 
 | member | why it is demanded |
 | --- | --- |
@@ -52,23 +52,28 @@ of a stored topic. Eight members, no verbs:
 | `lastActivityAt` | the card, the index row, and the activity sort |
 | `createdAt` | the index row |
 | `mentions` | the crossref pivot's join |
-| `[NAME]` | published onward as each topic's mention universe, where the editor requires it |
+| `[NAME]` | copied into each topic's mention-universe row, as the display name the editor's autocomplete matches on |
+| `shortName` | the card's badge, and the mention-universe row that `#42` matches |
 
-`[NAME]` is the one no reader of the board shows: the board hands the same
-array on as the mention universe, so the name has to survive the demand to
-reach the editor. Counting only what the board reads is what drops it, and
-dropping it costs no type error and empties every `@`-mention completion.
+`[NAME]` is the one no card renders. `mentionableIndex` reads it off each
+topic and copies it into that topic's row of the board's mention universe,
+where it is the display name the editor's autocomplete lists and matches on.
 
-Seven of the eight carry a default. `createdAt` is the exception, and it is
-safe for a different reason rather than by oversight: the topic pattern
-defaults its own `createdAt` input to `0` and publishes it unconditionally, so
-every topic produces the path whether or not it was ever stamped.
+Seven of the nine carry a default, and the two that do not are safe for
+different reasons rather than by oversight. `createdAt` is required: the topic
+pattern defaults its own `createdAt` input to `0` and publishes it
+unconditionally, so every topic produces the path whether or not it was ever
+stamped. `shortName` is optional rather than defaulted, because a default
+there would sit below an array constraint the compatibility proof cannot show
+stable under default insertion, while an optional property carries no default
+to move and tolerates a topic that publishes no name.
 
 That is the property the demand rests on, and defaults are how it is usually
 bought. A demanded path a stored topic cannot produce makes the whole array
 unreadable — not the one row, the array — while a value the topic always
-produces is simply read. A ninth member is safe when one of the two holds, and
-a default is the only one of them a board can grant itself.
+produces is simply read. A tenth member is safe when the topic always produces
+its path, and otherwise when the demand grants itself the tolerance: a
+default, or an optional declaration.
 
 ## Stages
 
@@ -274,9 +279,9 @@ Two preconditions belong to the board rather than to the code:
   topic's activity *backwards* and visibly reorder the board, while a stamped
   one cannot. `lastActivityOf` therefore keeps counting stamped records, and
   changing it to skip them reintroduces that silently. `commentCount` is the
-  other side: it counts the array's length today, so it has to exclude stamped
-  records or a card reads more comments than the topic shows. Both are
-  computations rather than schema, so neither needs a migration.
+  other side: it counts the records carrying no `removedAt` stamp, so a card
+  never promises more comments than the topic shows. Both are computations
+  rather than schema, so neither needs a migration.
 - Every field a stamped removal adds is optional, for the reason recorded on
   `TopicComment`: a stored record type has to accept what is already stored,
   and the deployed board holds records written before these fields existed.
@@ -312,7 +317,7 @@ Two preconditions belong to the board rather than to the code:
 - Stage B keeps the existing verb names. The rehearsed break is the *one*
   deliberate break in this plan: anything break-shaped discovered along the way
   rides it, and every other change stays gate-clean.
-- The board's demand names the eight members above, and losing the excluded
+- The board's demand names the nine members above, and losing the excluded
   fields from the board's published projection is accepted.
 
 [#6573]: https://github.com/commonfabric/labs/issues/6573
