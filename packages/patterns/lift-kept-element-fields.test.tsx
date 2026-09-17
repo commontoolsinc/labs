@@ -1,10 +1,10 @@
 /**
- * Five lifts over one input array, each reading `id` and `driver` off the
+ * Six lifts over one input array, each reading `id` and `driver` off the
  * elements that carry an `id`. They differ only in where the read happens: at
  * the element inside the callback, on a spread copy, through a helper, on the
- * element itself after it was returned whole from `flatMap`, and on the
- * elements a helper returned whole. All five must see both fields of both
- * rows.
+ * element itself after it was returned whole from `flatMap`, on the elements
+ * a helper collected whole, and on an element a helper handed straight back.
+ * All six must see both fields of both rows.
  */
 
 import { assert, lift, pattern, TESTS, Writable } from "commonfabric";
@@ -40,6 +40,16 @@ const keepInHelperThenRead = lift(({ index }: { index: Index }): string[] =>
   collectRows(index).map((s) => `${s.id}:${s.driver}`)
 );
 
+const sameRow = (row: Source): Source => row;
+
+const passThroughHelperThenRead = lift((
+  { index }: { index: Index },
+): string[] =>
+  index.sources.flatMap((s) => s?.id ? [sameRow(s)] : []).map((s) =>
+    `${s.id}:${s.driver}`
+  )
+);
+
 const EXPECTED = JSON.stringify(["a:x", "b:y"]);
 
 const allSeeBothFields = (
@@ -48,12 +58,14 @@ const allSeeBothFields = (
   helper: string[],
   kept: string[],
   keptInHelper: string[],
+  passedThroughHelper: string[],
 ): boolean =>
   JSON.stringify(atElement) === EXPECTED &&
   JSON.stringify(spread) === EXPECTED &&
   JSON.stringify(helper) === EXPECTED &&
   JSON.stringify(kept) === EXPECTED &&
-  JSON.stringify(keptInHelper) === EXPECTED;
+  JSON.stringify(keptInHelper) === EXPECTED &&
+  JSON.stringify(passedThroughHelper) === EXPECTED;
 
 export default pattern(() => {
   const index = new Writable<Index>({
@@ -64,17 +76,26 @@ export default pattern(() => {
   const helper = readViaHelper({ index });
   const kept = keepThenRead({ index });
   const keptInHelper = keepInHelperThenRead({ index });
+  const passedThroughHelper = passThroughHelperThenRead({ index });
 
-  const assert_all_five_see_both_fields = assert(() =>
-    allSeeBothFields(atElement, spread, helper, kept, keptInHelper)
+  const assert_all_six_see_both_fields = assert(() =>
+    allSeeBothFields(
+      atElement,
+      spread,
+      helper,
+      kept,
+      keptInHelper,
+      passedThroughHelper,
+    )
   );
 
   return {
-    [TESTS]: [{ assertion: assert_all_five_see_both_fields }],
+    [TESTS]: [{ assertion: assert_all_six_see_both_fields }],
     atElement,
     spread,
     helper,
     kept,
     keptInHelper,
+    passedThroughHelper,
   };
 });

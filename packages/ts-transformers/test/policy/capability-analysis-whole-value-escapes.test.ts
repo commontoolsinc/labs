@@ -43,6 +43,14 @@ declare function driverOf(s: Source): string;
 const collect = (index: Index): Source[] =>
   index.sources.flatMap((s) => s?.id ? [s] : []);
 
+const keepRow = (row: Source): Source => row;
+const wrapRow = (row: Source): Source[] => [row];
+function sameRow(row: Source): Source {
+  return row;
+}
+const idOf = (row: Source): string => row.id;
+const idVia = (row: Source): string => idOf(row);
+
 declare class Box {
   constructor(row: Source | undefined);
   readonly row: Source | undefined;
@@ -277,6 +285,32 @@ describe("capability-analysis-whole-value-escapes", () => {
       expect(elementPropertyNames(schema)).toEqual(WHOLE);
     });
 
+    it("keeps every element property when a helper returns the element it was passed", async () => {
+      // A helper's return goes straight back into the caller's body, so the
+      // helper's summary reports the parameter as left whole.
+      const schema = await liftInputSchema(
+        "index.sources.flatMap((s) => s?.id ? [keepRow(s)] : []).map((s) => `${s.id}:${s.driver}`)",
+        "string[]",
+      );
+      expect(elementPropertyNames(schema)).toEqual(WHOLE);
+    });
+
+    it("keeps every element property when a helper returns the element inside an array", async () => {
+      const schema = await liftInputSchema(
+        "index.sources.flatMap((s) => s?.id ? wrapRow(s) : []).map((s) => `${s.id}:${s.driver}`)",
+        "string[]",
+      );
+      expect(elementPropertyNames(schema)).toEqual(WHOLE);
+    });
+
+    it("keeps every element property when a function declaration returns the element", async () => {
+      const schema = await liftInputSchema(
+        "index.sources.flatMap((s) => s?.id ? [sameRow(s)] : []).map((s) => `${s.id}:${s.driver}`)",
+        "string[]",
+      );
+      expect(elementPropertyNames(schema)).toEqual(WHOLE);
+    });
+
     it("keeps every element property when the left of `??` carries the element out", async () => {
       const schema = await liftInputSchema(
         `index.sources.map((s) => ({
@@ -376,6 +410,22 @@ describe("capability-analysis-whole-value-escapes", () => {
         "string[]",
       );
       expect(wrappedRowPropertyNames(schema)).toEqual(["id"]);
+    });
+
+    it("narrows to the member a helper reads", async () => {
+      const schema = await liftInputSchema(
+        "index.sources.flatMap((s) => s?.id ? [idOf(s)] : [])",
+        "string[]",
+      );
+      expect(elementPropertyNames(schema)).toEqual(["id"]);
+    });
+
+    it("narrows to the member read when a helper hands the element to another helper", async () => {
+      const schema = await liftInputSchema(
+        "index.sources.flatMap((s) => s?.id ? [idVia(s)] : [])",
+        "string[]",
+      );
+      expect(elementPropertyNames(schema)).toEqual(["id"]);
     });
 
     it("narrows to the member read through a local bound to a fallback", async () => {

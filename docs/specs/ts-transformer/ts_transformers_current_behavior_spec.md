@@ -1647,15 +1647,17 @@ adjustments:
   that member. The left operand of `??` and `||` is the expression's value
   whenever it is there, so it leaves when the expression does. A helper's
   summary carries what the helper let leave whole, and the caller charges it to
-  the argument it passed. A primitive has nothing below it to keep and is left
-  alone. A
+  the argument it passed. What a helper returns counts: a function declaration,
+  or a function bound to a variable or a property, hands its result straight
+  back into the caller's body, so a parameter it returns has left whole. A
+  primitive has nothing below it to keep and is left alone. A
   value bound to a local or written into a local collection stays tracked and
   narrows as its reads say. So does a value handed on by reference, which the
   runtime stores as a link so that whatever reads through it does so under a
   schema of its own: an argument to a runtime call (a builder, an applied lift,
   `ifElse`, a cell factory), the payload of a write through a cell (`set`,
   `update`, `send`, `push` and the other writer methods), a JSX prop, and what
-  the builder itself, or a builder callback lowered inside it, returns.
+  a builder's callback returns, the analyzed one or one lowered inside it.
   `Array.isArray` asks a value's shape and reads nothing below it, so it is not
   an escape either (`wholeValueDestination` / `escapesWhole` in
   `policy/capability-analysis.ts`;

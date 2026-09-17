@@ -1096,6 +1096,23 @@ function isArrayIsArrayCall(
   });
 }
 
+/**
+ * Whether a function hands what it returns straight back to a caller's body:
+ * a function declaration or method, or a function bound to a variable or a
+ * property. A builder's callback is none of these. It is an argument of the
+ * builder call, and the runtime writes its result, storing a proxy in it as a
+ * link. A synthesized function with no parent is not taken to be a helper
+ * either: only positive evidence makes one.
+ */
+function returnsToACaller(fn: ts.Node): boolean {
+  if (ts.isFunctionDeclaration(fn) || ts.isMethodDeclaration(fn)) return true;
+  if (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)) return false;
+  const holder = outermostTransparentWrapper(fn).parent;
+  return holder !== undefined &&
+    (ts.isVariableDeclaration(holder) || ts.isPropertyAssignment(holder) ||
+      ts.isPropertyDeclaration(holder));
+}
+
 /** Calls `visit` on every source reference an alias binding reaches. */
 function forEachSourceRefLeaf(
   binding: AliasBinding,
@@ -2092,13 +2109,19 @@ export function analyzeFunctionCapabilities(
         detectCallKind(call, checker)?.kind === "builder";
     };
 
+    // Whether what this function returns goes straight back into a caller's
+    // body, where the caller reads it as a value, and not into the runtime,
+    // which would store a proxy in it as a link.
+    const helperReturnsToCaller = returnsToACaller(fn);
+
     // Whether an identifier's value leaves the analysis whole. A value bound
     // to a local, or written into a local collection, stays tracked. An
     // argument stays tracked when the callee's summary or declared signature
     // charged it, when the callee binds it by reference — a runtime call, a
     // write through a cell — or when the callee only asks its shape. A value
-    // this function or a builder callback returns is handed on by reference,
-    // and a value read where it stands is charged there.
+    // a builder's callback returns is handed on by reference, this function's
+    // own included when it is one; a helper's return is a value its caller
+    // goes on to read. A value read where it stands is charged there.
     const escapesWhole = (node: ts.Expression): boolean => {
       const destination = wholeValueDestination(node);
       switch (destination.kind) {
@@ -2108,7 +2131,9 @@ export function analyzeFunctionCapabilities(
         case "escaped":
           return true;
         case "result":
-          return destination.of !== fn && !isBuilderCallback(destination.of);
+          return destination.of === fn
+            ? helperReturnsToCaller
+            : !isBuilderCallback(destination.of);
         case "argument":
           return !summaryHandledArgumentUses.has(destination.argument) &&
             !signatureCapabilityArgumentUses.has(destination.argument) &&
@@ -3065,6 +3090,9 @@ export function analyzeFunctionCapabilities(
               markWildcard(leftRef.root);
             } else if (leftRef.path.length === 0) {
               markPassthrough(leftRef.root);
+              if (helperReturnsToCaller && escapesWhole(node.left)) {
+                trackFullShapeRead(leftRef.root, []);
+              }
             } else {
               trackReadRef(leftRef);
               // The identifier or member on the left is never visited, so
@@ -3166,6 +3194,7 @@ export function analyzeFunctionCapabilities(
               const ref = materializeSourceRef(leaf);
               if (ref.path.length === 0 && !ref.dynamic) {
                 markPassthrough(ref.root);
+                if (helperReturnsToCaller) trackFullShapeRead(ref.root, []);
               } else {
                 trackReadRef(ref);
                 trackFullShapeReadRef(ref);
@@ -3181,10 +3210,13 @@ export function analyzeFunctionCapabilities(
             // read rather than a plain one: a plain read at a path keeps the
             // whole value only while nothing below that path is read, and
             // a member the body did read would otherwise narrow the escaped
-            // value to that member. The root is left to the passthrough
-            // accounting below.
-            const wholeValueEscape = resolvedSource.path.length > 0 &&
-              !resolvedSource.dynamic && escapesWhole(node);
+            // value to that member. A builder's root is left to the
+            // passthrough accounting below. A helper's root is charged as
+            // well, so that its summary tells a caller the argument left
+            // whole, at whatever path the caller passed it from.
+            const wholeValueEscape = !resolvedSource.dynamic &&
+              (resolvedSource.path.length > 0 || helperReturnsToCaller) &&
+              escapesWhole(node);
             if (!parent) {
               // Synthetic identifiers can temporarily be detached from parent links.
               // Preserve narrowed-path reads while avoiding false root-read expansion.
@@ -3307,6 +3339,9 @@ export function analyzeFunctionCapabilities(
                       ? { identityOnly: true }
                       : undefined,
                   );
+                  if (wholeValueEscape && !identityOnlyArgumentUse) {
+                    trackFullShapeRead(resolvedSource.root, []);
+                  }
                 } else if (
                   identityOnlyArgumentUse && !resolvedSource.dynamic
                 ) {
