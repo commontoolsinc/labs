@@ -1394,6 +1394,26 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  /**
+   * Ends the run as `canceled`, retaining the driver's reason and the labels
+   * of the cells it touched. Cancellation adds no failure record.
+   *
+   * @throws Error when the run already has its outcome.
+   */
+  async cancelRun(reason: string): Promise<HarnessRunState> {
+    const now = this.#now();
+    this.#runState = await this.#withCellLabels(
+      patchHarnessRunState(
+        setHarnessRunStatus(this.#runState, "canceled", now, "canceled"),
+        { cancelReason: reason },
+        now,
+      ),
+      now,
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
   setPromptSlotBinding(
     promptSlotBinding: PromptSlotBinding,
   ): HarnessRunState {
@@ -1983,7 +2003,7 @@ export class CfHarnessEngine {
   }
 
   /**
-   * Helper for `completeRun()` and `failRun()`, which reads the run's space
+   * Helper for the terminal run transitions, which reads the run's space
    * for what it holds about the cells the run touched and returns `state`
    * with the answer recorded on it and written beside the run.
    *
@@ -2129,9 +2149,11 @@ export class CfHarnessEngine {
    * Runs one builtin tool and records its output on the run. A tool call is
    * one step of a run, not the run: the run's status is the driver's to
    * write, and this touches neither it nor `endedAt`. A tool that throws is
-   * recorded as a failure and rethrown for the driver to end the run on.
+   * recorded as a failure and rethrown for the driver to end the run on, unless
+   * the owning run was aborted. Cancellation retains any returned output but
+   * adds no failure record.
    *
-   * @throws Error from the tool, after the failure is recorded.
+   * @throws Error from the tool.
    */
   async invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
@@ -2149,8 +2171,11 @@ export class CfHarnessEngine {
         this.#createToolContext(options.signal),
         input,
       ) as BuiltinToolOutputMap[TToolId];
-      return await this.recordBuiltinToolOutput(toolId, input, output);
+      return await this.recordBuiltinToolOutput(toolId, input, output, options);
     } catch (error) {
+      if (options.signal?.aborted) {
+        throw error;
+      }
       const failureTime = this.#now();
       this.#runState = appendHarnessFailureRecord(
         this.#runState,
@@ -2170,6 +2195,7 @@ export class CfHarnessEngine {
     toolId: TToolId,
     input: BuiltinToolInputMap[TToolId],
     output: BuiltinToolOutputMap[TToolId],
+    options: { signal?: AbortSignal } = {},
   ): Promise<BuiltinToolInvocationResult<TToolId>> {
     if (!isToolOutputWithId(output)) {
       throw new Error(`builtin tool did not return an outputId: ${toolId}`);
@@ -2192,13 +2218,15 @@ export class CfHarnessEngine {
       resultRef,
       completionTime,
     );
-    const failure = classifyBuiltinToolFailure(
-      toolId,
-      input,
-      output,
-      completionTime,
-      this.#runState.capabilitySnapshot,
-    );
+    const failure = options.signal?.aborted
+      ? undefined
+      : classifyBuiltinToolFailure(
+        toolId,
+        input,
+        output,
+        completionTime,
+        this.#runState.capabilitySnapshot,
+      );
     if (failure !== undefined) {
       this.#runState = appendHarnessFailureRecord(
         this.#runState,

@@ -3596,6 +3596,7 @@ export class CfHarnessPromptLoop {
     let finalAssistantText: string | undefined;
     let taskOutcome: HarnessTaskOutcome = { outcome: "completed" };
     try {
+      options.signal?.throwIfAborted();
       const openingResearch = await this.#prepareOpeningResearch({
         task: options.openingResearchTask,
         model,
@@ -3639,6 +3640,7 @@ export class CfHarnessPromptLoop {
         }
       }
       while (modelTurns < maxModelTurns) {
+        options.signal?.throwIfAborted();
         modelTurns += 1;
         let response;
         try {
@@ -3687,6 +3689,7 @@ export class CfHarnessPromptLoop {
             usage: response.usage,
           });
         }
+        options.signal?.throwIfAborted();
         const assistantMessage = response.assistant;
         transcript.push(assistantMessage);
         await this.engine.persistTranscript(transcript);
@@ -3700,6 +3703,7 @@ export class CfHarnessPromptLoop {
           message: assistantMessage,
           transcript,
         });
+        options.signal?.throwIfAborted();
         const toolCalls = assistantMessage.toolCalls ?? [];
         if (toolCalls.length === 0) {
           finalAssistantText = assistantMessage.content;
@@ -3709,6 +3713,7 @@ export class CfHarnessPromptLoop {
         const pendingCfcModelContextObservations:
           HarnessCfcModelContextObservationInput[] = [];
         for (const toolCall of toolCalls) {
+          options.signal?.throwIfAborted();
           const invokedToolCall = await this.#invokeToolCall(
             toolCall,
             model,
@@ -3781,12 +3786,17 @@ export class CfHarnessPromptLoop {
             pendingCfcModelContextObservations,
           );
         }
+        options.signal?.throwIfAborted();
         if (finalAssistantText !== undefined) break;
       }
     } catch (error) {
       annotatePromptLoopError(error, modelTurns);
       try {
-        await this.engine.failRun("prompt_loop_error", error);
+        if (options.signal?.aborted) {
+          await this.engine.cancelRun(toErrorDetail(options.signal.reason));
+        } else {
+          await this.engine.failRun("prompt_loop_error", error);
+        }
         await this.engine.persistTranscript(transcript);
         await persistRunReport();
       } catch {
@@ -4627,8 +4637,9 @@ export class CfHarnessPromptLoop {
         ReturnType<CfHarnessEngine["invokeBuiltinTool"]>
       >["output"];
       resultRef: ToolResultRef;
-    };
+    } | undefined;
     try {
+      signal?.throwIfAborted();
       result = toolId === "delegate_task"
         ? await this.#invokeDelegateTaskTool({
           toolCall,
@@ -4648,20 +4659,25 @@ export class CfHarnessPromptLoop {
           input,
           signal,
         );
+      signal?.throwIfAborted();
     } catch (error) {
       recordActivity({
         type: "cf-harness.tool-activity",
-        ...baseActivity(policyDecision, "failed"),
+        ...baseActivity(
+          policyDecision,
+          signal?.aborted ? "canceled" : "failed",
+        ),
         toolInputSummary,
         ...optionalPolicyEventIndexes(policyEventIndexes),
+        ...(result !== undefined ? { resultRef: result.resultRef } : {}),
         errorDetail: toErrorDetail(error),
       });
-      // Reaching this catch means a genuinely fatal tool failure — sandbox
-      // spawn/infra, CFC transport, artifact/run-state persistence, an engine
-      // invariant, or a cancelled run. These are not model-correctable, so the
-      // run stays fatal. RECOVERABLE mistakes never arrive here, and there are
-      // two kinds. A mistake inside the tool (a `cwd` outside the sandbox, a
-      // command timeout) becomes an ordinary failed BashToolOutput the model
+      // Reaching this catch ends the run: its owner canceled it, or a tool
+      // failed in sandbox spawn/infra, CFC transport, artifact/run-state
+      // persistence, or an engine invariant. RECOVERABLE mistakes never arrive
+      // here, and there are two kinds. A mistake inside the tool (a `cwd`
+      // outside the sandbox, a command timeout) becomes a failed BashToolOutput
+      // the model
       // reacts to, flowing through the normal CFC-mediated output path below
       // (see bash.ts). A mistake in how the model wrote the call itself (a name
       // no tool answers to, arguments that are not JSON, an argument of the
@@ -5675,16 +5691,22 @@ export class CfHarnessPromptLoop {
         }
       }
     } catch (error) {
-      subagentStatus = "failed";
+      subagentStatus = options.signal?.aborted ? "canceled" : "failed";
       childModelTurns = promptLoopModelTurnsFromError(error) ?? childModelTurns;
-      summary = `Subagent failed: ${toErrorDetail(error)}`;
+      summary = subagentStatus === "canceled"
+        ? "Subagent canceled by the parent run."
+        : `Subagent failed: ${toErrorDetail(error)}`;
       // The child's loop writes the child's own outcome. A child that never
       // reached its loop — its model was unavailable, or its skill context
       // would not persist — has none yet, and gets one here.
       if (!isTerminalHarnessRunStatus(childEngine.getRunState().status)) {
-        await childEngine.failRun("setup_error", error, {
-          source: "run_error",
-        });
+        if (options.signal?.aborted) {
+          await childEngine.cancelRun(toErrorDetail(options.signal.reason));
+        } else {
+          await childEngine.failRun("setup_error", error, {
+            source: "run_error",
+          });
+        }
       }
     }
     const childRunState = childEngine.getRunState();
@@ -5707,6 +5729,26 @@ export class CfHarnessPromptLoop {
       ...(nativeModelToolResults.length > 0 ? { nativeModelToolResults } : {}),
       ...(structuredReturn !== undefined ? { structuredReturn } : {}),
     };
+    const subagentRun = {
+      type: "cf-harness.subagent-run-ref" as const,
+      parentToolCallId: options.toolCall.id,
+      childRunId,
+      status: subagent.status,
+      summary: subagent.summary,
+      manifest,
+      ...(options.resolvedSkill !== undefined
+        ? { skillHandle: options.resolvedSkill.token }
+        : {}),
+      ...(delegateInput.withoutSkillHandle === true
+        ? { withoutSkillHandle: true }
+        : {}),
+      runState: subagent.runState,
+      ...(structuredReturn !== undefined ? { structuredReturn } : {}),
+    };
+    if (options.signal?.aborted) {
+      await this.engine.recordSubagentRun(subagentRun);
+      options.signal.throwIfAborted();
+    }
     const output: DelegateTaskToolOutput = {
       type: "cf-harness.delegate-task-output",
       outputId: this.engine.nextToolOutputId("delegate_task"),
@@ -5721,21 +5763,8 @@ export class CfHarnessPromptLoop {
       output,
     );
     await this.engine.recordSubagentRun({
-      type: "cf-harness.subagent-run-ref",
-      parentToolCallId: options.toolCall.id,
+      ...subagentRun,
       outputId: output.outputId,
-      childRunId,
-      status: subagent.status,
-      summary: subagent.summary,
-      manifest,
-      ...(options.resolvedSkill !== undefined
-        ? { skillHandle: options.resolvedSkill.token }
-        : {}),
-      ...(delegateInput.withoutSkillHandle === true
-        ? { withoutSkillHandle: true }
-        : {}),
-      runState: subagent.runState,
-      ...(structuredReturn !== undefined ? { structuredReturn } : {}),
     });
     return {
       output: result.output,

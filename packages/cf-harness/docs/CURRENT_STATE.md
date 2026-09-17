@@ -149,7 +149,9 @@ The current package provides:
   `invalid` rather than `denied` — nothing about policy refused it — plus a
   `not-run` tool activity and an `invalid_tool_call` failure record. Only what
   the model cannot correct — transport, engine invariants, artifact persistence,
-  cancellation, the turn cap — ends the run;
+  cancellation, the turn cap — ends the run. A run-owned cancellation is
+  recorded as `canceled` in parent and active-child artifacts, with its reason
+  and without adding a failure record;
 - a release a confidentiality boundary refused is recorded as a policy decision
   with the outcome `withheld` rather than `denied`: the call ran and answered
   with the reference to the result whose values were held back, so the trace

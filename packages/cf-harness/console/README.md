@@ -419,10 +419,18 @@ every way it can fail, not only after the model has been asked.
 
 The same holds for the run behind the turn. Its `run-state.json` under the
 artifact root reads `status: "running"` from the moment the turn takes it,
-through every tool call, until the turn ends; `completed` or `failed`, with
-`endedAt` and `terminalReason`, appear once and only when it is over. A `failed`
-run carries the failure under `failureRecords` and `primaryFailure`, and
-`terminalReason: "setup_error"` names the run that never reached a model turn.
+through every tool call, until the turn ends; `completed`, `failed`, or
+`canceled`, with `endedAt` and `terminalReason`, appear once and only when it is
+over. A `failed` run carries the failure under `failureRecords` and
+`primaryFailure`, and `terminalReason: "setup_error"` names the run that never
+reached a model turn. The run's controlling abort signal records
+`status: "canceled"`, `terminalReason: "canceled"`, and `cancelReason` in both
+state and report. Cancellation adds no failure record. Active delegated children
+unwind with the same outcome; children that already completed keep their
+outcome. A tool output returned during cancellation remains in the artifacts and
+is linked from the canceled tool activity. An unrelated provider `AbortError` is
+a failure unless the run's own signal was aborted. Resuming a run clears its
+prior terminal status and cancellation reason.
 
 ## What you'll see
 
