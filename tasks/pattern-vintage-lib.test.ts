@@ -143,11 +143,11 @@ describe("vintage paths", () => {
 
   it("keeps a pattern key with directories intact", () => {
     const path = `${
-      vintageDir("google/core/imported-calendar.test.tsx", AUTO)
+      vintageDir("battleship/multiplayer/lobby.test.tsx", AUTO)
     }/${vintageFileName("2026-01-01T00-00-00.000Z", ID_A)}`;
     const parsed = parseVintagePath(path);
 
-    expect(parsed?.testKey).toBe("google/core/imported-calendar.test.tsx");
+    expect(parsed?.testKey).toBe("battleship/multiplayer/lobby.test.tsx");
     expect(parsed?.tier).toBe(AUTO);
   });
 

@@ -32,7 +32,6 @@
     "./packages/memory",
     "./packages/navigation",
     "./packages/patterns",
-    "./packages/patterns/auth",
     "./packages/pure-json",
     "./packages/runner",
     "./packages/runtime-client",

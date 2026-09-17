@@ -324,7 +324,6 @@ export const EXCLUDED_FROM_COVERAGE_GATE: ReadonlyMap<string, string> = new Map(
       "generated-patterns integration job.",
     ],
     ["packages/home-schemas", "It has no tests."],
-    ["packages/patterns/auth", "Its test task defines no tests."],
     [
       "packages/patterns",
       "Authored pattern code is measured by transformer instrumentation " +
