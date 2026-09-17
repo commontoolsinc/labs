@@ -4,10 +4,12 @@ import { join, resolve, toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
+  consoleHealthRows,
   ConsoleServer,
   createConsoleInteractiveServiceOptions,
   resolveConsoleConfig,
 } from "../../console/server.ts";
+import { ConsoleHealth, type ConsoleHealthRow } from "../../console/health.ts";
 import { harnessSessionChatPolicy } from "../../src/session-assembly.ts";
 import type { ConsoleSessionListing } from "../../console/sessions.ts";
 import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
@@ -366,6 +368,83 @@ describe("console/server", () => {
       expect(policy.allowedToolIds).toContain("acquire_skill");
     });
 
+    it("runs skill scripts when the console was launched with the switch", async () => {
+      const named = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--allow-skill-scripts",
+        ],
+        {},
+        "/console",
+      );
+      expect(named.allowSkillScripts).toBe(true);
+
+      const inherited = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+        ],
+        { CF_HARNESS_ALLOW_SKILL_SCRIPTS: "1" },
+        "/console",
+      );
+      expect(inherited.allowSkillScripts).toBe(true);
+    });
+
+    it("runs no skill script when the console was launched without it", async () => {
+      expect((await config()).allowSkillScripts).toBe(false);
+    });
+
+    it("offers `run_skill_script` when a registry backs it and the switch is on", async () => {
+      // Backing alone never offers this tool — it appears only in the withheld
+      // set — so without this the switch would reach an acquired child through
+      // its own surface and never reach the run holding the registry, and the
+      // registry half of one decision would be undeliverable.
+      const withSwitch = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--skills-root",
+          "/workspace/skills",
+          "--allow-skill-scripts",
+        ],
+        {},
+        "/console",
+      );
+      const withNeither = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--skills-root",
+          "/workspace/skills",
+        ],
+        {},
+        "/console",
+      );
+
+      expect(harnessSessionChatPolicy(withSwitch).allowedToolIds).toContain(
+        "run_skill_script",
+      );
+      expect(harnessSessionChatPolicy(withNeither).allowedToolIds).not
+        .toContain("run_skill_script");
+    });
+
     it("withholds the skill tools from a session with no registry", async () => {
       const policy = harnessSessionChatPolicy(await config());
       expect(policy.allowedToolIds).not.toContain("search_skills");
@@ -635,6 +714,215 @@ describe("console/server", () => {
     });
   });
 
+  describe("GET /api/health/detail", () => {
+    it("returns the cached snapshot while a host probe remains pending and applies the existing host restriction", async () => {
+      const pending = Promise.withResolvers<readonly ConsoleHealthRow[]>();
+      const fact = {
+        id: "index.reachable",
+        group: "index",
+        label: "Index",
+        value: "not checked",
+        source: "host probe",
+      };
+      const health = new ConsoleHealth([], [{
+        id: fact.id,
+        initial: [fact],
+        read: () => pending.promise,
+        unavailable: () => [],
+      }]);
+      const healthServer = new ConsoleServer(
+        await config(),
+        () => server.service,
+        undefined,
+        health,
+      );
+      try {
+        const response = await healthServer.handle(
+          getRequest("/api/health/detail"),
+        );
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          version: 1,
+          rows: [{ ...fact, state: "unknown", checkedAt: null }],
+        });
+        expect(
+          (await healthServer.handle(
+            getRequest("/api/health/detail", { host: "evil.test:8100" }),
+          )).status,
+        ).toBe(403);
+        expect(server.service.turns()).toHaveLength(0);
+      } finally {
+        pending.resolve([]);
+        await health.refresh();
+      }
+    });
+  });
+
+  describe("consoleHealthRows()", () => {
+    it("keeps index URL credentials out of the configured value and retained launch evidence", async () => {
+      const indexUrl =
+        "https://user-secret:password-secret@index.test/api/?token=query-secret#fragment-secret";
+      const configured = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+        ],
+        { CF_HARNESS_PATTERN_INDEX_URL: indexUrl },
+        "/console",
+      );
+      const rows = consoleHealthRows(configured, {
+        checkedAt: "2026-09-17T00:00:00.000Z",
+        connectors: [],
+        resolved: [{ name: "index", value: indexUrl, source: "launch flag" }],
+      });
+      expect(rows.find((row) => row.id === "config.index")).toMatchObject({
+        value: "https://index.test/api/",
+        source: "console launch record",
+        detail: "launch flag",
+      });
+      expect(JSON.stringify(rows)).not.toContain("-secret");
+      expect(configured.patternIndex?.baseUrl).toBe(indexUrl);
+    });
+
+    it("retains the launch record only for inherited active values, including an equal explicit override", async () => {
+      const configured = await resolveConsoleConfig([
+        "--fabric-identity",
+        "key.pkcs8",
+        "--fabric-space",
+        "console-test",
+        "--port",
+        "8123",
+        "--session-db",
+        "none",
+      ], {
+        MEMORY_DIR: "/data/selected",
+        CF_HARNESS_MODEL: "test-model",
+        CF_HARNESS_ALLOW_SKILL_SCRIPTS: "1",
+      }, "/console");
+      const checkedAt = "2026-09-17T00:00:00.000Z";
+      const connector = {
+        id: "connector.refused.0",
+        group: "connectors",
+        label: "gmail",
+        value: "not granted",
+        source: "loom connector receipt + pieces.json (gmail)",
+        detail: "/loom/handles.json; /loom/pieces.json",
+        state: "degraded" as const,
+        reason: "Class already claimed.",
+        remedy: "Select a connection.",
+      };
+      const rows = consoleHealthRows(configured, {
+        checkedAt,
+        connectors: [connector],
+        resolved: [
+          { name: "port", value: "8123", source: "launch record" },
+          {
+            name: "store",
+            value: "/data/selected",
+            source: "loom toolshed-store-dir",
+          },
+          { name: "model", value: "other-model", source: "launch record" },
+        ],
+      });
+      expect(rows.find((row) => row.id === "config.port")).toMatchObject({
+        label: "Port",
+        value: "8123",
+        source: "console launch flag",
+        detail: "--port",
+      });
+      expect(rows.find((row) => row.id === "config.store")).toMatchObject({
+        value: "/data/selected",
+        source: "console launch record",
+        detail: "loom toolshed-store-dir",
+        checkedAt,
+      });
+      expect(rows.find((row) => row.id === "config.model")).toMatchObject({
+        value: "test-model",
+        source: "console configuration",
+        detail: "CF_HARNESS_MODEL",
+      });
+      expect(rows.find((row) => row.id === "config.skill-scripts"))
+        .toMatchObject({
+          label: "Skill Scripts",
+          value: "run in the sandbox",
+          source: "console configuration",
+          detail: "CF_HARNESS_ALLOW_SKILL_SCRIPTS",
+        });
+      expect(rows.find((row) => row.id === connector.id)).toEqual({
+        ...connector,
+        checkedAt,
+      });
+      expect(
+        rows.filter((row) => row.state !== "unknown").every((row) =>
+          Number.isFinite(Date.parse(row.checkedAt!))
+        ),
+      ).toBe(true);
+    });
+
+    it("keeps missing inventory, automatic store discovery and unobserved credentials unknown", async () => {
+      const rows = consoleHealthRows(await config());
+      expect(rows.find((row) => row.id === "connectors.inventory"))
+        .toMatchObject({
+          state: "unknown",
+          value: "0 explicit grants configured",
+        });
+      expect(rows.find((row) => row.id === "config.store")).toMatchObject({
+        state: "unknown",
+        value: "automatic discovery",
+      });
+      expect(rows.find((row) => row.id === "model.auth")).toMatchObject({
+        state: "unknown",
+        checkedAt: null,
+      });
+      expect(rows.find((row) => row.id === "config.index")).toMatchObject({
+        state: "degraded",
+        value: "not configured",
+      });
+      expect(
+        rows.filter((row) => row.id.startsWith("index.")).map((row) =>
+          row.state
+        ),
+      ).toEqual(["unknown", "unknown"]);
+    });
+
+    for (const mode of ["missing", "key", "none", "codex"] as const) {
+      it(`reports ${mode} credential provenance without publishing a credential`, async () => {
+        const options: CreateHarnessPromptLoopOptions = mode === "codex"
+          ? {
+            modelProvider: "openai-codex",
+            modelAuthSource: "cf-harness-local-store",
+          }
+          : {
+            modelProvider: "openai-compatible-gateway",
+            gatewayAuthMode: mode === "none" ? "none" : "bearer",
+            ...(mode === "key" ? { apiKey: "secret-test-value" } : {}),
+          };
+        const rows = consoleHealthRows(await config(), undefined, options, {
+          CF_HARNESS_API_KEY: mode === "key" ? "secret-test-value" : undefined,
+        });
+        expect(rows.find((row) => row.id === "model.auth")).toMatchObject({
+          label: "Model Authentication",
+          state: mode === "missing" ? "failed" : "ok",
+          source: mode === "codex"
+            ? "harness credential store"
+            : "console environment",
+          detail: mode === "codex"
+            ? "/console/.cf-harness/auth.json"
+            : mode === "none"
+            ? "CF_HARNESS_GATEWAY_AUTH_MODE"
+            : mode === "key"
+            ? "CF_HARNESS_API_KEY"
+            : "CF_HARNESS_API_KEY / OPENAI_API_KEY",
+        });
+        expect(JSON.stringify(rows)).not.toContain("secret-test-value");
+      });
+    }
+  });
+
   describe("task Loom context", () => {
     it("rejects malformed Loom targets before starting a turn", async () => {
       for (const loomId of ["../private", {}, "loom-not-valid"]) {
@@ -774,6 +1062,9 @@ describe("console/server", () => {
             url: "http://localhost:8000/console-test/reading-list",
           }],
           spaceName: "console-test",
+          outcome: "completed",
+          sessionId: started.sessionId,
+          continuable: true,
           finalText: "built it",
         });
       } finally {
@@ -846,6 +1137,9 @@ describe("console/server", () => {
           looms: [],
           pieces: [],
           spaceName: "console-test",
+          outcome: "completed",
+          sessionId: started.sessionId,
+          continuable: true,
           finalText: "restored result",
         });
       } finally {
@@ -1085,6 +1379,66 @@ describe("console/server", () => {
         "reference does not parse",
       );
       expect((await listSessions()).sessions).toHaveLength(0);
+    });
+
+    it("answers 400 for a piece address naming a space that is not this console's", async () => {
+      // The caller cannot see which space this console runs against, so the
+      // mismatch is this side's to explain — and it costs no turn to say it.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{
+          name: "pattern_1",
+          ref: "pattern:someone-elses-space/bill-inbox",
+        }],
+      }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        "this session runs in `console-test`",
+      );
+      expect((await listSessions()).sessions).toHaveLength(0);
+    });
+
+    it("answers 400 for a piece address whose slug is malformed", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{ name: "pattern_1", ref: "pattern:console-test/Bills!" }],
+      }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        "reference does not parse",
+      );
+      expect((await listSessions()).sessions).toHaveLength(0);
+    });
+
+    it("answers 400 for a bare slug the runtime's slug rule refuses", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{ name: "pattern_1", ref: "Bill Inbox" }],
+      }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        "reference does not parse",
+      );
+    });
+
+    it("answers 400 for a piece address naming a path under the piece", async () => {
+      // A slug names a piece or it names nothing; the general cell case is
+      // CT-2319's, and claiming it here would promise what nothing resolves.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{
+          name: "pattern_1",
+          ref: "pattern:console-test/bill-inbox/rows",
+        }],
+      }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        "more than one path segment",
+      );
     });
 
     it("answers 400 for input cells that are not a list of name and ref", async () => {
@@ -1420,6 +1774,9 @@ describe("console/server", () => {
           url: "http://localhost:8000/console-test/reading-list",
         }],
         spaceName: "console-test",
+        outcome: "completed",
+        sessionId: expect.any(String),
+        continuable: true,
         finalText: "built it",
       });
     });
@@ -1433,6 +1790,9 @@ describe("console/server", () => {
         looms: [],
         pieces: [],
         spaceName: "console-test",
+        outcome: "completed",
+        sessionId: expect.any(String),
+        continuable: true,
         finalText: "calculated it",
       });
     });

@@ -35,13 +35,23 @@ import { isDID } from "@commonfabric/identity/did";
 import { parseArgs } from "@std/cli/parse-args";
 import { join } from "@std/path";
 
+import { DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE } from "../src/config.ts";
 import type { HarnessConnectorGrantSpec } from "../src/contracts/well-known-grants.ts";
 import {
   DEFAULT_DOCKER_BINARY,
   registeredCfcSidecarHostDirs,
 } from "../src/sandbox/docker-runsc.ts";
+import { readDockerRuntimes } from "../src/sandbox/docker-runtimes.ts";
 import { resolveConnectorGrants } from "./connector-grants.ts";
+import type {
+  ConsoleHealthFactWithState,
+  ConsoleLaunchHealth,
+  ConsoleObservedLaunchHealth,
+  ConsoleResolvedValue,
+} from "./health.ts";
 import { startConsoleServer } from "./server.ts";
+
+export { readDockerRuntimes } from "../src/sandbox/docker-runtimes.ts";
 
 /** The port Weaver's harness-console setting and loom's proxy both address. */
 export const WEAVER_PAIRING_PORT = 8135;
@@ -97,6 +107,7 @@ export const LAUNCHER_OWNED_VARIABLES = [
   "CF_HARNESS_CONNECTOR_GRANTS",
   "CF_HARNESS_PATTERN_INDEX_URL",
   "CF_HARNESS_SKILLS_REGISTRY_URL",
+  "CF_HARNESS_ALLOW_SKILL_SCRIPTS",
   "CF_HARNESS_SPACE_DB",
   "MEMORY_DIR",
 ] as const;
@@ -105,11 +116,7 @@ export const LAUNCHER_OWNED_VARIABLES = [
  * One resolved value, with the record that decided it. `source` is what an
  * operator reads to know which file to edit when a value is wrong.
  */
-export interface ResolvedValue {
-  name: string;
-  value: string;
-  source: string;
-}
+export type ResolvedValue = ConsoleResolvedValue;
 
 /**
  * A loom instance's own records, when the fabric being started is an
@@ -184,6 +191,8 @@ export interface ConsoleLaunchOptions {
   skillsRegistryUrl?: string;
   noPatternIndex?: boolean;
   noSkillsRegistry?: boolean;
+  allowSkillScripts?: boolean;
+  inheritedAllowSkillScripts?: boolean;
   cfcResultDir?: string;
   cfcInvocationContextDir?: string;
   posture?: string;
@@ -195,6 +204,9 @@ export interface ConsoleLaunchOptions {
 export interface ConsoleLaunchPlan {
   environment: Record<string, string>;
   resolved: readonly ResolvedValue[];
+
+  /** The same decisions retained for the operator status endpoint. */
+  health: ConsoleLaunchHealth;
 }
 
 /** Source labels the printout uses for a value nothing recorded. */
@@ -382,6 +394,7 @@ export const resolveConsoleLaunchPlan = (
   // whatever opens the console.
   const connectorGrants: HarnessConnectorGrantSpec[] = [];
   const connectorResolved: ResolvedValue[] = [];
+  const connectorHealth: ConsoleHealthFactWithState[] = [];
   if (instance !== undefined) {
     const resolvedConnectors = resolveConnectorGrants({
       ...(instance.handlesJson !== undefined
@@ -392,6 +405,25 @@ export const resolveConsoleLaunchPlan = (
       piecesJsonPath: instance.piecesJsonPath,
     });
     connectorGrants.push(...resolvedConnectors.grants);
+    const source = "loom connector receipt + pieces.json";
+    const detail = `${instance.handlesJsonPath}; ${instance.piecesJsonPath}`;
+    connectorHealth.push({
+      id: "connectors.inventory",
+      group: "connectors",
+      label: "Connector Inventory",
+      state: instance.handlesJson === undefined ? "unknown" : "ok",
+      value: instance.handlesJson === undefined
+        ? "No injection receipt has been recorded"
+        : `${resolvedConnectors.grants.length} granted; ${resolvedConnectors.unnamed.length} not granted`,
+      source,
+      detail,
+      ...(instance.handlesJson === undefined
+        ? {
+          remedy:
+            "Reconcile the instance's connectors in Loom, then restart the console.",
+        }
+        : {}),
+    });
     for (const grant of resolvedConnectors.grants) {
       connectorResolved.push({
         name: `grant ${grant.name}`,
@@ -399,12 +431,32 @@ export const resolveConsoleLaunchPlan = (
         source: `\`${instance.handlesJsonPath}\`, classed by ` +
           `\`${grant.source.piece}\` in \`${instance.piecesJsonPath}\``,
       });
+      connectorHealth.push({
+        id: `connector.granted.${grant.name}`,
+        group: "connectors",
+        label: grant.source.connection,
+        state: "ok",
+        value: `granted as ${grant.name}`,
+        source: `${source} (${grant.source.piece})`,
+        detail,
+      });
     }
-    for (const handle of resolvedConnectors.unnamed) {
+    for (const [index, handle] of resolvedConnectors.unnamed.entries()) {
       connectorResolved.push({
         name: `grant ${handle.connection}`,
         value: `(none: ${handle.reason})`,
         source: `\`${instance.handlesJsonPath}\``,
+      });
+      connectorHealth.push({
+        id: `connector.refused.${index}`,
+        group: "connectors",
+        label: handle.connection,
+        state: handle.state,
+        value: "not granted",
+        source: `${source} (${handle.piece})`,
+        detail,
+        reason: handle.reason,
+        remedy: handle.remedy,
       });
     }
   }
@@ -472,11 +524,23 @@ export const resolveConsoleLaunchPlan = (
       : `.cf-harness-console-${instance.id}-${port}`);
   const posture = options.posture ?? "max-enforcement";
   const flowLabels = options.flowLabels ?? "persist";
-  const enforcementMode = options.enforcementMode ?? "enforce-explicit";
+  const enforcementMode = options.enforcementMode ??
+    DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE;
 
   const deploymentDefault = "labs deployment default";
   const registrationSourceName =
     `\`${RUNSC_CFC_RUNTIME}\` as \`docker info\` reports it`;
+
+  // The operator's one decision about skill scripts. Nothing about the fabric
+  // implies it, so it is off unless someone says otherwise, and the printout
+  // says which of the two ways they said it.
+  const allowSkillScripts = options.allowSkillScripts === true ||
+    options.inheritedAllowSkillScripts === true;
+  const allowSkillScriptsSource = options.allowSkillScripts === true
+    ? NAMED
+    : options.inheritedAllowSkillScripts === true
+    ? "`CF_HARNESS_ALLOW_SKILL_SCRIPTS`, inherited"
+    : LAUNCHER_DEFAULT;
 
   const resolved: ResolvedValue[] = [
     ...(instance === undefined ? [] : [{
@@ -549,6 +613,11 @@ export const resolveConsoleLaunchPlan = (
         ? NAMED
         : deploymentDefault,
     },
+    {
+      name: "skill scripts",
+      value: allowSkillScripts ? "run in the sandbox" : "not run",
+      source: allowSkillScriptsSource,
+    },
     ...connectorResolved,
     {
       name: "proxy",
@@ -578,9 +647,14 @@ export const resolveConsoleLaunchPlan = (
     ...(skillsRegistryUrl !== undefined
       ? { CF_HARNESS_SKILLS_REGISTRY_URL: skillsRegistryUrl }
       : {}),
+    ...(allowSkillScripts ? { CF_HARNESS_ALLOW_SKILL_SCRIPTS: "1" } : {}),
   };
 
-  return { environment, resolved };
+  return {
+    environment,
+    resolved,
+    health: { resolved, connectors: connectorHealth },
+  };
 };
 
 /** The lines the launcher prints before the server binds. */
@@ -659,47 +733,6 @@ export const readToolshedStoreDir = async (
   return new TextDecoder().decode(output.stdout).trim();
 };
 
-/**
- * The runtime table `docker info` reports, or the reason it could not be read.
- * The running daemon's table rather than `daemon.json`: a configuration file
- * the daemon has not reloaded names directories nothing writes.
- */
-export const readDockerRuntimes = async (
-  dockerBinary: string,
-): Promise<{ runtimes?: unknown; unreadable?: string }> => {
-  let output: Deno.CommandOutput;
-  try {
-    output = await new Deno.Command(dockerBinary, {
-      args: ["info", "--format", "{{json .Runtimes}}"],
-      stdout: "piped",
-      stderr: "piped",
-    }).output();
-  } catch (error) {
-    return {
-      unreadable: `\`${dockerBinary} info\` could not be run: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    };
-  }
-  if (!output.success) {
-    return {
-      unreadable: `\`${dockerBinary} info\` exited ${output.code}: ${
-        new TextDecoder().decode(output.stderr).trim()
-      }`,
-    };
-  }
-  try {
-    return { runtimes: JSON.parse(new TextDecoder().decode(output.stdout)) };
-  } catch (error) {
-    return {
-      unreadable: `\`${dockerBinary} info\` reported a runtime table that ` +
-        `does not parse: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-    };
-  }
-};
-
 const positiveInteger = (value: string, flag: string): number => {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
@@ -759,7 +792,11 @@ export const prepareConsoleLaunch = async (
       "fabric-cfc-flow-labels",
       "fabric-cfc-enforcement-mode",
     ],
-    boolean: ["no-pattern-index", "no-skills-registry"],
+    boolean: [
+      "no-pattern-index",
+      "no-skills-registry",
+      "allow-skill-scripts",
+    ],
     "--": true,
   });
   // A flag present but empty is a value someone typed that did not survive
@@ -884,6 +921,9 @@ export const prepareConsoleLaunch = async (
       : {}),
     noPatternIndex: parsed["no-pattern-index"] === true,
     noSkillsRegistry: parsed["no-skills-registry"] === true,
+    allowSkillScripts: parsed["allow-skill-scripts"] === true,
+    inheritedAllowSkillScripts:
+      nonEmpty(env.CF_HARNESS_ALLOW_SKILL_SCRIPTS) === "1",
     ...(flag("cfc-result-dir") !== undefined
       ? { cfcResultDir: flag("cfc-result-dir")! }
       : {}),
@@ -901,7 +941,27 @@ export const prepareConsoleLaunch = async (
       : {}),
   });
 
-  return { plan, consoleArgs: (parsed["--"] ?? []).map(String) };
+  // The launch prints what it resolved, and this is one of the values it
+  // resolves, so a console argument setting it again would leave that report
+  // describing a console that does something else. Every other server flag
+  // still passes through.
+  const consoleArgs = (parsed["--"] ?? []).map(String);
+  // Both spellings: a boolean flag still parses `--flag=true` and `--flag=1`,
+  // so an exact-token check leaves the enabling form through and the printed
+  // report then describes a console that does something else.
+  const passedThrough = consoleArgs.find((argument) =>
+    argument === "--allow-skill-scripts" ||
+    argument.startsWith("--allow-skill-scripts=")
+  );
+  if (passedThrough !== undefined) {
+    throw new Error(
+      `\`${passedThrough}\` cannot be passed through to the console: ` +
+        `\`--allow-skill-scripts\` is one of the values this launch ` +
+        `resolves and prints, so name it before \`--\` instead`,
+    );
+  }
+
+  return { plan, consoleArgs };
 };
 
 /**
@@ -911,10 +971,15 @@ export const prepareConsoleLaunch = async (
 export const launchConsole = async (
   args: readonly string[] = Deno.args,
   env: Record<string, string | undefined> = Deno.env.toObject(),
-  serve: (consoleArgs: string[]) => Promise<void> = startConsoleServer,
+  serve: (
+    consoleArgs: string[],
+    health: ConsoleObservedLaunchHealth,
+  ) => Promise<void> = (consoleArgs, health) =>
+    startConsoleServer(consoleArgs, undefined, undefined, health),
   io: ConsoleLaunchIo = REAL_IO,
 ): Promise<void> => {
   const { plan, consoleArgs } = await prepareConsoleLaunch(args, env, io);
+  const health = { ...plan.health, checkedAt: new Date().toISOString() };
 
   console.log("");
   for (const line of consoleLaunchReport(plan)) {
@@ -927,7 +992,9 @@ export const launchConsole = async (
   for (const [name, value] of Object.entries(plan.environment)) {
     Deno.env.set(name, value);
   }
-  await serve(consoleArgs);
+  // These are the decisions that produced the running console's grants. A
+  // status request reports this observation even if the files later change.
+  await serve(consoleArgs, health);
 };
 
 /**

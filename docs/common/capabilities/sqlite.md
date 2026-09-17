@@ -90,6 +90,40 @@ Where a pattern also writes to the database, pass `{ reactOn: db }` so the read
 re-runs after a committed write. An input a pattern only reads has nothing to
 react to.
 
+## A param is a value
+
+A bind param is resolved as the statement is issued, and `undefined` is refused
+rather than bound: the whole read fails with "sqlite: param is undefined",
+`error` carries that text, and every field computed from the result is empty.
+`null` is what binds SQL NULL.
+
+An input's declared default is applied when the input is READ, so an input
+handed to `params` as itself rather than as a value read out of it arrives
+undefaulted. That costs nothing until someone composes the pattern: a caller
+forwards an optional input of its own, which reads `undefined` while nobody has
+supplied one, and the read the pattern's own default was written to cover is
+the read that fails. Leaving the argument key out is the only shape the default
+covers on its own.
+
+```tsx
+// Shown at module scope.
+import { computed, Default, pattern, type SqliteDb } from "commonfabric";
+
+export default pattern<{ ledger: SqliteDb; month?: string | Default<""> }>(
+  ({ ledger, month }) => {
+    // Read out of `month` rather than `month` itself, so a caller forwarding a
+    // month nobody supplied gets the empty string the statement resolves.
+    const monthParam = computed(() => month);
+
+    return ledger.query<{ id: number }>(
+      "SELECT id FROM rows_plaid_transaction WHERE substr(date, 1, 7) = " +
+        "COALESCE(NULLIF(?, ''), strftime('%Y-%m', 'now')) LIMIT 200",
+      { params: [monthParam] },
+    );
+  },
+);
+```
+
 ## One statement, one database
 
 A query is a single read-only `SELECT` (a read-only CTE counts). Multiple
@@ -101,16 +135,22 @@ join expressed in the pattern.
 
 ## Bound the rows
 
-An ordinary result row is written into the space as a document of its own —
-which is what gives a per-row label somewhere to sit — so the row count of a
+Every result row is written into the space as a document of its own — which
+is what gives a per-row label somewhere to sit — so the row count of a
 statement is a durable cost of the space rather than the cost of one render. A
-query that returns a million such rows writes a million documents, and they stay
-written after the view that asked for them is gone. One row shape is carried
-differently: a row projecting a column name a Fabric record reserves
-(`constructor`, `__proto__`) crosses the wire as a list of entries, and unless
-it carries a label it stays inline in the query's own document. That row still
-costs the space — it enlarges the document holding it — so the bound below is
-what a query needs either way.
+query that returns a million distinct rows writes a million documents, and they
+stay written after the view that asked for them is gone. A re-run whose rows
+are unchanged writes no row documents: a row of an unlabeled database is keyed
+on its content, so equal rows share one document and a row the result held
+before takes its old document back; a row of a labeled database is keyed on
+its position, so a change rewrites the documents at the positions it moved
+rows across and mints none; a row under a row label is keyed on its position
+and its label, so a row whose label changes takes a new document. Two things
+re-key every row of a labeled database at once and write it again: changing
+the query's projection, and re-declaring the handle's `tables`. A row
+projecting a
+column name a Fabric record reserves (`constructor`, `__proto__`) crosses the
+wire as a list of entries and is stored the same way.
 
 A statement therefore bounds its rows, and a filter is not a bound. A `WHERE`
 clause narrows the candidates and says nothing about how many survive it: a
@@ -123,9 +163,12 @@ takes in at once, and it keeps what one query leaves behind in the space
 proportionate to what the view displays. A view that needs more of the store
 than that pages through it — a bound the reader moves. Paging bounds what one
 query writes rather than what the space accumulates: every page fetched
-materializes its own rows, nothing reclaims the rows of a page the reader has
-left, and returning to an earlier page issues a fresh query rather than reading
-the rows it wrote before. The durable cost is the sum of the pages fetched.
+materializes its rows, and nothing reclaims the rows of a page the reader has
+left. Returning to an earlier page issues a fresh query; its rows land on the
+documents they had before where their content is the key, and rewrite the
+documents at their positions where their position is. The durable cost is
+the number of distinct row documents the pages materialize, which grows with
+every page whose rows the space has not held.
 
 Project the columns the view reads and no others: a row document carries every
 column the statement selected, so a wider projection is paid on every row.

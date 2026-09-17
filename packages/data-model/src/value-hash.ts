@@ -485,6 +485,13 @@ const primitiveHashCache = new LRUCache<
  */
 const frozenObjectHashCache = new WeakMap<object, FabricHash>();
 
+let frozenObjectHashCacheHits = 0;
+
+/** Counts `hashOf` and `hashStringOf` calls served by the frozen-object cache. */
+export function getFrozenObjectHashCacheHits(): number {
+  return frozenObjectHashCacheHits;
+}
+
 /**
  * Returns an already computed immutable hash without reading the value.
  *
@@ -568,6 +575,7 @@ function hashOfInternal(
       // checks needed on the fast path.
       const cached = frozenObjectHashCache.get(obj);
       if (cached !== undefined) {
+        frozenObjectHashCacheHits += 1;
         return cached;
       }
 

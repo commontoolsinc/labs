@@ -529,7 +529,7 @@ rooted reference whose first segment is a slug is the canonical grammar
 and predates shuttle, and reserving two values in that position means
 shuttle reads `/slugs/x` and `/pieces/x` differently from the way `cf`
 reads the same strings — and identically for every other slug. Issue
-[#6992](https://github.com/commontoolsinc/labs/issues/6992) retires the
+[#6992](https://github.com/commonfabric/labs/issues/6992) retires the
 divergence by having `set-slug` refuse those two values as slugs, after
 which no piece can carry them and the two grammars agree everywhere.
 

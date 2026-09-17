@@ -12,7 +12,12 @@ import {
   validateSchemaDefinition,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
-import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
+import {
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  type FabricPrimitiveSchemaType,
+  isFabricPrimitiveSchemaType,
+} from "@commonfabric/api";
+import { FABRIC_SPECIAL_OBJECT_BRAND } from "@commonfabric/runner/fabric-special-object-brand";
 import { isPlainObject } from "@commonfabric/utils/types";
 import {
   ARRAY_SUBSCHEMA_KEYS,
@@ -25,8 +30,17 @@ import {
 import { internSchema } from "@commonfabric/data-model-schema";
 import {
   fabricAwareEqual,
+  type FabricPrimitive,
   isKeyableObjectOrArray,
 } from "@commonfabric/data-model";
+import {
+  FabricBytes,
+  FabricEpochDay,
+  FabricEpochNsec,
+  FabricHash,
+  FabricKeyPair,
+  FabricRegExp,
+} from "@commonfabric/data-model/fabric-primitives";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
@@ -529,7 +543,10 @@ const comparableIfc = (ifc: unknown): unknown => {
  * leaves a writer's value unread, where a dropped result field breaks a reader,
  * so only the result side preserves its named fields outright. A candidate that
  * cannot hold a dropped field's value is still refused, by the ordinary
- * named-property proof against its additionalProperties contract. What keeps
+ * named-property proof against its additionalProperties contract. A newly
+ * required field is admitted on a valid default, which a `FabricPrimitive`
+ * stored where that field's object belongs never receives: the value is frozen,
+ * so the runtime's `required` check on it still fails. What keeps
  * those allowances sound is a second check at update time rather than anything
  * provable here: pattern setup re-stages the piece's stored argument
  * against the incoming schema and validates it inside the setup transaction, so
@@ -677,6 +694,11 @@ export function assertPatternSchemasBackwardCompatible(
  * Conservatively prove that every value described by `source` is accepted by
  * `target`. This is used for durable links: validating only their current
  * materialization is insufficient because the linked cell can change later.
+ *
+ * Materialization fills a valid target default before validation, so a
+ * default admits a field the target newly requires, provided every
+ * `FabricPrimitive` class the source admits already has that field: a
+ * `FabricPrimitive` is frozen and never receives the default.
  *
  * The `ifc` reduction {@link comparableIfc} performs reaches this proof as
  * well, where the two claims come from two separate pieces and a differing
@@ -854,8 +876,8 @@ function schemaSubsetIssue(
       source.anyOf || target.anyOf ||
       Array.isArray(source.type) || Array.isArray(target.type)
     ) {
-      const sources = schemaAlternatives(source);
-      const targets = schemaAlternatives(target);
+      const sources = schemaAlternatives(source, "source");
+      const targets = schemaAlternatives(target, "target");
       for (const sourceAlternative of sources) {
         const accepted = targets.some((targetAlternative) =>
           schemaConjunctionSubsetIssue(
@@ -926,6 +948,9 @@ function schemaSubsetIssue(
       }
     }
 
+    const primitiveIssue = fabricPrimitiveRequiredIssue(source, target, path);
+    if (primitiveIssue) return primitiveIssue;
+
     if (
       schemaMayProduceType(source, ["object"]) &&
       (declaresObjectShape(source) || declaresObjectShape(target))
@@ -988,15 +1013,19 @@ function schemaIsStableUnderDescendantDefaults(schema: JSONSchema): boolean {
   return Object.keys(schema).every((key) => {
     if (DEFAULT_STABLE_SCHEMA_KEYS.has(key)) return true;
     return (key === "anyOf" || key === "oneOf") &&
-      alternativesDeclareDisjointTypes(schema[key]!);
+      alternativesAreStableUnderDescendantDefaults(schema[key]!);
   });
 }
 
 /**
- * Whether composition branches can never change membership after descendant
- * defaults are inserted because their accepted top-level types do not overlap.
+ * Whether composition branches keep their membership after descendant
+ * defaults are inserted. Their accepted top-level types must not overlap, so
+ * no value can move to another branch, and every branch a default can be
+ * inserted into — one admitting objects or arrays — must keep its own
+ * constraints true under the insertion, as any node is asked to. A branch
+ * admitting only scalars receives no default, whatever else it constrains.
  */
-function alternativesDeclareDisjointTypes(
+function alternativesAreStableUnderDescendantDefaults(
   alternatives: readonly JSONSchema[],
 ): boolean {
   const declared = alternatives.map((alternative) => {
@@ -1026,7 +1055,24 @@ function alternativesDeclareDisjointTypes(
       }
     }
   }
-  return true;
+  return alternatives.every((alternative, index) =>
+    declared[index]!.every(isScalarSchemaType) ||
+    schemaIsStableUnderDescendantDefaults(alternative)
+  );
+}
+
+const SCALAR_SCHEMA_TYPES: ReadonlySet<string> = new Set([
+  "boolean",
+  "integer",
+  "null",
+  "number",
+  "string",
+  "undefined",
+]);
+
+/** Whether a `type` name admits no value a default can be inserted into. */
+function isScalarSchemaType(type: string): boolean {
+  return SCALAR_SCHEMA_TYPES.has(type);
 }
 
 function objectSubsetIssue(
@@ -1073,16 +1119,30 @@ function objectSubsetIssue(
   const allowEvolutionDefaults = allowEvolutionPolicy &&
     context.allowEvolutionDefaults;
   if (context.role === "argument") {
+    let admittedPrimitiveTypes: FabricPrimitiveSchemaType[] | undefined;
     for (const property of targetRequired) {
+      if (sourceRequired.has(property)) continue;
       if (
-        !sourceRequired.has(property) &&
-        (!(context.allowTargetDefaults || allowEvolutionDefaults) ||
-          !schemaProvidesValidDefault(
-            targetProperties[property],
-            context.targetRoot,
-          ))
+        !(context.allowTargetDefaults || allowEvolutionDefaults) ||
+        !schemaProvidesValidDefault(
+          targetProperties[property],
+          context.targetRoot,
+        )
       ) {
         return `${path}.${property}: newly required argument field has no default`;
+      }
+      // Link materialization inserts the default into a record, but a
+      // `FabricPrimitive` is frozen, so one the source admits without the
+      // field keeps failing the runtime's `required` check. A pattern update
+      // keeps the default, backed by the update-time check that
+      // `assertPatternSchemasBackwardCompatible()` describes.
+      if (context.defaultComparison !== "target") continue;
+      admittedPrimitiveTypes ??= fabricPrimitiveTypesAdmittedBy(source);
+      const unfilled = admittedPrimitiveTypes.find((type) =>
+        !fabricPrimitiveHasRequiredKey(type, property)
+      );
+      if (unfilled !== undefined) {
+        return `${path}.${property}: newly required field is not a member of \`${unfilled}\`, which takes no default`;
       }
     }
 
@@ -1284,6 +1344,111 @@ function objectSubsetIssue(
   }
 
   return additionalPropertiesSubsetIssue(source, target, path, context);
+}
+
+/**
+ * The class each `FabricPrimitive` type name matches, by the same `instanceof`
+ * mapping `schemaTypeOfFabricPrimitive()` applies to a value. Keyed over the
+ * whole vocabulary, so a name added to it stops this compiling until its class
+ * is named here. Nothing checks that a name is paired with the right class.
+ */
+const FABRIC_PRIMITIVE_CLASSES: {
+  readonly [Type in FabricPrimitiveSchemaType]: {
+    readonly prototype: FabricPrimitive;
+  };
+} = {
+  FabricBytes,
+  FabricEpochDay,
+  FabricEpochNsec,
+  FabricHash,
+  FabricKeyPair,
+  FabricRegExp,
+};
+
+/**
+ * Helper for {@link schemaSubsetIssue}, which proves that a value of each
+ * `FabricPrimitive` class the source names by `type` carries every key the
+ * target's `required` checks on it. The runtime checks those keys on a
+ * `FabricPrimitive` with `in` whenever the target declares no `type` or its
+ * type list includes `object`, and excuses `FABRIC_SPECIAL_OBJECT_BRAND`. A
+ * target typed only by `FabricPrimitive` names is not checked, and the object
+ * keywords besides `required` never reach a primitive.
+ * {@link objectSubsetIssue} does not run for a source typed this way, so this
+ * is the whole object proof for such a source.
+ *
+ * Membership is decided by {@link fabricPrimitiveHasRequiredKey}. A target
+ * default does not supply a missing key, since nothing can be written onto a
+ * frozen value.
+ */
+function fabricPrimitiveRequiredIssue(
+  source: SchemaObject,
+  target: SchemaObject,
+  path: string,
+): string | undefined {
+  const targetTypes = typeof target.type === "string"
+    ? [target.type]
+    : target.type;
+  if (
+    target.required === undefined || targetTypes?.includes("object") === false
+  ) {
+    return undefined;
+  }
+  for (const type of schemaTypes(source) ?? []) {
+    if (!isFabricPrimitiveSchemaType(type)) continue;
+    for (const key of target.required) {
+      if (fabricPrimitiveHasRequiredKey(type, key)) continue;
+      return `${path}.${key}: required field is not a member of \`${type}\``;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Whether the runtime's `required` check finds `key` on every value of the
+ * `FabricPrimitive` class `type` names. That check is `in`, and excuses
+ * `FABRIC_SPECIAL_OBJECT_BRAND`.
+ *
+ * Membership is read off the class's prototype. `BaseFabricPrimitive` freezes
+ * each instance at construction, which leaves a subclass no own field to add,
+ * so every key `in` finds on a value is on that prototype chain; a key found
+ * only on an instance would be reported missing here.
+ */
+function fabricPrimitiveHasRequiredKey(
+  type: FabricPrimitiveSchemaType,
+  key: string,
+): boolean {
+  return key === FABRIC_SPECIAL_OBJECT_BRAND ||
+    key in FABRIC_PRIMITIVE_CLASSES[type].prototype;
+}
+
+/**
+ * Helper for {@link objectSubsetIssue}, which returns the `FabricPrimitive`
+ * type names whose values `schema` admits by its `type` and `required`. A name
+ * among the schema's types is admitted, and so is every name when those types
+ * are unbounded or include `object` or `unknown`. The runtime checks `required`
+ * on a `FabricPrimitive` only when the schema declares no `type` or its type
+ * list includes `object`, and there a class missing one of those keys is not
+ * admitted.
+ *
+ * No other keyword is read, so a schema whose other constraints refuse every
+ * `FabricPrimitive` still admits them here.
+ */
+function fabricPrimitiveTypesAdmittedBy(
+  schema: SchemaObject,
+): FabricPrimitiveSchemaType[] {
+  const types = schemaTypes(schema);
+  const declared = typeof schema.type === "string"
+    ? [schema.type]
+    : schema.type;
+  const checksRequired = declared === undefined || declared.includes("object");
+  return FABRIC_PRIMITIVE_SCHEMA_TYPES.filter((type) =>
+    (types === undefined ||
+      types.some((admitted) => schemaTypeAdmits(admitted, type))) &&
+    (!checksRequired ||
+      (schema.required ?? []).every((key) =>
+        fabricPrimitiveHasRequiredKey(type, key)
+      ))
+  );
 }
 
 function matchingPatternPropertySchemas(
@@ -1554,15 +1719,51 @@ function schemaMayProduceType(
  * checks the node's own keywords ({@link NODE_LEVEL_KEYWORDS}). Fragments omit
  * the parent node's default and extensions, including for a single-type node.
  * Branch and descendant schemas retain their own defaults and extensions.
+ *
+ * A source node with neither `anyOf` nor a `type` list, whose `enum` values
+ * {@link schemaTypes} reads as more than one type, expands into one fragment
+ * per type, each listing only that type's values. The fragments together
+ * accept exactly what the node does, and the nullable literal union
+ * `{enum: ["open", null]}` meets a `string` branch and a `null` branch one
+ * type at a time. A node listing a value {@link valueSchemaType} cannot name,
+ * such as a `FabricPrimitive`, stays whole. A target node stays whole too: a
+ * source alternative has to fit inside a single target alternative, and one
+ * listing values of several types fits only the whole node.
  */
-function schemaAlternatives(schema: SchemaObject): JSONSchema[][] {
+function schemaAlternatives(
+  schema: SchemaObject,
+  side: "source" | "target",
+): JSONSchema[][] {
   const fragment = withoutNodeLevelKeywords(schema);
   if (fragment.anyOf) {
     const { anyOf, ...base } = fragment;
     return anyOf.map((alternative) => [base, alternative]);
   }
   if (Array.isArray(fragment.type)) {
-    return fragment.type.map((type) => [{ ...fragment, type }]);
+    const { type: types, ...untyped } = fragment;
+    if (!types.includes("object")) {
+      return types.map((type) => [{ ...fragment, type }]);
+    }
+    // The runtime checks `required` on a `FabricPrimitive` when the type list
+    // includes `object`, and would not check it under a branch typed by a
+    // `FabricPrimitive` name or by `unknown` alone. `object` admits every
+    // `FabricPrimitive` already, so those names add no branch of their own,
+    // and `unknown` becomes the untyped branch, which admits every value and
+    // is checked.
+    return types.filter((type) => !isFabricPrimitiveSchemaType(type))
+      .map((type) => [type === "unknown" ? untyped : { ...untyped, type }]);
+  }
+  // With no `type` list, `schemaTypes` names more than one type only when it
+  // can name every listed value, and a `const` lists a single value. So each
+  // `enum` value lands in exactly one fragment, and a value the declared
+  // `type` rejects lands in none.
+  const types = side === "source" ? schemaTypes(fragment) : undefined;
+  const values = fragment.enum;
+  if (types !== undefined && types.length > 1 && values !== undefined) {
+    return types.map((type) => [{
+      ...fragment,
+      enum: values.filter((value) => valueSchemaType(value) === type),
+    }]);
   }
   return [[fragment]];
 }
@@ -1632,9 +1833,69 @@ function hasComplexSameInstanceConstraints(schema: SchemaObject): boolean {
   return COMPLEX_CONSTRAINT_KEYS.some((key) => schema[key] !== undefined);
 }
 
+/**
+ * The `type` names a schema admits, or `undefined` when it leaves them
+ * unbounded. A schema that lists every value it accepts in `enum` or `const`
+ * admits exactly the types those values carry, narrowed by any `type` it
+ * declares beside them: `{enum: ["open", "closed"]}` — the spelling a literal
+ * union compiles to — is a `string` schema to every type comparison here, and
+ * `{type: "number", enum: [1, 2]}` an `integer` one. A listed value whose
+ * type {@link valueSchemaType} cannot name leaves the declared `type` to
+ * bound the schema, or nothing to.
+ */
 function schemaTypes(schema: SchemaObject): readonly string[] | undefined {
-  if (schema.type === undefined) return undefined;
-  return typeof schema.type === "string" ? [schema.type] : schema.type;
+  const declared = schema.type === undefined
+    ? undefined
+    : typeof schema.type === "string"
+    ? [schema.type]
+    : schema.type;
+  const values = allowedLiteralValues(schema);
+  if (values === undefined) return declared;
+  const types: string[] = [];
+  for (const value of values) {
+    const type = valueSchemaType(value);
+    if (type === undefined) return declared;
+    if (
+      declared !== undefined &&
+      !declared.some((admitted) => schemaTypeAdmits(admitted, type))
+    ) {
+      continue;
+    }
+    if (!types.includes(type)) types.push(type);
+  }
+  return types;
+}
+
+/**
+ * Whether a schema `type` name admits a value of the given type name: the
+ * same name, `unknown`, an `integer` under `number`, or a `FabricPrimitive`
+ * class under `object` (mirrors `schemaTypeMatchesValueType` in the runner's
+ * traverse).
+ */
+function schemaTypeAdmits(schemaType: string, valueType: string): boolean {
+  return schemaType === valueType || schemaType === "unknown" ||
+    (schemaType === "number" && valueType === "integer") ||
+    (schemaType === "object" && isFabricPrimitiveSchemaType(valueType));
+}
+
+/**
+ * The `type` name a literal value satisfies, in the JSON vocabulary the
+ * runtime validates against, with an integral number an `integer`. A value
+ * outside that vocabulary gets no name. That includes a `FabricPrimitive`,
+ * on purpose: the runtime checks an object schema's `required` keys on one
+ * whenever the schema declares no `type` or admits `object`, so the class
+ * name alone does not say which object keywords reach the value, and a
+ * schema listing one has to stay unbounded for the object proof to run.
+ */
+function valueSchemaType(value: unknown): string | undefined {
+  if (value === null) return "null";
+  if (typeof value === "string") return "string";
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? "integer" : "number";
+  }
+  if (typeof value === "boolean") return "boolean";
+  if (Array.isArray(value)) return "array";
+  return isPlainObject(value) ? "object" : undefined;
 }
 
 /**

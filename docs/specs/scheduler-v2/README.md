@@ -613,18 +613,32 @@ runnable(N) = N.status ∈ {invalid, never-ran} ∧ live(N) ∧ eligible(N)
 5. Commit optimistically. The local apply emits change records synchronously
    → downstream invalidation happens *here*, through the one channel, before
    the next node in `order` runs.
-6. On commit rejection (conflict): restore `causes` into `invalidCauses`
-   (the retry exists because of them), `N.status = invalid`, consume retry
-   budget, tick. On `RetryImmediately` (name-resolution signal): same shape.
-   On exception: report through error handlers; node keeps its registered
-   read set (it stays subscribed); status stays clean until something it read
-   changes — plus a bounded-retry policy for transient failure classes.
+6. On a stale-basis commit rejection, restore `causes` into `invalidCauses`
+   and refresh the subscription. A server conflict waits for the catch-up gate
+   and the runtime's scoped pulls of every named conflict before its retry is
+   queued; validation-only output reads can require repair without being
+   scheduling dependencies. The wait remains on the pending-commit barrier.
+   Fresh input changes may independently run the node during recovery. The
+   delayed retry checks its registration lifetime and write teardown before
+   requeueing, so removal or replacement cannot revive an old registration.
+   A same-replica inconsistency needs no remote recovery. Both stale-basis
+   classes retry outside the bounded failure budget: mark `N.status = invalid`
+   and tick. `RetryImmediately` (name resolution) restores causes and requeues
+   within the bounded retry budget. On exception, report through error handlers;
+   the node keeps its registered read set and stays clean until an input changes,
+   with a bounded retry policy for transient failure classes.
 7. Under persistence, attach the observation to the transaction (§9.3).
 
-Note what is *absent* from the run path relative to v1: no
-resubscribe/unsubscribe, no changed-write diffing and reader-marking (the
-channel does it), no demand-context entry/exit sets, no first-run/continuation
-set deletions, no conditional-scheduling cleanup.
+Retry counters belong to the action across registrations. A successful commit
+or a permanent or terminal refusal clears them even if its registration has
+retired; terminal refusals still reach the error channel. Waking consumers on
+success requires the committing run's registration to remain active.
+
+The run path refreshes live subscriptions incrementally, including during
+retry recovery, without tearing them down and recreating them. The change
+channel owns changed-write diffing and reader-marking. The run path has no
+demand-context entry/exit sets, first-run/continuation set deletions, or
+conditional-scheduling cleanup.
 
 ### 7.4 Ordering rules
 

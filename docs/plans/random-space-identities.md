@@ -73,18 +73,18 @@ labels.
   already require the ACL-only first transaction. The
   [current-pass protocol](../specs/memory-v2/04-protocol.md#451-current-pass)
   must lose the conflicting permanent implicit ownership of the space DID.
-- [CFC space principals and role membership](https://github.com/commontoolsinc/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/03-core-concepts.md#36-spaces-and-role-based-confidentiality)
+- [CFC space principals and role membership](https://github.com/commonfabric/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/03-core-concepts.md#36-spaces-and-role-based-confidentiality)
   agree that a space DID is a confidentiality principal whose membership is
   administered.
-- [CFC `HasRole` fact generation](https://github.com/commontoolsinc/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/04-label-representation.md#493-hasrole-fact-generation)
+- [CFC `HasRole` fact generation](https://github.com/commonfabric/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/04-label-representation.md#493-hasrole-fact-generation)
   and the
-  [formal membership model](https://github.com/commontoolsinc/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/formal/Cfc/Membership.lean#L101-L113)
+  [formal membership model](https://github.com/commonfabric/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/formal/Cfc/Membership.lean#L101-L113)
   currently grant membership when the principal equals the space. Preparation
   must amend both so the special case admits genesis without creating permanent
   CFC membership.
-- [CFC trusted derived identifiers](https://github.com/commontoolsinc/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/02-overview.md#24-trusted-derived-identifiers)
+- [CFC trusted derived identifiers](https://github.com/commonfabric/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/02-overview.md#24-trusted-derived-identifiers)
   and
-  [CFC causal addressing](https://github.com/commontoolsinc/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/17-addressing-and-storage.md#171-causal-id-storage-core-cfc-path)
+  [CFC causal addressing](https://github.com/commonfabric/specs/blob/5fb2c64357f643f7344d00cdb049f0d9e5983ef0/cfc/17-addressing-and-storage.md#171-causal-id-storage-core-cfc-path)
   govern replay-stable operation identifiers. Those identifiers select an
   allocation record and never determine key data or authority.
 - [Server-side provisioning](../specs/server-side-execution/protocol.md#2b-cross-space-writes)
@@ -100,7 +100,7 @@ labels.
   defines the Common Memory server embedded in each Toolshed process. Existing
   [multi-process host topology](../development/staging-space-copy.md#the-host)
   uses a shared durable store. The current production
-  [storage routing](https://github.com/commontoolsinc/infra/blob/16e48222254059cc9eff53f5064ab696fbd37236/ansible/roles/nginx/templates/toolshed.conf.j2)
+  [storage routing](https://github.com/commonfabric/infra/blob/16e48222254059cc9eff53f5064ab696fbd37236/ansible/roles/nginx/templates/toolshed.conf.j2)
   is defined in `infra`: nginx sends each `space=<did>` Memory connection to
   one of the host's Toolshed processes. The control spaces use that same
   space-keyed route as ordinary spaces; they do not assume that embedded
@@ -113,9 +113,9 @@ labels.
   [space name registry](space-name-registry.md) concepts are not dependencies
   of random space creation and leave no implementation residue in this plan.
 - Earlier `ct-space`
-  [recovery](https://github.com/commontoolsinc/labs/blob/850bca9aed74c22773de5caa2b0b81c98713e646/docs/access-recovery.md)
+  [recovery](https://github.com/commonfabric/labs/blob/850bca9aed74c22773de5caa2b0b81c98713e646/docs/access-recovery.md)
   and
-  [keyring](https://github.com/commontoolsinc/labs/blob/a98c7444b08a944467171539a1e7baf7082e367d/docs/keyring-architecture.md)
+  [keyring](https://github.com/commonfabric/labs/blob/a98c7444b08a944467171539a1e7baf7082e367d/docs/keyring-architecture.md)
   designs generated fresh space keys but retained them. This plan keeps their
   random allocation boundary and avoids long-term key recovery by removing the
   key's authority after genesis.

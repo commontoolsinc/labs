@@ -1,6 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE } from "../../src/config.ts";
+
 import {
   type ConsoleLaunchIo,
   type ConsoleLaunchRecords,
@@ -17,6 +19,7 @@ import {
   resolveConsoleLaunchPlan,
   WEAVER_PAIRING_PORT,
 } from "../../console/launch.ts";
+import type { ConsoleObservedLaunchHealth } from "../../console/health.ts";
 
 const PIECES_JSON = JSON.stringify({
   defaults: {
@@ -134,6 +137,83 @@ const fakeBinary = async (body: string): Promise<string> => {
 
 describe("launch", () => {
   describe("resolveConsoleLaunchPlan()", () => {
+    it("retains every grant and refusal with its deciding records and a distinct remedy", () => {
+      const pieces = JSON.parse(PIECES_JSON_WITH_CONNECTOR);
+      const original = pieces.pieces[0];
+      pieces.pieces.push({
+        ...original,
+        name: "duplicate",
+        sqlite_sources: [{
+          ...original.sqlite_sources[0],
+          connection_id: "gmail-other",
+        }],
+      }, {
+        name: "unlabeled",
+        sqlite_sources: [{ connection_id: "no-class", tables: {} }],
+      });
+      const handles = JSON.parse(HANDLES_JSON);
+      const invalidRef = "private-malformed-reference";
+      handles.handles.push(
+        {
+          connection_id: "gmail-other",
+          piece: "duplicate",
+          handle_ref: MAIL_REF,
+        },
+        { connection_id: "no-class", piece: "unlabeled", handle_ref: MAIL_REF },
+        { connection_id: "broken", piece: "broken", handle_ref: invalidRef },
+      );
+      const plan = resolveConsoleLaunchPlan({
+        ...WITH_CONNECTOR,
+        instance: {
+          ...WITH_CONNECTOR.instance!,
+          piecesJson: JSON.stringify(pieces),
+          handlesJson: JSON.stringify(handles),
+        },
+      }, OPTIONS);
+      expect(plan.health.resolved).toBe(plan.resolved);
+      expect(
+        plan.health.connectors.map(({ label, value, state }) => ({
+          label,
+          value,
+          state,
+        })),
+      ).toEqual([
+        {
+          label: "Connector Inventory",
+          value: "1 granted; 3 not granted",
+          state: "ok",
+        },
+        { label: "gmail-work", value: "granted as email", state: "ok" },
+        { label: "gmail-other", value: "not granted", state: "degraded" },
+        { label: "no-class", value: "not granted", state: "degraded" },
+        { label: "broken", value: "not granted", state: "unknown" },
+      ]);
+      expect(
+        plan.health.connectors.every((row) =>
+          row.detail?.includes(HANDLES_JSON_PATH) &&
+          row.detail?.includes(RECORDS.instance!.piecesJsonPath)
+        ),
+      ).toBe(true);
+      expect(plan.health.connectors[2]).toMatchObject({
+        source: "loom connector receipt + pieces.json (duplicate)",
+        reason:
+          "its declared CFC class `email` is already the grant connection `gmail-work` was named by",
+        remedy:
+          "Select the intended connection for the email class in Loom, then restart the console.",
+      });
+      expect(plan.health.connectors[3]).toMatchObject({
+        reason: "its declared table contract carries no CFC class",
+        remedy:
+          "Declare the per-column ifc.confidentiality Resource class in this connector's sqlite_sources, then restart the console.",
+      });
+      expect(JSON.stringify(plan.health.connectors)).not.toContain(MAIL_REF);
+      expect(plan.health.connectors[4]).toMatchObject({
+        state: "unknown",
+        reason: "its `handle_ref` does not parse",
+      });
+      expect(JSON.stringify(plan.health.connectors)).not.toContain(invalidRef);
+    });
+
     it("returns the identity, space and toolshed the instance records", () => {
       const plan = resolveConsoleLaunchPlan(RECORDS, OPTIONS);
 
@@ -270,7 +350,7 @@ describe("launch", () => {
         "persist",
       );
       expect(plan.environment.CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE).toBe(
-        "enforce-explicit",
+        DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
       );
     });
 
@@ -430,6 +510,49 @@ describe("launch", () => {
 
       expect(() => resolveConsoleLaunchPlan(records, OPTIONS)).toThrow(
         "`--cfc-invocation-context-dir`",
+      );
+    });
+
+    it("does not run skill scripts unless a launch says so", () => {
+      const plan = resolveConsoleLaunchPlan(RECORDS, {});
+
+      expect(plan.environment.CF_HARNESS_ALLOW_SKILL_SCRIPTS).toBeUndefined();
+      expect(
+        consoleLaunchReport(plan).find((line) =>
+          line.includes("skill scripts")
+        ),
+      ).toContain("not run");
+    });
+
+    it("runs skill scripts when a launch names the switch", () => {
+      const plan = resolveConsoleLaunchPlan(RECORDS, {
+        allowSkillScripts: true,
+      });
+
+      expect(plan.environment.CF_HARNESS_ALLOW_SKILL_SCRIPTS).toBe("1");
+      const reported = consoleLaunchReport(plan).find((line) =>
+        line.includes("skill scripts")
+      );
+      expect(reported).toContain("run in the sandbox");
+      expect(reported).toContain("named on the command line");
+    });
+
+    it("runs skill scripts when the variable carries the switch", () => {
+      const plan = resolveConsoleLaunchPlan(RECORDS, {
+        inheritedAllowSkillScripts: true,
+      });
+
+      expect(plan.environment.CF_HARNESS_ALLOW_SKILL_SCRIPTS).toBe("1");
+      expect(
+        consoleLaunchReport(plan).find((line) =>
+          line.includes("skill scripts")
+        ),
+      ).toContain("inherited");
+    });
+
+    it("names the skill-script variable among the ones the launcher owns", () => {
+      expect(LAUNCHER_OWNED_VARIABLES).toContain(
+        "CF_HARNESS_ALLOW_SKILL_SCRIPTS",
       );
     });
 
@@ -908,6 +1031,55 @@ describe("launch", () => {
       );
     });
 
+    it("reads the switch from the flag and from the variable", async () => {
+      const named = await prepareConsoleLaunch(
+        [...NAMED_ARGS, "--allow-skill-scripts"],
+        {},
+        io(),
+      );
+      expect(named.plan.environment.CF_HARNESS_ALLOW_SKILL_SCRIPTS).toBe("1");
+
+      const inherited = await prepareConsoleLaunch(
+        NAMED_ARGS,
+        { CF_HARNESS_ALLOW_SKILL_SCRIPTS: "1" },
+        io(),
+      );
+      expect(inherited.plan.environment.CF_HARNESS_ALLOW_SKILL_SCRIPTS).toBe(
+        "1",
+      );
+
+      const neither = await prepareConsoleLaunch(NAMED_ARGS, {}, io());
+      expect(neither.plan.environment.CF_HARNESS_ALLOW_SKILL_SCRIPTS)
+        .toBeUndefined();
+    });
+
+    it("refuses the skill-script switch passed through to the console", async () => {
+      // Every spelling that would enable it on the server: a boolean flag
+      // still parses `=true` and `=1`, so the bare token is not the whole of
+      // what has to be caught.
+      for (
+        const argument of [
+          "--allow-skill-scripts",
+          "--allow-skill-scripts=true",
+          "--allow-skill-scripts=1",
+        ]
+      ) {
+        await expect(
+          prepareConsoleLaunch([...NAMED_ARGS, "--", argument], {}, io()),
+        ).rejects.toThrow("cannot be passed through");
+      }
+    });
+
+    it("passes other console flags through unchanged", async () => {
+      const { consoleArgs } = await prepareConsoleLaunch(
+        [...NAMED_ARGS, "--", "--host-mount", "name=c"],
+        {},
+        io(),
+      );
+
+      expect(consoleArgs).toEqual(["--host-mount", "name=c"]);
+    });
+
     it("leaves the registries out when both are waived", async () => {
       const { plan } = await prepareConsoleLaunch(
         [...NAMED_ARGS, "--no-pattern-index", "--no-skills-registry"],
@@ -1155,6 +1327,24 @@ describe("launch", () => {
           "/consoles/launched",
         );
         expect(Deno.env.get("MEMORY_DIR")).toBe("/checkout/cache/memory");
+      });
+    });
+
+    it("carries its observed decision report into serving", async () => {
+      await withEnvironmentRestored(async () => {
+        let observed: ConsoleObservedLaunchHealth | undefined;
+        await launchConsole(ARGS, {}, (_args, health) => {
+          observed = health;
+          return Promise.resolve();
+        }, io);
+        expect(observed?.resolved).toContainEqual({
+          name: "space",
+          value: "cf-harness-dev",
+          source: "named on the command line",
+        });
+        expect(Number.isFinite(Date.parse(observed?.checkedAt ?? ""))).toBe(
+          true,
+        );
       });
     });
 

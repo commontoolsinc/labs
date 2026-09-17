@@ -283,4 +283,77 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
     expect(settledA.pending).toBe(false);
     expect(settledA.error).toBeUndefined();
   });
+
+  it("a second runtime recovers a pending query left by a stopped runtime", async () => {
+    const a = runPattern(runtimeA);
+    await a.commit;
+    const qCellA = a.resultCell.key("q").resolveAsCell();
+    const initial = await waitForCellValue<QueryState>(
+      runtimeA,
+      qCellA,
+      (value) => value?.pending === false,
+    );
+    expect(typeof initial.requestHash).toBe("string");
+
+    const providerA = runtimeA.storageManager.open(space) as unknown as {
+      sqliteQuery: (...args: unknown[]) => Promise<unknown>;
+    };
+    const originalA = providerA.sqliteQuery.bind(providerA);
+    let resumeA: (() => Promise<void>) | undefined;
+    providerA.sqliteQuery = (...args) =>
+      new Promise((resolve, reject) => {
+        resumeA = async () => {
+          try {
+            resolve(await originalA(...args));
+          } catch (error) {
+            reject(error);
+          }
+        };
+      });
+    await seedDbFile(runtimeA, a.resultCell);
+    const pending = await waitForCellValue<QueryState>(
+      runtimeA,
+      qCellA,
+      (value) =>
+        value?.pending === true && value.requestHash !== initial.requestHash,
+    );
+    expect(typeof pending.requestHash).toBe("string");
+    await runtimeA.patternManager.flushCompileCacheWrites();
+    await runtimeA.storageManager.synced();
+    runtimeA.scheduler.dispose();
+
+    runtimeB = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: EmulatedStorageManager.connectTo(server, { as: signer }),
+    });
+    const providerB = runtimeB.storageManager.open(space) as unknown as {
+      sqliteQuery: (...args: unknown[]) => Promise<unknown>;
+    };
+    const originalB = providerB.sqliteQuery.bind(providerB);
+    let issuesFromB = 0;
+    providerB.sqliteQuery = (...args) => {
+      issuesFromB++;
+      return originalB(...args);
+    };
+
+    const { commonfabric: cfB } = createTrustedBuilder(runtimeB);
+    const resultCellB = runtimeB.getCell(space, RESULT_CAUSE, undefined);
+    const cancelResultSink = resultCellB.sink(() => {});
+    await runtimeB.runSynced(resultCellB, makePattern(cfB));
+    const qCellB = resultCellB.key("q").resolveAsCell();
+    const recovered = await waitForCellValue<QueryState>(
+      runtimeB,
+      qCellB,
+      (value) => value?.pending === false,
+    );
+
+    expect(issuesFromB).toBe(1);
+    expect(recovered.pending).toBe(false);
+    expect(recovered.requestHash).toBe(pending.requestHash);
+    expect(recovered.error).toBeUndefined();
+    cancelResultSink();
+    expect(resumeA).toBeDefined();
+    await resumeA!();
+    await runtimeA.settled();
+  });
 });

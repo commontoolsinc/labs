@@ -2283,7 +2283,7 @@ describe("mounted callable resolution and execution", () => {
         symbol: "default",
         source: {
           ref: `cf:pattern:${"A".repeat(43)}`,
-          repository: "https://github.com/commontoolsinc/labs",
+          repository: "https://github.com/commonfabric/labs",
           entry: "/notes/note.tsx",
           origin: "file:///repo/notes/note.tsx",
         },
@@ -2325,7 +2325,7 @@ describe("mounted callable resolution and execution", () => {
       symbol: "default",
       source: {
         ref: `cf:pattern:${"A".repeat(43)}`,
-        repository: "https://github.com/commontoolsinc/labs",
+        repository: "https://github.com/commonfabric/labs",
         entry: "/notes/note.tsx",
         origin: "file:///repo/notes/note.tsx",
       },

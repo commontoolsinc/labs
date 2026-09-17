@@ -42,6 +42,84 @@ declarations are rejected. See the
 [budget contract](../../docs/features/read-accounting.md#pattern-test-budgets)
 for measured transactions, exclusions, and settlement behavior.
 
+## Pattern test CFC posture and labeled fixtures
+
+`cf test` accepts `--cfc-flow-labels <off|derive|observe|persist>` and
+`--cfc-enforcement-mode <disabled|observe|enforce-explicit|enforce-strict>`.
+`derive` is an alias for the runtime's `observe` flow mode: compute the join
+without persisting derived labels. `--cfc-shell-posture` selects
+`enforce-explicit` and `persist`, the shell's two CFC dial defaults. It
+conflicts with either individual dial, in either argument order. The shorthand
+changes these two dials only; it does not simulate the browser or enable every
+CFC gate. An omitted dial retains the pattern-test preset (enforcement
+`enforce-explicit`, flow labels `off`). Every runtime prints its resolved
+posture, including each multi-user participant. Programmatic callers use
+`TestRunnerOptions.cfcFlowLabels` with the runtime names `off`, `observe`, or
+`persist`.
+
+A pattern test can create its own labeled store without a connector. Declare a
+column's `ifc` alongside its SQLite type and seed rows in an action:
+
+```tsx
+// Shown at module scope.
+import {
+  action,
+  assert,
+  pattern,
+  sqliteDatabase,
+  table,
+  TESTS,
+} from "commonfabric";
+
+export default pattern(() => {
+  const db = sqliteDatabase({
+    tables: {
+      orders: table({
+        id: "integer primary key",
+        glaze: {
+          type: "string",
+          sqlType: "text",
+          ifc: { confidentiality: ["bakery-private"] },
+        },
+      }),
+    },
+  });
+  const rows = db.query<{ id: number; glaze: string }>(
+    "SELECT id, glaze FROM orders ORDER BY id LIMIT 11",
+  );
+  return {
+    [TESTS]: [
+      {
+        action: action(() => {
+          db.exec("INSERT INTO orders VALUES (?, ?)", [1, "maple"]);
+        }),
+      },
+      { assertion: assert(() => rows.result?.[0]?.glaze === "maple") },
+    ],
+  };
+});
+```
+
+With enforcement at `enforce-explicit`, SQLite query results carry the declared
+column labels with flow labels `off` or `persist`. The flow dial controls their
+downstream derivation and persistence. Query result assertions settle
+asynchronous SQLite work; put one before a render step when measuring the mapped
+view separately from querying and row materialization.
+
+The verbose timing table always includes `prepareCfc`, `deriveFlowJoin`,
+`collectConsumedLabel`, and `preparedDigestFor`, even below the top-ten cutoff.
+A zero count means that interval did not call the operation. These are
+cumulative elapsed spans, nested inside preparation where applicable; do not add
+them as independent CPU time. The digest span covers canonicalization and
+hashing, including commit-time rechecks. Read counts retain their reactive-body
+boundary; preparation spans cover work outside that boundary. Explicit render
+steps print both timing and read tables. `--timing-measures-out` also captures
+the spans and the `runTestPattern/step/render_N/materialize` phase boundaries.
+
+The
+[mapped-render regression benchmark](../../docs/development/BENCHMARKS.md#labeled-pattern-test-mapped-render)
+uses this fixture mechanism at both postures.
+
 ## View pager
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source
@@ -191,8 +269,8 @@ and never the place. `slugs` and `pieces` are reserved as the first segment of a
 rooted reference as well as at the root, so `cd /slugs/board` is the same as
 `cd /` then `cd slugs/board`. That is the one place the shell reads a reference
 differently from the rest of `cf`, which takes those two as ordinary slugs;
-[#6992](https://github.com/commontoolsinc/labs/issues/6992) retires the
-difference by refusing them as slug values.
+[#6992](https://github.com/commonfabric/labs/issues/6992) retires the difference
+by refusing them as slug values.
 
 A relative operand is the cell reference grammar's
 ([`docs/specs/cell-reference-grammar.md`](../../docs/specs/cell-reference-grammar.md)),
@@ -616,7 +694,16 @@ process on every deployment.
 Preflight uses setup's stored-argument validation: optional fields holding
 `undefined` count as absent, and unreadable linked values defer to reactive
 reads. A compatible verdict therefore does not prove that every linked value has
-loaded. A committed direct handle retained under an unchanged input contract
+loaded. It also runs the CFC schema-envelope merge the setup transaction
+performs at commit, in dry run, over both documents that take it: the envelope
+stored on the piece's argument document against the candidate's argument schema,
+and the envelope stored on the piece's own document against its result schema,
+the latter only where setup would rewrite the result projection, since a
+candidate that leaves the projection as it is takes no result merge at commit. A
+stored claim the candidate cannot reconcile with — an owner-protected field
+whose `writeAuthorizedBy` claim names a different binding, say — is reported by
+the check in the merge's own words rather than discovered as a commit rejection
+at apply. A committed direct handle retained under an unchanged input contract
 keeps its producer's policy; the check does not require the consumer to
 redeclare that policy. New links and changed handle contracts require the full
 producer-contract proof. A successful render after apply is required.

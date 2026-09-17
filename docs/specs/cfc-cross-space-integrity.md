@@ -6,7 +6,7 @@ confidentiality, or take only a subset — and where the authoring surface still
 has gaps. Grounded in the runner implementation (`packages/runner/src/cfc/`) and
 pinned end-to-end by
 [`packages/runner/test/cfc-cross-space-integrity.test.ts`](../../packages/runner/test/cfc-cross-space-integrity.test.ts).
-Spec ground: `commontoolsinc/specs` `cfc/03-core-concepts.md` §3.7 (cross-space
+Spec ground: `commonfabric/specs` `cfc/03-core-concepts.md` §3.7 (cross-space
 links), `cfc/08-02` (pass-through via references), `cfc/08-03` (projection),
 `cfc/08-04` (exact-copy verification), `cfc/08-12` (store-label monotonicity /
 declassification routes). Written 2026-07-10._

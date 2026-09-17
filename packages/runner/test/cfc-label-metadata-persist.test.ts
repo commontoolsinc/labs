@@ -37,7 +37,12 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     };
   };
 
-  const setup = async () => {
+  const setup = async (
+    additionalEntries: Array<{
+      path: string[];
+      label: { confidentiality: string[] };
+    }> = [],
+  ) => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -70,6 +75,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
           entries: [
             { path: [], label: { confidentiality: ["source-root"] } },
             { path: ["secret"], label: { confidentiality: [fullCaveat] } },
+            ...additionalEntries,
           ],
         },
       },
@@ -196,6 +202,76 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
       expect(craftedEntry!.label.confidentiality).toContainEqual(
         "source-root",
       );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  for (const segment of ["0", "*"]) {
+    it(`joins every deepest authoritative cover for a ${segment} carried path`, async () => {
+      const { storageManager, runtime, sourceId } = await setup([
+        { path: ["rows"], label: { confidentiality: ["ancestor"] } },
+        { path: ["rows", "0"], label: { confidentiality: ["exact"] } },
+        { path: ["rows", "*"], label: { confidentiality: ["template"] } },
+        { path: ["rows", "0"], label: { confidentiality: ["duplicate"] } },
+        {
+          path: ["rows", "0", "child", "deeper"],
+          label: { confidentiality: ["descendant"] },
+        },
+      ]);
+      try {
+        const persistedId = await commitLinkWrite(runtime, sourceId, {
+          version: 1,
+          entries: [{
+            path: ["rows", segment, "child"],
+            label: { confidentiality: ["carried"] },
+          }],
+        });
+        const persisted = persistedEntriesFor(storageManager, persistedId)
+          .find((entry) =>
+            entry.origin === "link" &&
+            entry.path.join("/") === `field/rows/${segment}/child`
+          );
+        expect(persisted).toBeDefined();
+        expect(persisted!.label.confidentiality).toEqual([
+          "template",
+          "exact",
+          "duplicate",
+          "carried",
+        ]);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+  }
+
+  it("retains every deepest cover when trailing templates share many label parts", async () => {
+    const atoms = Array.from({ length: 40 }, (_, i) => `source-${i}`);
+    const { storageManager, runtime, sourceId } = await setup([
+      { path: ["rows"], label: { confidentiality: ["ancestor"] } },
+      ...atoms.map((atom) => ({
+        path: ["rows", "*"],
+        label: { confidentiality: [atom] },
+      })),
+      {
+        path: ["rows", "0", "deep"],
+        label: { confidentiality: ["descendant"] },
+      },
+    ]);
+    try {
+      const persistedId = await commitLinkWrite(runtime, sourceId, {
+        version: 1,
+        entries: [{
+          path: ["rows", "*"],
+          label: { confidentiality: ["carried"] },
+        }],
+      });
+      const template = persistedEntriesFor(storageManager, persistedId).find((
+        entry,
+      ) => entry.origin === "link" && entry.path.join("/") === "field/rows/*");
+      expect(template?.label.confidentiality).toEqual([...atoms, "carried"]);
     } finally {
       await runtime.dispose();
       await storageManager.close();

@@ -5,7 +5,10 @@ import {
   cfcSchemaMergeIssue,
   mergeCfcSchemaEnvelopes,
 } from "../src/cfc/schema-merge.ts";
-import { storedSchemaCoversCandidateEnvelope } from "../src/cfc/prepare.ts";
+import {
+  storedCfcEnvelopeMergeIssue,
+  storedSchemaCoversCandidateEnvelope,
+} from "../src/cfc/prepare.ts";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 describe("mergeCfcSchemaEnvelopes", () => {
@@ -1616,5 +1619,81 @@ describe("schema comparison over a link-valued default", () => {
         withLink("of:sp-one"),
       ),
     ).toBe(true);
+  });
+});
+
+describe("storedCfcEnvelopeMergeIssue", () => {
+  // The dry run of what the persist loop does with a stored envelope: the
+  // merge-skipping fast paths, then the merge. `cf piece setsrc --check`
+  // drives it for the piece's argument and result documents, so what these
+  // cases pin is that its verdict is the persist loop's — the options the
+  // loop passes reach the merge, and a candidate the stored envelope already
+  // stands for raises nothing.
+
+  it("returns `undefined` for a candidate the stored envelope covers", () => {
+    const stored = {
+      type: "object",
+      properties: { a: { type: "string", ifc: { confidentiality: ["x"] } } },
+    } as const;
+    expect(storedCfcEnvelopeMergeIssue(stored, {
+      type: "object",
+      properties: { a: { type: "string" } },
+    })).toBe(undefined);
+  });
+
+  it("reports a newly required field without a default as the migration class", () => {
+    const issue = storedCfcEnvelopeMergeIssue({
+      type: "object",
+      properties: { a: { type: "string" } },
+    }, {
+      type: "object",
+      properties: { a: { type: "string" }, b: { type: "string" } },
+      required: ["b"],
+    });
+    expect(issue?.migration).toBe(true);
+    expect(issue?.message).toContain("needs a default");
+  });
+
+  it("returns `undefined` for a newly required field under a generated output path", () => {
+    // The exemption setup's result write carries: the module materializes
+    // the whole document in the same transaction, so no older value is there
+    // to preserve. The preflight passes `[[]]` for the result document, and
+    // the verdict has to change with it.
+    expect(storedCfcEnvelopeMergeIssue({
+      type: "object",
+      properties: { a: { type: "string" } },
+    }, {
+      type: "object",
+      properties: { a: { type: "string" }, b: { type: "string" } },
+      required: ["b"],
+    }, { generatedOutputPaths: [[]] })).toBe(undefined);
+  });
+
+  it("reports two stamped writer claims naming different bindings", () => {
+    const claim = (path: string) => ({
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          ifc: {
+            writeAuthorizedBy: {
+              __ctWriterIdentityOf: {
+                file: "/app/main.tsx",
+                path: [path],
+                moduleIdentity: "cf:module/one",
+              },
+            },
+          },
+        },
+      },
+    } as const);
+    const issue = storedCfcEnvelopeMergeIssue(
+      claim("setName"),
+      claim("assignName"),
+    );
+    expect(issue?.migration).toBe(false);
+    expect(issue?.message).toBe(
+      "writeAuthorizedBy must remain stable at /name",
+    );
   });
 });

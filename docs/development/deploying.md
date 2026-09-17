@@ -73,14 +73,14 @@ checked again, and the deploy fails the same way. A re-run cannot recover on
 its own; someone has to remove the directory on the host.
 
 That playbook is `ansible/playbooks/toolshed_binary_deploy.yml` in the
-[infra repository](https://github.com/commontoolsinc/infra), behind the
+[infra repository](https://github.com/commonfabric/infra), behind the
 `/opt/cf/deploy.sh` wrapper described above. Making the download replace what
 it finds, rather than skip it, is a change in that repository.
 
 ## The wrapper is owned by another repository
 
 `/opt/cf/deploy.sh` is not in this repository. The
-[infra repository](https://github.com/commontoolsinc/infra) generates it, in
+[infra repository](https://github.com/commonfabric/infra) generates it, in
 `ansible/playbooks/bastion.yml`, and writes it to the bastion when that
 playbook runs. Nothing here reads it, imports it, or tests it against the real
 thing.

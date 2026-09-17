@@ -57,6 +57,7 @@ export type {
   CfcLabelMetadataProtectionMode,
   CfcMetadata,
   CfcPolicyEvaluationMode,
+  CfcPreparationWork,
   CfcPrepareState,
   CfcSandboxDiagnostic,
   CfcSandboxExitCodeObservation,
@@ -239,7 +240,7 @@ export {
   gatedSinkRequestExists,
   loadStoredCfcEnvelope,
   prepareBoundaryCommit,
-  storedSchemaCoversCandidateEnvelope,
+  storedCfcEnvelopeMergeIssue,
 } from "./prepare.ts";
 export type {
   CfcPrefixBoundSource,
@@ -268,8 +269,11 @@ export {
   parseCfcLabelReference,
   referencedCfcLabelDocumentHashes,
 } from "./label-documents.ts";
-export { cfcSchemaMergeIssue } from "./schema-merge.ts";
-export type { CfcSchemaMergeIssue, IfcKey } from "./schema-merge.ts";
+export type {
+  CfcSchemaMergeIssue,
+  IfcKey,
+  MergeCfcSchemaEnvelopeOptions,
+} from "./schema-merge.ts";
 export {
   createSinkRequestPolicyInput,
   recordSinkRequestPolicyInput,

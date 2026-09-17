@@ -1,9 +1,9 @@
 /**
  * The typed client for the deployed pattern index: a small JSON-over-HTTP
  * surface for searching published patterns, reading one back, recording what
- * a run did with it, and publishing a new one. Every call is a POST to
- * `{baseUrl}/{function}` signed with the CF1 first-party scheme, so the index
- * sees the run's own identity rather than a shared secret.
+ * a run did with it, and publishing a new one. Pattern calls are POSTs to
+ * `{baseUrl}/{function}` signed with the CF1 first-party scheme. Public health
+ * and enrollment observations use GET; enrollment names the same principal.
  *
  * Everything here runs on the trusted host side. A pattern's source reaches
  * this module, the `run_pattern` compile path, and the private research loop.
@@ -22,11 +22,20 @@ import {
   defaultHarnessFetch,
   type HarnessFetch,
 } from "../contracts/http-fetch.ts";
+import { resolvePatternIndexSuccessors } from "./successors.ts";
 
-/** Usage counters the index keeps for a pattern, when it has any. */
+/** Own and publication-bounded inherited evidence computed by the index. */
 export interface PatternIndexSignals {
   uses: number;
   score: number;
+
+  /** The inherited portion, distinct from events on this exact generation. */
+  inherited?: {
+    priorPatternId: string;
+    asOf: string;
+    events: Readonly<Record<string, number>>;
+    score: number;
+  };
 }
 
 /** Whether a published argument schema classifies a hit as reusable or whole. */
@@ -108,7 +117,7 @@ export interface PatternIndexGetRequest {
 
 /**
  * One row of `listPatterns`: a pattern's public metadata, the events recorded
- * against it counted by type, and the weighted total those counts produce.
+ * against it counted by type, and its own plus inherited ranking evidence.
  * Carries no source and none of the private query fields a publication
  * supplied.
  */
@@ -126,6 +135,12 @@ export interface PatternIndexListedPattern {
   events: Readonly<Record<string, number>>;
 
   score: number;
+
+  /** Combined evidence, absent on index deployments without inheritance. */
+  signals?: PatternIndexSignals;
+
+  /** Evidence tier computed by the index, absent on older deployments. */
+  quality?: PatternIndexQuality;
 }
 
 export interface PatternIndexListPatternsResponse {
@@ -280,6 +295,7 @@ export class PatternIndexClient {
   readonly #baseUrl: string;
   readonly #fetchFn: HarnessFetch;
   readonly #signer: FirstPartyHttpSigner;
+  readonly #discoveryRecords = new Map<string, Promise<PatternIndexPattern>>();
 
   constructor(options: PatternIndexClientOptions) {
     // The function name is appended to the base's path, so a base carrying a
@@ -333,6 +349,11 @@ export class PatternIndexClient {
       headers,
       body,
     });
+    return await this.#readResponse<T>(fn, response);
+  }
+
+  /** Parses a service response while keeping its failure detail artifact-only. */
+  async #readResponse<T>(fn: string, response: Response): Promise<T> {
     const text = await response.text();
     let parsed: unknown;
     try {
@@ -357,14 +378,59 @@ export class PatternIndexClient {
     return parsed as T;
   }
 
-  searchPatterns(
+  /** Reads the index's public health response. */
+  async health(): Promise<unknown> {
+    const response = await this.#fetchFn(functionUrl(this.#baseUrl, "health"));
+    return await this.#readResponse("health", response);
+  }
+
+  /** Reads public membership for the principal this client signs as. */
+  async enrollmentStatus(): Promise<unknown> {
+    const url = functionUrl(this.#baseUrl, "enrollmentStatus");
+    url.searchParams.set("did", this.did);
+    const response = await this.#fetchFn(url);
+    return await this.#readResponse("enrollmentStatus", response);
+  }
+
+  /**
+   * Searches current discoverable generations. Catalog membership is read on
+   * every nonempty search; create-only pattern metadata is cached per client.
+   * A replacement keeps the first matching position and its own index signals.
+   */
+  async searchPatterns(
     request: PatternIndexSearchRequest,
   ): Promise<PatternIndexSearchResponse> {
-    return this.#call<PatternIndexSearchResponse>("searchPatterns", {
-      ...(request.tags !== undefined ? { tags: [...request.tags] } : {}),
-      ...(request.text !== undefined ? { text: request.text } : {}),
-      ...(request.limit !== undefined ? { limit: request.limit } : {}),
-    });
+    const response = await this.#call<PatternIndexSearchResponse>(
+      "searchPatterns",
+      {
+        ...(request.tags !== undefined ? { tags: [...request.tags] } : {}),
+        ...(request.text !== undefined ? { text: request.text } : {}),
+        ...(request.limit !== undefined ? { limit: request.limit } : {}),
+      },
+    );
+    if (response.results.length === 0) return response;
+    const { patterns: listed } = await this.listPatterns();
+    const records = await Promise.all(listed.map((row) => {
+      const held = this.#discoveryRecords.get(row.patternId);
+      if (held !== undefined) return held;
+      const read = this.getPattern({
+        patternId: row.patternId,
+        includeSource: false,
+      }).then((pattern) => {
+        if (pattern.patternId !== row.patternId) {
+          throw new Error(
+            "pattern index returned mismatched discovery metadata",
+          );
+        }
+        return pattern;
+      }).catch((error) => {
+        this.#discoveryRecords.delete(row.patternId);
+        throw error;
+      });
+      this.#discoveryRecords.set(row.patternId, read);
+      return read;
+    }));
+    return resolvePatternIndexSuccessors(response, listed, records);
   }
 
   getPattern(request: PatternIndexGetRequest): Promise<PatternIndexPattern> {

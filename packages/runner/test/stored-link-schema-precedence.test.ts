@@ -8,8 +8,12 @@
  * empty object — describes neither, so the reader's schema keeps traveling
  * and governs the projection, which is what makes an element read by its own
  * path project the same as that element read within its array. A stored
- * schema that does constrain still governs, and a stored `false` still
- * selects nothing.
+ * schema that does constrain still governs a read addressed at the element,
+ * and a stored `false` still selects nothing there — while the array's own
+ * traversal crosses the same link under the reader's item schema, so the
+ * two reads of one element can project differently. A link into another
+ * space carries its stored schema across recomposed, and projects by it the
+ * same way.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -24,12 +28,16 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
+import { isCellResult } from "../src/query-result-proxy.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { CellLinkRefPayload } from "../src/sigil-types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("stored link schema precedence");
 const space = signer.did();
+const otherSpace =
+  (await Identity.fromPassphrase("stored link schema precedence, other space"))
+    .did();
 
 type Row = { title: string };
 type Holder = { rows: Row[] };
@@ -44,6 +52,12 @@ const rowSchema = {
 const holderSchema = {
   type: "object",
   properties: { rows: { type: "array", items: rowSchema } },
+} as const satisfies JSONSchema;
+
+/** A stored shape that selects a different property than the reader. */
+const glazeSchema = {
+  type: "object",
+  properties: { glaze: { type: "string" } },
 } as const satisfies JSONSchema;
 
 /** The value a row link points at, wider than the row schema selects. */
@@ -148,18 +162,97 @@ describe("stored-link-schema-precedence", () => {
 
   describe("a stored schema that constrains", () => {
     it("governs the projection in place of the reader's row schema", () => {
-      const holder = holderOverLinkCarrying({
-        type: "object",
-        properties: { glaze: { type: "string" } },
-      });
+      const holder = holderOverLinkCarrying(glazeSchema);
 
       expect(projectionOf(elementByPath(holder))).toEqual({ glaze: "maple" });
+    });
+
+    it("projects an element by path differently from within its array", () => {
+      // The same link, the same declared row type, two projections: a read
+      // addressed at the element adopts the stored schema at its entry,
+      // where the array's traversal crosses the same link under the reader's
+      // item schema (`combineSchemaForLink`) and keeps the reader's shape.
+      const holder = holderOverLinkCarrying(glazeSchema);
+
+      expect(projectionOf(elementByPath(holder))).toEqual({ glaze: "maple" });
+      expect(projectionOf(elementWithinArray(holder))).toEqual({
+        title: "cruller",
+      });
     });
 
     it("selects nothing when the stored schema is `false`", () => {
       const holder = holderOverLinkCarrying(false);
 
       expect(elementByPath(holder)).toBeUndefined();
+    });
+  });
+
+  describe("an `unknown` at the read's entry", () => {
+    const unknownSchema = { type: "unknown" } as const satisfies JSONSchema;
+
+    it("adopts the stored schema for a reader typed `unknown`", () => {
+      // The handle a caller keys into is typed `unknown`; the stored schema
+      // is what describes the value the handle reaches.
+      const holder = holderOverLinkCarrying(glazeSchema);
+      const element = holder.key("rows").key(0).asSchema(unknownSchema).get();
+
+      expect(projectionOf(element)).toEqual({ glaze: "maple" });
+    });
+
+    it("keeps a shaped reader's read by path a reference under a stored `unknown`", () => {
+      // A stored `unknown` is built here, not minted: `set()` carries the
+      // target's own schema, never the writer's. Read by path, the stored
+      // declaration governs and the read holds the reference, a live
+      // query-result proxy exposing nothing; read within the array, the
+      // reader's item schema governs the same link and reads through.
+      const holder = holderOverLinkCarrying(unknownSchema);
+
+      const byPath = elementByPath(holder);
+      expect(isCellResult(byPath)).toBe(true);
+      expect(projectionOf(byPath)).toEqual({});
+      expect(projectionOf(elementWithinArray(holder))).toEqual({
+        title: "cruller",
+      });
+    });
+  });
+
+  describe("a link into another space", () => {
+    // A minted link carries its stored schema as a `cid:` reference whose
+    // documents live in the space holding the link. Read by path, the stored
+    // schema governs the projection as it does in one space, recomposed into
+    // a self-contained form at the crossing so the target space need not hold
+    // the documents (docs/specs/content-addressed-schemas.md, "Space
+    // boundaries"); read within the array, the reader's row schema governs.
+
+    it("projects an element by path through the stored schema, recomposed", async () => {
+      const row = runtime.getCell(
+        otherSpace,
+        `row-${seq}-other`,
+        glazeSchema,
+        tx,
+      );
+      row.setRaw(storedRow);
+      // One transaction writes one space: the row lands before the holder.
+      await tx.commit();
+      tx = runtime.edit();
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-other`,
+        holderSchema,
+        tx,
+      );
+      holder.set({ rows: [row] } as never);
+      const readerLink = {
+        ...holder.getAsNormalizedFullLink(),
+        path: ["rows", "0"],
+        schema: rowSchema as JSONSchema,
+      };
+
+      expect(resolveLink(runtime, tx, readerLink).schema).toEqual(glazeSchema);
+      expect(projectionOf(elementByPath(holder))).toEqual({ glaze: "maple" });
+      expect(projectionOf(elementWithinArray(holder))).toEqual({
+        title: "cruller",
+      });
     });
   });
 

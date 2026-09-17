@@ -1,3 +1,5 @@
+import type { PendingRequestDiagnostic } from "@commonfabric/runtime-client";
+
 import { describeThrown } from "./describe-thrown.ts";
 import type { Page } from "./page.ts";
 
@@ -9,13 +11,15 @@ const TEXT_LIMIT = 500;
 const CONSOLE_TAIL_LIMIT = 40;
 
 /**
- * What a page held at the moment a shell navigation or state wait failed.
+ * What a page held at the moment a wait or a navigation against it failed.
  *
  * Read with {@link readShellPageProbe} and rendered with
  * {@link describeShellPage}. Every field answers a question an investigator
- * asks of a failed shell test: is this the shell at all, did the server answer
- * with the document that was asked for, had the shell booted far enough to
- * publish itself, and what was it showing.
+ * asks of a failed browser test: is this the shell at all, did the server
+ * answer with the document that was asked for, had the shell booted far enough
+ * to publish itself, what was it showing, and what was it waiting on the
+ * runtime worker for. A page that is not the shell answers the first of those
+ * and is described by its own text.
  */
 export interface ShellPageProbe {
   /** The document's own URL, which a redirect can make differ from the one requested. */
@@ -45,6 +49,24 @@ export interface ShellPageProbe {
   /** The DID of the identity that state carries, where it carries one. */
   identityDid?: string;
 
+  /**
+   * Whether the page carries a runtime on `globalThis.commonfabric.rt`. Every
+   * page does not: the shell builds one at login.
+   */
+  runtime: boolean;
+
+  /**
+   * The requests that runtime has sent its worker and has no reply to, oldest
+   * first, which is the order it reports them in. Reading these needs no
+   * worker round trip, so a worker that has stopped answering is named here
+   * all the same. Absent where there is no runtime to ask, and where the
+   * runtime is one that does not report them.
+   */
+  pendingRequests?: PendingRequestDiagnostic[];
+
+  /** Why those could not be read, when reading them threw. */
+  pendingRequestsError?: string;
+
   /** The start of the document's rendered text. */
   text: string;
 
@@ -61,6 +83,9 @@ export async function readShellPageProbe(page: Page): Promise<ShellPageProbe> {
   return await page.evaluate((textLimit: number, tailLimit: number) => {
     const scope = globalThis as typeof globalThis & {
       app?: { serialize?: () => { view?: unknown; identityDid?: string } };
+      commonfabric?: {
+        rt?: { getPendingRequests?: () => PendingRequestDiagnostic[] };
+      };
       __cfConsoleTail?: Array<{ t: number; method: string; text: string }>;
     };
 
@@ -85,6 +110,17 @@ export async function readShellPageProbe(page: Page): Promise<ShellPageProbe> {
       }
     }
 
+    const rt = scope.commonfabric?.rt;
+    let pendingRequests: PendingRequestDiagnostic[] | undefined;
+    let pendingRequestsError: string | undefined;
+    if (rt?.getPendingRequests) {
+      try {
+        pendingRequests = rt.getPendingRequests();
+      } catch (error) {
+        pendingRequestsError = String(error);
+      }
+    }
+
     const body = document.body;
     const text = (body?.innerText ?? body?.textContent ?? "").trim()
       .slice(0, textLimit);
@@ -103,10 +139,45 @@ export async function readShellPageProbe(page: Page): Promise<ShellPageProbe> {
       view,
       viewError,
       identityDid,
+      runtime: rt !== undefined,
+      pendingRequests,
+      pendingRequestsError,
       text,
       consoleTail,
     };
   }, { args: [TEXT_LIMIT, CONSOLE_TAIL_LIMIT] });
+}
+
+/**
+ * Helper for {@link describeShellPage}, which renders what the page's runtime
+ * is still waiting on, one line per request.
+ *
+ * No runtime to ask, a runtime that does not report, a report that threw, and
+ * a runtime with nothing in flight are four different diagnoses that would
+ * otherwise render alike, so each says which it is.
+ */
+function describePendingRequests(probe: ShellPageProbe): string[] {
+  if (!probe.runtime) {
+    return ["  pending runtime requests: none, the page carries no runtime"];
+  }
+  if (probe.pendingRequestsError !== undefined) {
+    return [
+      "  pending runtime requests: reading them threw: " +
+      probe.pendingRequestsError,
+    ];
+  }
+  const pending = probe.pendingRequests;
+  if (pending === undefined) {
+    return ["  pending runtime requests: this runtime does not report them"];
+  }
+  if (pending.length === 0) return ["  pending runtime requests: none"];
+  return [
+    `  pending runtime requests (${pending.length}, oldest first):`,
+    ...pending.map((request) =>
+      `    ${request.type} (msgId ${request.msgId}), outstanding for ` +
+      `${request.ageMs}ms`
+    ),
+  ];
 }
 
 /**
@@ -138,6 +209,7 @@ export function describeShellPage(probe: ShellPageProbe): string {
   } else {
     lines.push("  globalThis.app: absent");
   }
+  lines.push(...describePendingRequests(probe));
   if (!probe.rootView) {
     const text = probe.text.replace(/\s+/g, " ");
     lines.push(`  document text: ${text || "(empty)"}`);
@@ -151,20 +223,43 @@ export function describeShellPage(probe: ShellPageProbe): string {
   return lines.join("\n");
 }
 
+// How long a failure report waits for the page to answer its probe. The probe
+// runs in the page, so a wedged main thread never answers it, and a wedged main
+// thread is one of the states a report is written for. This bounds the report
+// and nothing a test is waiting to succeed at.
+const PROBE_READ_LIMIT_MS = 10_000;
+
 /**
  * Read `page` and render it as the detail block of a failure message,
- * reporting the reason instead when the page cannot be read at all.
+ * reporting the reason instead when the page cannot be read.
  *
  * This is the whole of what a failure report needs from the page. A page that
- * has closed, or a browser that has gone away, must not replace the failure
- * being reported with a second one, so the read is guarded here rather than at
- * each call site.
+ * has closed, a browser that has gone away, and a main thread that never gets
+ * around to the probe must none of them replace the failure being reported
+ * with a second one, or hold it back, so the read is guarded here rather than
+ * at each call site.
  */
 export async function readAndDescribeShellPage(page: Page): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return describeShellPage(await readShellPageProbe(page));
+    const unanswered = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `the page did not answer within ${PROBE_READ_LIMIT_MS}ms`,
+            ),
+          ),
+        PROBE_READ_LIMIT_MS,
+      );
+    });
+    return describeShellPage(
+      await Promise.race([readShellPageProbe(page), unanswered]),
+    );
   } catch (error) {
     return `  the page could not be probed: ${describeThrown(error)}`;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

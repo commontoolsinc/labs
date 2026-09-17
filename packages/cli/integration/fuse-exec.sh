@@ -752,9 +752,12 @@ run_mount() {
   # under this script's `set -e` the run ends at that line with the shell's own
   # "Permission denied" and the path it was writing to, which names no mode.
   #
-  # The runner default is `disabled` today (DEFAULT_CFC_ENFORCEMENT_MODE in
-  # packages/runner/src/cfc/types.ts, which `resolveCfcMode` falls back to), so
-  # the flag selects the mode this mount would have resolved to without it.
+  # A mount that names no mode runs at DEFAULT_FUSE_CFC_MODE
+  # (packages/fuse/cfc-writeback.ts), which is `enforce-strict`, so the flag
+  # lowers this mount rather than restating where it would have landed. That
+  # rung belongs to the mount; the floor an unconfigured transaction carries
+  # is DEFAULT_CFC_ENFORCEMENT_MODE in packages/runner/src/cfc/types.ts, which
+  # stays `disabled`.
   MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$FUSE_API_URL" --identity="$IDENTITY" --space="$SPACE" --cfc-mode=disabled --background --dangerously-allow-incompatible-schema)
   echo "$MOUNT_OUTPUT"
 

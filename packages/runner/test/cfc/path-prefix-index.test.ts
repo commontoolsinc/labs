@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import { isPrefix, PathPrefixIndex } from "../../src/cfc/path-prefix-index.ts";
+import { PATH_INDEX_GRID, pathIndexCorpus } from "./path-index-corpus.ts";
 
 function scan(sources: readonly string[][], path: readonly string[]): boolean {
   return sources.some((source) => isPrefix(source, path));
@@ -14,6 +15,29 @@ function indexOf(sources: readonly string[][]): PathPrefixIndex {
 }
 
 describe("path-prefix-index", () => {
+  for (const { size, fraction } of PATH_INDEX_GRID) {
+    it(`agrees with a scan for ${size} sources with ${fraction} wildcard fraction`, () => {
+      const { sources, queries } = pathIndexCorpus(size, fraction);
+      const index = indexOf(sources);
+      let hits = 0;
+      for (const query of queries) {
+        const expected = scan(sources, query);
+        expect(index.hasPrefixOf(query)).toBe(expected);
+        expect(index.overlaps(query)).toBe(
+          sources.some((source) =>
+            isPrefix(source, query) || isPrefix(query, source)
+          ),
+        );
+        hits += Number(expected);
+      }
+      expect(hits).toBeGreaterThan(0);
+      expect(hits).toBeLessThan(queries.length);
+      expect(sources.filter((path) => path.includes("*")).length).toBe(
+        Math.floor(size * fraction),
+      );
+    });
+  }
+
   it("finds an exact path", () => {
     expect(indexOf([["a", "b"]]).hasPrefixOf(["a", "b"])).toBe(true);
   });
@@ -38,6 +62,8 @@ describe("path-prefix-index", () => {
   it("finds nothing in an empty index", () => {
     expect(indexOf([]).hasPrefixOf(["a"])).toBe(false);
     expect(indexOf([]).hasPrefixOf([])).toBe(false);
+    expect(indexOf([]).overlaps([])).toBe(false);
+    expect(indexOf([]).overlaps(["*"])).toBe(false);
   });
 
   it("takes a wildcard in the source as matching any segment", () => {
@@ -81,6 +107,26 @@ describe("path-prefix-index", () => {
     expect(index.accessForTestingOnly.scannedPaths).toEqual([["a", "b"]]);
   });
 
+  it("copies and deduplicates wildcard sources without hiding later concrete paths", () => {
+    const index = new PathPrefixIndex();
+    const path = ["a", "*", "tail", "*"];
+    index.add(path);
+    index.add(path);
+    path[2] = "changed";
+    index.add(["a", "b", "other"]);
+
+    expect(index.accessForTestingOnly.scannedPaths).toEqual([
+      ["a", "*", "tail", "*"],
+      ["a", "b", "other"],
+    ]);
+    expect(index.hasPrefixOf(["a", "b", "tail", "c"])).toBe(true);
+    expect(index.hasPrefixOf(["a", "b", "changed", "c"])).toBe(false);
+    expect(index.hasPrefixOf(["a", "b", "other"])).toBe(true);
+    expect(index.hasPrefixOf(["a", "b", "tail"])).toBe(false);
+    expect(index.hasPrefixOf(["a"])).toBe(false);
+    expect(index.hasPrefixOf(["a", "*", "tail", "c"])).toBe(true);
+  });
+
   it("agrees with a linear scan across a generated corpus", () => {
     const segments = ["a", "b", "c", "*"];
     const paths: string[][] = [[]];
@@ -102,6 +148,11 @@ describe("path-prefix-index", () => {
       const index = indexOf(sources);
       for (const path of paths) {
         expect(index.hasPrefixOf(path)).toBe(scan(sources, path));
+        expect(index.overlaps(path)).toBe(
+          sources.some((source) =>
+            isPrefix(source, path) || isPrefix(path, source)
+          ),
+        );
         compared++;
       }
     }

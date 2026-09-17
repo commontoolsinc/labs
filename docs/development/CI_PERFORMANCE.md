@@ -105,7 +105,7 @@ artifacts do need an admin token, so the per-test timings in the `test-timing-*`
 artifacts are not reachable this way; measure those locally.
 
 Jobs and steps for a run:
-`GET /repos/commontoolsinc/labs/actions/runs/<run-id>/jobs?per_page=100` — each
+`GET /repos/commonfabric/labs/actions/runs/<run-id>/jobs?per_page=100` — each
 job and step carries `started_at` and `completed_at`.
 
 The team ops dashboard's `/bench?view=ci` page provides repeated-run analysis

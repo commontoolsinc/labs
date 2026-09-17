@@ -27,11 +27,11 @@ const TRUSTED_PROFILE_CREATE_ACTION = "CreateProfile";
 //
 // To pull the distribution from the most recent 100 CI runs (this test runs in
 // the "CI" / deno.yml `package-integration-test` job; PRs land on
-// commontoolsinc/labs — adjust -R for a fork). Requires the `gh` CLI:
+// commonfabric/labs — adjust -R for a fork). Requires the `gh` CLI:
 //
-//   gh run list -R commontoolsinc/labs --workflow deno.yml --limit 100 \
+//   gh run list -R commonfabric/labs --workflow deno.yml --limit 100 \
 //     --json databaseId --jq '.[].databaseId' \
-//     | xargs -P4 -I{} gh run view -R commontoolsinc/labs {} --log 2>/dev/null \
+//     | xargs -P4 -I{} gh run view -R commonfabric/labs {} --log 2>/dev/null \
 //     | grep 'CHURN_METRIC label=reload' > /tmp/churn.txt
 //
 //   for k in commitConflicts commitReverts scheduleRunErrors; do

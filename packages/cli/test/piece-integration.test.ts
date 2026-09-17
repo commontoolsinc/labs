@@ -39,7 +39,7 @@ const SESSION_SCOPED_PATTERN =
   `${REPO_ROOT}/packages/cli/test/fixtures/session-scoped-result.tsx`;
 
 const NOTE_CONTENT = "Hello world";
-const REPOSITORY = "https://github.com/commontoolsinc/labs";
+const REPOSITORY = "https://github.com/commonfabric/labs";
 
 const noteEntry: EntryConfig = {
   mainPath: NOTE_PATTERN,

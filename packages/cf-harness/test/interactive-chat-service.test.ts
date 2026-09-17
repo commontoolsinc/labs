@@ -4,6 +4,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
+import { expect } from "@std/expect";
 import { join } from "@std/path";
 import {
   createPatternSkillsFixture,
@@ -172,6 +173,7 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
   );
   assertEquals(service.events("session-1").at(-1)?.event, {
     kind: "turn_completed",
+    outcome: "completed",
     turnId: "turn-1",
     finalText: "Done.",
     usage: {
@@ -182,10 +184,12 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
       totalTokens: 2_100,
     },
   });
-  assertEquals(loopOptions[0], {
+  expect(loopOptions[0]).toEqual({
     workspaceHostPath: "/workspace",
     cwd: "/workspace/project",
     model: "gpt-test",
+    taskText: "Hi",
+    researchGoal: "Hi",
     cacheAffinityKey: "interactive:session-1",
     allowedToolIds: [
       "bash",
@@ -196,6 +200,7 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
       "write_file",
       "delegate_task",
       "describe_handle",
+      "finish_task",
     ],
     allowedSubagentProfiles: ["default"],
   });
@@ -567,10 +572,12 @@ Deno.test("interactive service forces comment-thread turns to read-only prompt-l
   });
   await service.waitForTurn("session-1", "turn-1");
 
-  assertEquals(loopOptions[0], {
+  expect(loopOptions[0]).toEqual({
     workspaceHostPath: "/workspace",
     cacheAffinityKey: "interactive:session-1",
     allowedToolIds: ["read_file", "view_image", "read_skill_resource"],
+    taskText: "Read only please",
+    researchGoal: "Read only please",
     allowedSubagentProfiles: [],
   });
   assertEquals(service.status("session-1").sessions[0].policy, {
@@ -614,10 +621,12 @@ Deno.test("interactive service passes Browser Access leases to browser-profile t
   assertEquals(turn.ok, true);
   await service.waitForTurn("session-1", "turn-1");
 
-  assertEquals(loopOptions[0], {
+  expect(loopOptions[0]).toEqual({
     workspaceHostPath: "/workspace",
     cacheAffinityKey: "interactive:session-1",
     allowedToolIds: ["delegate_task"],
+    taskText: "Inspect the browser",
+    researchGoal: "Inspect the browser",
     allowedSubagentProfiles: ["browser"],
     browserAccess,
   });

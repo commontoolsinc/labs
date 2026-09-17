@@ -144,6 +144,9 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
       value: "25 flaky tests",
       valueLabel: "25 flaky tests",
       sub: "60 days of runs · 3h old",
+      extra: history(),
+      duration: 18 * DAY,
+      aside: `<span class="running"><span class="rdot"></span>running</span>`,
       hint: "flakes ↗",
       href: "/test-selection#flaky",
     },
@@ -155,7 +158,9 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
       status: "good",
       value: "64%",
       sub: "16,614 of 19,544 tests",
-      aside: `<span class="hfacet" title="12h old">12h old</span>`,
+      extra: history(),
+      duration: 18 * DAY,
+      aside: `<span class="running"><span class="rdot"></span>running</span><span class="hfacet" title="12h old">12h old</span>`,
       hint: "lanes ↗",
       href: "/test-selection",
     },
@@ -227,12 +232,12 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
     view: {
       label: "production",
       status: "bad",
-      value: "common.tools down",
-      valueLabel: "common.tools down",
+      value: "commonfabric.com down",
+      valueLabel: "commonfabric.com down",
       extra:
         `<div class="tile-detail-list" tabindex="0" role="region" aria-label="Production target details; scroll for more" title="Scroll for more details" style="display:grid;grid-template-columns:auto 1fr;gap:7px 10px;margin-top:11px;font-size:12px;line-height:1.35">${
           [
-            "common.tools",
+            "commonfabric.com",
             "estuary",
             "rapids",
             "bastion",

@@ -1,5 +1,5 @@
-// Relative weights from successful CI runs. Only tests whose cost materially
-// affects placement need an entry; selectors use a default for the long tail.
+// Relative weights from successful coverage runs. Only tests whose cost
+// materially affects placement need an entry; selectors default the long tail.
 
 /**
  * Relative weights for the `agents-host` test files. The debug-view suite
@@ -97,13 +97,19 @@ export const PIECE_TEST_WEIGHTS: Readonly<Record<string, number>> = {
 };
 
 export const TASK_TEST_WEIGHTS: Readonly<Record<string, number>> = {
-  "check-skill-facts.test.ts": 0.8,
-  "check-unused-deps.test.ts": 1.3,
-  "ci-check-lib.test.ts": 1.8,
-  "email-pattern-launcher-types.test.ts": 2.6,
-  "pattern-vintage-run.test.ts": 15.8,
-  "vintage-adopt.test.ts": 3.9,
-  "write-coverage-lcov.test.ts": 3.1,
+  "check-command-docs.test.ts": 2,
+  "check-skill-facts.test.ts": 0.9,
+  "check-test-topology.test.ts": 1,
+  "check-unused-deps.test.ts": 1.6,
+  "ci-check-lib.test.ts": 1,
+  "ci-lane.test.ts": 3.5,
+  "coverage-report.test.ts": 37,
+  "pattern-vintage-derived-corrections.test.ts": 72,
+  "pattern-vintage-run.test.ts": 63,
+  "post-main-report.test.ts": 21,
+  "typecheck.test.ts": 2.2,
+  "vintage-adopt.test.ts": 14,
+  "write-coverage-lcov.test.ts": 0.9,
 };
 
 // Package weights model total CPU work. Each workspace job runs several
@@ -146,7 +152,6 @@ export const WORKSPACE_TEST_WEIGHTS: Readonly<Record<string, number>> = {
   llm: 1,
   memory: 49.8,
   patterns: 6.2,
-  "patterns/auth": 1,
   "piece (1/3)": 60,
   "piece (2/3)": 60,
   "piece (3/3)": 60,
@@ -158,9 +163,9 @@ export const WORKSPACE_TEST_WEIGHTS: Readonly<Record<string, number>> = {
   "spec-model": 1.7,
   "state-inspector": 12.2,
   static: 8.9,
-  "tasks (1/3)": 35,
-  "tasks (2/3)": 25,
-  "tasks (3/3)": 25,
+  "tasks (1/3)": 28.3,
+  "tasks (2/3)": 28.3,
+  "tasks (3/3)": 28.3,
   "test-support": 2.2,
   toolshed: 36.2,
   "ts-transformers": 58.2,

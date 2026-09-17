@@ -226,17 +226,27 @@ The runtime compiles patterns itself, using the TypeScript compiler API at
 runtime. Seven runtime and build packages (`js-compiler`, `ts-transformers`,
 `schema-generator`, `runner`, `cli`, `static`, `deno-web-test`) import
 `npm:typescript`. The `api` package imports it for the type-profiling harness,
-and `tasks` imports it for the coverage gate, which compiles a source file to
-find out whether it holds any executable code. All nine workspace members pin
-the same version in their `deno.jsonc` import maps. This npm dependency is separate from the TypeScript that `deno check`
-uses: Deno bundles its own copy of the compiler. Keeping the npm pin on the
-same minor version as the Deno-bundled compiler (`deno --version` prints it)
-avoids the two disagreeing about what type-checks.
+`tasks` imports it for the coverage gate, which compiles a source file to find
+out whether it holds any executable code, and `patterns` imports it for the
+Topics browser-measurement helper, which parses authored and compiled sources
+to find a lift's declaration. All ten workspace members pin the same version in
+their `deno.jsonc` import maps. This npm dependency is separate from the
+TypeScript that `deno check` uses: Deno bundles its own copy of the compiler.
+Keeping the npm pin on the same minor version as the Deno-bundled compiler
+(`deno --version` prints it) avoids the two disagreeing about what type-checks.
 
-To roll the version, update every pin and the lockfile in one step, then verify:
+`packages/patterns` pins it twice. Its lane 1 unit tests run under
+`packages/patterns/test-import-map.json`, which replaces the package's import
+map rather than extending it, so a dependency a unit test reaches is declared
+in both files. `deno outdated` rewrites the `deno.jsonc` pin alone, so rolling
+the version means editing that file by hand as well.
+
+To roll the version, update both pins and the lockfile, then verify:
 
 ```bash
 deno outdated --update --recursive typescript@<version>
+# `deno outdated` leaves the second pin alone: set `typescript` in
+# packages/patterns/test-import-map.json to the same version by hand.
 deno task check
 deno task test
 (cd packages/static && deno task check-cfc-types)
@@ -512,16 +522,16 @@ and CI can disagree about what type checks.
 
 ### Astral
 
-Common Tools uses the published `@astral/astral` package. The root import map
+Common Fabric uses the published `@astral/astral` package. The root import map
 pins version 0.5.6. The repository does not carry a copy of Astral's source
 (it previously did).
 
 #### Local compatibility code
 
-Common Tools keeps its application-specific browser behavior at the integration
+Common Fabric keeps its application-specific browser behavior at the integration
 boundary:
 
-| Behavior | Common Tools owner | Published Astral surface |
+| Behavior | Common Fabric owner | Published Astral surface |
 | --- | --- | --- |
 | Query open shadow roots with `strategy: "pierce"` | `packages/integration/astral-adapter.ts` | Raw page protocol bindings and the public `ElementHandle` constructor |
 | Wait for a matching shadow element | `packages/integration/astral-adapter.ts` | Raw page protocol bindings |
@@ -579,7 +589,7 @@ The pull request's macOS check passed. Its Linux and Windows checks ended after
 ten minutes in tests that depended on `example.com`. The proposed local test
 server was split into
 [Astral pull request 167](https://github.com/lino-levan/astral/pull/167),
-which also remained open. Common Tools does not depend on either pull request.
+which also remained open. Common Fabric does not depend on either pull request.
 
 ## Debugging dependency problems
 

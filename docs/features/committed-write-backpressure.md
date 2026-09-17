@@ -223,18 +223,21 @@ registered `scheduler.onError` handlers as a `CommitConvergenceError`.
 ## The reactive-action path
 
 The reactive path (`scheduler/run.ts`) does not need this backpressure.
-Both paths window a stale basis and both wait for the conflict's catch-up
-before re-running, but they differ in what surrounds that wait: the event path
-re-queues with backoff inside a bounded window, while the reactive path re-arms
-its subscription and re-queues at once. A reactive action is a
-re-derivation: its
-output is a function of its inputs. On a conflict it does not enter the bounded
-retry budget — instead it re-arms its subscription, waits for
-the conflict's `readyToRetry` catch-up, and re-queues itself to re-run against
-the caught-up state. (Reader-dirty propagation re-runs it too when the catch-up
-write lands as a fresh notification, a redundant fast path that does not cover a
-conflict whose triggering write was already delivered.) A conflict there is a
-wait for catch-up, not a failure, and consumes no budget. Only non-conflict
+Both paths wait for conflict recovery before the scheduler retries the run, but
+they differ in what surrounds that wait: the event path re-queues with backoff
+inside a bounded window, while the reactive path re-arms its subscription and
+re-queues after recovery. A reactive action is a re-derivation: its output is a
+function of its inputs. On a conflict it does not enter the bounded retry
+budget — instead it re-arms its subscription and awaits
+`Runtime.awaitCommitRetryReadiness`: first the conflict's `readyToRetry`
+catch-up, then scoped pulls of every named conflict instance. Those pulls also
+repair validation dependencies outside the action's scheduling read set. If the
+registration is still active, it re-queues itself against the repaired state.
+Fresh input changes can independently re-run the action while recovery is still
+pending. Reader-dirty propagation is a redundant fast path when the catch-up
+write lands as a fresh notification, but it does not cover a conflict whose
+triggering write was already delivered. A conflict there is a wait for recovery,
+not a failure, and consumes no budget. Only non-conflict
 transient errors fall back to the bounded `MAX_RETRIES_FOR_REACTIVE` retry, and
 every attempt re-subscribes so the action recovers when its inputs next change.
 

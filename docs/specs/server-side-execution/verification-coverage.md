@@ -398,10 +398,11 @@ PR):
   (`executor-outbox.test.ts`), and the E2E's exactly-once
   external-call pins under repeated load runs; (ii) the sqliteQuery
   memo decision distinguishes a SETTLED result (a hit) from a bare
-  claim marker — an orphaned claim re-issues under the serving
-  posture only (`sqliteQueryMemoDecision`, unit-pinned), restoring
-  §6 step 3's re-miss premise for the one builtin whose key commits
-  ahead of its result; (iii) userless/grantless outbound appends
+  claim marker — a pending claim with no local in-flight read re-issues
+  in serving and direct execution, while speculative execution continues
+  to dedupe the effect it cannot enact (`sqliteQueryMemoDecision`, unit- and
+  multi-runtime-pinned), restoring §6 step 3's re-miss premise for the one
+  builtin whose key commits ahead of its result; (iii) userless/grantless outbound appends
   are refused at the SOURCE (`enqueueOutboundAppend`), fail-closed
   ahead of the delegated floor that would deterministically destroy
   them at delivery — the Phase-3 floor carve-out for sessionless
@@ -1351,8 +1352,10 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   server's root-existence coverage are recorded by OW18 below.
   The `executor/space-server-terminal-structure.test.ts` controls observe the
   real engine's durable result at every covering commit for creation during
-  confirmation, across a flush deadline, through an owning backlink, and with
-  sealed writes pending. `executor/space-server-terminal-confirmation.test.ts`
+  confirmation, across a flush deadline, at each deadline check the settle
+  loop makes once its input barrier has passed — the re-armed structure retry
+  and the scheduler probe — through an owning backlink, and with sealed
+  writes pending. `executor/space-server-terminal-confirmation.test.ts`
   covers traversed-address demand, departure and return, sync failure, and
   teardown. `ensure-piece-running-scope.test.ts` distinguishes same-ID links
   across scopes from true cycles under both execution postures.
@@ -3817,6 +3820,60 @@ Delta 2026-09-03 — post-flip toggle hygiene:
   `false` posture in the filename, so a default flip cannot restore a shell
   compiled for the former opposite arm.
 
+Delta 2026-09-15 — nonce reconciliation in either order:
+
+- protocol §5's "Reconciliation holds in either order" and speculation
+  §2's "stands aside when that nonce is already recorded" ELABORATE the
+  exactly-once MUST already counted under protocol; they add no rule to
+  §1's map. The exactly-once duty was previously kept in one direction
+  only — the overlay recorded its optimistic nonce so a later intent
+  converged, and nothing converged the optimistic enactment on an
+  intent that had already arrived and enacted, so one fire navigated
+  twice whenever the served round trip beat the client's speculative
+  run. The nonce is now arbitrated by the effects channel, against one
+  record both arms meet: `EffectsChannel.enactOnce` is the optimistic
+  arm's entry point, and the channel's own delivery arm converges on
+  that record inline before it takes the nonce. The record is
+  installed before an enactment's callback runs, so a callback that
+  enacts synchronously meets it rather than a gap.
+- Instrument: `packages/runner/test/speculation-overlay.test.ts` — the
+  already-enacted nonce is not flushed while a fresh one is, and an
+  in-flight enactment is awaited rather than assumed, so its FAILURE
+  (which retracts the record) enacts the optimistic flush instead of
+  losing the navigation.
+
+Delta 2026-09-16 — the deferred start of a piece a speculative run
+created:
+
+- protocol §1's scheduler-tell rule and speculation §2's
+  no-creation-carve-out corollary add no sentence to the map; what
+  changes is which instrument covers the corollary, and which normative
+  sections describe the site. The 2026-08-07 batch recorded the
+  corollary as riding the stamping-boundary pins, because a run that
+  instantiates a pattern is stamped by construction. A run does not
+  always set the piece up in its own transaction: when the piece's
+  execution family is not in this replica yet,
+  `Runner.runAfterNamedFamilyLands` names that family, waits for it,
+  and sets the piece up in a transaction it mints itself. That
+  transaction was stamped bookkeeping whatever ran it, so a flag-ON
+  client committed the argument its speculative run computed over the
+  argument the served run wrote — a client path from a scheduler run to
+  the wire, which the wrappers around a transaction hid a second way by
+  hiding the stamp the lookup went after. The durable-read mark was
+  lost across the same wait.
+- serving-loop.md §3d sanctioned the speculative-consequence stamp for
+  the start a commit callback mints and listed every deferred start
+  under bookkeeping; it now says the stamp follows the run a start came
+  from, and names the third start and the derivation kind.
+  speculation.md's durable-read paragraph said the mark covers only the
+  transaction the runner mints for itself; it now says what a start
+  that waits for a family carries into the second one.
+- Instrument: `packages/runner/test/cold-speculative-child.test.ts` —
+  a child left cold and then run from a speculative transaction,
+  direct and through the real and nested transaction wrappers, with
+  authored and serving-runtime controls that still persist, and a pair
+  covering the durable-read mark either side of the wait.
+
 Delta 2026-08-16 — fan-out stage A (OW17 leg 1: the instance-keyed
 serving replica + wire; the client arrival gate):
 
@@ -4500,7 +4557,7 @@ supply; OW29/OW32/OW34 closed):
     the posture proves wrong during the build, flag for follow-up
     after merging to main rather than blocking.
   - Not rows, recorded: #5991's ledger comment POSTED 2026-08-18
-    (<https://github.com/commontoolsinc/labs/pull/5991#issuecomment-5337935897>;
+    (<https://github.com/commonfabric/labs/pull/5991#issuecomment-5337935897>;
     the second review round's report recovered on-branch beside the
     closeout, `stage-c/stage-c-tuning-independent-review.md`); the design
     pass's reconciled report (`stage-c-design.md`) LANDED 2026-08-18 as
@@ -6628,7 +6685,7 @@ supply; OW29/OW32/OW34 closed):
     [`ow45-default-app-store-incomplete-root-cause-2026-08-26.md`](../../history/plans/server-execution-v2/optimize/ow45-default-app-store-incomplete-root-cause-2026-08-26.md).
     **DIRECT CI UNSKIP PROBE, 2026-08-26: RED — NO LIFT.** Head
     `66a969ca02e8962ae44eeb4da264a575da421893`, Actions run
-    [33008274232, ON shard 5](https://github.com/commontoolsinc/labs/actions/runs/33008274232/job/98307864923).
+    [33008274232, ON shard 5](https://github.com/commonfabric/labs/actions/runs/33008274232/job/98307864923).
     The registry had no default-app entry, the job printed that no listed
     skip was in its file list, and the exact rapid-note step ran. The other
     nine ON pattern shards passed. Shard 5 failed only this target after
@@ -7840,7 +7897,7 @@ supply; OW29/OW32/OW34 closed):
     teardown with a port-free check, `gtimeout 600` never approached, quiet
     and loaded interleaved. Probe head `95f313835` (both entries and the
     default-app in-file guard removed in one commit), CI run
-    [33138358110](https://github.com/commontoolsinc/labs/actions/runs/33138358110);
+    [33138358110](https://github.com/commonfabric/labs/actions/runs/33138358110);
     eight of the ten ON pattern shards passed, shards 5 and 7 red — the two
     shards that carry the two probed files.
 
@@ -8075,7 +8132,7 @@ supply; OW29/OW32/OW34 closed):
       lift exactly as the bar states (captured and classified, never
       rerun-looped).
     **PROBE 2 (this PR's first board at head `83f31e47f`, run
-    [33160430927](https://github.com/commontoolsinc/labs/actions/runs/33160430927),
+    [33160430927](https://github.com/commonfabric/labs/actions/runs/33160430927),
     ON shard 7, job 98813758092): RED AT THE PROBED SURFACE — that lift
     attempt WITHDREW, and the classification found the SECOND supplier
     geometry.** The surface itself failed (the HOST's join, "Unknown
@@ -8119,7 +8176,7 @@ supply; OW29/OW32/OW34 closed):
     the CI geometry the identity-home persists ARE recorded, so the
     child replication converges order-independently.
     **PROBE 3 (the v4 board, run
-    [33164596936](https://github.com/commontoolsinc/labs/actions/runs/33164596936),
+    [33164596936](https://github.com/commonfabric/labs/actions/runs/33164596936),
     ON shard 7, job 98827162794): RED at the surface again — and the
     artifact caught the fix's own defect: the fallback NEVER FIRED
     (`closure-replication-fallback-origin` 0 beside the same one
@@ -8144,7 +8201,7 @@ supply; OW29/OW32/OW34 closed):
     there restores the entry with the accumulated map — no further
     iteration on this PR.
     **PROBE 4 (the keying-fix board, run
-    [33165960083](https://github.com/commontoolsinc/labs/actions/runs/33165960083),
+    [33165960083](https://github.com/commonfabric/labs/actions/runs/33165960083),
     ON shard 7, job 98831529935): RED at the surface — the THIRD
     geometry, and the declared hard stop is honored: THE ENTRY IS
     RESTORED.** Same signature, fallback counter still 0 — and this
@@ -8312,7 +8369,7 @@ supply; OW29/OW32/OW34 closed):
       and the entry restored carrying the map plus probe 5's 3b
       classification — the PROBE 5 block below.
     **PROBE 5 (run
-    [33198257149](https://github.com/commontoolsinc/labs/actions/runs/33198257149),
+    [33198257149](https://github.com/commonfabric/labs/actions/runs/33198257149),
     ON shard 7, job 98941298566, head `683477989`): RED at the surface —
     and the artifact is GEOMETRY 3B ON ITS PRE-DECLARED SIGNATURE, the
     first probe classified by a discriminator this arc built for it in
@@ -8502,7 +8559,7 @@ supply; OW29/OW32/OW34 closed):
     board across three PRs. The PROBE 6 block below carries the
     reading.]**
     **PROBE 6 (run
-    [33222653635](https://github.com/commontoolsinc/labs/actions/runs/33222653635),
+    [33222653635](https://github.com/commonfabric/labs/actions/runs/33222653635),
     head `1a5f3e66e`, THIS PR's own board — read settle-confirmed by
     the arc coordinator): GREEN AT THE PROBED SURFACE.** All ten
     server-execution ON shards succeeded — including ON shard 7 with
@@ -8639,7 +8696,7 @@ supply; OW29/OW32/OW34 closed):
       campaign's own report is PR #6469's (merged `23cf68e7d`) record.
     - **Requirement (2), the direct-CI unskip probe — MET at the probed
       SURFACE.** Probe head `95f313835`, CI run
-      [33138358110](https://github.com/commontoolsinc/labs/actions/runs/33138358110),
+      [33138358110](https://github.com/commonfabric/labs/actions/runs/33138358110),
       ON shard 5, job 98743591519: the registry carried no default-app entry,
       the job ran this exact step, and it **PASSED — `ok (18s)`** — the whole
       `default-app flow test` file green, the shard's published toolshed log

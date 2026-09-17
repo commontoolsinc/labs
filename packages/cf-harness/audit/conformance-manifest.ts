@@ -43,7 +43,7 @@ import type { CheckResult, CheckVerdict } from "./report.ts";
  * noticing.
  */
 export const CFC_PROFILE_SOURCE = {
-  repo: "commontoolsinc/specs",
+  repo: "commonfabric/specs",
   commit: "8b8613ea",
   section: "cfc/18-runtime-implementation-profiles.md §18.3.3",
   profile: "CfcAgentHarnessProfile",

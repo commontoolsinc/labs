@@ -17,6 +17,7 @@ import {
   parseWishTarget,
   type SidecarSurfaceState,
   tagMatchesHashtag,
+  wishSidecarDiagnostics,
 } from "../src/builtins/wish.ts";
 import {
   getPatternEnvironment,
@@ -1637,6 +1638,82 @@ describe("wish built-in", () => {
         expect(data.type).toBe("from-other-space");
       });
 
+      it("answers nothing, not a no-match error, while the arbitrary DID space's mentionables are not there", async () => {
+        // The other space holds nothing when the wish runs: its mentionables
+        // read as not loaded, which is a pending answer — neither a match nor
+        // the no-match error a loaded, empty space would earn. Once the data
+        // is there, a wish over the same scope finds it.
+        const wishPattern = pattern(() => {
+          return {
+            result: wish({ query: "#late-tag", scope: [otherSpace.did()] }),
+          };
+        });
+        const resultCell = runtime.getCell<{
+          result?: { result?: unknown; error?: string };
+        }>(
+          patternSpace.did(),
+          "scope-arb-did-late-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+
+        await result.pull();
+        expect(result.key("result").get()?.result).toBeUndefined();
+        expect(result.key("result").get()?.error).toBeUndefined();
+
+        const otherSpaceCell = runtime.getCell(
+          otherSpace.did(),
+          otherSpace.did(),
+        ).withTx(tx);
+        const otherDefaultPattern = runtime.getCell(
+          otherSpace.did(),
+          "other-late-default-pattern",
+          undefined,
+          tx,
+        );
+        const otherBacklinksIndex = runtime.getCell(
+          otherSpace.did(),
+          "other-late-backlinks-index",
+          undefined,
+          tx,
+        );
+        const otherMentionable = runtime.getCell(
+          otherSpace.did(),
+          "other-late-mentionable-item",
+          undefined,
+          tx,
+        );
+        const mentionableData: any = { type: "arrived-late" };
+        mentionableData[NAME] = "late-tag";
+        otherMentionable.set(mentionableData);
+        otherBacklinksIndex.set({ mentionable: [otherMentionable] });
+        otherDefaultPattern.set({ backlinksIndex: otherBacklinksIndex });
+        (otherSpaceCell as any).key("defaultPattern").set(otherDefaultPattern);
+        await tx.commit();
+        tx = runtime.edit();
+
+        const laterCell = runtime.getCell<{
+          result?: { result?: unknown; error?: string };
+        }>(
+          patternSpace.did(),
+          "scope-arb-did-later-result",
+          undefined,
+          tx,
+        );
+        const later = runtime.run(tx, wishPattern, {}, laterCell);
+        await tx.commit();
+        tx = runtime.edit();
+
+        await later.pull();
+        const foundItem = later.key("result").get()?.result;
+        expect(foundItem).toBeDefined();
+        const data = (foundItem as any).get?.() ?? foundItem;
+        expect(data.type).toBe("arrived-late");
+      });
+
       it('searches both current space and arbitrary DID with scope: [".", did]', async () => {
         // Setup: Add mentionables to pattern space (current space)
         const spaceCell = runtime.getCell(
@@ -2938,6 +3015,64 @@ describe("wish built-in", () => {
       expect(JSON.stringify(createCell.key(UI).get())).toContain(
         "profile-create.tsx",
       );
+    });
+
+    it("launches nothing when the create surface answers after its demander stopped", async () => {
+      // The launch is asynchronous: the surface's source is fetched, and the
+      // pattern lands later. A piece stopped while that fetch is in flight
+      // has no surface to render, so the answer, when it comes, launches
+      // nothing and writes nothing — neither the pattern nor a failure.
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-create-stopped",
+        undefined,
+        tx,
+      );
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const held = Promise.withResolvers<Response>();
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (() => held.promise) as typeof fetch;
+      const opensBefore = wishSidecarDiagnostics.profileCreateSurfaceOpens;
+      try {
+        const wishPattern = pattern(() => ({
+          profile: wish({ query: "#profile" }),
+        }));
+        const resultCell = runtime.getCell<Record<string, any>>(
+          patternSpace.did(),
+          "wish-profile-create-stopped-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+
+        // A sink is the demand that runs the wish. `idle()` would wait on the
+        // launch the run starts, and that is waiting on the fetch, so the
+        // drain here is the reactive work alone.
+        const stopReading = result.sink(() => {});
+        await clock.settle();
+        expect(wishSidecarDiagnostics.profileCreateSurfaceOpens).toBe(
+          opensBefore + 1,
+        );
+        const createCell = result.key("profile").key(UI).key("props")
+          .key("$cell").resolveAsCell();
+
+        stopReading();
+        runtime.runner.stop(resultCell);
+        held.reject(new Error("the surface's source never came"));
+        await runtime.idle();
+
+        expect(createCell.key(UI).get()).toBeUndefined();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     });
 
     it("asks the host serving the surface's space for the profile-create source", async () => {

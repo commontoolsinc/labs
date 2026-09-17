@@ -20,10 +20,13 @@ import { DETAIL_PAGE_STYLES } from "./detail-page.ts";
 import {
   compactSpan,
   escapeHtml,
-  friendlyError,
   groupDigits,
 } from "./lib.ts";
 import { STATUS_EDGE, STATUS_WASH } from "./palette.ts";
+import {
+  collectionSub,
+  sharedTestSelection,
+} from "./test-selection-history.ts";
 import {
   FLAKE_EXCLUSION_FALLBACK,
   FLAKE_WINDOW_FALLBACK_DAYS,
@@ -33,7 +36,6 @@ import {
   type ManifestReader,
   numberDial,
   selectedCount,
-  sharedManifest,
 } from "./test-selection-manifest.ts";
 import {
   DASHBOARD_THEME_CLIENT,
@@ -308,7 +310,7 @@ export function testSelectionUnavailable(reason: string): string {
 
 /** Serves the page against the manifest the tiles are already reading. */
 export async function testSelectionResponse(
-  read: ManifestReader = sharedManifest,
+  read: ManifestReader = sharedTestSelection.latest,
   clock?: () => number,
 ): Promise<Response> {
   const html = (body: string, status: number) =>
@@ -321,6 +323,6 @@ export async function testSelectionResponse(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("test selection page:", message);
-    return html(testSelectionUnavailable(friendlyError(message)), 503);
+    return html(testSelectionUnavailable(collectionSub(error)), 503);
   }
 }

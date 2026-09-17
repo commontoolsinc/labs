@@ -103,6 +103,10 @@ import {
   WEB_FETCH_SUBAGENT_PROFILE,
   WEB_SEARCH_SUBAGENT_PROFILE,
 } from "./contracts/subagent.ts";
+import {
+  type HarnessTaskOutcome,
+  readHarnessTaskOutcome,
+} from "./contracts/task-outcome.ts";
 import type {
   BuiltinToolId,
   HarnessToolDescriptor,
@@ -110,6 +114,7 @@ import type {
 } from "./contracts/tool-descriptor.ts";
 import {
   type HarnessToolBackingAvailability,
+  isSubagentOnlyToolId,
   parentToolIdsForBacking,
   withheldToolIds,
 } from "./contracts/tool-descriptor.ts";
@@ -184,7 +189,10 @@ import {
   validateAndSanitizeSubagentReturn,
 } from "./subagent-return.ts";
 import { createResearchRunner } from "./research/runner.ts";
-import { selectResearchContext } from "./research/context.ts";
+import {
+  researchPatternRecords,
+  selectResearchContext,
+} from "./research/context.ts";
 import { projectHarnessResearchKitForModel } from "./research/model-projection.ts";
 import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
@@ -284,6 +292,10 @@ export interface RunHarnessTranscriptOptions {
 export interface HarnessPromptLoopResult {
   model: string;
   finalAssistantText: string;
+
+  /** User-facing disposition; absent on older injected loop results. */
+  taskOutcome?: HarnessTaskOutcome;
+
   transcript: HarnessTranscriptMessage[];
   modelTurns: number;
 
@@ -1310,7 +1322,7 @@ const buildSubagentSystemPrompt = (
     "You are a focused cf-harness subagent working on one delegated task.",
     "You start with a fresh context and do not know the parent conversation.",
     "Use only the task and context provided in this child run.",
-    "Do not ask the user follow-up questions.",
+    "Report missing inputs or choices to the parent through your failure-return contract; the parent owns questions to the user. Do not repeat authoring to discover a source the granted references do not hold. Unavailable, refused, or unsettled reads remain unknown, not absent.",
     "Do not attempt to delegate further; nested subagents are not available.",
     `Subagent profile: ${profileConfig.profile}`,
     ...(profileConfig.hostToolIds.length > 0
@@ -1384,15 +1396,15 @@ const buildSubagentSystemPrompt = (
         "A task larger than one atom is a task to decompose: name the atoms, run each one, and compose them last. Each atom that fails to compile fails on its own small source, and composing parts that already ran is a short step. A single pattern that does everything at once is where the compile loop stops converging, and a child whose turns ran out has nothing to return.",
         ...(options.hasInheritedResearchKit
           ? [
-            `Start from the Common Fabric implementation kit inherited from the parent. ${
+            `Start from the Common Fabric research findings inherited from the parent. The orientation establishes an approach using available data and reusable pieces; follow-ups resolve what remains unclear. ${
               profileConfig.allowedToolIds.includes("research")
-                ? "Call research only for an unresolved item or a focused follow-up; do not repeat the whole initial pass."
+                ? "Ask research a useful follow-up question, including a code or invocation example when needed. Use followUpTo to select relevant prior findings and build on them."
                 : "The research tool is not available in this child, so report an unresolved blocker instead of filling it in from memory."
             } Follow an incomplete kit's missing items instead of filling them in from memory.`,
           ]
           : profileConfig.allowedToolIds.includes("research")
           ? [
-            "Use research on the whole task before you author anything. Its private loop can inspect CF documentation, available handle contracts, and complete indexed source and dependencies, then returns a cited implementation kit. Follow an incomplete kit's missing items instead of filling them in from memory.",
+            "Use research for the CF contracts and examples needed to achieve the user goal. Ask what remains unclear rather than commissioning another whole app. Reuse existing data and pieces, and author the smallest missing reusable capability.",
           ]
           : []),
         ...(profileConfig.allowedToolIds.includes("search_patterns")
@@ -1413,7 +1425,7 @@ const buildSubagentSystemPrompt = (
                 "A search hit is a component to wire, not a specification to rebuild. When a result's description says it does something one of your atoms needs, import and call it. Rewriting it from its description is the one move that makes the index worth nothing: it publishes a second pattern doing the same job under a different id, and the next searcher has two things to choose between and no reason to prefer either.",
               ]
               : []),
-            "A pattern you author and run successfully is recorded in the index for later evaluation, so pass run_pattern a `description` saying in one line what it does and `hashtags` naming the words someone should find it under if evidence earns discoverability. Write them for the next person, not for this task: a pattern recorded without a description is not published at all.",
+            "When pattern-index publication is enabled, a pattern you author and run successfully with a non-empty `description` and a durable content-addressed pattern identity is queued for the index for later evaluation. No contribution is queued when no index is configured, publication is disabled, the description is empty, or the pattern has no durable identity. The tool result does not confirm publication; the session flush sends retained contributions when it ends, and index failures are logged. Pass run_pattern a `description` saying in one line what it does and `hashtags` naming the words someone should find it under if publication succeeds and evidence earns discoverability. Write them for the next person, not for this task. The run-created piece persists independently of index publication; `assign_slug` separately names and lists it in the space.",
             "Give every atom its own description and hashtags, not just the composition on top of them. The atom is the part someone else can reuse; the composition is usually specific to the task that asked for it.",
             'Tag at two levels: the domain (what it is about — "grocery", "budget") AND the capabilities (what interactions it embodies — "crud-list", "form-input", "counter", "toggle"). Searchers hunting a scaffold for a different domain find your pattern only through its capability tags. The description should name the interactions too: "add items, toggle done, count remaining" finds readers that "a handy list app" never will.',
           ]
@@ -1523,15 +1535,30 @@ const PATTERN_REFS_CHILD_CONTEXT = (
  */
 const RESEARCH_KITS_CHILD_CONTEXT = (
   runs: readonly HarnessResearchRunSummary[],
+  availableHandleTokens: readonly string[],
 ): string =>
   [
-    "Common Fabric implementation kits established by the parent:",
-    "These kits contain host-admitted citations, pattern records, and handle bindings. Use them as implementation context; honor incomplete kits' missing items.",
+    "Common Fabric research findings established by the parent:",
+    "Use the orientation and follow-up findings to achieve the user goal. Inspected patterns and cited examples can be used directly; leads remain unverified. Honor missing items and ask useful follow-up questions when needed.",
     JSON.stringify(
-      runs.map((run) => ({
-        researchRunId: run.researchRunId,
-        kit: projectHarnessResearchKitForModel(run.kit).kit,
-      })),
+      runs.map((run) => {
+        const { kit } = projectHarnessResearchKitForModel(run.kit);
+        if (kit.purpose === "orient") {
+          kit.availableHandleTokens = kit.availableHandleTokens.filter((
+            token,
+          ) => availableHandleTokens.includes(token));
+        }
+        return {
+          researchRunId: run.researchRunId,
+          ...(run.historical
+            ? {
+              bindingNotice:
+                "These bindings belong to an earlier task. Only current granted tokens may be used; describe them before rebinding.",
+            }
+            : {}),
+          kit,
+        };
+      }),
       null,
       2,
     ),
@@ -1541,8 +1568,11 @@ const buildSubagentUserPrompt = (
   input: DelegateTaskToolInput,
   patternRefs: readonly RehydratedDelegatePatternRef[] = [],
   researchRuns: readonly HarnessResearchRunSummary[] = [],
+  availableHandleTokens: readonly string[] = [],
+  userGoal?: string,
 ): string =>
   [
+    ...(userGoal === undefined ? [] : ["Current user goal:", userGoal, ""]),
     "Task:",
     input.goal,
     ...(input.context !== undefined ? ["", "Context:", input.context] : []),
@@ -1550,7 +1580,7 @@ const buildSubagentUserPrompt = (
       ? ["", PATTERN_REFS_CHILD_CONTEXT(patternRefs)]
       : []),
     ...(researchRuns.length > 0
-      ? ["", RESEARCH_KITS_CHILD_CONTEXT(researchRuns)]
+      ? ["", RESEARCH_KITS_CHILD_CONTEXT(researchRuns, availableHandleTokens)]
       : []),
     ...(input.returnSchema !== undefined
       ? [
@@ -1881,6 +1911,10 @@ const EDIT_FILE_STATUS_OBSERVATION_DETAIL =
 
 interface InvokedToolCallMessages {
   toolMessage: HarnessToolTranscriptMessage;
+
+  /** The admitted user-facing result before model-bound handle substitution. */
+  taskOutcome?: HarnessTaskOutcome;
+
   followupMessages?: readonly HarnessTranscriptMessage[];
   cfcModelContextObservations?:
     readonly HarnessCfcModelContextObservationInput[];
@@ -2877,8 +2911,20 @@ export class CfHarnessPromptLoop {
     const requestedToolIds = options.allowedToolIds ??
       parentToolIdsForBacking(availability);
     const withheld = withheldToolIds(availability);
+    // A subagent-only tool never reaches a parent, however it was asked for.
+    // `parentToolIdsForBacking` already omits them, but an explicit
+    // `allowedToolIds` arrives here from a CLI flag, an interactive client's
+    // chat policy, and any library caller, and each of those validates against
+    // the tools this build defines. This is the one boundary all of them pass
+    // through, so it is where the rule is enforced rather than restated; a
+    // run with a lineage is a subagent, and only a subagent may hold them.
+    const isSubagent = this.engine.getRunState().lineage !== undefined;
     this.#allowedToolIds = new Set(
-      requestedToolIds.filter((toolId) => !withheld.has(toolId)),
+      requestedToolIds.filter((toolId) =>
+        !withheld.has(toolId) &&
+        (isSubagent || !isSubagentOnlyToolId(toolId)) &&
+        (!isSubagent || toolId !== "finish_task")
+      ),
     );
     this.#nativeModelToolIds = options.nativeModelToolIds ?? [];
     this.#allowedSubagentProfiles = new Set(
@@ -2966,6 +3012,7 @@ export class CfHarnessPromptLoop {
         promptSlotBindingSource,
         parentToolAllowance: this.#parentToolAllowance(),
         allowedToolIds: this.#allowedToolIdsForSnapshot(),
+        allowSkillScripts: this.engine.config.allowSkillScripts === true,
         allowedSkillScripts: this.engine.config.allowedSkillScripts ?? [],
         allowedSubagentProfiles,
         subagentProfileConfigs: allowedSubagentProfiles.map((profile) =>
@@ -3256,7 +3303,10 @@ export class CfHarnessPromptLoop {
           type: "function",
           function: {
             name: "research",
-            arguments: JSON.stringify({ task: options.task }),
+            arguments: JSON.stringify({
+              task: options.task,
+              purpose: "orient",
+            }),
           },
         },
         options.model,
@@ -3457,6 +3507,7 @@ export class CfHarnessPromptLoop {
     };
     const persistRunReport = async (
       finalAssistantText?: string,
+      taskOutcome?: HarnessTaskOutcome,
     ): Promise<void> => {
       await this.engine.persistPolicyTrace(await buildPolicyTrace());
       await this.engine.persistRunReport(
@@ -3474,6 +3525,7 @@ export class CfHarnessPromptLoop {
             : "custom",
           modelTurns,
           ...(finalAssistantText !== undefined ? { finalAssistantText } : {}),
+          ...(taskOutcome !== undefined ? { taskOutcome } : {}),
           timeline: reportTimeline,
           toolActivity,
           modelAttempts,
@@ -3540,10 +3592,11 @@ export class CfHarnessPromptLoop {
     for (const message of transcript) {
       await options.onTranscriptEvent?.({ message, transcript });
     }
-    // Set by the model turn that answers without a tool call, which is the
-    // one way the loop ends in success.
+    // A normal final answer or an admitted finish_task ends the model loop.
     let finalAssistantText: string | undefined;
+    let taskOutcome: HarnessTaskOutcome = { outcome: "completed" };
     try {
+      options.signal?.throwIfAborted();
       const openingResearch = await this.#prepareOpeningResearch({
         task: options.openingResearchTask,
         model,
@@ -3587,6 +3640,7 @@ export class CfHarnessPromptLoop {
         }
       }
       while (modelTurns < maxModelTurns) {
+        options.signal?.throwIfAborted();
         modelTurns += 1;
         let response;
         try {
@@ -3635,6 +3689,7 @@ export class CfHarnessPromptLoop {
             usage: response.usage,
           });
         }
+        options.signal?.throwIfAborted();
         const assistantMessage = response.assistant;
         transcript.push(assistantMessage);
         await this.engine.persistTranscript(transcript);
@@ -3648,6 +3703,7 @@ export class CfHarnessPromptLoop {
           message: assistantMessage,
           transcript,
         });
+        options.signal?.throwIfAborted();
         const toolCalls = assistantMessage.toolCalls ?? [];
         if (toolCalls.length === 0) {
           finalAssistantText = assistantMessage.content;
@@ -3657,6 +3713,7 @@ export class CfHarnessPromptLoop {
         const pendingCfcModelContextObservations:
           HarnessCfcModelContextObservationInput[] = [];
         for (const toolCall of toolCalls) {
+          options.signal?.throwIfAborted();
           const invokedToolCall = await this.#invokeToolCall(
             toolCall,
             model,
@@ -3666,8 +3723,17 @@ export class CfHarnessPromptLoop {
             (activity) => toolActivity.push(activity),
             (usage) => descendantUsage.push(usage),
             options.onTranscriptEvent,
+            undefined,
+            toolCalls.length,
           );
           const toolMessage = invokedToolCall.toolMessage;
+          const outcome = invokedToolCall.taskOutcome;
+          if (outcome !== undefined && outcome.outcome !== "completed") {
+            taskOutcome = outcome;
+            finalAssistantText = outcome.outcome === "question"
+              ? outcome.question.text
+              : outcome.reason;
+          }
           transcript.push(toolMessage);
           // After the result rather than after the call that asked for it: a
           // marker names the artifact holding what it replaced, and both the
@@ -3720,11 +3786,17 @@ export class CfHarnessPromptLoop {
             pendingCfcModelContextObservations,
           );
         }
+        options.signal?.throwIfAborted();
+        if (finalAssistantText !== undefined) break;
       }
     } catch (error) {
       annotatePromptLoopError(error, modelTurns);
       try {
-        await this.engine.failRun("prompt_loop_error", error);
+        if (options.signal?.aborted) {
+          await this.engine.cancelRun(toErrorDetail(options.signal.reason));
+        } else {
+          await this.engine.failRun("prompt_loop_error", error);
+        }
         await this.engine.persistTranscript(transcript);
         await persistRunReport();
       } catch {
@@ -3744,10 +3816,11 @@ export class CfHarnessPromptLoop {
       throw turnLimitError;
     }
     await this.engine.completeRun("assistant_completed");
-    await persistRunReport(finalAssistantText);
+    await persistRunReport(finalAssistantText, taskOutcome);
     return {
       model,
       finalAssistantText,
+      taskOutcome,
       transcript,
       modelTurns,
       ...(modelUsage.length > 0
@@ -3780,7 +3853,8 @@ export class CfHarnessPromptLoop {
    * before dispatch), `describe_handle`, whose input names a token rather
    * than a referent, and `research`, whose private loop must retain the same
    * opaque tokens it describes and binds. `loom_compose` also proves
-   * membership before resolving a Pattern Instance. Returns `input` itself
+   * membership before resolving a Pattern Instance. `finish_task` preserves
+   * its user-facing message as text. Returns `input` itself
    * when no substitution applies.
    */
   #resolveHandleTokensInToolInput(
@@ -3789,7 +3863,7 @@ export class CfHarnessPromptLoop {
   ): Record<string, unknown> {
     if (
       toolId === "delegate_task" || toolId === "describe_handle" ||
-      toolId === "research" ||
+      toolId === "research" || toolId === "finish_task" ||
       toolId === "loom_compose"
     ) {
       return input;
@@ -3905,12 +3979,14 @@ export class CfHarnessPromptLoop {
     }
   }
 
-  /** Retains every index record a prior host-side research run confirmed. */
+  /** Retains host-observed index records from prior research, including leads. */
   #seedResearchPatternRecords(
     runs: readonly HarnessResearchRunSummary[],
   ): void {
     for (const run of runs) {
-      for (const record of run.confirmedPatterns) {
+      for (
+        const record of researchPatternRecords(run.kit, run.confirmedPatterns)
+      ) {
         this.#trustedPatternRecords.set(
           record.patternId,
           structuredClone(record),
@@ -3935,12 +4011,17 @@ export class CfHarnessPromptLoop {
     }
   }
 
-  /** Retains the pattern records confirmed inside a successful research run. */
+  /** Retains host-observed patterns without promoting leads to verified source. */
   #recordResearchResult(toolId: BuiltinToolId, output: unknown): void {
     if (toolId !== "research" || !isResearchToolSuccessOutput(output)) {
       return;
     }
-    for (const record of output.researchRecord.confirmedPatterns) {
+    for (
+      const record of researchPatternRecords(
+        output.kit,
+        output.researchRecord.confirmedPatterns,
+      )
+    ) {
       this.#trustedPatternRecords.set(
         record.patternId,
         structuredClone(record),
@@ -4089,6 +4170,7 @@ export class CfHarnessPromptLoop {
     recordDescendantUsage: (usage: HarnessModelUsage) => void = () => {},
     onTranscriptEvent?: (event: HarnessTranscriptEvent) => void | Promise<void>,
     origin?: HarnessToolInvocationOrigin,
+    toolCallCount = 1,
   ): Promise<InvokedToolCallMessages> {
     // The name the model wrote stays out of the complaint: it is model text,
     // and a tool name carries injected instruction as readily as any other
@@ -4219,6 +4301,22 @@ export class CfHarnessPromptLoop {
         ...(origin !== undefined ? { origin } : {}),
         ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
         policyEventIndexes,
+        recordActivity,
+      });
+    }
+    if (toolId === "finish_task" && toolCallCount !== 1) {
+      return await this.#rejectInvalidToolCall({
+        toolCall,
+        invalid: {
+          reason: "invalid-argument",
+          toolId,
+          field: "toolCalls",
+          expected: "finish_task as the only tool call in this model turn",
+        },
+        sequence,
+        startedAt: activityStartedAt,
+        effectClass: tool.descriptor.effectClass,
+        ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
         recordActivity,
       });
     }
@@ -4539,8 +4637,9 @@ export class CfHarnessPromptLoop {
         ReturnType<CfHarnessEngine["invokeBuiltinTool"]>
       >["output"];
       resultRef: ToolResultRef;
-    };
+    } | undefined;
     try {
+      signal?.throwIfAborted();
       result = toolId === "delegate_task"
         ? await this.#invokeDelegateTaskTool({
           toolCall,
@@ -4560,20 +4659,25 @@ export class CfHarnessPromptLoop {
           input,
           signal,
         );
+      signal?.throwIfAborted();
     } catch (error) {
       recordActivity({
         type: "cf-harness.tool-activity",
-        ...baseActivity(policyDecision, "failed"),
+        ...baseActivity(
+          policyDecision,
+          signal?.aborted ? "canceled" : "failed",
+        ),
         toolInputSummary,
         ...optionalPolicyEventIndexes(policyEventIndexes),
+        ...(result !== undefined ? { resultRef: result.resultRef } : {}),
         errorDetail: toErrorDetail(error),
       });
-      // Reaching this catch means a genuinely fatal tool failure — sandbox
-      // spawn/infra, CFC transport, artifact/run-state persistence, an engine
-      // invariant, or a cancelled run. These are not model-correctable, so the
-      // run stays fatal. RECOVERABLE mistakes never arrive here, and there are
-      // two kinds. A mistake inside the tool (a `cwd` outside the sandbox, a
-      // command timeout) becomes an ordinary failed BashToolOutput the model
+      // Reaching this catch ends the run: its owner canceled it, or a tool
+      // failed in sandbox spawn/infra, CFC transport, artifact/run-state
+      // persistence, or an engine invariant. RECOVERABLE mistakes never arrive
+      // here, and there are two kinds. A mistake inside the tool (a `cwd`
+      // outside the sandbox, a command timeout) becomes a failed BashToolOutput
+      // the model
       // reacts to, flowing through the normal CFC-mediated output path below
       // (see bash.ts). A mistake in how the model wrote the call itself (a name
       // no tool answers to, arguments that are not JSON, an argument of the
@@ -4671,8 +4775,13 @@ export class CfHarnessPromptLoop {
         }],
       };
     }
+    const taskOutcome = toolId === "finish_task" &&
+        isObjectNotArray(result.output) && result.output.status === "ok"
+      ? readHarnessTaskOutcome(result.output.taskOutcome)
+      : undefined;
     return {
       toolMessage,
+      ...(taskOutcome !== undefined ? { taskOutcome } : {}),
       ...(modelOutputResult.cfcModelContextObservations !== undefined
         ? {
           cfcModelContextObservations:
@@ -5132,12 +5241,13 @@ export class CfHarnessPromptLoop {
       parentAcquiredSkills?.skills,
       options.resolvedSkill?.acquisition,
     );
-    // The operator's allowlist is the run's and the tool surface is the
-    // profile's, so a child given an acquired skill needs both brought to it or
-    // it holds a mounted skill it cannot run a script of.
+    // Whether skill scripts run is the run's decision and the tool surface is
+    // the profile's, so a child given an acquired skill needs both brought to
+    // it or it holds a mounted skill it cannot run a script of.
     const acquiredScripts = acquiredSkillScriptSurface(
       this.engine.config.allowedSkillScripts,
       childAcquiredSkill,
+      this.engine.config.allowSkillScripts === true,
     );
     const childAllowedSkillScripts = [
       ...(profileConfig.allowedSkillScripts ?? []),
@@ -5218,11 +5328,16 @@ export class CfHarnessPromptLoop {
         ? { docsCorpus: this.engine.docsCorpus }
         : {}),
       ...(inheritedResearchRuns.length > 0 ? { inheritedResearchRuns } : {}),
+      researchGoal: parentRunState.researchGoal,
       ...(parentRunState.cfcModelContext !== undefined
         ? { inheritedCfcModelContext: parentRunState.cfcModelContext }
         : {}),
       ...(childAllowedSkillScripts.length > 0
         ? { allowedSkillScripts: childAllowedSkillScripts }
+        : {}),
+      // The run's decision, not the profile's, so it reaches every child.
+      ...(this.engine.config.allowSkillScripts === true
+        ? { allowSkillScripts: true }
         : {}),
       ...(profileConfig.skillScriptExecutionTarget !== undefined
         ? {
@@ -5299,7 +5414,7 @@ export class CfHarnessPromptLoop {
       this.engine.handleTable,
       childRunId,
       delegateInput,
-      inheritedResearchRuns.flatMap((run) =>
+      inheritedResearchRuns.filter((run) => !run.historical).flatMap((run) =>
         run.kit.inputs.map((input) => input.token)
       ),
     );
@@ -5480,6 +5595,8 @@ export class CfHarnessPromptLoop {
           delegateInput,
           patternRefResolution.records,
           inheritedResearchRuns,
+          childEngine.handleTable?.entries.map((entry) => entry.token) ?? [],
+          parentRunState.researchGoal,
         ),
         contextMessages: childSkillContextMessages,
         model: childModel.model,
@@ -5574,16 +5691,22 @@ export class CfHarnessPromptLoop {
         }
       }
     } catch (error) {
-      subagentStatus = "failed";
+      subagentStatus = options.signal?.aborted ? "canceled" : "failed";
       childModelTurns = promptLoopModelTurnsFromError(error) ?? childModelTurns;
-      summary = `Subagent failed: ${toErrorDetail(error)}`;
+      summary = subagentStatus === "canceled"
+        ? "Subagent canceled by the parent run."
+        : `Subagent failed: ${toErrorDetail(error)}`;
       // The child's loop writes the child's own outcome. A child that never
       // reached its loop — its model was unavailable, or its skill context
       // would not persist — has none yet, and gets one here.
       if (!isTerminalHarnessRunStatus(childEngine.getRunState().status)) {
-        await childEngine.failRun("setup_error", error, {
-          source: "run_error",
-        });
+        if (options.signal?.aborted) {
+          await childEngine.cancelRun(toErrorDetail(options.signal.reason));
+        } else {
+          await childEngine.failRun("setup_error", error, {
+            source: "run_error",
+          });
+        }
       }
     }
     const childRunState = childEngine.getRunState();
@@ -5606,6 +5729,26 @@ export class CfHarnessPromptLoop {
       ...(nativeModelToolResults.length > 0 ? { nativeModelToolResults } : {}),
       ...(structuredReturn !== undefined ? { structuredReturn } : {}),
     };
+    const subagentRun = {
+      type: "cf-harness.subagent-run-ref" as const,
+      parentToolCallId: options.toolCall.id,
+      childRunId,
+      status: subagent.status,
+      summary: subagent.summary,
+      manifest,
+      ...(options.resolvedSkill !== undefined
+        ? { skillHandle: options.resolvedSkill.token }
+        : {}),
+      ...(delegateInput.withoutSkillHandle === true
+        ? { withoutSkillHandle: true }
+        : {}),
+      runState: subagent.runState,
+      ...(structuredReturn !== undefined ? { structuredReturn } : {}),
+    };
+    if (options.signal?.aborted) {
+      await this.engine.recordSubagentRun(subagentRun);
+      options.signal.throwIfAborted();
+    }
     const output: DelegateTaskToolOutput = {
       type: "cf-harness.delegate-task-output",
       outputId: this.engine.nextToolOutputId("delegate_task"),
@@ -5620,21 +5763,8 @@ export class CfHarnessPromptLoop {
       output,
     );
     await this.engine.recordSubagentRun({
-      type: "cf-harness.subagent-run-ref",
-      parentToolCallId: options.toolCall.id,
+      ...subagentRun,
       outputId: output.outputId,
-      childRunId,
-      status: subagent.status,
-      summary: subagent.summary,
-      manifest,
-      ...(options.resolvedSkill !== undefined
-        ? { skillHandle: options.resolvedSkill.token }
-        : {}),
-      ...(delegateInput.withoutSkillHandle === true
-        ? { withoutSkillHandle: true }
-        : {}),
-      runState: subagent.runState,
-      ...(structuredReturn !== undefined ? { structuredReturn } : {}),
     });
     return {
       output: result.output,

@@ -90,10 +90,13 @@ export interface CiContext {
   event?: string;
 
   /**
-   * True when the run's head repository differs from the base repository.
-   * Stamped from the trusted payload, never from job artifacts: record
-   * lines and job facts of a fork run are authored by the fork, so
-   * consumers that feed decisions must filter fork runs out by this flag.
+   * True when the run's head repository is not the base repository, and
+   * true when the payload did not name both: a run this repository
+   * cannot place reads as a fork. Stamped from the trusted payload,
+   * never from job artifacts. The member gate means every stored run was
+   * authored under the repository's write access, so what this leaves a
+   * consumer is that a run it marks is never a baseline. See
+   * `docs/specs/test-records.md`, "Trust boundaries for consumers".
    */
   fork?: boolean;
 }
@@ -106,7 +109,7 @@ export interface RunContext {
   /** ULID; unique per uploaded object. */
   reportId: string;
 
-  /** Canonical repository name, as in "commontoolsinc/labs". */
+  /** Canonical repository name, as in "commonfabric/labs". */
   repo: string;
 
   /** Full hash of the commit the tests ran against. */

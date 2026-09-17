@@ -32,7 +32,7 @@ describe("run-pattern description", () => {
       "Bound every query's rows with a LIMIT",
     );
     expect(runPatternToolDescriptor.description).toContain(
-      "an ordinary result row is materialized as its own document in the space",
+      "every result row is materialized as its own document in the space",
     );
   });
 

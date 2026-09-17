@@ -83,7 +83,7 @@ Deno.test("postCoverageComment posts when no marked comment exists", async () =>
   assertEquals(requests[0].method, "POST");
   assertEquals(
     requests[0].url,
-    "https://api.github.com/repos/commontoolsinc/labs/issues/4211/comments",
+    "https://api.github.com/repos/commonfabric/labs/issues/4211/comments",
   );
   assertEquals(requests[0].body, body);
 });
@@ -99,7 +99,7 @@ Deno.test("postCoverageComment updates the existing comment in place", async () 
   assertEquals(requests[0].method, "PATCH");
   assertEquals(
     requests[0].url,
-    "https://api.github.com/repos/commontoolsinc/labs/issues/comments/1",
+    "https://api.github.com/repos/commonfabric/labs/issues/comments/1",
   );
   assertEquals(requests[0].body, body);
 });
@@ -141,7 +141,7 @@ Deno.test("postCoverageComment resolves an existing comment when coverage is acc
   assertEquals(requests[0].method, "PATCH");
   assertEquals(
     requests[0].url,
-    "https://api.github.com/repos/commontoolsinc/labs/issues/comments/1",
+    "https://api.github.com/repos/commonfabric/labs/issues/comments/1",
   );
   assertStringIncludes(requests[0].body, "<details>");
   assertStringIncludes(

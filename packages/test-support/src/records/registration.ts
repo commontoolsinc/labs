@@ -40,10 +40,12 @@ const BDD_MODULE_SUFFIX = "src/records/bdd.ts";
  * that module rather than the test file: `registration.ts` is the
  * `Deno.test` wrapper the preload installs, `bdd.ts` the `describe` and
  * `it` this repository's import map resolves to, `fixture-runner.ts`
- * builds a suite over a directory of fixtures, and `clock-preload.ts`
- * replaces `Deno.test` to give each test a clock. Ingestion rejects a
- * classname ending in one of these rather than reading it as a test
- * file, and the preload's name map supplies the file instead.
+ * builds a suite over a directory of fixtures, `clock-preload.ts`
+ * replaces `Deno.test` to give each test a clock, and the runner's
+ * `silent-backstop-guard.ts` replaces it again to fail a test a
+ * production backstop carried. Ingestion rejects a classname ending in
+ * one of these rather than reading it as a test file, and the preload's
+ * name map supplies the file instead.
  *
  * Every module named here calls `registerFrameworkModule`, so that the
  * map names the file that asked for the test rather than the module
@@ -55,6 +57,7 @@ export const MACHINERY_MODULE_SUFFIXES: readonly string[] = [
   BDD_MODULE_SUFFIX,
   "src/fixture-runner.ts",
   "test/clock-preload.ts",
+  "test/support/silent-backstop-guard.ts",
 ];
 
 /**

@@ -82,6 +82,33 @@ Deno.test("writeDetailValueForTarget: coarse whole-object write reconstructs as-
   });
 });
 
+Deno.test("writeDetailValueForTarget: uses document-narrowed write details when available", () => {
+  const wanted = detail(["value"], { body: "bounded" });
+  const tx = {
+    getWriteDetails: () => {
+      throw new Error("must not scan every document in the space");
+    },
+    getWriteDetailsForTarget: (requested: {
+      space: MemorySpace;
+      id: URI;
+      scope?: string;
+      path?: readonly PropertyKey[];
+    }) => {
+      assertEquals(requested, {
+        space: SPACE,
+        id: ID,
+        scope: SCOPE,
+        path: [],
+      });
+      return [wanted];
+    },
+  } as unknown as IExtendedStorageTransaction;
+
+  assertEquals(writeDetailValueForTarget(tx, target([]), "value"), {
+    body: "bounded",
+  });
+});
+
 Deno.test("writeDetailValueForTarget: granular envelope + field writes reconstruct the full object", () => {
   // This is the shape produced when an object is written field-by-field (e.g.
   // a deep-frozen value): an empty envelope at the root plus per-field writes.

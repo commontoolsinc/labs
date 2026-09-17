@@ -19,6 +19,11 @@ export type {
   TestRecord,
 } from "./schema.ts";
 export {
+  isLaneMeasurement,
+  LANE_MEASUREMENT_PREFIX,
+  LANE_MEASUREMENT_SURFACE,
+} from "./lane-measurement.ts";
+export {
   AGENT_VARIABLE,
   agentLabel,
   defaultSpoolRoot,
@@ -122,10 +127,14 @@ export type {
 } from "./store-reader.ts";
 export { recordsSpooledBy } from "./testing.ts";
 export {
+  declaredSchema,
   digestIdentities,
   MANIFEST_SCHEMA_VERSION,
+  MANIFESTS_LOOKED_BACK,
   parseManifest,
+  SELECTION_AREA,
   serializeManifest,
+  writtenAhead,
 } from "./selection.ts";
 export {
   freeCalibration,

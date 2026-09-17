@@ -44,7 +44,7 @@ export const RESEARCH_INPUTS_SCHEMA: JSONSchema = {
 };
 
 /** API rules supported by exact read identities. */
-export const RESEARCH_RULES_SCHEMA: JSONSchema = {
+export const RESEARCH_RULES_SCHEMA = {
   type: "array",
   maxItems: 24,
   items: {
@@ -60,7 +60,7 @@ export const RESEARCH_RULES_SCHEMA: JSONSchema = {
     required: ["rule", "sourceIds"],
     additionalProperties: false,
   },
-};
+} satisfies JSONSchema;
 
 /** Source availability and confidentiality are independent from kit completeness. */
 export const RESEARCH_CFC_SCHEMA: JSONSchema = {
@@ -167,6 +167,8 @@ const source: JSONSchema = {
       enum: ["documentation", "pattern-metadata", "pattern-source"],
     },
     location: { type: "string" },
+    documentTitle: { type: "string" },
+    headingPath: strings,
     offset: { type: "number" },
     end: { type: "number" },
     totalChars: { type: "number" },
@@ -186,8 +188,33 @@ const source: JSONSchema = {
   additionalProperties: false,
 };
 
-/** Admitted kit, including required parser evidence for a source example. */
-export const RESEARCH_KIT_SCHEMA: JSONSchema = {
+const example: JSONSchema = {
+  oneOf: [
+    {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["run-pattern-input"] },
+        content: { type: "string" },
+        sourceIds: strings,
+      },
+      required: ["kind", "content", "sourceIds"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["pattern-source"] },
+        content: { type: "string" },
+        sourceIds: strings,
+        syntax,
+      },
+      required: ["kind", "content", "sourceIds", "syntax"],
+      additionalProperties: false,
+    },
+  ],
+};
+
+const legacyRecipe = {
   type: "object",
   properties: {
     status: { type: "string", enum: ["complete", "incomplete"] },
@@ -208,31 +235,7 @@ export const RESEARCH_KIT_SCHEMA: JSONSchema = {
     inputs: RESEARCH_INPUTS_SCHEMA,
     patterns: { type: "array", items: pattern },
     steps: strings,
-    example: {
-      oneOf: [
-        {
-          type: "object",
-          properties: {
-            kind: { type: "string", enum: ["run-pattern-input"] },
-            content: { type: "string" },
-            sourceIds: strings,
-          },
-          required: ["kind", "content", "sourceIds"],
-          additionalProperties: false,
-        },
-        {
-          type: "object",
-          properties: {
-            kind: { type: "string", enum: ["pattern-source"] },
-            content: { type: "string" },
-            sourceIds: strings,
-            syntax,
-          },
-          required: ["kind", "content", "sourceIds", "syntax"],
-          additionalProperties: false,
-        },
-      ],
-    },
+    example,
     rules: RESEARCH_RULES_SCHEMA,
     verification: strings,
     sources: { type: "array", items: source },
@@ -252,4 +255,63 @@ export const RESEARCH_KIT_SCHEMA: JSONSchema = {
     "missing",
   ],
   additionalProperties: false,
+} satisfies JSONSchema;
+
+/** Findings share evidence contracts with saved implementation kits. */
+const findings = {
+  status: { type: "string", enum: ["complete", "incomplete"] },
+  task: { type: "string" },
+  summary: { type: "string", maxLength: 4_000 },
+  inputs: RESEARCH_INPUTS_SCHEMA,
+  patterns: { type: "array", items: pattern },
+  rules: RESEARCH_RULES_SCHEMA,
+  sources: { type: "array", items: source },
+  missing: strings,
+} satisfies Record<string, JSONSchema>;
+
+/** Orientation candidates remain separate from inspected pattern records. */
+const lead: JSONSchema = {
+  type: "object",
+  properties: {
+    pattern,
+    question: { type: "string", maxLength: 500 },
+  },
+  required: ["pattern", "question"],
+  additionalProperties: false,
+};
+
+/** Public result variants; saved recipe kits may omit their purpose. */
+export const RESEARCH_KIT_SCHEMA: JSONSchema = {
+  oneOf: [legacyRecipe, {
+    type: "object",
+    properties: {
+      ...findings,
+      example,
+      purpose: { type: "string", enum: ["answer"] },
+    },
+    required: [...Object.keys(findings), "purpose"],
+    additionalProperties: false,
+  }, {
+    type: "object",
+    properties: {
+      ...findings,
+      example,
+      purpose: { type: "string", enum: ["orient"] },
+      availableHandleTokens: strings,
+      leads: { type: "array", maxItems: 3, items: lead },
+      questions: {
+        type: "array",
+        maxItems: 3,
+        items: { type: "string", maxLength: 500 },
+      },
+    },
+    required: [
+      ...Object.keys(findings),
+      "purpose",
+      "leads",
+      "questions",
+      "availableHandleTokens",
+    ],
+    additionalProperties: false,
+  }],
 };

@@ -1,5 +1,7 @@
 import { sleep } from "@commonfabric/utils/sleep";
+import { describeThrown } from "./describe-thrown.ts";
 import type { Page } from "./page.ts";
+import { readAndDescribeShellPage } from "./shell-page-probe.ts";
 
 // Default poll interval between predicate calls. Polls are cheap (a CDP
 // evaluate round-trip), and a coarse interval quantizes every wall-clock
@@ -21,6 +23,83 @@ const DEFAULT_DELAY_MS = (() => {
 // the slowest legitimate wait (a runtime resync after a reload) without capping
 // a condition that is still making progress.
 const WAIT_FOR_CONDITION_TIMEOUT = 300_000; // 5 minutes
+
+/**
+ * The safety net's length for one wait. Read per wait rather than once, and
+ * from `CF_WAIT_FOR_CONDITION_TIMEOUT_MS`, which is how a test drives the
+ * report this net produces without waiting five minutes for it. Nothing
+ * outside a test sets it: shortening the net in a run caps what a wait can
+ * observe, which is the thing the net is written to avoid.
+ */
+function waitForConditionTimeout(): number {
+  try {
+    const raw = Number(Deno.env.get("CF_WAIT_FOR_CONDITION_TIMEOUT_MS"));
+    return Number.isFinite(raw) && raw > 0 ? raw : WAIT_FOR_CONDITION_TIMEOUT;
+  } catch {
+    return WAIT_FOR_CONDITION_TIMEOUT;
+  }
+}
+
+// How much of any one value a failure report carries on its line. Long enough
+// to tell one wait in a file from the next, short enough that a line stays
+// readable beside the page it is reported with.
+const CONDITION_VALUE_LIMIT = 400;
+
+/** `value` on one line, cut to {@link CONDITION_VALUE_LIMIT}. */
+function oneLine(value: string): string {
+  const collapsed = value.replace(/\s+/g, " ").trim();
+  return collapsed.length > CONDITION_VALUE_LIMIT
+    ? `${collapsed.slice(0, CONDITION_VALUE_LIMIT)}…`
+    : collapsed;
+}
+
+/**
+ * Render what a wait was waiting for and what `page` held while it waited.
+ *
+ * `predicateSource` is the source the page ran, and it is usually what names
+ * the wait, waits carrying no names of their own. Where several waits share
+ * one predicate the arguments are what tell them apart, so each gets a line of
+ * its own rather than being run together.
+ *
+ * `predicateError` is the message of the last throw the predicate itself made,
+ * where it made one. A predicate that throws on every evaluation is stuck for
+ * a reason nothing else in the report carries, since the page is exactly as it
+ * would be for a predicate that is merely false.
+ */
+export async function describeConditionWaitFailure(
+  page: Page,
+  predicateSource: string,
+  args?: readonly unknown[],
+  predicateError?: string,
+): Promise<string> {
+  const lines = [`  awaited condition: ${oneLine(predicateSource)}`];
+  if (args !== undefined && args.length > 0) {
+    lines.push("  condition arguments:");
+    args.forEach((arg, index) => {
+      // A value JSON cannot carry is reported as one: a report must not
+      // replace the failure it describes with a failure of its own. The
+      // numbers JSON renders as something else are spelled out instead,
+      // since a wait told apart from its neighbours by an argument is told
+      // apart wrongly when that argument reads back as `null` or `0`.
+      let rendered: string;
+      try {
+        rendered = JSON.stringify(arg, (_key, value) =>
+          typeof value === "number" &&
+            (!Number.isFinite(value) || Object.is(value, -0))
+            ? (Object.is(value, -0) ? "-0" : String(value))
+            : value) ?? String(arg);
+      } catch (error) {
+        rendered = `(unrenderable: ${describeThrown(error)})`;
+      }
+      lines.push(`    [${index}] ${oneLine(rendered)}`);
+    });
+  }
+  if (predicateError !== undefined) {
+    lines.push(`  predicate threw: ${oneLine(predicateError)}`);
+  }
+  lines.push(await readAndDescribeShellPage(page));
+  return lines.join("\n");
+}
 
 /**
  * Receives an async predicate function to executed repeatedly
@@ -426,6 +505,25 @@ function installWaiter(
     }
   };
 
+  // A predicate that throws is a stuck wait whose cause the page alone knows,
+  // so its message is sent over the same binding, tagged so the test process
+  // records it rather than treating the wait as over. Only a message differing
+  // from the last sent is sent, a predicate throwing on every evaluation being
+  // the ordinary case.
+  let reportedError: string | undefined;
+  const reportPredicateError = (error: unknown): void => {
+    const text = error instanceof Error
+      ? `${error.name}: ${error.message}`
+      : String(error);
+    if (text === reportedError) return;
+    const notify = (globalThis as Record<string, unknown>)[bindingName];
+    if (typeof notify !== "function") return;
+    reportedError = text;
+    (notify as (payload: string) => void)(
+      JSON.stringify({ predicateError: text }),
+    );
+  };
+
   const fire = (): boolean => {
     const notify = (globalThis as Record<string, unknown>)[bindingName];
     if (typeof notify !== "function") return false;
@@ -507,9 +605,11 @@ function installWaiter(
           evaluate();
         }
       })
-      .catch(() => {
+      .catch((error) => {
         running = false;
-        if (!stopped && rerun) {
+        if (stopped) return;
+        reportPredicateError(error);
+        if (rerun) {
           rerun = false;
           evaluate();
         }
@@ -549,9 +649,9 @@ function installWaiter(
  * Every wait checks once immediately, including when the event already fired.
  *
  * On a stuck condition it throws once the built-in `WAIT_FOR_CONDITION_TIMEOUT`
- * safety net elapses; callers add the context and rich probe for the failure
- * message. There is no caller-supplied timeout: the wait resolves on the
- * condition, and the safety net is not the common-case latency.
+ * safety net elapses, naming the predicate that ran out and rendering what the
+ * page held while it did. There is no caller-supplied timeout: the wait
+ * resolves on the condition, and the safety net is not the common-case latency.
  *
  * Resolves with whatever the predicate answered, when that answer is a value
  * rather than `true`. The answer travels in the same notification that ends
@@ -569,6 +669,7 @@ export const waitForCondition = async <
   const bindingName = `__cfcWait_${crypto.randomUUID().replace(/-/g, "")}`;
   let answer: R | undefined;
   let answerError: string | undefined;
+  let predicateError: string | undefined;
   let resolveSignal!: () => void;
   const signaled = new Promise<void>((resolve) => {
     resolveSignal = resolve;
@@ -579,7 +680,14 @@ export const waitForCondition = async <
       const parsed = JSON.parse(payload) as {
         value?: R;
         unserializable?: string;
+        predicateError?: string;
       };
+      // A predicate's own throw is news about a wait that is still running,
+      // so it is recorded for the report and the wait carries on.
+      if (parsed.predicateError !== undefined) {
+        predicateError = parsed.predicateError;
+        return;
+      }
       answerError = parsed.unserializable;
       answer = parsed.value;
     } catch (error) {
@@ -599,18 +707,32 @@ export const waitForCondition = async <
         events,
       ],
     });
+    const bound = waitForConditionTimeout();
     const timedOut = new Promise<never>((_, reject) => {
       timer = setTimeout(
         () =>
           reject(
-            new Error(
-              `waitForCondition did not resolve within ${WAIT_FOR_CONDITION_TIMEOUT}ms`,
-            ),
+            new Error(`waitForCondition did not resolve within ${bound}ms`),
           ),
-        WAIT_FOR_CONDITION_TIMEOUT,
+        bound,
       );
     });
-    await Promise.race([signaled, timedOut]);
+    try {
+      await Promise.race([signaled, timedOut]);
+    } catch (cause) {
+      // The page is read here rather than by each caller: a wait that runs out
+      // is stuck on what the page is showing, and a message saying only that
+      // time ran out sends every investigation back to CI for another run.
+      throw new Error(
+        `${describeThrown(cause)}.\n${await describeConditionWaitFailure(
+          page,
+          predicate.toString(),
+          args,
+          predicateError,
+        )}`,
+        { cause },
+      );
+    }
     if (answerError !== undefined) {
       throw new Error(
         `The condition held, but its answer did not reach the test: ` +

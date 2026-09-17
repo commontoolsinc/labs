@@ -21,12 +21,16 @@
  * `toJSON()` has no bearing on what a value is. An object carrying one is
  * still an object and a class instance carrying one is still unrecognized,
  * whether the member is own or inherited.
+ *
+ * The plus cases hold an `isPlusType` predicate to its place in the order:
+ * consulted only for a value no earlier question decides, never for one the
+ * vocabulary already names, and fixing the `PlusType` in the type system.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import type { JsTypeTagIncludingNull } from "@commonfabric/utils/types";
+import type { JsTypeTagIncludingNull, Same } from "@commonfabric/utils/types";
 
 import {
   BaseFabricPrimitive,
@@ -41,14 +45,25 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { codecClasses } from "@/fabric-primitives/index.ts";
 import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { FabricPrimitive, type FabricValue } from "@/interface.ts";
 import {
+  FabricPrimitive,
+  type FabricValue,
+  type FabricValuePlus,
+  type FabricValuePlusLayer,
+} from "@/interface.ts";
+import {
+  type ConvertibleJsValueTag,
   FABRIC_PRIMITIVE_VALUE_TAGS,
+  FABRIC_VALUE_PLUS_TAGS,
+  FABRIC_VALUE_TAGS,
   type FabricPrimitiveValueTag,
+  type FabricValuePlusTag,
+  type FabricValueTag,
   isValidFabricConvertibleJsObject,
   isValidFabricValueLayer,
   JS_TYPE_VALUE_TAGS,
   type JsTypeValueTag,
+  type PlusTypePredicate,
   tagOfConvertibleJsValueElseNull,
   tagOfFabricPrimitive,
   tagOfFabricPrimitiveElseNull,
@@ -114,9 +129,42 @@ class UntaggedProbe extends BaseFabricPrimitive {
  */
 class RoguePrimitive extends FabricPrimitive {}
 
+/** The `PlusType` of the plus cases: a class the vocabulary does not name. */
+class PlusProbe {}
+
+/** Predicate for `PlusProbe`. */
+const isPlusProbe: PlusTypePredicate<PlusProbe> = (value): value is PlusProbe =>
+  value instanceof PlusProbe;
+
+/** A `PlusType` that is a function, which the JS-type branch has to admit. */
+type PlusFn = () => void;
+
+/** Predicate for `PlusFn`. */
+const isPlusFn: PlusTypePredicate<PlusFn> = (value): value is PlusFn =>
+  typeof value === "function";
+
+/**
+ * Builds a predicate that records each value it is asked about and accepts
+ * it, so a case can assert whether the dispatch consulted it at all.
+ */
+function recordingPredicate(): {
+  readonly asked: unknown[];
+  readonly isPlusType: PlusTypePredicate<PlusProbe>;
+} {
+  const asked: unknown[] = [];
+
+  return {
+    asked,
+    isPlusType: (value): value is PlusProbe => {
+      asked.push(value);
+      return true;
+    },
+  };
+}
+
 /** One value of each JS primitive type, labeled, with the tag it takes. */
 const JS_PRIMITIVE_TAGS: ReadonlyArray<
-  [string, FabricValue, JsTypeValueTag]
+  [string, FabricValue, Exclude<JsTypeValueTag, "function">]
 > = [
   ["a bigint", 42n, VALUE_TAGS.bigint],
   ["a boolean", true, VALUE_TAGS.boolean],
@@ -155,6 +203,28 @@ const FABRIC_PRIMITIVE_TAGS: ReadonlyArray<
   [new FabricRegExp(/a/), VALUE_TAGS.FabricRegExp],
 ];
 
+/**
+ * One value under each tag the `FabricValue` vocabulary holds, labeled: the
+ * values a dispatch names without consulting a predicate.
+ */
+const RECOGNIZED: ReadonlyArray<[string, FabricValue, FabricValueTag]> = [
+  ...JS_PRIMITIVE_TAGS,
+  ...FABRIC_PRIMITIVE_TAGS.map((
+    [value, tag],
+  ): [string, FabricValue, FabricValueTag] => [
+    `a \`${value.constructor.name}\``,
+    value,
+    tag,
+  ]),
+  ["an array", [1], VALUE_TAGS.Array],
+  ["a plain object", { a: 1 }, VALUE_TAGS.Object],
+  [
+    "a `FabricInstance`",
+    new FabricMap(new Map([["a", 1]])),
+    VALUE_TAGS.FabricInstance,
+  ],
+];
+
 describe("tags", () => {
   describe("VALUE_TAGS", () => {
     it("is frozen", () => {
@@ -169,6 +239,12 @@ describe("tags", () => {
 
     it("holds every JS type tag", () => {
       for (const [key, tag] of Object.entries(JS_TYPE_VALUE_TAGS)) {
+        expect(VALUE_TAGS[key as keyof typeof VALUE_TAGS]).toBe(tag);
+      }
+    });
+
+    it("holds every `FabricValuePlus` tag", () => {
+      for (const [key, tag] of Object.entries(FABRIC_VALUE_PLUS_TAGS)) {
         expect(VALUE_TAGS[key as keyof typeof VALUE_TAGS]).toBe(tag);
       }
     });
@@ -204,11 +280,28 @@ describe("tags", () => {
     });
 
     it("is the `typeOfIncludingNull()` vocabulary, less `object`", () => {
-      type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
-        : false;
-
       const _same: Same<JsTypeValueTag | "object", JsTypeTagIncludingNull> =
         true;
+    });
+  });
+
+  describe("FABRIC_VALUE_PLUS_TAGS", () => {
+    it("is frozen", () => {
+      expect(Object.isFrozen(FABRIC_VALUE_PLUS_TAGS)).toBe(true);
+    });
+
+    it("holds every `FabricValue` tag, `PlusType`, and nothing else", () => {
+      expect(new Set(Object.values(FABRIC_VALUE_PLUS_TAGS))).toEqual(
+        new Set([...Object.values(FABRIC_VALUE_TAGS), VALUE_TAGS.PlusType]),
+      );
+    });
+
+    it("is the `FabricValue` vocabulary plus `PlusType`, in the type system, and `PlusType` is no convertible-JS tag", () => {
+      const _plus: Same<FabricValuePlusTag, FabricValueTag | "PlusType"> = true;
+      const _convertible: Same<
+        Extract<ConvertibleJsValueTag, "PlusType">,
+        never
+      > = true;
     });
   });
 
@@ -385,6 +478,94 @@ describe("tags", () => {
         "Not possibly a valid `FabricValue`",
       );
     });
+
+    describe("given an `isPlusType` predicate", () => {
+      it("is asked about a value under every `FabricValue` tag", () => {
+        // The table is the domain only while it covers every tag, so the two
+        // are held equal rather than the table being trusted.
+
+        expect(new Set(RECOGNIZED.map(([, , tag]) => tag))).toEqual(
+          new Set(Object.values(FABRIC_VALUE_TAGS)),
+        );
+      });
+
+      for (const [label, value, tag] of RECOGNIZED) {
+        it(`returns \`${tag}\` for ${label} without consulting the predicate`, () => {
+          const { asked, isPlusType } = recordingPredicate();
+
+          expect(tagOfFabricValue(value, isPlusType)).toBe(tag);
+          expect(asked).toEqual([]);
+        });
+      }
+
+      it("returns `Object` for a proxy over a plain object without consulting the predicate", () => {
+        // A proxy reports its target's prototype, so the plain-object question
+        // is decided before the predicate could be asked, whatever the proxy
+        // is standing in for.
+
+        const { asked, isPlusType } = recordingPredicate();
+        const value = new Proxy({ a: 1 }, {}) as FabricValuePlusLayer<
+          PlusProbe
+        >;
+
+        expect(tagOfFabricValue(value, isPlusType)).toBe(VALUE_TAGS.Object);
+        expect(asked).toEqual([]);
+      });
+
+      it("returns `PlusType` for a class instance the predicate accepts", () => {
+        expect(tagOfFabricValue(new PlusProbe(), isPlusProbe)).toBe(
+          VALUE_TAGS.PlusType,
+        );
+      });
+
+      it("returns `PlusType` for a function the predicate accepts", () => {
+        expect(tagOfFabricValue(() => {}, isPlusFn)).toBe(VALUE_TAGS.PlusType);
+      });
+
+      it("consults the predicate once, with the value itself, for a value the vocabulary does not name", () => {
+        const { asked, isPlusType } = recordingPredicate();
+        const value = new Date() as unknown as FabricValuePlusLayer<PlusProbe>;
+
+        expect(tagOfFabricValue(value, isPlusType)).toBe(VALUE_TAGS.PlusType);
+        expect(asked).toEqual([value]);
+      });
+
+      it("throws for a class instance the predicate refuses", () => {
+        const value = new Date() as unknown as FabricValuePlusLayer<PlusProbe>;
+
+        expect(() => tagOfFabricValue(value, isPlusProbe)).toThrow(
+          "Not possibly a valid `FabricValue`",
+        );
+      });
+
+      it("throws for a function the predicate refuses", () => {
+        const value = (() => {}) as unknown as FabricValuePlusLayer<PlusProbe>;
+
+        expect(() => tagOfFabricValue(value, isPlusProbe)).toThrow(
+          "Not possibly a valid `FabricValue`",
+        );
+      });
+
+      it("takes its `PlusType` and its return type from the predicate, in the type system", () => {
+        // Type-level only: nothing calls this function, so the refused calls
+        // never run.
+
+        function _typeOnly(
+          value: FabricValuePlus<PlusProbe>,
+          plain: FabricValue,
+        ): void {
+          // @ts-expect-error a plus value matches no overload without its predicate
+          tagOfFabricValue(value);
+          // @ts-expect-error the predicate must be for the value's own `PlusType`
+          tagOfFabricValue(value, isPlusFn);
+
+          const withPredicate = tagOfFabricValue(value, isPlusProbe);
+          const withoutPredicate = tagOfFabricValue(plain);
+          const _wide: Same<typeof withPredicate, FabricValuePlusTag> = true;
+          const _narrow: Same<typeof withoutPredicate, FabricValueTag> = true;
+        }
+      });
+    });
   });
 
   describe("tagOfFabricValueElseNull()", () => {
@@ -428,6 +609,85 @@ describe("tags", () => {
       expect(tagOfFabricValueElseNull(new NonPrimitiveTagProbe())).toBe(null);
       expect(tagOfFabricValueElseNull(new RoguePrimitive())).toBe(null);
     });
+
+    describe("given an `isPlusType` predicate", () => {
+      for (const [label, value, tag] of RECOGNIZED) {
+        it(`returns \`${tag}\` for ${label} without consulting the predicate`, () => {
+          const { asked, isPlusType } = recordingPredicate();
+
+          expect(tagOfFabricValueElseNull(value, isPlusType)).toBe(tag);
+          expect(asked).toEqual([]);
+        });
+      }
+
+      it("returns `Object` for a proxy over a plain object without consulting the predicate", () => {
+        const { asked, isPlusType } = recordingPredicate();
+        const value = new Proxy({ a: 1 }, {}) as FabricValuePlusLayer<
+          PlusProbe
+        >;
+
+        expect(tagOfFabricValueElseNull(value, isPlusType)).toBe(
+          VALUE_TAGS.Object,
+        );
+        expect(asked).toEqual([]);
+      });
+
+      it("returns `PlusType` for a class instance the predicate accepts", () => {
+        expect(tagOfFabricValueElseNull(new PlusProbe(), isPlusProbe)).toBe(
+          VALUE_TAGS.PlusType,
+        );
+      });
+
+      it("returns `PlusType` for a function the predicate accepts", () => {
+        expect(tagOfFabricValueElseNull(() => {}, isPlusFn)).toBe(
+          VALUE_TAGS.PlusType,
+        );
+      });
+
+      it("consults the predicate once, with the value itself, for a value the vocabulary does not name", () => {
+        const { asked, isPlusType } = recordingPredicate();
+        const value = new Date() as unknown as FabricValuePlusLayer<PlusProbe>;
+
+        expect(tagOfFabricValueElseNull(value, isPlusType)).toBe(
+          VALUE_TAGS.PlusType,
+        );
+        expect(asked).toEqual([value]);
+      });
+
+      it("returns `null` for a class instance the predicate refuses", () => {
+        const value = new Date() as unknown as FabricValuePlusLayer<PlusProbe>;
+
+        expect(tagOfFabricValueElseNull(value, isPlusProbe)).toBe(null);
+      });
+
+      it("returns `null` for a function the predicate refuses", () => {
+        const value = (() => {}) as unknown as FabricValuePlusLayer<PlusProbe>;
+
+        expect(tagOfFabricValueElseNull(value, isPlusProbe)).toBe(null);
+      });
+
+      it("takes its `PlusType` and its return type from the predicate, in the type system", () => {
+        // Type-level only: nothing calls this function, so the refused calls
+        // never run.
+
+        function _typeOnly(
+          value: FabricValuePlus<PlusProbe>,
+          plain: FabricValue,
+        ): void {
+          // @ts-expect-error a plus value matches no overload without its predicate
+          tagOfFabricValueElseNull(value);
+          // @ts-expect-error the predicate must be for the value's own `PlusType`
+          tagOfFabricValueElseNull(value, isPlusFn);
+
+          const withPredicate = tagOfFabricValueElseNull(value, isPlusProbe);
+          const withoutPredicate = tagOfFabricValueElseNull(plain);
+          const _wide: Same<typeof withPredicate, FabricValuePlusTag | null> =
+            true;
+          const _narrow: Same<typeof withoutPredicate, FabricValueTag | null> =
+            true;
+        }
+      });
+    });
   });
 
   describe("the fabric dispatch and the convertible-JS dispatch", () => {
@@ -451,6 +711,16 @@ describe("tags", () => {
       });
     }
 
+    for (const [label, value] of accepted) {
+      it(`tags ${label} without consulting an \`isPlusType\` predicate`, () => {
+        const { asked, isPlusType } = recordingPredicate();
+
+        expect(tagOfFabricValueElseNull(value as FabricValue, isPlusType))
+          .toBe(tagOfFabricValueElseNull(value as FabricValue));
+        expect(asked).toEqual([]);
+      });
+    }
+
     it("reaches values on both sides of membership", () => {
       expect(accepted.length).toBeGreaterThan(0);
       expect(refused.length).toBeGreaterThan(0);
@@ -466,6 +736,22 @@ describe("tags", () => {
 
     it("returns `null` for a function", () => {
       expect(tagOfConvertibleJsValueElseNull(() => {})).toBe(null);
+    });
+
+    it("returns `null` for a function whatever its prototype names", () => {
+      // The class switch is never reached by a function, so a prototype
+      // re-pointed at a recognized builtin's does not make one a builtin.
+
+      expect(
+        tagOfConvertibleJsValueElseNull(
+          Object.setPrototypeOf(() => {}, Map.prototype),
+        ),
+      ).toBe(null);
+      expect(
+        tagOfConvertibleJsValueElseNull(
+          Object.setPrototypeOf(() => {}, Date.prototype),
+        ),
+      ).toBe(null);
     });
 
     it("returns `JsError` tag for standard `Error` subclasses", () => {
@@ -494,6 +780,23 @@ describe("tags", () => {
       // Recognized at the value level: `Error.isError()` reads the internal
       // slot, so an `Error` subclass is tagged before any class is read.
       expect(tagOfConvertibleJsValueElseNull(exotic)).toBe(VALUE_TAGS.JsError);
+    });
+
+    it("returns `JsError` tag for an `Error` whatever its prototype names", () => {
+      // `Error.isError()` reads the internal slot and is asked before the
+      // prototype is, so neither a plain object's prototype nor a recognized
+      // builtin's changes the answer.
+
+      expect(
+        tagOfConvertibleJsValueElseNull(
+          Object.setPrototypeOf(new Error("x"), Object.prototype),
+        ),
+      ).toBe(VALUE_TAGS.JsError);
+      expect(
+        tagOfConvertibleJsValueElseNull(
+          Object.setPrototypeOf(new Error("x"), Map.prototype),
+        ),
+      ).toBe(VALUE_TAGS.JsError);
     });
 
     it("returns `JsError` tag for an `Error` whose prototype was severed", () => {

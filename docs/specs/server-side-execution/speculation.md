@@ -94,7 +94,11 @@ currency. The existing overlay and retirement rules below still apply.
   identity — a session-blind recomputation would misread "inputs
   changed" for every such node.
 - `navigate-to`: may enact optimistically (protocol.md §5) — navigation
-  is reversible. The overlay records the nonce it acted on. When the
+  is reversible. The overlay records the nonce it acted on, and stands
+  aside when that nonce is already recorded: the authoritative intent
+  reached the channel and enacted before this speculative run sealed,
+  which is the ordering whenever the served round trip beats the
+  client's own run of the same handler. When the
   AUTHORITATIVE run's branch computes NO navigation (a speculative read
   diverged — the 2026-08-27 r06/r09 root cause, register OW45), the
   optimistic enactment STANDS: ruled PUNT (owner, 2026-08-27) — the
@@ -646,9 +650,15 @@ handlers its graph installed, so the next send to one of those
 streams finds no handler and the scheduler drops the event. A list
 that grows by handler sends stops growing, one send at a time, with
 no error anywhere near the send. Reading durably is what keeps that
-commit exportable. The mark covers only the transaction the runner
-mints for itself; a start handed a caller's transaction keeps that
-caller's read semantics.
+commit exportable. The mark covers a transaction the runner mints
+for itself; a start handed a caller's transaction keeps that
+caller's read semantics. A start that waits for a piece's
+execution family mints a SECOND transaction once that family
+lands, and that one carries the mark when the transaction it
+continues did — the view the start read before the wait is the
+view it commits against after. Without it a standing echo over
+the child's argument enters the authored commit's basis, and the
+refusal above takes the child's registration with it.
 
 One retirement wake completes the ruling's "fix infinitely stuck
 things" half (§4's evaluation detail): a sweep that runs while an

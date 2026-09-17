@@ -1,8 +1,12 @@
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { decodeBase64 } from "@std/encoding/base64";
+import { expect } from "@std/expect";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import type { CfcLabelView, CfcSandboxResult } from "@commonfabric/runner/cfc";
+
 import { createHarnessCfcInvocationContext } from "../src/contracts/cfc-invocation-context.ts";
 import type {
   HarnessAllowedSkillScript,
@@ -228,6 +232,7 @@ const createContext = (
   skillScriptExecutionTarget: HarnessToolContext["skillScriptExecutionTarget"] =
     "sandbox",
   browserAccess?: HarnessBrowserAccessLease,
+  allowSkillScripts = false,
 ): HarnessToolContext => {
   let currentDir = initialCurrentDir;
   let sequence = 0;
@@ -238,6 +243,7 @@ const createContext = (
     workspaceHostPath,
     skillRegistry,
     skillActivations,
+    allowSkillScripts,
     allowedSkillScripts,
     skillScriptExecutionTarget,
     browserAccess,
@@ -1740,6 +1746,141 @@ Deno.test("read_file tool denies reserved artifact paths before shelling out", a
   assertEquals(sandbox.calls, []);
 });
 
+describe("readSkillResourceTool", () => {
+  const skillContent = [
+    "---",
+    "name: pattern-dev",
+    "description: Build Common Fabric patterns",
+    "---",
+    "",
+    "# Pattern Dev",
+    "Build a café menu.",
+  ].join("\n");
+  let root: string;
+  let skillPath: string;
+  let registry: HarnessSkillRegistry;
+  let reads: HarnessSkillResourceRead[];
+  let context: HarnessToolContext;
+
+  beforeEach(async () => {
+    root = await Deno.makeTempDir({ prefix: "cf-harness-skill-body-" });
+    skillPath = join(root, "pattern-dev", "SKILL.md");
+    await Deno.mkdir(join(root, "pattern-dev"));
+    await Deno.writeTextFile(skillPath, skillContent);
+    registry = await discoverHarnessSkills({
+      skillsRoot: root,
+      sandboxSkillsRoot: "/workspace/labs/skills",
+    });
+    reads = [];
+    context = createContext(
+      new FakeSandboxRuntime(),
+      "/workspace",
+      new FakeProcessRunner(),
+      "observe",
+      undefined,
+      registry,
+      reads,
+    );
+  });
+
+  afterEach(async () => {
+    await Deno.remove(root, { recursive: true });
+  });
+
+  it("returns the registered skill's `SKILL.md` as context with read provenance", async () => {
+    const output = await readSkillResourceTool.invoke(context, {
+      skill: "pattern-dev",
+      path: "SKILL.md",
+    });
+
+    expect(output).toMatchObject({
+      status: "read",
+      path: "SKILL.md",
+      kind: "other",
+      content: skillContent,
+      contentKind: "text",
+      cfcPromptRole: "context",
+      sandboxResourcePath: "/workspace/labs/skills/pattern-dev/SKILL.md",
+      registryDigest: registry.skills[0].digest,
+      observedDigest: registry.skills[0].digest,
+      registrySizeBytes: new TextEncoder().encode(skillContent).length,
+      digestMatchesRegistry: true,
+      truncated: false,
+      diagnostics: [],
+    });
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatchObject({
+      outputId: output.outputId,
+      skillName: "pattern-dev",
+      path: "SKILL.md",
+      status: "read",
+      cfcPromptRole: "context",
+      observedDigest: registry.skills[0].digest,
+    });
+  });
+
+  it("returns changed `SKILL.md` content with a snapshot mismatch diagnostic", async () => {
+    const content = `${skillContent}\nList the available pastries.\n`;
+    await Deno.writeTextFile(skillPath, content);
+
+    const output = await readSkillResourceTool.invoke(context, {
+      skill: "pattern-dev",
+      path: "SKILL.md",
+    });
+
+    expect(output.status).toBe("read");
+    expect(output.content).toBe(content);
+    expect(output.registryDigest).toBe(registry.skills[0].digest);
+    expect(output.digestMatchesRegistry).toBe(false);
+    expect(output.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+      "skill-resource-snapshot-mismatch",
+    ]);
+    expect(reads).toHaveLength(1);
+    expect(reads[0].digestMatchesRegistry).toBe(false);
+  });
+
+  it("returns `SKILL.md` when supporting files exhaust the resource scan budget", async () => {
+    const referencesPath = join(root, "pattern-dev", "references");
+    await Deno.mkdir(referencesPath);
+    for (let index = 0; index < 2000; index += 1) {
+      await Deno.writeTextFile(
+        join(referencesPath, `${index}.md`),
+        "Supporting guidance.",
+      );
+    }
+    const largeRegistry = await discoverHarnessSkills({ skillsRoot: root });
+
+    const output = await readSkillResourceTool.invoke(
+      { ...context, skillRegistry: largeRegistry },
+      { skill: "pattern-dev", path: "SKILL.md" },
+    );
+
+    expect(output.status).toBe("read");
+    expect(output.content).toBe(skillContent);
+    expect(largeRegistry.skills[0].resources).toHaveLength(2000);
+    expect(largeRegistry.skills[0].diagnostics.map(({ code }) => code))
+      .toContain("resource-file-limit-exceeded");
+  });
+
+  it("returns `resource_outside_root` when `SKILL.md` becomes a symlink outside its skill directory", async () => {
+    const outsidePath = join(root, "outside.md");
+    await Deno.writeTextFile(outsidePath, "Outside the registered skill.");
+    await Deno.remove(skillPath);
+    await Deno.symlink(outsidePath, skillPath);
+
+    const output = await readSkillResourceTool.invoke(context, {
+      skill: "pattern-dev",
+      path: "SKILL.md",
+    });
+
+    expect(output.status).toBe("error");
+    expect(output.error?.code).toBe("resource_outside_root");
+    expect(output.content).toBeUndefined();
+    expect(reads).toHaveLength(1);
+    expect(reads[0].error?.code).toBe("resource_outside_root");
+  });
+});
+
 Deno.test({
   name:
     "read_skill_resource reads indexed text resources and records provenance",
@@ -2757,10 +2898,65 @@ Deno.test({
         { skill: "pattern-test", path: "scripts/check.ts" },
       );
 
+      // The operator's one switch reaches a registry script too: no entry
+      // names this one, and with the switch on it is no longer refused as
+      // un-allowlisted. It is still held to the run-start digest, which this
+      // file no longer matches — so the switch decides whether scripts run,
+      // and decides nothing about which bytes.
+      const allowedByTheSwitch = await runSkillScriptTool.invoke(
+        createContext(
+          new FakeSandboxRuntime(),
+          "/workspace",
+          new FakeProcessRunner(),
+          "observe",
+          undefined,
+          registry,
+          [],
+          "/tmp/cf-harness-workspace",
+          activations,
+          [],
+          [],
+          "sandbox",
+          undefined,
+          true,
+        ),
+        { skill: "pattern-test", path: "scripts/check.ts" },
+      );
+
       assertEquals(notActivated.status, "error");
       assertEquals(notActivated.error?.code, "skill_activations_missing");
       assertEquals(notAllowlisted.status, "error");
       assertEquals(notAllowlisted.error?.code, "script_not_allowlisted");
+      // The switch is about the sandbox, so a host-target run is still held to
+      // an exactly-named script: it must not open host execution to every
+      // activated script on the strength of a decision that never said host.
+      const hostUnderTheSwitch = await runSkillScriptTool.invoke(
+        createContext(
+          new FakeSandboxRuntime(),
+          "/workspace",
+          new FakeProcessRunner(),
+          "observe",
+          undefined,
+          registry,
+          [],
+          "/tmp/cf-harness-workspace",
+          activations,
+          [],
+          [],
+          "host",
+          undefined,
+          true,
+        ),
+        { skill: "pattern-test", path: "scripts/check.ts" },
+      );
+
+      assertEquals(allowedByTheSwitch.status, "error");
+      assertEquals(
+        allowedByTheSwitch.error?.code,
+        "script_snapshot_mismatch",
+      );
+      assertEquals(hostUnderTheSwitch.status, "error");
+      assertEquals(hostUnderTheSwitch.error?.code, "script_not_allowlisted");
       assertEquals(drift.status, "error");
       assertEquals(drift.error?.code, "script_snapshot_mismatch");
       assertEquals(drift.digestMatchesRegistry, false);

@@ -1,9 +1,10 @@
 import {
-  type FabricArray,
-  type FabricContainerValue,
-  FabricInstance,
-  type FabricPlainObject,
+  type FabricArrayPlus,
+  type FabricContainerValuePlus,
+  type FabricInstancePlus,
+  type FabricPlainObjectPlus,
   type FabricValue,
+  type FabricValuePlus,
 } from "@/interface.ts";
 
 import { BaseValueVisitor } from "./BaseValueVisitor.ts";
@@ -11,7 +12,6 @@ import {
   type BaselineVisitResult,
   type DispatchingVisitorResult,
   DO_RECURSE_VALUES,
-  type DomainFor,
   type LeafVisitorResult,
 } from "./interface.ts";
 
@@ -26,59 +26,59 @@ import {
  * The implementation includes a definition for all container-specific
  * `visit*()` methods, which all return `DO_RECURSE_VALUES` (per the above
  * description), and also implements no-op (empty) `visited*()` methods. Every
- * other method of the interface remains `abstract`. The `visit*()` method
- * implementations are intended to make it easy to override implementations
- * selectively, by overriding `visitFabricContainer()` to return
+ * other method of the interface is left as defined by `BaseValueVisitor`. The
+ * `visit*()` method implementations are intended to make it easy to override
+ * implementations selectively, by overriding `visitFabricContainer()` to return
  * `DO_VISIT_SUBTYPE` and then whatever specific subtypes need to be altered.
  */
 export abstract class RecursiveValueVisitor<
-  DomainExtra = never,
+  PlusType = never,
   ResultType = FabricValue,
-> extends BaseValueVisitor<DomainExtra, ResultType> {
+> extends BaseValueVisitor<PlusType, ResultType> {
   //
   // Instance members
   //
 
   /** @inheritDoc */
-  visitFabricArray(
-    _value: FabricArray,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
+  override visitFabricArray(
+    _value: FabricArrayPlus<PlusType>,
+  ): LeafVisitorResult<PlusType, ResultType> {
     return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
-  visitFabricInstance(
-    _value: FabricInstance,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
+  override visitFabricInstance(
+    _value: FabricInstancePlus<PlusType>,
+  ): LeafVisitorResult<PlusType, ResultType> {
     return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
-  visitFabricPlainObject(
-    _value: FabricPlainObject,
-  ): LeafVisitorResult<DomainExtra, ResultType> {
+  override visitFabricPlainObject(
+    _value: FabricPlainObjectPlus<PlusType>,
+  ): LeafVisitorResult<PlusType, ResultType> {
     return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
-  visitFabricContainer(
-    _value: FabricContainerValue,
-  ): DispatchingVisitorResult<DomainExtra, ResultType> {
+  override visitFabricContainer(
+    _value: FabricContainerValuePlus<PlusType>,
+  ): DispatchingVisitorResult<PlusType, ResultType> {
     return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
-  visitedFabricArrayElement(
-    _array: FabricArray,
+  override visitedFabricArrayElement(
+    _array: FabricArrayPlus<PlusType>,
     _index: number,
-    _value: DomainFor<DomainExtra>,
+    _value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
-  visitedFabricArrayGap(
-    _array: FabricArray,
+  override visitedFabricArrayGap(
+    _array: FabricArrayPlus<PlusType>,
     _start: number,
     _count: number,
   ): BaselineVisitResult<ResultType> {
@@ -86,18 +86,18 @@ export abstract class RecursiveValueVisitor<
   }
 
   /** @inheritDoc */
-  visitedFabricInstance(
-    _instance: FabricInstance,
-    _state: FabricValue,
+  override visitedFabricInstance(
+    _instance: FabricInstancePlus<PlusType>,
+    _state: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType> {
     return undefined;
   }
 
   /** @inheritDoc */
-  visitedFabricPlainObjectEntry(
-    _container: FabricPlainObject,
-    _key: DomainFor<DomainExtra>,
-    _value: DomainFor<DomainExtra>,
+  override visitedFabricPlainObjectEntry(
+    _container: FabricPlainObjectPlus<PlusType>,
+    _key: FabricValuePlus<PlusType>,
+    _value: FabricValuePlus<PlusType>,
   ): BaselineVisitResult<ResultType> {
     return undefined;
   }

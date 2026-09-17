@@ -438,6 +438,10 @@ Deno.test({
           runId: "run-loop-persisted",
           model: "gpt-5.4",
           skillsRoot: fixture.skillsRoot,
+          // Read back off the persisted snapshot below: the operator's switch
+          // has to survive the whole `engine.config` to run-state path, not
+          // only the projection that builds the snapshot object.
+          allowSkillScripts: true,
           // The policy-snapshot comparison below reads this rung and its
           // source back, and the run reads a file, which a rung above this
           // one refuses without direct-command authorization.
@@ -555,6 +559,10 @@ Deno.test({
         absenceBehavior: "fail-closed-if-absent",
         substrateStatus: "not-attested",
       });
+      assertEquals(persistedPolicySnapshot.skillScripts, {
+        allowSkillScripts: true,
+        allowedScripts: [],
+      });
       assertEquals(persistedPolicySnapshot.runManifest, { present: false });
       assertEquals(persistedPolicySnapshot.promptSlot, {
         present: false,
@@ -571,6 +579,7 @@ Deno.test({
           "write_file",
           "delegate_task",
           "describe_handle",
+          "finish_task",
           "research",
         ],
       });
@@ -721,7 +730,7 @@ Deno.test({
         {
           model: "gpt-5.4",
           messageCount: 1,
-          toolCount: 9,
+          toolCount: 10,
         },
       );
       assert(

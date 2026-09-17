@@ -3112,7 +3112,7 @@ describe("cell-bridge", () => {
                 symbol: "default",
                 source: {
                   ref: `cf:pattern:${"A".repeat(43)}`,
-                  repository: "https://github.com/commontoolsinc/labs",
+                  repository: "https://github.com/commonfabric/labs",
                   entry: "/notes/note.tsx",
                 },
               }),
@@ -3144,7 +3144,7 @@ describe("cell-bridge", () => {
             symbol: "default",
             source: {
               ref: `cf:pattern:${"A".repeat(43)}`,
-              repository: "https://github.com/commontoolsinc/labs",
+              repository: "https://github.com/commonfabric/labs",
               entry: "/notes/note.tsx",
             },
           });
@@ -5103,7 +5103,7 @@ describe("cell-bridge", () => {
             symbol: "default",
             source: {
               ref: `cf:pattern:${"A".repeat(43)}`,
-              repository: "https://github.com/commontoolsinc/labs",
+              repository: "https://github.com/commonfabric/labs",
               entry: "/notes/note.tsx",
             },
           };
@@ -5142,7 +5142,7 @@ describe("cell-bridge", () => {
             symbol: "default",
             source: {
               ref: `cf:pattern:${"B".repeat(43)}`,
-              repository: "https://github.com/commontoolsinc/labs",
+              repository: "https://github.com/commonfabric/labs",
               entry: "/notes/note.tsx",
             },
           };
@@ -5171,7 +5171,7 @@ describe("cell-bridge", () => {
             ...patternRef,
             source: {
               ...patternRef.source,
-              repository: "https://github.com/commontoolsinc/another-repo",
+              repository: "https://github.com/commonfabric/another-repo",
             },
           };
           const repositoryRefreshed = defer();

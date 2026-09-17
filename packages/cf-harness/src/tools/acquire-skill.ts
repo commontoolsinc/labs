@@ -92,7 +92,7 @@ export const acquireSkillToolDescriptor: HarnessToolDescriptor = {
   toolId: "acquire_skill",
   title: "Acquire Skill",
   description:
-    "Acquire a discovered skill id from its pinned GitHub commit after checking the complete recursive listing. The parent never receives skill text: a loaded result carries a handle only. A refusal is an expected outcome with its reason and offending paths as inert metadata; do not retry around it. Acquisition grants no permission and loads nothing into the parent. Loading the handle into a child is a separate later delegate_task decision.",
+    "Acquire a skill by its exact id, from the commit its repository's default branch points at, after checking the complete recursive listing. The id need not appear in search_skills results: a skill can be real and unlisted, so a search that does not return it is not evidence it does not exist, and an id a person named is acquired by that id rather than searched for first. The parent never receives skill text: a loaded result carries a handle only. A refusal is an expected outcome with its reason and offending paths as inert metadata; do not retry around it. Acquisition grants no permission and loads nothing into the parent. Loading the handle into a child is a separate later delegate_task decision.",
   effectClass: "write",
   inputSchema: {
     type: "object",
@@ -100,7 +100,7 @@ export const acquireSkillToolDescriptor: HarnessToolDescriptor = {
       id: {
         type: "string",
         description:
-          "Exact discovery id returned by search_skills, in owner/repository/slug form.",
+          "An exact skill id in owner/repository/slug form. It names a skill directly: search_skills is one way to find one, and this tool does not require the id to have come from it. An id a person gave you is acquired by that id.",
       },
     },
     required: ["id"],

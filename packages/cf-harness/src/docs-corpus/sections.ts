@@ -68,12 +68,19 @@ export const splitMarkdownSections = (
 ): readonly HarnessDocsCorpusSection[] => {
   const sections: HarnessDocsCorpusSection[] = [];
   let heading = "";
+  let documentTitle = "";
+  let ancestors: { level: number; title: string }[] = [];
   let lines: string[] = [];
   let inFence = false;
   const flush = () => {
     const text = sectionText(lines);
     if (text.length > 0) {
-      sections.push({ ...document, heading, text });
+      sections.push({
+        ...document,
+        heading,
+        headingPath: ancestors.map((entry) => entry.title),
+        text,
+      });
     }
     lines = [];
   };
@@ -91,9 +98,16 @@ export const splitMarkdownSections = (
     }
     flush();
     heading = match[2].trim();
+    const level = match[1].length;
+    if (level === 1 && documentTitle.length === 0) documentTitle = heading;
+    ancestors = ancestors.filter((entry) => entry.level < level);
+    ancestors.push({ level, title: heading });
   }
   flush();
-  return sections;
+  return sections.map((section) => ({
+    ...section,
+    documentTitle: documentTitle || document.path,
+  }));
 };
 
 /** The scoring terms of a question, lowercased and stripped of stop words. */
@@ -126,7 +140,8 @@ export const scoreSection = (
   section: HarnessDocsCorpusSection,
   terms: readonly string[],
 ): number => {
-  const heading = section.heading.toLowerCase();
+  const heading = (section.headingPath?.join(" > ") ?? section.heading)
+    .toLowerCase();
   const path = section.path.toLowerCase();
   const body = section.text.toLowerCase();
   let score = 0;
@@ -168,4 +183,90 @@ export const rankSections = (
       utf8Compare(left.section.path, right.section.path) ||
       utf8Compare(left.section.heading, right.section.heading)
     );
+};
+
+/** Exact excerpt around the passage matching the most distinct query terms. */
+export interface DocsPassage {
+  /** Character offset in the section text. */
+  offset: number;
+
+  /** Exclusive end of the excerpt. */
+  end: number;
+
+  /** Verbatim section text at these offsets. */
+  content: string;
+}
+
+/** Groups paragraphs and fenced examples into exact contiguous text ranges. */
+const markdownBlocks = (text: string): { offset: number; end: number }[] => {
+  const blocks: { offset: number; end: number }[] = [];
+  let offset = 0;
+  let start = 0;
+  let fence: string | undefined;
+  for (const line of text.split("\n")) {
+    const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence === undefined && marker !== undefined) {
+      if (offset > start) blocks.push({ offset: start, end: offset });
+      start = offset;
+      fence = marker;
+    } else if (
+      fence !== undefined && marker?.[0] === fence[0] &&
+      marker.length >= fence.length
+    ) {
+      blocks.push({ offset: start, end: offset + line.length });
+      start = offset + line.length + 1;
+      fence = undefined;
+    } else if (fence === undefined && line.trim().length === 0) {
+      if (offset > start) blocks.push({ offset: start, end: offset });
+      start = offset + 1;
+    }
+    offset += line.length + 1;
+  }
+  if (start < text.length) blocks.push({ offset: start, end: text.length });
+  return blocks;
+};
+
+/**
+ * Finds a query-bearing passage inside a section, including matches far beyond
+ * its opening. Short paragraphs and fenced examples remain whole when they
+ * fit in the requested window; longer passages retain exact continuation offsets.
+ */
+export const findSectionPassage = (
+  section: HarnessDocsCorpusSection,
+  query: string,
+  maxChars = 1_600,
+): DocsPassage => {
+  const text = section.text;
+  const lower = text.toLowerCase();
+  const terms = questionTerms(query);
+  const positions = new Set<number>([0]);
+  for (const term of terms) {
+    let position = lower.indexOf(term);
+    while (position !== -1) {
+      positions.add(Math.max(0, position - 240));
+      position = lower.indexOf(term, position + term.length);
+    }
+  }
+  let offset = 0;
+  let best = -1;
+  for (const position of positions) {
+    const window = lower.slice(position, position + maxChars);
+    const score = terms.filter((term) => window.includes(term)).length;
+    if (score > best) {
+      best = score;
+      offset = position;
+    }
+  }
+  const firstMatch = Math.min(...terms.map((term) => {
+    const at = lower.indexOf(term, offset);
+    return at < 0 ? Infinity : at;
+  }));
+  const block = markdownBlocks(text).find((range) =>
+    range.offset <= firstMatch && firstMatch < range.end
+  );
+  if (block !== undefined && block.end - block.offset <= maxChars) {
+    return { ...block, content: text.slice(block.offset, block.end) };
+  }
+  const end = Math.min(text.length, offset + maxChars);
+  return { offset, end, content: text.slice(offset, end) };
 };

@@ -5,16 +5,16 @@
  * stay apart — including the pair that a payload field named `value` produces,
  * whose canonical path still opens with the element canonicalization strips.
  *
- * Only `canonicalizePreparedDigestInput`'s handling of `dereferenceTraces` is
- * in scope. Each other field of the digest input is covered alongside the gate
- * that depends on it, the write-attempt log's ordering in
- * `cfc-write-prefix-provenance.test.ts` among them.
+ * Policy inputs retain their structural hash tiebreak order and bind mutable
+ * values independently on each call. Other digest fields are covered beside
+ * their gates, including temporal writes in cfc-write-prefix-provenance.test.ts.
  */
 
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
+import { hashStringOf } from "@commonfabric/data-model";
 
 import {
   canonicalizePreparedDigestInput,
@@ -56,6 +56,30 @@ describe("canonical", () => {
 
   const digestOf = (traces: CfcDereferenceTrace[]) =>
     preparedDigestFor(baseInput({ dereferenceTraces: traces }));
+
+  it("preserves hash-tiebreak order and value binding across mutable policy inputs", () => {
+    const inputs = Array.from({ length: 40 }, (_, index) => ({
+      kind: "custom" as const,
+      name: "same-primary-key",
+      value: { index, payload: `value-${index}` },
+    }));
+    const input = baseInput({ writePolicyInputs: inputs });
+    const expected = () =>
+      [...inputs].sort((left, right) => {
+        const a = hashStringOf(left);
+        const b = hashStringOf(right);
+        return a < b ? -1 : a > b ? 1 : 0;
+      });
+    expect(canonicalizePreparedDigestInput(input).writePolicyInputs).toEqual(
+      expected(),
+    );
+    const before = preparedDigestFor(input);
+    inputs[0].value.payload = "changed";
+    expect(canonicalizePreparedDigestInput(input).writePolicyInputs).toEqual(
+      expected(),
+    );
+    expect(preparedDigestFor(input)).not.toBe(before);
+  });
 
   describe("dereference traces in the prepared digest", () => {
     const hop = trace(address("board"), address("row"));

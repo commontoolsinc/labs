@@ -1283,6 +1283,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       "write_file",
       "delegate_task",
       "describe_handle",
+      "finish_task",
       "research",
     ],
   );
@@ -1386,17 +1387,12 @@ describe("CfHarnessPromptLoop research handoff", () => {
                   status: "incomplete",
                   summary:
                     "The handle contract did:key:zResearchText is known, but semantics remain.",
-                  recommendation: {
-                    kind: "author",
-                    rationale: "Author against the described input shape.",
-                  },
                   inputs: [{
                     name: "mail",
                     token: minted.token,
                     purpose: "Read message metadata",
                   }],
                   selectedPatternIds: [],
-                  steps: ["Bind the opaque handle without materializing it."],
                   example: {
                     kind: "pattern-source",
                     content: "export default ({ mail }) => mail;",
@@ -1406,7 +1402,6 @@ describe("CfHarnessPromptLoop research handoff", () => {
                     rule: "Describe a handle before binding it.",
                     sourceIds: [sourceId],
                   }],
-                  verification: ["Type-check the authored pattern."],
                   sourceIds: [sourceId],
                   missing: [
                     "The task's filtering semantics remain unresolved.",
@@ -1430,6 +1425,7 @@ describe("CfHarnessPromptLoop research handoff", () => {
                       name: "research",
                       arguments: JSON.stringify({
                         task: `Build a reader around ${minted.token}`,
+                        purpose: "answer",
                       }),
                     },
                   }],
@@ -2184,16 +2180,11 @@ describe("CfHarnessPromptLoop opening research", () => {
                   status: "incomplete",
                   summary:
                     "The task did:key:zOpeningText needs more exact evidence.",
-                  recommendation: {
-                    kind: "focused-api",
-                    rationale:
-                      "Resolve the remaining contract before implementation.",
-                  },
                   inputs: [],
                   selectedPatternIds: [],
-                  steps: [],
+                  leads: [],
+                  questions: ["Which counter contract fits?"],
                   rules: [],
-                  verification: [],
                   sourceIds: [],
                   missing: ["an exact implementation contract"],
                 }),
@@ -2268,16 +2259,31 @@ describe("CfHarnessPromptLoop opening research", () => {
       expect(result.runState.openingResearch?.status).toBe("completed");
       expect(result.runState.openingResearch?.outputId).toBe(openingOutputId);
       expect(result.runState.researchRuns).toHaveLength(1);
+      expect(result.runState.researchRuns?.[0]?.kit.purpose).toBe("orient");
+      expect(result.runState.researchRuns?.[0]?.kit).not.toHaveProperty(
+        "example",
+      );
       const openingCfc = result.runState.researchRuns?.[0]?.cfc;
       expect(openingCfc?.coverage).toBe("complete");
       expect(openingCfc?.missingLabels).toEqual([]);
-      expect(openingCfc?.sourceLabel.integrity).toBeUndefined();
+      expect(openingCfc?.sourceLabel.integrity).toEqual([
+        expect.objectContaining({
+          class: "CommonFabricHarnessOperatorProvisionedReference",
+          subject: expect.stringMatching(/\/docs\/common$/),
+        }),
+        expect.objectContaining({
+          class: "CommonFabricHarnessOperatorProvisionedReference",
+          subject: expect.stringMatching(/\/skills$/),
+        }),
+      ]);
       expect(openingCfc?.sourceLabel.confidentiality).toHaveLength(1);
       expect(
         (openingCfc?.sourceLabel.confidentiality?.[0] as { type?: string })
           ?.type,
       ).toBe(CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE);
-      expect(openingCfc?.outputLabel).toEqual(openingCfc?.sourceLabel);
+      expect(openingCfc?.outputLabel).toEqual({
+        confidentiality: openingCfc?.sourceLabel.confidentiality,
+      });
       expect(result.runState.cfcModelContext?.observations).toEqual([
         expect.objectContaining({
           toolCallId: `opening-research:${runId}`,
@@ -3734,6 +3740,7 @@ Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surfac
       "run_pattern",
       "assign_slug",
       "describe_handle",
+      "finish_task",
       "research",
     ],
   );
@@ -3762,6 +3769,37 @@ Deno.test("CfHarnessPromptLoop advertises run_pattern from an explicit allowlist
   assertEquals(
     chatViewOfRequest(request).tools.map((name) => name),
     ["read_file", "run_pattern"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop drops a subagent-only tool from a parent's explicit allowlist", async () => {
+  // A parent surface is named from three places — a CLI flag, an interactive
+  // client's chat policy, and any library caller — and each validates against
+  // the tools this build defines. This loop is the one boundary all three pass
+  // through, so a subagent-only tool asked for here is what the rule has to
+  // stop; the run has a fabric session, which is what would otherwise back it.
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "read_piece_source", "revise_piece"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "piece-source-parent-allowlist",
+      model: "gpt-5.4",
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file"],
   );
 });
 
@@ -3903,6 +3941,7 @@ Deno.test("CfHarnessPromptLoop advertises the pattern-index tools in the default
       "run_pattern",
       "assign_slug",
       "describe_handle",
+      "finish_task",
       "search_patterns",
       "record_feedback",
       "research",
@@ -4061,6 +4100,8 @@ Deno.test("CfHarnessPromptLoop withholds the pattern-index tools from the patter
     "read_skill_resource",
     "describe_handle",
     "run_pattern",
+    "read_piece_source",
+    "revise_piece",
     "research",
   ]);
 });
@@ -4360,6 +4401,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
       "write_file",
       "delegate_task",
       "describe_handle",
+      "finish_task",
       "research",
     ],
   );
@@ -5244,6 +5286,7 @@ Deno.test("CfHarnessPromptLoop keeps browser unavailable to the parent by defaul
       "write_file",
       "delegate_task",
       "describe_handle",
+      "finish_task",
       "research",
     ],
   );

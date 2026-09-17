@@ -1,4 +1,5 @@
 import { hashStringOf } from "@commonfabric/data-model";
+import { getLogger } from "@commonfabric/utils/logger";
 import type { CfcConfClause } from "./clause.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type {
@@ -198,6 +199,7 @@ const compareLabelMetadataObservation = (
 const compareWritePolicyInput = (
   left: WritePolicyInput,
   right: WritePolicyInput,
+  hashInput: (input: WritePolicyInput) => string,
 ): number => {
   if (left.kind < right.kind) return -1;
   if (left.kind > right.kind) return 1;
@@ -231,8 +233,8 @@ const compareWritePolicyInput = (
     }
   }
   if (primary !== 0) return primary;
-  const leftHash = hashStringOf(left);
-  const rightHash = hashStringOf(right);
+  const leftHash = hashInput(left);
+  const rightHash = hashInput(right);
   return leftHash < rightHash ? -1 : leftHash > rightHash ? 1 : 0;
 };
 
@@ -407,6 +409,24 @@ export const canonicalizeCfcMetadata = (
   },
 });
 
+/** Canonicalizes policy records and hashes each tied sort key at most once. */
+const canonicalizeWritePolicyInputs = (
+  inputs: readonly WritePolicyInput[],
+): WritePolicyInput[] => {
+  const hashes = new Map<WritePolicyInput, string>();
+  const hashInput = (input: WritePolicyInput): string => {
+    let digest = hashes.get(input);
+    if (digest === undefined) {
+      digest = hashStringOf(input);
+      hashes.set(input, digest);
+    }
+    return digest;
+  };
+  return inputs.map(canonicalizeWritePolicyInput).sort((left, right) =>
+    compareWritePolicyInput(left, right, hashInput)
+  );
+};
+
 export const canonicalizePreparedDigestInput = (
   input: PreparedDigestInput,
 ): PreparedDigestInput => ({
@@ -458,9 +478,7 @@ export const canonicalizePreparedDigestInput = (
     ),
     compareDereferenceTrace,
   ),
-  writePolicyInputs: [...input.writePolicyInputs].map(
-    canonicalizeWritePolicyInput,
-  ).sort(compareWritePolicyInput),
+  writePolicyInputs: canonicalizeWritePolicyInputs(input.writePolicyInputs),
   implementationIdentity: input.implementationIdentity,
   trustSnapshot: input.trustSnapshot,
   ...(input.moduleDelegations !== undefined &&
@@ -524,5 +542,14 @@ export const canonicalizePreparedDigestInput = (
     : {}),
 });
 
-export const preparedDigestFor = (input: PreparedDigestInput): string =>
-  hashStringOf(canonicalizePreparedDigestInput(input));
+const cfcLogger = getLogger("cfc", { enabled: false });
+
+/** Hashes canonical preparation inputs and records the digest span. */
+export const preparedDigestFor = (input: PreparedDigestInput): string => {
+  const started = performance.now();
+  try {
+    return hashStringOf(canonicalizePreparedDigestInput(input));
+  } finally {
+    cfcLogger.time(started, "preparedDigestFor");
+  }
+};

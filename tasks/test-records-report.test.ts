@@ -46,7 +46,7 @@ function contextOn(startedAt: string): RunContext {
     schema: 1,
     line: "context",
     reportId: "01REPORTTEST000000000000",
-    repo: "commontoolsinc/labs",
+    repo: "commonfabric/labs",
     commit: "c".repeat(40),
     dirty: false,
     env: "local",
@@ -76,6 +76,44 @@ describe("test-records-report", () => {
         skips: 0,
         maxDurationMs: 90,
       });
+    });
+
+    it("leaves out a lane's measurements of itself", () => {
+      // A lane's own measurements are not test surfaces: nothing
+      // enumerates them and no lane can be asked to run one. Only the
+      // first of the three a lane writes per batch is a duration at all
+      // — the second says what the packer expected the batch's tests to
+      // take, and the third counts the units it opened — so an aggregate
+      // that took them would report the worst duration of something that
+      // never ran.
+      const byIdentity = aggregate([
+        report("a", [
+          record("glaze", "pass", 10),
+          {
+            line: "record",
+            test: { k: "gate", s: "ci", n: "ci-lane batch runner-unit" },
+            outcome: "pass",
+            durationMs: 252_500,
+          },
+          {
+            line: "record",
+            test: {
+              k: "gate",
+              s: "ci",
+              n: "ci-lane planned batch runner-unit",
+            },
+            outcome: "pass",
+            durationMs: 60_600,
+          },
+          {
+            line: "record",
+            test: { k: "gate", s: "ci", n: "ci-lane units batch runner-unit" },
+            outcome: "pass",
+            durationMs: 338,
+          },
+        ]),
+      ]);
+      expect([...byIdentity.keys()]).toEqual(['["unit","bakery","glaze"]']);
     });
 
     it("joins a renamed test's history under its current name", () => {
@@ -179,7 +217,7 @@ describe("test-records-report", () => {
   describe("runReport()", () => {
     const NOW = Date.parse("2026-08-18T12:00:00Z");
 
-    // One day's listing with two objects: a trusted report and a
+    // One day's listing with two objects: a same-repository report and a
     // fork-authored one carrying an over-sixty-seconds record.
     function reportFetch(bodies: Record<string, string>): typeof fetch {
       return ((input: URL | RequestInfo) => {
@@ -221,7 +259,10 @@ describe("test-records-report", () => {
         records.map((entry) => JSON.stringify(entry)).join("\n") + "\n";
     }
 
-    it("excludes fork-authored reports from the ratchet", async () => {
+    it("fails the gate for an over-sixty-seconds record from a fork run", async () => {
+      // See `docs/specs/test-records.md`, "Trust boundaries for consumers",
+      // for what the store's member gate leaves the fork flag meaning.
+
       const gateFailed = await runReport({
         days: 1,
         gate: true,
@@ -229,14 +270,14 @@ describe("test-records-report", () => {
         prefix: "p",
         now: NOW,
         fetchImpl: reportFetch({
-          "trusted.ndjson": ciBody(false, [record("fast", "pass", 5)]),
+          "same-repository.ndjson": ciBody(false, [record("fast", "pass", 5)]),
           "forked.ndjson": ciBody(true, [record("slow", "fail", 90_000)]),
         }),
       });
-      expect(gateFailed).toBe(false);
+      expect(gateFailed).toBe(true);
     });
 
-    it("fails the gate for an over-sixty-seconds trusted record", async () => {
+    it("fails the gate for an over-sixty-seconds record", async () => {
       const gateFailed = await runReport({
         days: 1,
         gate: true,
@@ -244,7 +285,9 @@ describe("test-records-report", () => {
         prefix: "p",
         now: NOW,
         fetchImpl: reportFetch({
-          "trusted.ndjson": ciBody(false, [record("slow", "pass", 61_000)]),
+          "same-repository.ndjson": ciBody(false, [
+            record("slow", "pass", 61_000),
+          ]),
         }),
       });
       expect(gateFailed).toBe(true);
@@ -258,7 +301,9 @@ describe("test-records-report", () => {
         prefix: "p",
         now: NOW,
         fetchImpl: reportFetch({
-          "trusted.ndjson": ciBody(false, [record("slow", "pass", 61_000)]),
+          "same-repository.ndjson": ciBody(false, [
+            record("slow", "pass", 61_000),
+          ]),
         }),
       });
       expect(gateFailed).toBe(false);

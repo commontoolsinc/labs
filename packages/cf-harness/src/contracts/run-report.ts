@@ -11,6 +11,7 @@ import { countHarnessPolicyDecisions } from "./policy-trace.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
 import type { HarnessFabricSessionCfcPosture } from "../run-state.ts";
 import type { HarnessSubagentRunRef } from "./subagent.ts";
+import type { HarnessTaskOutcome } from "./task-outcome.ts";
 import type { HarnessToolEffectClass } from "./tool-descriptor.ts";
 import type { HarnessTranscriptMessage } from "./transcript.ts";
 import type { ToolResultRef } from "./tool-result.ts";
@@ -43,7 +44,11 @@ export type HarnessToolPolicyDecision =
   | "invalid"
   | "withheld";
 
-export type HarnessToolExecutionStatus = "completed" | "failed" | "not-run";
+export type HarnessToolExecutionStatus =
+  | "completed"
+  | "failed"
+  | "canceled"
+  | "not-run";
 export type HarnessToolInvocationOrigin = "model" | "opening-research";
 export type HarnessRunTimelineKind =
   | "run_started"
@@ -157,6 +162,13 @@ export interface HarnessRunReport {
   endedAt?: string;
   terminalReason?: string;
   finalAssistantText?: string;
+
+  /** Reason supplied by the run's controlling abort signal. */
+  cancelReason?: string;
+
+  /** User-facing disposition of a normally completed model loop. */
+  taskOutcome?: HarnessTaskOutcome;
+
   artifactRoot?: string;
   transcriptPath?: string;
   promptSlotBinding?: PromptSlotBinding;
@@ -188,6 +200,10 @@ export interface CreateHarnessRunReportOptions {
     updatedAt: string;
     endedAt?: string;
     terminalReason?: string;
+
+    /** Reason supplied by the run's controlling abort signal. */
+    cancelReason?: string;
+
     cfcEnforcementMode: CfcEnforcementMode;
     fabricSessionCfc?: HarnessFabricSessionCfcPosture;
     artifactRoot?: string;
@@ -213,6 +229,10 @@ export interface CreateHarnessRunReportOptions {
   cacheAffinity?: "run" | "custom";
   modelTurns: number;
   finalAssistantText?: string;
+
+  /** User-facing disposition of a normally completed model loop. */
+  taskOutcome?: HarnessTaskOutcome;
+
   timeline?: readonly HarnessRunTimelineEntryInput[];
   toolActivity: readonly HarnessToolActivity[];
   modelAttempts?: readonly HarnessModelAttempt[];
@@ -380,6 +400,12 @@ export const createHarnessRunReport = (
       : {}),
     ...(options.runState.terminalReason !== undefined
       ? { terminalReason: options.runState.terminalReason }
+      : {}),
+    ...(options.runState.cancelReason !== undefined
+      ? { cancelReason: options.runState.cancelReason }
+      : {}),
+    ...(options.taskOutcome !== undefined
+      ? { taskOutcome: options.taskOutcome }
       : {}),
     ...(options.finalAssistantText !== undefined
       ? { finalAssistantText: options.finalAssistantText }

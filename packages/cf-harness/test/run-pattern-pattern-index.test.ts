@@ -17,12 +17,17 @@ import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
 import type { FabricPatternInstantiations } from "../src/fabric-instantiations.ts";
 import { comparableEntityHash } from "../src/fabric-observations.ts";
+import {
+  createFabricInstantiationRecorder,
+  type FabricInstantiationRecord,
+} from "../src/fabric-instantiations.ts";
 import { PatternIndexClient } from "../src/pattern-index/client.ts";
 import {
   MAX_COMPOSED_PATTERNS,
   patternIndexDependencies,
   runtimeProgramFromIndex,
 } from "../src/pattern-index/composition.ts";
+import { OUTPUT_CONCERN_MESSAGES } from "../src/run-pattern-output-concerns.ts";
 import type {
   RunPatternToolErrorOutput,
   RunPatternToolSuccessOutput,
@@ -76,6 +81,38 @@ const DOUBLER_SOURCE = [
   "}));",
   "",
 ].join("\n");
+
+/**
+ * A published reader of the shape the index seeds: rows beside the two
+ * outputs that say what became of the read. Its failure is its own output,
+ * which is what a composing pattern is free never to pass on.
+ */
+const READER_SOURCE = [
+  "import { computed, pattern } from 'commonfabric';",
+  "interface Input { n: number; }",
+  "interface Output { rows: number[]; rowCount: number; errorMessage: string; }",
+  "export default pattern<Input, Output>(({ n }) => ({",
+  "  rows: computed(() => []),",
+  "  rowCount: computed(() => 0),",
+  "  errorMessage: computed(() =>",
+  "    n > 0 ? 'sqlite: param is undefined' : ''),",
+  "}));",
+  "",
+].join("\n");
+
+/** Composes the reader and passes on neither its failure nor its count. */
+const digestSource = (readerId: string): string =>
+  [
+    "import { computed, pattern } from 'commonfabric';",
+    `import reader from "cf:pattern:${readerId}";`,
+    "interface Input { n: number; }",
+    "interface Output { total: number; }",
+    "export default pattern<Input, Output>(({ n }) => {",
+    "  const read = reader({ n });",
+    "  return { total: computed(() => (read.rows ?? []).length) };",
+    "});",
+    "",
+  ].join("\n");
 
 /** Composes the doubler, by pattern and by exported value. */
 const quadruplerSource = (doublerId: string): string =>
@@ -261,13 +298,20 @@ const entryIdentityOf = async (source: string): Promise<string> => {
   ]);
 };
 
-const STRANDED_RECORDS = [{
+const STRANDED_ENTITY =
+  "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc" as const;
+
+const STRANDED_RECORDS: readonly FabricInstantiationRecord[] = [{
   sequence: 1,
   identity: "keyless:zStranded",
   symbol: "default",
-  cell: comparableEntityHash(
-    "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc",
-  )!,
+  cell: comparableEntityHash(STRANDED_ENTITY)!,
+  link: {
+    id: STRANDED_ENTITY,
+    space: signer.did(),
+    scope: "space",
+    path: [],
+  },
 }];
 
 describe("run-pattern over the pattern index", () => {
@@ -327,6 +371,33 @@ describe("run-pattern over the pattern index", () => {
     );
     await controller.synced();
     return controller;
+  };
+
+  /**
+   * A session whose runtime reports what it materializes, paired with the read
+   * side `run_pattern` queries. The recorder is a runtime construction option,
+   * so a session that answers what a run composed has to be built with one.
+   */
+  const sessionRecordingInstantiations = async (): Promise<{
+    pieces: PiecesController;
+    instantiations: FabricPatternInstantiations;
+  }> => {
+    const recorder = createFabricInstantiationRecorder();
+    const own = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+      onPatternInstantiated: recorder.observe,
+    });
+    extraRuntimes.push(own);
+    const controller = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `run-pattern-index-recorded-${crypto.randomUUID()}`,
+      }),
+      own,
+    );
+    await controller.synced();
+    return { pieces: controller, instantiations: recorder.instantiations };
   };
 
   /**
@@ -1038,6 +1109,12 @@ describe("run-pattern over the pattern index", () => {
       required: ["doubled"],
     } as const;
 
+    const TOTAL_RESULT_SCHEMA = {
+      type: "object",
+      properties: { total: { type: "number" } },
+      required: ["total"],
+    } as const;
+
     const QUADRUPLED_RESULT_SCHEMA = {
       type: "object",
       properties: { half: HALF_SCHEMA, quadrupled: { type: "number" } },
@@ -1259,6 +1336,115 @@ describe("run-pattern over the pattern index", () => {
       // pattern's id nor anything the source alone determines.
       expect(publish?.body.patternId).not.toBe(doublerId);
       expect(publish?.body.patternId).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    });
+
+    it("discloses a composed pattern's failure the composing source never passed on", async () => {
+      const { pieces: recorded, instantiations } =
+        await sessionRecordingInstantiations();
+      const readerId = await entryIdentityOf(READER_SOURCE);
+      const index = stubIndex({
+        [readerId]: indexRecord(readerId, READER_SOURCE),
+      });
+      const result = await createEngine(index, {
+        pieces: recorded,
+        instantiations,
+      }).invokeBuiltinTool("run_pattern", {
+        sourceText: digestSource(readerId),
+        inputs: { n: 3 },
+        resultSchema: TOTAL_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+
+      // The run succeeded and the piece stands: this is a disclosure beside
+      // the result, not a refusal of it.
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ total: 0 });
+      expect(output.outputConcerns).toEqual([
+        {
+          concern: "error-branch",
+          key: "errorMessage",
+          patternId: readerId,
+          message: OUTPUT_CONCERN_MESSAGES["error-branch"],
+        },
+        {
+          concern: "no-rows",
+          key: "rows",
+          patternId: readerId,
+          message: OUTPUT_CONCERN_MESSAGES["no-rows"],
+        },
+      ]);
+    });
+
+    it("keeps the composed failure's own text for the run's artifact", async () => {
+      const { pieces: recorded, instantiations } =
+        await sessionRecordingInstantiations();
+      const readerId = await entryIdentityOf(READER_SOURCE);
+      const index = stubIndex({
+        [readerId]: indexRecord(readerId, READER_SOURCE),
+      });
+      const result = await createEngine(index, {
+        pieces: recorded,
+        instantiations,
+      }).invokeBuiltinTool("run_pattern", {
+        sourceText: digestSource(readerId),
+        inputs: { n: 3 },
+        resultSchema: TOTAL_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+
+      // The prompt loop strips `rawCauseMessage` from what the model is
+      // shown, so this is the operator's copy and the only one there is.
+      expect(output.rawCauseMessage).toContain(
+        `${readerId} errorMessage (error-branch): sqlite: param is undefined`,
+      );
+      expect(output.rawCauseMessage).toContain(`${readerId} rows (no-rows)`);
+    });
+
+    it("keeps the composed failure's own text out of what it discloses", async () => {
+      const { pieces: recorded, instantiations } =
+        await sessionRecordingInstantiations();
+      const readerId = await entryIdentityOf(READER_SOURCE);
+      const index = stubIndex({
+        [readerId]: indexRecord(readerId, READER_SOURCE),
+      });
+      const result = await createEngine(index, {
+        pieces: recorded,
+        instantiations,
+      }).invokeBuiltinTool("run_pattern", {
+        sourceText: digestSource(readerId),
+        inputs: { n: 3 },
+        resultSchema: TOTAL_RESULT_SCHEMA,
+      });
+
+      const concerns =
+        (result.output as RunPatternToolSuccessOutput).outputConcerns;
+
+      expect(concerns?.length).toBeGreaterThan(0);
+      expect(JSON.stringify(concerns)).not.toContain("param is undefined");
+    });
+
+    it("discloses only the empty read for a composed pattern that did not fail", async () => {
+      const { pieces: recorded, instantiations } =
+        await sessionRecordingInstantiations();
+      const readerId = await entryIdentityOf(READER_SOURCE);
+      const index = stubIndex({
+        [readerId]: indexRecord(readerId, READER_SOURCE),
+      });
+      const result = await createEngine(index, {
+        pieces: recorded,
+        instantiations,
+      }).invokeBuiltinTool("run_pattern", {
+        sourceText: digestSource(readerId),
+        // The reader reports a failure only for a positive input, so this is
+        // the same composition over a read that did not fail.
+        inputs: { n: 0 },
+        resultSchema: TOTAL_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+
+      expect(output.status).toBe("ok");
+      expect(output.outputConcerns?.map((concern) => concern.concern))
+        .toEqual(["no-rows"]);
     });
 
     it("has no light identity to publish a composed source under", async () => {

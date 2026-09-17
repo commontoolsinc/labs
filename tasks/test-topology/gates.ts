@@ -16,6 +16,7 @@ import { collectPathsByScope, scopeOfPath } from "../typecheck.ts";
 import * as path from "@std/path";
 import {
   collectPatternFiles,
+  normalizePatternPath,
   PATTERN_TREES,
   patternKey,
 } from "../pattern-files.ts";
@@ -468,27 +469,70 @@ async function typecheckSuite(root: string): Promise<Suite> {
 }
 
 /**
- * The pattern type check. It writes one record per pattern file and
- * takes no way of running part of itself, so the suite is one unit and
- * every one of those records belongs to it.
+ * Every authored pattern in the tree, repository-relative.
+ *
+ * Collected against the root the topology was given rather than the
+ * process's own directory: a lane runs from the repository root, and a
+ * test of the topology runs from wherever its package does.
  */
-function cfcheckSuite(): Suite {
-  const unit = "cfcheck";
+async function patternFiles(root: string): Promise<string[]> {
+  const found = await Promise.all(
+    PATTERN_TREES.map((tree) =>
+      collectPatternFiles(path.join(root, tree.directory))
+    ),
+  );
+  return found.flat()
+    .map((file) => normalizePatternPath(path.relative(root, file)))
+    .sort();
+}
+
+/**
+ * The `--only` arguments that restrict a pattern task to `chosen`. The
+ * flag takes a single value, so it is repeated rather than given a list.
+ *
+ * A run asked for every pattern passes no filter at all, which leaves it
+ * the task's own unfiltered run. That is what a task with a whole-tree
+ * question of its own needs, and what makes a full run's command the one
+ * a person types.
+ */
+function onlyArguments(chosen: readonly string[], whole: boolean): string[] {
+  return whole ? [] : chosen.flatMap((value) => ["--only", value]);
+}
+
+/**
+ * The pattern type check, one unit per pattern. Its task takes `--only`
+ * to restrict which patterns it compiles, so a lane checks the ones it
+ * was given, and a run given every pattern passes no `--only` at all.
+ *
+ * A unit is the pattern's own path, so the diff naming it is the whole of
+ * what makes it mandatory and this suite maps nothing itself. The task
+ * writes one record per pattern named `cfcheck <path>`; the record the
+ * wrapper writes for the invocation is named for the suite, and carries
+ * what the whole run took rather than what any pattern took.
+ */
+async function cfcheckSuite(root: string): Promise<Suite> {
+  const units = await patternFiles(root);
+  const known = new Set(units);
+  const name = "cfcheck";
   const recordSurfaces = [{ kind: "typecheck", scope: "repo" }];
   return {
-    id: "cfcheck",
+    id: name,
     recordSurfaces,
     needs: ["deno"],
-    units: [unit],
+    units,
     unavailable: [],
     locate(record): Location | undefined {
       if (!claimsIdentity({ recordSurfaces }, record.test)) return undefined;
-      return record.test.n === unit || record.test.n.startsWith(`${unit} `)
-        ? { level: "unit", unit }
-        : undefined;
+      if (record.test.n === name) return { level: "suite" };
+      if (!record.test.n.startsWith(`${name} `)) return undefined;
+      const unit = record.test.n.slice(name.length + 1);
+      return known.has(unit) ? { level: "unit", unit } : undefined;
     },
     command(requests, context): Promise<Invocation[]> {
-      if (requests.length === 0) return Promise.resolve([]);
+      const chosen = requests
+        .map((request) => request.unit)
+        .filter((unit) => known.has(unit));
+      if (chosen.length === 0) return Promise.resolve([]);
       return Promise.resolve([{
         command: [
           Deno.execPath(),
@@ -496,11 +540,12 @@ function cfcheckSuite(): Suite {
           "run-recorded",
           "typecheck",
           "repo",
-          "cfcheck",
+          name,
           "--",
           Deno.execPath(),
           "task",
-          "cfcheck",
+          name,
+          ...onlyArguments(chosen, chosen.length === units.length),
         ],
         cwd: context.root,
       }]);
@@ -511,21 +556,15 @@ function cfcheckSuite(): Suite {
 /**
  * The pattern update compatibility gate, one unit per pattern. Its task
  * takes `--only` to restrict which patterns it reads, so a lane runs the
- * ones it was given. A run given every pattern passes no `--only` at
- * all, because the whole-tree questions the gate also answers — whether a
- * retired pattern still has a baseline, whether an accepted break has
- * gone orphaned — are only asked of an unfiltered run.
+ * ones it was given, and a run given every pattern passes no `--only` at
+ * all — the whole-tree questions this gate also answers, whether a
+ * retired pattern still has a baseline and whether an accepted break has
+ * gone orphaned, are only asked of an unfiltered run.
  */
 async function patternCompatSuite(root: string): Promise<Suite> {
-  // Collected against the root the topology was given rather than the
-  // process's own directory: a lane runs from the repository root, and a
-  // test of the topology runs from wherever its package does.
-  const files = (await Promise.all(
-    PATTERN_TREES.map((tree) =>
-      collectPatternFiles(path.join(root, tree.directory))
-    ),
-  )).flat().sort().map((file) => path.relative(root, file));
-  const byKey = new Map(files.map((file) => [patternKey(file), file]));
+  const byKey = new Map(
+    (await patternFiles(root)).map((file) => [patternKey(file), file]),
+  );
   const units = [...byKey.keys()].sort();
   const recordSurfaces = [{ kind: "gate", scope: "repo" }];
   const name = "pattern-compat";
@@ -560,7 +599,10 @@ async function patternCompatSuite(root: string): Promise<Suite> {
           Deno.execPath(),
           "task",
           name,
-          ...(whole ? [] : ["--only", ...keys.map((key) => byKey.get(key)!)]),
+          ...onlyArguments(
+            keys.map((key) => byKey.get(key)!),
+            whole,
+          ),
         ],
         cwd: context.root,
       }]);
@@ -618,7 +660,7 @@ export async function loadGateSuites(root: string): Promise<Suite[]> {
     gateSuite("repo-gates", WORKING_TREE_GATES, ["deno", "github-api"]),
     gateSuite("repo-history-gates", HISTORY_GATES, ["deno", "git-history"]),
     await typecheckSuite(root),
-    cfcheckSuite(),
+    await cfcheckSuite(root),
     await patternCompatSuite(root),
     patternVintageSuite(),
   ];

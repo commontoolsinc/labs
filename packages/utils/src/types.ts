@@ -81,7 +81,9 @@
  *
  * `@commonfabric/data-model` asks the first of these questions of a value the
  * type system already says is a `FabricValue`, and spells it
- * `isFabricObjectOrArray()` for the same reason.
+ * `isFabricObjectOrArray()` for the same reason. It spells the third
+ * `isFabricPlainObject()`, which narrows to `FabricPlainObject` and so keeps
+ * an indexed value typed as a `FabricValue`.
  *
  * `typeOfIncludingNull()` is the one function here that is not a predicate.
  * It returns a value's `typeof` tag, with `null` given a tag of its own, for
@@ -97,6 +99,17 @@
 export type Constructor<T = unknown> =
   & (abstract new (...args: any[]) => T)
   & { prototype: T };
+
+/**
+ * Whether `A` and `B` are the same type, by the identity the compiler applies
+ * when it compares two generic signatures. This is the stricter of the two
+ * type comparisons here. Where `Same` matches, this tells `any` in a type
+ * argument from every other argument, a `readonly` property from a mutable
+ * one, and a union from a type each of its members is assignable to. Reach for
+ * it when how a type is written is the claim.
+ */
+export type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends
+  (<T>() => T extends B ? 1 : 2) ? true : false;
 
 /** Helper type to recursively add `readonly` properties to type `T`. */
 export type Immutable<T> = T extends ReadonlyArray<infer U>
@@ -124,6 +137,14 @@ export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
   : T;
 
+/**
+ * Compiles only when `T` is `true`: the assertion form of `Same` and `Equal`,
+ * for a type alias that states a fact the compiler holds. `never` satisfies
+ * the constraint, so a comparison that yields `never` rather than `false` on a
+ * mismatch passes here vacuously; `Same` and `Equal` yield `false`.
+ */
+export type MustBeTrue<T extends true> = T;
+
 /** The union of all primitive JavaScript types. */
 export type Primitive =
   | bigint
@@ -138,6 +159,17 @@ export type Primitive =
  * A record whose string keys can be read but not assigned through this type.
  */
 export type ReadonlyRecord = Readonly<Record<string, unknown>>;
+
+/**
+ * Whether `A` and `B` are mutually assignable. This is the looser of the two
+ * type comparisons here: `any` in a type argument matches any argument,
+ * `Map<any, any>` and `Map<string, number>` among them; a `readonly` property
+ * matches a mutable one; and a union matches a type each of its members is
+ * assignable to, so `Error | TypeError` matches `Error`. `Equal` tells each
+ * of those apart.
+ */
+export type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
+  : false;
 
 // TODO(danfuzz): The wire formats accept a plain object with any keys, that
 // being the rule a cross-language format has to hold to. This implementation

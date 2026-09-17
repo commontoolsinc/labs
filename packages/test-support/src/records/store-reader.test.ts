@@ -21,7 +21,7 @@ function ciContext(reportId: string, fork: boolean): RunContext {
     schema: 1,
     line: "context",
     reportId,
-    repo: "commontoolsinc/labs",
+    repo: "commonfabric/labs",
     commit: "0123456789abcdef0123456789abcdef01234567",
     dirty: false,
     env: "ci",

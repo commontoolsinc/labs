@@ -5937,7 +5937,7 @@ describe("piece pull materialization", () => {
   });
 
   it("stores repository metadata when preparing without starting", async () => {
-    const repository = "https://github.com/commontoolsinc/labs";
+    const repository = "https://github.com/commonfabric/labs";
     const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
@@ -6024,7 +6024,7 @@ describe("piece pull materialization", () => {
   });
 
   it("persists setPattern replacement by identity for fresh runtime reloads", async () => {
-    const repository = "https://github.com/commontoolsinc/labs";
+    const repository = "https://github.com/commonfabric/labs";
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledMultiplierProgram("v1", 2),
       { space: pieces.getSpace() },
@@ -6104,8 +6104,8 @@ describe("piece pull materialization", () => {
   });
 
   it("preserves a repository until a source update explicitly replaces it", async () => {
-    const originalRepository = "https://github.com/commontoolsinc/labs";
-    const replacementRepository = "https://github.com/commontoolsinc/patterns";
+    const originalRepository = "https://github.com/commonfabric/labs";
+    const replacementRepository = "https://github.com/commonfabric/patterns";
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledMultiplierProgram("v1", 2),
       { space: pieces.getSpace() },
@@ -6602,7 +6602,7 @@ describe("piece pull materialization", () => {
   });
 
   it("preserves conflicting defined values while merging object defaults", async () => {
-    const originalRepository = "https://github.com/commontoolsinc/labs";
+    const originalRepository = "https://github.com/commonfabric/labs";
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledDefaultedOptionsProgram(1),
       { space: pieces.getSpace() },
@@ -6625,7 +6625,7 @@ describe("piece pull materialization", () => {
 
     await expect(
       controller.setPattern(compiledDefaultedOptionsProgram(2), {
-        repository: "https://github.com/commontoolsinc/other",
+        repository: "https://github.com/commonfabric/other",
       }),
     ).rejects.toThrow(/updated arguments do not match the candidate schema/);
 

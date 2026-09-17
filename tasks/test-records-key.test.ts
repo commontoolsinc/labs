@@ -153,7 +153,7 @@ function mintRun(
     status: run.status ?? "completed",
     conclusion: run.conclusion ?? "success",
     created_at: run.created_at ?? "2026-08-21T02:00:00Z",
-    html_url: `https://github.com/commontoolsinc/labs/actions/runs/${id}`,
+    html_url: `https://github.com/commonfabric/labs/actions/runs/${id}`,
     display_title: run.named === false
       ? "Test Records Mint"
       : `Mint reporting key for octocat (${recipient})`,

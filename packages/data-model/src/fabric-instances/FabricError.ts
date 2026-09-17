@@ -449,7 +449,7 @@ export class FabricError extends FabricNativeWrapper<Error>
 
   static #codec = Object.freeze(
     new (class FabricErrorCodec
-      extends BaseNonterminalCodec<FabricPlainObject> {
+      extends BaseNonterminalCodec<never, FabricPlainObject> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Error, FabricError);

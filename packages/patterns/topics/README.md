@@ -208,12 +208,12 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   read under two minimal declared views: one for identity, one for what each
   topic points at. Matching is a scan of `equals`, because nothing in the
   pattern API turns a topic reference into a resolved key carrying space, scope,
-  and path. The comparisons come from two passes. Finding the distinct topics
-  compares each of the board's `n` entries with the distinct entries kept before
-  it, at most `n(n - 1) / 2` comparisons, which grows with the square of the
-  topic count even on a board with no mentions. Each distinct topic's row then
-  checks every source's mentions for that topic, which grows as the number of
-  topics times the number of mentions.
+  and path. The comparisons come from two passes. Finding the distinct topics,
+  in `distinctByIdentity`, compares each of the board's `n` entries with the
+  distinct entries kept before it, at most `n(n - 1) / 2` comparisons, which
+  grows with the square of the topic count even on a board with no mentions.
+  Each distinct topic's row then checks every source's mentions for that topic,
+  which grows as the number of topics times the number of mentions.
 
   Each topic then does a lookup rather than the join: `backlinksOf` scans the
   pivot for the row whose topic is itself, and takes that row's `mentionedBy`.

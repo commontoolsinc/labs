@@ -23,8 +23,11 @@ Deno.test("builtin tool registry includes the agreed first-pass tool floor", () 
     "write_file",
     "delegate_task",
     "run_pattern",
+    "read_piece_source",
+    "revise_piece",
     "assign_slug",
     "describe_handle",
+    "finish_task",
     "search_patterns",
     "record_feedback",
     "search_skills",
@@ -34,7 +37,7 @@ Deno.test("builtin tool registry includes the agreed first-pass tool floor", () 
     "loom_inspect",
     "loom_authoring_context",
   ]);
-  assertEquals(BUILTIN_TOOL_REGISTRY.size, 21);
+  assertEquals(BUILTIN_TOOL_REGISTRY.size, 24);
   assertEquals(
     [...DEFAULT_PARENT_TOOL_IDS],
     [
@@ -46,6 +49,7 @@ Deno.test("builtin tool registry includes the agreed first-pass tool floor", () 
       "write_file",
       "delegate_task",
       "describe_handle",
+      "finish_task",
     ] satisfies BuiltinToolId[],
   );
 });
