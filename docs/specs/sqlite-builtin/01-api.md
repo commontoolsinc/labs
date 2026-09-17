@@ -302,6 +302,13 @@ parse it, because whether SQLite marks such a column as JSON depends on the
 query plan (a sort or a materialized subquery unmarks it), and a column's type
 under `Row` has to hold under every plan. Declare the column `string` in `Row`.
 
+An INTEGER column reaches the row as the integer SQLite holds. A value within
+±(2^53 − 1) arrives as a `number`, so an epoch-millisecond timestamp, a rowid,
+and a count are ordinary numbers. A value beyond that range arrives as a
+`bigint`, because no `number` names it; a `Row` that declares such a column
+`number` does not admit the `bigint`, so a column that can hold one is declared
+`bigint`.
+
 This handles projections the table schema can't: because `Cell<T>` lowers to
 `asCell`, declaring a result field as `Cell<User>` tells the runtime that column
 is cell-bearing **even when an alias hides the `_cf_link` suffix**:
