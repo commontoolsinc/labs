@@ -12,8 +12,10 @@
  *
  * `shortName` is copied off the member's own — the property `naming.ts` gives
  * it — so a member's number is derived once and reads the same wherever the
- * collection shows it. `docs/common/conventions/mentionable.md` is the contract
- * both editors consume this through.
+ * collection shows it. A collection that numbers its members without showing
+ * the numbers asks for rows without them, and every row then carries the empty
+ * name. `docs/common/conventions/mentionable.md` is the contract both editors
+ * consume this through.
  */
 
 import { Default, lift, NAME, type ReadonlyCell } from "commonfabric";
@@ -42,7 +44,9 @@ export interface MentionableRow {
 /**
  * Each member's universe row, read once per member. A member whose own
  * `shortName` has produced no value carries the empty name, which is a row no
- * `#42` query matches.
+ * `#42` query matches and no mention pill takes a number from. With
+ * `withShortNames` set to `false`, every member's row carries the empty name,
+ * whatever the member publishes.
  *
  * Declared structurally, and that is what makes the mid-sync guard a
  * compile-checked read: `get()` on a `ReadonlyCell` is declared to return a
@@ -60,6 +64,7 @@ export function mentionableRowsOf(
     }
     | undefined
   )[],
+  { withShortNames = true }: { withShortNames?: boolean } = {},
 ): MentionableRow[] {
   const rows: MentionableRow[] = [];
   for (const member of members) {
@@ -71,7 +76,7 @@ export function mentionableRowsOf(
       // persisted title is authoritative until it does.
       [NAME]: value[NAME] || value.title || "",
       title: value.title ?? "",
-      shortName: value.shortName ?? "",
+      shortName: withShortNames ? value.shortName ?? "" : "",
       piece: member,
     });
   }
@@ -102,10 +107,15 @@ export function mentionableRowsOf(
  * measured that refusal against an optional string and an optional `unknown`
  * alike. A member that publishes none contributes a row carrying the empty
  * string, which `mentionableRowsOf` coalesces.
+ *
+ * `withShortNames` is for a collection that numbers its members but does not
+ * show the numbers: `false` gives every row the empty name, so the collection's
+ * editors offer no member for a `#42` query and show no number on a mention's
+ * pill. Absent, each row carries its member's own.
  */
 export const mentionableIndex = lift(
   (
-    { members }: {
+    { members, withShortNames }: {
       members:
         | ReadonlyCell<{
           [NAME]?: string | Default<"">;
@@ -113,9 +123,12 @@ export const mentionableIndex = lift(
           shortName?: string;
         }>[]
         | Default<[]>;
+
+      /** Whether each row carries its member's own `shortName`. */
+      withShortNames?: boolean;
     },
   ): MentionableRow[] =>
     // A plain array, read once per member: an element read through the
     // reactive array costs a link resolution per access.
-    mentionableRowsOf(Array.from(members)),
+    mentionableRowsOf(Array.from(members), { withShortNames }),
 );

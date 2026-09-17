@@ -1,7 +1,8 @@
 /**
  * What the board and a topic actually RENDER through whatever projection the
- * board declares for its topics: that a card carries its topic's text, and
- * that the body editor's completion source reaches it populated.
+ * board declares for its topics: that a card carries its topic's text, that
+ * the body editor's completion source reaches it populated, and that no entry
+ * of that source carries a topic's number while Topics shows none.
  *
  * Both assertions were validated by mutation — remove the step that files a
  * topic and both go red — so neither is decoration.
@@ -148,6 +149,20 @@ export default pattern(() => {
     });
   });
 
+  // The filed topic has a number, and the entry standing for it in the
+  // editor's completion source carries the empty name, so a `#1` query offers
+  // nothing and a mention of it shows no number.
+  const assert_editor_entries_carry_no_number = assert(() => {
+    const editors = findAllByTag(detail[UI], "cf-code-editor");
+    if (editors.length !== 1) return false;
+    const entries = propValue(editors[0].props["$mentionable"]);
+    if (!Array.isArray(entries) || entries.length !== 1) return false;
+    const entry = entries[0] as Record<string, unknown>;
+    return board.index?.[0]?.shortName === "1" &&
+      propValue(entry?.[NAME]) === "Rendered topic" &&
+      propValue(entry?.shortName) === "";
+  });
+
   // An edit is only honest if a reader can see one happened, and `editedAt`
   // is written by the verb rather than shown by anything that reads it. These
   // two assertions are a pair on purpose: the first says the marker is absent
@@ -171,6 +186,7 @@ export default pattern(() => {
       { action: action_open_the_editor },
       { render: detail[UI] },
       { assertion: assert_editor_receives_mentionables },
+      { assertion: assert_editor_entries_carry_no_number },
       { action: action_comment_on_detail },
       { render: detail[UI] },
       { assertion: assert_no_edited_marker_before },

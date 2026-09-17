@@ -446,7 +446,7 @@ export interface TopicInput {
   boardCrossrefs?: ReadonlyCell<TopicCrossrefRow[] | Default<[]>>;
 
   /** The board's names table, one row per named topic. The topic reads its own
-   * row out of it and nothing else; absent, the topic shows no number.
+   * row out of it and nothing else; absent, the topic has no number.
    *
    * Readable, not writable, for the reason `boardCrossrefs` states: the table
    * is the board's derivation, and a topic has no business writing into it.
@@ -612,18 +612,17 @@ export interface TopicPiece extends TopicSummary {
   [NAME]: string | Default<""> | undefined;
 
   /** The name the board calls this topic by, read out of the board's names
-   * table by identity. The display name stays the title — this rides beside
-   * it, under the name a mention pill reads it by (`Mentionable.shortName` in
-   * `packages/ui/src/v2/core/mentionable.ts`), so a mention of this topic
-   * elsewhere gains the number as soon as the board names it.
+   * table by identity. The display name stays the title, and this rides
+   * beside it. Published whether or not Topics shows numbers; while
+   * `SHOW_TOPIC_NUMBERS` is on, the topic's header and the board's card render
+   * it as a badge, and the board's mention universe carries a copy of it,
+   * which is what a mention pill and a `#42` query read.
    *
    * Absent for a topic no board has named, or one wired to no board: the
    * lookup produces nothing and the property is simply not there. Every
-   * consumer treats that as no name — the badge renders nothing, a universe
-   * row matches no `#42` query, and a mention pill shows no number
-   * (`_trackRefShortName` in
-   * `packages/ui/src/v2/components/cf-code-editor/cf-code-editor.ts` reads an
-   * absent name exactly as it reads a blank one).
+   * consumer treats that as no name — the badge renders nothing, and the
+   * topic's universe row carries the empty name, which matches no `#42` query
+   * and gives a mention pill no number.
    *
    * Optional rather than defaulted, and the difference is the compatibility
    * proof's: this is what a board's stored list is validated against, and a
@@ -860,8 +859,9 @@ export interface TopicOutput extends TopicPiece {
   submitLink: Stream<void>;
 }
 
-// ===== Shared theme (calm editorial light) =====
+// ===== Shared presentation =====
 
+/** The Topics theme: calm editorial light. */
 export const TOPICS_THEME = {
   fontFamily: "'Iowan Old Style', 'Palatino', 'Georgia', serif",
   borderRadius: "0.5rem",
@@ -879,6 +879,26 @@ export const TOPICS_THEME = {
     accentForeground: "#fdfcf8",
   },
 };
+
+/**
+ * Whether Topics shows a topic's number: the badge in the topic's header and
+ * on its board card, the number beside a mention's label, and the topics a
+ * `#42` query offers in the body editor.
+ *
+ * Off while only some topics have a number, because a number on some of a
+ * board's topics and not on the rest confuses the people reading it. The board
+ * numbers every topic it creates, but a topic filed before the board numbered
+ * anything has no number until `backfillNames` names it and an operator binds
+ * the board's `namesTable` onto its `boardNames`.
+ *
+ * Only the showing is off. The board still allocates a number on every create
+ * and records it in `names`, a number still addresses its topic as `top/<n>`,
+ * and a topic still publishes its number as `shortName`, so the board's
+ * `index` rows carry it and an operator can read it to check a bind.
+ */
+// TODO(mike): Turn this on once every topic on the deployed Topics board has a
+// number.
+export const SHOW_TOPIC_NUMBERS: boolean = false;
 
 // ===== Pure helpers =====
 
@@ -2183,6 +2203,9 @@ export default pattern<TopicInput, TopicOutput>(
     // The board has already derived the table; this is a lookup by identity,
     // and it is written as one.
     const shortName = ownName({ table: boardNames, self });
+    // The header badge's number. The topic publishes `shortName` whether or
+    // not Topics shows numbers.
+    const shownName = SHOW_TOPIC_NUMBERS ? shortName : undefined;
 
     // --- Streams (external API; also usable headlessly via CLI) ---
 
@@ -2395,10 +2418,10 @@ export default pattern<TopicInput, TopicOutput>(
                     align="center"
                     style="flex: 1; min-width: 0;"
                   >
-                    {shortName
+                    {shownName
                       ? (
                         <cf-badge size="sm" color="primary" data-member-name="">
-                          {shortName}
+                          {shownName}
                         </cf-badge>
                       )
                       : null}

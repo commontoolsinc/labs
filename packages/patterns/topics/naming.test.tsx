@@ -2,30 +2,25 @@
  * Pattern tests for the member namespace the Topics board owns: allocation in
  * the same transaction as the create, the names table that gives a topic its
  * name by identity, a topic reading its own name out of that table and
- * rendering it beside its title, the survey rows and the mention universe that
- * carry the copy, the backfill over topics filed before the board numbered
- * anything, and the bound on what any of those reads expands.
+ * publishing it, the survey rows that carry the copy, the backfill over topics
+ * filed before the board numbered anything, and the bound on what any of those
+ * reads expands.
+ *
+ * Topics shows none of those numbers while `SHOW_TOPIC_NUMBERS` in
+ * `topic.tsx` is off, and this file holds that as well: a named topic's
+ * header, the board's cards, and the mention universe's rows carry no number,
+ * while the namespace, the table, and the survey rows carry every one.
  *
  * Separate from topics.test.tsx for the reason render-shape.test.tsx is
  * separate from it: this file drives one surface end to end and keeps
  * compiling while a change to the board's other demands is in flight.
  *
- * ONE CLAIM HAS NO COVERAGE ANYWHERE, and it is stated rather than left
- * implicit: the POSITIVE case of a topic's own header badge. Deleting that
- * JSX reds no test in any lane. Reading a topic's `[UI]` needs a handle the
- * pattern body holds, and naming that topic needs a verb — but a body-held
- * piece captured by a verb is materialized through the verb's state schema,
- * whatever the target's own demand narrows to, so any step that would name a
- * topic this file could read the header of does not run (`TopicOutput`'s
- * `editingBody` says why, and what it would cost to change). The shell lane
- * asserts the equivalent badge for the collection-naming EXEMPLAR's item, in
- * the exemplar's own space; nothing asserts it for a Topic. Restoring it means
- * a Topics browser test under `packages/patterns/integration/`, driving the
- * board's create and opening the created topic.
- *
- * What is covered instead: the board's own card badge, the index and universe
- * rows carrying the name, the negative header case on a topic wired to no
- * board, and the lookup itself through `ownName`.
+ * The header is read off a topic this file composes and lists in a board's
+ * input, which the board's `backfillNames` then names. A verb that captured the
+ * body-held topic could not name it: a verb receives a captured topic through
+ * its own state schema, which does not materialize one (`TopicOutput`'s
+ * `editingBody` says why). `backfillNames` reaches the topic through the
+ * board's list instead.
  *
  * The mixed-vintage case — a topic deployed before `shortName` existed, read
  * beside one that has it — is NOT here, and deliberately. A fixture of that
@@ -60,12 +55,9 @@ import {
   backfillNames,
   nameOf,
   type NamesMap,
+  namesTable,
 } from "../collection-naming/naming.ts";
-import {
-  findElement,
-  findElementByExactText,
-  hasText,
-} from "../test/vnode-helpers.ts";
+import { findElement, hasText } from "../test/vnode-helpers.ts";
 import Topics, { type TopicDemand } from "./main.tsx";
 import Topic from "./topic.tsx";
 
@@ -142,22 +134,25 @@ export default pattern(() => {
     board.index?.[0]?.shortName === "1" &&
     board.index?.[1]?.shortName === "2"
   );
-  // The board's cards render the number beside the title, never in place of
-  // it: both are on screen.
-  const assert_cards_show_the_badge = assert(() =>
-    findElementByExactText(board[UI], "cf-badge", "1") !== undefined &&
-    findElementByExactText(board[UI], "cf-badge", "2") !== undefined &&
+  // The board's cards show the titles and no number, although both topics
+  // have one: the badge is the only `cf-badge` a card renders.
+  const assert_cards_show_no_number = assert(() =>
+    findElement(board[UI], "cf-badge") === undefined &&
     hasText(board[UI], "First topic") &&
     hasText(board[UI], "Second topic")
   );
-  // The mention universe: one row per topic carrying the board's copy of its
-  // name, which is what a `#42` completion matches without reading a topic.
-  const assert_universe_rows_carry_the_name = assert(() =>
+  // The mention universe: one row per topic, each carrying the empty name
+  // although its topic has a number. A `#42` completion matches a row's name
+  // and a mention's pill shows it, so a row without one is offered for no
+  // number and gives a pill none.
+  const assert_universe_rows_carry_no_name = assert(() =>
     (board.mentionable ?? []).length === 2 &&
     board.mentionable?.[0]?.[NAME] === "First topic" &&
     board.mentionable?.[0]?.title === "First topic" &&
-    board.mentionable?.[0]?.shortName === "1" &&
-    board.mentionable?.[1]?.shortName === "2" &&
+    board.mentionable?.[0]?.shortName === "" &&
+    board.mentionable?.[1]?.shortName === "" &&
+    board.index?.[0]?.shortName === "1" &&
+    board.index?.[1]?.shortName === "2" &&
     equals(
       board.mentionable?.[0]?.piece as object,
       board.topics?.[0] as object,
@@ -193,6 +188,29 @@ export default pattern(() => {
   const assert_solo_topic_renders_no_badge = assert(() =>
     findElement(solo[UI], "cf-badge") === undefined &&
     hasText(solo[UI], "Solo topic")
+  );
+
+  // A named topic's header shows its title and no number. The topic is listed
+  // in the board's input and named by the board's backfill. It reads its name
+  // out of a names table over the board's namespace, as a topic `addTopic`
+  // creates does, so it publishes the name its header leaves out; the table is
+  // derived here rather than taken off the board, which is built after the
+  // topic.
+  const heldNames = new Writable<NamesMap>({});
+  const held = Topic({
+    title: "Held topic",
+    boardNames: namesTable({ names: heldNames }),
+  });
+  const heldBoard = Topics({ topics: [held], names: heldNames });
+  const action_name_the_held_topic = action(() => {
+    heldBoard.backfillNames.send({ agentName: "Sol" });
+  });
+  const assert_named_topic_header_shows_no_number = assert(() =>
+    Object.keys((heldBoard.names ?? {}) as NamesMap).join(",") === "1" &&
+    held.shortName === "1" &&
+    heldBoard.index?.[0]?.shortName === "1" &&
+    findElement(held[UI], "cf-badge") === undefined &&
+    hasText(held[UI], "Held topic")
   );
 
   // The backfill, on a board that held topics before it numbered anything. The
@@ -235,12 +253,14 @@ export default pattern(() => {
   const action_backfill = action(() => {
     assigned.push(backfillNames(olderTopics, olderNames));
   });
+  // The names reach the survey rows through the topics' own wiring, and the
+  // universe rows still carry none.
   const assert_backfilled_in_filing_order = assert(() =>
     Object.keys((older.names ?? {}) as NamesMap).join(",") === "1,2" &&
     older.index?.[0]?.shortName === "1" &&
     older.index?.[1]?.shortName === "2" &&
-    older.mentionable?.[0]?.shortName === "1" &&
-    older.mentionable?.[1]?.shortName === "2" &&
+    older.mentionable?.[0]?.shortName === "" &&
+    older.mentionable?.[1]?.shortName === "" &&
     equals(
       ((older.names ?? {}) as NamesMap)["1"] as object,
       older.topics?.[0] as object,
@@ -299,11 +319,13 @@ export default pattern(() => {
       { assertion: assert_allocated_on_create },
       { assertion: assert_table_names_each_topic },
       { assertion: assert_index_rows_carry_the_name },
-      { assertion: assert_cards_show_the_badge },
-      { assertion: assert_universe_rows_carry_the_name },
+      { assertion: assert_cards_show_no_number },
+      { assertion: assert_universe_rows_carry_no_name },
       { assertion: assert_reads_expand_no_topic },
       { assertion: assert_solo_topic_has_no_name },
       { assertion: assert_solo_topic_renders_no_badge },
+      { action: action_name_the_held_topic },
+      { assertion: assert_named_topic_header_shows_no_number },
       { action: action_file_two_unnamed },
       { assertion: assert_unnamed_rows_carry_no_name },
       { action: action_backfill },
