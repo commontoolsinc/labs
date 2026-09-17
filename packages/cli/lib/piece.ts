@@ -38,6 +38,7 @@ import {
   PieceInputPathError,
   type PiecePatternRef,
   PiecesController,
+  type PieceSourceActionResult,
 } from "@commonfabric/piece/ops";
 import {
   Cell,
@@ -1980,6 +1981,42 @@ async function updateOnServer(
  * commit; a piece addressed at a scope keeps the client-side path, since
  * the served verb takes the piece's id alone.
  */
+/**
+ * Points a piece at `origin` and adopts what that origin currently serves,
+ * in one source transition (`repoint`). From then on the piece follows the
+ * origin: opening it adopts each later release the origin ships.
+ *
+ * This is how a piece created detached — a profile made before the runtime
+ * claimed origins for children of system pieces, say — is put on the
+ * lifecycle a release reaches. Unlike `setsrc`, which detaches, the origin
+ * is recorded with the revision. The transition carries the same writer
+ * delegation a `setsrc` does, since it is the owner's explicit act.
+ *
+ * @throws Error when the piece cannot be resolved, or when the origin cannot
+ * be read or does not compile.
+ */
+export async function followPieceSource(
+  config: PieceConfig,
+  origin: string,
+  deps: PieceOperationDependencies = {},
+): Promise<PieceSourceActionResult> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps,
+  );
+  const piece = await pieces.get(
+    resolvedConfig.piece,
+    false,
+    undefined,
+    resolvedConfig.pieceScope,
+  );
+  const result = await piece.changeSource({ kind: "repoint", url: origin });
+  if (result.status === "applied") noteWroteTo(config.space);
+  return result;
+}
+
 export async function setPiecePattern(
   config: PieceConfig,
   entry: EntryConfig,
