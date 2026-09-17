@@ -328,8 +328,14 @@ export class FabricUnavailable extends BaseFabricPrimitive
     return this.#reason === UNAVAILABLE_REASONS.syncing;
   }
 
-  /** Whether the reason is `error`. */
-  isError(): boolean {
+  /**
+   * Whether the reason is `error`, narrowing `errorKind` and `errorMessage`
+   * to the non-`null` values the `error` reason always carries.
+   */
+  isError(): this is {
+    readonly errorKind: UnavailableErrorKind;
+    readonly errorMessage: string;
+  } {
     return this.#reason === UNAVAILABLE_REASONS.error;
   }
 

@@ -288,6 +288,34 @@ describe("FabricUnavailable", () => {
       }
     });
 
+    describe("isError()", () => {
+      // The narrowing is a compile-time fact, pinned here the way
+      // `api.test.ts` pins one: an assignment that must type-check inside
+      // the guard, and a `@ts-expect-error` on the same assignment outside
+      // it, which becomes unused, and fails the check, if the narrowing ever
+      // reaches there on its own.
+
+      it("narrows `errorKind` and `errorMessage` to non-`null` when it returns `true`", () => {
+        const instance: FabricUnavailable = new FabricUnavailable(
+          "error",
+          "network",
+        );
+        // @ts-expect-error `errorKind` is `UnavailableErrorKind | null` before
+        // the guard.
+        const unnarrowedKind: UnavailableErrorKind = instance.errorKind;
+        expect(unnarrowedKind).toBe("network");
+
+        if (instance.isError()) {
+          const kind: UnavailableErrorKind = instance.errorKind;
+          const message: string = instance.errorMessage;
+          expect(kind).toBe("network");
+          expect(message.length).toBeGreaterThan(0);
+        } else {
+          throw new Error("Expected `isError()` to return `true`.");
+        }
+      });
+    });
+
     describe("isTransient()", () => {
       it("returns `true` for `pending` and `syncing`", () => {
         for (const reason of TRANSIENT_REASONS) {

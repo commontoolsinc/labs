@@ -506,8 +506,14 @@ export interface FabricUnavailable extends FabricPrimitive {
   /** Whether the reason is `syncing`. */
   isSyncing(): boolean;
 
-  /** Whether the reason is `error`. */
-  isError(): boolean;
+  /**
+   * Whether the reason is `error`, narrowing `errorKind` and `errorMessage`
+   * to the non-`null` values the `error` reason always carries.
+   */
+  isError(): this is {
+    readonly errorKind: UnavailableErrorKind;
+    readonly errorMessage: string;
+  };
 
   /**
    * Whether the data is on its way rather than failed: `true` for the

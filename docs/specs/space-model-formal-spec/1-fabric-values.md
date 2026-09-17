@@ -1509,7 +1509,11 @@ export class FabricUnavailable extends FabricPrimitive {
     return this.#reason === "syncing";
   }
 
-  isError(): boolean {
+  /** Narrows the two error members to what the `error` reason carries. */
+  isError(): this is {
+    readonly errorKind: UnavailableErrorKind;
+    readonly errorMessage: string;
+  } {
     return this.#reason === "error";
   }
 
