@@ -406,7 +406,6 @@ export function readReport(
       observations.push({
         test,
         outcome: record.outcome,
-        durationMs: record.durationMs,
         day,
         startedAt: group.context.startedAt,
         commit: group.context.commit,

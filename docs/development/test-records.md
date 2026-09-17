@@ -276,7 +276,9 @@ validating reader; `deno task` scripts built on it:
 
 Readers that join history across renames apply the alias file through
 `loadAliasResolver` in `@commonfabric/test-support/records`, which the
-report tool and the dashboard collector already do.
+report tool and the dashboard collector already do. A duration a consumer
+reports or fits comes from passing records alone, for the reason the
+specification gives; run, failure and skip counts come from every record.
 
 Not every record in the store is a test. A lane measures its own setup
 and each of its batches through the same machinery, so those
@@ -434,4 +436,6 @@ browser harness over.
 
 Every test must finish within sixty seconds in CI, not counting setup; a
 check that cannot is a container to split, and the report's over-60s list
-is the work queue for that.
+is the work queue for that. The list is built from passing executions, so
+a failure that a wait's safety net ended at its bound does not put a test
+on it.

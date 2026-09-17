@@ -2405,10 +2405,9 @@ The manifest still carries an `unschedulable` list for new items that do
 not fit, and the report tool surfaces it. The general fix is the 60-second
 rule that
 [`tasks/test-records-report.ts`](../development/test-records.md#reading-the-data)
-already ratchets. 12 distinct identities currently break that rule; their
-15 executions hold 18 percent of all measured test time. Getting them
-split is valuable independently of this plan and becomes more valuable
-with it.
+already ratchets. The identities that break it are what that tool's
+over-sixty-seconds list names. Getting them split is valuable
+independently of this plan and becomes more valuable with it.
 
 ### Why the lanes do not coordinate the plan
 
