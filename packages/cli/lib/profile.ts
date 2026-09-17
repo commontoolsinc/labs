@@ -98,7 +98,7 @@ function profileSpaces(root: Cell<unknown>): Map<string, Cell<unknown>> {
  *
  * @throws Error when more than one candidate carries `name`.
  */
-async function createdByThisCall(
+export async function createdByThisCall(
   candidates: [string, Cell<unknown>][],
   name: string,
 ): Promise<[string, Cell<unknown>] | undefined> {
