@@ -100,6 +100,19 @@ users) running `/api/patterns/system/profile-home.tsx`; the link is appended to
 (`profile-picker.tsx`): it lists profiles, lets the user create more inline, pick
 the default, and stamp MRU. There is no `profileName` mirror field anymore.
 
+New profile homes record `system:system/profile-home.tsx` as their source origin
+and retain their initial source revision in their own space. Opening a profile
+uses ordinary source reconciliation to follow later releases. Reopening or
+retrying creation preserves an existing profile's detach, edit, or repoint;
+profiles created without an origin need an explicit one-time source transition.
+
+The creator supplies the name as a persisted, owner-protected writable input.
+Source updates keep that input and the profile's other saved fields; authorized
+edits continue through `setName`. The `name` input is required, so an update
+cannot silently replace a legacy saved name with a default. When explicitly
+migrating an older profile, copy its current saved name into this input as part
+of the migration before following the current source.
+
 `profiles`/`defaultProfile`/`mru` are CFC-protected profile-link data, created
 through the trusted profile-create / picker surfaces. Untrusted writes are
 rejected: adding/replacing a link fails the element contract, and structural

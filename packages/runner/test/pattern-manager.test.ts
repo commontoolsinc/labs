@@ -214,6 +214,16 @@ describe("PatternManager program persistence", () => {
       "pattern source destination",
     )).did();
     expect(destinationSpace).not.toBe(space);
+    const creation = runtime.edit();
+    expect(() =>
+      runtime.patternManager.stagePatternSource(
+        compiled,
+        space,
+        destinationSpace,
+        creation,
+      )
+    ).toThrow("carries CFC provenance that cannot be copied");
+    creation.abort("protected source cannot be copied during creation");
     const recoveryRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,

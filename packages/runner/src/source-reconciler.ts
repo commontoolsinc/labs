@@ -42,6 +42,7 @@ import type { Pattern } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
 import { prepareSourceClosureVerification } from "./compilation-cache/cell-cache.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
+import type { PreparedSourceUpdate } from "./pattern-manager.ts";
 import {
   classifyPieceOriginString,
   type PieceOriginKind,
@@ -1090,6 +1091,13 @@ export class SourceReconciler {
       origin: claim?.origin ?? state.storedSource ?? null,
       expected: state.snapshot,
     };
+    const sourceUpdate = baseline.kind === "retain"
+      ? await runtime.patternManager.prepareSourceUpdate(
+        state.space,
+        state.running.identity,
+        candidateRef.identity,
+      )
+      : undefined;
     // Setting up the candidate restages the piece's stored argument against
     // its schema, so that document has to be local before the transaction
     // opens, and still what it was when the transaction commits. A concurrent
@@ -1112,6 +1120,15 @@ export class SourceReconciler {
         candidateRef,
         transition,
       );
+      if (sourceUpdate !== undefined) {
+        runtime.patternManager.stageSourceUpdate(
+          sourceUpdate,
+          state.space,
+          state.running.identity,
+          candidateRef.identity,
+          tx,
+        );
+      }
       // Staging the candidate belongs to this transaction whether or not the
       // piece is running, so a refusal costs nothing either way: setup that
       // cannot take the piece's data fails the transaction and the piece keeps
@@ -1122,7 +1139,7 @@ export class SourceReconciler {
         prepareForResume: true,
       });
       return true;
-    });
+    }, sourceUpdate);
     return committed ? "updated" : "unavailable";
   }
 
@@ -1219,33 +1236,41 @@ export class SourceReconciler {
     state: PieceState,
     signal: AbortSignal | undefined,
     write: (tx: Parameters<typeof applyPieceSourceTransition>[2]) => boolean,
+    sourceUpdate?: PreparedSourceUpdate,
   ): Promise<boolean> {
     const runtime = this.#runtime;
-    const result = await runtime.editWithRetry((tx) => {
-      // editWithRetry re-runs this callback after a retryable rejection, and a
-      // stop can abort between attempts, so every attempt re-enters the gate.
-      // Throwing ends the retry loop; aborting the transaction would be
-      // classified as retryable and consume the remaining attempts.
-      signal?.throwIfAborted();
-      const candidate = resultCell.withTx(tx);
-      const currentRef = getPatternIdentityRef(candidate);
-      // The piece must still run what the candidate was compared against, and
-      // still record the origin that was resolved. Nothing else decides this
-      // transition, so nothing else is guarded: the setup marker in
-      // particular is written by setup, which this transition triggers.
-      if (
-        currentRef?.identity !== state.running.identity ||
-        currentRef.symbol !== state.running.symbol ||
-        getPatternSource(candidate) !== state.storedSource
-      ) return false;
-      // The reconciler runs from a raw promise, with no scheduler run to stamp
-      // it — bookkeeping per serving-loop.md §3d, RULED 2026-08-05.
-      runtime.stampServerRun(tx, {
-        actionId: `source-reconcile/${resultCell.sourceURI}`,
-        kind: "bookkeeping",
-      });
-      return write(tx);
-    });
+    const result = await runtime.editWithRetry(
+      (tx) => {
+        // editWithRetry re-runs this callback after a retryable rejection, and a
+        // stop can abort between attempts, so every attempt re-enters the gate.
+        // Throwing ends the retry loop; aborting the transaction would be
+        // classified as retryable and consume the remaining attempts.
+        signal?.throwIfAborted();
+        if (sourceUpdate !== undefined && runtime.sealDestinationInstalled) {
+          throw new Error("source update authority requires a durable commit");
+        }
+        const candidate = resultCell.withTx(tx);
+        const currentRef = getPatternIdentityRef(candidate);
+        // The piece must still run what the candidate was compared against, and
+        // still record the origin that was resolved. Nothing else decides this
+        // transition, so nothing else is guarded: the setup marker in
+        // particular is written by setup, which this transition triggers.
+        if (
+          currentRef?.identity !== state.running.identity ||
+          currentRef.symbol !== state.running.symbol ||
+          getPatternSource(candidate) !== state.storedSource
+        ) return false;
+        // The reconciler runs from a raw promise, with no scheduler run to stamp
+        // it — bookkeeping per serving-loop.md §3d, RULED 2026-08-05.
+        runtime.stampServerRun(tx, {
+          actionId: `source-reconcile/${resultCell.sourceURI}`,
+          kind: "bookkeeping",
+        });
+        return write(tx);
+      },
+      undefined,
+      { sourceUpdate },
+    );
     if (signal?.aborted) return false;
     if (result.error) {
       logger.warn("reconcile-commit-failed", () => [

@@ -2324,8 +2324,17 @@ export type NodeFactory<T, R> =
     asScope(scope: CellScope): NodeFactory<T, R>;
   };
 
+/** Options applied only when a pattern invocation creates a piece. */
+export interface PatternCreationOptions {
+  /**
+   * Source origin to follow on subsequent opens. Creation requires retained
+   * source; invoking an existing piece preserves its code and source choices.
+   */
+  sourceOrigin?: string;
+}
+
 export type PatternFactory<T, R> =
-  & ((inputs: FactoryInput<T>) => Reactive<R>)
+  & ((inputs: FactoryInput<T>, options?: PatternCreationOptions) => Reactive<R>)
   & Pattern
   & toJSON
   & toEncodableForm

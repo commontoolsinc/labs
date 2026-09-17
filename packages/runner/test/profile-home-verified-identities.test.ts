@@ -79,7 +79,7 @@ describe("profile-home verified external identities", () => {
       );
       // deno-lint-ignore no-explicit-any
       const result = runtime.run(tx, pattern as any, {
-        initialName: "Ada Lovelace",
+        name: "Ada Lovelace",
       }, resultCell);
       runtime.prepareTxForCommit(tx);
       expect((await tx.commit()).error).toBeUndefined();
@@ -160,7 +160,7 @@ describe("profile-home verified external identities", () => {
         setupTx,
         // deno-lint-ignore no-explicit-any
         pattern as any,
-        { initialName: "Ada Lovelace" },
+        { name: "Ada Lovelace" },
         runtime.getCell(
           space,
           "profile-home rejects unlabeled identity",

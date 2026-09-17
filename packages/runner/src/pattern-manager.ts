@@ -32,6 +32,7 @@ import {
   type ModuleDelegationMap,
   moduleDelegationsFromDocs,
   planCompileCacheWriteChunks,
+  readVerifiedSourceClosure,
   recordUndeclarablePolicyStore,
   ROOT_LINK_SPECIFIER,
   type SourceDoc,
@@ -1133,6 +1134,78 @@ export class PatternManager {
     const entryRef = this.getArtifactEntryRef(pattern);
     if (!entryRef) return;
     this.#issueReplication(entryRef.identity, fromSpace, toSpace, delegated);
+  }
+
+  /**
+   * Retain a pattern's verified source in its child's creation transaction.
+   * Missing source refuses creation. Source documents carry no authority from
+   * the parent space; the target's authenticated delegations remain its own.
+   */
+  stagePatternSource(
+    pattern: Pattern | Module,
+    fromSpace: MemorySpace,
+    toSpace: MemorySpace,
+    tx: IExtendedStorageTransaction,
+  ): void {
+    const entry = this.getArtifactEntryRef(pattern);
+    if (entry === undefined) {
+      throw new Error(
+        "source-tracked creation requires a source-backed pattern",
+      );
+    }
+    const visited = new Set<string>();
+    const stage = (identity: string): void => {
+      if (visited.has(identity)) return;
+      visited.add(identity);
+      const retained = readVerifiedSourceClosure(
+        this.#runtime,
+        toSpace,
+        identity,
+        tx,
+      );
+      const source = retained ?? readVerifiedSourceClosure(
+        this.#runtime,
+        fromSpace,
+        identity,
+        tx,
+      );
+      if (source === undefined) {
+        throw new Error(`source unavailable for tracked creation: ${identity}`);
+      }
+      if (retained === undefined) {
+        this.#assertSourceCopyAllowed(
+          source.keys(),
+          identity,
+          fromSpace,
+          toSpace,
+          tx,
+        );
+      }
+      const modules: CacheableModule[] = [...source].map(([identity, doc]) => ({
+        identity,
+        filename: doc.filename,
+        source: doc.code,
+        js: "",
+        imports: uniqueCacheableImports([
+          ...doc.imports
+            .filter((imp) => !imp.specifier.startsWith(ROOT_LINK_SPECIFIER))
+            .map((imp) => ({
+              specifier: imp.specifier,
+              targetIdentity: imp.identity,
+            })),
+          ...fabricImportRefsFromSource(doc),
+        ]),
+      }));
+      for (const doc of source.values()) {
+        for (const dependency of fabricImportRefsFromSource(doc)) {
+          stage(dependency.targetIdentity);
+        }
+      }
+      if (retained === undefined) {
+        writeSourceDocs(this.#runtime, toSpace, modules, identity, tx);
+      }
+    };
+    stage(entry.identity);
   }
 
   /** Issue one closure replication fire-and-forget: fresh ticket and
@@ -3446,6 +3519,35 @@ export class PatternManager {
     return compilationPromise;
   }
 
+  #assertSourceCopyAllowed(
+    identities: Iterable<string>,
+    entryIdentity: string,
+    fromSpace: MemorySpace,
+    toSpace: MemorySpace,
+    tx: IExtendedStorageTransaction,
+  ): void {
+    if (fromSpace === toSpace) return;
+    for (const identity of identities) {
+      const sourceId = this.#runtime.getCell(
+        fromSpace,
+        sourceDocKey(identity),
+        undefined,
+        tx,
+      ).getAsNormalizedFullLink().id;
+      // Unreadable metadata must fail closed, as a protected source would.
+      const metadata = readStoredCfcMetadata(tx, {
+        space: fromSpace,
+        id: sourceId,
+      });
+      if (sourceCfcMetadataProhibitsCrossSpaceCopy(metadata)) {
+        throw new Error(
+          `pattern source ${entryIdentity} carries CFC provenance that ` +
+            `cannot be copied from ${fromSpace} to ${toSpace}`,
+        );
+      }
+    }
+  }
+
   /**
    * Best-effort authored source program for a stored pattern by its content
    * `entryIdentity` — recovered from the verified `pattern:<identity>` source-doc
@@ -3482,30 +3584,13 @@ export class PatternManager {
         sourceDocs !== undefined && destinationSpace !== undefined &&
         destinationSpace !== space
       ) {
-        for (const identity of sourceDocs.keys()) {
-          const sourceId = this.#runtime.getCell(
-            space,
-            sourceDocKey(identity),
-            undefined,
-            readTx,
-          ).getAsNormalizedFullLink().id;
-          // A `StoredCfcMetadataError` propagates, deliberately: a
-          // stored-source envelope this build cannot produce labels from
-          // must not read as unprotected source.
-          const metadata = readStoredCfcMetadata(readTx, {
-            space,
-            id: sourceId,
-          });
-          const prohibited = sourceCfcMetadataProhibitsCrossSpaceCopy(
-            metadata,
-          );
-          if (prohibited) {
-            throw new Error(
-              `pattern source ${entryIdentity} carries CFC provenance that ` +
-                `cannot be copied from ${space} to ${destinationSpace}`,
-            );
-          }
-        }
+        this.#assertSourceCopyAllowed(
+          sourceDocs.keys(),
+          entryIdentity,
+          space,
+          destinationSpace,
+          readTx,
+        );
       }
     } finally {
       readTx.abort?.("get-pattern-source-files read complete");

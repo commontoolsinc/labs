@@ -347,6 +347,7 @@ describe("piece source reconciliation", () => {
 
       expect(await reconcile(piece)).toBe("updated");
       await runtime.idle();
+      await runtime.runner.idlePointerMaintenance();
       // Staging belongs to the transaction that moves the pointer whether or
       // not the piece is running, so the completion marker names the candidate
       // and the watcher re-instantiates over a document already set up for it.

@@ -135,6 +135,7 @@ import {
   PatternManager,
   type PreparedSourceUpdate,
 } from "./pattern-manager.ts";
+import { classifyPieceOriginString } from "./piece-origin-kind.ts";
 import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import type { Runtime } from "./runtime.ts";
 import {
@@ -11814,7 +11815,27 @@ export class Runner {
     ]);
 
     const initialize = (instanceTx: IExtendedStorageTransaction) => {
-      if (childResultCell.space !== parentResultCell.space) {
+      const sourceOrigin = plan.module.sourceOrigin;
+      const existing = getPatternIdentityRef(
+        childResultCell.withTx(instanceTx),
+      );
+      const trackedCreation = sourceOrigin !== undefined &&
+        existing === undefined;
+      const resumeExisting = sourceOrigin !== undefined &&
+        existing !== undefined;
+      if (trackedCreation) {
+        const origin = classifyPieceOriginString(
+          sourceOrigin,
+          this.#runtime.hostForSpace(childResultCell.space),
+        );
+        if (
+          origin.kind === "unusable" ||
+          (origin.kind === "legacy-path" && origin.ref === undefined)
+        ) {
+          throw new Error(`invalid creation source origin: ${sourceOrigin}`);
+        }
+      }
+      if (!resumeExisting && childResultCell.space !== parentResultCell.space) {
         // Cross-space child pattern: run it inline in a multi-space transaction
         // (child space committed first) rather than re-instantiating it in a
         // deferred second transaction, which would lose its verified-function
@@ -11824,6 +11845,16 @@ export class Runner {
           childResultCell.space,
           parentResultCell.space,
         );
+      }
+      if (trackedCreation) {
+        this.#runtime.patternManager.stagePatternSource(
+          patternImpl,
+          parentResultCell.space,
+          childResultCell.space,
+          instanceTx,
+        );
+      }
+      if (!resumeExisting && childResultCell.space !== parentResultCell.space) {
         // CT-1687: a fresh runtime navigating to the child piece loads its
         // pattern artifacts from `resultCell.space` (the child's own space),
         // where neither the meta nor the compiled closure exist yet. Replicate
@@ -11848,18 +11879,23 @@ export class Runner {
             : undefined,
         );
       }
-      const childRun = this.#runWithStartOwnership(
-        instanceTx,
-        patternImpl,
-        inputs,
-        childResultCell.withTx(instanceTx),
-        {
-          awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
-            schedulerRehydration,
-          ),
-          parentPieceRootId: parentResultCell.getAsNormalizedFullLink().id,
-        },
-      );
+      // A tracked child owns its stored code and inputs after creation. Its
+      // current pattern may be an owner edit absent from this runtime's cache.
+      const childRun = resumeExisting
+        ? this.#resumeChildAfterCommit(instanceTx, childResultCell, addCancel)
+        : this.#runWithStartOwnership(
+          instanceTx,
+          patternImpl,
+          inputs,
+          childResultCell.withTx(instanceTx),
+          {
+            sourceOrigin,
+            awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
+              schedulerRehydration,
+            ),
+            parentPieceRootId: parentResultCell.getAsNormalizedFullLink().id,
+          },
+        );
 
       if (sendToBindings) {
         sendValueToBinding(
@@ -11888,6 +11924,44 @@ export class Runner {
         ? this.retainChild(childResultCell)
         : () => this.releaseChild(childResultCell, childRun.installedCancel),
     );
+  }
+
+  /** Resumes a child from its retained source after its parent's commit. */
+  #resumeChildAfterCommit<T>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<T>,
+    addCancel: AddCancel,
+  ): RunResult<T> {
+    const ownership = this.#createDeferredStartOwnership(resultCell);
+    if (!this.#usesScopedPrograms(resultCell)) {
+      addCancel(() => {
+        if (
+          !this.#independentlyStartedResults.has(this.#getDocKey(resultCell))
+        ) {
+          ownership.cancel();
+        }
+      });
+    }
+    tx.addCommitCallback((_committedTx, result) => {
+      if (result.error) {
+        ownership.cancel();
+        return;
+      }
+      if (ownership.isCancelled()) return;
+      const work = this.#startFromServedState(resultCell.withTx(), ownership)
+        .then((started) => {
+          if (!started) ownership.cancel();
+        }).catch((error) => {
+          ownership.cancel();
+          this.#reportPieceStartCommitFailure(
+            `piece-start/${resultCell.sourceURI}`,
+            error,
+          );
+          throw error;
+        });
+      this.#runtime.scheduler.trackBackgroundTask(work);
+    });
+    return { resultCell, cancelDeferredStart: ownership.cancel };
   }
 }
 

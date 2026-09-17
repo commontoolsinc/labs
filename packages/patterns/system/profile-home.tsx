@@ -254,6 +254,8 @@ export type ProfileHomeOutput = {
 };
 
 export type ProfileHomeInput = {
+  // Required so a source update cannot default away a legacy saved name.
+  name: Writable<OwnerProtectedProfileWrite<string, typeof setName>>;
   initialName?: string;
 };
 
@@ -719,11 +721,7 @@ const applyInitialName = lift<
 });
 
 export default pattern<ProfileHomeInput, ProfileHomeOutput>(
-  ({ initialName, [SELF]: self }) => {
-    const initialProfileName = trimInitialName(initialName);
-    const name = new Writable<
-      OwnerProtectedProfileWrite<string, typeof setName>
-    >(initialProfileName).for("name");
+  ({ initialName, name, [SELF]: self }) => {
     const avatar = new Writable<
       OwnerProtectedProfileWrite<string, typeof setAvatar>
     >("").for("avatar");

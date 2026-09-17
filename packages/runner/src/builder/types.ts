@@ -223,6 +223,9 @@ declare module "@commonfabric/api" {
 
     /** Run this module's result in a specific space. */
     targetSpace?: MemorySpace;
+
+    /** Source origin to attach only when this invocation creates its piece. */
+    sourceOrigin?: string;
   }
 }
 

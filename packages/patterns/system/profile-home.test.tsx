@@ -2,7 +2,7 @@ import { action, assert, pattern, TESTS } from "commonfabric";
 import ProfileHome from "./profile-home.tsx";
 
 export default pattern(() => {
-  const profile = ProfileHome({ initialName: "Ada Lovelace" });
+  const profile = ProfileHome({ name: "Ada Lovelace" });
 
   // CT-1748: the rendered profile view. Single context, so the owner-protected
   // name/avatar/elements resolve cleanly (no cross-stamp moduleIdentity
@@ -151,6 +151,7 @@ export default pattern(() => {
   });
 
   const assert_initial_state = assert(() =>
+    profile.name === "Ada Lovelace" &&
     profile.initialNameApplied === "Ada Lovelace" &&
     profile.externalLinks.length === 0 &&
     profile.verifiedIdentities.length === 0 &&

@@ -1,4 +1,4 @@
-import type { JSONSchemaObj } from "@commonfabric/api";
+import type { JSONSchemaObj, PatternCreationOptions } from "@commonfabric/api";
 import {
   hashStringOf,
   isWalkableObjectOrArray,
@@ -611,10 +611,16 @@ function factoryFromPattern<T, R>(
     defaultSpace?: string | unknown,
   ): PatternFactory<T, R> => {
     const factory = Object.assign(
-      (inputs: FactoryInput<T>): Reactive<R> => {
+      (
+        inputs: FactoryInput<T>,
+        options?: PatternCreationOptions,
+      ): Reactive<R> => {
         const module: Module & toEncodableForm & toJSON = {
           type: "pattern",
           implementation: factory,
+          ...(options?.sourceOrigin !== undefined
+            ? { sourceOrigin: options.sourceOrigin }
+            : {}),
           ...(factory.defaultScope !== undefined
             ? { defaultScope: factory.defaultScope }
             : {}),
