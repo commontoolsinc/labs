@@ -363,6 +363,38 @@ describe("input-cells", () => {
       );
     });
 
+    it("throws for a qualified address when the session's space has no name", async () => {
+      // The resolution knows one space. A name this side cannot check is a
+      // space it cannot honour — answering with this space's same-slug
+      // piece would hand back a cell nobody asked for.
+      let asked = false;
+      await expect(mintInputCellHandles(
+        undefined,
+        "run-1",
+        [{ name: "pattern_1", ref: "pattern:some-space/reading-list" }],
+        SPACE_DID,
+        {
+          resolvePiece: () => {
+            asked = true;
+            return Promise.resolve(PIECE_ID);
+          },
+        },
+      )).rejects.toThrow("has no name to check that against");
+      expect(asked).toBe(false);
+    });
+
+    it("resolves a bare slug when the session's space has no name", async () => {
+      // A slug names no space to disagree about: it means this one.
+      const { inputCells } = await mintInputCellHandles(
+        undefined,
+        "run-1",
+        [{ name: "pattern_1", ref: "reading-list" }],
+        SPACE_DID,
+        { resolvePiece: () => Promise.resolve(PIECE_ID) },
+      );
+      expect(inputCells[0].ref).toContain(PIECE_ID);
+    });
+
     it("throws for a named address with no session to resolve it", async () => {
       await expect(mintInputCellHandles(
         undefined,

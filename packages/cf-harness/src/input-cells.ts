@@ -299,6 +299,18 @@ const resolvedInputCellRef = async (
       `--input-cell \`${spec.name}\` names the piece \`${address.slug}\`, which needs a fabric session to resolve; configure --fabric-space`,
     );
   }
+  // A QUALIFIED ADDRESS IS RESOLVED IN THIS SPACE OR NOT AT ALL. The
+  // resolution below asks the session, which knows one space, so a space
+  // this side cannot check the name of is one the address cannot be
+  // honoured against: the same slug in another space is a different piece,
+  // and answering with this space's would hand back a cell nobody asked
+  // for. A space configured by `did:key` has no name, which is exactly
+  // when this fires.
+  if (address.spaceName !== undefined && session.spaceName === undefined) {
+    throw new Error(
+      `--input-cell \`${spec.name}\` names space \`${address.spaceName}\`, and this session's space has no name to check that against; name the space, or attach the piece by reference`,
+    );
+  }
   let pieceId: string;
   try {
     pieceId = await session.resolvePiece(address.slug);

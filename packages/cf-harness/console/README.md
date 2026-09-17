@@ -286,6 +286,13 @@ side's to explain. Whether the space HOLDS that slug is not a fact about the
 text; the turn finds it out and fails naming the slug, under the rule above that
 governs every reference which parses and still cannot mint.
 
+One case the turn answers rather than the route: a qualified address on a
+console whose space is configured by `did:key` and so carries no name. The
+resolution knows one space, and a name that cannot be checked is a space the
+address cannot be honoured against — the same slug in another space is a
+different piece — so the turn refuses rather than answering with this space's. A
+bare slug is unaffected: it names no space to disagree about.
+
 The address is scoped to pieces. A pane may show any cell in a space, and the
 general case is CT-2319's; a slug names a piece or it names nothing, which is
 what lets this resolve with no vocabulary the space does not already have. The
