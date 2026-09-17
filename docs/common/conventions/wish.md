@@ -141,10 +141,11 @@ wish({ query: "#profileBio" }) // default profile's bio (free-text description)
 wish({ query: "#profileSpace" }) // default profile's space cell
 ```
 
-`wish({ query: "#profile" }).result` is **always the single current profile** —
+Once profile data is loaded and at least one profile exists,
+`wish({ query: "#profile" }).result` is **the single current profile** —
 the best of the ordered candidates (default → MRU → first) — in **every** mode
-(interactive, headless, and the blessed read). Once profile data is loaded, it
-does not depend on the picker sidecar pattern running, so
+(interactive, headless, and the blessed read). It does not depend on the picker
+sidecar pattern running, so
 consumers can gate on `.result` without stranding in the multi-profile case
 (CT-1829). The `candidates` array holds all ordered profiles.
 

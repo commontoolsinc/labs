@@ -415,8 +415,6 @@ describe("wish", () => {
             await seedManager.synced();
             await runtime.dispose();
             await seed.dispose();
-            await manager.close();
-            await seedManager.close();
             await server.close();
             globalThis.fetch = originalFetch;
           }

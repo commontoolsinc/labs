@@ -34,9 +34,10 @@ export function createWishProfileReadiness(
   let action: Action | undefined;
   const subscription: IStorageNotification = {
     next(notification) {
+      if (!active) return { done: true };
       if (notification.type === "reset") {
         confirmations.clear();
-        if (active && action) runtime.scheduler.invalidateAction(action);
+        if (action) runtime.scheduler.invalidateAction(action);
       }
       return undefined;
     },
@@ -92,8 +93,13 @@ export function createWishProfileReadiness(
             runtime.scheduler.invalidateAction(action, { retry: true });
           }
         };
+        // syncCell registers its pending load before yielding, but can fulfill
+        // with a provider error. Captures the ledger's failure-aware wait before
+        // that load settles and its ledger entry is removed.
+        const sync = syncCellForIdentity(root, identity);
+        const settled = runtime.storageManager.loadsSettled?.([key]);
         runtime.storageManager.trackUntilSettled(
-          syncCellForIdentity(root, identity).then(
+          Promise.all([sync, settled]).then(
             () => finish({ status: "confirmed" }),
             (cause: unknown) =>
               finish({

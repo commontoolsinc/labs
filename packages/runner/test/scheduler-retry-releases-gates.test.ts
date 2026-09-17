@@ -66,7 +66,6 @@ describe("scheduler-owed retries run past the node's freshness gates", () => {
         confirmed.resolve();
         cancel?.();
         await runtime.dispose();
-        await storageManager.close();
       }
     });
   }

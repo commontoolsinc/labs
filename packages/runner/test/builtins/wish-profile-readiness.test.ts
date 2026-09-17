@@ -23,6 +23,7 @@ import { readStoredCfcMetadata } from "../../src/cfc/metadata.ts";
 import { rawMetaWriteAuthorization } from "../../src/meta-seam.ts";
 import { Runtime } from "../../src/runtime.ts";
 import type { IStorageNotification } from "../../src/storage/interface.ts";
+import { StorageNotificationRelay } from "../../src/storage/subscription.ts";
 import {
   EmulatedStorageManager,
   newLoopbackServer,
@@ -281,8 +282,6 @@ describe("wish", () => {
         cancels.forEach((cancel) => cancel());
         await runtime.dispose();
         await seed.dispose();
-        await manager.close();
-        await seedManager.close();
         await server.close();
       }
     });
@@ -388,10 +387,139 @@ describe("wish", () => {
         await manager.synced();
         await runtime.idle();
         await runtime.dispose();
-        await manager.close();
       }
     });
   }
+
+  for (
+    const document of ["Home root", "default pattern", "roster", "profile"]
+  ) {
+    it(`keeps profile creation closed when the ${document} provider reports a load error`, async () => {
+      const manager = EmulatedStorageManager.emulate({ as: user });
+      const runtime = makeRuntime(manager);
+      const cancels: (() => void)[] = [];
+      const home = runtime.getHomeSpaceCell().asSchema(undefined);
+      const defaultPattern = runtime.getCell(user.did(), "default-pattern");
+      const roster = runtime.getCell(user.did(), "profile-roster");
+      const profile = runtime.getCell(persona.did(), "missing-profile");
+      const missing = document === "Home root"
+        ? home
+        : document === "default pattern"
+        ? defaultPattern
+        : document === "roster"
+        ? roster
+        : profile;
+      const provider = manager.open(missing.space);
+      const originalSync = provider.sync.bind(provider);
+      let reportedFailures = 0;
+      try {
+        const owner = runtime.getCell(board.did(), "consumer");
+        const inputs = runtime.getCell(board.did(), "wish-inputs");
+        let tx = runtime.edit();
+        if (document !== "Home root") {
+          home.withTx(tx).setRaw({
+            defaultPattern: defaultPattern.getAsLink(),
+          });
+        }
+        if (document === "roster" || document === "profile") {
+          defaultPattern.withTx(tx).setRaw({ profiles: roster.getAsLink() });
+        }
+        if (document === "profile") {
+          roster.withTx(tx).setRaw([profile.getAsLink()]);
+        }
+        runtime.prepareTxForCommit(tx);
+        expect((await tx.commit()).error).toBeUndefined();
+        tx = runtime.edit();
+        owner.withTx(tx).set({});
+        inputs.withTx(tx).set({ query: "#profile", headless: true });
+        runtime.prepareTxForCommit(tx);
+        expect((await tx.commit()).error).toBeUndefined();
+        await manager.synced();
+        provider.sync = (id, ...rest) => {
+          if (id === missing.getAsNormalizedFullLink().id) {
+            reportedFailures++;
+            return Promise.resolve({
+              error: new Error("Provider load failed"),
+            });
+          }
+          return originalSync(id, ...rest);
+        };
+        let output: Cell<unknown> | undefined;
+        const result = wish(
+          inputs as Cell<[unknown, unknown]>,
+          (_tx, value) => output = value as Cell<unknown>,
+          (cancel) => cancels.push(cancel),
+          [owner],
+          owner,
+          runtime,
+        );
+        result.onActionRegistered?.(result.action);
+        cancels.push(
+          runtime.scheduler.subscribe(result.action, { isEffect: true }),
+        );
+        await runtime.idle();
+        expect(reportedFailures).toBeGreaterThan(0);
+        expect(output).toBeDefined();
+        const state = output!.withTx(undefined);
+        expect(state.key("error").get()).toBe(
+          "Error: Could not load profile selection data",
+        );
+        expect(
+          state.key("$UI").key("props").key("data-profile-create-ui").get(),
+        )
+          .toBeUndefined();
+        expect([...runtime.runner.cancels.keys()]).toHaveLength(0);
+      } finally {
+        provider.sync = originalSync;
+        cancels.forEach((cancel) => cancel());
+        await runtime.dispose();
+      }
+    });
+  }
+
+  it("retires cancelled readiness subscriptions when storage has no unsubscribe", async () => {
+    const manager = EmulatedStorageManager.emulate({ as: user });
+    const runtime = makeRuntime(manager);
+    const cancels: (() => void)[] = [];
+    const release = defer<void>();
+    const relay = new StorageNotificationRelay();
+    const originalSync = manager.syncCell.bind(manager);
+    const originalSubscribe = manager.subscribe.bind(manager);
+    try {
+      manager.syncCell = async (cell) => {
+        await release.promise;
+        return cell;
+      };
+      manager.subscribe = (subscription) => relay.subscribe(subscription);
+      Object.defineProperty(manager, "unsubscribe", {
+        value: undefined,
+        configurable: true,
+      });
+      const readiness = createWishProfileReadiness(
+        runtime,
+        (cancel) => cancels.push(cancel),
+      );
+      const tx = runtime.edit();
+      try {
+        expect(() => readiness.requireDocument(runtime.getHomeSpaceCell(), tx))
+          .toThrow(WishProfilePending);
+      } finally {
+        tx.abort();
+      }
+      expect(relay.hasSubscribers()).toBe(true);
+      cancels.splice(0).forEach((cancel) => cancel());
+      relay.next({ type: "reset", space: user.did() });
+      expect(relay.hasSubscribers()).toBe(false);
+    } finally {
+      release.resolve();
+      cancels.forEach((cancel) => cancel());
+      manager.syncCell = originalSync;
+      manager.subscribe = originalSubscribe;
+      Reflect.deleteProperty(manager, "unsubscribe");
+      await runtime.dispose();
+    }
+  });
+
   it("requires fresh confirmation after a replica reset during a load", async () => {
     const manager = EmulatedStorageManager.emulate({ as: user });
     const runtime = makeRuntime(manager);
@@ -443,7 +571,6 @@ describe("wish", () => {
       manager.syncCell = originalSync;
       manager.subscribe = originalSubscribe;
       await runtime.dispose();
-      await manager.close();
     }
   });
 });
