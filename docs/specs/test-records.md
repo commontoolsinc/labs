@@ -522,7 +522,6 @@ The list is over tests: a lane's measurement of one of its batches is not
 one, however long that batch ran. A test that wedges rather than
 finishing slowly records no duration; wedges surface through job
 failures, and the incremental producers bound what a wedged job loses to
-its unflushed lines. An identity whose every execution in the window
-failed has no duration either, and is absent from the list for the same
-reason. A test that never passes surfaces through the job it fails rather
-than through this list.
+its unflushed lines. An identity with no passing execution in the window
+has no duration either, and is absent from the list for the same reason.
+A test that fails every time it runs surfaces through the job it fails.
