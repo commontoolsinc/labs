@@ -100,7 +100,7 @@ import {
   getMetaLink,
   matchLLMFriendlyLink,
   type NormalizedFullLink,
-  ownerDeclaresStream,
+  ownerStreamSchema,
   parseLink,
   parseLLMFriendlyLink,
   sanitizeSchemaForLinks,
@@ -2071,11 +2071,22 @@ function resolveToolCall(
     // builtin's handlers are fields of its own result document) is typed from
     // that schema. A path an observation handed out names a stream's own
     // document, and its owner's manifest declares it.
-    const typedRef = getResultCellWithSourceSchema(cellRef);
-    const declaredBySchema = isStream(typedRef.resolveAsCell());
-    const namesStreamDocument = !declaredBySchema &&
-      ownerDeclaresStream(cellRef.resolveAsCell());
-    const targetsStream = declaredBySchema || namesStreamDocument;
+    //
+    // They are tried in that order because the handle chosen is also what the
+    // integrity gate reads its floors from (`integrityGateTarget`): a stored
+    // link and a manifest link carry the handler's event schema, floors
+    // included, where a result schema may say no more than "a stream".
+    const streamHandle = (): Cell<unknown> | undefined => {
+      if (isStream(cellRef.resolveAsCell())) return cellRef;
+      const typedRef = getResultCellWithSourceSchema(cellRef);
+      if (isStream(typedRef.resolveAsCell())) return typedRef;
+      const ownerSchema = ownerStreamSchema(cellRef.resolveAsCell());
+      return ownerSchema === undefined
+        ? undefined
+        : cellRef.asSchema(ownerSchema);
+    };
+    const handler = streamHandle();
+    const targetsStream = handler !== undefined;
 
     if (name === READ_TOOL_NAME) {
       // Get cell reference from the link - works for any valid handle
@@ -2095,9 +2106,7 @@ function resolveToolCall(
         type: "invoke",
         // A send decides stream or write off the handle, so the handle
         // carries the declaration that was found for it.
-        handler: (namesStreamDocument
-          ? cellRef.asSchema({ asCell: ["stream"] })
-          : typedRef) as unknown as Stream<any>,
+        handler: handler as unknown as Stream<any>,
         call: {
           id,
           name,

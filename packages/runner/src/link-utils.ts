@@ -1017,7 +1017,8 @@ export function getMetaLink(
 }
 
 /**
- * Whether the owner of the document `cell` names declares it a stream.
+ * The schema under which the owner of the document `cell` names declares it
+ * a stream, or `undefined` when no owner does.
  *
  * A stream's document holds only the `result` back-link setup writes onto
  * it, so an address that names the document alone says nothing about it:
@@ -1025,24 +1026,31 @@ export function getMetaLink(
  * no schema. The declaration is on the owner, in the manifest link its result
  * document keeps for each derived internal cell, and this follows the
  * back-link to read it there. A cell below a document's root, or one whose
- * document names no owner, is declared by no one.
+ * document names no owner, is declared by no one. The schema returned is the
+ * manifest link's own, so it carries the event schema the stream was declared
+ * with beside the declaration.
  */
-export function ownerDeclaresStream(cell: Cell<unknown>): boolean {
+export function ownerStreamSchema(
+  cell: Cell<unknown>,
+): JSONSchema | undefined {
   const target = cell.getAsNormalizedFullLink();
-  if (target.path.length > 0) return false;
+  if (target.path.length > 0) return undefined;
   const ownerLink = getMetaLink(cell, "result");
-  if (ownerLink === undefined) return false;
+  if (ownerLink === undefined) return undefined;
   const owner = cell.runtime.getCellFromLink(
     { ...ownerLink, path: [], schema: undefined },
     undefined,
     cell.tx,
   );
   const manifest = owner.getMetaRaw("internal", META_READ_OPTIONS);
-  if (!Array.isArray(manifest)) return false;
-  return manifest.some((entry) => {
-    if (!isObjectNotArray(entry)) return false;
+  if (!Array.isArray(manifest)) return undefined;
+  for (const entry of manifest) {
+    if (!isObjectNotArray(entry)) continue;
     const link = parseLink(entry.link, owner);
-    return link !== undefined && areNormalizedLinksSame(link, target) &&
-      ContextualFlowControl.declaresStream(link.schema);
-  });
+    if (
+      link !== undefined && areNormalizedLinksSame(link, target) &&
+      ContextualFlowControl.declaresStream(link.schema)
+    ) return link.schema;
+  }
+  return undefined;
 }

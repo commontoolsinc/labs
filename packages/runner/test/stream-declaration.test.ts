@@ -12,7 +12,7 @@ import {
   getDerivedInternalCell,
   getMetaLink,
   KeepAsCell,
-  ownerDeclaresStream,
+  ownerStreamSchema,
   parseLink,
 } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -389,9 +389,10 @@ describe("stream declaration", () => {
       const { cell, bare } = await streamDocumentOf("counter-bare");
       // No stored link hop, no caller schema, and nothing in the document.
       expect(isStream(bare)).toBe(false);
-      expect(ownerDeclaresStream(bare)).toBe(true);
+      expect(ContextualFlowControl.declaresStream(ownerStreamSchema(bare)))
+        .toBe(true);
       // The piece's result document names an owner for nothing.
-      expect(ownerDeclaresStream(cell)).toBe(false);
+      expect(ownerStreamSchema(cell)).toBeUndefined();
     });
 
     it("is invoked, not read, when a tool call names it", async () => {
@@ -415,6 +416,9 @@ describe("stream declaration", () => {
         handler: Cell<unknown>;
       };
       expect(resolved.type).toBe("invoke");
+      // The integrity gate reads its floors off the handle's schema, so the
+      // handle carries the owner's declaration whole, event schema included.
+      expect(resolved.handler.schema).toEqual(ownerStreamSchema(bare));
 
       const before = countOf(cell);
       const tx = rt.edit();
