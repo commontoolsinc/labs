@@ -87,6 +87,7 @@ import {
   describePiece,
   type EntryConfig,
   executePieceCallable,
+  followPieceSource,
   formatViewTree,
   generateSpaceMap,
   getCellCfcLabel,
@@ -2581,6 +2582,34 @@ export const piece = targetOptions(
     }
     await applyPieceSourceCommandAction(options, mainPath);
   })
+  /* piece follow */
+  .command(
+    "follow",
+    cliText(
+      `Point a piece at a source origin and adopt what it serves now.
+
+From then on the piece follows the origin: opening it adopts each later
+release. This is how a piece created detached is put on the lifecycle a
+release reaches — a profile made before the runtime claimed origins for
+the children of system pieces, say:
+
+  cf piece follow --cell <profile> system:system/profile-home.tsx
+
+Unlike 'setsrc', which detaches, the origin is recorded with the revision.`,
+    ),
+  )
+  .example(
+    cliText(
+      `cf piece follow ${EX_ID} ${EX_COMP_PIECE} system:system/profile-home.tsx`,
+    ),
+    `Make "${EX_PIECE}" follow the deployment's profile pattern.`,
+  )
+  .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
+  .arguments("<origin:string>")
+  .action(async (options, origin) => {
+    setQuietMode(!!options.quiet);
+    await followPieceSourceAction(options, origin);
+  })
   /* piece inspect */
   .command("inspect", "Inspect detailed information about a piece")
   .usage(pieceUsage)
@@ -5013,6 +5042,53 @@ export async function setPieceSourceFromCommand(
     },
   );
   return { config, update };
+}
+
+/** Injectable effects for {@link followPieceSourceAction}. */
+export interface FollowPieceSourceCommandDependencies {
+  followPieceSource?: typeof followPieceSource;
+  render?: (value: unknown) => void;
+  hint?: (message: string) => void;
+  printError?: (message: string) => void;
+  setExitCode?: (code: number) => void;
+}
+
+/**
+ * The `cf piece follow <origin>` action body: points the piece at the origin
+ * and reports the transition. A candidate the piece cannot take is reported
+ * with the compatibility message and a non-zero exit, and nothing is written.
+ */
+export async function followPieceSourceAction(
+  options: PieceCLIOptions,
+  origin: string,
+  deps: FollowPieceSourceCommandDependencies = {},
+): Promise<void> {
+  const config = parsePieceOptions(options);
+  const trimmed = origin.trim();
+  if (trimmed.length === 0) {
+    throw new ValidationError("An origin is required.", { exitCode: 1 });
+  }
+  const result = await (deps.followPieceSource ?? followPieceSource)(
+    config,
+    trimmed,
+  );
+  if (result.status === "incompatible") {
+    (deps.printError ?? console.error)(
+      `The source ${trimmed} serves now cannot replace what ${config.piece} ` +
+        `runs: ${result.message}`,
+    );
+    (deps.setExitCode ?? ((code: number) => {
+      Deno.exitCode = code;
+    }))(1);
+    return;
+  }
+  (deps.render ?? render)(`${config.piece} now follows ${trimmed}`);
+  if (result.executionWarning !== undefined) {
+    (deps.hint ?? hint)(result.executionWarning);
+  }
+  (deps.hint ?? hint)(cliText(`NEXT STEPS:
+  → Inspect state: cf piece inspect --cell ${config.piece} ...
+  → Open the piece in the shell; each later release of the origin is adopted there.`));
 }
 
 /** Applies `piece setsrc` and renders the receipt returned by the commit. */
