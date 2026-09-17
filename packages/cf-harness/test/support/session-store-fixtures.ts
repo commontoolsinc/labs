@@ -7,6 +7,14 @@ import type {
   HarnessPromptLoopResult,
   RunHarnessTranscriptOptions,
 } from "../../src/prompt-loop.ts";
+import { pieceTargetingContextMessages } from "../../src/piece-targeting.ts";
+
+/** Context established before each new unattached task, including after restore. */
+export const unattachedTurnContext = () =>
+  pieceTargetingContextMessages([]).map((content) => ({
+    role: "user" as const,
+    content,
+  }));
 
 /** Returns a clock whose readings advance by one second per call. */
 export const nextIsoNow = (): () => string => {

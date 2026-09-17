@@ -51,9 +51,8 @@ import {
   type CfHarnessHostMountConfig,
   hostMountsToAdditionalMounts,
 } from "./host-mounts.ts";
-import { inputCellsContextMessage } from "./input-cells.ts";
 import { patternRefsContextMessage } from "./pattern-refs.ts";
-import { PIECE_TARGETING_GUIDANCE } from "./piece-targeting.ts";
+import { pieceTargetingContextMessages } from "./piece-targeting.ts";
 import type { CreateHarnessPromptLoopOptions } from "./prompt-loop.ts";
 import type { DockerRunscAdditionalMountConfig } from "./sandbox/types.ts";
 import { loadHarnessSkillContext } from "./skills/registry.ts";
@@ -427,8 +426,9 @@ const establishContextMessages = async (
       options.onGrantsUnavailable?.(error);
     }
   }
-  messages.push(inputCellsContextMessage(await engine.establishInputCells()));
-  messages.push(PIECE_TARGETING_GUIDANCE);
+  messages.push(
+    ...pieceTargetingContextMessages(await engine.establishInputCells()),
+  );
   const patternRefsMessage = patternRefsContextMessage(
     await engine.establishPatternRefs(),
   );

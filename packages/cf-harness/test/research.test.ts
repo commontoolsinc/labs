@@ -175,10 +175,19 @@ describe("research", () => {
             questions: ["Which piece should be edited?"],
           })),
       ]);
-      await createResearchRunner({ modelClient: model })(requestFor({
-        task: "Add a total to this bills pane.",
-        purpose: "orient",
-      }));
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({
+          task: "Add a total to this bills pane.",
+          purpose: "orient",
+        }),
+      );
+      expect(reply.kit.status).toBe("incomplete");
+      expect(reply.kit).toHaveProperty("questions", [
+        "Which piece should be edited?",
+      ]);
+      expect(
+        reply.record.messages.filter((message) => message.role === "tool"),
+      ).toEqual([]);
       const system = model.requests[0].transcript.find((message) =>
         message.role === "system"
       )?.content;
