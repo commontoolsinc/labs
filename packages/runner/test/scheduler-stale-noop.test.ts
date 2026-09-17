@@ -84,7 +84,6 @@ describe("scheduler-stale-noop", () => {
           runtime.clearSealDestination();
           await storage.synced();
           await runtime.dispose();
-          await storage.close();
         }
       });
     }
