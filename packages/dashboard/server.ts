@@ -1,9 +1,9 @@
 #!/usr/bin/env -S deno run --allow-net --allow-run=deno,git --allow-read --allow-write --allow-env
 
 /**
- * Runs the fabric wall: the live dashboard everything else in this package
- * feeds. Each tile lives under tiles/ and is registered once in registry.ts,
- * and this file stays generic about all of them. It schedules every tile's
+ * Runs the dashboard: the live page everything else in this package feeds.
+ * Each tile lives under tiles/ and is registered once in registry.ts, and
+ * this file stays generic about all of them. It schedules every tile's
  * collect() on that tile's own interval, renders the results uniformly, serves
  * the page, pushes updates down the event stream, and mounts whatever
  * drill-down routes a tile declares. It knows nothing about individual tiles.
@@ -616,7 +616,7 @@ export function start(
   const timer = setInterval(onTick, TICK_MS);
   const server = serve({
     port: PORT,
-    onListen: () => console.log(`\n  Fabric wall LIVE:  http://localhost:${PORT}\n  ${TILES.length} tiles registered.\n`),
+    onListen: () => console.log(`\n  Dashboard LIVE:  http://localhost:${PORT}\n  ${TILES.length} tiles registered.\n`),
   }, handle);
   return { timer, server, onTick };
 }

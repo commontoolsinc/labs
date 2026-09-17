@@ -1559,7 +1559,7 @@ Deno.test("routes: a tile's drill-down path wins over the page; anything else is
   const fallback = await handle(req("/not-a-route"));
   assertEquals(fallback.status, 200);
   assertEquals(fallback.headers.get("content-type"), "text/html; charset=utf-8");
-  assertStringIncludes(await fallback.text(), "<title>Fabric wall — LIVE</title>");
+  assertStringIncludes(await fallback.text(), "<title>Dashboard — LIVE</title>");
 
   // Views have landed by now, so the probe reports the board as up.
   assertEquals((await (await handle(req("/healthz"))).json()).ok, true);

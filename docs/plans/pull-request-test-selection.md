@@ -1644,8 +1644,8 @@ allowed to prove itself.
 **The rule reaches a repository gate as well.** Formatting, linting and
 the drift guard are tests of the tree, and the rule says nothing about
 one of them that it does not say about a unit test. A gate above the
-flake threshold leaves the selectable set, and appears on the wall as the
-defect in the gate that it is.
+flake threshold leaves the selectable set, and appears on the dashboard
+as the defect in the gate that it is.
 
 The exception the rule carries reaches a gate through the paths the gate
 declares a change reaches it by. A gate's unit is the name of a gate
@@ -1956,9 +1956,9 @@ days, because what shows a test has settled is running without
 disagreeing, and a test left untouched for three weeks has shown nothing.
 
 Both counts are published beside the share. A share cannot be weighed
-without them, and everything that shows a person this figure — the wall
-and the report a red `main` leaves — shows the counts with it. They are
-counted flat, so they are not what the share divides.
+without them, and everything that shows a person this figure — the
+dashboard and the report a red `main` leaves — shows the counts with it.
+They are counted flat, so they are not what the share divides.
 
 Two things follow from knowing it.
 
@@ -2143,10 +2143,10 @@ Three things elsewhere have to move with this rule.
 
 Nothing is masked. Every run is recorded, every failure is scored by the
 same rules as any other, the job summary names each non-gating failure and
-the identity it belongs to, and the wall and the deflake work queue read
-exactly these records. The failure no longer fails the build, and only for
-tests whose measured share says they cannot tell a good change from a bad
-one.
+the identity it belongs to, and the dashboard and the deflake work queue
+read exactly these records. The failure no longer fails the build, and
+only for tests whose measured share says they cannot tell a good change
+from a bad one.
 
 **The first rule alone is a real option, and it is worth saying why it was
 not taken.** Running an excluded identity several times on `main` and
@@ -3066,7 +3066,7 @@ red build for one uncovered line would make `main`'s color mean nothing.
 Narrower measurements do still gate pull requests, and they are the
 subject of [the next section](#the-measured-set).
 
-It is a dashboard tile instead, and the tile follows [the wall's
+It is a dashboard tile instead, and the tile follows [the dashboard's
 rules](../../packages/dashboard/README.md#philosophy-and-values). It shows
 the count of uncovered lines and, under it, what a median day does to that
 count, which is the part somebody can act on. It is not a percentage:
@@ -3505,11 +3505,11 @@ pull request's own run could not have:
 
 ### Keeping this on the right side of the line
 
-The wall's rule is "report on the system, never on individuals: no
+The dashboard's rule is "report on the system, never on individuals: no
 per-person leaderboards, no 'who broke the build', nothing that turns the
-wall into a place to rank or shame people." A comment naming the change
-that introduced a regression is close enough to that line to be worth
-being deliberate about which side it is on.
+dashboard into a place to rank or shame people." A comment naming the
+change that introduced a regression is close enough to that line to be
+worth being deliberate about which side it is on.
 
 It sits on the right side, and these are the properties that keep it
 there, each of which is a constraint on the implementation rather than an
@@ -3534,8 +3534,8 @@ observation about it:
 
 If it ever stops being all five of those, it should be removed rather than
 tuned. A notification people learn to resent is worse than no
-notification, for the same reason a wall of red tiles is worse than no
-wall.
+notification, for the same reason a board of red tiles is worse than no
+board.
 
 ## Consequences we are choosing
 
@@ -3649,7 +3649,7 @@ is pinned to the commit's date. And if none of that settles it,
 | A fork pull request | Works unchanged. The manifest is world-readable, and the existing member gate decides whether the fork's records ship. |
 | A re-run of one failed lane | Runs the same set, because the manifest is resolved by the commit's date, which no attempt changes. |
 | Both `pr-tests` and `full-tests` skip | `Status` fails. Its second clause requires one of them to have succeeded, so a pull request that ran no tests can never report green. |
-| A test too flaky for pull requests fails on `main` | The run stays green and the job summary names the failure and its identity. The records are scored as any others, so the failure feeds the share, the wall, and the deflake work queue. |
+| A test too flaky for pull requests fails on `main` | The run stays green and the job summary names the failure and its identity. The records are scored as any others, so the failure feeds the share, the dashboard, and the deflake work queue. |
 | A batch on `main` does not account for every identity it was asked to run | The lane fails. Nothing has shown the failures it did record to be the whole of what went wrong, and missing evidence is read as a real failure. |
 | A test too flaky for pull requests genuinely regresses | `main` stays green and the change ships. The regression is found when somebody deflakes the test, or from the reporter's comment where every run failed at the commit and every run passed at its parent. That comment says a bad runner produces the same record. |
 | A repository gate goes above the flake threshold | It leaves pull requests as any test does, and it goes on failing `main`. The non-gating rule is for tests, so a gate never stops gating the branch it is a gate on. |
