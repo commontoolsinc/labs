@@ -65,6 +65,11 @@
 
 import type { Ctx, Route, Status, Tile, TileView } from "../types.ts";
 import {
+  isCalibrationKey,
+  isKeyBenchmark,
+  parseBenchmarkReport,
+} from "../bench-report.ts";
+import {
   BenchmarkHistoryStore,
   type BenchmarkRefreshResult,
   type BenchmarkStats,
@@ -185,12 +190,6 @@ interface Artifact {
   id: number;
   name: string;
   expired: boolean;
-}
-interface Bench {
-  origin: string;
-  group: string | null;
-  name: string;
-  results: { ok?: Partial<Stats> }[];
 }
 
 const benchmarkStore = new BenchmarkHistoryStore();
@@ -361,24 +360,6 @@ export function subscribeBenchmarkProgress(
   return () => record.listeners.delete(listener);
 }
 
-const benchKey = (b: Bench): string =>
-  `${b.origin.replace(/^file:\/\/.*\/packages\//, "packages/")} > ${
-    b.group ? b.group + "/" : ""
-  }${b.name}`;
-
-// The benchmarks that measure the machine rather than the repository. The
-// Benchmarks workflow runs this file alongside the product benchmarks and its
-// bodies call no repository code, so what moves them between two runs on one
-// processor is the host. They are the tile's ruler, not one of the things it
-// measures: they set each run's machine factor and take no other part, so they
-// are absent from the index, from the benchmark count, and from the
-// drill-down. Runs from before the calibration landed carry none, and read
-// uncorrected.
-export const CALIBRATION_FILE =
-  "packages/dashboard/machine-calibration.bench.ts";
-const isCalibrationKey = (key: string): boolean =>
-  key.startsWith(`${CALIBRATION_FILE} > `);
-
 // How many of a run's product benchmarks match the selection. Zero means the
 // run measured nothing the tile trends, whatever else its artifact holds.
 const productMetricCount = (
@@ -405,39 +386,6 @@ export function formatNs(ns: number): string {
   if (ns < 1e6) return `${(ns / 1e3).toFixed(ns < 1e4 ? 1 : 0)}µs`;
   if (ns < 1e9) return `${(ns / 1e6).toFixed(ns < 1e7 ? 1 : 0)}ms`;
   return `${(ns / 1e9).toFixed(2)}s`;
-}
-
-// deno bench --json -> processor identity plus benchmark timings. A benchmark's
-// own console output can precede the JSON report on stdout, so parse from the
-// report object.
-function parseBenchmarkReport(
-  json: string,
-): { cpu?: string; metrics: Map<string, Stats> } {
-  const at = json.match(/\{\s*"version"\s*:/);
-  const data = JSON.parse(at ? json.slice(at.index) : json) as {
-    cpu?: unknown;
-    benches?: Bench[];
-  };
-  const cpu = typeof data.cpu === "string" && data.cpu.trim().length > 0
-    ? data.cpu.trim()
-    : undefined;
-  const m = new Map<string, Stats>();
-  for (const b of data.benches ?? []) {
-    const ok = b.results?.[0]?.ok;
-    if (!ok || typeof ok.avg !== "number") continue;
-    const n = (v: number | undefined, d: number) =>
-      typeof v === "number" ? v : d;
-    m.set(benchKey(b), {
-      min: n(ok.min, ok.avg),
-      avg: ok.avg,
-      max: n(ok.max, ok.avg),
-      p75: n(ok.p75, ok.avg),
-      p99: n(ok.p99, ok.avg),
-      p995: n(ok.p995, ok.avg),
-      p999: n(ok.p999, ok.avg),
-    });
-  }
-  return { cpu, metrics: m };
 }
 
 async function fetchZip(
@@ -1557,11 +1505,6 @@ export const benchmark: Tile = {
     },
   ] satisfies Route[],
 };
-
-/** Selects the product measurements shared by the key tile and its drilldown. */
-const isKeyBenchmark = (key: string): boolean =>
-  key.endsWith(" > topic board/journey") ||
-  key.endsWith(" > topic board scale/100");
 
 /** Topic board journey and 100-topic load measurements. */
 export const keyBenchmarks: Tile = makeBenchmarkTile(

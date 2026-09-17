@@ -123,13 +123,14 @@ covers one proof against unchanged values.
 **Stdout must stay pure JSON.** The workflow redirects all of stdout to
 `results.json`. One stray line printed by any bench file corrupts the
 artifact for every benchmark in the run, not just the offending file. A
-validation step fails the run when the artifact is not valid JSON, lists no
-benches, or carries no machine calibration, so each of those shows up as a red
-run in the Actions tab. What keeps corruption off the charts is the dashboard
-applying the same test to the artifact it downloads, rather than the run's
-color: a red run's measurements are charted like any other run's. This
-applies to module-scope code as well as bench bodies. Write diagnostics to
-stderr. Module-scope diagnostics may use `console.error`. The JSON reporter
+validation step (`tasks/check-bench-report.ts`) fails the run when stdout
+carried anything besides the report, and when the report is missing anything
+the dashboard reads from it, so each of those shows up as a red run in the
+Actions tab. What keeps a corrupt artifact off the charts is the dashboard
+dropping one it cannot parse, rather than the run's color: a red run's
+measurements are charted like any other run's. This applies to module-scope
+code as well as bench bodies. Write diagnostics to stderr. Module-scope
+diagnostics may use `console.error`. The JSON reporter
 captures console output from benchmark bodies, so body diagnostics that need
 to reach the workflow must write to `Deno.stderr` directly. The workflow copies
 stderr to `diagnostics.log` in the uploaded artifact and also shows it in the
@@ -167,7 +168,14 @@ and misses others.
 **Names identify chart series.** The dashboard tracks each benchmark by its
 origin file, group, and verbatim name. Renaming a bench or its group breaks
 the series: history stays under the old name and the renamed bench starts
-over. So:
+over. Two of those keys are written out in `KEY_BENCHMARKS` in
+`packages/dashboard/bench-report.ts`, and the key benchmarks tile trends those
+and nothing else, so moving or renaming one of them empties that tile rather
+than restarting it. Two things hold that in place: `deno task
+check-bench-workflow` fails a change that leaves one of those files out of the
+workflow's `deno bench` list, and the validation step fails a run whose report
+is missing either, which together keep such a change to a red check or one red
+run instead of a hole in the history. So:
 
 - Keep names stable. Never interpolate values that change as unrelated commits
   land: content hashes, byte counts, module counts, dates. If a name must
