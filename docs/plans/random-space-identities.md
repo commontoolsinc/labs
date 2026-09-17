@@ -139,7 +139,11 @@ adds no directory:
 
 ## Prerequisites
 
-None of these is part of the pull request. Each has to be finished first.
+None of these is part of the pull request. Each has to be finished first, and
+none depends on another, so they can be done in any order and by different
+people. Retiring the wildcard genesis grant is the one to start with: it is the
+smallest, and on its own it closes the larger of the two holes a new space is
+born with.
 
 ### In this repository, as separate pull requests
 
@@ -151,22 +155,20 @@ None of these is part of the pull request. Each has to be finished first.
 
 - **Route every name resolution through one seam, and record allocations.**
   Give `PatternFactory.inSpace(name)` a durable allocation record in the calling
-  space, and make every production caller of `createSession({ spaceName })`
-  resolve a label through the Home space list instead. Keep the existing
-  derivation as the generator for a name with no record, so this pull request
-  changes no DID and no behavior a user can see.
+  space, and make every production caller of `createSession({ spaceName })` go
+  through one resolution function instead. That function consults a recorded DID
+  where one exists and derives otherwise, which is what it keeps doing after the
+  change. Keep the existing derivation as the generator for a name with no
+  record, so this pull request changes no DID and no behavior a user can see.
 
   This is what makes the rest one pull request: afterwards the step that invents
   a DID for a name is one expression in one function, rather than being spread
   across a dozen modules.
 
-  Two callers resolve a name today without touching the network, and routing
-  them through a record they must read changes what they need. The shell
-  library's `resolveSpaceDid` becomes an asynchronous read of the Home space,
-  and the command-line interface must open the user's Home space to resolve a
-  label. Decide in this pull request whether those callers read the Home space
-  or require a DID outright; requiring a DID is the smaller change and is
-  consistent with creating and opening being separate operations.
+  Two callers resolve a name today without touching the network, and both keep
+  doing so: the derivation is local, so the seam they move onto needs no network
+  either. Neither the shell library's `resolveSpaceDid` nor the command-line
+  interface's ingest-channel resolver changes its signature.
 
 - **Convert the test call sites off `spaceName`.** A test that wants one space
   uses an explicit DID generated once; a test that wants two sessions on one
