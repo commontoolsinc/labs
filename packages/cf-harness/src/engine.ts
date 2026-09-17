@@ -2611,6 +2611,7 @@ export class CfHarnessEngine {
       researchGoal: this.#runState.researchGoal,
       ...(researchTaskCfcLabel !== undefined ? { researchTaskCfcLabel } : {}),
       patternRefs: this.#runState.patternRefs ?? [],
+      inputCells: this.#runState.inputCells ?? [],
       recordResearchRun: (run: HarnessResearchRunSummary) => {
         this.recordResearchRun(run);
       },

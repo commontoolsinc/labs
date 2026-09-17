@@ -452,6 +452,12 @@ or infer a value from the piece name. This is shared model guidance, not a
 runtime quota, and does not limit an explicit request to list or analyze the
 space.
 
+Private research receives the same explicit input-cell names and tokens as the
+parent, separately from the general handle inventory. Registry and connector
+grants therefore do not stand in for attachments, and a piece attachment stays
+identifiable even when its schema describes the piece's result. The bound
+reference behind the attachment remains private.
+
 These dispositions keep the run lifecycle `completed` and the conversation
 reusable. `run-report.json` records `taskOutcome`, a union discriminated by
 `outcome: "completed" | "question" | "gave-up"`; only a question carries

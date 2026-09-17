@@ -29,6 +29,7 @@ import {
   confidentialityOnlyIfcLabel,
 } from "../contracts/cfc-model-context.ts";
 import type { TrustedPatternRecord } from "../contracts/trusted-pattern.ts";
+import type { HarnessInputCell } from "../contracts/input-cells.ts";
 import type { HarnessModelToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type {
   HarnessAssistantTranscriptMessage,
@@ -41,6 +42,7 @@ import {
 import type { HarnessDocsCorpus } from "../docs-corpus/corpus.ts";
 import { findSectionPassage, rankSections } from "../docs-corpus/sections.ts";
 import { errorMessage } from "../error-message.ts";
+import { inputCellsContextMessage } from "../input-cells.ts";
 import { PIECE_TARGETING_GUIDANCE } from "../piece-targeting.ts";
 import type {
   HarnessModelAttemptDiagnostic,
@@ -142,6 +144,9 @@ export interface HarnessResearchRequest {
 
   /** General handles visible to the calling run. */
   handleTokens: readonly string[];
+
+  /** Explicit attachments; only their operator names and tokens reach the model. */
+  inputCells?: readonly HarnessInputCell[];
 
   /** Safe shape-only description of one general handle. */
   describeHandle?: (token: string) => Promise<DescribeHandleResearchResult>;
@@ -580,6 +585,12 @@ const userPrompt = (
     request.handleTokens.length > 0
       ? request.handleTokens.join("\n")
       : "No general handles are available.",
+    ...(request.inputCells === undefined ? [] : [
+      "",
+      "Explicit input-cell attachment context for the calling run:",
+      inputCellsContextMessage(request.inputCells),
+      "An attached piece's token can be passed directly to read_piece_source by the pattern-author; a result-shaped schema does not require finding another identity through the registry.",
+    ]),
     ...(canonicalGuides.length > 0
       ? [
         "Canonical authoring references (use list_doc_sections or search_docs to select useful passages):",

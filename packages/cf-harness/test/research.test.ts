@@ -160,6 +160,31 @@ describe("research", () => {
   });
 
   describe("private tool boundaries", () => {
+    for (const attached of [true, false]) {
+      it(`distinguishes explicit input attachments from general grants when attached is ${attached}`, async () => {
+        const token = "cfh:a:attached";
+        const ref = `/of:fid1:${"A".repeat(43)}`;
+        const model = new ScriptedModelClient([() => finalResult()]);
+        await createResearchRunner({ modelClient: model })(requestFor({
+          handleTokens: ["cfh:a:registry", token],
+          inputCells: attached ? [{ name: "pattern_1", token, ref }] : [],
+        }));
+        const prompt = model.requests[0].transcript.find((message) =>
+          message.role === "user"
+        )?.content;
+        expect(prompt).toContain("cfh:a:registry");
+        expect(prompt).not.toContain(ref);
+        if (attached) {
+          expect(prompt).toContain(`${token} — pattern_1`);
+          expect(prompt).not.toContain("No input cells are attached");
+          expect(prompt).toContain("passed directly to read_piece_source");
+        } else {
+          expect(prompt).toContain("No input cells are attached");
+          expect(prompt).not.toContain("pattern_1");
+        }
+      });
+    }
+
     it("returns unresolved piece selection to the parent without proposing a registry crawl", async () => {
       const model = new ScriptedModelClient([
         () =>
