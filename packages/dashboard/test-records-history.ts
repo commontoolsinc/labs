@@ -45,7 +45,11 @@ export interface DayAggregate {
   runs: number;
   failures: number;
   skips: number;
+
+  /** Summed over the day's passing runs. */
   totalDurationMs: number;
+
+  /** The worst of the day's passing runs. */
   maxDurationMs: number;
 }
 
@@ -86,7 +90,8 @@ export function isDayAggregate(value: unknown): value is DayAggregate {
  * resolve through the alias file as of the day, so a renamed test keeps
  * one continuous series. A lane measuring its own setup or one of its
  * batches is not a test, and carries the duration of everything it ran,
- * so nothing here counts it.
+ * so nothing here counts it. The duration figures count passing records
+ * alone; the run, failure and skip counts count every record.
  */
 export async function collectDay(
   day: string,
@@ -136,6 +141,11 @@ export async function collectDay(
         entry.runs++;
         if (record.outcome === "fail") entry.failures++;
         if (record.outcome === "skip") entry.skips++;
+        // Durations come from passing executions alone. A failure ended
+        // where the failure was reached, and where a wait's safety net
+        // ended it, the figure is that net's bound rather than anything
+        // about the test. The counters above read every record.
+        if (record.outcome !== "pass") continue;
         entry.totalDurationMs += record.durationMs;
         entry.maxDurationMs = Math.max(entry.maxDurationMs, record.durationMs);
       }
@@ -165,17 +175,26 @@ function isStoredHistory(value: unknown): value is StoredHistory {
   );
 }
 
-/** The per-test series trend.ts fits: times ascending, one point per day. */
+/**
+ * The per-test series trend.ts fits: times ascending, one point per day.
+ * Each measurement carries the days it has values for, because a day
+ * holding nothing but failures has a pass rate and no duration. Each
+ * pair of arrays is named for the measurement it belongs to, so a caller
+ * handing `trend.ts` a pair takes both halves from one name.
+ */
 export interface TestSeries {
   key: string;
 
-  /** Milliseconds since epoch, one per day with data, ascending. */
-  times: number[];
+  /** Milliseconds since epoch, one per day that executed the test. */
+  passRateTimes: number[];
 
-  /** Fraction of runs that passed that day. */
+  /** Fraction of the day's executed runs that passed. */
   passRates: number[];
 
-  /** Mean duration that day, in milliseconds. */
+  /** Milliseconds since epoch, one per day the test passed in. */
+  durationTimes: number[];
+
+  /** Mean duration of the day's passing runs, in milliseconds. */
   meanDurationsMs: number[];
 }
 
@@ -277,8 +296,9 @@ export class TestRecordsHistoryStore {
   series(key: string): TestSeries {
     const series: TestSeries = {
       key,
-      times: [],
+      passRateTimes: [],
       passRates: [],
+      durationTimes: [],
       meanDurationsMs: [],
     };
     for (const day of this.days()) {
@@ -286,17 +306,21 @@ export class TestRecordsHistoryStore {
         (candidate) => candidate.key === key,
       );
       if (aggregate === undefined) continue;
+      const time = new Date(day.replaceAll("/", "-")).getTime();
       // Rates are over the runs that executed: a skip is neither a pass
       // nor a failure, and an all-skip day contributes no point.
       const executed = aggregate.runs - aggregate.skips;
       if (executed <= 0) continue;
-      series.times.push(new Date(day.replaceAll("/", "-")).getTime());
+      series.passRateTimes.push(time);
       series.passRates.push(
         (executed - aggregate.failures) / executed,
       );
-      series.meanDurationsMs.push(
-        aggregate.totalDurationMs / aggregate.runs,
-      );
+      // The day's duration was summed over its passing runs, so the mean
+      // divides by those, and a day that holds none has no mean.
+      const passes = executed - aggregate.failures;
+      if (passes <= 0) continue;
+      series.durationTimes.push(time);
+      series.meanDurationsMs.push(aggregate.totalDurationMs / passes);
     }
     return series;
   }

@@ -46,7 +46,6 @@ export type CatchPlace = "local" | "pr" | "main";
 export interface Observation {
   test: TestIdentity;
   outcome: "pass" | "fail" | "skip";
-  durationMs: number;
 
   /** UTC calendar day, "yyyy-mm-dd". */
   day: string;
