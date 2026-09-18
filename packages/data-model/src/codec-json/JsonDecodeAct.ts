@@ -5,7 +5,7 @@ import type { FabricValue } from "@/interface.ts";
 import { BaseDecodeAct } from "@/codec-common/BaseDecodeAct.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
-import { toShortQuotedDebugString } from "@/value-debug.ts";
+import { toShortQuotedDebugString } from "@/value-debug";
 import { ENCODING_PREFIX_TAG, type JsonCodecValue } from "./interface.ts";
 import {
   isEncodedInstance,

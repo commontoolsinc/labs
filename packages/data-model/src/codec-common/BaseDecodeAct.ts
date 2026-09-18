@@ -4,10 +4,7 @@ import type {
   NonterminalCodec,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import {
-  toCompactDebugString,
-  toShortQuotedDebugString,
-} from "@/value-debug.ts";
+import { toCompactDebugString, toShortQuotedDebugString } from "@/value-debug";
 import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 import { UnknownValue } from "./UnknownValue.ts";
 import type { FabricValue } from "@/interface.ts";

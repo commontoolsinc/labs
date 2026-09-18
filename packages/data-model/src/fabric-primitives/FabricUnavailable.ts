@@ -39,7 +39,7 @@ import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
 } from "@/types";
-import { toShortQuotedDebugString } from "@/value-debug.ts";
+import { toShortQuotedDebugString } from "@/value-debug";
 
 /**
  * The reasons a `FabricUnavailable` can give, as a table keyed by itself, so

@@ -9,7 +9,7 @@ import {
   type FabricValue,
   type FabricValuePlus,
 } from "@/interface.ts";
-import { toShortQuotedDebugString } from "@/value-debug.ts";
+import { toShortQuotedDebugString } from "@/value-debug";
 import { type PrimitiveValueTag } from "@/types";
 
 import {

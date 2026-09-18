@@ -18,7 +18,7 @@ import {
   tagOfFabricValueElseNull,
   VALUE_TAGS,
 } from "@/types";
-import { toShortQuotedDebugString } from "@/value-debug.ts";
+import { toShortQuotedDebugString } from "@/value-debug";
 
 import {
   type BaselineVisitResult,
