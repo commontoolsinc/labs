@@ -1,22 +1,25 @@
 /**
- * What `fabric-primitives/index.ts` derives from its list of classes. Nothing
- * here names a class: each case ranges over `codecClasses()`, over
- * `FABRIC_PRIMITIVE_SCHEMA_TYPES`, or over the primitives the shared corpus
- * holds, so a class added to the package is covered without an edit here.
+ * What `fabric-primitives/index.ts` derives from its list of classes, and that
+ * list's agreement with the vocabularies in `interface.ts`. Nothing here names
+ * a class: each case ranges over `codecClasses()`, over one of those
+ * vocabularies, or over the primitives the shared corpus holds, so a class
+ * added to the package is covered without an edit here.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import {
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  type FabricPrimitiveSchemaType,
-  isFabricPrimitiveSchemaType,
-} from "@/api.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import {
   codecClasses,
   fabricPrimitiveClassOfSchemaType,
 } from "@/fabric-primitives/index.ts";
+import {
+  FABRIC_PRIMITIVE_CODEC_TYPE_TAGS,
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  type FabricPrimitiveSchemaType,
+  isFabricPrimitiveSchemaType,
+} from "@/fabric-primitives/interface.ts";
 import { FabricPrimitive } from "@/interface.ts";
 import { LAYER_CORPUS } from "../fabric-value-corpus.ts";
 
@@ -39,6 +42,17 @@ describe("fabric-primitives/index", () => {
       const names = codecClasses().map((cls) => cls.prototype.schemaType);
       expect(new Set<string>(names)).toEqual(
         new Set<string>(FABRIC_PRIMITIVE_SCHEMA_TYPES),
+      );
+    });
+
+    it("lists classes whose JSON codecs' type tags are exactly `FABRIC_PRIMITIVE_CODEC_TYPE_TAGS`", () => {
+      const tags = codecClasses().map((cls) =>
+        cls[JSON_CODEC].recognizedTypeTag
+      );
+      expect(new Set(tags)).toEqual(
+        new Set<string | undefined>(
+          Object.values(FABRIC_PRIMITIVE_CODEC_TYPE_TAGS),
+        ),
       );
     });
 

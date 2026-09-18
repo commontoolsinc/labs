@@ -24,11 +24,11 @@ import {
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
+import { FabricBytes } from "./FabricBytes.ts";
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
-} from "@/types";
-import { FabricBytes } from "./FabricBytes.ts";
+} from "./interface.ts";
 
 /**
  * The encoded state of a {@link FabricKeyPair} that holds material: the

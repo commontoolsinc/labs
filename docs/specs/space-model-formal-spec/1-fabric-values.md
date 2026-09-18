@@ -3367,9 +3367,11 @@ registrations. A caller needing classes of its own extends what this returns.
 | `registerSelfRep` | `null`, `boolean`, `number`, `string` | _(none)_ | Self-representing: emitted as-is. `number` is registered both ways; the codec is tried first. |
 
 The canonical tag strings live in `CODEC_TYPE_TAGS`
-(`codec-interface/codec-type-tags.ts`); the structural meta tags (`quote`,
-`hole`, `object`) live in `CODEC_META_TAGS`
-(`codec-interface/codec-meta-tags.ts`).
+(`codec-interface/codec-type-tags.ts`), which takes the `FabricPrimitive`
+classes' entries from `FABRIC_PRIMITIVE_CODEC_TYPE_TAGS`
+(`fabric-primitives/interface.ts`), where they sit with the other vocabularies
+that range over those classes; the structural meta tags (`quote`, `hole`,
+`object`) live in `CODEC_META_TAGS` (`codec-interface/codec-meta-tags.ts`).
 
 An un-codec'd `FabricSpecialObject` reaching the encoder is a **hard
 error** — every wire form is explicitly represented; there is no implicit

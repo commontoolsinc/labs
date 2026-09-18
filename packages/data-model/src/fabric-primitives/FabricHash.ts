@@ -30,7 +30,7 @@ import type { FabricValue } from "@/interface.ts";
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
-} from "@/types";
+} from "./interface.ts";
 
 /**
  * The encoded state of a {@link FabricHash}: the algorithm tag, and the digest

@@ -35,11 +35,11 @@ import {
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
+import { toShortQuotedDebugString } from "@/value-debug.ts";
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
-} from "@/types";
-import { toShortQuotedDebugString } from "@/value-debug.ts";
+} from "./interface.ts";
 
 /**
  * The reasons a `FabricUnavailable` can give, as a table keyed by itself, so

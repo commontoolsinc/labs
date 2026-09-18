@@ -27,7 +27,7 @@ import {
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
-} from "@/types";
+} from "./interface.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.

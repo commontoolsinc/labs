@@ -12,9 +12,8 @@
 
 import type { MustBeTrue, Same } from "@commonfabric/utils/types";
 
-import type { FabricPrimitiveSchemaType } from "@/api.ts";
-
 import type { FabricPrimitiveClass } from "./index.ts";
+import type { FabricPrimitiveSchemaType } from "./interface.ts";
 
 /** Whether the names the classes report are exactly the vocabulary. */
 export type SchemaTypesAgree = MustBeTrue<
