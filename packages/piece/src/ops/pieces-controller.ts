@@ -20,6 +20,7 @@ import {
   type EntityIdListOptions,
   type EntityIdListResult,
   type EnvReader,
+  type ExperimentalOptions,
   experimentalOptionsForDeployedClient,
   getEntityId,
   getMetaLink,
@@ -241,6 +242,7 @@ export class PiecesController<T = unknown> {
       identity,
       space,
       deferSpaceCellSync,
+      experimental,
       moduleByteCache,
       patternCoverage,
       navigateCallback,
@@ -269,6 +271,18 @@ export class PiecesController<T = unknown> {
        * explicitly rather than carry one default across to the other.
        */
       deferSpaceCellSync?: boolean;
+
+      /**
+       * The experimental posture the controller's runtime runs under. Absent,
+       * it is the deployment's own, with this process's explicit
+       * `EXPERIMENTAL_*` winning per flag (`experimentalOptionsForDeployedClient`).
+       * A caller that had to know the posture before opening the session — a
+       * host that refuses a read ceiling under server execution up front, a
+       * test that states the arm it exercises — passes what it resolved, so
+       * the runtime runs the posture the caller checked rather than a second
+       * resolution that may differ from it.
+       */
+      experimental?: ExperimentalOptions;
 
       // Optional compiled-module-byte cache to share across controllers. Supplied
       // only by test code (see the integration suite's compile-byte-cache helper);
@@ -327,9 +341,10 @@ export class PiecesController<T = unknown> {
     // Shared first-party posture for client runtimes against a deployed API
     // (CT-1814); the CFC pin this site previously restated lives in the
     // preset core. Trust provenance stays a visible delta of this controller.
-    // The flags come from the deployment itself, this process's explicit
-    // EXPERIMENTAL_* still winning per flag — a controller opened by a cf
-    // binary or a fuse mount is not built alongside the server it talks to
+    // Unless the caller states them, the flags come from the deployment
+    // itself, this process's explicit EXPERIMENTAL_* still winning per flag —
+    // a controller opened by a cf binary or a fuse mount is not built
+    // alongside the server it talks to
     // (docs/development/EXPERIMENTAL_OPTIONS.md).
     // Constructed inside the cleanup scope: a runtime the constructor
     // refuses (a read ceiling on a client under server execution, say)
@@ -340,10 +355,11 @@ export class PiecesController<T = unknown> {
       runtime = new Runtime(runtimePresets.remoteClient({
         apiUrl: api,
         storageManager,
-        experimental: await experimentalOptionsForDeployedClient({
-          apiUrl: api,
-          env: readEnv,
-        }),
+        experimental: experimental ??
+          await experimentalOptionsForDeployedClient({
+            apiUrl: api,
+            env: readEnv,
+          }),
         moduleByteCache,
         patternCoverage,
         ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),

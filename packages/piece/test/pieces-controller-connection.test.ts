@@ -87,7 +87,7 @@ describe("pieces-controller", () => {
           }
         });
 
-        it("hands the read ceiling and its mode to the runtime it builds", async () => {
+        it("builds the runtime under the posture it is given rather than the one the deployment declares", async () => {
           const originalHealthCheck = Runtime.prototype.healthCheck;
           let created: Runtime | undefined;
           Runtime.prototype.healthCheck = function () {
@@ -98,19 +98,75 @@ describe("pieces-controller", () => {
             await expect(PiecesController.initialize({
               apiUrl,
               identity,
-              space: "read-ceiling-forwarded",
-              cfcReadMaxConfidentiality: [identity.did()],
-              cfcReadOnExceed: "skip",
+              space: "posture-given",
+              experimental: { serverExecution: false },
             })).rejects.toThrow(
               'Could not connect to "http://toolshed.test/".',
             );
-            expect(created?.cfcReadMaxConfidentiality).toEqual([
-              identity.did(),
-            ]);
-            expect(created?.cfcReadOnExceed).toBe("skip");
+            expect(created?.experimental.serverExecution).toBe(false);
+            // The posture was the caller's, so the deployment was not asked
+            // for one; with the health probe stubbed, nothing was requested.
+            expect(requested).toEqual([]);
           } finally {
             Runtime.prototype.healthCheck = originalHealthCheck;
           }
+        });
+
+        describe("the read ceiling", () => {
+          // A read ceiling bounds only the runtime it is set on, which is
+          // why the arm each case runs under is stated: on the OFF arm the
+          // controller's own runtime issues the session's queries, and on
+          // the ON arm the space server's runtime serves them.
+
+          it("hands the read ceiling and its mode to the runtime it builds on the OFF arm", async () => {
+            const originalHealthCheck = Runtime.prototype.healthCheck;
+            let created: Runtime | undefined;
+            Runtime.prototype.healthCheck = function () {
+              created = this;
+              return Promise.resolve(false);
+            };
+            try {
+              await expect(PiecesController.initialize({
+                apiUrl,
+                identity,
+                space: "read-ceiling-forwarded",
+                experimental: { serverExecution: false },
+                cfcReadMaxConfidentiality: [identity.did()],
+                cfcReadOnExceed: "skip",
+              })).rejects.toThrow(
+                'Could not connect to "http://toolshed.test/".',
+              );
+              expect(created?.cfcReadMaxConfidentiality).toEqual([
+                identity.did(),
+              ]);
+              expect(created?.cfcReadOnExceed).toBe("skip");
+            } finally {
+              Runtime.prototype.healthCheck = originalHealthCheck;
+            }
+          });
+
+          it("throws naming server execution for a read ceiling on the ON arm, before the health probe", async () => {
+            const originalHealthCheck = Runtime.prototype.healthCheck;
+            let probed = false;
+            Runtime.prototype.healthCheck = function () {
+              probed = true;
+              return Promise.resolve(false);
+            };
+            try {
+              await expect(PiecesController.initialize({
+                apiUrl,
+                identity,
+                space: "read-ceiling-refused",
+                experimental: { serverExecution: true },
+                cfcReadMaxConfidentiality: [identity.did()],
+              })).rejects.toThrow(
+                /cfcReadMaxConfidentiality does not bound a client under server execution/,
+              );
+              expect(probed).toBe(false);
+            } finally {
+              Runtime.prototype.healthCheck = originalHealthCheck;
+            }
+          });
         });
 
         it("throws the connection error for a space given as a `did:key:` DID", async () => {
