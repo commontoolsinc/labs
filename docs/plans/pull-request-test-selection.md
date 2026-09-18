@@ -1651,7 +1651,7 @@ The exception the rule carries reaches a gate through the paths the gate
 declares a change reaches it by. A gate's unit is the name of a gate
 rather than a path, so the suite maps a change onto its units from a list
 each gate carries: `check-test-aliases` names
-`tasks/test-identity-aliases.jsonl`, `check-action-pins` names
+`tasks/test-identity-aliases/`, `check-action-pins` names
 `.github/`, and a change touching one of those makes that gate mandatory.
 The pull request that fixes a gate too flaky to judge by therefore runs
 it, which is what the exception is for.
@@ -1719,14 +1719,15 @@ catches, worth 0.75 on `proven`, becomes worth 0.05. It will still run,
 because an unknown identity is mandatory, but only once, and then it
 disappears into the tail.
 
-`tasks/test-identity-aliases.jsonl` already solves this and the mechanism
-needs no changes. A line maps an old identity, or a whole scope for a
+`tasks/test-identity-aliases/` already solves this and the mechanism
+needs no changes. The directory holds one file of lines per test-file
+name and reads as a single set. A line maps an old identity, or a whole scope for a
 package rename, to its replacement with the date of the rename. Readers
 resolve transitively, prefer a full-identity mapping over a whole-scope
 one, and apply an alias only to records from days strictly before its
 date, so the two halves of a test's history join under today's name.
-`deno task check-test-aliases` holds the file to append-only, at most one
-mapping per identity, and acyclic. The scope form matters more here than
+`deno task check-test-aliases` holds each file to append-only, and the
+directory as a whole to at most one mapping per identity and to acyclic. The scope form matters more here than
 it looks: the topology maps records by kind, scope, and optional variant,
 so a package rename without one orphans every configuration of the suite
 at once.
@@ -1736,8 +1737,8 @@ every variant. Resolution preserves the record's variant, so one rename
 bridges the default and every non-default history without joining those
 histories to each other.
 
-The mechanism is there and so, by now, is the practice: the file holds
-219 lines across nine dates, so renames are being bridged as they happen
+The mechanism is there and so, by now, is the practice: as of this
+writing the directory holds 2168 lines across 24 dates, so renames are being bridged as they happen
 rather than swept up once. What the reporter's suggestion adds is the
 case nobody notices — a rename whose author had no reason to think the
 history mattered.
@@ -2219,25 +2220,41 @@ then prices out its own smallest batch.
 
 So the model is fitted instead. Every batch the lane runner executes
 records what its own tests took between them, what the batch actually
-took, and how many units it opened. The publisher regresses those per
-suite over the last week — the intercept is `suiteOverhead`, the slope on
-the tests' own seconds multiplies into `correction`, and the slope on the
-unit count is `unitOverhead` — and publishes the result in the next
-manifest. They start
-at zero, one and zero, and converge within a few days of lanes running.
-Three numbers per suite, all measured, none maintained by hand.
+took, and how many units it opened. The publisher fits those per suite
+over the last week — `correction` is the least-squares slope of what a
+batch spent on what its tests took, `unitOverhead` is the rate a batch
+paid per unit for what it spent beyond its tests, and `suiteOverhead` is
+what those two leave — and publishes the result in the next manifest.
+They start at zero, one and zero, and converge within a few days of lanes
+running. Three numbers per suite, all measured, none maintained by hand.
 
 The intercept is then raised until no batch anybody has seen is
 under-predicted, because a least-squares line sits in the middle of its
 observations and half the lanes would otherwise run past the budget they
-were packed against. A slope is fitted at all only once a suite has enough
-batches, spread far enough apart in what that slope reads, for it to mean
-something: each is read far outside the range it was fitted over, since a
-suite whose every batch anybody has seen held six seconds of tests may be
-charged thousands the first time a lane packs it whole, and one that has never
-held more than five units may be asked to hold nine hundred. A suite whose
-batches all held the same seconds of tests per unit says nothing that
-separates the two slopes, and keeps the one it has always been fitted.
+were packed against. The correction is fitted at all only once a suite has
+enough batches, far enough apart in the seconds their tests took, for a
+slope to mean something: it is read far outside the range it was fitted
+over, since a suite whose every batch anybody has seen held six seconds of
+tests may be charged thousands the first time a lane packs it whole.
+
+`unitOverhead` is a rate rather than a slope because whether a slope can
+be fitted is a property of the run rather than of the suite. The packer
+puts an identity in the cheapest lane that can hold it and breaks a tie by
+which lane is emptier, so a suite gathers in the lanes already holding it
+and is shared out among them; where every lane fills to one budget the
+counts come out close. Across a full run of twenty-two lanes the widest
+gap between two batches' sizes is around twenty units against batches of
+eighty, and a least-squares slope over a gap that narrow is negative for
+five of the eight suites with enough batches to fit one and inside its own
+standard error for two more. Across five lanes packing a selection the
+same suite has held five units in one batch and six hundred in another,
+where the slope is worth fitting. A threshold on that gap therefore
+settles what a suite is charged from how its run happened to divide, and
+falls back to charging nothing a unit. What a batch says on its own is the
+rate it paid, which is what it spent beyond its tests over the units that
+spending opened. Whatever the batch paid for itself is in that rate, which
+is what carries a reading above what a unit costs, and the middle reading
+is the one taken.
 Nothing bounds either from above. A slope fitted too high only
 over-charges, and what a bound took off it would land on the intercept,
 which a lane pays to run one test of the suite where the slopes are

@@ -34,18 +34,9 @@ import {
 import { internSchema } from "@commonfabric/data-model-schema";
 import {
   fabricAwareEqual,
-  type FabricPrimitive,
   isKeyableObjectOrArray,
 } from "@commonfabric/data-model";
-import {
-  FabricBytes,
-  FabricEpochDay,
-  FabricEpochNsec,
-  FabricHash,
-  FabricKeyPair,
-  FabricRegExp,
-  FabricUnavailable,
-} from "@commonfabric/data-model/fabric-primitives";
+import { fabricPrimitiveClassOfSchemaType } from "@commonfabric/data-model/fabric-primitives";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
@@ -1352,26 +1343,6 @@ function objectSubsetIssue(
 }
 
 /**
- * The class each `FabricPrimitive` type name matches, by the same `instanceof`
- * mapping `schemaTypeOfFabricPrimitive()` applies to a value. Keyed over the
- * whole vocabulary, so a name added to it stops this compiling until its class
- * is named here. Nothing checks that a name is paired with the right class.
- */
-const FABRIC_PRIMITIVE_CLASSES: {
-  readonly [Type in FabricPrimitiveSchemaType]: {
-    readonly prototype: FabricPrimitive;
-  };
-} = {
-  FabricBytes,
-  FabricEpochDay,
-  FabricEpochNsec,
-  FabricHash,
-  FabricKeyPair,
-  FabricRegExp,
-  FabricUnavailable,
-};
-
-/**
  * Helper for {@link schemaSubsetIssue}, which proves that a value of each
  * `FabricPrimitive` class the source names by `type` carries every key the
  * target's `required` checks on it. The runtime checks those keys on a
@@ -1424,7 +1395,7 @@ function fabricPrimitiveHasRequiredKey(
   key: string,
 ): boolean {
   return key === FABRIC_SPECIAL_OBJECT_BRAND ||
-    key in FABRIC_PRIMITIVE_CLASSES[type].prototype;
+    key in fabricPrimitiveClassOfSchemaType(type).prototype;
 }
 
 /**

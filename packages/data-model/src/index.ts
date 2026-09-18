@@ -32,11 +32,14 @@ export {
 } from "./value-clone.ts";
 
 export {
+  debugStr,
   toCompactDebugString,
   toDebugKindString,
   toIndentedDebugString,
+  toLongQuotedDebugString,
+  toShortQuotedDebugString,
   toStructuredDebugValue,
-} from "./value-debug.ts";
+} from "@/value-debug";
 
 export {
   getFrozenObjectHashCacheHits,

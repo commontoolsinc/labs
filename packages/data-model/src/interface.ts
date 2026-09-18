@@ -17,6 +17,7 @@ import type {
   FabricArrayPlus,
   FabricInstancePlus,
   FabricPlainObjectPlus,
+  FabricPrimitiveSchemaType,
   FabricValuePlus,
 } from "./api.ts";
 import { FABRIC_INSTANCE_PLUS_BRAND, FABRIC_PRIMITIVE_BRAND } from "./api.ts";
@@ -204,6 +205,15 @@ export abstract class FabricPrimitive extends BaseFabricSpecialObject {
   constructor() {
     super();
   }
+
+  /**
+   * Name of this instance's class in the schema `type` vocabulary: the `type`
+   * a schema names to admit this value by its class. Every instance of a class
+   * reports the same name, which need not be the name of the class. Each
+   * concrete class supplies its own, and the getter reads no instance state,
+   * so that it returns the same name when read off the class's `prototype`.
+   */
+  abstract get schemaType(): FabricPrimitiveSchemaType;
 }
 
 //

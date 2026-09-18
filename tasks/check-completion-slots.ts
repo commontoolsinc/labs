@@ -64,6 +64,11 @@ export const NO_CANDIDATES = new Map<string, string>([
   // Words the caller is coining or composing.
   ["acl set:capability", "a capability string, composed rather than chosen"],
   ["piece search:query", "a search query"],
+  ["profile create:name", "a display name the caller is coining"],
+  [
+    "piece follow:origin",
+    "a source origin the caller names, such as a `system:` ref",
+  ],
   // Words that belong to a callable rather than to the CLI: the verb opens the
   // callable's section, so its own vocabulary fills this positional. Item 4 of
   // docs/plans/cli-completion-coverage.md builds the candidates and is what

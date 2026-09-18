@@ -50,7 +50,7 @@ The package's `test` task in its `deno.jsonc` says which kind it is.
 flag was appended.
 
 A test's name is also its identity in the run-record store, so a renamed test
-must be listed in `tasks/test-identity-aliases.jsonl` to keep its recorded
+must be listed in `tasks/test-identity-aliases/` to keep its recorded
 history joined to its new name.
 
 ### Browser tests in agent sandboxes

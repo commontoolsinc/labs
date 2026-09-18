@@ -9,7 +9,7 @@ import {
   type FabricValue,
   type FabricValuePlus,
 } from "@/interface.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
+import { toShortQuotedDebugString } from "@/value-debug";
 import { type PrimitiveValueTag } from "@/types";
 
 import {
@@ -153,7 +153,7 @@ export abstract class BaseValueVisitor<
    * Throws an error indicating that this visitor does not handle cycles.
    */
   protected throwNoCycles(value: FabricValuePlus<PlusType>): never {
-    const desc = toCompactDebugString(value, { backtickQuote: true });
+    const desc = toShortQuotedDebugString(value);
     throw new Error(`Cannot visit cyclic value: ${desc}`);
   }
 
@@ -163,7 +163,7 @@ export abstract class BaseValueVisitor<
    */
   protected throwShouldntCall(methodName: string): never {
     const desc = `\`${methodName}()\``;
-    const thisDesc = toCompactDebugString(this, { backtickQuote: true });
+    const thisDesc = toShortQuotedDebugString(this);
     throw new Error(`Shouldn't happen: ${desc} called on ${thisDesc}`);
   }
 }

@@ -30,7 +30,7 @@ import type { FabricValue } from "@/interface.ts";
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
-} from "@/types";
+} from "./interface.ts";
 
 /**
  * The encoded state of a {@link FabricHash}: the algorithm tag, and the digest
@@ -96,6 +96,11 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   /** @inheritDoc */
   get [VALUE_TAG](): FabricPrimitiveValueTag {
     return FABRIC_PRIMITIVE_VALUE_TAGS.FabricHash;
+  }
+
+  /** @inheritDoc */
+  get schemaType(): "FabricHash" {
+    return "FabricHash";
   }
 
   /** Defensive copy of the raw hash bytes. */

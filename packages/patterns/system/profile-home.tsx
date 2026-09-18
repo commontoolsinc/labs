@@ -715,15 +715,19 @@ const applyInitialName = lift<
   { initialName?: string; name: Writable<string> },
   string
 >(({ initialName, name }) => {
-  return name.get() ?? trimInitialName(initialName);
+  return name.get() || trimInitialName(initialName);
 });
 
 export default pattern<ProfileHomeInput, ProfileHomeOutput>(
   ({ initialName, [SELF]: self }) => {
-    const initialProfileName = trimInitialName(initialName);
+    // A static initializer, so the cell keeps its identity across releases:
+    // a default derived from an input is materialized under an id that moves
+    // with the pattern, and a release would leave the saved name behind in
+    // the cell it no longer links. The display falls back to `initialName`
+    // (`applyInitialName`) until the person stores one through `setName`.
     const name = new Writable<
       OwnerProtectedProfileWrite<string, typeof setName>
-    >(initialProfileName).for("name");
+    >("").for("name");
     const avatar = new Writable<
       OwnerProtectedProfileWrite<string, typeof setAvatar>
     >("").for("avatar");

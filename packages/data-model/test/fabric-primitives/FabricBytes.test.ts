@@ -86,6 +86,14 @@ describe("FabricBytes", () => {
   });
 
   describe("instance members", () => {
+    describe(".schemaType", () => {
+      it("is `FabricBytes`", () => {
+        expect(new FabricBytes(new Uint8Array()).schemaType).toBe(
+          "FabricBytes",
+        );
+      });
+    });
+
     describe(".length", () => {
       it("returns the byte count", () => {
         expect(new FabricBytes(new Uint8Array([1, 2, 3])).length).toBe(3);

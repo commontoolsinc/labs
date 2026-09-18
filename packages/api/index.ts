@@ -12,6 +12,7 @@ import type {
   FabricBytes,
   FabricHash,
   FabricPlainObjectPlus,
+  FabricPrimitiveSchemaType,
   FabricValue,
   FabricValuePlus,
 } from "@commonfabric/data-model/api";
@@ -1735,41 +1736,6 @@ export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
  * Deeply-mutable version of `JSONValue`.
  */
 export type MutableJSONValue = Mutable<JSONValue>;
-
-/**
- * `FabricPrimitive` validation types -- a non-standard addition to the JSON
- * Schema `type` vocabulary. Each name identifies a concrete `FabricPrimitive`
- * class from the data-model, and a value matches by prototype (`instanceof`),
- * not by structure. `"object"` also accepts these values -- every
- * `FabricPrimitive` is a subtype of `"object"` the way an `"integer"` value
- * satisfies a `"number"` schema -- so schemas that predate this vocabulary keep
- * working.
- */
-export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
-  [
-    "FabricBytes",
-    "FabricEpochDay",
-    "FabricEpochNsec",
-    "FabricHash",
-    "FabricKeyPair",
-    "FabricRegExp",
-    "FabricUnavailable",
-  ] as const,
-);
-
-export type FabricPrimitiveSchemaType =
-  typeof FABRIC_PRIMITIVE_SCHEMA_TYPES[number];
-
-const FABRIC_PRIMITIVE_SCHEMA_TYPE_SET: ReadonlySet<string> = new Set(
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
-);
-
-/** Whether the given schema type names a `FabricPrimitive` class. */
-export function isFabricPrimitiveSchemaType(
-  type: string,
-): type is FabricPrimitiveSchemaType {
-  return FABRIC_PRIMITIVE_SCHEMA_TYPE_SET.has(type);
-}
 
 // Valid values for the "type" property of a JSONSchema
 export type JSONSchemaTypes =

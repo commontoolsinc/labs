@@ -1,4 +1,4 @@
-import { toCompactDebugString } from "@commonfabric/data-model";
+import { toLongQuotedDebugString } from "@commonfabric/data-model";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
@@ -42,13 +42,6 @@ import { RuntimeTransport } from "./transport.ts";
 import { EventEmitter } from "./emitter.ts";
 import { $onCellUpdate, CellHandle } from "@/cell-handle.ts";
 import { cellRefToKey } from "@/shared/utils.ts";
-
-/**
- * Longest rendering of an unknown notification a warning carries. What
- * arrives is bounded only by the transport, and a warning names it rather
- * than carrying it.
- */
-const MAX_UNKNOWN_NOTIFICATION_RENDER = 512;
 
 const ipcLogger = getLogger("runtime-client");
 
@@ -603,11 +596,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
         this.emit("eventneedsattention", message);
       } else {
         console.warn(
-          `Unknown notification: ${
-            toCompactDebugString(message, {
-              maxLength: MAX_UNKNOWN_NOTIFICATION_RENDER,
-            })
-          }`,
+          `Unknown notification: ${toLongQuotedDebugString(message)}`,
         );
       }
       return;

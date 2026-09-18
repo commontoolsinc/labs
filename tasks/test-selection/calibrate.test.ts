@@ -18,7 +18,6 @@ import {
 import {
   MIN_CORRECTION_SAMPLES,
   MIN_CORRECTION_SPAN_SECONDS,
-  MIN_UNIT_SPAN_UNITS,
 } from "./policy.ts";
 
 /** One figure a lane spooled, as the record format carries it. */
@@ -56,12 +55,11 @@ function batch(
 }
 
 /**
- * Observations that say what each of the two slopes is worth on its own.
- * Every combination of a small and a large reading of each, which is what
- * stops one slope explaining the other's effect, over spans wide enough
- * that both slopes are believed.
+ * Observations over every combination of a small and a large reading of
+ * each of the two things a batch is charged for, far enough apart in the
+ * seconds its tests took for a correction to be fitted.
  */
-function separable(
+function spread(
   spent: (ran: number, units: number) => number,
 ): BatchObservation[] {
   const observations: BatchObservation[] = [];
@@ -71,7 +69,7 @@ function separable(
       MIN_CORRECTION_SPAN_SECONDS * 3,
     ]
   ) {
-    for (const units of [MIN_UNIT_SPAN_UNITS, MIN_UNIT_SPAN_UNITS * 3]) {
+    for (const units of [20, 60]) {
       observations.push({
         suite: "s",
         ran,
@@ -81,6 +79,20 @@ function separable(
     }
   }
   return observations;
+}
+
+/**
+ * A suite's batches as they arrive when every lane fills to one budget:
+ * all one size, disagreeing only in the seconds their tests took, each
+ * paying `rate` for every unit it opened and nothing for itself.
+ */
+function oneSize(rate: number): BatchObservation[] {
+  return Array.from({ length: MIN_CORRECTION_SAMPLES + 5 }, (_, i) => ({
+    suite: "s",
+    units: 80,
+    ran: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+    spent: MIN_CORRECTION_SPAN_SECONDS * (1 + i) + rate * 80,
+  }));
 }
 
 describe("calibrate", () => {
@@ -235,23 +247,110 @@ describe("calibrate", () => {
   });
 
   describe("fitting one suite", () => {
-    it("puts the whole of one observation into the intercept", () => {
-      // With one sample there is nothing to say about how the cost grows,
-      // so the intercept carries what the lane was seen to spend.
-      expect(fitSuite([{ suite: "s", ran: 40, spent: 92, units: 6 }]))
-        .toEqual({ overhead: 52, correction: 1, unitOverhead: 0 });
+    it("charges one observation's whole cost to the units it opened", () => {
+      // With one batch there is nothing to say about how much of what it
+      // spent was the batch and how much was the units inside it.
+      // Charging the units errs high for a lane packing more of them
+      // than that batch held, which is the direction a lane is killed
+      // in, and errs low for a lane packing fewer: a lane holding one
+      // unit of this suite is charged 13 against the 52 the batch spent.
+      expect(fitSuite([{ suite: "s", ran: 40, spent: 92, units: 4 }]))
+        .toEqual({ overhead: 0, correction: 1, unitOverhead: 13 });
     });
 
-    it("tells what the tests cost from what the units cost", () => {
+    it("tells what the tests cost from what the units cost, where a suite pays nothing to open a batch", () => {
       // The whole point of measuring the unit count: a suite that opens a
       // runner and loads a module per unit pays for that whatever its
-      // tests take, and nothing in a test's own duration holds it.
-      const fitted = fitSuite(
-        separable((ran, units) => 10 + 2 * ran + 0.5 * units),
-      );
+      // tests take, and nothing in a test's own duration holds it. Where
+      // a batch also pays something for itself the two cannot be
+      // recovered separately, which the reading below covers.
+      const fitted = fitSuite(spread((ran, units) => 2 * ran + 0.5 * units));
       expect(fitted.correction).toBeCloseTo(2, 6);
       expect(fitted.unitOverhead).toBeCloseTo(0.5, 6);
-      expect(fitted.overhead).toBeCloseTo(10, 6);
+      expect(fitted.overhead).toBeCloseTo(0, 6);
+    });
+
+    it("reads what a unit costs from batches that all held the same count", () => {
+      // The shape a suite's batches arrive in when every lane fills to
+      // one budget: they disagree about how many units they held by a few
+      // out of eighty, and a slope over a gap that narrow is describing
+      // the runner. The rate each batch paid is not.
+      const fitted = fitSuite(oneSize(0.5));
+      expect(fitted.correction).toBeCloseTo(1, 6);
+      expect(fitted.unitOverhead).toBeCloseTo(0.5, 6);
+      expect(fitted.overhead).toBeCloseTo(0, 6);
+    });
+
+    it("charges a lane packing more units than any batch held for them", () => {
+      // A lane packs by cost, so a suite's cheapest units can reach one
+      // in numbers no batch anybody has measured ever held. Charging a
+      // unit nothing leaves that lane paying a batch's fixed cost and
+      // nothing more, and the lane is killed at its bound. Ten times the
+      // largest batch measured, which is the sort of reach a suite of a
+      // thousand units divided over lanes gives.
+      const fitted = fitSuite(oneSize(0.5));
+      expect(fitted.overhead + fitted.unitOverhead * 800)
+        .toBeGreaterThanOrEqual(0.5 * 800);
+    });
+
+    it("spreads what a batch paid for itself over the units it opened", () => {
+      // Batches of one size cannot tell a cost paid once from a cost
+      // paid per unit, so the rate carries a share of whatever the batch
+      // paid for itself and the intercept carries what the rate leaves.
+      // The rate is therefore above what a unit costs, which is the
+      // direction everything here errs in.
+      const fitted = fitSuite(
+        Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
+          suite: "s",
+          units: 20,
+          ran: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+          spent: MIN_CORRECTION_SPAN_SECONDS * (1 + i) + 10 + 0.5 * 20,
+        })),
+      );
+      expect(fitted.unitOverhead).toBeCloseTo(1, 6);
+      expect(fitted.unitOverhead).toBeGreaterThan(0.5);
+      expect(fitted.overhead).toBeCloseTo(0, 6);
+    });
+
+    it("reads the middle of the rates its batches paid", () => {
+      // A batch's wall time moves by several seconds for reasons that
+      // have nothing to do with what it held, so the largest rate a
+      // suite has shown is describing the runner. The intercept is what
+      // covers the batch the middle rate under-charges.
+      const fitted = fitSuite(
+        [0.5, 20, 0.4, 0.7, 0.6].map((rate) => ({
+          suite: "s",
+          units: 10,
+          ran: 30,
+          spent: 30 + rate * 10,
+        })),
+      );
+      expect(fitted.unitOverhead).toBeCloseTo(0.6, 6);
+      expect(fitted.overhead).toBeCloseTo(194, 6);
+    });
+
+    it("takes the higher rate where two of them are in the middle", () => {
+      const fitted = fitSuite(
+        [0.4, 0.5, 0.6, 0.7].map((rate) => ({
+          suite: "s",
+          units: 10,
+          ran: 30,
+          spent: 30 + rate * 10,
+        })),
+      );
+      expect(fitted.unitOverhead).toBeCloseTo(0.6, 6);
+    });
+
+    it("reads no rate from a batch that opened no unit", () => {
+      // Such a batch says nothing about what opening one costs, and the
+      // rate it would be read at is a division by nothing. The intercept
+      // covers it the way it covers every other observation.
+      const fitted = fitSuite([
+        { suite: "s", units: 0, ran: 10, spent: 30 },
+        { suite: "s", units: 10, ran: 10, spent: 30 },
+      ]);
+      expect(fitted.unitOverhead).toBeCloseTo(2, 6);
+      expect(fitted.overhead).toBeCloseTo(20, 6);
     });
 
     it("finds the slope enough disagreeing observations carry", () => {
@@ -260,62 +359,60 @@ describe("calibrate", () => {
           suite: "s",
           units: 1,
           ran: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
-          spent: 10 + 2 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+          spent: 2 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
         })),
       );
       expect(fitted.correction).toBeCloseTo(2, 6);
-      expect(fitted.overhead).toBeCloseTo(10, 6);
+      expect(fitted.overhead).toBeCloseTo(0, 6);
     });
 
-    it("fits no slope from too few observations", () => {
+    it("fits no correction from too few observations", () => {
       // Two points fit a line exactly, so a line through two of them says
       // whatever they say and nothing about their noise. They are charged
       // far enough apart to clear the span guard, so the count is the
-      // only thing that can refuse a slope here.
+      // only thing that can refuse a correction here.
       const fitted = fitSuite([
         {
           suite: "s",
-          units: 1,
+          units: 20,
           ran: MIN_CORRECTION_SPAN_SECONDS,
           spent: 80,
         },
         {
           suite: "s",
-          units: MIN_UNIT_SPAN_UNITS * 4,
+          units: 20,
           ran: MIN_CORRECTION_SPAN_SECONDS * 3,
           spent: 100,
         },
       ]);
       expect(fitted.correction).toBe(1);
-      expect(fitted.unitOverhead).toBe(0);
-      expect(fitted.overhead).toBeCloseTo(80 - MIN_CORRECTION_SPAN_SECONDS, 6);
     });
 
-    it("charges a steep suite on its slope rather than its intercept", () => {
-      // Nothing bounds the slope from above. The intercept is what a lane
-      // pays to run one test of the suite, so a bound that moved cost
-      // there would make the suite dearer to reach, not cheaper.
+    it("charges a steep suite on its correction rather than its intercept", () => {
+      // Nothing bounds the correction from above. The intercept is what a
+      // lane pays to run one test of the suite, so a bound that moved
+      // cost there would make the suite dearer to reach, not cheaper.
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
-          units: 1,
+          units: 20,
           ran: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
-          spent: 20 + 50 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+          spent: 50 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
         })),
       );
       expect(fitted.correction).toBeCloseTo(50, 6);
-      expect(fitted.overhead).toBeCloseTo(20, 6);
+      expect(fitted.overhead).toBeCloseTo(0, 6);
     });
 
     it("never predicts a batch costing less than one was seen to", () => {
-      // A least-squares plane sits in the middle of its observations,
+      // A least-squares line sits in the middle of its observations,
       // which for this quantity is half the lanes running past the
       // budget they were packed against.
       const seen: BatchObservation[] = [
-        ...separable((ran, units) => 10 + 2 * ran + 0.5 * units),
+        ...spread((ran, units) => 10 + 2 * ran + 0.5 * units),
         {
           suite: "s",
-          units: MIN_UNIT_SPAN_UNITS,
+          units: 20,
           ran: MIN_CORRECTION_SPAN_SECONDS,
           spent: 900,
         },
@@ -326,6 +423,20 @@ describe("calibrate", () => {
           fitted.overhead + fitted.correction * one.ran +
             fitted.unitOverhead * one.units,
         ).toBeGreaterThanOrEqual(one.spent - 1e-9);
+      }
+    });
+
+    it("charges a batch past the sizes it was fitted over what those sizes say a unit costs", () => {
+      // Holding every observation from below says nothing about a batch
+      // larger than all of them, which is the one the intercept cannot
+      // reach and the one a lane is killed for. What the figures have to
+      // cover there is the rate the batches themselves paid.
+      const seen = oneSize(0.5);
+      const fitted = fitSuite(seen);
+      const held = Math.max(...seen.map((one) => one.units));
+      for (const units of [held * 2, held * 10, held * 100]) {
+        expect(fitted.overhead + fitted.unitOverhead * units)
+          .toBeGreaterThanOrEqual(0.5 * units - 1e-9);
       }
     });
 
@@ -364,86 +475,6 @@ describe("calibrate", () => {
       expect(fitted.correction).toBe(1);
     });
 
-    it("charges a suite per unit where its tests say too little", () => {
-      // The shape a workspace unit suite arrives in: every batch charged
-      // about the same seconds of tests, and batches of wildly different
-      // sizes. There is no correction to fit, and the whole of what
-      // separates one batch from another is how many units it opened.
-      const fitted = fitSuite(
-        Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
-          suite: "s",
-          units: MIN_UNIT_SPAN_UNITS * (1 + i),
-          ran: MIN_CORRECTION_SPAN_SECONDS,
-          spent: MIN_CORRECTION_SPAN_SECONDS + 8 +
-            3 * MIN_UNIT_SPAN_UNITS * (1 + i),
-        })),
-      );
-      expect(fitted.correction).toBe(1);
-      expect(fitted.unitOverhead).toBeCloseTo(3, 6);
-      expect(fitted.overhead).toBeCloseTo(8, 6);
-    });
-
-    it("believes no correction where the tests track the units", () => {
-      // The mirror of the reading below: a correction fitted beside a
-      // unit count it moves in lockstep with is as much a choice as a
-      // per-unit cost fitted beside the tests would be. The suite keeps
-      // the slope it has always been fitted, which is the one on its
-      // tests, and that slope carries both readings together.
-      const fitted = fitSuite(
-        Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
-          suite: "s",
-          units: MIN_UNIT_SPAN_UNITS * (1 + i),
-          ran: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
-          spent: 10 + 2 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
-        })),
-      );
-      expect(fitted.correction).toBeCloseTo(2, 6);
-      expect(fitted.unitOverhead).toBe(0);
-    });
-
-    it("believes no per-unit cost from batches of about one size", () => {
-      // The same reasoning in the units the regressor counts. These
-      // batches differ from each other by three units where fifty is
-      // what a per-unit cost has to be spread over before it is
-      // believed, so what separates them is the runner rather than the
-      // suite, and a slope fitted across them would be read out at the
-      // nine hundredth unit.
-      const fitted = fitSuite(
-        Array.from({ length: MIN_CORRECTION_SAMPLES + 1 }, (_, i) => ({
-          suite: "s",
-          units: MIN_UNIT_SPAN_UNITS + i,
-          ran: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
-          spent: 100 + 40 * i,
-        })),
-      );
-      expect(fitted.unitOverhead).toBe(0);
-    });
-
-    it("believes no per-unit cost where the units track the tests", () => {
-      // Nothing separates the two where every batch held about the same
-      // seconds of tests per unit, however wide a range of sizes those
-      // batches covered. Splitting what they cost between them would be
-      // a choice rather than a reading, so the suite keeps the one slope
-      // it has always been fitted. The second reading bends off the line,
-      // by a quarter of what a unit count has to vary by before it is
-      // believed. That is the case the widest gap between two batches'
-      // sizes passes several times over, and the gap left after the
-      // tests are accounted for does not.
-      const bends = Math.round(MIN_UNIT_SPAN_UNITS / 4);
-      for (const bend of [0, bends]) {
-        const fitted = fitSuite(
-          Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
-            suite: "s",
-            units: MIN_UNIT_SPAN_UNITS * (1 + i) + bend * i * i,
-            ran: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
-            spent: 10 + 2 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
-          })),
-        );
-        expect(fitted.correction).toBeCloseTo(2, 6);
-        expect(fitted.unitOverhead).toBe(0);
-      }
-    });
-
     it("fits a suite whose batch runs faster than the sum of its tests", () => {
       // A batch runs its files in parallel, so its wall time is
       // routinely a fraction of the sum of its tests' own durations —
@@ -453,12 +484,64 @@ describe("calibrate", () => {
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
-          units: 1,
+          units: 20,
           ran: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
           spent: MIN_CORRECTION_SPAN_SECONDS * (2 + i) / 3,
         })),
       );
       expect(fitted.correction).toBeCloseTo(1 / 3, 6);
+      expect(fitted.unitOverhead).toBe(0);
+      expect(fitted.overhead).toBeCloseTo(0, 6);
+    });
+
+    it("charges nothing per unit for a batch that outran its own tests", () => {
+      // A batch whose wall time is under what its tests took, against a
+      // correction of one, is not evidence that a unit gives time back.
+      const fitted = fitSuite([
+        { suite: "s", units: 20, ran: 30, spent: 10 },
+        { suite: "s", units: 20, ran: 30, spent: 12 },
+      ]);
+      expect(fitted.correction).toBe(1);
+      expect(fitted.unitOverhead).toBe(0);
+      expect(fitted.overhead).toBe(0);
+    });
+
+    it("keeps a correction whose batches spend exactly in proportion to their tests", () => {
+      // The line the guard above refuses either side of. A suite sitting
+      // on it is one the model can carry, with nothing fixed and nothing
+      // per unit, so what decides it must not be the arithmetic.
+      const fitted = fitSuite(
+        Array.from({ length: MIN_CORRECTION_SAMPLES + 2 }, (_, i) => ({
+          suite: "s",
+          units: 20,
+          ran: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
+          spent: MIN_CORRECTION_SPAN_SECONDS * (2 + i) / 3,
+        })),
+      );
+      expect(fitted.correction).toBeCloseTo(1 / 3, 6);
+      expect(fitted.overhead).toBeCloseTo(0, 6);
+      expect(fitted.unitOverhead).toBeCloseTo(0, 6);
+    });
+
+    it("refuses a correction whose line needs a fixed cost below nothing", () => {
+      // The shape a suite arrives in where its batches cost more than
+      // their tests and cost more of it the more they hold: the slope on
+      // the tests alone comes out steep enough to explain every batch on
+      // its own, and what it has taken is what the units cost. Read that
+      // way the suite is charged nothing a unit, which is the reading
+      // this whole term exists to replace.
+      const seen = Array.from({ length: MIN_CORRECTION_SAMPLES + 2 }, (
+        _,
+        i,
+      ) => ({
+        suite: "s",
+        units: 10 * (1 + i) ** 2,
+        ran: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+        spent: MIN_CORRECTION_SPAN_SECONDS * (1 + i) + 7 * 10 * (1 + i) ** 2,
+      }));
+      const fitted = fitSuite(seen);
+      expect(fitted.correction).toBe(1);
+      expect(fitted.unitOverhead).toBeCloseTo(7, 6);
       expect(fitted.overhead).toBeCloseTo(0, 6);
     });
 
@@ -478,25 +561,6 @@ describe("calibrate", () => {
       expect(fitted.correction).toBe(1);
     });
 
-    it("keeps the per-unit cost when the correction comes out negative", () => {
-      // The two are fitted together, so a reading refused takes the other
-      // one's figure with it: what a unit costs beside a correction of
-      // minus a half is not what it costs beside a correction of one.
-      const fitted = fitSuite(
-        separable((ran, units) => units - 0.5 * ran),
-      );
-      expect(fitted.correction).toBe(1);
-      expect(fitted.unitOverhead).toBeGreaterThan(0);
-    });
-
-    it("keeps the correction when the per-unit cost comes out negative", () => {
-      const fitted = fitSuite(
-        separable((ran, units) => 2 * ran - units),
-      );
-      expect(fitted.correction).toBeCloseTo(2, 6);
-      expect(fitted.unitOverhead).toBe(0);
-    });
-
     it("fits every suite figures a manifest will carry", () => {
       // `parseCalibration` refuses a correction at or below zero and a
       // per-unit cost below zero, and it refuses the whole manifest with
@@ -504,7 +568,7 @@ describe("calibrate", () => {
       for (const perSecond of [-3, -0.5, 0, 0.25, 4, 50]) {
         for (const perUnit of [-2, 0, 0.5, 9]) {
           const fitted = fitSuite(
-            separable((ran, units) => 500 + perSecond * ran + perUnit * units),
+            spread((ran, units) => 500 + perSecond * ran + perUnit * units),
           );
           expect(fitted.correction).toBeGreaterThan(0);
           expect(fitted.unitOverhead).toBeGreaterThanOrEqual(0);
@@ -521,7 +585,6 @@ describe("calibrate", () => {
       });
     });
   });
-
   describe("calibrate()", () => {
     it("names every capability and every suite it was given", () => {
       const fitted = calibrate({
@@ -536,7 +599,10 @@ describe("calibrate", () => {
         "runner-unit",
         "workspace-unit",
       ]);
-      expect(fitted.suites["workspace-unit"].overhead).toBe(52);
+      expect(fitted.suites["workspace-unit"].unitOverhead).toBeCloseTo(
+        52 / 3,
+        6,
+      );
     });
   });
 

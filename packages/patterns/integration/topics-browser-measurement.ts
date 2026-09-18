@@ -36,6 +36,7 @@ import { RequestType, type RuntimeClient } from "@commonfabric/runtime-client";
 
 import { describeThrown } from "../../integration/describe-thrown.ts";
 import { settleView, waitForRuntimeIdle } from "./cfc-browser-helpers.ts";
+import type { TopicsBrowserPosture } from "./topics-browser-posture.ts";
 import {
   compiledLiftText,
   type CompiledTopicsLift,
@@ -195,6 +196,14 @@ interface TopicsSampleBase {
   /** The caller's name for the operation. */
   readonly label: string;
 
+  /**
+   * What the deployment under measurement says about the posture it ran, and
+   * where the shell's half of that was read from. A sample prints both, and
+   * prints a deployment that declares no posture as `posture undeclared`
+   * rather than as a mode, so no reader takes it for a measured one.
+   */
+  readonly posture: TopicsBrowserPosture;
+
   /** From starting the operation to a settled view over an idle runtime. */
   readonly elapsedMs: number;
 
@@ -269,6 +278,14 @@ export type TopicsSample = TopicsReadSample | TopicsTimedSample;
 export interface TopicsOperationOptions {
   /** Names the operation in the sample and in failures. */
   readonly label: string;
+
+  /**
+   * The posture the deployment under measurement runs, which labels the
+   * sample. Read from the deployment once per benchmark run with
+   * `readTopicsBrowserPosture()`, so a sample cannot be labeled with a mode
+   * the run did not exercise.
+   */
+  readonly posture: TopicsBrowserPosture;
 
   /** Drives the page; the helper waits for the view and runtime afterward. */
   readonly operation: () => Promise<unknown>;
@@ -490,6 +507,7 @@ export async function measureTopicsReads(
       }
       return {
         label: options.label,
+        posture: options.posture,
         readAccounting: true,
         elapsedMs: measured.elapsedMs,
         graph: { before: measured.before.graph, after: after.graph },
@@ -570,6 +588,7 @@ export async function timeTopicsOperation(
         }
         return {
           label: options.label,
+          posture: options.posture,
           readAccounting: false,
           accountingTurnedOff: true,
           mayRunNothing,
@@ -605,7 +624,11 @@ export function formatTopicsSample(
 ): string[] {
   const { before, after } = sample.graph;
   const lines = [
-    `${sample.label}: ${sample.elapsedMs.toFixed(0)}ms, read accounting ${
+    `${sample.label} [${
+      sample.posture.declared
+        ? `${sample.posture.mode} via ${sample.posture.clientFrom}`
+        : "posture undeclared"
+    }]: ${sample.elapsedMs.toFixed(0)}ms, read accounting ${
       sample.readAccounting ? "on" : "off"
     }; graph ${before.nodes} -> ${after.nodes} nodes, ${before.edges} -> ${after.edges} edges`,
   ];

@@ -2,8 +2,9 @@
  * Pattern-visible declarations for the fabric value type system, and for the
  * options of the debug renderers over it, in the form that `@commonfabric/api`
  * re-exports to patterns. Everything here is an interface, a type, or a
- * `declare const`, except for the brand constants, so the module's only
- * runtime footprint is those constants.
+ * `declare const`, except for the brand constants and the `FabricPrimitive`
+ * schema `type` vocabulary with its predicate, so the module's only runtime
+ * footprint is those.
  *
  * The canonical implementations live in this module's siblings --
  * `interface.ts`, `fabric-primitives/FabricHash.ts`,
@@ -18,7 +19,9 @@
  *
  * Every concrete `FabricPrimitive` subclass needs an instanceof-capable
  * declaration here, that being an interface, a constructor interface, and a
- * `declare const` combining the two.
+ * `declare const` combining the two. The interface narrows `.schemaType` to
+ * the one name its class reports, and that name is listed in
+ * `FABRIC_PRIMITIVE_SCHEMA_TYPES`.
  *
  * This module has no imports, and can have none. `@commonfabric/api`
  * re-exports it to patterns, and the script that builds the type file the
@@ -251,6 +254,13 @@ export interface FabricPrimitive {
    * carries the key.
    */
   readonly [FABRIC_PRIMITIVE_BRAND]: true;
+
+  /**
+   * Name of this instance's class in the schema `type` vocabulary: the `type`
+   * a schema names to admit this value by its class. Every instance of a class
+   * reports the same name, which need not be the name of the class.
+   */
+  readonly schemaType: FabricPrimitiveSchemaType;
 }
 
 export interface FabricPrimitiveConstructor {
@@ -313,6 +323,9 @@ export declare const FabricInstance:
  * `sliceBuffer()`, or `copyInto()`.
  */
 export interface FabricBytes extends FabricPrimitive {
+  /** @inheritDoc */
+  readonly schemaType: "FabricBytes";
+
   readonly length: number;
   slice(start?: number, end?: number): Uint8Array<ArrayBuffer>;
   sliceBuffer(start?: number, end?: number): ArrayBuffer;
@@ -331,6 +344,9 @@ export declare const FabricBytes: FabricBytesConstructor;
  * POSIX Epoch. Wraps a `bigint` value.
  */
 export interface FabricEpochDay extends FabricPrimitive {
+  /** @inheritDoc */
+  readonly schemaType: "FabricEpochDay";
+
   readonly value: bigint;
 }
 
@@ -346,6 +362,9 @@ export declare const FabricEpochDay: FabricEpochDayConstructor;
  * Wraps a `bigint` value.
  */
 export interface FabricEpochNsec extends FabricPrimitive {
+  /** @inheritDoc */
+  readonly schemaType: "FabricEpochNsec";
+
   readonly value: bigint;
 }
 
@@ -360,6 +379,9 @@ export declare const FabricEpochNsec: FabricEpochNsecConstructor;
  * A content-addressed identifier: a hash digest paired with an algorithm tag.
  */
 export interface FabricHash extends FabricPrimitive {
+  /** @inheritDoc */
+  readonly schemaType: "FabricHash";
+
   readonly tag: string;
   readonly bytes: Uint8Array;
   readonly length: number;
@@ -387,6 +409,9 @@ export declare const FabricHash: FabricHashConstructor;
  * throws.
  */
 export interface FabricKeyPair extends FabricPrimitive {
+  /** @inheritDoc */
+  readonly schemaType: "FabricKeyPair";
+
   readonly algorithm: string;
   readonly hasMaterial: boolean;
 
@@ -431,6 +456,9 @@ export declare const FabricKeyPair: FabricKeyPairConstructor;
  * carried. `value` reconstitutes a JS `RegExp` where one exists.
  */
 export interface FabricRegExp extends FabricPrimitive {
+  /** @inheritDoc */
+  readonly schemaType: "FabricRegExp";
+
   readonly source: string;
   readonly flags: string;
   readonly flavor: string;
@@ -481,6 +509,9 @@ export type UnavailableErrorKind =
  * For the other two reasons every error member is `null`.
  */
 export interface FabricUnavailable extends FabricPrimitive {
+  /** @inheritDoc */
+  readonly schemaType: "FabricUnavailable";
+
   /** Why the data is unavailable. */
   readonly reason: UnavailableReason;
 
@@ -532,6 +563,46 @@ export interface FabricUnavailableConstructor {
 }
 
 export declare const FabricUnavailable: FabricUnavailableConstructor;
+
+//
+// The `FabricPrimitive` schema `type` vocabulary
+//
+
+/**
+ * `FabricPrimitive` validation types -- a non-standard addition to the JSON
+ * Schema `type` vocabulary. Each name identifies a concrete `FabricPrimitive`
+ * class, being the name its instances report as `.schemaType`, and a value
+ * matches by prototype (`instanceof`), not by structure. `"object"` also
+ * accepts these values -- every `FabricPrimitive` is a subtype of `"object"`
+ * the way an `"integer"` value satisfies a `"number"` schema -- so schemas
+ * that do not use this vocabulary admit them all the same.
+ */
+export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
+  [
+    "FabricBytes",
+    "FabricEpochDay",
+    "FabricEpochNsec",
+    "FabricHash",
+    "FabricKeyPair",
+    "FabricRegExp",
+    "FabricUnavailable",
+  ] as const,
+);
+
+/** One of the `FabricPrimitive` names in the schema `type` vocabulary. */
+export type FabricPrimitiveSchemaType =
+  typeof FABRIC_PRIMITIVE_SCHEMA_TYPES[number];
+
+const FABRIC_PRIMITIVE_SCHEMA_TYPE_SET: ReadonlySet<string> = new Set(
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+);
+
+/** Whether the given schema type names a `FabricPrimitive` class. */
+export function isFabricPrimitiveSchemaType(
+  type: string,
+): type is FabricPrimitiveSchemaType {
+  return FABRIC_PRIMITIVE_SCHEMA_TYPE_SET.has(type);
+}
 
 //
 // Concrete `FabricInstance` classes
@@ -647,8 +718,10 @@ export interface DebugValueOptions {
    * Maximum depth of result nesting: a positive integer, or `Infinity` for as
    * deep as the conversion allows. An item which would require further
    * nesting is instead converted into a form suggestive of the elided
-   * information. When absent, the depth is ten levels. A large value is capped;
-   * there is no guarantee about the _actual_ possible maximum depth.
+   * information. The contents of a `FabricPrimitive` are nested to this depth
+   * in their own right, whatever the depth of the `FabricPrimitive` itself.
+   * When absent, the depth is ten levels. A large value is capped; there is no
+   * guarantee about the _actual_ possible maximum depth.
    */
   readonly maxDepth?: number;
 
@@ -657,10 +730,21 @@ export interface DebugValueOptions {
    * integer, or `Infinity` for as many as the conversion allows. An array
    * with more elements than this has only the elements at indices below the
    * limit converted, and in place of the rest a form suggestive of the
-   * elision, which includes the array's actual length. When absent, the limit
-   * is one hundred. A large value is capped.
+   * elision, which includes the array's actual length. This applies to an
+   * array within the contents of a `FabricPrimitive` too. When absent, the
+   * limit is one hundred. A large value is capped.
    */
   readonly maxArrayLength?: number;
+
+  /**
+   * Maximum number of bytes of a buffer which are rendered: a positive
+   * integer, or `Infinity` for as many as the rendering allows. A buffer is
+   * what holds the bytes of a `FabricPrimitive`, such as those of a
+   * `FabricBytes`. One with more bytes than this has only that many rendered,
+   * and after them a note of the elision, which includes the buffer's actual
+   * length. When absent, the limit is two hundred. A large value is capped.
+   */
+  readonly maxBufferLength?: number;
 
   /**
    * Maximum number of properties of an object which are represented: a

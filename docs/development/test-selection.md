@@ -44,7 +44,7 @@ Each of those is printed on its own, because they are not alternatives: a
 withheld identity a change reaches runs anyway, so an answer that picked
 one of them would be leaving out something true.
 
-The identity resolves through `tasks/test-identity-aliases.jsonl` first,
+The identity resolves through `tasks/test-identity-aliases/` first,
 so asking about a renamed test under either name finds the joined history.
 
 ### `dials`
@@ -261,7 +261,6 @@ rather than a setting to fix.
 | `FILL_EXPLORATION_SHARE` | 0.15 | share of the run's budget | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
 | `MIN_CORRECTION_SPAN_SECONDS` | 23 | seconds | derived | A tenth of a lane's budget, measured as the widest gap between the time two batches' own tests took. Down when a suite's real slope is going unbelieved for too long; up when a slope fitted inside a narrow range is being read far outside it. |
 | `MIN_CORRECTION_SAMPLES` | 3 | batches | chosen | Up when a slope is being fitted from too little and swinging about; down when a suite's real slope takes too long to be believed. |
-| `MIN_UNIT_SPAN_UNITS` | 50 | units | chosen | The widest gap between two batches' sizes a suite needs before what one more unit costs it is believed. Down when a suite's real per-unit cost is going unbelieved for too long; up when a slope fitted across a few units is being read across hundreds. |
 | `FLAKE_EXCLUSION_RATE` | 0.005 | share of runs | chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |
 | `FLAKE_MIN_EXECUTIONS` | 2 | runs of one item | chosen | What an item that has ever disagreed runs. Down to one when the cheapest evidence of intermittency is not worth a second execution; nowhere useful above two, since the line through the anchor covers everything flakier. |
 | `FLAKE_ANCHOR_RATE` | 0.01 | share of runs | chosen | With `FLAKE_ANCHOR_EXECUTIONS`, the point the count's line passes through. Down to make the count climb faster with the rate; up to make it climb slower. |
@@ -973,8 +972,8 @@ itself.
   extra runs are what make the observation possible, so this note is
   silent until they land.
 - **A rename that discarded history**, with the number of catches it
-  would bring back and the line to append to
-  `tasks/test-identity-aliases.jsonl`. Four things have to hold: the
+  would bring back and the line to append under
+  `tasks/test-identity-aliases/`. Four things have to hold: the
   departing test caught something; the unit it lived in produced records
   in this run, so its absence is a test that left rather than a suite
   that did not run; the arriving name is one the store has never seen;
@@ -1027,8 +1026,8 @@ of the identity being the reported name:
 - Prefer stable, content-derived wording over positional counters or
   interpolated identifiers, which mint a new identity every time they
   shift.
-- A rename splits history unless a line is appended to
-  `tasks/test-identity-aliases.jsonl`. Most renames cost nothing, because
+- A rename splits history unless a line is appended under
+  `tasks/test-identity-aliases/`. Most renames cost nothing, because
   most tests have never caught anything; a rename of a test that has is
   worth the line.
 

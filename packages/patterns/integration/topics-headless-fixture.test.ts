@@ -25,6 +25,7 @@ import {
   topicIndicesOf,
   TOPICS_LIFT_NAMES,
   type TopicsFixture,
+  topicsFixtureModeOf,
   type TopicsLiftName,
   type TopicsMeasurement,
   type TopicsOperation,
@@ -255,6 +256,52 @@ describe("topics-headless-fixture", () => {
           repeatedMention: 0,
         })
       ).toThrow(/`repeatedMention`/);
+    });
+  });
+
+  describe("topicsFixtureModeOf()", () => {
+    // A measurement's `mode` is what labels every sample the probe writes, and
+    // it is read back off the runtime rather than taken from what the caller
+    // asked for. Each case here checks the runtime's own report as well, so a
+    // pass cannot come from the two agreeing on a flag neither one set.
+
+    it("returns `lazy-materialization-on` for a measurement given no mode", async () => {
+      await using measurement = await measureTopicsFixture(
+        buildTopicsFixture({ topicCount: 1, mentions: { shape: "none" } }),
+        "topics-headless-fixture default mode",
+      );
+      const { experimental } = measurement.runtime;
+      expect(experimental.lazyMaterialization).toBe(true);
+      expect(experimental.serverExecution).toBe(false);
+      expect(topicsFixtureModeOf(experimental)).toBe("lazy-materialization-on");
+      expect(measurement.mode).toBe("lazy-materialization-on");
+    });
+
+    it("returns `lazy-materialization-off` for a measurement given that mode", async () => {
+      await using measurement = await measureTopicsFixture(
+        buildTopicsFixture({ topicCount: 1, mentions: { shape: "none" } }),
+        "topics-headless-fixture lazy materialization off",
+        { workload: "all-backlinks" },
+        { mode: "lazy-materialization-off" },
+      );
+      const { experimental } = measurement.runtime;
+      expect(experimental.lazyMaterialization).toBe(false);
+      expect(experimental.serverExecution).toBe(false);
+      expect(topicsFixtureModeOf(experimental)).toBe(
+        "lazy-materialization-off",
+      );
+      expect(measurement.mode).toBe("lazy-materialization-off");
+    });
+
+    it("throws naming the flags when no mode holds them", () => {
+      expect(() =>
+        topicsFixtureModeOf({
+          lazyMaterialization: true,
+          serverExecution: true,
+        })
+      ).toThrow(
+        /^No measurement mode runs with lazyMaterialization=true, serverExecution=true\.$/,
+      );
     });
   });
 

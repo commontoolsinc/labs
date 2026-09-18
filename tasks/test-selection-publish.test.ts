@@ -531,11 +531,13 @@ describe("publish()", () => {
     );
     const manifest = await publishedManifest(created);
     expect(manifest.calibration.setupCost).toEqual({ fuse: 14.8 });
-    // The lane spent 92 seconds on a batch whose own tests took 40. With
-    // one observation there is nothing to say about how that cost grows
-    // with the work, so the whole difference is the suite's fixed cost.
+    // The lane spent 92 seconds on a batch of one unit whose own tests
+    // took 40. With one observation there is nothing to say about how
+    // much of the 52 between them was the batch and how much was the
+    // unit inside it, so the unit carries it: charging it there errs
+    // high for a lane packing more units than that batch held.
     expect(manifest.calibration.suites["workspace-unit"])
-      .toEqual({ overhead: 52, correction: 1, unitOverhead: 0 });
+      .toEqual({ overhead: 0, correction: 1, unitOverhead: 52 });
   });
 
   it("publishes a cost model the manifest reader will carry", async () => {

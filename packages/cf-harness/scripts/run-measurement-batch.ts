@@ -42,7 +42,7 @@ import { parseArgs } from "@std/cli/parse-args";
 import { ensureDir } from "@std/fs";
 import { isAbsolute, join } from "@std/path";
 
-import { toCompactDebugString } from "@commonfabric/data-model";
+import { toLongQuotedDebugString } from "@commonfabric/data-model";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { ConsolePolicyReport } from "../console/policy.ts";
@@ -958,7 +958,7 @@ export class ConsoleClient {
       return {
         kind: "refused",
         reason: `the index answered with no results array: ${
-          toCompactDebugString(answer, { maxLength: 200 })
+          toLongQuotedDebugString(answer)
         }`,
       };
     }

@@ -24,7 +24,6 @@ import {
   internSchemaPairAsKey,
   isInternedSchema,
   REJECTING_SELECTOR,
-  schemaTypeOfFabricPrimitive,
   schemaWithProperties,
 } from "@commonfabric/data-model-schema";
 import { walkSchemaDocumentClosure } from "@commonfabric/data-model-schema/schema-closure";
@@ -4399,7 +4398,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // satisfies `required: ["length"]`), mirroring the anyOf prefilters'
       // `in` checks.
       if (
-        this.#isValidType(schemaObj, schemaTypeOfFabricPrimitive(doc.value)) ===
+        this.#isValidType(schemaObj, doc.value.schemaType) ===
           TypeValidity.False
       ) {
         return fail(TRAVERSE_FAILURES.invalidType);
@@ -5596,7 +5595,7 @@ function getPlainJsonType(
   // A `FabricPrimitive` reports its specific type name; a schema saying
   // `"object"` still accepts it via schemaTypeMatchesValueType's subtype rule.
   if (value instanceof FabricPrimitive) {
-    return schemaTypeOfFabricPrimitive(value);
+    return value.schemaType;
   }
   if (isObjectNotArray(value)) return "object";
   return null;

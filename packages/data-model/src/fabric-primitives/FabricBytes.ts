@@ -27,7 +27,7 @@ import {
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
-} from "@/types";
+} from "./interface.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.
@@ -70,6 +70,11 @@ export class FabricBytes extends BaseFabricPrimitive implements ApiFabricBytes {
   /** @inheritDoc */
   get [VALUE_TAG](): FabricPrimitiveValueTag {
     return FABRIC_PRIMITIVE_VALUE_TAGS.FabricBytes;
+  }
+
+  /** @inheritDoc */
+  get schemaType(): "FabricBytes" {
+    return "FabricBytes";
   }
 
   /** The number of bytes. */

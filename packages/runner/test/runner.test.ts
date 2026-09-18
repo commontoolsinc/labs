@@ -1598,7 +1598,7 @@ describe("setup/start", () => {
     setupTrusted(runtime, undefined, pattern, {}, resultCell);
 
     await expect(runtime.start(resultCell)).rejects.toThrow(
-      "is not a link (got: 42)",
+      "is not a link (got: `42`)",
     );
   });
 
