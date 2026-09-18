@@ -155,7 +155,7 @@ const sourcesByHandle = (
       if (source !== undefined && connection !== undefined) {
         if (
           source.companion_key !== undefined &&
-          typeof source.companion_key !== "string"
+          asNonEmptyString(source.companion_key) === undefined
         ) continue;
         const key = handleKey(
           name,
@@ -243,10 +243,10 @@ export const resolveConnectorGrants = (
     };
     if (
       handle?.companion_key !== undefined &&
-      typeof handle.companion_key !== "string"
+      companionKey === undefined
     ) {
       skip(
-        "its companion key is not a string",
+        "its companion key is not a non-empty string",
         "Repair this connector's injection receipt in Loom, then restart the console.",
         "unknown",
       );

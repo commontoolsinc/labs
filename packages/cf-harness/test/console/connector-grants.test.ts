@@ -326,7 +326,7 @@ describe("connector-grants", () => {
       });
     });
 
-    for (const companion of [123, null]) {
+    for (const companion of [123, null, "", "   "]) {
       it(`reports an unreadable companion key ${JSON.stringify(companion)}`, () => {
         const result = resolveConnectorGrants(records({
           handlesJson: handlesJson([{
@@ -336,9 +336,28 @@ describe("connector-grants", () => {
         }));
         expect(result.grants).toEqual([]);
         expect(result.unnamed[0]).toMatchObject({
-          reason: "its companion key is not a string",
+          reason: "its companion key is not a non-empty string",
           state: "unknown",
         });
+      });
+
+      it(`excludes a source with unreadable companion key ${JSON.stringify(companion)}`, () => {
+        const result = resolveConnectorGrants(records({
+          handlesJson: handlesJson([
+            handle(MAIL_PIECE.name, "gmail-work", MAIL_REF),
+          ]),
+          piecesJson: piecesJson([{
+            ...MAIL_PIECE,
+            sqlite_sources: [{
+              ...MAIL_PIECE.sqlite_sources[0],
+              companion_key: companion,
+            }],
+          }]),
+        }));
+        expect(result.grants).toEqual([]);
+        expect(result.unnamed[0]?.reason).toContain(
+          "declares no `sqlite_sources`",
+        );
       });
     }
 
