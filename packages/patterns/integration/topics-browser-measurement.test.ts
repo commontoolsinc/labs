@@ -27,6 +27,10 @@ import {
   type TopicsProgram,
   type TopicsSample,
 } from "./topics-browser-measurement.ts";
+import {
+  readTopicsBrowserPosture,
+  type TopicsBrowserPosture,
+} from "./topics-browser-posture.ts";
 import { waitForPieceView } from "./topics-navigation-helpers.ts";
 
 /** The page globals the client-replacement cases read and write. */
@@ -44,12 +48,14 @@ type ReplacementGlobal = typeof globalThis & {
 describe("topics-browser-measurement", () => {
   let fixture: TopicBoardFixture;
   let identity: Identity;
+  let posture: TopicsBrowserPosture;
   let program: TopicsProgram;
   let session: BoardSession;
 
   // The smallest board on which every named lift runs: the newest of two topics
   // cites the other, so the pivot has a row to build and a backlink to find.
   beforeAll(async () => {
+    posture = await readTopicsBrowserPosture(env.API_URL, env.FRONTEND_URL);
     program = await prepareTopicsProgram();
     identity = await seedIdentity(
       `topics browser measurement ${crypto.randomUUID()}`,
@@ -212,6 +218,7 @@ describe("topics-browser-measurement", () => {
 
       const sample = await measureTopicsReads(session.page, {
         label: "open topic and return",
+        posture,
         program,
         operation: async () => {
           await openTopmostTopic();
@@ -251,6 +258,7 @@ describe("topics-browser-measurement", () => {
       await expect(
         measureTopicsReads(session.page, {
           label: "undemanded",
+          posture,
           program,
           operation: () => Promise.resolve(),
         }),
@@ -269,6 +277,7 @@ describe("topics-browser-measurement", () => {
 
       const sample = await measureTopicsReads(session.page, {
         label: "undemanded, declared",
+        posture,
         program,
         operation: () => Promise.resolve(),
         mayRunNothing: true,
@@ -292,6 +301,7 @@ describe("topics-browser-measurement", () => {
       try {
         const sample = await measureTopicsReads(fresh.page, {
           label: "open topic and return, declared",
+          posture,
           program,
           operation: async () => {
             await openTopmostTopic(fresh);
@@ -326,6 +336,7 @@ describe("topics-browser-measurement", () => {
       await expect(
         measureTopicsReads(session.page, {
           label: "unparseable",
+          posture,
           program,
           operation: () => deliverRun("not a source location"),
           mayRunNothing: true,
@@ -342,6 +353,7 @@ describe("topics-browser-measurement", () => {
 
       const sample = await measureTopicsReads(session.page, {
         label: "no source location",
+        posture,
         program,
         operation: () => deliverRun(undefined),
         mayRunNothing: true,
@@ -359,6 +371,7 @@ describe("topics-browser-measurement", () => {
       await expect(
         measureTopicsReads(session.page, {
           label: "no source location, undeclared",
+          posture,
           program,
           operation: () => deliverRun(undefined),
         }),
@@ -373,6 +386,7 @@ describe("topics-browser-measurement", () => {
       await expect(
         measureTopicsReads(session.page, {
           label: "failing",
+          posture,
           program,
           operation: () => Promise.reject(failure),
         }),
@@ -393,6 +407,7 @@ describe("topics-browser-measurement", () => {
         await expect(
           measureTopicsReads(fresh.page, {
             label: "coverage on",
+            posture,
             program,
             operation: async () => {
               await openTopmostTopic(fresh);
@@ -418,6 +433,7 @@ describe("topics-browser-measurement", () => {
         await expect(
           measureTopicsReads(fresh.page, {
             label: "replaced client",
+            posture,
             program,
             operation: () => replaceRuntimeClient(fresh.page),
           }),
@@ -498,6 +514,7 @@ describe("topics-browser-measurement", () => {
         });
         const sample = await timeTopicsOperation(fresh.page, {
           label: "open topic and return, timed",
+          posture,
           operation: async () => {
             await openTopmostTopic(fresh);
             await returnToBoard(fresh);
@@ -529,6 +546,7 @@ describe("topics-browser-measurement", () => {
       await expect(
         timeTopicsOperation(session.page, {
           label: "idle",
+          posture,
           operation: () => Promise.resolve(),
         }),
       ).rejects.toThrow("idle: the timed operation ran nothing in the worker");
@@ -541,6 +559,7 @@ describe("topics-browser-measurement", () => {
       await expect(
         timeTopicsOperation(session.page, {
           label: "failing, timed",
+          posture,
           operation: () => Promise.reject(failure),
           interval: {
             start: () => interval.started++,
@@ -557,6 +576,7 @@ describe("topics-browser-measurement", () => {
         await expect(
           timeTopicsOperation(session.page, {
             label: "replaced client, timed",
+            posture,
             operation: () => replaceRuntimeClient(),
           }),
         ).rejects.toThrow("The runtime client was replaced");
@@ -569,6 +589,7 @@ describe("topics-browser-measurement", () => {
     it("returns a sample recording the declaration for an operation declared to run nothing", async () => {
       const sample = await timeTopicsOperation(session.page, {
         label: "idle, declared",
+        posture,
         operation: () => Promise.resolve(),
         mayRunNothing: true,
       });
