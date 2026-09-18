@@ -33,10 +33,7 @@ import {
 } from "../executor/effect-completion.ts";
 import { waveSettlementOf } from "../executor/wave.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "../query-result-proxy.ts";
+import { getCellOrThrow } from "../query-result-proxy.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type { Action } from "../scheduler.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -145,27 +142,23 @@ export function agentRunRecordCell(
 
 /**
  * Helper for `agent()`, which resolves what a pattern passed under `inputs`
- * to cell handles. Anything that is not a cell is an invalid input: the
- * calling convention is references, and a value here would be one the
- * request carries.
+ * to cell handles. The parameter schema reads every entry as a cell, so a
+ * value a pattern wrote inline arrives as a handle to where it sits in the
+ * node's argument, and the request carries that address like any other.
  */
 function resolveInputHandles(
   inputs: Record<string, unknown> | undefined,
 ): Record<string, Cell<any>> {
   const handles: Record<string, Cell<any>> = {};
   for (const [name, value] of Object.entries(inputs ?? {})) {
-    if (isCell(value)) {
-      handles[name] = value;
-    } else if (isCellResultForDereferencing(value)) {
-      handles[name] = getCellOrThrow(value);
-    } else {
-      throw new Error(
-        `INVALID_INPUT: agent input \`${name}\` is not a cell; pass the ` +
-          `cell rather than its value`,
-      );
-    }
+    handles[name] = isCell(value) ? value : getCellOrThrow(value);
   }
   return handles;
+}
+
+/** Helper for `agent()`, which reports a rejected write to the operator. */
+function reportRejection(what: string, requestHash: string, error: Error) {
+  console.error(`[agent] ${what}`, { requestHash, rejection: error.message });
 }
 
 /** Helper for `agent()`, which snapshots one input handle as its address. */
@@ -280,9 +273,12 @@ export function agent(
     const outputScope = tx.getNarrowestReadScope();
     const served = runtime.servingPosture &&
       runtime.experimental.serverExecution;
-    const identity: ScopeKeyIdentity | undefined = served
-      ? tx.tx.scopeKeyIdentity ?? runtime.scopeKeyIdentity
-      : undefined;
+    // The identity this run acts as: the demanding principal's on a serving
+    // runtime, the runtime's own elsewhere. Every later transaction of this
+    // request is bound to it, so the user-scoped record resolves to the same
+    // instance the staging run addressed.
+    const identity: ScopeKeyIdentity = tx.tx.scopeKeyIdentity ??
+      runtime.scopeKeyIdentity;
 
     if (!state.resultCell || state.cellScope !== outputScope) {
       state.resultCell = ownedCell(
@@ -328,17 +324,7 @@ export function agent(
       return;
     }
 
-    let inputHandles: Record<string, Cell<any>>;
-    try {
-      inputHandles = resolveInputHandles(rawInputs);
-    } catch (error) {
-      settleWithoutRun(
-        fields,
-        error instanceof Error ? error.message : String(error),
-        undefined,
-      );
-      return;
-    }
+    const inputHandles = resolveInputHandles(rawInputs);
 
     const requestSnapshot = createFrozenRequestSnapshot({
       task,
@@ -371,10 +357,10 @@ export function agent(
 
     // A request that settled without a run stays settled: the error is
     // recorded against its hash, and only a different request stages again.
-    if (fields.error.get() !== undefined && fields.requestHash.get() === hash) {
-      return;
-    }
-    if (hash === state.previousCallHash) return;
+    // One already staged and still in flight is not staged twice.
+    const settledWithoutRun = fields.error.get() !== undefined &&
+      fields.requestHash.get() === hash;
+    if (settledWithoutRun || hash === state.previousCallHash) return;
 
     // The record is found through the requester's home-space index, so a run
     // with no requesting identity to resolve that space for has nowhere to
@@ -457,7 +443,7 @@ export function agent(
     const createRecord = async (): Promise<void> => {
       const { error } = await runtime.editWithRetry((tx) => {
         markEffectCompletion(tx, effectKey);
-        if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
+        tx.tx.scopeKeyIdentity = identity;
         const live = inputs.withTx(tx).get();
         const liveHandles = resolveInputHandles(
           inputs.key("inputs").withTx(tx).get() as
@@ -477,7 +463,7 @@ export function agent(
             : {}),
           ...(live.tools !== undefined ? { tools: live.tools } : {}),
         });
-        if (hashOf(liveSnapshot).toString() !== hash) return;
+        const replaced = hashOf(liveSnapshot).toString() !== hash;
         const record = agentRunRecordCell(
           runtime,
           tx,
@@ -485,10 +471,12 @@ export function agent(
           cause,
           hash,
         );
-        const existing = record.withTx(tx).get() as
-          | AgentRunRecord
-          | undefined;
-        if (existing !== undefined && existing.state !== undefined) return;
+        // Nothing to create for a request the node has since replaced, or
+        // one whose record already holds a state. The state is read on its
+        // own: a record missing a required field reads as absent when read
+        // whole, and would be overwritten.
+        const existingState = record.withTx(tx).key("state").get();
+        if (replaced || existingState !== undefined) return;
         recordRuntimeOwnedStore(tx, parentCell, record);
         const now = new Date().toISOString();
         record.withTx(tx).set({
@@ -514,11 +502,7 @@ export function agent(
         });
       });
       if (error) {
-        console.error(
-          "[agent] Creating the run record was rejected; the request " +
-            "settles as refused.",
-          { requestHash: hash, rejection: error.message },
-        );
+        reportRejection("Creating the run record was rejected.", hash, error);
         await settleAbandoned(
           new Error(`${AGENT_SINK} request was refused before it started`, {
             cause: error,
@@ -527,7 +511,7 @@ export function agent(
         return;
       }
       const indexed = await runtime.editWithRetry((tx) => {
-        if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
+        tx.tx.scopeKeyIdentity = identity;
         const record = agentRunRecordCell(
           runtime,
           tx,
@@ -548,14 +532,14 @@ export function agent(
         // A record no index names is a request nothing will ever claim, so
         // the effect, which still owns the record until it is indexed, ends
         // it: the record reads `refused` and the result cell derives that.
-        console.error(
-          "[agent] Indexing the run record in the home space was rejected; " +
-            "the record settles as refused.",
-          { requestHash: hash, rejection: indexed.error.message },
+        reportRejection(
+          "Indexing the run record was rejected.",
+          hash,
+          indexed.error,
         );
         const refused = await runtime.editWithRetry((tx) => {
           markEffectCompletion(tx, effectKey);
-          if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
+          tx.tx.scopeKeyIdentity = identity;
           const record = agentRunRecordCell(
             runtime,
             tx,
@@ -571,9 +555,10 @@ export function agent(
           recordTx.key("errorCode").set("REFUSED");
         });
         if (refused.error) {
-          console.error(
-            "[agent] Settling the unindexed run record was rejected.",
-            { requestHash: hash, rejection: refused.error.message },
+          reportRejection(
+            "Ending the unindexed record was rejected.",
+            hash,
+            refused.error,
           );
         }
       }
@@ -591,7 +576,7 @@ export function agent(
       await runtime.idle();
       const { error: writeError } = await runtime.editWithRetry((tx) => {
         markEffectCompletion(tx, effectKey);
-        if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
+        tx.tx.scopeKeyIdentity = identity;
         // Read at write time: a newer request can stage while this one
         // waits for the scheduler, and from then on the cell is its.
         if (state.currentHash !== hash) return;
@@ -600,10 +585,10 @@ export function agent(
       });
       if (state.previousCallHash === hash) state.previousCallHash = undefined;
       if (writeError) {
-        console.error(
-          "[agent] Writing the request's refusal to its result cell was " +
-            "rejected.",
-          { requestHash: hash, cause: error.message, rejection: writeError },
+        reportRejection(
+          "Writing the request's refusal was rejected.",
+          hash,
+          writeError,
         );
       }
     };
@@ -615,14 +600,14 @@ export function agent(
       requestSnapshot,
       "agent-start",
       (committedTx) => {
-        const work = (async () => {
-          if (served) {
-            const settlement = waveSettlementOf(committedTx) ??
-              waveSettlementOf(tx);
-            if (settlement && (await settlement).error) return;
-          }
-          await createRecord();
-        })();
+        // A serving runtime's wave can still withdraw an accepted commit;
+        // a withdrawn request creates no record.
+        const settlement = served
+          ? waveSettlementOf(committedTx) ?? waveSettlementOf(tx)
+          : undefined;
+        const work = Promise.resolve(settlement).then((verdict) =>
+          verdict?.error ? undefined : createRecord()
+        );
         runtime.trackAsyncWork(work, parentCell);
       },
       {
@@ -633,12 +618,10 @@ export function agent(
         // The release check refusing after commit is the other way a staged
         // request never goes out; without this the result stays pending.
         onReleaseRejected: () => {
-          runtime.trackAsyncWork(
-            settleAbandoned(
-              new Error(`${AGENT_SINK} request was not released after commit`),
-            ),
-            parentCell,
+          const error = new Error(
+            `${AGENT_SINK} request was not released after commit`,
           );
+          runtime.trackAsyncWork(settleAbandoned(error), parentCell);
         },
       },
     );

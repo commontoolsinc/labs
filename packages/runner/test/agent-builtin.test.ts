@@ -47,7 +47,12 @@ type AgentResult = {
   result?: { answer: string };
   error?: string;
   requestHash?: string;
-  run?: { state?: string; submittedAt?: string; tools?: string[] };
+  run?: {
+    state?: string;
+    submittedAt?: string;
+    tools?: string[];
+    task?: string;
+  };
   host?: string;
 };
 
@@ -349,6 +354,273 @@ describe("agent builtin", () => {
     expect(settled.error).not.toContain(PROMPT_INFLUENCE.source);
     expect(settled.pending).toBe(false);
     expect(result.withTx().key("run").get()).toBeUndefined();
+  });
+
+  it("settles idle, with no error, while the task is empty", async () => {
+    setUp();
+    const result = runAgentPattern("agent-no-request", { task: "" });
+    await tx.commit();
+
+    const settled = await waitForCellValue<AgentResult>(
+      runtime,
+      result,
+      (value) => value?.pending === false,
+    );
+    await runtime.settled();
+
+    expect(settled.error).toBeUndefined();
+    expect(settled.requestHash).toBeUndefined();
+    expect(result.withTx().key("run").get()).toBeUndefined();
+  });
+
+  it("refuses before staging when no requesting identity resolves a home space", async () => {
+    setUp();
+    // A serving runtime running a node with no demanding principal resolves
+    // no home space; the stub stands in for that posture.
+    runtime.homeSpacePrincipalFor = () => undefined;
+    const result = runAgentPattern("agent-no-identity");
+    await tx.commit();
+
+    const settled = await waitForCellValue<AgentResult>(
+      runtime,
+      result,
+      (value) => typeof value?.error === "string",
+    );
+    await runtime.settled();
+
+    expect(settled.error).toContain("INVALID_INPUT");
+    expect(settled.pending).toBe(false);
+    expect(result.withTx().key("run").get()).toBeUndefined();
+  });
+
+  describe("when a post-commit write is rejected", () => {
+    // `editWithRetry` reports a commit it could not land as `{ error }`. The
+    // effect makes its writes in a fixed order — the record, then the index
+    // entry — so rejecting the nth call rejects that write and no other.
+
+    /**
+     * Rejects each of the numbered writes, counting from the next one, and
+     * runs `before` ahead of the first of them.
+     */
+    const rejectEffectWrite = (
+      nths: number[],
+      before?: () => Promise<void>,
+    ) => {
+      const original = runtime.editWithRetry.bind(runtime);
+      let calls = 0;
+      runtime.editWithRetry = (async (fn, ...rest) => {
+        calls += 1;
+        if (calls === nths[0]) await before?.();
+        if (nths.includes(calls)) {
+          return { error: new Error("rejected for the test") };
+        }
+        return original(fn, ...rest);
+      }) as typeof runtime.editWithRetry;
+    };
+
+    it("settles the refusal when the record cannot be created", async () => {
+      setUp();
+      const result = runAgentPattern("agent-record-rejected");
+      rejectEffectWrite([1]);
+      await tx.commit();
+
+      const settled = await waitForCellValue<AgentResult>(
+        runtime,
+        result,
+        (value) => typeof value?.error === "string",
+      );
+      await runtime.settled();
+
+      expect(settled.error).toContain("was refused before it started");
+      expect(settled.pending).toBe(false);
+      expect(result.withTx().key("run").get()).toBeUndefined();
+    });
+
+    it("leaves the request pending when the refusal cannot be written either", async () => {
+      setUp();
+      const result = runAgentPattern("agent-record-and-refusal-rejected");
+      rejectEffectWrite([1, 2]);
+      await tx.commit();
+      await waitForCellValue<AgentResult>(
+        runtime,
+        result,
+        (value) => value?.requestHash !== undefined,
+      );
+      await runtime.settled();
+
+      // Nothing could be written, so the cell still holds what the staging
+      // transaction committed; the rejection is reported to the operator.
+      expect(result.withTx().key("pending").get()).toBe(true);
+      expect(result.withTx().key("error").get()).toBeUndefined();
+    });
+
+    it("leaves the record queued when neither the index nor the refusal can be written", async () => {
+      setUp();
+      const result = runAgentPattern("agent-index-and-refusal-rejected");
+      rejectEffectWrite([2, 3]);
+      await tx.commit();
+
+      const record = await waitForRecord(result);
+
+      expect(record.get()?.state).toBe("queued");
+      expect(result.withTx().key("pending").get()).toBe(true);
+    });
+
+    it("leaves the cell to a newer request staged while the refusal waited", async () => {
+      setUp();
+      const { pattern, agent } = commonfabric;
+      const testPattern = pattern<{ task: string }>(({ task }) =>
+        // deno-lint-ignore no-explicit-any
+        agent({ task, inputs: {}, resultSchema: RESULT_SCHEMA } as any)
+      );
+      const taskCell = runtime.getCell<string>(
+        space,
+        "agent-replaced-task",
+        { type: "string" },
+        tx,
+      );
+      taskCell.set("the first task");
+      const resultCell = runtime.getCell(
+        space,
+        "agent-replaced",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { task: taskCell },
+        resultCell,
+      ) as Cell<AgentResult>;
+      runtime.prepareTxForCommit(tx);
+      // The first request's record is rejected, and before its refusal is
+      // written the task changes, which stages a second request.
+      rejectEffectWrite([1], async () => {
+        const replace = runtime.edit();
+        taskCell.withTx(replace).set("the second task");
+        await replace.commit();
+      });
+      await tx.commit();
+
+      const record = await waitForRecord(result);
+
+      expect(record.get()?.task).toBe("the second task");
+      expect(result.withTx().key("error").get()).toBeUndefined();
+      expect(result.withTx().key("pending").get()).toBe(true);
+    });
+
+    it("ends the record as `refused` when it cannot be indexed", async () => {
+      setUp();
+      const result = runAgentPattern("agent-index-rejected");
+      rejectEffectWrite([2]);
+      await tx.commit();
+
+      const settled = await waitForCellValue<AgentResult>(
+        runtime,
+        result,
+        (value) => value?.pending === false,
+      );
+      await runtime.settled();
+
+      expect(settled.error).toBe("REFUSED");
+      expect(result.withTx().key("run").get()?.state).toBe("refused");
+      const entries = agentQueueIndexCell(runtime, space).key("entries").get();
+      expect(entries ?? []).toEqual([]);
+    });
+  });
+
+  it("settles a request whose release check refuses it after commit", async () => {
+    setUp();
+    // The release check compares the staged request with the policy input
+    // the committed transaction prepared. Handing the effect a committed
+    // transaction that prepared none is how this case reaches the refusal.
+    const edit = runtime.edit.bind(runtime);
+    runtime.edit = ((...args: Parameters<typeof runtime.edit>) => {
+      const editTx = edit(...args);
+      const enqueue = editTx.enqueuePostCommitEffect.bind(editTx);
+      editTx.enqueuePostCommitEffect = (effect) =>
+        enqueue(
+          effect.kind !== "agent-start" ? effect : {
+            ...effect,
+            flush: () =>
+              effect.flush(
+                {
+                  getCfcState: () => ({
+                    writePolicyInputs: [],
+                    prepare: {
+                      status: "prepared",
+                      input: { writePolicyInputs: [] },
+                    },
+                  }),
+                } as unknown as IExtendedStorageTransaction,
+              ),
+          },
+        );
+      return editTx;
+    }) as typeof runtime.edit;
+    const result = runAgentPattern("agent-release-refused");
+    await tx.commit();
+
+    const settled = await waitForCellValue<AgentResult>(
+      runtime,
+      result,
+      (value) => typeof value?.error === "string",
+    );
+    await runtime.settled();
+
+    expect(settled.error).toContain("was not released after commit");
+    expect(settled.pending).toBe(false);
+    expect(result.withTx().key("run").get()).toBeUndefined();
+  });
+
+  describe("when the effect finds its work already done", () => {
+    /** Runs `before` ahead of the numbered effect write, which then proceeds. */
+    const beforeEffectWrite = (nth: number, before: () => Promise<void>) => {
+      const original = runtime.editWithRetry.bind(runtime);
+      let calls = 0;
+      runtime.editWithRetry = (async (fn, ...rest) => {
+        calls += 1;
+        if (calls === nth) await before();
+        return await original(fn, ...rest);
+      }) as typeof runtime.editWithRetry;
+    };
+
+    it("writes nothing over a record that already exists", async () => {
+      setUp();
+      const result = runAgentPattern("agent-record-exists");
+      beforeEffectWrite(1, async () => {
+        const claim = runtime.edit();
+        const record = result.key("run").resolveAsCell();
+        record.withTx(claim).key("state").set("claimed");
+        await claim.commit();
+      });
+      await tx.commit();
+
+      const record = await waitForRecord(result);
+
+      // The effect's creation would have written the task and `queued`.
+      expect(record.get()?.state).toBe("claimed");
+      expect(record.getRaw()).not.toHaveProperty("task");
+    });
+
+    it("appends no second index entry for a record already listed", async () => {
+      setUp();
+      const result = runAgentPattern("agent-already-listed");
+      beforeEffectWrite(2, async () => {
+        const list = runtime.edit();
+        agentQueueIndexCell(runtime, space, list).key("entries").push({
+          run: result.key("run").resolveAsCell(),
+          host: "https://fabric.example",
+        });
+        await list.commit();
+      });
+      await tx.commit();
+
+      await waitForRecord(result);
+      const entries = agentQueueIndexCell(runtime, space).key("entries").get();
+
+      expect(entries?.length).toBe(1);
+    });
   });
 
   describe("the tool check against the registered runner", () => {
