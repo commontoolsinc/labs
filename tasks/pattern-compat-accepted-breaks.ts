@@ -158,6 +158,24 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     },
   },
   {
+    // The admin registry's declared default takes effect. Its type is
+    // `Stored | Default<Record<PropertyKey, never>>` reached through
+    // `PerSpace<…>`, and default recovery from the resolved union had taken
+    // the propertyless plain arm for a marker-less brand, so no baseline
+    // carries the `default: {}` the declaration always meant. A piece
+    // holding an unset registry reads `{}` where it read `undefined`.
+    pattern: "cfc-group-chat-demo/main.tsx",
+    baselines: [
+      "20260729T022742Z-piF14M8QDh5pSPw1",
+      "20260821T064855Z-7vNcdzNpQKWFJXVr",
+      "20260831T222745Z-kIL5Ew24PVUYtyxy",
+    ],
+    paths: ["argument.adminRegistry", "result.adminRegistry"],
+    reason:
+      "the admin registry's declared `Default<{}>` is honored where the recorded contracts carry no default",
+    record: "docs/history/admin-registry-default-honored-break.md",
+  },
+  {
     // The Join verb's event opens: `Record<PropertyKey, never>` compiled to
     // a closed empty object the runner's closed-world gate now enforces, so
     // the rendered button's serialized DOM event was refused and the roster
