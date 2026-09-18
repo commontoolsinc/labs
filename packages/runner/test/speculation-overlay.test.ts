@@ -23,12 +23,16 @@
 //   kind still enacts (optimistic navigation, speculation.md §2);
 // - the runner's own piece-start instantiation reads the DURABLE view,
 //   so its bookkeeping commit never names an overlay layer and the
-//   piece keeps the registration its event handlers hang off.
+//   piece keeps the registration its event handlers hang off, and a
+//   list coordinator's resume seed reads it for the same reason — with
+//   nothing to re-derive behind it, a refused seed strands the
+//   coordinator on a container that never arrives.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
+import { Logger, type LogMessage } from "@commonfabric/utils/logger";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
@@ -42,6 +46,7 @@ import type {
 import { ExecutorHost } from "../src/executor/host.ts";
 import { waitForSettled } from "../src/executor/watermark.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { seedResultContainerWhenPullSettles } from "../src/builtins/list-result-container-seed.ts";
 import {
   ArrivalLog,
   awaitAdmitted,
@@ -79,6 +84,21 @@ const serviceSigner = await Identity.fromPassphrase(
   "speculation overlay service",
 );
 const aliceSigner = await Identity.fromPassphrase("speculation overlay alice");
+
+/**
+ * A logger that keeps each report as the key it was filed under and the name
+ * of the error it carried, so a test that expects none names the refusal it
+ * got instead of only that something was reported.
+ */
+class RecordingLogger extends Logger {
+  readonly reports: Array<{ key: string; error?: string }> = [];
+
+  override warn(key: string, ...messages: LogMessage[]): void {
+    const carried = (messages[1] as { error?: { name?: string } } | undefined)
+      ?.error;
+    this.reports.push({ key, ...(carried ? { error: carried.name } : {}) });
+  }
+}
 
 describe("Phase 2 speculation overlay", () => {
   let server: MemoryV2Server.Server;
@@ -2648,6 +2668,160 @@ describe("Phase 2 speculation overlay", () => {
           isTerminalRejection(error as { name?: string })
         ),
       ).toEqual([]);
+    } finally {
+      verdict.resolve({ withdrawn: { message: "test complete" } });
+      await sealed.settled.catch(() => {});
+    }
+  });
+
+  it("a list coordinator's resume seed reads the durable view while a speculative echo stands on its container: the seed lands, and the coordinator's wait ends (speculation.md §6)", async () => {
+    // A list coordinator that resumes onto a result container with no
+    // value defers its reconcile and pulls the container, so that the
+    // value's arrival re-triggers it. A container that was never
+    // persisted has no value to arrive, and the seed is what ends that
+    // wait: it writes the empty array a fresh coordinator would have
+    // written, and that write is the arrival.
+    //
+    // The recovery the terminal refusal names — re-deriving once the
+    // authoritative value lands — is therefore unavailable to the seed,
+    // whose own write is that value. A refused seed leaves the
+    // coordinator waiting for a re-trigger nothing sends: it starts no
+    // element run, and the list it renders stays empty for the life of
+    // the piece.
+    //
+    // The window is the ordinary one. An echo stands on the container's
+    // document while the list it holds has never been persisted, so a
+    // seed reading through the overlay names a process-local layer in
+    // its commit basis and is refused terminally.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+    const engine = await server.engineForSpace(space);
+
+    const container = clientRuntime.getCell<unknown[]>(
+      space,
+      "resume-seed-speculative-container",
+      undefined,
+    );
+    await container.sync();
+    const containerId = container.getAsNormalizedFullLink().id;
+
+    const replica = clientManager.open(space).replica;
+    const verdict = Promise.withResolvers<SealedCommitVerdict>();
+    const sealed = replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: containerId,
+          type: "application/json",
+          value: { cfc: { version: 1, labelMap: { entries: [] } } },
+        }],
+      },
+      undefined,
+      verdict.promise,
+      { speculative: true },
+    );
+    // The layer carries no value for the container, so the overlay view
+    // agrees with the durable one that the list is still absent: what
+    // separates the two is the basis a commit reading either would name.
+    expect(container.get()).toBeUndefined();
+
+    const logger = new RecordingLogger("resume seed durable view");
+    try {
+      await seedResultContainerWhenPullSettles(
+        clientRuntime,
+        container,
+        () => true,
+        () => {},
+        Promise.resolve(),
+        logger,
+        "map/resume-seed/of:resume-seed-speculative-container",
+      );
+
+      // The seed reached the store, so the container now holds the
+      // value whose arrival re-triggers the deferred reconcile.
+      await clientRuntime.storageManager.synced();
+      expect(logger.reports).toEqual([]);
+      expect(Engine.read(engine, { id: containerId })?.value).toEqual([]);
+    } finally {
+      verdict.resolve({ withdrawn: { message: "test complete" } });
+      await sealed.settled.catch(() => {});
+    }
+  });
+
+  it("a list coordinator's resume seed still reads a DURABLE in-flight layer: a container another writer has already filled is left alone (speculation.md §6)", async () => {
+    // The reverse pin of the case above, and the one that catches the
+    // wrong implementation of it. The seed's precondition is that the
+    // container holds nothing, and a durable in-flight layer is a real
+    // value on its way to the store. Written as "read past every pending
+    // layer", the case above still passes and this one replaces a filled
+    // container with an empty list, which discards every element run
+    // that coordinator had.
+    //
+    // The two seals differ in exactly one token, the `speculative`
+    // option, so what the container ends up holding is what separates
+    // the two layer classes.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+
+    const engine = await server.engineForSpace(space);
+    const container = clientRuntime.getCell<unknown[]>(
+      space,
+      "resume-seed-durable-container",
+      undefined,
+    );
+    await container.sync();
+    const containerId = container.getAsNormalizedFullLink().id;
+
+    const replica = clientManager.open(space).replica;
+    const verdict = Promise.withResolvers<SealedCommitVerdict>();
+    const sealed = replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: containerId,
+          type: "application/json",
+          value: { value: ["already here"] },
+        }],
+      },
+      undefined,
+      verdict.promise,
+    );
+    expect(container.get()).toEqual(["already here"]);
+    const commitsBefore = Engine.selectCommitsSince(engine, { fromSeq: 0 })
+      .length;
+
+    const logger = new RecordingLogger("resume seed durable layer");
+    try {
+      await seedResultContainerWhenPullSettles(
+        clientRuntime,
+        container,
+        () => true,
+        () => {},
+        Promise.resolve(),
+        logger,
+        "map/resume-seed/of:resume-seed-durable-container",
+      );
+      // The seed stood down: it wrote nothing, so the store received no
+      // commit from it, and the container still holds the layer's value.
+      // The value alone would not say so, because the layer stands above
+      // whatever the seed wrote.
+      expect(Engine.selectCommitsSince(engine, { fromSeq: 0 }).length).toBe(
+        commitsBefore,
+      );
+      expect(container.get()).toEqual(["already here"]);
+      expect(logger.reports).toEqual([]);
     } finally {
       verdict.resolve({ withdrawn: { message: "test complete" } });
       await sealed.settled.catch(() => {});
