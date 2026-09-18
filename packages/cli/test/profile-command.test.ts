@@ -127,13 +127,13 @@ describe("cf profile command actions", () => {
 
     it("throws a `ValidationError` for a name carrying a control character, before connecting", async () => {
       const { deps, creates } = stubDeps();
-      await expect(
-        profileCreateAction(
-          { apiUrl: "http://127.0.0.1:8000", identity: "/unread.key" },
-          "Ada\u001bLovelace",
-          deps,
-        ),
-      ).rejects.toThrow(/control characters/);
+      const attempt = profileCreateAction(
+        { apiUrl: "http://127.0.0.1:8000", identity: "/unread.key" },
+        "Ada\u001bLovelace",
+        deps,
+      );
+      await expect(attempt).rejects.toThrow(ValidationError);
+      await expect(attempt).rejects.toThrow(/control characters/);
       expect(creates).toHaveLength(0);
     });
 
