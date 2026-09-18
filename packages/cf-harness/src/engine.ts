@@ -152,6 +152,7 @@ import type {
   HarnessInputCellSpec,
 } from "./contracts/input-cells.ts";
 import { mintInputCellHandles } from "./input-cells.ts";
+import type { HarnessAssignedPiece } from "./contracts/assigned-piece.ts";
 import { resolvePieceAddress } from "@commonfabric/piece";
 import type {
   HarnessPatternRef,
@@ -2610,6 +2611,16 @@ export class CfHarnessEngine {
       ...(researchTaskCfcLabel !== undefined ? { researchTaskCfcLabel } : {}),
       patternRefs: this.#runState.patternRefs ?? [],
       inputCells: this.#runState.inputCells ?? [],
+      recordAssignedPiece: (piece: HarnessAssignedPiece) => {
+        this.#runState = patchHarnessRunState(this.#runState, {
+          assignedPieces: [
+            ...(this.#runState.assignedPieces ?? []).filter((existing) =>
+              existing.ref !== piece.ref
+            ),
+            structuredClone(piece),
+          ],
+        }, this.#now());
+      },
       recordResearchRun: (run: HarnessResearchRunSummary) => {
         this.recordResearchRun(run);
       },
