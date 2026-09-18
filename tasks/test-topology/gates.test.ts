@@ -3,6 +3,7 @@ import { parse as parseJsonc } from "@std/jsonc";
 import { describe, it } from "@std/testing/bdd";
 import { DOC_DEMOS } from "../check-verb-session-sync.ts";
 import { TRIPWIRES } from "../check-tripwires.ts";
+import { namedBenchmarkFiles } from "../check-bench-workflow.ts";
 import { matchesPatternFilter } from "../pattern-files.ts";
 import {
   type Gate,
@@ -251,6 +252,10 @@ describe("the repository's gate suites", () => {
     for (const tripwire of TRIPWIRES) {
       found.push(reachedBy("check-tripwires", tripwire.testFile));
       declared.push(`check-tripwires runs for ${tripwire.testFile}`);
+    }
+    for (const file of namedBenchmarkFiles()) {
+      found.push(reachedBy("check-bench-workflow", file));
+      declared.push(`check-bench-workflow runs for ${file}`);
     }
     expect(found).toEqual(declared);
   });
