@@ -49,6 +49,7 @@ describe("fabric-primitives/index", () => {
       const tags = codecClasses().map((cls) =>
         cls[JSON_CODEC].recognizedTypeTag
       );
+      expect(new Set(tags).size).toBe(tags.length);
       expect(new Set(tags)).toEqual(
         new Set<string | undefined>(
           Object.values(FABRIC_PRIMITIVE_CODEC_TYPE_TAGS),

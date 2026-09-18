@@ -91,7 +91,8 @@ const CODEC_CLASSES = Object.freeze(
 /**
  * One of the concrete primitive classes, as a class rather than an instance
  * of one. `schema-types-agreement.ts` stops compiling when the names these
- * report as `.schemaType` and `FabricPrimitiveSchemaType` stop agreeing.
+ * report as `.schemaType` and `FabricPrimitiveSchemaType` stop agreeing, or
+ * when two of these report the same name.
  */
 export type FabricPrimitiveClass = typeof CODEC_CLASSES[number];
 

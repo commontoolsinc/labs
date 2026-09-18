@@ -964,6 +964,7 @@ that form the `FabricPrimitive` arm of `FabricValue`.
 // Shown for illustration only.
 // file: packages/data-model/src/interface.ts
 
+import type { FabricPrimitiveSchemaType } from "./api.ts";
 import { FABRIC_INSTANCE_PLUS_BRAND, FABRIC_PRIMITIVE_BRAND } from "./api.ts";
 
 /**
