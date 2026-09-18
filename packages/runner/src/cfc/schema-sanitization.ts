@@ -7,7 +7,6 @@ import {
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import {
   deepFrozenCloneAndInternSchema,
-  schemaTypeOfFabricPrimitive,
 } from "@commonfabric/data-model-schema";
 import { isSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import {
@@ -636,7 +635,7 @@ const typeMatches = (
     default:
       if (isFabricPrimitiveSchemaType(type)) {
         return value instanceof FabricPrimitive &&
-          schemaTypeOfFabricPrimitive(value) === type;
+          value.schemaType === type;
       }
       return !rejectUnknownType;
   }

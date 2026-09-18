@@ -998,6 +998,15 @@ export abstract class FabricPrimitive extends BaseFabricSpecialObject {
   constructor() {
     super();
   }
+
+  /**
+   * Name of this instance's class in the schema `type` vocabulary: the `type`
+   * a schema names to admit this value by its class. Every instance of a class
+   * reports the same name, which need not be the name of the class. Each
+   * concrete class supplies its own, and the getter reads no instance state,
+   * so that it returns the same name when read off the class's `prototype`.
+   */
+  abstract get schemaType(): FabricPrimitiveSchemaType;
 }
 ```
 
@@ -1007,6 +1016,12 @@ and `#tag: string` for content IDs, `#bytes: Uint8Array` for byte sequences).
 The base class holds no state — its purpose is to provide a single
 `instanceof FabricPrimitive` check where code needs to identify these types
 uniformly (e.g., the conversion functions' freeze-bypass logic).
+
+Its one abstract member, `.schemaType`, is how a value reports the name its
+class has in the schema dialect's `type` vocabulary
+(`docs/specs/json_schema.md`). Every concrete class supplies it as a constant.
+The per-class listings in the sections that follow leave it out, as they leave
+out each class's codecs.
 
 #### 1.4.7 `FabricEpochNsec`
 

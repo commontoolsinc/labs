@@ -22,8 +22,6 @@ export {
   isInternedSchema,
 } from "./schema-intern.ts";
 
-export { schemaTypeOfFabricPrimitive } from "./schemaTypeOfFabricPrimitive.ts";
-
 export {
   DEFAULT_SELECTOR,
   internPathSelector,

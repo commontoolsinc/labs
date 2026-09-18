@@ -53,6 +53,11 @@ export class FabricEpochDay extends BaseFabricPrimitive
     return FABRIC_PRIMITIVE_VALUE_TAGS.FabricEpochDay;
   }
 
+  /** @inheritDoc */
+  get schemaType(): "FabricEpochDay" {
+    return "FabricEpochDay";
+  }
+
   /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */
   get value(): bigint {
     return this.#value;

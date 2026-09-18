@@ -56,6 +56,11 @@ export class FabricEpochNsec extends BaseFabricPrimitive
     return FABRIC_PRIMITIVE_VALUE_TAGS.FabricEpochNsec;
   }
 
+  /** @inheritDoc */
+  get schemaType(): "FabricEpochNsec" {
+    return "FabricEpochNsec";
+  }
+
   /**
    * Nanoseconds from the POSIX Epoch. A negative value represents a pre-epoch
    * timestamp.

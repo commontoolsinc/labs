@@ -199,6 +199,11 @@ export class FabricUnavailable extends BaseFabricPrimitive
     return FABRIC_PRIMITIVE_VALUE_TAGS.FabricUnavailable;
   }
 
+  /** @inheritDoc */
+  get schemaType(): "FabricUnavailable" {
+    return "FabricUnavailable";
+  }
+
   /** Why the data is unavailable. */
   get reason(): UnavailableReason {
     return this.#reason;

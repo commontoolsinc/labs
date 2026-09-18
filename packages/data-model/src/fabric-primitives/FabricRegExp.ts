@@ -126,6 +126,11 @@ export class FabricRegExp extends BaseFabricPrimitive
     return FABRIC_PRIMITIVE_VALUE_TAGS.FabricRegExp;
   }
 
+  /** @inheritDoc */
+  get schemaType(): "FabricRegExp" {
+    return "FabricRegExp";
+  }
+
   /** The pattern source text. */
   get source(): string {
     return this.#source;

@@ -85,12 +85,20 @@ class TaggedProbe extends BaseFabricPrimitive {
   get [VALUE_TAG](): FabricPrimitiveValueTag {
     return FABRIC_PRIMITIVE_VALUE_TAGS.FabricHash;
   }
+
+  get schemaType(): never {
+    throw new Error("Unimplemented.");
+  }
 }
 
 /** A `BaseFabricPrimitive` subclass reporting a tag the vocabulary lacks. */
 class MistaggedProbe extends BaseFabricPrimitive {
   get [VALUE_TAG](): FabricPrimitiveValueTag {
     return "Bogus" as FabricPrimitiveValueTag;
+  }
+
+  get schemaType(): never {
+    throw new Error("Unimplemented.");
   }
 }
 
@@ -102,6 +110,10 @@ class MistaggedProbe extends BaseFabricPrimitive {
 class NonPrimitiveTagProbe extends BaseFabricPrimitive {
   get [VALUE_TAG](): FabricPrimitiveValueTag {
     return VALUE_TAGS.JsError as FabricPrimitiveValueTag;
+  }
+
+  get schemaType(): never {
+    throw new Error("Unimplemented.");
   }
 }
 
@@ -116,6 +128,10 @@ class InheritedNameProbe extends BaseFabricPrimitive {
   get [VALUE_TAG](): FabricPrimitiveValueTag {
     return "toString" as FabricPrimitiveValueTag;
   }
+
+  get schemaType(): never {
+    throw new Error("Unimplemented.");
+  }
 }
 
 /** A `BaseFabricPrimitive` subclass reporting something that is no string. */
@@ -123,13 +139,21 @@ class UntaggedProbe extends BaseFabricPrimitive {
   get [VALUE_TAG](): FabricPrimitiveValueTag {
     return undefined as unknown as FabricPrimitiveValueTag;
   }
+
+  get schemaType(): never {
+    throw new Error("Unimplemented.");
+  }
 }
 
 /**
  * A direct `FabricPrimitive` subclass, bypassing `BaseFabricPrimitive`, which
  * no production class does.
  */
-class RoguePrimitive extends FabricPrimitive {}
+class RoguePrimitive extends FabricPrimitive {
+  get schemaType(): never {
+    throw new Error("Unimplemented.");
+  }
+}
 
 /** The `PlusType` of the plus cases: a class the vocabulary does not name. */
 class PlusProbe {}

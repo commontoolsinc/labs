@@ -72,6 +72,11 @@ export class FabricBytes extends BaseFabricPrimitive implements ApiFabricBytes {
     return FABRIC_PRIMITIVE_VALUE_TAGS.FabricBytes;
   }
 
+  /** @inheritDoc */
+  get schemaType(): "FabricBytes" {
+    return "FabricBytes";
+  }
+
   /** The number of bytes. */
   get length(): number {
     return this.#bytes.length;

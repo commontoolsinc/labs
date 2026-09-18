@@ -98,6 +98,11 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     return FABRIC_PRIMITIVE_VALUE_TAGS.FabricHash;
   }
 
+  /** @inheritDoc */
+  get schemaType(): "FabricHash" {
+    return "FabricHash";
+  }
+
   /** Defensive copy of the raw hash bytes. */
   get bytes(): Uint8Array {
     return new Uint8Array(this.#hash);

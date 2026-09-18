@@ -157,6 +157,11 @@ export class FabricKeyPair extends BaseFabricPrimitive {
     return FABRIC_PRIMITIVE_VALUE_TAGS.FabricKeyPair;
   }
 
+  /** @inheritDoc */
+  get schemaType(): "FabricKeyPair" {
+    return "FabricKeyPair";
+  }
+
   /** The algorithm name (e.g. `"Ed25519"`). */
   get algorithm(): string {
     return this.#algorithm;
