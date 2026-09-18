@@ -33,6 +33,7 @@ import {
   type SessionOpenAuthMetadata,
   type SessionOpenChallenge,
   type SessionOpenResult,
+  type SessionReadCeiling,
   type SessionRevokedMessage,
   type SessionSync,
   type SqliteDbRef,
@@ -101,6 +102,12 @@ export type MountOptions = {
    * principals only. Carried on reopen so a route replacement keeps
    * the binding. */
   actingAs?: "space-owner";
+
+  /** The session's declared read ceiling (the wire
+   * `SessionDescriptor.readCeiling`): set by a client runtime under server
+   * execution that is configured with one, and carried on every reopen so
+   * a resumed session is bounded exactly as the first open was. */
+  readCeiling?: SessionReadCeiling;
 };
 
 export type SessionOpenAuth = {
