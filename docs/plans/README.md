@@ -10,6 +10,15 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Agent requests from a pattern, and the queue that runs them](agent-requests-and-work-queue.md)
+  proposes an `agent` builtin in the effectful class beside `llm` — inputs
+  passed as handles, an observation ceiling defaulting to the requester's own
+  view, a structured result labeled with the run's join and carrying links
+  back to its sources — with read-only Loom retrieval tools in `cf-harness`,
+  and a per-user queue of items stored as cells in the requesting space and
+  indexed from the home space, each ending in a receipt that reuses the
+  harness's usage and cost evidence. Carries the owner decisions and the
+  assumptions the first take rests on.
 - [Discovering Loom resources with wish](loom-resource-discovery.md) proposes
   publishing existing database and companion-cell references once per Loom
   environment, with a staged person-inbox migration and compiled integration
