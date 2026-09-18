@@ -6,6 +6,7 @@ import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import { createChildCellTransaction } from "../src/storage/extended-storage-transaction.ts";
@@ -49,7 +50,7 @@ const makeRuntime = () => {
  */
 const seedLabeledDoc = (tx: IExtendedStorageTransaction, id: URI): void => {
   writeSeedEnvelopeDoc(tx, space);
-  tx.writeOrThrow({ space, scope: "space", id, path: [] }, {
+  seedStoredEnvelope(tx, { space, scope: "space", id, path: [] }, {
     value: { note: "labeled" },
     cfc: {
       version: 1,

@@ -11,17 +11,18 @@
  * fires, then confirms the cell settled with no result. The wait resolves on the
  * `pending` the early return writes, the same signal a real response would clear.
  *
- * A prompt can also become empty after having been set, which a pattern that
- * gates its prompt on an input does every time that input is cleared. Two
- * further tests cover that transition. Entering the no-request state has to
- * abandon a request already in flight, so a response that lands afterwards
- * writes nothing; and it has to forget the request it remembered, so the same
- * prompt coming back is sent again rather than suppressed as a duplicate.
+ * A prompt — or `llm`'s message list — can also become empty after having
+ * been set, which a pattern that gates its prompt on an input does every time
+ * that input is cleared. Further tests cover that transition. Entering the
+ * no-request state has to abandon a request already in flight, so a response
+ * that lands afterwards writes nothing; and it has to forget the request it
+ * remembered, so the same prompt coming back is sent again rather than
+ * suppressed as a duplicate.
  *
  * Both of those apply to a request the builtin can abandon. A queued request
  * runs to completion under the queue's own lifecycle, so it is remembered
  * across the empty prompt and the same prompt returning does not enqueue a
- * second copy. A fourth test holds that line.
+ * second copy. The queued cases hold that line.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -42,6 +43,9 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+/** One message of the list `llm` is handed. */
+type Msg = { role: "user" | "assistant" | "tool"; content: string };
 
 describe("LLM builtin no-request paths", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -290,6 +294,129 @@ describe("LLM builtin no-request paths", () => {
 
       // The same prompt is a new request, not a duplicate of one whose result
       // was thrown away.
+      expect(calls).toBe(2);
+      expect(result.key("result").get()).toBe("a summary of cats");
+    } finally {
+      LLMClient.prototype.sendRequest = original;
+    }
+  });
+
+  it("`llm` leaves no trace of a request a cleared message list abandoned", async () => {
+    const original = LLMClient.prototype.sendRequest;
+    const arrived = Promise.withResolvers<void>();
+    const held = new Promise<void>((resolve) => {
+      releaseHeldRequest = resolve;
+    });
+    LLMClient.prototype.sendRequest = async () => {
+      arrived.resolve();
+      await held;
+      return { content: "a summary of cats" } as never;
+    };
+    try {
+      const testPattern = builder.pattern<{ messages: Msg[] }>(
+        ({ messages }) => builder.llm({ messages }),
+      );
+      const messagesCell = runtime.getCell<Msg[]>(
+        space,
+        "cleared-messages-input",
+        undefined,
+        tx,
+      );
+      messagesCell.set([{ role: "user", content: "summarize cats" }]);
+      const resultCell = runtime.getCell(
+        space,
+        "cleared-messages",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { messages: messagesCell },
+        resultCell,
+      );
+      // A reader holds the node live across the message list's transitions; the
+      // runtime's disposal ends the subscription.
+      result.sink(() => {});
+      tx.commit();
+      tx = runtime.edit();
+
+      await arrived.promise;
+
+      const clear = runtime.edit();
+      messagesCell.withTx(clear).set([]);
+      clear.commit();
+      await runtime.idle();
+
+      releaseHeldRequest!();
+      await runtime.settled();
+
+      // `requestHash` is the field that tells an applied response from an
+      // abandoned one, for the reason the `generateText` case above gives.
+      expect(result.key("requestHash").get()).toBeUndefined();
+      expect(result.key("result").get()).toBeUndefined();
+      expect(result.key("partial").get()).toBeUndefined();
+      expect(result.key("pending").get()).toBe(false);
+    } finally {
+      LLMClient.prototype.sendRequest = original;
+    }
+  });
+
+  it("`llm` sends again when a cleared message list comes back", async () => {
+    const original = LLMClient.prototype.sendRequest;
+    let calls = 0;
+    LLMClient.prototype.sendRequest = () => {
+      calls++;
+      return Promise.resolve({ content: "a summary of cats" } as never);
+    };
+    try {
+      const testPattern = builder.pattern<{ messages: Msg[] }>(
+        ({ messages }) => builder.llm({ messages }),
+      );
+      const messagesCell = runtime.getCell<Msg[]>(
+        space,
+        "restored-messages-input",
+        undefined,
+        tx,
+      );
+      messagesCell.set([{ role: "user", content: "summarize cats" }]);
+      const resultCell = runtime.getCell(
+        space,
+        "restored-messages",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { messages: messagesCell },
+        resultCell,
+      );
+      // A reader holds the node live across the message list's transitions; the
+      // runtime's disposal ends the subscription.
+      result.sink(() => {});
+      tx.commit();
+      tx = runtime.edit();
+
+      await waitForLlmSettled(runtime, result);
+      expect(calls).toBe(1);
+      expect(result.key("result").get()).toBe("a summary of cats");
+
+      const clear = runtime.edit();
+      messagesCell.withTx(clear).set([]);
+      clear.commit();
+      await runtime.settled();
+      expect(result.key("result").get()).toBeUndefined();
+
+      const restore = runtime.edit();
+      messagesCell.withTx(restore).set([
+        { role: "user", content: "summarize cats" },
+      ]);
+      restore.commit();
+      await runtime.settled();
+
+      // The same messages are a new request, not a duplicate of one whose
+      // result was thrown away.
       expect(calls).toBe(2);
       expect(result.key("result").get()).toBe("a summary of cats");
     } finally {

@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model-schema";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -83,7 +84,7 @@ const seedConfidential = async (
   const seed = runtime.edit();
   const target = runtime.getCell(signer.did(), id, undefined, seed);
   const targetId = target.getAsNormalizedFullLink().id;
-  seed.writeOrThrow({
+  seedStoredEnvelope(seed, {
     space: signer.did(),
     scope: "space",
     id: targetId,
@@ -446,7 +447,7 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
         );
         const srcId = srcCell.getAsNormalizedFullLink().id;
         writeSeedEnvelopeDoc(seed, signer.did());
-        seed.writeOrThrow({
+        seedStoredEnvelope(seed, {
           space: signer.did(),
           scope: "space",
           id: srcId,

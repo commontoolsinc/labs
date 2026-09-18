@@ -22,6 +22,7 @@ import {
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "../../../runner/test/cfc-seed-envelope.ts";
 
@@ -156,7 +157,7 @@ describe("render-audience", () => {
             undefined,
             seed,
           );
-          seed.writeOrThrow({
+          seedStoredEnvelope(seed, {
             space: session.space,
             id: cell.getAsNormalizedFullLink().id!,
             type: "application/json",

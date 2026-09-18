@@ -44,9 +44,8 @@ export type {
 /**
  * A handle's name is the whole of what a model is told the token stands for,
  * so it is held to a shape that cannot smuggle structure: word characters and
- * hyphens. Shared with the connector grants the console launcher resolves,
- * whose names are read from a loom instance's records rather than authored by
- * an operator and are held to the same rule for the same reason.
+ * hyphens. Connector connection identities have their own name grammar in
+ * `well-known-grants.ts`.
  */
 export const HANDLE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 

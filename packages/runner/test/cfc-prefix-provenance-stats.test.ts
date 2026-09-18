@@ -7,6 +7,7 @@ import type { URI } from "@commonfabric/memory/interface";
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import { parsePointer } from "../../memory/v2/path.ts";
@@ -79,7 +80,7 @@ const seedLabeledDoc = async (
   const cell = runtime.getCell(signer.did(), id, undefined, seed);
   const docId = cell.getAsNormalizedFullLink().id as URI;
   writeSeedEnvelopeDoc(seed, signer.did());
-  seed.writeOrThrow({
+  seedStoredEnvelope(seed, {
     space: signer.did(),
     id: docId,
     type: "application/json",

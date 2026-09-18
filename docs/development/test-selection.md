@@ -79,6 +79,20 @@ hours old, so it names units the tree has since dropped and misses units
 the tree has since gained; the reconciliation of the two is what gets
 packed, and it is what is counted here.
 
+It also names any suite a lane cannot fill around: one whose overhead,
+per-unit charge and capability setup together pass a lane's budget before
+it runs anything. Such a suite takes a whole lane for each identity it
+can still place, and one where no lane can hold any of them places none
+at all. That line is what answers "why is a lane holding one test?" and
+"why did none of this suite run?".
+
+A suite that holds nothing has its identities left out of the list
+beneath it, since the suite's line says what naming each of them would.
+A suite that holds some of them keeps the rest in that list, because what
+puts one of those past the bound is its own time on top of the charge and
+the charge alone does not say which. The count beside the suite is of
+what it can still run, so the two never disagree about the same test.
+
 `--verify` compares the identity set the topology produces against what a
 recorded run actually executed, in both directions: identities a run
 produced that no suite claims, and units the topology enumerates that the
@@ -245,7 +259,7 @@ rather than a setting to fix.
 | `FILL_VALUE_SHARE` | 0.6 | share of the run's budget | chosen | Up when expensive high-value tests are crowded out by cheap ones; down when a lane spends its budget on a few slow tests and runs little else. The three shares sum to one. |
 | `FILL_DENSITY_SHARE` | 0.25 | share of the run's budget | chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
 | `FILL_EXPLORATION_SHARE` | 0.15 | share of the run's budget | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
-| `MIN_CORRECTION_SPAN_SECONDS` | 23 | seconds | derived | A tenth of a lane's budget, measured as the widest gap between two batches' charges. Down when a suite's real slope is going unbelieved for too long; up when a slope fitted inside a narrow range is being read far outside it. |
+| `MIN_CORRECTION_SPAN_SECONDS` | 23 | seconds | derived | A tenth of a lane's budget, measured as the widest gap between the time two batches' own tests took. Down when a suite's real slope is going unbelieved for too long; up when a slope fitted inside a narrow range is being read far outside it. |
 | `MIN_CORRECTION_SAMPLES` | 3 | batches | chosen | Up when a slope is being fitted from too little and swinging about; down when a suite's real slope takes too long to be believed. |
 | `MIN_UNIT_SPAN_UNITS` | 50 | units | chosen | The widest gap between two batches' sizes a suite needs before what one more unit costs it is believed. Down when a suite's real per-unit cost is going unbelieved for too long; up when a slope fitted across a few units is being read across hundreds. |
 | `FLAKE_EXCLUSION_RATE` | 0.005 | share of runs | chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |
@@ -324,8 +338,18 @@ in one place.
 
 A lane looks past such a body to the newest one behind it, over
 `MANIFESTS_LOOKED_BACK` manifests, because a lane with no manifest runs
-the whole corpus. The dashboard reports a fault instead and shows nothing,
-which costs a person a figure rather than costing a run its selection.
+the whole corpus. The dashboard looks past one the same way and over the
+same stretch, so that the figure a person reads is taken from the manifest
+a pull request would obey rather than from an older one the dashboard
+alone settled for.
+
+A reader that passed over every body it looked at says so, naming the
+newest shape it passed over. Reporting nothing there would say the store
+holds no manifest, which is the one thing a reader that far behind its
+publisher must not say. Anything else unreadable ends the search where it
+stands: a corrupt object is not a reader waiting to be deployed, and
+answering from an older body would report a figure while passing silently
+over a store that is damaged.
 
 **Nothing gates on it.** When the publisher fails, the previous manifest is
 still the newest one and consumers keep using it. A manifest going stale
@@ -607,11 +631,24 @@ keeps them in its rolling aggregate over `COST_WINDOW_DAYS`, the same
 window it measures a test's cost over, and fits `setupCost`,
 `suiteOverhead`, `correction` and `unitOverhead` from them for the next
 manifest. A lane writes one record per capability it opens and three per
-batch — what it spent, what it was packed to spend, and how many units it
-opened — and it is the second and third that make a fit possible. Neither
-can be recovered from the records the batch produced: those say what the
-tests took rather than what the packer expected them to take, and a unit
-whose tests all recorded nothing leaves no trace of having been opened.
+batch — what the batch spent, what its own tests took between them, and
+how many units it opened — and it is the second and third that make a fit
+possible. Neither can be recovered from the records the batch produced: a
+reader of a report cannot tell which of its records came from which
+batch, and a unit whose tests all recorded nothing leaves no trace of
+having been opened.
+
+What its tests took, rather than what the packer expected them to take.
+The two differ by however wrong the manifest's costs are, and a unit
+nothing has measured is charged a stand-in that can be out by a factor of
+ten. Fitting against the expectation would put that error in the
+intercept, which is charged once to every lane that holds the suite and
+kept for the whole window, long after the costs behind it were measured.
+A suite whose intercept passes `LANE_BOUND_SECONDS` can place no
+discretionary identity at all, so an expectation that was briefly wrong
+would hold a whole suite out of every pull request for a week. What a
+suite's cost model should carry is the machine's error, which is what the
+tests' own time leaves.
 
 The publisher leaves all of those out rather than putting an entry in the
 manifest that no lane could run. The next record that says enough puts the
@@ -746,8 +783,8 @@ object the publisher folds for the first time gives up its lane
 measurements, so one run puts a figure in the model and seven days of
 runs fill the window `COST_WINDOW_DAYS` names. Until then the model is
 not merely thin. Every figure in it is a maximum — the worst capability
-opening seen, and the largest gap between what a batch was charged and
-what it took — so a model fitted over part of a window reads lower than
+opening seen, and the largest gap between what a batch's own tests took
+and what the batch took — so a model fitted over part of a window reads lower than
 one fitted over all of it, and reading low is the direction that
 overruns a lane. A suite with nothing at all in the window is charged
 nothing.

@@ -381,12 +381,18 @@ A set of edges carries them, and
   each wave cycle as it ends — committed or not, thrown or not. The loop's
   counters move inside a cycle and are visible only as numbers afterwards, so
   `awaitEach(log, predicate)` re-reads them when one has run.
+- `SpaceServerOptions.onRootEnsure` reports each space-root ensure attempt's
+  outcome. A skip writes nothing at all, and a deadline failure reports
+  `failed` while the ensure it gave up on runs on detached and may write later,
+  so at the moment either is reported there is no commit for a test to wait
+  on.
 - `SpaceServerOptions.onEventDrainPass` reports the end of a drain pass, which
   is where `events.processed` moves. A pass ends before the settle that
   follows it, so a wait on that counter at the cycle boundary instead sleeps
   through a whole flush deadline for nothing.
 - `ExecutorHostOptions.onActivationSettled` reports each activation attempt as
-  it ends. Activation is driven from the admission feed and from session opens
+  it ends, and how it ended. `onSpaceParked` beside it reports each tenure's
+  park. Activation is driven from the admission feed and from session opens
   and finishes on neither of their edges.
 - `SpaceServerOptions.onDrainInFlightSkip` and `onEventDeferred`, forwarded the
   same way, report the two things that happen INSIDE a drain pass rather than
@@ -397,7 +403,9 @@ A set of edges carries them, and
 - A client's own `storageManager.subscribe`, through
   `awaitReplica(manager, predicate)`, for what a push to that client reports and
   the watermark does not: a retirement, which is the loop's own bookkeeping, or
-  a re-issue after a requeue.
+  a re-issue after a requeue. Its predicate may read the engine rather than the
+  client: the server commits before it fans out, so any such state is already
+  true when the delivery that wakes this wait arrives.
 
 `settleServing(engine, runtime, space)` is the barrier the assertions stand
 behind: it flushes the runtime, reads the highest AUTHORED seq in the space, and
@@ -427,9 +435,14 @@ test's own code writes is better still: report the write from the code that
 makes it, and the wait names the write rather than the view of it.
 
 Each of the SpaceServer and ExecutorHost options above is marked `DIAGNOSTIC
-(tests)` where it is declared. They exist because the state they report has no
-other boundary, and adding one is the alternative the note above prefers to
-keeping a poll.
+(tests)` where it is declared. So are two more that serve one suite each:
+`EventAppendQueue.onPacedHold`, which reports each pacing hold as it begins, and
+`SpaceOutbox.onEffectRetired`, which reports each in-flight effect as the outbox
+retires it, once the counts that drop with it have moved. `ExecutorHostOptions`
+forwards the second, the way it forwards `onWaveCycle`, so a suite that does not
+build the outbox can still reach it. They exist because the state they report
+has no other boundary, and adding one is the alternative the note above prefers
+to keeping a poll.
 
 These waits carry a stuck-condition net, which the waits in the sections above
 do not. A live SpaceServer renews its lease on a repeating timer, so a process
@@ -1066,12 +1079,13 @@ runtime settle INSIDE that predicate, between two readings of the
 suspension, so a frame still held or a run still owed un-suspends the loop
 before the second rather than landing after the wait returns — the fan-out
 on both sides of the runtime settle, since that settle can itself run work
-that commits. Hold
-`#hasWork()` true and that wait fails by name while the three-second interval
+that commits. The reading is taken again on each wave cycle the serving loop
+reports, because the loop arms its input wait synchronously after one. Hold
+`#hasWork()` true and that wait never returns while the three-second interval
 it replaced passes — the storm's cadence is the flush deadline, which on that
 host is longer than any interval a test can afford. The control is the same
 reading taken while the edits are being covered, which must go false; a
-reading pinned true would satisfy the wait on its first poll. What stays
+reading pinned true would satisfy the wait on its first attempt. What stays
 out of reach there is a wake from work neither settle covers, and the
 comment says which shape that leaves rather than implying the assertion
 covers everything.
@@ -1159,19 +1173,24 @@ boundary the test can await without adding one to production code.
   `nested-counter.test.ts` resolve a `defer()` from an existing
   `resultCell.sink(...)`.
 - `packages/runner/test/support/wait-until.ts` — the `waitUntil` the runner's
-  server-execution suites share. Twenty-seven test files still wait through it
-  on state the serving loop produces as a side effect of its own cycles: an
-  engine row, a watermark advance, a stats counter. It stays for as long as
-  they do, and no longer: the boundaries those waits want are the ones listed
-  under "Suites that drive a live memory server" above, and the events-down
-  suite waits on them rather than on this. Its deadline is a stuck-condition
-  backstop of the same kind, for the same reason — the serving loop holds the
-  event loop open through its lease-renew interval, so the fail-fast described
-  above never fires. What the poll interval under it costs is a latency floor
-  on every one of those waits, and that is what converting a file removes. The
-  failure names elapsed milliseconds and the poll count, which is what
-  separates a predicate that never came true from one the test never got to
-  evaluate.
+  server-execution suites once shared. Six test files still wait through it on
+  state the serving loop produces as a side effect of its own cycles: an engine
+  row, a watermark advance, a stats counter. They are
+  `executor-compile-and-run`, `engine-read-through`, `executor-lifecycle-verbs`,
+  `executor-fetch-program-instances`, `executor-fetch-instances` and
+  `executor-sqlite-instances`. What they poll is the same material the
+  boundaries listed under "Suites that drive a live memory server" above
+  report — an engine row, a watermark seq, a stats counter, whether a tenure is
+  active, a cell read after `sync()` — so each is a conversion left undone
+  rather than a poll this section endorses, and the helper stays for as long as
+  they do and no longer. Its deadline is a
+  stuck-condition backstop of the same kind, for the same reason — the serving
+  loop holds the event loop open through its lease-renew interval, so the
+  fail-fast described above never fires. What the poll interval under it costs
+  is a latency floor on every one of those waits, and that is what converting a
+  file removes. The failure names elapsed milliseconds and the poll count, which
+  is what separates a predicate that never came true from one the test never got
+  to evaluate.
 
   One class of that state does have a reporter after all: an engine row the
   serving loop writes that also fans out to a flag-ON client — the served

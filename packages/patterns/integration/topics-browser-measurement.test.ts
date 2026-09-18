@@ -129,6 +129,31 @@ describe("topics-browser-measurement", () => {
     });
   }
 
+  /**
+   * Delivers one `scheduler.run.complete` marker to the page's telemetry,
+   * carrying a read sample so the samplers count it as a run, and `src` when
+   * one is given. Omitting `src` is the shape a run of something other than an
+   * authored module takes.
+   */
+  async function deliverRun(src: string | undefined): Promise<void> {
+    await session.page.evaluate((src: string | undefined) => {
+      const client = (globalThis as typeof globalThis & {
+        commonfabric?: { rt?: unknown };
+      }).commonfabric!.rt! as { emit: (e: string, m: unknown) => void };
+      client.emit("telemetry", {
+        type: "scheduler.run.complete",
+        ...(src === undefined ? {} : { src }),
+        durationMs: 1,
+        reads: {
+          proxyAccesses: 1,
+          linkResolutions: 0,
+          distinctDocuments: 1,
+          registeredDependencies: 1,
+        },
+      });
+    }, { args: [src] });
+  }
+
   /** Index of the seeded topic `pieceId` addresses. */
   function topicIndexOf(pieceId: string): number {
     return fixture.topics.findIndex((topic) =>
@@ -230,7 +255,115 @@ describe("topics-browser-measurement", () => {
           operation: () => Promise.resolve(),
         }),
       ).rejects.toThrow(
-        "undemanded: the measured operation produced no runs with a read sample",
+        "undemanded: the measured operation completed no run carrying an " +
+          "authored source location; declare `mayRunNothing` for an " +
+          "operation that may",
+      );
+      expect(await samplesLeftInPage()).toEqual([]);
+    });
+
+    it("returns a sample recording a zero for an operation declared to run nothing", async () => {
+      // The declaration permits a zero; it does not assert one. The case below
+      // checks the other half, that an operation which does run is attributed
+      // as usual under the same declaration.
+
+      const sample = await measureTopicsReads(session.page, {
+        label: "undemanded, declared",
+        program,
+        operation: () => Promise.resolve(),
+        mayRunNothing: true,
+      });
+
+      checkSample(sample, () => {
+        expect(sample.mayRunNothing).toBe(true);
+        expect(sample.lifts.map((lift) => lift.runs)).toEqual([0, 0, 0, 0]);
+        expect(sample.remaining.runs).toBe(0);
+        expect(sample.graph.after.nodes).toBeGreaterThan(0);
+      });
+    });
+
+    it("attributes the runs of an operation that does run, under the same declaration", async () => {
+      // A browser of its own, in which no other case has opened a topic: an
+      // operation already run in a page can run nothing, which is the very
+      // thing the declaration permits, and this case is about the other
+      // half — that declaring it does not suppress runs it does complete.
+
+      const fresh = await openFreshSession();
+      try {
+        const sample = await measureTopicsReads(fresh.page, {
+          label: "open topic and return, declared",
+          program,
+          operation: async () => {
+            await openTopmostTopic(fresh);
+            await returnToBoard(fresh);
+          },
+          mayRunNothing: true,
+        });
+
+        checkSample(sample, () => {
+          expect(sample.mayRunNothing).toBe(true);
+          expect(
+            sample.lifts.filter((lift) => lift.runs === 0).map((lift) =>
+              lift.name
+            ),
+          ).toEqual([]);
+        });
+      } finally {
+        await fresh.close();
+      }
+    });
+
+    it("throws for a run whose source location cannot be parsed, even under the declaration", async () => {
+      // The declaration waives a run that carries no source location. It must
+      // not waive one that carries a location this helper cannot read: that is
+      // a measurement it cannot place, and zeroing it would be the
+      // misattribution the position checks exist to catch.
+      //
+      // The run is made unreadable at its source: a marker is delivered to the
+      // page's telemetry carrying a `src` that `parseSrc()` rejects, alongside
+      // the read sample that makes it a counted run.
+
+      await expect(
+        measureTopicsReads(session.page, {
+          label: "unparseable",
+          program,
+          operation: () => deliverRun("not a source location"),
+          mayRunNothing: true,
+        }),
+      ).rejects.toThrow("carried no source location to attribute them by");
+      expect(await samplesLeftInPage()).toEqual([]);
+    });
+
+    it("counts a run carrying no source location apart, and waives it only when declared", async () => {
+      // The branch that tells the two apart, driven with the one marker shape
+      // that reaches it. Without this the counter is only ever read as zero:
+      // the declared-to-run-nothing case completes no run at all, and the
+      // unparseable case above delivers a `src`.
+
+      const sample = await measureTopicsReads(session.page, {
+        label: "no source location",
+        program,
+        operation: () => deliverRun(undefined),
+        mayRunNothing: true,
+      });
+
+      checkSample(sample, () => {
+        expect(sample.runsWithoutSource).toBe(1);
+        // Counted apart for reporting, and still part of `remaining`, which
+        // is every run the sample could not place against a named lift.
+        expect(sample.remaining.runs).toBe(1);
+        expect(sample.lifts.map((lift) => lift.runs)).toEqual([0, 0, 0, 0]);
+      });
+
+      // The same run undeclared: the waiver is what admits it.
+      await expect(
+        measureTopicsReads(session.page, {
+          label: "no source location, undeclared",
+          program,
+          operation: () => deliverRun(undefined),
+        }),
+      ).rejects.toThrow(
+        "completed no run carrying an authored source location",
       );
       expect(await samplesLeftInPage()).toEqual([]);
     });

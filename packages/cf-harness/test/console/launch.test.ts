@@ -180,11 +180,19 @@ describe("launch", () => {
       ).toEqual([
         {
           label: "Connector Inventory",
-          value: "1 granted; 3 not granted",
+          value: "2 granted; 2 not granted",
           state: "ok",
         },
-        { label: "gmail-work", value: "granted as email", state: "ok" },
-        { label: "gmail-other", value: "not granted", state: "degraded" },
+        {
+          label: "gmail-work",
+          value: "granted: gmail-work (email)",
+          state: "ok",
+        },
+        {
+          label: "gmail-other",
+          value: "granted: gmail-other (email)",
+          state: "ok",
+        },
         { label: "no-class", value: "not granted", state: "degraded" },
         { label: "broken", value: "not granted", state: "unknown" },
       ]);
@@ -196,10 +204,8 @@ describe("launch", () => {
       ).toBe(true);
       expect(plan.health.connectors[2]).toMatchObject({
         source: "loom connector receipt + pieces.json (duplicate)",
-        reason:
-          "its declared CFC class `email` is already the grant connection `gmail-work` was named by",
-        remedy:
-          "Select the intended connection for the email class in Loom, then restart the console.",
+        state: "ok",
+        value: "granted: gmail-other (email)",
       });
       expect(plan.health.connectors[3]).toMatchObject({
         reason: "its declared table contract carries no CFC class",
@@ -625,7 +631,8 @@ describe("launch", () => {
 
       expect(JSON.parse(plan.environment.CF_HARNESS_CONNECTOR_GRANTS!))
         .toEqual([{
-          name: "email",
+          name: "gmail-work",
+          cfcClass: "email",
           ref: MAIL_REF,
           source: {
             connection: "gmail-work",
@@ -636,7 +643,9 @@ describe("launch", () => {
 
     it("reports each grant against the two records that decided it", () => {
       const plan = resolveConsoleLaunchPlan(WITH_CONNECTOR, OPTIONS);
-      const grant = plan.resolved.find((entry) => entry.name === "grant email");
+      const grant = plan.resolved.find((entry) =>
+        entry.name === "grant gmail-work (email)"
+      );
 
       expect(grant?.value).toBe(MAIL_REF);
       expect(grant?.source).toContain(HANDLES_JSON_PATH);

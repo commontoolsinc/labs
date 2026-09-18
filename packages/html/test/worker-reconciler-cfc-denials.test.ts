@@ -6,6 +6,7 @@ import { resetCfcDenialAnnouncements } from "@commonfabric/runner/cfc";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "../../runner/test/cfc-seed-envelope.ts";
 import type { WorkerVNode } from "../src/worker/types.ts";
@@ -56,7 +57,7 @@ Deno.test("worker reconciler CFC denials", async (t) => {
       undefined,
       tx,
     );
-    tx.writeOrThrow({
+    seedStoredEnvelope(tx, {
       space: signer.did(),
       id: secret.getAsNormalizedFullLink().id!,
       type: "application/json",

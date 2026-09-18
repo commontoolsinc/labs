@@ -7,11 +7,8 @@
 
 /**
  * The fixed well-known references, whose model-facing descriptions the
- * harness authors in full. A connector grant's name is not one of these:
- * it is read from the records of the loom instance the console was launched
- * against, which is why it is held to the same name shape an operator's
- * `--input-cell` name is (`HANDLE_NAME_PATTERN` in `src/input-cells.ts`)
- * before it reaches a model.
+ * harness authors in full. Connector names come from the Loom instance's
+ * connection identities and are validated before reaching model context.
  */
 export type HarnessWellKnownGrantName = "piece-registry";
 
@@ -30,6 +27,9 @@ export interface HarnessConnectorGrantSource {
   /** The loom connection the handle belongs to. */
   connection: string;
 
+  /** An additional store on a connection, when Loom declares one. */
+  companionKey?: string;
+
   /** The loom piece that carries the handle. */
   piece: string;
 }
@@ -37,11 +37,13 @@ export interface HarnessConnectorGrantSource {
 /** One connector handle to grant, as the console was configured with it. */
 export interface HarnessConnectorGrantSpec {
   /**
-   * The model-facing name: the one CFC class loom's own table contract
-   * declares for the handle's columns, so a session is told `email` for a
-   * mail database and `finance` for a bank one.
+   * Connection identity: `connection` or `connection#companionKey`.
+   * Legacy records without `cfcClass` use their class as the name.
    */
   name: string;
+
+  /** Declared column classification; legacy records carry it in `name`. */
+  cfcClass?: string;
 
   /** The reference to mint, as an LLM-friendly link string. */
   ref: string;
@@ -72,8 +74,11 @@ export type HarnessWellKnownGrant =
     source?: undefined;
   }
   | {
-    /** The declared CFC class loom named this handle's columns with. */
+    /** The connector grant's connection identity, or legacy class name. */
     name: string;
+
+    /** Declared column classification; legacy records carry it in `name`. */
+    cfcClass?: string;
 
     /** The token the model holds. */
     token: string;

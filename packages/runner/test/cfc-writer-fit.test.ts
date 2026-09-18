@@ -7,6 +7,7 @@ import { streamEntriesDocId } from "@commonfabric/memory/v2";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -150,7 +151,7 @@ const seedSecretSource = async (
   );
   const sourceId = parseLink(sourceCell.getAsLink()).id!;
   writeSeedEnvelopeDoc(seed, signer.did());
-  seed.writeOrThrow({
+  seedStoredEnvelope(seed, {
     space: signer.did(),
     scope: "space",
     id: sourceId,
@@ -989,7 +990,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         );
         const foreignId = foreignCell.getAsNormalizedFullLink().id;
         writeSeedEnvelopeDoc(seed, foreign);
-        seed.writeOrThrow({
+        seedStoredEnvelope(seed, {
           space: foreign,
           scope: "space",
           id: foreignId,
@@ -1289,7 +1290,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         );
         const foreignId = foreignCell.getAsNormalizedFullLink().id;
         writeSeedEnvelopeDoc(seed, foreign);
-        seed.writeOrThrow({
+        seedStoredEnvelope(seed, {
           space: foreign,
           scope: "space",
           id: foreignId,
@@ -1638,7 +1639,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         );
         const foreignId = foreignCell.getAsNormalizedFullLink().id;
         writeSeedEnvelopeDoc(seed, foreign);
-        seed.writeOrThrow({
+        seedStoredEnvelope(seed, {
           space: foreign,
           scope: "space",
           id: foreignId,
@@ -1889,7 +1890,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           .getAsNormalizedFullLink().id;
         const seed = runtime.edit();
         writeSeedEnvelopeDoc(seed, signer.did());
-        seed.writeOrThrow({
+        seedStoredEnvelope(seed, {
           space: signer.did(),
           scope: "space",
           id: targetId,
