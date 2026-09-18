@@ -126,25 +126,13 @@
         ],
         "type": "object"
       },
-      "ProfileInboxPointer": {
+      "ProfileInbox": {
         "properties": {
-          "host": {
-            "description": "The memory host the space lives on (an http(s) origin).",
-            "type": "string"
-          },
           "piece": {
-            "description": "Id of the inbox piece in that space, in the bare spelling the CLI takes\n(`baedreia…`, no `of:` prefix). Absent on a pointer written without one,\nwhich names the space alone.",
-            "type": "string"
-          },
-          "space": {
-            "description": "The inbox space's DID.",
-            "type": "string"
+            "$ref": "#/$defs/ShareInboxPiece",
+            "description": "The owner's share inbox piece."
           }
         },
-        "required": [
-          "space",
-          "host"
-        ],
         "type": "object"
       },
       "SetProfileAvatarEvent": {
@@ -203,15 +191,9 @@
       },
       "SetProfileInboxEvent": {
         "properties": {
-          "host": {
-            "type": "string"
-          },
-          "piece": {
-            "description": "Inbox piece id; a leading `of:` is dropped, and blank means none.",
-            "type": "string"
-          },
-          "space": {
-            "type": "string"
+          "inbox": {
+            "$ref": "#/$defs/ShareInboxPiece",
+            "description": "The inbox piece to point at; absent clears the pointer."
           }
         },
         "type": "object"
@@ -239,6 +221,14 @@
               }
             },
             "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "ShareInboxPiece": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -293,7 +283,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+              "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
               "path": [
                 "setAvatar"
               ]
@@ -319,7 +309,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+              "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
               "path": [
                 "setBio"
               ]
@@ -344,7 +334,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+              "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
               "path": [
                 "mutateElements"
               ]
@@ -373,7 +363,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+              "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
               "path": [
                 "mutateExternalProfileLinks"
               ]
@@ -386,7 +376,7 @@
         "type": "array"
       },
       "inbox": {
-        "$ref": "#/$defs/ProfileInboxPointer",
+        "$ref": "#/$defs/ProfileInbox",
         "ifc": {
           "addIntegrity": [
             {
@@ -402,7 +392,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+              "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
               "path": [
                 "setInbox"
               ]
@@ -433,7 +423,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+              "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
               "path": [
                 "setName"
               ]
@@ -513,7 +503,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+              "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
               "path": [
                 "publishVerifiedIdentities"
               ]

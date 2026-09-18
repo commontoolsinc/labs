@@ -2,17 +2,25 @@
 status: historical
 created: 2026-09-18
 archived: 2026-09-18
-reason: "Record of the deliberate contract break taken when the profile's share inbox pointer gained the inbox piece's id, which the pattern-update gate reads as an unaccepted alternative beneath profile-picker's union-typed defaultProfile argument."
+reason: "Record of the deliberate contract break taken when the profile's share inbox pointer dropped its space and host fields for a link to the inbox piece, including the ruling under which the required home pattern takes the break."
 ---
 
-# Profile: the share inbox pointer names the inbox piece
+# Profile: the share inbox pointer is a link to the inbox piece
 
-`system/profile-home.tsx`'s `ProfileInboxPointer` gained an optional `piece`:
-the id of the inbox piece inside the inbox space, in the bare spelling the CLI
-takes (`baedreia…`, without the `of:` prefix a link carries). `setInbox`
-accepts the same field, trims it, drops a leading `of:`, stores it beside
-`space` and `host` when the pointer is whole, and leaves a pointer written
-without one as `{ space, host }`.
+`system/profile-home.tsx`'s `inbox` was `{ space, host }`: the DID of the
+owner's share inbox space and the http(s) origin of the memory host it lives
+on. It is `{ piece? }` now, where `piece` is a link to the owner's share inbox
+piece — the `link@1` sigil naming the piece and its space — and `setInbox`
+takes that link alone, or nothing to clear the pointer. The memory host is not
+part of it: the inbox lives on the host the profile pointing at it lives on,
+so a reader uses the host it read the profile from.
+
+The link sits under a key rather than being the stored value itself. Measured
+in the pattern test: a write to a cell whose document root holds a link goes
+through the link into the piece it names, so a pointer stored bare was set
+once and then every re-point wrote the next link into the first piece, and a
+clear erased it. Under a key, a new link re-binds the slot and an omitted key
+removes it, and both pieces the test pointed at keep their content.
 
 ## Why the pointer names the piece
 
@@ -24,44 +32,49 @@ of the space seems right — such a link is effectively redundant since it
 contains the space and the host (if it differs from where the link is written
 to)".
 
-## Why a plain id beside the space, and not a link
-
-The shape Berni named is a link to the inbox piece — space and piece id
-together, the `link@1` sigil the profile already mints for its elements —
-plus the host. Measured against the gate, that shape fails `system/home.tsx`
-at `result.defaultProfile` on all five of its recorded baselines (`a schema
-alternative accepted previously is not accepted by the candidate`), and on
-`system/profile-home.tsx` at `result.inbox.space: existing result field was
-removed`. Home is a required pattern: `pattern-break-registry-guards.ts`
-refuses any accepted break naming one, because the auto-updating roots would
-strand every space's root the moment the break merged, and that guard is not
-one this change relaxes.
-
-Berni allowed an incompatible update for the profile itself, 2026-09-18: "you
-can make that an allowed incompatible pattern update if you need to since
-other than Gideon no one will have that version of setInbox." The allowance
-does not reach home, so the id rides beside the two existing fields as an
-optional string, which home and the profile carry compatibly. The link shape
-waits on a gate decision about the home contract; the type's doc comment and
-the shared-profile spec both record it as the shape this one stands in for.
+An additive shape was measured first — the object kept, with an optional
+`piece` id beside it — and Berni ruled it out the same day: "`inbox: {
+space, host, piece? }` is an antipattern, let's not go there. Drop the current
+inbox format and just send a link to the piece and that's it. It's backwards
+incompatible, so apply the overrides."
 
 ## What the proof reports
 
-`system/profile-picker.tsx` takes a stored profile as `defaultProfile:
-BackwardsCompatibleProfile | undefined`. Against both of its recorded
-baselines the proof reports `argument.defaultProfile: a schema alternative
-accepted previously is not accepted by the candidate`. The argument is a
-union, and `schemaConjunctionSubsetIssue` proves the alternatives of a union
-with `allowEvolutionPolicy: false`, so the evolution policy that admits a new
-optional property at home's `result.defaultProfile` does not apply beneath
-the picker's alternative, and the same addition is refused there.
+The recorded object requires `space` and `host`, so no candidate without them
+applies over any baseline that records it. The proof names one path per
+pattern:
+
+- `system/profile-home.tsx`, `result.inbox.host` — the first of the two
+  fields that left — on both baselines that record the pointer.
+- `system/profile-picker.tsx`, `argument.defaultProfile`, on both — the same
+  path its earlier entry forgives for the pointer's arrival, so the two
+  entries keep their baseline pairs disjoint.
+- `system/home.tsx`, `result.defaultProfile`, on all five of its baselines
+  that record the pointer.
+
+`system/profile-create.tsx`, which takes the stored profiles as an argument,
+reports the change compatible, and carries no entry.
+
+## Why the required home pattern takes the break
+
+Home is a required pattern: it updates every space's root aggressively and
+unconditionally, and `pattern-break-registry-guards.ts` refuses an accepted
+break naming one, because such a break strands every root the moment it
+merges. Berni ruled the break in anyway, 2026-09-18: "you can make that an
+allowed incompatible pattern update if you need to since other than Gideon no
+one will have that version of setInbox." The guard gained a
+`requiredPatternOverride` field for exactly this: an entry naming a required
+pattern passes when it carries the ruling — who made it, when, and what it
+said — and is refused when it does not. Home's entry carries this
+ruling.
 
 ## What the break costs
 
-Nothing deployed holds state under the old shape that the new one refuses: a
-stored profile without `piece` validates against the candidate (the property
-is optional), and a picker reading such a profile sees `piece` as absent. The
-entry in `tasks/pattern-compat-accepted-breaks.ts` forgives exactly the two
-`(system/profile-picker.tsx, baseline)` pairs on the one path the proof
-names, disjoint from the pairs the pointer's first break forgave, and the
-contract recorded once this ships is a new baseline no entry names.
+A stored profile holding the old `{ space, host }` object still validates
+against the candidate — the new object requires nothing, and the old fields
+are extra properties — and reads as a pointer with no `piece`, so what the
+break costs is the in-place update of a piece holding the old contract, not
+the profile's readability. One install held a pointer of the old shape when
+this shipped. A sender that read `inbox.space` and `inbox.host` reads
+`inbox.piece` now — a link — and takes the space from it, and the host from
+wherever it read the profile.

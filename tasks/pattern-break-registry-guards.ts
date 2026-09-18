@@ -6,13 +6,15 @@
  * forgiving anything fails the run that would have used it. These guards are
  * about what an entry IS, before any finding exists:
  *
- * - **No entry may name a required pattern.** The home and default-app roots
- *   are the patterns that update aggressively and unconditionally — a break
- *   accepted there is a decision to strand every space's root the moment it
- *   merges, which is never the intent of a per-pattern exemption. The
- *   required set comes in from the caller, derived from the runtime's own
- *   constants (the same seam `pattern-vintage` already uses), so this guard
- *   cannot drift from what actually auto-updates.
+ * - **No entry may name a required pattern without a ruling.** The home and
+ *   default-app roots are the patterns that update aggressively and
+ *   unconditionally — a break accepted there is a decision to strand every
+ *   space's root the moment it merges, which is never the intent of a
+ *   per-pattern exemption. An entry that carries a `requiredPatternOverride`
+ *   names the person who made that decision, and passes; one that does not
+ *   is refused. The required set comes in from the caller, derived from the
+ *   runtime's own constants (the same seam `pattern-vintage` already uses),
+ *   so this guard cannot drift from what actually auto-updates.
  * - **Every entry names its decision record, and the record exists.** The
  *   registry line is the declaration; the record under `docs/history/` is the
  *   deliberation — what broke, why it was accepted, and what happens to the
@@ -30,7 +32,10 @@
 
 import { fromFileUrl } from "@std/path/from-file-url";
 
-import { ACCEPTED_CONTRACT_BREAKS } from "./pattern-compat-accepted-breaks.ts";
+import {
+  ACCEPTED_CONTRACT_BREAKS,
+  type RequiredPatternOverride,
+} from "./pattern-compat-accepted-breaks.ts";
 import {
   ACCEPTED_STATE_DROPS,
   patternKeyClaims,
@@ -61,6 +66,9 @@ export interface BreakRegistryEntry {
 
   /** Repo-relative path of the entry's decision record. */
   record: string;
+
+  /** The ruling under which the entry may name a required pattern, if any. */
+  requiredPatternOverride?: RequiredPatternOverride;
 }
 
 export interface BreakRegistryFinding {
@@ -150,6 +158,7 @@ export function collectBreakRegistryEntries(): BreakRegistryEntry[] {
       registry: "pattern-compat-accepted-breaks",
       pattern: entry.pattern,
       record: entry.record,
+      requiredPatternOverride: entry.requiredPatternOverride,
     })),
     ...ACCEPTED_STATE_DROPS.map((entry) => ({
       registry: "pattern-vintage-accepted-drops",
@@ -166,12 +175,16 @@ export function guardBreakRegistryEntries(options: {
 }): BreakRegistryFinding[] {
   const findings: BreakRegistryFinding[] = [];
   for (const entry of options.entries) {
-    if (namesRequiredPattern(options.requiredPatternKeys, entry.pattern)) {
+    if (
+      namesRequiredPattern(options.requiredPatternKeys, entry.pattern) &&
+      entry.requiredPatternOverride === undefined
+    ) {
       findings.push({
         registry: entry.registry,
         pattern: entry.pattern,
-        detail: `names a required pattern — the auto-updating roots are ` +
-          `never eligible for an accepted break`,
+        detail: `names a required pattern — an auto-updating root takes an ` +
+          `accepted break only under a \`requiredPatternOverride\` naming ` +
+          `who ruled it`,
       });
     }
     const pathProblem = recordPathProblem(entry.record);

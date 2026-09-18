@@ -1,5 +1,11 @@
 {
   "argumentSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+  },
+  "pattern": "system/home.tsx",
+  "resultSchema": {
     "$defs": {
       "BackwardsCompatibleProfile": {
         "properties": {
@@ -43,7 +49,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
                   "path": [
                     "setAvatar"
                   ]
@@ -69,7 +75,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
                   "path": [
                     "setBio"
                   ]
@@ -94,7 +100,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
                   "path": [
                     "mutateElements"
                   ]
@@ -123,7 +129,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
                   "path": [
                     "mutateExternalProfileLinks"
                   ]
@@ -136,7 +142,7 @@
             "type": "array"
           },
           "inbox": {
-            "$ref": "#/$defs/ProfileInboxPointer",
+            "$ref": "#/$defs/ProfileInbox",
             "ifc": {
               "addIntegrity": [
                 {
@@ -152,7 +158,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
                   "path": [
                     "setInbox"
                   ]
@@ -183,7 +189,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
                   "path": [
                     "setName"
                   ]
@@ -263,7 +269,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "gslcY4VLiO22LMjanvEd60YGJRLYn0peG0q2a2MEPOI",
+                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
                   "path": [
                     "publishVerifiedIdentities"
                   ]
@@ -271,10 +277,7 @@
               }
             },
             "items": {
-              "$ref": "#/$defs/VerifiedExternalIdentity",
-              "asCell": [
-                "cell"
-              ]
+              "$ref": "#/$defs/VerifiedExternalIdentity"
             },
             "type": "array"
           }
@@ -295,6 +298,33 @@
           "isEditing",
           "initialNameApplied"
         ],
+        "type": "object"
+      },
+      "CreateProfileEvent": {
+        "properties": {
+          "detail": {
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "target": {
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
         "type": "object"
       },
       "ExternalIdentityAssertion": {
@@ -329,6 +359,85 @@
           "label",
           "url"
         ],
+        "type": "object"
+      },
+      "Favorite": {
+        "properties": {
+          "cell": {
+            "properties": {
+              "$NAME": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "spaceName": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "userTags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "cell",
+          "tags",
+          "userTags"
+        ],
+        "type": "object"
+      },
+      "JournalEntry": {
+        "properties": {
+          "eventType": {
+            "type": "string"
+          },
+          "narrative": {
+            "type": "string"
+          },
+          "narrativePending": {
+            "type": "boolean"
+          },
+          "snapshot": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "schemaTag": {
+                "type": "string"
+              },
+              "valueExcerpt": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "space": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "unknown"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "timestamp": {
+            "type": "number"
+          }
+        },
         "type": "object"
       },
       "MutateExternalProfileLinksEvent": {
@@ -376,10 +485,7 @@
         "properties": {
           "identities": {
             "items": {
-              "$ref": "#/$defs/VerifiedExternalIdentity",
-              "asCell": [
-                "cell"
-              ]
+              "$ref": "#/$defs/VerifiedExternalIdentity"
             },
             "type": "array"
           }
@@ -416,25 +522,13 @@
         ],
         "type": "object"
       },
-      "ProfileInboxPointer": {
+      "ProfileInbox": {
         "properties": {
-          "host": {
-            "description": "The memory host the space lives on (an http(s) origin).",
-            "type": "string"
-          },
           "piece": {
-            "description": "Id of the inbox piece in that space, in the bare spelling the CLI takes\n(`baedreia…`, no `of:` prefix). Absent on a pointer written without one,\nwhich names the space alone.",
-            "type": "string"
-          },
-          "space": {
-            "description": "The inbox space's DID.",
-            "type": "string"
+            "$ref": "#/$defs/ShareInboxPiece",
+            "description": "The owner's share inbox piece."
           }
         },
-        "required": [
-          "space",
-          "host"
-        ],
         "type": "object"
       },
       "SetProfileAvatarEvent": {
@@ -493,15 +587,9 @@
       },
       "SetProfileInboxEvent": {
         "properties": {
-          "host": {
-            "type": "string"
-          },
-          "piece": {
-            "description": "Inbox piece id; a leading `of:` is dropped, and blank means none.",
-            "type": "string"
-          },
-          "space": {
-            "type": "string"
+          "inbox": {
+            "$ref": "#/$defs/ShareInboxPiece",
+            "description": "The inbox piece to point at; absent clears the pointer."
           }
         },
         "type": "object"
@@ -533,6 +621,125 @@
         },
         "type": "object"
       },
+      "ShareInboxPiece": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SpaceEntry": {
+        "properties": {
+          "did": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "TrustedDefaultProfile": {
+        "anyOf": [
+          {
+            "type": "undefined"
+          },
+          {
+            "$ref": "#/$defs/BackwardsCompatibleProfile"
+          }
+        ]
+      },
+      "TrustedProfileLink": {
+        "$ref": "#/$defs/BackwardsCompatibleProfile",
+        "ifc": {
+          "addIntegrity": [
+            "profile-link"
+          ],
+          "uiContract": {
+            "action": "CreateProfile",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "ProfileCreateSurface"
+            ],
+            "trustedPattern": "ProfileCreateSurface"
+          },
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/system/profile-create.tsx",
+              "moduleIdentity": "k2wwgP8km8KeZ49hbTrcLU1_DVTL4FEkz-U66bGnFKg",
+              "path": [
+                "submitProfileCreation"
+              ]
+            }
+          }
+        }
+      },
+      "TrustedProfileList": {
+        "ifc": {
+          "addIntegrity": [
+            "profile-link"
+          ],
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/system/profile-create.tsx",
+              "moduleIdentity": "k2wwgP8km8KeZ49hbTrcLU1_DVTL4FEkz-U66bGnFKg",
+              "path": [
+                "submitProfileCreation"
+              ]
+            }
+          }
+        },
+        "items": {
+          "$ref": "#/$defs/TrustedProfileLink"
+        },
+        "type": "array"
+      },
+      "TrustedProfileMru": {
+        "ifc": {
+          "addIntegrity": [
+            "profile-link"
+          ],
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/system/profile-create.tsx",
+              "moduleIdentity": "k2wwgP8km8KeZ49hbTrcLU1_DVTL4FEkz-U66bGnFKg",
+              "path": [
+                "setMruProfile"
+              ]
+            }
+          }
+        },
+        "items": {
+          "$ref": "#/$defs/BackwardsCompatibleProfile",
+          "ifc": {
+            "addIntegrity": [
+              "profile-link"
+            ],
+            "uiContract": {
+              "action": "SetMruProfile",
+              "helper": "UiAction",
+              "requiredEventIntegrity": [
+                "ProfilePickerSurface"
+              ],
+              "trustedPattern": "ProfilePickerSurface"
+            },
+            "writeAuthorizedBy": {
+              "__ctWriterIdentityOf": {
+                "file": "/packages/patterns/system/profile-create.tsx",
+                "moduleIdentity": "k2wwgP8km8KeZ49hbTrcLU1_DVTL4FEkz-U66bGnFKg",
+                "path": [
+                  "setMruProfile"
+                ]
+              }
+            }
+          }
+        },
+        "type": "array"
+      },
       "VerifiedExternalIdentity": {
         "$ref": "#/$defs/ExternalIdentityAssertion",
         "ifc": {
@@ -543,31 +750,61 @@
       }
     },
     "properties": {
-      "defaultName": {
+      "$NAME": {
         "type": "string"
       },
-      "inputId": {
-        "type": "string"
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
       },
-      "profiles": {
+      "addFavorite": {
         "asCell": [
-          "cell"
+          "stream"
         ],
-        "items": {
-          "$ref": "#/$defs/BackwardsCompatibleProfile"
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "piece": {
+            "properties": {
+              "$NAME": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "spaceName": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
         },
-        "type": "array"
-      }
-    },
-    "required": [
-      "profiles"
-    ],
-    "type": "object"
-  },
-  "pattern": "system/profile-create.tsx",
-  "resultSchema": {
-    "$defs": {
-      "CreateProfileEvent": {
+        "required": [
+          "piece"
+        ],
+        "type": "object"
+      },
+      "addJournalEntry": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "entry": {
+            "$ref": "#/$defs/JournalEntry"
+          }
+        },
+        "required": [
+          "entry"
+        ],
+        "type": "object"
+      },
+      "addSpace": {
+        "asCell": [
+          "stream"
+        ],
         "properties": {
           "detail": {
             "properties": {
@@ -575,42 +812,98 @@
                 "type": "string"
               }
             },
-            "type": "object"
-          },
-          "key": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "target": {
-            "properties": {
-              "value": {
-                "type": "string"
-              }
-            },
+            "required": [
+              "message"
+            ],
             "type": "object"
           }
         },
+        "required": [
+          "detail"
+        ],
         "type": "object"
-      }
-    },
-    "properties": {
-      "$NAME": {
-        "type": "string"
-      },
-      "$UI": {
-        "$ref": "https://commonfabric.org/schemas/vnode.json"
       },
       "createProfile": {
         "$ref": "#/$defs/CreateProfileEvent",
         "asCell": [
           "stream"
         ]
+      },
+      "defaultAppUrl": {
+        "default": "",
+        "type": "string"
+      },
+      "defaultProfile": {
+        "$ref": "#/$defs/TrustedDefaultProfile"
+      },
+      "favorites": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/Favorite"
+        },
+        "type": "array"
+      },
+      "journal": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/JournalEntry"
+        },
+        "type": "array"
+      },
+      "mru": {
+        "$ref": "#/$defs/TrustedProfileMru",
+        "default": []
+      },
+      "profiles": {
+        "$ref": "#/$defs/TrustedProfileList",
+        "default": []
+      },
+      "removeFavorite": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "piece": {
+            "type": "unknown"
+          }
+        },
+        "type": "object"
+      },
+      "removeSpace": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "spaces": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/SpaceEntry"
+        },
+        "type": "array"
       }
     },
     "required": [
+      "favorites",
+      "journal",
+      "spaces",
+      "defaultAppUrl",
+      "profiles",
+      "mru",
       "createProfile",
+      "addFavorite",
+      "removeFavorite",
+      "addJournalEntry",
+      "addSpace",
+      "removeSpace",
       "$NAME",
       "$UI"
     ],

@@ -40,6 +40,38 @@ describe("pattern-break-registry-guards", () => {
     expect(findings[0].detail).toContain("required pattern");
   });
 
+  it("returns no required-pattern finding for an entry carrying a `requiredPatternOverride`", () => {
+    expect(guardBreakRegistryEntries({
+      entries: [entry({
+        pattern: "system/home.tsx",
+        requiredPatternOverride: {
+          rulingBy: "Someone",
+          on: "2026-09-18",
+          reason: "no deployed root holds the old shape",
+        },
+      })],
+      requiredPatternKeys: new Set(["system/home.tsx"]),
+      recordExists: () => true,
+    })).toEqual([]);
+  });
+
+  it("still returns the record finding for an overridden entry whose record does not exist", () => {
+    const findings = guardBreakRegistryEntries({
+      entries: [entry({
+        pattern: "system/home.tsx",
+        requiredPatternOverride: {
+          rulingBy: "Someone",
+          on: "2026-09-18",
+          reason: "no deployed root holds the old shape",
+        },
+      })],
+      requiredPatternKeys: new Set(["system/home.tsx"]),
+      recordExists: () => false,
+    });
+    expect(findings.length).toBe(1);
+    expect(findings[0].detail).toContain("does not exist");
+  });
+
   it("returns a finding for a record outside docs/history/", () => {
     const findings = guardBreakRegistryEntries({
       entries: [entry({ record: "docs/plans/some-plan.md" })],
@@ -142,8 +174,9 @@ describe("pattern-break-registry-guards", () => {
     // existence probe, so a bare `length === 3` passes on the wrong three.
     expect(findings.map((finding) => `${finding.pattern} ${finding.detail}`))
       .toEqual([
-        "system/home.tsx names a required pattern — the auto-updating roots " +
-        "are never eligible for an accepted break",
+        "system/home.tsx names a required pattern — an auto-updating root " +
+        "takes an accepted break only under a `requiredPatternOverride` " +
+        "naming who ruled it",
         'system/home.tsx record "docs/history/topics-crossref-identity-break' +
         '.md" does not exist — an accepted break carries its deliberation, ' +
         "not just its declaration",
