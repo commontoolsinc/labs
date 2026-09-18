@@ -1,4 +1,3 @@
-import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/api";
 import {
   CFC_ATOM_TYPE,
@@ -30,6 +29,7 @@ import {
   refuseFabricInstance,
   valueEqual,
 } from "@commonfabric/data-model";
+import { isFabricPrimitiveSchemaType } from "@commonfabric/data-model/fabric-primitives";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { STREAM_ENTRIES_DOC_PREFIX } from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
