@@ -18,7 +18,7 @@ import {
   tagOfFabricValueElseNull,
   VALUE_TAGS,
 } from "@/types";
-import { toCompactDebugString } from "@/value-debug.ts";
+import { toShortQuotedDebugString } from "@/value-debug";
 
 import {
   type BaselineVisitResult,
@@ -254,7 +254,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
         case null: {
           // `null` means that `value` has no fabric shape and `isPlusType()`
           // did not claim it.
-          const desc = toCompactDebugString(value);
+          const desc = toShortQuotedDebugString(value);
           throw new Error(
             `Encountered a value outside of the visitor's domain: ${desc}`,
           );
@@ -530,7 +530,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
       }
     }
 
-    const desc = toCompactDebugString(finalValue, { backtickQuote: true });
+    const desc = toShortQuotedDebugString(finalValue);
     throw new Error(
       `Cannot use \`recurse\` result with non-container: ${desc}`,
     );

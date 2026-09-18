@@ -3,7 +3,7 @@ import {
   cloneIfNecessary,
   fabricFromConvertibleJsValue,
   type FabricValue,
-  toCompactDebugString,
+  toLongQuotedDebugString,
   toStructuredDebugValue,
 } from "@commonfabric/data-model";
 import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
@@ -2149,7 +2149,7 @@ export class RuntimeProcessor {
       // is bounded because the argument is a caller's data.
       throw new Error(
         `A piece's argument must be a record, not: ${
-          toCompactDebugString(argument, { maxLength: 120 })
+          toLongQuotedDebugString(argument)
         }`,
       );
     }

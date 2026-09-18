@@ -4,8 +4,9 @@ Status: built end to end and on by default behind `lazyMaterialization`. What
 remains is removing the flag and the eager path for lift arguments; handler
 materialization is settled under Stage 5.
 
-The remaining execution sequence and acceptance gates are owned by the separate
-[lazy materialization fast-follow](lazy-materialization-fast-follow.md). This
+Switch retirement is optional work for the flag owner. The separate
+[lazy materialization fast-follow](lazy-materialization-fast-follow.md) owns
+default-on measurements and guidance and can complete without retirement. This
 document retains the view and snapshot design and its implementation record.
 
 `Cell.get()` materializes everything its schema selects, in one pass, before the
@@ -477,9 +478,9 @@ diffing and the scheduler's own reads keep eager semantics.
       link resolution now applies the same rule, which is also where an eager
       read of such a link used to answer `undefined`.
       `gideon-tests/proxy-length-repro` pins it.
-- [ ] Soak on default-on before removing the flag. F3/F4 in the
-      [fast-follow plan](lazy-materialization-fast-follow.md) own the evidence,
-      retirement decision and implementation sequence.
+- [ ] Owner-led: decide whether and when to remove the default-on flag. The
+      [fast-follow plan](lazy-materialization-fast-follow.md) supplies evidence;
+      its completion does not depend on this optional retirement.
 
 ## Testing
 

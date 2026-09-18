@@ -10,7 +10,6 @@ import {
   emptySchemaObject,
   internSchema,
   internSchemaAsTaggedHashString,
-  schemaTypeOfFabricPrimitive,
 } from "@commonfabric/data-model-schema";
 import { isDID } from "@commonfabric/identity/did";
 import {
@@ -3603,7 +3602,7 @@ const schemaTypeMatchesValue = (
           isFabricPrimitiveSchemaType(candidate)
         ) {
           return value instanceof FabricPrimitive &&
-            schemaTypeOfFabricPrimitive(value) === candidate;
+            value.schemaType === candidate;
         }
         return true;
     }

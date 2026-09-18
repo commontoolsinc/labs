@@ -1584,7 +1584,7 @@ describe("setup/start", () => {
     setupTrusted(runtime, undefined, pattern, { ev: 7 }, resultCell);
 
     await expect(runtime.start(resultCell)).rejects.toThrow(
-      "was overwritten (found: 7)",
+      "was overwritten (found: `7`)",
     );
   });
 
@@ -1662,7 +1662,7 @@ describe("setup/start", () => {
     const pattern: Pattern = {
       argumentSchema: {
         type: "object",
-        properties: { ev: { type: "string" } },
+        properties: { ev: { type: "array", items: { type: "string" } } },
       },
       resultSchema: {},
       result: {},
@@ -1683,20 +1683,21 @@ describe("setup/start", () => {
       runtime,
       undefined,
       pattern,
-      { ev: "x".repeat(200) },
+      { ev: Array.from({ length: 100 }, () => "abcdef") },
       resultCell,
     );
 
-    // The diagnostic prints the offending value but must stay bounded:
-    // toCompactDebugString caps it at 80 characters with an ellipsis, so an
+    // The diagnostic prints the offending value but must stay bounded: the
+    // rendering is `toLongQuotedDebugString()`'s, cut with an ellipsis, so an
     // error message never dumps a large payload.
     const error = await runtime.start(resultCell).then(
       () => undefined,
       (e) => e as Error,
     );
-    expect(error?.message).toContain("was overwritten (found: ");
-    expect(error?.message).toContain("...");
-    expect(error?.message).not.toContain("x".repeat(100));
+    expect(error?.message).toContain('was overwritten (found: `["abcdef",');
+    const found = error?.message.split("(found: ")[1];
+    expect(found).toMatch(/\.\.\.`\)$/);
+    expect(found?.length).toBeLessThan(600);
   });
 
   it("start() leaves no running registration when instantiation throws", async () => {

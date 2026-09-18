@@ -10,6 +10,7 @@ import {
   isWalkableObjectOrArray,
   refuseFabricInstance,
   toCompactDebugString,
+  toLongQuotedDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
@@ -184,6 +185,11 @@ import {
   resolveOriginal,
   resolveProducerEntryRef,
 } from "./builder/pattern-metadata.ts";
+import { classifyPieceOriginString } from "./piece-origin-kind.ts";
+import {
+  PATTERNS_ROUTE_PREFIX,
+  systemPatternSource,
+} from "./pattern-source-scheme.ts";
 import {
   resolveBuiltinImplementationIdentity,
   resolvePolicyFacingImplementationIdentity,
@@ -6663,10 +6669,16 @@ export class Runner {
     inputs: FabricValue,
     markCreateOnlyResult = false,
     speculativeConsequence?: { eventId: string },
+    parentPieceRootId?: string,
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const startLifecycleEpoch = this.#lifecycleEpoch;
     const ownership = this.#createDeferredStartOwnership(resultCell);
+    // The piece this result belongs to is known now and not at the deferred
+    // start, and a child the result instantiates asks for it by the chain
+    // (`#ancestorSystemOrigin`), so the chain is recorded ahead of the start
+    // exactly as the immediate path's start records it.
+    this.#demandRootChainFor(resultLink.id, parentPieceRootId);
     tx.addCommitCallback((_committedTx, result) => {
       if (result.error) {
         // Settled here for the same reason as the start above: this callback
@@ -6713,6 +6725,7 @@ export class Runner {
           pattern,
           inputs,
           committedResultCell,
+          parentPieceRootId === undefined ? {} : { parentPieceRootId },
         ).installedCancel;
         if (ownership.markInstalled(installedRegistration)) {
           startTx.abort("Deferred runner start was cancelled");
@@ -7450,6 +7463,65 @@ export class Runner {
         observerError,
       ]);
     }
+  }
+
+  /**
+   * The `system:` origin a child instantiated under `parent` claims, or
+   * `undefined` when it claims none.
+   *
+   * A child claims one when the piece it is instantiated under follows a
+   * `system:` origin and the child's module is one the runtime fetched from
+   * the deployment's patterns route as part of that program — the same
+   * ground on which the runtime claims the `system:` ref for the surfaces it
+   * instantiates itself (`docs/specs/piece-source-lifecycle.md`, "Origins").
+   * The caller asks only for a child in a space of its own.
+   * Both halves are required: the module's name alone is author-controlled
+   * (a locally compiled program may call a file anything), and it is the
+   * followed parent that says the name was a route the runtime resolved.
+   *
+   * The parent is the piece a handler belongs to as much as the piece a
+   * nested node sits in: a handler's result pattern runs into a receipt
+   * cell that records no origin, so the search walks the demand-root chain
+   * that receipt was started under.
+   */
+  #childSystemOrigin(
+    tx: IExtendedStorageTransaction,
+    parent: Cell<unknown>,
+    child: Pattern | Module,
+  ): string | undefined {
+    const sourcePath = getPatternSourcePath(child);
+    if (
+      sourcePath === undefined || !sourcePath.startsWith(PATTERNS_ROUTE_PREFIX)
+    ) {
+      return undefined;
+    }
+    if (this.#ancestorSystemOrigin(tx, parent) === undefined) return undefined;
+    return systemPatternSource(sourcePath.slice(PATTERNS_ROUTE_PREFIX.length));
+  }
+
+  /**
+   * Helper for {@link Runner.#childSystemOrigin}, which finds the `system:`
+   * origin `cell` or the nearest piece root it was started under records.
+   */
+  #ancestorSystemOrigin(
+    tx: IExtendedStorageTransaction,
+    cell: Cell<unknown>,
+  ): string | undefined {
+    const { space, id } = cell.getAsNormalizedFullLink();
+    const roots = this.#demandRootChains.get(id) ?? [];
+    for (const rootId of [id, ...roots]) {
+      const candidate = rootId === id
+        ? cell.withTx(tx)
+        : this.#runtime.getCellFromLink(
+          { id: rootId as URI, space, path: [] },
+          undefined,
+          tx,
+        );
+      const origin = getPatternSource(candidate);
+      if (origin === undefined) continue;
+      if (classifyPieceOriginString(origin).kind === "system") return origin;
+    }
+    return undefined;
   }
 
   /**
@@ -9868,6 +9940,7 @@ export class Runner {
         undefined,
         true,
         speculativeConsequence,
+        patternResultCell.getAsNormalizedFullLink().id,
       );
       addCancel(cancelDeferredStart);
       this.#runtime.scheduler.lineage.recordPieceStop(
@@ -9888,6 +9961,7 @@ export class Runner {
           cause,
           true,
           speculativeConsequence,
+          patternResultCell.getAsNormalizedFullLink().id,
         );
         cancelDeferredStart = setup.cancelDeferredStart;
         return setup.resultCell;
@@ -10033,12 +10107,20 @@ export class Runner {
     cause: Record<string, any>,
     markCreateOnlyResult = false,
     speculativeConsequence?: { eventId: string },
+    parentPieceRootId?: string,
   ): DeferredStartResult<any> {
     const resultCell = this.#runtime.getCell(
       resultSpace,
       { resultFor: cause },
       undefined,
       tx,
+    );
+    // Recorded before the setup instantiates the result's children: a child
+    // asks the chain for the piece its handler belongs to
+    // (`#ancestorSystemOrigin`), and the deferred start comes too late for it.
+    this.#demandRootChainFor(
+      resultCell.getAsNormalizedFullLink().id,
+      parentPieceRootId,
     );
     const resultSetup = this.#setupInternal(
       tx,
@@ -10060,7 +10142,7 @@ export class Runner {
         tx,
         resultCell,
         resultSetup.pattern,
-        {},
+        parentPieceRootId === undefined ? {} : { parentPieceRootId },
         speculativeConsequence,
       )
       : undefined;
@@ -11848,6 +11930,14 @@ export class Runner {
             : undefined,
         );
       }
+      // Only a child in a space of its own claims one: an in-space nested
+      // node is part of its parent's graph and is re-instantiated from the
+      // parent's program on each release of the parent, so an origin of its
+      // own would be followed twice; a cross-space child outlives the
+      // program that made it and is what a release has to reach.
+      const sourceOrigin = childResultCell.space === parentResultCell.space
+        ? undefined
+        : this.#childSystemOrigin(instanceTx, parentResultCell, patternImpl);
       const childRun = this.#runWithStartOwnership(
         instanceTx,
         patternImpl,
@@ -11858,6 +11948,7 @@ export class Runner {
             schedulerRehydration,
           ),
           parentPieceRootId: parentResultCell.getAsNormalizedFullLink().id,
+          ...(sourceOrigin === undefined ? {} : { sourceOrigin }),
         },
       );
 
@@ -11917,7 +12008,7 @@ function describeHandlerStreamFailure(
 
   if (eventTarget.link === undefined) {
     return `${prefix} is not a stream reference (got: ${
-      toCompactDebugString(eventTarget.value, { maxLength: 80 })
+      toLongQuotedDebugString(eventTarget.value)
     })`;
   }
 
@@ -11948,7 +12039,7 @@ function describeHandlerStreamFailure(
 
   return `${prefix} resolves to ${where}, whose value is not a stream ` +
     `marker — { "$stream": true } was overwritten (found: ${
-      toCompactDebugString(eventTarget.value, { maxLength: 80 })
+      toLongQuotedDebugString(eventTarget.value)
     })`;
 }
 
@@ -12243,6 +12334,14 @@ function initializePieceSourceHistory(
     getPieceSourceRevisions(candidate);
     throw new Error("piece source history exists without a pattern identity");
   }
+  if (origin !== undefined) {
+    candidate.setMetaRaw("patternSource", origin, rawMetaWriteAuthorization);
+  }
+  // The creation revision links the retained source, so it waits for a space
+  // that holds it: a cross-space child's closure replicates after its run.
+  // The origin is a claim about where the code comes from and stands either
+  // way; a piece carrying one and no revision is followed from a baseline the
+  // first adoption records.
   if (
     readVerifiedSourceClosure(
       runtime,
@@ -12252,9 +12351,6 @@ function initializePieceSourceHistory(
     ) === undefined
   ) {
     return;
-  }
-  if (origin !== undefined) {
-    candidate.setMetaRaw("patternSource", origin, rawMetaWriteAuthorization);
   }
   candidate.setMetaRaw("pieceSourceHistory", [{
     revisionId: crypto.randomUUID(),

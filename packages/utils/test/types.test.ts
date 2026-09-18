@@ -15,6 +15,7 @@ import {
   isPrimitive,
   isReadonlyObjectOrArray,
   isString,
+  type IsUnion,
   isUnsafeObjectKey,
   type JsTypeTagIncludingNull,
   type MustBeTrue,
@@ -530,6 +531,44 @@ describe("types", () => {
     it("is `false` for a union and a type each of its members is assignable to", () => {
       const _subtype: Equal<Error | TypeError, Error> = false;
       const _written: Equal<Error | TypeError, Error | TypeError> = true;
+    });
+  });
+
+  describe("IsUnion", () => {
+    // Each result is compared through `Equal`, which tells `true` from
+    // `boolean` where a bare assignment of `true` would accept either.
+
+    it("is `true` for a union of unrelated types, and `false` for a single type", () => {
+      const _union: Equal<IsUnion<string | number>, true> = true;
+      const _single: Equal<IsUnion<string>, false> = true;
+    });
+
+    it("is `false` for a single object type, however many members it has", () => {
+      const _object: Equal<IsUnion<{ a: string; b: number }>, false> = true;
+    });
+
+    it("is `true` for `boolean`, which is the union of `true` and `false`", () => {
+      const _boolean: Equal<IsUnion<boolean>, true> = true;
+      const _literal: Equal<IsUnion<true>, false> = true;
+    });
+
+    it("is `boolean` for a union with a member every other member is assignable to", () => {
+      type Wide = { a: 1 };
+      type Narrow = { a: 1; b: 2 };
+      const _covered: Equal<IsUnion<Wide | Narrow>, boolean> = true;
+      const _disjoint: Equal<IsUnion<Error | Date>, true> = true;
+    });
+
+    it("is `false` for a union whose members are mutually assignable", () => {
+      const _mutual: Equal<IsUnion<Error | TypeError>, false> = true;
+    });
+
+    it("is `false` for a union the compiler reduces to one member", () => {
+      const _absorbed: Equal<IsUnion<string | "x">, false> = true;
+    });
+
+    it("is `never` for `never`", () => {
+      const _never: Equal<IsUnion<never>, never> = true;
     });
   });
 

@@ -1151,7 +1151,7 @@ describe("report", () => {
 
     it("gives the alias line as something to paste", () => {
       const body = renderReport(buildReport(everything()), context)!;
-      expect(body).toContain("tasks/test-identity-aliases.jsonl");
+      expect(body).toContain("`tasks/test-identity-aliases/`");
       expect(body).toContain('{"date":"2026-09-07","from":');
     });
 

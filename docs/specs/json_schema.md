@@ -258,7 +258,8 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   generated from the real class types cannot express such a mismatch; only
   hand-written schemas can, and they get no shape enforcement on opaque
   leaves. The authoritative name list is `FABRIC_PRIMITIVE_SCHEMA_TYPES` in
-  `packages/api/index.ts`.
+  `packages/data-model/src/api.ts`, which `@commonfabric/api` re-exports, and
+  each name is the one its class's instances report as `.schemaType`.
 
 A generated schema places each named type in its root `$defs` and refers to
 it by `#/$defs/<name>`. The full TypeScript→schema mapping is specified in
