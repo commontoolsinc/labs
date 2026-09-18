@@ -294,7 +294,8 @@ export interface RunHarnessTranscriptOptions {
 
   /**
    * Completed tool batch or opening handoff with matching research and model
-   * influence. The views borrow loop state; retained checkpoints must copy it.
+   * influence, excluding turn-local budget notices. Message and run-state
+   * objects borrow loop state; retained checkpoints must copy them.
    */
   onCheckpoint?: (checkpoint: {
     transcript: readonly HarnessTranscriptMessage[];
@@ -313,6 +314,7 @@ export interface HarnessPromptLoopResult {
   /** User-facing disposition; absent on older injected loop results. */
   taskOutcome?: HarnessTaskOutcome;
 
+  /** Resumable history; turn-local budget notices remain only in audit artifacts. */
   transcript: HarnessTranscriptMessage[];
   modelTurns: number;
 
@@ -3493,6 +3495,12 @@ export class CfHarnessPromptLoop {
     }
     this.engine.bindRunModel(model);
     const transcript: HarnessTranscriptMessage[] = [...options.transcript];
+    // Keep audit history intact while excluding this loop's own control messages
+    // from session replay. Identity preserves user quotations and host-only
+    // omission annotations; content matching or deep cloning would lose either.
+    const budgetNotices = new Set<HarnessTranscriptMessage>();
+    const resumableTranscript = () =>
+      transcript.filter((message) => !budgetNotices.has(message));
     // The attachment first, so a search this run also made — which carries
     // the ranking evidence a by-id read has none of — refines it.
     this.#seedAttachedPatternRecords(initialRunState.patternRefs ?? []);
@@ -3663,7 +3671,7 @@ export class CfHarnessPromptLoop {
       if (openingResearch !== undefined) {
         options.signal?.throwIfAborted();
         await options.onCheckpoint?.({
-          transcript,
+          transcript: resumableTranscript(),
           runState: this.engine.getRunState(),
         });
       }
@@ -3679,9 +3687,10 @@ export class CfHarnessPromptLoop {
           const budgetMessage: HarnessTranscriptMessage = {
             role: "user",
             content: finalizing
-              ? "Host turn budget: provide your final response now. Tools are unavailable. Summarize verified findings with source citations, explicitly identify unread material and uncertainty, and do not claim exhaustive coverage."
-              : "Host turn budget: two root turns remain after this call, with the last reserved for your final response. Prioritize essential source reads and prepare verified findings and remaining gaps.",
+              ? "Host turn budget: provide your final response now. Tools are unavailable. Summarize verified findings with source citations, explicitly identify unread material and uncertainty, and do not claim exhaustive coverage. This notice applies only to this user turn; subsequent user requests have a fresh budget."
+              : "Host turn budget: two root turns remain after this call, with the last reserved for your final response. Prioritize essential source reads and prepare verified findings and remaining gaps. This notice applies only to this user turn; subsequent user requests have a fresh budget.",
           };
+          budgetNotices.add(budgetMessage);
           transcript.push(budgetMessage);
           await this.engine.persistTranscript(transcript);
           await options.onTranscriptEvent?.({
@@ -3856,7 +3865,7 @@ export class CfHarnessPromptLoop {
         }
         options.signal?.throwIfAborted();
         await options.onCheckpoint?.({
-          transcript,
+          transcript: resumableTranscript(),
           runState: this.engine.getRunState(),
         });
         if (finalAssistantText !== undefined) break;
@@ -3897,7 +3906,7 @@ export class CfHarnessPromptLoop {
       model,
       finalAssistantText,
       taskOutcome,
-      transcript,
+      transcript: resumableTranscript(),
       modelTurns,
       ...(modelUsage.length > 0
         ? {

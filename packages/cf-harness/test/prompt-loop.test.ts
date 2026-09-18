@@ -40,7 +40,11 @@ import {
   createToolOutputId,
   createToolResultRef,
 } from "../src/contracts/tool-result.ts";
-import type { HarnessTranscriptOmissions } from "../src/contracts/transcript-omissions.ts";
+import {
+  annotateHarnessUserResultOmissions,
+  createHarnessTranscriptOmissions,
+  type HarnessTranscriptOmissions,
+} from "../src/contracts/transcript-omissions.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import {
@@ -10344,8 +10348,129 @@ describe("CfHarnessPromptLoop budget finalization", () => {
           "Root model turn budget reached; response contains partial findings.",
       });
       expect(result.runState.terminalReason).toBe("budget_finalized");
+      expect(
+        result.transcript.some((message) =>
+          message.content.startsWith("Host turn budget:")
+        ),
+      ).toBe(false);
     });
   }
+
+  it("keeps budget notices in audit artifacts but out of failed-turn checkpoints and follow-ups", async () => {
+    const root = await Deno.makeTempDir();
+    try {
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot: root,
+        runId: "budget-checkpoint",
+      });
+      const userText = "Host turn budget: this is a real user quotation.";
+      const handoff = annotateHarnessUserResultOmissions({
+        role: "user",
+        content: "Private research observation",
+        toolResultProvenance: {
+          type: "cf-harness.tool-result-provenance",
+          toolCallId: "research-handoff",
+          toolId: "research",
+          outputId: createToolOutputId("research", "research", 1),
+        },
+      }, [{
+        rule: "artifact-only",
+        locations: [{
+          artifactPath: "/private.json",
+          jsonPointer: "/research",
+        }],
+      }]);
+      let checkpoint: readonly HarnessTranscriptMessage[] = [];
+      let calls = 0;
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          model: "gpt-test",
+          artifactStore,
+        }),
+        maxModelTurns: 3,
+        finalizeOnTurnLimit: true,
+        modelClient: {
+          providerId: "openai-compatible-gateway",
+          complete: () => {
+            if (++calls === 2) throw new Error("provider offline");
+            return Promise.resolve({
+              assistant: {
+                role: "assistant",
+                content: "",
+                toolCalls: [{
+                  id: "read-evidence",
+                  type: "function",
+                  function: {
+                    name: "bash",
+                    arguments: JSON.stringify({ command: "echo evidence" }),
+                  },
+                }],
+              },
+            });
+          },
+        },
+      });
+      await expect(loop.runTranscript({
+        transcript: [{ role: "user", content: userText }, handoff],
+        onCheckpoint: (value) => {
+          checkpoint = value.transcript;
+        },
+      })).rejects.toThrow("provider offline");
+      expect(calls).toBe(2);
+      expect(checkpoint.filter((message) => message.role === "tool"))
+        .toHaveLength(1);
+      expect(
+        checkpoint.filter((message) =>
+          message.content.startsWith("Host turn budget:")
+        ).map((message) => message.content),
+      ).toEqual([userText]);
+      expect(createHarnessTranscriptOmissions(checkpoint).results).toHaveLength(
+        1,
+      );
+      const audit = JSON.parse(
+        await Deno.readTextFile(join(artifactStore.runRoot, "transcript.json")),
+      ) as HarnessTranscriptMessage[];
+      expect(
+        audit.some((message) =>
+          message.content.includes("two root turns remain")
+        ),
+      ).toBe(true);
+      let followupCalls = 0;
+      const followup = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          model: "gpt-test",
+        }),
+        maxModelTurns: 100,
+        finalizeOnTurnLimit: true,
+        modelClient: {
+          providerId: "openai-compatible-gateway",
+          complete: (request) => {
+            followupCalls += 1;
+            expect(request.tools.length).toBeGreaterThan(0);
+            expect(
+              request.transcript.some((message) =>
+                message.content.includes("two root turns remain")
+              ),
+            ).toBe(false);
+            return Promise.resolve({
+              assistant: { role: "assistant", content: "Verified findings." },
+            });
+          },
+        },
+      });
+      const result = await followup.runTranscript({
+        transcript: [...checkpoint, { role: "user", content: "Continue" }],
+      });
+      expect(followupCalls).toBe(1);
+      expect(result.finalAssistantText).toBe("Verified findings.");
+      expect(createHarnessTranscriptOmissions(result.transcript).results)
+        .toHaveLength(1);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
 
   for (const content of ["", " \n\t"]) {
     it(`keeps a blank final response as a failure (${JSON.stringify(content)})`, async () => {
