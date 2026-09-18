@@ -680,6 +680,8 @@ export class DebugStringifier {
     }
     // deno-coverage-ignore-stop
 
+    // `#lengthOf()` returns a length for a plain object alone, which the type
+    // of `value` does not show.
     const { excerpt } = value as FabricPlainObject;
     return (typeof excerpt === "string") ? { length, excerpt } : undefined;
   }
