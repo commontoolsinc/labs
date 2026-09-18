@@ -149,6 +149,20 @@ export interface PollHost {
 export const DEFAULT_HOST: PollHost = {};
 
 /**
+ * The clock override, object-wrapped so that "no instant" is the absence of a
+ * field rather than a number standing for it. Every number is a valid instant,
+ * so a bare number input would need one of them to mean "unset".
+ */
+export interface ClockOverride {
+  /** The instant the poll reads as now, in milliseconds since the epoch. */
+  readonly at?: number;
+}
+
+export const DEFAULT_CLOCK: ClockOverride = {};
+
+export type ClockValue = ClockOverride | Default<typeof DEFAULT_CLOCK>;
+
+/**
  * The viewer-identity override, claimed through the `overrideViewer` stream.
  *
  * A unit test has no `#profile` wish environment, so it claims the viewer's
@@ -1153,6 +1167,20 @@ export interface CozyPollInput {
   // internal form drafts, declared as local per-session cells in the pattern
   // body (parking-coordinator idiom).
   visits?: PerSpace<HistoryEntry[] | Default<[]>>;
+
+  /**
+   * Allocation site for the clock override. Leave this absent outside a test:
+   * an instant written here replaces the `#now/300` wish everywhere the poll
+   * reads the clock, which fixes the day the poll shows and the day every
+   * later vote and visit is stamped with, for every viewer of that poll, until
+   * it is cleared. A runner-owned timer writes that wish on aligned five-minute
+   * boundaries, which a pattern body cannot make happen, so a test that needs
+   * the poll at a chosen instant, or at two instants one tick apart, writes
+   * them here. Per space rather than per user, because the day a poll runs on
+   * is one day for everyone looking at it. Production leaves it absent and the
+   * wish rules.
+   */
+  clock?: PerSpace<ClockValue>;
 }
 
 export interface CozyPollOutput {
@@ -1232,6 +1260,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       host,
       viewer,
       visits,
+      clock,
     },
   ) => {
     // Internal per-session form drafts — local to each browser session,
@@ -1254,8 +1283,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // pre-#4740 runtimes, which lack `#now` — and every downstream read
     // guards that window (an empty vote view, a placeholder date, and vote /
     // visit handlers that no-op).
+    // The `clock` input stands in front of the wish so a test can put the poll
+    // at a chosen instant. It carries no instant in production, and the wish
+    // rules there.
     const nowTickWish = wish<number>({ query: "#now/300" });
-    const nowTick = computed(() => nowTickWish.result ?? null);
+    const nowTick = computed(() => clock.at ?? nowTickWish.result ?? null);
     // Two-step confirmation for destructive actions. Stores the optionId
     // pending remove-confirm (null or undefined = nothing pending). Same idiom as
     // parking-coordinator's `removePersonConfirmTarget`.
