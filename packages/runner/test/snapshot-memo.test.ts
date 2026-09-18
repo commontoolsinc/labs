@@ -27,6 +27,7 @@ import {
   cfcLabelViewForDereference,
   cfcLabelViewForDereferenceTraces,
 } from "../src/cfc/label-view-state.ts";
+import { seedStoredEnvelope } from "./cfc-seed-envelope.ts";
 
 const signer = await Identity.fromPassphrase("snapshot memo test");
 const space = signer.did();
@@ -362,7 +363,7 @@ describe("snapshot memo", () => {
     const cell = runtime.getCell(space, "scoped-label-epochs", undefined, tx);
     const address = cell.getAsNormalizedFullLink();
     const writeLabel = (name: string) =>
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space,
         id: address.id,
         type: "application/json",
@@ -629,7 +630,7 @@ describe("snapshot memo", () => {
   it("keeps the label views of two paths in one document apart", () => {
     const labeled = runtime.getCell(space, "labeled-doc", undefined, tx);
     const link = labeled.getAsNormalizedFullLink();
-    tx.writeOrThrow({
+    seedStoredEnvelope(tx, {
       space,
       id: link.id,
       type: "application/json",

@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -179,7 +180,7 @@ describe("PatternManager program persistence", () => {
       seed,
     );
     writeSeedEnvelopeDoc(seed, space);
-    seed.writeOrThrow({
+    seedStoredEnvelope(seed, {
       space,
       id: sourceCell.getAsNormalizedFullLink().id,
       type: "application/json",

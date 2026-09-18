@@ -1,6 +1,7 @@
 import { internSchema } from "@commonfabric/data-model-schema";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -39,7 +40,7 @@ describe("CFC envelope version guard", () => {
     const id = parseLink(runtime.getCell(space, name).getAsLink()).id!;
     const seed = runtime.edit();
     writeSeedEnvelopeDoc(seed, space);
-    seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+    seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
       value: { secret: "sealed" },
       cfc: {
         version,
@@ -142,7 +143,7 @@ describe("CFC envelope version guard", () => {
       ).id!;
       const seed = runtime.edit();
       writeSeedEnvelopeDoc(seed, space);
-      seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+      seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
         value: { secret: "sealed" },
         cfc: {
           version: 1,
@@ -227,7 +228,12 @@ describe("CFC envelope version guard", () => {
         ).id!;
         const seed = runtime.edit();
         writeSeedEnvelopeDoc(seed, space);
-        seed.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
+        seedStoredEnvelope(seed, {
+          space,
+          scope: "space",
+          id: sourceId,
+          path: [],
+        }, {
           value: { secret: "sealed" },
           cfc: envelope,
         });
@@ -314,7 +320,7 @@ describe("CFC envelope version guard", () => {
         runtime.getCell(space, "version-guard-renamed").getAsLink(),
       ).id!;
       const seed = runtime.edit();
-      seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+      seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
         value: { secret: "sealed" },
         cfc: { version: 3, payload: { labels: [] } },
       });
@@ -472,7 +478,7 @@ describe("CFC envelope version guard", () => {
           path: [],
         }, { value: sah.schema });
       }
-      seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+      seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
         value: { secret: "sealed" },
         cfc: {
           version: 1,
@@ -596,7 +602,8 @@ describe("CFC envelope version guard", () => {
           ).id!;
           const seed = runtime.edit();
           writeSeedEnvelopeDoc(seed, space);
-          seed.writeOrThrow(
+          seedStoredEnvelope(
+            seed,
             { space, scope: "space", id, path: [] },
             { value: { secret: "sealed" }, cfc } as never,
           );
@@ -651,7 +658,7 @@ describe("CFC envelope version guard", () => {
         ).id!;
         const seed = runtime.edit();
         writeSeedEnvelopeDoc(seed, space);
-        seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+        seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
           value: { secret: "sealed" },
           cfc: {
             version: 1,
@@ -701,7 +708,7 @@ describe("CFC envelope version guard", () => {
         ).id!;
         const seed = runtime.edit();
         writeSeedEnvelopeDoc(seed, space);
-        seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+        seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
           value: { secret: "sealed" },
           cfc: {
             schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
@@ -739,7 +746,7 @@ describe("CFC envelope version guard", () => {
           runtime.getCell(space, "reader-agreement-absent").getAsLink(),
         ).id!;
         const seed = runtime.edit();
-        seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+        seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
           value: { secret: "sealed" },
           cfc: null,
         });

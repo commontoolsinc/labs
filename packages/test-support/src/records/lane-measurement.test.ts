@@ -18,7 +18,7 @@ describe("lane-measurement", () => {
         const name of [
           "ci-lane batch runner-unit",
           "ci-lane batch workspace-unit with coverage",
-          "ci-lane planned batch runner-unit",
+          "ci-lane ran batch runner-unit",
           "ci-lane setup fuse",
         ]
       ) {

@@ -32,17 +32,23 @@ import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import {
+  ArrivalLog,
+  awaitAdmitted,
+  awaitEach,
+  settleServing,
+} from "./support/serving-waits.ts";
+import {
   stampWaveRunContext,
   warmWritesOf,
   type WaveSpaceCommit,
 } from "../src/executor/wave.ts";
 import {
   applyCommit,
+  type Engine,
   read as readDoc,
   serverSeq,
 } from "@commonfabric/memory/v2/engine";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
-import { waitUntil } from "./support/wait-until.ts";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
   static override connectTo(
@@ -72,6 +78,11 @@ const aliceSigner = await Identity.fromPassphrase("warm request alice");
 describe("executor-warm-request", () => {
   let server: MemoryV2Server.Server;
   let host: ExecutorHost | undefined;
+  /** Every activation attempt's space and outcome — activation finishes
+   * on no admission or session edge of its own. */
+  let activations: ArrivalLog<{ space: MemorySpace; outcome: string }>;
+  /** Each firing of the one-shot activation-failure stub below. */
+  let stubFirings: ArrivalLog<void>;
   let clientManager: SharedServerStorageManager;
   let clientRuntime: Runtime;
   let servingRuntime: Runtime | undefined;
@@ -90,6 +101,7 @@ describe("executor-warm-request", () => {
       createRuntime: (space) => {
         if (failNextRuntimeFor === space) {
           failNextRuntimeFor = undefined;
+          stubFirings.record();
           return Promise.reject(
             new Error("stubbed one-shot activation failure (test)"),
           );
@@ -114,12 +126,58 @@ describe("executor-warm-request", () => {
         });
       },
       policy: { flushDeadlineMs: 5_000, idleParkMs: 600_000 },
+      onActivationSettled: (space, outcome) =>
+        activations.record({ space, outcome }),
     });
+
+  /** Resolves once `space` has an ACTIVE tenure, counting the ones that
+   * settled before the call. */
+  const activated = (space: MemorySpace): Promise<unknown> =>
+    activations.matching((entry) =>
+      entry.space === space && entry.outcome === "active"
+    );
+
+  /** Resolves once `space` has an ACTIVE tenure recorded after the first
+   * `from` entries. A successor's activation is what the tests below
+   * wait for, and its predecessor's is already in the log. */
+  const activatedSince = (space: MemorySpace, from: number): Promise<void> =>
+    awaitEach(
+      activations,
+      () =>
+        activations.entries.slice(from).some((entry) =>
+          entry.space === space && entry.outcome === "active"
+        ),
+    );
+
+  /** Commit an authored poke into `space` and wait for the loop to cover
+   * it. The demand pass runs at the top of a wave cycle, so W reaching
+   * the poke's own authored seq is ordered after one. The poke is never
+   * demanded, so it adds no root of its own to that pass. */
+  let pokes = 0;
+  const settleACycle = async (
+    engine: Engine,
+    space: MemorySpace,
+  ): Promise<void> => {
+    pokes += 1;
+    const poke = clientRuntime.getCell<{ n: number }>(
+      space,
+      `warm-cycle-poke-${pokes}`,
+      undefined,
+    );
+    await poke.sync();
+    const tx = clientRuntime.edit();
+    poke.withTx(tx).set({ n: pokes });
+    expect((await tx.commit()).error).toBeUndefined();
+    await settleServing(engine, clientRuntime, space);
+  };
 
   beforeEach(() => {
     server = newSharedServer();
     servingRuntime = undefined;
     failNextRuntimeFor = undefined;
+    activations = new ArrivalLog();
+    stubFirings = new ArrivalLog();
+    pokes = 0;
   });
 
   afterEach(async () => {
@@ -154,12 +212,8 @@ describe("executor-warm-request", () => {
     );
     const cancel = demandCell.sink(() => {});
     try {
-      await waitUntil(
-        () =>
-          servingRuntime !== undefined &&
-          host!.spaceServer(homeSpace)?.active === true,
-        "home space activation",
-      );
+      await activated(homeSpace);
+      expect(servingRuntime).toBeDefined();
       const serving = servingRuntime!;
 
       // The pattern whose materialization is the staged SETUP: compiled
@@ -222,11 +276,7 @@ describe("executor-warm-request", () => {
         },
       );
       await serving.patternManager.flushCompileCacheWrites();
-      await waitUntil(
-        () => serverSeq(pEngine) > 1,
-        "the delegated program writeback landing in the provisioned space",
-        30_000,
-      );
+      await awaitAdmitted(server, () => serverSeq(pEngine) > 1);
 
       // (2) The piece scaffolding: a served, stamped provisioning run —
       // the T11 `.inSpace()` shape — instantiates the piece INTO the
@@ -265,24 +315,17 @@ describe("executor-warm-request", () => {
 
       const resultId = resultCell.getAsNormalizedFullLink().id;
       const setupSeq = () => serverSeq(pEngine);
-      await waitUntil(
-        () => setupSeq() > 2,
-        "the staged piece scaffolding landing in the provisioned space",
-        30_000,
-      );
+      await awaitAdmitted(server, () => setupSeq() > 2);
 
-      // THE PIN. Before the warm request existed, this wait timed out:
+      // THE PIN. Before the warm request existed, this wait never
+      // returned:
       // the setup is durably present, the space is lease-less with no
       // live session and no events, the admission hook activates
       // nothing (T11.Q7's designed parking), and nothing ever
       // re-demands the staged setup — the home-profile "Alan Turing"
       // inertness. WITH the warm request, the provisioning path's
       // signal activates the target's own serving loop.
-      await waitUntil(
-        () => host!.spaceServer(pSpace)?.active === true,
-        "the target space's activation on the staged setup's warm request",
-        30_000,
-      );
+      await activated(pSpace);
 
       // The demand half: the staged instances are the tenure's warm
       // demand, so the loop structure-loads the staged piece and its
@@ -293,11 +336,7 @@ describe("executor-warm-request", () => {
         (pEngine.database.prepare(
           `SELECT COUNT(*) AS n FROM "commit" WHERE class = 'derived'`,
         ).get() as { n: number }).n;
-      await waitUntil(
-        () => derivedCommits() > 0,
-        "the staged setup's derivation committing in the target space",
-        30_000,
-      );
+      await awaitAdmitted(server, () => derivedCommits() > 0);
       // The result doc's `out` is a LINK to the computed's own doc; the
       // derived VALUE lives there. Follow it and read 42 + 1 durably.
       const outLinkId = () => {
@@ -306,15 +345,11 @@ describe("executor-warm-request", () => {
         } | null;
         return doc?.value?.out?.["/"]?.["link@1"]?.id;
       };
-      await waitUntil(
-        () => {
-          const id = outLinkId();
-          return id !== undefined &&
-            JSON.stringify(readDoc(pEngine, { id }) ?? {}).includes("43");
-        },
-        "the derived computed value (42 + 1) durably present in the target's own store",
-        30_000,
-      );
+      await awaitAdmitted(server, () => {
+        const id = outLinkId();
+        return id !== undefined &&
+          JSON.stringify(readDoc(pEngine, { id }) ?? {}).includes("43");
+      });
       // The warm request is observable in the loop's own counters.
       expect(host!.stats().warmRequests).toBeGreaterThan(0);
     } finally {
@@ -344,10 +379,8 @@ describe("executor-warm-request", () => {
     );
     const cancel = demandCell.sink(() => {});
     try {
-      await waitUntil(
-        () => host!.spaceServer(pSpace)?.active === true,
-        "the race target's initial activation",
-      );
+      await activated(pSpace);
+      const firstTenure = activations.entries.length;
       const target = host!.spaceServer(pSpace)!;
       const pEngine = await server.engineForSpace(pSpace);
       const terminals = () => host!.stats().structureLoadTerminal;
@@ -357,11 +390,8 @@ describe("executor-warm-request", () => {
       // on (the session's registry rows survive the park, so the
       // SUCCESSOR terminalizes the same root once again).
       const t0 = terminals();
-      await waitUntil(
-        () => terminals() >= t0 + 1,
-        "the first tenure terminalizing the client's absent watch root",
-        30_000,
-      );
+      await settleACycle(pEngine, pSpace);
+      expect(terminals()).toBeGreaterThanOrEqual(t0 + 1);
       const t1 = terminals();
 
       // The park-window race: park() flips the tenure inactive
@@ -398,19 +428,12 @@ describe("executor-warm-request", () => {
       // episode counter that distinguishes one captured root from
       // two. The successor's expected delta is exactly THREE: the
       // client session's surviving watch root re-terminalizes, plus
-      // c1, plus c2. Before the fix this wait timed out at +2 — the
+      // c1, plus c2. Before the fix the count stopped at +2 — the
       // first notice reactivated the space, the second was dropped
       // with the dying tenure.
-      await waitUntil(
-        () => host!.spaceServer(pSpace)?.active === true,
-        "reactivation on the warm notices racing the park",
-        30_000,
-      );
-      await waitUntil(
-        () => terminals() >= t1 + 3,
-        "BOTH warm notices' staged roots reaching the successor's demand pass",
-        30_000,
-      );
+      await activatedSince(pSpace, firstTenure);
+      await settleACycle(pEngine, pSpace);
+      expect(terminals()).toBeGreaterThanOrEqual(t1 + 3);
     } finally {
       cancel();
     }
@@ -437,19 +460,14 @@ describe("executor-warm-request", () => {
     );
     const cancel = demandCell.sink(() => {});
     try {
-      await waitUntil(
-        () => host!.spaceServer(pSpace)?.active === true,
-        "the fail target's initial activation",
-      );
+      await activated(pSpace);
+      const firstTenure = activations.entries.length;
       const target = host!.spaceServer(pSpace)!;
       const pEngine = await server.engineForSpace(pSpace);
       const terminals = () => host!.stats().structureLoadTerminal;
       const t0 = terminals();
-      await waitUntil(
-        () => terminals() >= t0 + 1,
-        "the first tenure terminalizing the client's absent watch root",
-        30_000,
-      );
+      await settleACycle(pEngine, pSpace);
+      expect(terminals()).toBeGreaterThanOrEqual(t0 + 1);
       const t1 = terminals();
 
       // Arm the one-shot failure, then fire ONE warm notice in the park
@@ -473,19 +491,17 @@ describe("executor-warm-request", () => {
       await parked;
       // The stubbed failure has consumed the reactivation (the stub
       // clears itself when it fires) and the space has no server.
-      await waitUntil(
-        () =>
-          failNextRuntimeFor === undefined &&
-          host!.spaceServer(pSpace) === undefined,
-        "the stubbed activation failure consuming the reactivation",
-        30_000,
+      await stubFirings.reached(1);
+      await activations.matching((entry) =>
+        entry.space === pSpace && entry.outcome === "failed"
       );
+      expect(host!.spaceServer(pSpace)).toBeUndefined();
 
       // The recovery trigger: a SECOND warm notice (a later provisioning
       // batch) activates the space for real. The re-buffered first
       // notice must ride along — the successor's demand pass must hold
       // BOTH staged roots (+ the session's re-terminalizing watch root):
-      // delta +3. Before the fix this wait timed out at +2 — c1's warm
+      // delta +3. Before the fix the count stopped at +2 — c1's warm
       // demand died with the failed activation.
       server.noteExecutorCommit({
         space: pSpace,
@@ -495,16 +511,9 @@ describe("executor-warm-request", () => {
         writes: [{ id: "of:warm-fail-c2", scopeKey: "space" }],
         warm: true,
       });
-      await waitUntil(
-        () => host!.spaceServer(pSpace)?.active === true,
-        "the recovery activation on the second warm notice",
-        30_000,
-      );
-      await waitUntil(
-        () => terminals() >= t1 + 3,
-        "BOTH warm roots (the re-buffered and the fresh) reaching the successor's demand pass",
-        30_000,
-      );
+      await activatedSince(pSpace, firstTenure);
+      await settleACycle(pEngine, pSpace);
+      expect(terminals()).toBeGreaterThanOrEqual(t1 + 3);
     } finally {
       cancel();
     }

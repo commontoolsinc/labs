@@ -222,9 +222,12 @@ bundle already shipped, so those keys are public permanently whatever the
 product does next. Removing the derivation prevents future use; it recovers
 nothing. Only one use has to stop, and that is creating a space.
 
-Where a name is recorded beside a DID, in a Home list entry that carries one,
-the record is authoritative and the derivation is not consulted. The derivation
-answers for a name nothing has recorded.
+A record is consulted where the resolution has one to consult: the allocation
+record `PatternFactory.inSpace(name)` reads sits in the space that called it. A
+name a person types, or follows in a URL, has no such record and is derived,
+which is what keeps that resolution local. A Home list entry is not consulted,
+because it is keyed by DID and opening it uses that DID rather than resolving
+its label.
 
 Existing spaces reached through a stored link rather than a name need no
 resolution at all. A cross-space child, including every space an anonymous

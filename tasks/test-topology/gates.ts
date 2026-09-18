@@ -132,6 +132,23 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
     reachedBy: ["deno.jsonc", "docs/", "!docs/history/"],
   },
   {
+    name: "check-bench-workflow",
+    kind: "gate",
+    run: ["task", "check-bench-workflow"],
+    // The workflow holding the `deno bench` list, the module holding the
+    // names, and each file named. `gates.test.ts` compares the last of
+    // those against the names themselves, so a name added here without a
+    // declaration fails there.
+    reachedBy: [
+      ".github/workflows/benchmarks.yml",
+      "packages/dashboard/bench-report.ts",
+      "packages/dashboard/machine-calibration.bench.ts",
+      "packages/patterns/integration/topic-board-navigation.bench.ts",
+      "packages/patterns/integration/topic-board-scale.bench.ts",
+      "tasks/check-bench-workflow.ts",
+    ],
+  },
+  {
     name: "check-docs-history-index",
     kind: "gate",
     run: ["task", "check-docs-history-index"],

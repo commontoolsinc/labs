@@ -139,7 +139,11 @@ adds no directory:
 
 ## Prerequisites
 
-None of these is part of the pull request. Each has to be finished first.
+None of these is part of the pull request. Each has to be finished first, and
+none depends on another, so they can be done in any order and by different
+people. Retiring the wildcard genesis grant is the one to start with: it is the
+smallest, and on its own it closes the larger of the two holes a new space is
+born with.
 
 ### In this repository, as separate pull requests
 
@@ -151,22 +155,23 @@ None of these is part of the pull request. Each has to be finished first.
 
 - **Route every name resolution through one seam, and record allocations.**
   Give `PatternFactory.inSpace(name)` a durable allocation record in the calling
-  space, and make every production caller of `createSession({ spaceName })`
-  resolve a label through the Home space list instead. Keep the existing
-  derivation as the generator for a name with no record, so this pull request
-  changes no DID and no behavior a user can see.
+  space, and make every production caller of `createSession({ spaceName })` go
+  through one resolution function instead. That function consults a recorded DID
+  where one exists and derives otherwise, which is what it keeps doing after the
+  change. Keep the existing derivation as the generator for a name with no
+  record, so this pull request changes no DID and no behavior a user can see.
 
   This is what makes the rest one pull request: afterwards the step that invents
   a DID for a name is one expression in one function, rather than being spread
   across a dozen modules.
 
-  Two callers resolve a name today without touching the network, and routing
-  them through a record they must read changes what they need. The shell
-  library's `resolveSpaceDid` becomes an asynchronous read of the Home space,
-  and the command-line interface must open the user's Home space to resolve a
-  label. Decide in this pull request whether those callers read the Home space
-  or require a DID outright; requiring a DID is the smaller change and is
-  consistent with creating and opening being separate operations.
+  Two callers resolve a name today without touching the network, and both keep
+  doing so, because a name is resolved by the derivation alone. A record is read
+  where one addresses the resolution — the allocation record `inSpace(name)`
+  reads sits in the calling space, which is mounted already — and no record is
+  consulted for a name a person typed. Neither the shell library's
+  `resolveSpaceDid` nor the command-line interface's ingest-channel resolver
+  changes its signature.
 
 - **Convert the test call sites off `spaceName`.** A test that wants one space
   uses an explicit DID generated once; a test that wants two sessions on one
@@ -276,10 +281,10 @@ None of these is part of the pull request. Each has to be finished first.
   or names a DID the resolver cannot open. Creating a replacement silently would
   move a space's data; the record is immutable, so the honest outcome is to
   report the inconsistency rather than to allocate again.
-- Make the Home space list the record for user-facing spaces. Resolve a label
-  through it in the shell, the command-line interface, and the FUSE filesystem.
-  A label matching no entry resolves to nothing; a label matching more than one
-  entry reports the candidates and opens nothing.
+- Do not resolve a label. A Home list entry carries a DID, so opening one uses
+  that DID and no name is resolved at all; two entries may share a label without
+  anything having to choose between them. A name a person types or follows in a
+  URL is resolved by the derivation, which is what makes that resolution local.
 - Treat a Home list entry as a label and a route, never as authority. Anything
   with Home write access can add one, so an entry a user did not create must be
   able to mislead them about what a space is called and about nothing else.
@@ -295,9 +300,9 @@ None of these is part of the pull request. Each has to be finished first.
 - Leave `resolveSpaceDid` in the shell library and the command-line interface's
   ingest-channel resolver resolving offline. Both keep their signatures; only
   what they call underneath changes.
-- Consult a recorded DID first where one exists. A Home list entry that carries
-  a DID is authoritative, and the derivation answers only for a name nothing has
-  recorded.
+- Read an allocation record before deriving, where the resolution has one to
+  read: `inSpace(name)` has one in its calling space. A name reached any other
+  way has no record to consult and is derived.
 - Remove `Session.spaceIdentity` and every other route by which the derived key
   reaches a caller.
 - Rewrite the `space-key-derivation` tripwire to probe what now matters: that
@@ -447,9 +452,10 @@ None of these is part of the pull request. Each has to be finished first.
 - Prove an existing cross-space child, including a profile space created by an
   anonymous `PatternFactory.inSpace()` call, still loads through its parent's
   stored link.
-- Prove a label matching no Home entry resolves to nothing in the shell, the
-  command-line interface, and the FUSE filesystem, and that a label matching
-  several entries opens nothing and reports the candidates.
+- Give two Home entries one label and prove both still open, each by its own
+  DID, with nothing having to choose between them.
+- Prove the shell, the command-line interface, and the FUSE filesystem resolve a
+  typed name with no network available.
 - Edit and remove a Home list entry and prove the space, its access-control
   document, and its site-table hint are unchanged.
 - Prove duplicate and renamed labels do not affect resolution.

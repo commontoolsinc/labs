@@ -9,6 +9,7 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -100,7 +101,12 @@ const seedLabeledDoc = async (
   const cell = runtime.getCell(space, id, undefined, seed);
   const docId = cell.getAsNormalizedFullLink().id as URI;
   writeSeedEnvelopeDoc(seed, space);
-  seed.writeOrThrow({ space, id: docId, type: "application/json", path: [] }, {
+  seedStoredEnvelope(seed, {
+    space,
+    id: docId,
+    type: "application/json",
+    path: [],
+  }, {
     value,
     cfc: {
       version: 1,

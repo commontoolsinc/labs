@@ -2,7 +2,7 @@
 
 Status: current implementation reference\
 Last verified: 2026-09-18\
-Revision: `aab765023+interactive-checkpoint-review`
+Revision: `c89aef10a+interactive-checkpoint-review`
 
 The [system map](system-map/README.md) moves in lockstep with this current-state
 reference.

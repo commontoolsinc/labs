@@ -166,9 +166,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   sequences how long an invocation record is kept and what the runtime knows
   about who caused it — the `AgentActor` mint, trusted ingress, and metadata
   confidentiality. Gated on a CFC review that has not happened.
-- [Random space identities](random-space-identities.md) replaces publicly
-  derived named-space keys with fresh random identities whose authority ends
-  after ACL genesis. It implements the
+- [Random space identities](random-space-identities.md) gives every newly
+  created space a fresh random identity whose authority ends after ACL genesis,
+  while every space that already exists keeps its DID and the name that reaches
+  it. It implements the
   [random space identity specification](../specs/random-space-identities.md),
   uses existing DID routes, and is complete without a public name registry.
 - [CFC runner implementation](runner_cfc_implementation.md) defines the

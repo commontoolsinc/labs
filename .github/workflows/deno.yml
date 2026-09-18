@@ -144,6 +144,12 @@ jobs:
           deno task run-recorded gate repo check-docs-history-index --
           deno task check-docs-history-index
 
+      - name: 🔎 Check the benchmarks workflow against the names the dashboard reads
+        timeout-minutes: *work-timeout
+        run: >-
+          deno task run-recorded gate repo check-bench-workflow --
+          deno task check-bench-workflow
+
       - name: 🚧 Guard against new polling waitFor in integration tests
         timeout-minutes: *work-timeout
         run: >-

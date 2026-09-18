@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import type { CfcConfClause } from "../src/cfc/clause.ts";
@@ -39,7 +40,7 @@ describe("CFC envelope schema documents ride the shared staging path", () => {
       ).id!;
       const seed = runtime.edit();
       writeSeedEnvelopeDoc(seed, space);
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space,
         scope: "space",
         id: sourceId,

@@ -263,6 +263,33 @@ describe("test-selection", () => {
       expect(text).not.toContain("lane 1:");
     });
 
+    it("names a suite no lane can hold, and not the tests inside it", () => {
+      // Every identity of such a suite is past the bound by the suite's
+      // charge, so the report names the suite and drops the identities
+      // that would otherwise repeat it once each.
+      const manifest = sampleManifest({
+        entries: [
+          sampleEntry({ k: "unit", s: "memory", n: "cheap" }, {
+            cost: 0.001,
+            unit: "packages/memory/test/memory.test.ts",
+          }),
+        ],
+        calibration: {
+          setupCost: {},
+          suites: {
+            "workspace-unit": { overhead: 400, correction: 1, unitOverhead: 0 },
+          },
+          prologue: 0,
+        },
+      });
+      const text = planLines(manifest, TOPOLOGY, undefined).join("\n");
+      expect(text).toContain(
+        "workspace-unit costs 400.0s before it runs anything",
+      );
+      expect(text).toContain("none of its 1 tests ran");
+      expect(text).not.toContain("unschedulable");
+    });
+
     it("names an identity no lane can hold", () => {
       const manifest = sampleManifest({
         entries: [sampleEntry({ k: "unit", s: "memory", n: "huge" }, {
