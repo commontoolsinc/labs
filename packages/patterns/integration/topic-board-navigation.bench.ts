@@ -64,6 +64,7 @@ import {
   fillCfTextarea,
   waitForRuntimeIdle,
   waitForSettledText,
+  writeAllSync,
 } from "./cfc-browser-helpers.ts";
 import { clickButtonWithExactText } from "./note-button-helpers.ts";
 import {
@@ -349,9 +350,10 @@ const encoder = new TextEncoder();
  * captures console output and `note()` above therefore cannot be used.
  */
 function report(message: string): void {
-  // `writeSync`, not `write`: these carry whole sample dumps, and a partial
-  // write would drop part of one silently.
-  Deno.stderr.writeSync(
+  // Looped, because one `writeSync` may take only part of the buffer and these
+  // carry whole sample dumps; `writeAllSync` says the rest.
+  writeAllSync(
+    Deno.stderr,
     encoder.encode(`[topic-board-navigation] ${message}\n`),
   );
 }

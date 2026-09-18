@@ -33,7 +33,7 @@ import {
   topicTitle,
 } from "./topic-board-fixture.ts";
 import { BoardSession } from "./topic-board-session.ts";
-import { waitForSettledText } from "./cfc-browser-helpers.ts";
+import { waitForSettledText, writeAllSync } from "./cfc-browser-helpers.ts";
 import {
   formatTopicsSample,
   measureTopicsReads,
@@ -113,8 +113,9 @@ const encoder = new TextEncoder();
 const note = (message: string): void => {
   // Boards are seeded inside a bench body, where the JSON reporter captures
   // console output. Writing to the stream is what reaches the workflow's copy
-  // of stderr, and so `diagnostics.log`.
-  Deno.stderr.writeSync(encoder.encode(`[topic-board-scale] ${message}\n`));
+  // of stderr, and so `diagnostics.log`. Looped, because one `writeSync` may
+  // take only part of the buffer and these carry whole sample dumps.
+  writeAllSync(Deno.stderr, encoder.encode(`[topic-board-scale] ${message}\n`));
 };
 
 note(
