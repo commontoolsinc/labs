@@ -154,15 +154,15 @@ case
 instead derives a fresh DID from the creating handler's frame cause (per-user
 home-space input links + the durable per-event id), so the space is unique per
 user AND per creation event, stable across the cross-space-commit retry. The
-display name is therefore independent of the space identity: it flows only to
+display name is therefore independent of the space identity: it flows to
 `initialName`, which the profile shows until a name is stored in the profile's
-`name` cell. That cell is initialized statically so it keeps its identity — and
-the name saved in it — across releases of the profile pattern, and it is seeded
-at creation: the create handler queues a second step (`seedProfileName` in
-`profile-create.tsx`, addressed by the new entry's position in `profiles`)
-that stores the creation name through `setName`, the cell's owner-protected
-writer, once the profile is live, so `#profile` readers find the name in
-storage without running the profile. A profile renamed under
+`name` cell, and into that cell itself at creation. The cell is initialized
+statically so it keeps its identity — and the name saved in it — across
+releases of the profile pattern; the create handler queues a second step
+(`seedProfileName` in `profile-create.tsx`, addressed by the new entry's
+position in `profiles`) that stores the creation name through `setName`, the
+cell's owner-protected writer, once the profile's docs have loaded, so
+`#profile` readers find the name in storage without running the profile. A profile renamed under
 an earlier release, whose `name` cell was derived from `initialName`, loses
 that saved name once, at its first release under the static initializer, and
 keeps every name saved after. The home default pattern's `profile` link is

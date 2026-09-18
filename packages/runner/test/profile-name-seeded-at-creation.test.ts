@@ -87,9 +87,9 @@ describe("a profile's name is seeded at creation", () => {
     managerB = EmulatedStorageManager.connectTo(server, { as: signer });
   });
 
+  // Each runtime's `dispose()` closes its own manager; only the shared
+  // server is this hook's to close.
   afterEach(async () => {
-    await managerA?.close();
-    await managerB?.close();
     await server?.close();
   });
 

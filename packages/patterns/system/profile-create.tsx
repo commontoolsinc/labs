@@ -55,26 +55,6 @@ export type CreateProfileEvent = {
   target?: { value?: string };
 };
 
-// Appends a freshly-created profile (its own `inSpace` space) to the home
-// `profiles` list. The cross-space `inSpace` child materializes during the push;
-// the `.inSpace(...)` call opts the transaction into a multi-space commit (see
-// builder/pattern.ts `optIntoInSpaceMultiSpaceCommit` → runner
-// `enableCrossSpaceChildCommit`).
-//
-// CT-1650: the profile space is created via ANONYMOUS `inSpace()` — never
-// `inSpace(name)`. A named target derives its DID from
-// `fromPassphrase("common user").derive(name)` (createSession spaceName path),
-// i.e. the display NAME alone, so two different users picking the same profile
-// name — or one user creating two same-named profiles — collide into a single
-// shared space. That named path supports the legacy space names used during
-// development and nothing else, and is removed once those development-only
-// spaces have been migrated (docs/plans/random-space-identities.md).
-// The anonymous case instead derives the DID from this handler's
-// frame cause, which carries the creating user's per-home-space input links plus
-// the durable per-event id (runner.ts `createPatternFrame` cause): unique per
-// user AND per creation event, stable across the cross-space-commit retry. The
-// display name flows ONLY to `initialName` (editable later, independent of the
-// space identity). Existing profiles keep their already-baked concrete DID link.
 export type SeedProfileNameEvent = { name?: string; index?: number };
 
 // What the seed step needs of each profile in the list: the stored name (to
@@ -134,6 +114,26 @@ export const seedProfileName = handler<
   target.setName.send({ name });
 });
 
+// Appends a freshly-created profile (its own `inSpace` space) to the home
+// `profiles` list. The cross-space `inSpace` child materializes during the push;
+// the `.inSpace(...)` call opts the transaction into a multi-space commit (see
+// builder/pattern.ts `optIntoInSpaceMultiSpaceCommit` → runner
+// `enableCrossSpaceChildCommit`).
+//
+// CT-1650: the profile space is created via ANONYMOUS `inSpace()` — never
+// `inSpace(name)`. A named target derives its DID from
+// `fromPassphrase("common user").derive(name)` (createSession spaceName path),
+// i.e. the display NAME alone, so two different users picking the same profile
+// name — or one user creating two same-named profiles — collide into a single
+// shared space. That named path supports the legacy space names used during
+// development and nothing else, and is removed once those development-only
+// spaces have been migrated (docs/plans/random-space-identities.md).
+// The anonymous case instead derives the DID from this handler's
+// frame cause, which carries the creating user's per-home-space input links plus
+// the durable per-event id (runner.ts `createPatternFrame` cause): unique per
+// user AND per creation event, stable across the cross-space-commit retry. The
+// display name flows ONLY to `initialName` (editable later, independent of the
+// space identity). Existing profiles keep their already-baked concrete DID link.
 export const submitProfileCreation = handler<
   CreateProfileEvent,
   {
@@ -158,7 +158,14 @@ export const submitProfileCreation = handler<
     // Where the push lands; the seed step below addresses the profile by it.
     // Read as link cells (see `profileLinkListSchema`): a deep read collapses
     // to undefined when any entry lives in a space this runtime has not
-    // loaded, which every freshly created profile's does.
+    // loaded, which every freshly created profile's does; the link read does
+    // not. NOT bound as a value the runner would resolve first: a home whose
+    // list doc this replica has not loaded reads as undefined there, and the
+    // create then never runs ("did not run in 10 dispatches", measured in the
+    // shell for a fresh user). The bound: a list doc that is unloaded here
+    // reads as empty, the index is 0, and the seed step — which writes only
+    // where no name is stored — skips rather than miswrites; the profile then
+    // shows `initialName` until a name is saved.
     const index = ((profiles as any).asSchema(profileLinkListSchema()).get() ??
       []).length as number;
     profiles.push(
