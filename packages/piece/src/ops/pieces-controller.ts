@@ -277,10 +277,10 @@ export class PiecesController<T = unknown> {
        * it is the deployment's own, with this process's explicit
        * `EXPERIMENTAL_*` winning per flag (`experimentalOptionsForDeployedClient`).
        * A caller that had to know the posture before opening the session — a
-       * host that refuses a read ceiling under server execution up front, a
-       * test that states the arm it exercises — passes what it resolved, so
-       * the runtime runs the posture the caller checked rather than a second
-       * resolution that may differ from it.
+       * host that decides something on it, a test that states the arm it
+       * exercises — passes what it resolved, so the runtime runs the posture
+       * the caller checked rather than a second resolution that may differ
+       * from it.
        */
       experimental?: ExperimentalOptions;
 
@@ -348,7 +348,7 @@ export class PiecesController<T = unknown> {
     // alongside the server it talks to
     // (docs/development/EXPERIMENTAL_OPTIONS.md).
     // Constructed inside the cleanup scope: a runtime the constructor
-    // refuses (a read ceiling on a client under server execution, say)
+    // refuses (a malformed read ceiling, say)
     // still leaves the storage manager open, and the enabler state the
     // constructor claimed, unless the same teardown runs for it.
     let runtime: Runtime | undefined;

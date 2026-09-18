@@ -928,7 +928,9 @@ export interface BrowserWorkerPresetParams extends CoreParams {
    * The runtime-wide read ceiling for this worker's `db.query` reads
    * (`RuntimeOptions.cfcReadMaxConfidentiality`), from `InitializationData`:
    * a worker is one device's runtime, so a ceiling set here is per device
-   * by construction and never touches the space.
+   * by construction and never touches the space. Under server execution
+   * the worker's sessions declare it and the space server's runtime reads
+   * under it for every run served as one of them.
    */
   cfcReadMaxConfidentiality?: readonly CfcConfClause[];
 

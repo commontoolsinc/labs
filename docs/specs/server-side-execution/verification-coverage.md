@@ -10183,7 +10183,13 @@ supply; OW29/OW32/OW34 closed):
     constructor refusal is retired; what it refuses now is a manager
     that cannot carry the ceiling. Pinned: wire parse, registry and
     flag in `packages/memory/test/v2-session-read-ceiling.test.ts`;
-    the client capability gate and the late-declaration refusal in
+    the memory client re-declaring the ceiling on every reopen after a
+    dropped connection (the server takes it fresh per open, so a
+    reopen without it would read unbounded) and refusing, at every
+    open, a server without the flag, in
+    `packages/memory/test/v2-client-read-ceiling.test.ts`; the same
+    refusal through the remote session factory and the
+    late-declaration refusal in
     `packages/runner/test/memory-v2-remote-session.test.ts`; the
     constructor handoff and the effective-ceiling meet in
     `packages/runner/test/sqlite-runtime-read-ceiling.test.ts`; end
@@ -10203,7 +10209,17 @@ supply; OW29/OW32/OW34 closed):
     the session's — the same seam `RuntimeOptions.cfcReadMaxConfidentiality`'s
     doc names for the OFF arm, closed the same way (a pattern authored
     for a bounded run declares its query results per session; a
-    bounded client's own run refuses anything broader).
+    bounded client's own run refuses anything broader). A second
+    residual, fail-OPEN and therefore owed: the stamp reads the LIVE
+    session record, so a run served as a session whose record has
+    expired — an event a bounded client fired and then stayed
+    disconnected past the session's retention — finds no ceiling and
+    reads under the serving runtime's option alone, into that
+    session's instance. A detached session inside its retention keeps
+    its ceiling; past it the server no longer knows the session was
+    bounded. The candidate close is the server-assigned source this
+    seam exists for: a ceiling keyed by principal (or persisted with
+    the event's `firedAt` pair) rather than by a live session.
 
 ## 4. Standing rule
 

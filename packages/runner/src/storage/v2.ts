@@ -1652,6 +1652,7 @@ export class StorageManager implements IStorageManager {
     };
   }
 
+  /** See `IStorageManager.setSessionReadCeiling`. */
   setSessionReadCeiling(ceiling: SessionReadCeiling): void {
     if (this.#providers.size > 0) {
       throw new Error(

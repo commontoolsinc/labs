@@ -331,6 +331,7 @@ export class Client {
       openAuthFactory,
       signal,
       options.actingAs,
+      options.readCeiling,
     );
     this.#spaces.add(session);
     return session;
@@ -401,6 +402,21 @@ export class Client {
     auth?: SessionOpenAuth,
     holdings?: SessionHolding[],
   ): Promise<SessionOpenResult> {
+    // Every open passes through here — a first mount and each reopen after
+    // a dropped connection alike — so this is where a declared ceiling is
+    // held to the server it is declared to. A server that does not
+    // advertise `sessionReadCeiling` would accept the descriptor and serve
+    // every query unbounded.
+    if (
+      session.readCeiling !== undefined &&
+      this.serverFlags?.sessionReadCeiling !== true
+    ) {
+      throw protocolError(
+        "memory server does not record a session's read ceiling " +
+          "(`sessionReadCeiling` is not among its protocol flags), so a " +
+          "session declaring one cannot be bounded by it",
+      );
+    }
     const result = await this.request<SessionOpenResult>({
       type: "session.open",
       requestId: this.#nextRequestId(),
@@ -873,6 +889,7 @@ export class SpaceSession {
   readonly #openAuthFactory?: SessionOpenAuthFactory;
   readonly #routeSignal?: AbortSignal;
   readonly #actingAs?: "space-owner";
+  readonly #readCeiling?: SessionReadCeiling;
 
   constructor(
     client: Client,
@@ -883,11 +900,13 @@ export class SpaceSession {
     openAuthFactory?: SessionOpenAuthFactory,
     routeSignal?: AbortSignal,
     actingAs?: "space-owner",
+    readCeiling?: SessionReadCeiling,
   ) {
     this.#client = client;
     this.#openAuthFactory = openAuthFactory;
     this.#routeSignal = routeSignal;
     this.#actingAs = actingAs;
+    this.#readCeiling = readCeiling;
     this.#sessionId = sessionId;
     this.#sessionToken = sessionToken;
     this.#serverSeq = serverSeq;
@@ -1893,6 +1912,12 @@ export class SpaceSession {
       // The delegated READ binding survives a route replacement (OW31):
       // a reopen without it would silently drop to envelope-only READ.
       ...(this.#actingAs !== undefined ? { actingAs: this.#actingAs } : {}),
+      // The server takes a session's ceiling from the descriptor of its
+      // LAST open: a reopen without it would leave the session reading
+      // unbounded from the first dropped connection on.
+      ...(this.#readCeiling !== undefined
+        ? { readCeiling: this.#readCeiling }
+        : {}),
     };
     const auth = await runWithAbortSignal(
       this.#routeSignal,

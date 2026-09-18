@@ -538,20 +538,6 @@ export class RemoteSessionFactory implements SessionFactory {
       // only window this method has to check for itself is the one after the
       // mount resolves, below.
       client = await MemoryClient.connect({ transport, signal });
-      // A server that does not advertise `sessionReadCeiling` would accept
-      // the descriptor and serve every query unbounded: refused here, before
-      // the session opens, rather than discovered as rows the ceiling never
-      // withheld.
-      if (
-        mountOptions.readCeiling !== undefined &&
-        client.serverFlags?.sessionReadCeiling !== true
-      ) {
-        throw new Error(
-          "the memory server does not record a session's read ceiling " +
-            "(`sessionReadCeiling` is not among its protocol flags), so a " +
-            "session declaring one cannot be bounded by it",
-        );
-      }
       const closeForAbort = (): void => {
         void client?.close().catch(() => {});
       };
