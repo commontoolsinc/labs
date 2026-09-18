@@ -10,6 +10,13 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Piece upgrades from first principles](piece-upgrades.md) designs the state
+  half of changing a piece's source and data shape — a runtime-owned state
+  version with upgrade steps, a writer-version guard, contracts between pieces
+  checked at three strengths, capability narrowing made free, and a scoped
+  acknowledgment in place of the global override — and walks every kind of
+  break through it with its cost. Each decision is a numbered proposal for
+  Bernhard, Robin, Gideon, danfuzz, or Mike to confirm; nothing is implemented.
 - [Discovering Loom resources with wish](loom-resource-discovery.md) proposes
   publishing existing database and companion-cell references once per Loom
   environment, with a staged person-inbox migration and compiled integration
