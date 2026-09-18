@@ -8,11 +8,14 @@
  * format's own symbol, so nothing here can name the symbol to look for without
  * naming a format. Adding a primitive therefore means editing this file, and
  * the list is built to fail loudly when it has not been. Everything else here
- * that ranges over the classes is derived from that list, and the vocabularies
- * that range over them are in `interface.ts`.
+ * that ranges over the classes is derived from that list. The tag
+ * vocabularies that range over them are in `interface.ts`, and the schema
+ * `type` vocabulary is in `api.ts`.
  */
 
 import { backtickQuote } from "@commonfabric/utils/markdown";
+
+import type { FabricPrimitiveSchemaType } from "@/api.ts";
 
 import { FabricBytes } from "./FabricBytes.ts";
 import { FabricEpochDay } from "./FabricEpochDay.ts";
@@ -21,7 +24,6 @@ import { FabricHash } from "./FabricHash.ts";
 import { FabricKeyPair } from "./FabricKeyPair.ts";
 import { FabricRegExp } from "./FabricRegExp.ts";
 import { FabricUnavailable } from "./FabricUnavailable.ts";
-import type { FabricPrimitiveSchemaType } from "./interface.ts";
 
 export { FabricBytes } from "./FabricBytes.ts";
 export { FabricRegExp } from "./FabricRegExp.ts";

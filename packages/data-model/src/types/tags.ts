@@ -2,18 +2,13 @@
  * The tag vocabulary: the names a dispatch returns when asked what a value
  * already is. The dispatches themselves are in `tag-of.ts`. The tags the
  * primitive classes report are defined beside those classes, in
- * `fabric-primitives/interface.ts`, and are re-exported here as part of the
- * whole. That module is this one's only import, and it reaches no class, so a
- * class which reports a tag of its own can name the vocabulary without
- * reaching the dispatches, which recognize that class.
+ * `fabric-primitives/interface.ts`, and the tables here that include them take
+ * them from there. That module is this one's only import, and it imports
+ * nothing, so a class which reports a tag of its own can name its vocabulary
+ * without reaching the dispatches, which recognize that class.
  */
 
 import { FABRIC_PRIMITIVE_VALUE_TAGS } from "@/fabric-primitives/interface.ts";
-
-export {
-  FABRIC_PRIMITIVE_VALUE_TAGS,
-  type FabricPrimitiveValueTag,
-} from "@/fabric-primitives/interface.ts";
 
 /**
  * The tags of the non-fundamental JS classes (that is, neither plain object nor

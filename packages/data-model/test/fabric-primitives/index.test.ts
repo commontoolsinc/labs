@@ -1,25 +1,25 @@
 /**
  * What `fabric-primitives/index.ts` derives from its list of classes, and that
- * list's agreement with the vocabularies in `interface.ts`. Nothing here names
- * a class: each case ranges over `codecClasses()`, over one of those
- * vocabularies, or over the primitives the shared corpus holds, so a class
- * added to the package is covered without an edit here.
+ * list's agreement with the vocabularies that range over the classes. Nothing
+ * here names a class: each case ranges over `codecClasses()`, over one of
+ * those vocabularies, or over the primitives the shared corpus holds, so a
+ * class added to the package is covered without an edit here.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import {
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  type FabricPrimitiveSchemaType,
+  isFabricPrimitiveSchemaType,
+} from "@/api.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import {
   codecClasses,
   fabricPrimitiveClassOfSchemaType,
 } from "@/fabric-primitives/index.ts";
-import {
-  FABRIC_PRIMITIVE_CODEC_TYPE_TAGS,
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  type FabricPrimitiveSchemaType,
-  isFabricPrimitiveSchemaType,
-} from "@/fabric-primitives/interface.ts";
+import { FABRIC_PRIMITIVE_CODEC_TYPE_TAGS } from "@/fabric-primitives/interface.ts";
 import { FabricPrimitive } from "@/interface.ts";
 import { LAYER_CORPUS } from "../fabric-value-corpus.ts";
 

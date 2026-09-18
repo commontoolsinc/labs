@@ -44,6 +44,10 @@ import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { codecClasses } from "@/fabric-primitives/index.ts";
+import {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+} from "@/fabric-primitives/interface.ts";
 import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricUnavailable } from "@/fabric-primitives/FabricUnavailable.ts";
@@ -55,10 +59,8 @@ import {
 } from "@/interface.ts";
 import {
   type ConvertibleJsValueTag,
-  FABRIC_PRIMITIVE_VALUE_TAGS,
   FABRIC_VALUE_PLUS_TAGS,
   FABRIC_VALUE_TAGS,
-  type FabricPrimitiveValueTag,
   type FabricValuePlusTag,
   type FabricValueTag,
   isValidFabricConvertibleJsObject,

@@ -1,26 +1,20 @@
 /**
  * The vocabularies that range over the concrete primitive classes, one entry
- * per class in each: the tag a class reports to the `tagOf*()` dispatches, the
- * tag its codec writes to the wire, and the name it has in the schema `type`
- * vocabulary. They are nominally distinct, and an entry in one need not match
- * the class's entry in another. Adding a primitive means adding to each, and
- * they sit together so that one visit does it.
+ * per class in each: the tag a class reports to the `tagOf*()` dispatches, and
+ * the tag its codec writes to the wire. They are nominally distinct from each
+ * other and from the names the classes have in the schema `type` vocabulary,
+ * and a class's entry in one need not match its entry in another. Adding a
+ * primitive means adding to each, and they sit together so that one visit
+ * does it.
  *
- * The schema `type` vocabulary is defined in `api.ts` and re-exported here. A
+ * The schema `type` vocabulary is the one that is elsewhere, in `api.ts`. A
  * pattern compiles against that module, which can import nothing, and the
  * `FabricPrimitive` declaration there names the vocabulary's type.
  *
- * This module's one import is `api.ts`, which imports nothing, so that any
- * module can import this one without creating a circular dependency. The
- * classes themselves import it, which is why the list of them is in `index.ts`
- * and not here.
+ * This module imports nothing, so that any module can import it without
+ * creating a circular dependency. The classes themselves import it, which is
+ * why the list of them is in `index.ts` and not here.
  */
-
-export {
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  type FabricPrimitiveSchemaType,
-  isFabricPrimitiveSchemaType,
-} from "@/api.ts";
 
 /**
  * The tags a `FabricPrimitive` reports, one per primitive class this package

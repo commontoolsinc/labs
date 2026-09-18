@@ -10,18 +10,17 @@
  * The first two are one comparison of two unions, which cannot see a name
  * reported twice: two classes reporting one name add a single member to the
  * union between them. The third comparison is what catches that, and it is
- * what makes `fabricPrimitiveClassOfSchemaType()` a function of the name.
+ * what makes `fabricPrimitiveClassOfSchemaType()` a function of the name. It
+ * tells two classes apart by assignability, so two that are mutually
+ * assignable read as one. A class holding a `#private` member is assignable
+ * to no other, which covers every class with state.
  */
 
-import type { MustBeTrue, Same } from "@commonfabric/utils/types";
+import type { IsUnion, MustBeTrue, Same } from "@commonfabric/utils/types";
+
+import type { FabricPrimitiveSchemaType } from "@/api.ts";
 
 import type { FabricPrimitiveClass } from "./index.ts";
-import type { FabricPrimitiveSchemaType } from "./interface.ts";
-
-/** Whether `T` is a union of more than one member. */
-type IsUnion<T, Whole = T> = T extends unknown
-  ? ([Whole] extends [T] ? false : true)
-  : never;
 
 /** The members of `Classes` whose instances report `Name`. */
 type ClassesReporting<Classes, Name> = Extract<
