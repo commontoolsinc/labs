@@ -450,6 +450,80 @@ See `packages/patterns/examples/ui-variants-demo.tsx` for a full example.
 > `uiVariant()` helper for render paths outside `cf-render` is a planned
 > follow-up and does not exist yet.
 
+### Views a host draws itself
+
+A rendering is not the only thing a piece can offer. `[VIEWS]` is a single
+output key holding **named groups of facts and streams** for a host that draws
+with its own toolkit instead of rendering VDOM — a native application, say, or
+one built on a different renderer. It is a sibling concept to the variants
+above rather than a member of them: not a size, and not a shell slot.
+
+One key rather than one key per view is what keeps discovery cheap. A host
+reads `[VIEWS]` through a schema whose members are opaque and learns what is on
+offer in one round, before anything under it is derived; probing well-known
+names one at a time would make the common case slow.
+
+```tsx
+import {
+  handler,
+  NAME,
+  pattern,
+  type Stream,
+  UI,
+  VIEWS,
+  type Writable,
+} from "commonfabric";
+
+interface ThreadRow {
+  at: number;
+  title: string;
+}
+
+interface InboxView {
+  threads: ThreadRow[];
+  forQuery: string;
+  setSearch: Stream<{ query: string }>;
+}
+
+const setSearch = handler<{ query: string }, { query: Writable<string> }>(
+  ({ query }, state) => state.query.set(query),
+);
+
+export default pattern<
+  { threads: ThreadRow[]; query: Writable<string> },
+  { [NAME]: string; [VIEWS]: { inboxView: InboxView } }
+>((state) => ({
+  [NAME]: "Inbox",
+  // The floor, reading the same values a host would draw itself.
+  [UI]: <div>{state.query}</div>,
+  // Every offered group, under one key.
+  [VIEWS]: {
+    inboxView: {
+      threads: state.threads,
+      forQuery: state.query,
+      setSearch: setSearch(state),
+    },
+  },
+}));
+```
+
+`pattern()` types `[VIEWS]` as an object and no further: what a group holds is
+the pattern's to declare and its consumer's to demand through a schema. Two
+properties of a group follow from who draws it.
+
+- **`[UI]` stays the floor.** A host that knows none of the offered groups —
+  or holds a schema the value does not satisfy — renders `[UI]`, so a piece
+  that offers a group exports a complete `[UI]` as well.
+- **A group carries facts, not renderings.** A timestamp beside any label it
+  also offers, a count beside any "show 40 earlier", a named tint rather than a
+  colour. A host that formats in its own idiom needs the fact; one that cannot
+  still has the label.
+
+A group is named output like any other, so nothing here needs a new mechanism:
+TypeScript checks it, `resultSchema` carries it — streams and their payload
+schemas included — and a member declared for one host under design reaches no
+other host, because a reader receives only what its own demand declares.
+
 ### The piece context menu
 
 Right-clicking a rendered piece opens `cf-piece-menu` for it. **View source**
