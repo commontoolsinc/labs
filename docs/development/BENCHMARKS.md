@@ -483,10 +483,19 @@ run was started. `topics-browser-posture.ts` reads it from the deployment
 rather than from the benchmark process's own `EXPERIMENTAL_SERVER_EXECUTION`,
 which would label whatever it was told: the toolshed reports the posture it
 serves at on `/api/meta`, and the shell it serves states its own through the
-build define, read from `shellServerExecutionDefine` or from the define baked
-into the served bundle. The worker refuses to initialize when its resolved
-posture disagrees with the shell's declaration, so a page that loaded at all
-ran the posture its shell declared.
+build define. The worker refuses to initialize when its resolved posture
+disagrees with the shell's declaration, so a page that loaded at all ran the
+posture its shell declared.
+
+The shell's define has two possible statements and they are not
+interchangeable. The bundle served to the browser is the artifact the run
+loads; `shellServerExecutionDefine` on `/api/meta` describes the shell its own
+toolshed serves, which is the same artifact only when `FRONTEND_URL` and
+`API_URL` name one deployment. So both are read on every run, both are
+compared when both state a define, and a disagreement between them refuses.
+The toolshed's report settles the question alone only for a shell that
+toolshed serves; where another host serves it, that report describes a shell
+the browser never loads and the posture reads as undeclared.
 
 Reading a deployment has three outcomes. Where both halves state a posture and
 agree, that is the mode. Where both state one and disagree, reading refuses,

@@ -20,6 +20,16 @@
  * initialize when its resolved posture disagrees with that declaration, so a
  * page that loaded at all ran the posture its shell declared.
  *
+ * The shell's half itself has two possible statements, and they are not
+ * interchangeable. The bundle served to the browser is the artifact the run
+ * loads, so it states this run's posture. `/api/meta` states the posture of
+ * the shell its own toolshed serves, which is the same artifact only when the
+ * shell came from that toolshed — the two URLs are separate parameters
+ * because they can denote separate deployments. So the bundle is read
+ * whenever it can be, both statements are compared when both exist, and a
+ * disagreement refuses rather than picking one. Meta alone settles the
+ * question only for a shell served by the toolshed that reported it.
+ *
  * Reading a deployment has three outcomes, and no path labels a run from an
  * assumption. Where both halves are stated and agree, the posture is that
  * mode, carrying which statement the shell's half came from. Where both are
@@ -47,10 +57,16 @@ export type TopicsBrowserMode =
 
 /** Where the served shell's posture was read from. */
 export type ClientPostureSource =
-  /** `shellServerExecutionDefine`, which the toolshed reports of its shell. */
+  /**
+   * `shellServerExecutionDefine` alone, which the toolshed reports of its own
+   * shell. Only used where the shell is that toolshed's, and no bundle could
+   * be read to check it against.
+   */
   | "meta"
-  /** The build define baked into the served shell's bundle. */
-  | "bundle";
+  /** The build define baked into the served shell's bundle, alone. */
+  | "bundle"
+  /** Both, agreeing — the shell's own script and the toolshed's report. */
+  | "meta and bundle";
 
 /** A deployment whose two halves both state a posture, and agree on it. */
 export interface DeclaredTopicsBrowserPosture {
@@ -112,12 +128,22 @@ export interface PostureMeta {
   readonly shellServerExecutionDefine?: unknown;
 }
 
+/** What every {@link ServedBundle} says about where the shell came from. */
+interface ServedFrom {
+  /**
+   * Whether the shell was sought from the toolshed's own origin. When it was
+   * not, the two are separate deployments and `/api/meta` describes a shell
+   * the browser is not loading, so its define is no evidence about this run.
+   */
+  readonly servedByToolshed: boolean;
+}
+
 /** The served shell's entry script, or why it was not read. */
 export type ServedBundle =
   /** The script's text, as fetched from the shell being served. */
-  | { readonly kind: "read"; readonly source: string }
+  | (ServedFrom & { readonly kind: "read"; readonly source: string })
   /** No script could be read, with what the attempt came to. */
-  | { readonly kind: "unreachable"; readonly reason: string };
+  | (ServedFrom & { readonly kind: "unreachable"; readonly reason: string });
 
 /**
  * Matches the build define in a served shell's bundle. The bundler emits the
@@ -132,18 +158,25 @@ const BAKED_DEFINE =
  * the deployment runs: the mode where both halves state one and agree, and an
  * undeclared posture where the shell's half is stated nowhere.
  *
- * It settles the shell's half from the first of these that states it: the
- * `shellServerExecutionDefine` the toolshed reports, and the define baked into
- * a bundle that was read. A shell built without posture defines states
+ * The shell's half is settled from the define baked into a bundle that was
+ * read, from the `shellServerExecutionDefine` the toolshed reports, or from
+ * both where both state one and agree. Meta is used alone only when the
+ * bundle carries `servedByToolshed`, since otherwise it describes a shell
+ * this run does not load. A shell built without posture defines states
  * neither, which is an ordinary configuration rather than a fault.
  *
  * @throws Error when the toolshed reports no resolved `serverExecution`, when
- * a statement of the posture is not a boolean spelling, or when the two halves
- * disagree.
+ * a statement of the posture is not a boolean spelling, when the toolshed's
+ * report and the served bundle disagree, or when the shell's half and the
+ * served half disagree.
  */
 export function topicsBrowserPostureOf(
   meta: PostureMeta,
-  bundle: ServedBundle = { kind: "unreachable", reason: "none was fetched" },
+  bundle: ServedBundle = {
+    kind: "unreachable",
+    reason: "none was fetched",
+    servedByToolshed: true,
+  },
 ): TopicsBrowserPosture {
   const served = meta.experimental?.serverExecution;
   if (typeof served !== "boolean") {
@@ -153,16 +186,8 @@ export function topicsBrowserPostureOf(
     );
   }
   const stated = clientPosture(meta, bundle);
-  if (stated === undefined) {
-    return {
-      declared: false,
-      served,
-      reason: bundle.kind === "unreachable"
-        ? `the toolshed names no baked define and no served shell could be ` +
-          `read (${bundle.reason})`
-        : "the toolshed names no baked define and the served shell's entry " +
-          "script carries none either",
-    };
+  if (stated.kind === "unstated") {
+    return { declared: false, served, reason: stated.reason };
   }
   const { client, clientFrom } = stated;
   if (client !== served) {
@@ -184,23 +209,65 @@ export function topicsBrowserPostureOf(
 
 /**
  * Helper for {@link topicsBrowserPostureOf}, which returns the posture the
- * served shell runs and the statement it was read from, or `undefined` where
- * neither statement names one.
+ * served shell runs and the statements it was read from, or `undefined` where
+ * nothing states it.
  *
- * @throws Error when a statement it reads is neither `true` nor `false`.
+ * The bundle is the script the browser loads, so it states the posture of the
+ * run itself. `/api/meta` states the posture of the shell its own toolshed
+ * serves, which is the same artifact only when the shell came from that
+ * toolshed; where the two are separate deployments, meta alone says nothing
+ * about this run.
+ *
+ * @throws Error when a statement it reads is neither `true` nor `false`, and
+ * when the two statements disagree.
  */
 function clientPosture(
   meta: PostureMeta,
   bundle: ServedBundle,
-): { client: boolean; clientFrom: ClientPostureSource } | undefined {
-  const declared = meta.shellServerExecutionDefine;
-  if (declared !== undefined && declared !== null) {
-    return { client: booleanNamed(declared, "meta"), clientFrom: "meta" };
+):
+  | { kind: "stated"; client: boolean; clientFrom: ClientPostureSource }
+  | { kind: "unstated"; reason: string } {
+  const reported = meta.shellServerExecutionDefine;
+  const fromMeta = reported === undefined || reported === null
+    ? undefined
+    : booleanNamed(reported, "meta");
+  const baked = bundle.kind === "read"
+    ? BAKED_DEFINE.exec(bundle.source)
+    : null;
+  const fromBundle = baked === null
+    ? undefined
+    : booleanNamed(baked[1], "bundle");
+
+  if (fromMeta !== undefined && fromBundle !== undefined) {
+    if (fromMeta !== fromBundle) {
+      throw new Error(
+        `The toolshed reports its shell baked \`${fromMeta}\` while the shell ` +
+          `actually served carries \`${fromBundle}\`. The two describe ` +
+          "different artifacts, so neither states what this run loaded.",
+      );
+    }
+    return {
+      kind: "stated",
+      client: fromBundle,
+      clientFrom: "meta and bundle",
+    };
   }
-  if (bundle.kind === "unreachable") return undefined;
-  const baked = BAKED_DEFINE.exec(bundle.source);
-  if (baked === null) return undefined;
-  return { client: booleanNamed(baked[1], "bundle"), clientFrom: "bundle" };
+  if (fromBundle !== undefined) {
+    return { kind: "stated", client: fromBundle, clientFrom: "bundle" };
+  }
+  if (fromMeta !== undefined && bundle.servedByToolshed) {
+    return { kind: "stated", client: fromMeta, clientFrom: "meta" };
+  }
+  const shell = bundle.kind === "unreachable"
+    ? `no served shell could be read (${bundle.reason})`
+    : "the served shell's entry script carries no define";
+  return {
+    kind: "unstated",
+    reason: fromMeta === undefined
+      ? `the toolshed names no baked define and ${shell}`
+      : "the toolshed names a baked define for its own shell, but another " +
+        `deployment serves the shell this run loads, and ${shell}`,
+  };
 }
 
 /**
@@ -220,10 +287,12 @@ function booleanNamed(value: unknown, from: ClientPostureSource): boolean {
 
 /**
  * Returns what the deployment at `apiUrl`, serving the shell at
- * `frontendUrl`, says about the posture it runs, by reading `/api/meta` and,
- * where that names no baked define, the served shell's entry script. A
- * deployment that states its shell's posture in neither place reads as
- * undeclared; a caller that needs a declared one uses
+ * `frontendUrl`, says about the posture it runs, by reading `/api/meta` and
+ * the served shell's entry script. Both are read every time: the toolshed's
+ * report describes its own shell, so where `frontendUrl` is a separate
+ * deployment only the bundle describes what the browser loads. A deployment
+ * that states its shell's posture in neither place reads as undeclared; a
+ * caller that needs a declared one uses
  * {@link readDeclaredTopicsBrowserPosture} instead.
  *
  * @throws Error when `/api/meta` cannot be read, and as
@@ -241,19 +310,22 @@ export async function readTopicsBrowserPosture(
     );
   }
   const meta: PostureMeta = await response.json();
-  if (
-    meta.shellServerExecutionDefine !== undefined &&
-    meta.shellServerExecutionDefine !== null
-  ) {
-    return topicsBrowserPostureOf(meta);
-  }
+  // The shell is fetched even when `/api/meta` names a define, because that
+  // define describes the shell the toolshed itself serves. Where `frontendUrl`
+  // is a separate deployment, the browser loads a different artifact, and
+  // reading meta alone would label this run from that other one.
   const script = new URL("scripts/index.js", frontendUrl);
+  const servedByToolshed = new URL("api/meta", apiUrl).origin === script.origin;
   const bundle = await fetch(script);
   return topicsBrowserPostureOf(
     meta,
     bundle.ok
-      ? { kind: "read", source: await bundle.text() }
-      : { kind: "unreachable", reason: `\`${script}\` gave ${bundle.status}` },
+      ? { kind: "read", source: await bundle.text(), servedByToolshed }
+      : {
+        kind: "unreachable",
+        reason: `\`${script}\` gave ${bundle.status}`,
+        servedByToolshed,
+      },
   );
 }
 
