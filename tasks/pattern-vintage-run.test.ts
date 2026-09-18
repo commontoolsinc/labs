@@ -743,11 +743,11 @@ describe("the vintage gate, end to end", () => {
   });
 
   it("credits the accepted drop that forgave a loss, and passes", async () => {
-    // The forgiven half of the moved-key case above. An entry covering the key
-    // that moved retires the finding, and the run reports which
-    // `(pattern, path)` pair did the forgiving — `pattern-vintage` fails an
-    // entry that forgave nothing anywhere, so an entry that credits itself
-    // here is what keeps the exemption list judgeable.
+    // The forgiven half of the moved-key case above, over one capture so that
+    // the loss the entry forgives is the loss this test watched happen. The
+    // run reports which `(pattern, path)` pair did the forgiving:
+    // `pattern-vintage` fails an entry that forgave nothing anywhere, so an
+    // entry crediting itself is what keeps the exemption list judgeable.
 
     await captureMissing(
       roots,
@@ -755,20 +755,22 @@ describe("the vintage gate, end to end", () => {
       new Date("2026-07-29T12:00:00.000Z"),
     );
     await setSource(MOVED_KEY);
+    const entry = {
+      pattern: KEY,
+      paths: ["items"],
+      capturedThrough: "2026-07-29T12-00-00.000Z",
+      reason: "the moved key this suite writes on purpose",
+      record: "docs/history/vintage-gate-subject-moved-key.md",
+    };
 
-    const { stranded, failures, dropsApplied } = await replayAll(roots, {
-      acceptedDrops: [{
-        pattern: KEY,
-        paths: ["items"],
-        capturedThrough: "2026-07-29T12-00-00.000Z",
-        reason: "the moved key this suite writes on purpose",
-        record: "docs/history/vintage-gate-subject-moved-key.md",
-      }],
-    });
+    const unforgiven = await replayAll(roots);
+    const forgiven = await replayAll(roots, { acceptedDrops: [entry] });
 
-    expect(failures).toEqual([]);
-    expect(stranded).toBe(0);
-    expect([...dropsApplied]).toEqual([`${KEY} items`]);
+    expect(unforgiven.stranded).toBe(1);
+    expect(unforgiven.dropsApplied.size).toBe(0);
+    expect(forgiven.failures).toEqual([]);
+    expect(forgiven.stranded).toBe(0);
+    expect([...forgiven.dropsApplied]).toEqual([`${KEY} items`]);
   });
 
   it("reports a vintage whose pattern no longer exists", async () => {

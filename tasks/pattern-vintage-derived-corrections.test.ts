@@ -47,16 +47,19 @@ describe("pattern-vintage-derived-corrections", () => {
     // `unused()` reports.
 
     const dir = await Deno.makeTempDir({ prefix: "derived-corrections-" });
-    const vintage = await openFileBackedRuntime(
-      await Identity.fromPassphrase("pattern vintage fixture"),
-      dir,
-      fixture.path,
-    );
+    // The open is inside the try, because restoring the fixture is a way it
+    // throws and the temp copy it made by then is 3.5 MiB.
+    let vintage: Awaited<ReturnType<typeof openFileBackedRuntime>> | undefined;
     let entries: readonly VintageManifestEntry[];
     try {
+      vintage = await openFileBackedRuntime(
+        await Identity.fromPassphrase("pattern vintage fixture"),
+        dir,
+        fixture.path,
+      );
       entries = (await readVintageManifest(vintage))?.entries ?? [];
     } finally {
-      await vintage.dispose().catch(() => {});
+      await vintage?.dispose().catch(() => {});
       await Deno.remove(dir, { recursive: true }).catch(() => {});
     }
     expect(entries.filter((held) => held.cellId === entry.cellId))
