@@ -118,9 +118,9 @@ export type Immutable<T> = T extends ReadonlyArray<infer U>
   : T;
 
 /**
- * Whether `T` is a union of more than one member: `true` for one, and `false`
- * for a single type. Members are told apart by assignability, which bounds
- * that in three ways. A union whose members are all mutually assignable,
+ * Whether `T` is a union of more than one member: `true` for such a union, and
+ * `false` for a single type. Members are told apart by assignability, which
+ * bounds that in three ways. A union whose members are all mutually assignable,
  * `Error | TypeError` among them, yields `false`. A union with a member that
  * every other member is assignable to, and not the other way round, yields
  * `boolean`: that member reports `false` and the rest `true`. And `never`, the
