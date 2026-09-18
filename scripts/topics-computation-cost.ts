@@ -35,7 +35,9 @@ import {
 } from "../packages/patterns/integration/topics-cost-cases.ts";
 import {
   buildTopicsFixture,
-  TOPICS_FIXTURE_EXPERIMENTAL_OPTIONS,
+  DEFAULT_TOPICS_FIXTURE_MODE,
+  TOPICS_FIXTURE_MODES,
+  type TopicsFixtureMode,
 } from "../packages/patterns/integration/topics-headless-fixture.ts";
 import {
   assignedLimitsNotExceeded,
@@ -62,6 +64,9 @@ const REPOSITORY_ROOT = fromFileUrl(new URL("..", import.meta.url));
 
 /** What the command line selects for a run. */
 interface RunOptions {
+  /** The experimental posture every case's runtime is given. */
+  readonly mode: TopicsFixtureMode;
+
   /** How many rounds of every selected case to run. */
   readonly repeat: number;
 
@@ -103,9 +108,10 @@ type CaseOutcome =
   };
 
 /**
- * Runs every case `options` selects, in rounds, writing the environment, each
- * sample, each limit, and a completion record as JSON lines. A `board` case
- * starts no process: its sample records that it is not measured, and why.
+ * Runs every case `options` selects, in rounds, under the mode it names,
+ * writing the environment, each sample, each limit, and a completion record as
+ * JSON lines. A `board` case starts no process: its sample records the run's
+ * mode, that it is not measured, and why.
  *
  * @throws Error when no case is selected, or when a case fails other than by
  * exhausting its process's heap.
@@ -127,7 +133,8 @@ async function runProbe(options: RunOptions): Promise<void> {
       target: Deno.build.target,
     },
     processors: navigator.hardwareConcurrency,
-    experimental: TOPICS_FIXTURE_EXPERIMENTAL_OPTIONS,
+    mode: options.mode,
+    experimental: TOPICS_FIXTURE_MODES[options.mode],
     arguments: Deno.args,
     childV8Flags: v8Flags,
     repeat: options.repeat,
@@ -146,6 +153,7 @@ async function runProbe(options: RunOptions): Promise<void> {
         emit({
           kind: "sample",
           round,
+          mode: options.mode,
           ...caseRecord(probeCase, buildTopicsFixture(probeCase.options)),
           measured: false,
           reason: BOARD_NOT_MEASURED,
@@ -155,7 +163,7 @@ async function runProbe(options: RunOptions): Promise<void> {
       }
       if (size >= (limits.get(series) ?? Infinity)) continue;
       console.error(`round ${round}: ${id}`);
-      const outcome = await runCase(probeCase, v8Flags);
+      const outcome = await runCase(probeCase, v8Flags, options.mode);
       if (outcome.kind === "sample") {
         emit({ kind: "sample", round, ...outcome.sample });
         samples++;
@@ -169,6 +177,7 @@ async function runProbe(options: RunOptions): Promise<void> {
       emit({
         kind: "limit",
         round,
+        mode: options.mode,
         case: id,
         series,
         size,
@@ -230,9 +239,9 @@ async function gitState(): Promise<{ revision: string; dirty: boolean }> {
 
 /**
  * Runs `probeCase` in a child process started with `v8Flags`, under the
- * regression variant `variant` when one is named, forwarding everything the
- * child prints to stderr, and returns its sample, or the limit its process
- * reached by exhausting its heap.
+ * posture `mode` names and the regression variant `variant` when one is named,
+ * forwarding everything the child prints to stderr, and returns its sample, or
+ * the limit its process reached by exhausting its heap.
  *
  * @throws Error when the child fails other than by exhausting its heap, or
  * exits successfully without writing its sample.
@@ -240,6 +249,7 @@ async function gitState(): Promise<{ revision: string; dirty: boolean }> {
 async function runCase(
   probeCase: ProbeCase,
   v8Flags: readonly string[],
+  mode: TopicsFixtureMode,
   variant?: ReadBudgetVariantName,
 ): Promise<CaseOutcome> {
   const sampleFile = await Deno.makeTempFile({
@@ -256,6 +266,7 @@ async function runCase(
         `--v8-flags=${v8Flags.join(",")}`,
         fromFileUrl(import.meta.url),
         `--case=${probeCase.id}`,
+        `--mode=${mode}`,
         `--sample-file=${sampleFile}`,
         ...(variant === undefined ? [] : [`--variant=${variant}`]),
       ],
@@ -327,15 +338,17 @@ async function forwardToStderr(
 //
 
 /**
- * Measures `probeCase`, under the regression variant `variant` when one is
- * named, and writes its sample to `sampleFile`: the case, the heap limit the
- * process ran under, and a record for each phase.
+ * Measures `probeCase` under the posture `mode` names, and the regression
+ * variant `variant` when one is named, and writes its sample to `sampleFile`:
+ * the case, the posture its runtimes reported running under, the heap limit
+ * the process ran under, and a record for each phase.
  *
  * @throws Error as {@link measureCasePhases} does.
  */
 async function measureCase(
   probeCase: ProbeCase,
   sampleFile: string,
+  mode: TopicsFixtureMode,
   variant?: ReadBudgetVariantName,
 ): Promise<void> {
   const heapSizeLimitBytes = getHeapStatistics().heap_size_limit;
@@ -343,7 +356,8 @@ async function measureCase(
   // heap this process had even when the case never finishes. The sample
   // replaces it.
   await Deno.writeTextFile(sampleFile, JSON.stringify({ heapSizeLimitBytes }));
-  const { fixture, phases } = await measureCasePhases(probeCase, {
+  const measured = await measureCasePhases(probeCase, {
+    mode,
     progress: (line) => console.error(line),
     variant: variant === undefined
       ? undefined
@@ -353,10 +367,11 @@ async function measureCase(
     sampleFile,
     JSON.stringify({
       kind: "sample",
-      ...caseRecord(probeCase, fixture),
+      mode: measured.mode,
+      ...caseRecord(probeCase, measured.fixture),
       measured: true,
       heapSizeLimitBytes,
-      phases,
+      phases: measured.phases,
     }),
   );
 }
@@ -390,7 +405,11 @@ async function deriveLimits(v8Flags: readonly string[]): Promise<void> {
   for (let round = 1; round <= DERIVATION_ROUNDS; round++) {
     for (const id of ids) {
       console.error(`derivation round ${round}: ${id}`);
-      const outcome = await runCase(caseNamed(id), v8Flags);
+      const outcome = await runCase(
+        caseNamed(id),
+        v8Flags,
+        DEFAULT_TOPICS_FIXTURE_MODE,
+      );
       if (outcome.kind === "limit") {
         throw new Error(
           `Case \`${id}\` exhausted its heap: ${outcome.message}`,
@@ -475,7 +494,12 @@ async function deriveControls(
     const probeCase = caseNamed(id);
     for (const variant of variantsAssignedTo(probeCase)) {
       console.error(`control: ${id} under \`${variant}\``);
-      const outcome = await runCase(probeCase, v8Flags, variant);
+      const outcome = await runCase(
+        probeCase,
+        v8Flags,
+        DEFAULT_TOPICS_FIXTURE_MODE,
+        variant,
+      );
       if (outcome.kind === "limit") {
         throw new Error(
           `Case \`${id}\` exhausted its heap under the \`${variant}\` ` +
@@ -532,6 +556,25 @@ function variantNamed(value?: string): ReadBudgetVariantName | undefined {
 }
 
 /**
+ * Helper for {@link main}, which returns `value` as the name of a measurement
+ * mode, and the default mode when it is `undefined`.
+ *
+ * @throws Error when `value` names no mode.
+ */
+function modeNamed(value?: string): TopicsFixtureMode {
+  if (value === undefined) return DEFAULT_TOPICS_FIXTURE_MODE;
+  if (!Object.hasOwn(TOPICS_FIXTURE_MODES, value)) {
+    const names = Object.keys(TOPICS_FIXTURE_MODES)
+      .map((name) => `\`${name}\``)
+      .join(", ");
+    throw new Error(
+      `No mode is named \`${value}\`. The modes are ${names}.`,
+    );
+  }
+  return value as TopicsFixtureMode;
+}
+
+/**
  * Helper for {@link main}, which returns `value` as a positive integer.
  *
  * @throws RangeError when `value` is not one.
@@ -545,9 +588,9 @@ function positiveInteger(name: string, value: string): number {
 }
 
 /**
- * Runs the probe, or, given `--case`, measures that one case as a child of a
- * run, under the variant `--variant` names when it is given, or, given
- * `--derive-limits`, derives the read-budget limits.
+ * Runs the probe under the mode `--mode` names, or, given `--case`, measures
+ * that one case as a child of a run, under the variant `--variant` names when
+ * it is given, or, given `--derive-limits`, derives the read-budget limits.
  *
  * @throws Error for an argument the probe does not take.
  */
@@ -557,6 +600,7 @@ async function main(): Promise<void> {
     "case",
     "filter",
     "max-old-space-size",
+    "mode",
     "repeat",
     "sample-file",
     "variant",
@@ -597,6 +641,7 @@ async function main(): Promise<void> {
     await measureCase(
       caseNamed(args.case),
       args["sample-file"],
+      modeNamed(args.mode),
       variantNamed(args.variant),
     );
     return;
@@ -605,6 +650,7 @@ async function main(): Promise<void> {
     throw new Error("`--variant` needs `--case`.");
   }
   await runProbe({
+    mode: modeNamed(args.mode),
     repeat: args.repeat === undefined
       ? 1
       : positiveInteger("repeat", args.repeat),

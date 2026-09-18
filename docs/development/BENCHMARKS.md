@@ -1001,9 +1001,35 @@ The options select what runs:
   back.
 - `--max-old-space-size=<megabytes>` sets the heap each case's process runs
   under.
+- `--mode=<name>` runs every case under that measurement mode, which defaults
+  to `lazy-materialization-on`. [The modes](#the-modes) below list them.
 - `--derive-limits` runs the read-budget cases instead and prints their limits,
   as [the read budget](#the-read-budget) describes. It takes no other option
-  but `--max-old-space-size`.
+  but `--max-old-space-size`, so the limits are derived under the default mode.
+
+### The modes
+
+A mode is an experimental posture the run's runtimes are given, and every
+record the run writes is labeled with it, so a result file says which semantics
+produced it without a reader consulting where the file sits.
+`TOPICS_FIXTURE_MODES` in the fixture holds them:
+
+- `lazy-materialization-on` pins `lazyMaterialization` on, which is the posture
+  a runtime takes by default.
+- `lazy-materialization-off` pins it off, so that a lift's body reads the whole
+  of what its schema selects rather than the paths it touches.
+
+Both pin `serverExecution` off. A measurement's runtime runs over an emulated
+storage manager in one process, with no memory server and no serving loop,
+where the ON posture needs a toolshed carrying an `ExecutorHost` over its
+memory server; see
+[`serverExecution`](EXPERIMENTAL_OPTIONS.md#serverexecution). Server execution
+is measured in the browser tier, which has a toolshed to serve.
+
+A measured case's label comes from the flags its runtime reports back once it
+has resolved what it was given, not from the option asked for, and a runtime
+whose resolved flags are not the ones the mode names fails the case. A `board`
+case starts no runtime, so its sample carries the run's mode.
 
 ### The heap the 512-topic cases need
 
@@ -1126,19 +1152,20 @@ everything a case's process prints.
 
 - The first line has the `kind` `environment`: the git revision and whether the
   tree is dirty, the Deno, V8, and TypeScript versions, the platform, the
-  processor count, the experimental options the fixture pins, the arguments, the
-  V8 flags each case's process starts with, the `repeat` count, and the selected
-  case IDs.
-- A `sample` line is one case in one `round`: the case, its `family` (`pivot` or
-  `thread`), its series, the `size` its series scales, its `workload`, the
-  fixture's options with its mention count, the `focusTopic` and its
-  `focusMentioners` count, and `demandedActions`, how many actions of each lift
-  the workload starts. A measured sample adds `measured: true`, the heap limit
-  its process ran under, and a record per phase; a `board` sample adds
+  processor count, the `mode` the run was given and the experimental options
+  that mode pins, the arguments, the V8 flags each case's process starts with,
+  the `repeat` count, and the selected case IDs.
+- A `sample` line is one case in one `round`: its `mode`, the case, its `family`
+  (`pivot` or `thread`), its series, the `size` its series scales, its
+  `workload`, the fixture's options with its mention count, the `focusTopic` and
+  its `focusMentioners` count, and `demandedActions`, how many actions of each
+  lift the workload starts. A measured sample adds `measured: true`, the heap
+  limit its process ran under, and a record per phase; a `board` sample adds
   `measured: false` and the `reason` instead.
 - A `limit` line records a case whose process exhausted its heap, which the
   probe recognizes by V8's out-of-memory message on the process's stderr. It
-  names the case, its series (the ID with the scaled count written as `*`), the
+  names the run's `mode`, the case, its series (the ID with the scaled count
+  written as `*`), the
   `size` that failed, `largestBuilt` (the largest smaller size of the series
   with a sample, or `null`), the heap limit the process ran under, how long it
   ran, the signal or exit code that ended it, and the out-of-memory message. No
