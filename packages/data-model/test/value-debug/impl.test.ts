@@ -73,13 +73,13 @@ describe("impl", () => {
       });
 
       for (const len of [10, 25, 100]) {
-        it("renders the full text when `maxLength` fits the whole thing", () => {
+        it(`renders the full text when a \`maxLength\` of ${len} fits the whole thing`, () => {
           const item = ["xy", NaN];
           const expected = '["xy",NaN]'; // Note: Length 10.
           expect(toCompactDebugString(item, { maxLength: len })).toBe(expected);
         });
 
-        it("truncates to `maxLength` when it is smaller than the whole rendered length", () => {
+        it(`truncates to a \`maxLength\` of ${len} when it is smaller than the whole rendered length`, () => {
           const largeString = "This is a very large string! ".repeat(40);
           const item = { a: 123, b: 456, c: 789, d: largeString };
           const whole = toCompactDebugString(item);
