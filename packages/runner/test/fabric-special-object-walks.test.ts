@@ -45,7 +45,7 @@ import {
   FabricBytes,
   fabricPrimitiveClassesByName,
 } from "@commonfabric/data-model/fabric-primitives";
-import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@commonfabric/data-model/fabric-primitives/examples-for-testing-only";
+import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@commonfabric/data-model/fabric-primitives/for-testing-only";
 import {
   fabricAwareEqual,
   type FabricSpecialObject,

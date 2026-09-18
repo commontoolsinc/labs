@@ -43,10 +43,10 @@ import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
-import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@/fabric-primitives/examples-for-testing-only.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@/fabric-primitives/for-testing-only.ts";
 import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
 import {
   type FabricConvertibleJsValue,
