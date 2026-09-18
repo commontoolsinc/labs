@@ -197,10 +197,10 @@ interface TopicsSampleBase {
   readonly label: string;
 
   /**
-   * The server-execution posture the deployment under measurement ran, and
-   * where its client half was read from — which a sample prints, so that a
-   * posture assumed from the first-party default never reads the same as one
-   * the deployment reported.
+   * What the deployment under measurement says about the posture it ran, and
+   * where the shell's half of that was read from. A sample prints both, and
+   * prints a deployment that declares no posture as `posture undeclared`
+   * rather than as a mode, so no reader takes it for a measured one.
    */
   readonly posture: TopicsBrowserPosture;
 
@@ -624,9 +624,11 @@ export function formatTopicsSample(
 ): string[] {
   const { before, after } = sample.graph;
   const lines = [
-    `${sample.label} [${sample.posture.mode} via ${sample.posture.clientFrom}]: ${
-      sample.elapsedMs.toFixed(0)
-    }ms, read accounting ${
+    `${sample.label} [${
+      sample.posture.declared
+        ? `${sample.posture.mode} via ${sample.posture.clientFrom}`
+        : "posture undeclared"
+    }]: ${sample.elapsedMs.toFixed(0)}ms, read accounting ${
       sample.readAccounting ? "on" : "off"
     }; graph ${before.nodes} -> ${after.nodes} nodes, ${before.edges} -> ${after.edges} edges`,
   ];

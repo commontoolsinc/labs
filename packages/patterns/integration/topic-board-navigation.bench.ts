@@ -75,8 +75,8 @@ import {
   type TopicsProgram,
 } from "./topics-browser-measurement.ts";
 import {
-  readTopicsBrowserPosture,
-  type TopicsBrowserPosture,
+  type DeclaredTopicsBrowserPosture,
+  readDeclaredTopicsBrowserPosture,
 } from "./topics-browser-posture.ts";
 import { waitForPieceView } from "./topics-navigation-helpers.ts";
 
@@ -321,11 +321,15 @@ function topicsProgram(): Promise<TopicsProgram> {
  * sizes are all skipped asks it nothing, and read once so that every sample of
  * a run carries the same statement of what produced it.
  */
-let reading: Promise<TopicsBrowserPosture> | undefined;
+let reading: Promise<DeclaredTopicsBrowserPosture> | undefined;
 
-/** Returns the deployment's posture, reading it on first use. */
-function benchPosture(): Promise<TopicsBrowserPosture> {
-  reading ??= readTopicsBrowserPosture(env.API_URL, env.FRONTEND_URL);
+/** Returns the deployment's declared posture, reading it on first use. */
+function benchPosture(): Promise<DeclaredTopicsBrowserPosture> {
+  reading ??= readDeclaredTopicsBrowserPosture(
+    env.API_URL,
+    env.FRONTEND_URL,
+    "This benchmark",
+  );
   return reading;
 }
 

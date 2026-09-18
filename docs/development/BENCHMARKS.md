@@ -488,18 +488,26 @@ into the served bundle. The worker refuses to initialize when its resolved
 posture disagrees with the shell's declaration, so a page that loaded at all
 ran the posture its shell declared.
 
-No path labels a run from an assumption. A deployment that states its shell's
-posture in neither place — a bundle carrying no define, or no bundle that can
-be read — is refused rather than labeled from the first-party default, a
-constant compiled into the benchmark process rather than something the
-deployment said. Refusing costs a benchmark nothing, since a deployment with no
-readable shell has none to drive either.
+Reading a deployment has three outcomes. Where both halves state a posture and
+agree, that is the mode. Where both state one and disagree, reading refuses,
+because a client and a server on opposite postures exercise neither. Where the
+deployment states the shell's half nowhere — a bundle with no define, or no
+bundle that can be read — the posture is `undeclared`: a recorded fact about
+the deployment, never the first-party default, which is a constant compiled
+into the benchmark process rather than something the deployment said. So no
+path labels a run from an assumption.
 
-A run whose two halves disagree is refused as well, because a client and a
-server on opposite postures exercise neither. A source-run toolshed given the
-ON flag is one such case where it also serves a shell built at the opposite
-posture; serving no readable shell at all, it is refused by the rule above
-instead.
+Whether `undeclared` is usable belongs to the caller, because strictness is a
+property of what a measurement is for. A benchmark comparing two postures needs
+a declared one and reads through `readDeclaredTopicsBrowserPosture()`, which
+refuses the rest; the Benchmarks workflow builds its toolshed binary with
+`EXPERIMENTAL_SERVER_EXECUTION` set, so the shell it serves carries a define
+and the read succeeds. A test exercising these helpers does not care what
+posture it ran under, reads through `readTopicsBrowserPosture()`, and carries
+whatever it finds into its samples; the pattern-integration lane serves a shell
+built with no posture defines, which is an ordinary configuration rather than a
+fault. A sample taken under an undeclared posture prints `[posture undeclared]`
+rather than a mode, so it cannot later be read as a measurement of either.
 
 ### What a sample records
 
