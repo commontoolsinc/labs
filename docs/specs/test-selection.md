@@ -437,9 +437,9 @@ one identity's runs go in one lane and one observation beats none. Down
 to once and never to nothing.
 
 A plan says what a suite costs it, as well as what a test does. A lane
-pays a suite's overhead, one unit of it, and its capabilities' setup
-before it runs anything of that suite, and that charge is the same for
-every identity the suite has. Where it alone passes what a lane holding
+pays a suite's overhead, what one of its units costs to open, and its
+capabilities' setup before it runs anything of that suite, and that
+charge is the same for every identity the suite has. Where it alone passes what a lane holding
 two things may take, nothing can share a lane with one of the suite's
 identities, so the suite takes a whole lane for each one it places; where
 it passes what a lane is killed at, no lane can hold the suite and every

@@ -82,11 +82,16 @@ packed, and it is what is counted here.
 It also names any suite a lane cannot fill around: one whose overhead,
 per-unit charge and capability setup together pass a lane's budget before
 it runs anything. Such a suite takes a whole lane for each identity it
-places, and one past the hard bound as well places none at all. That line
-is what answers "why is a lane holding one test?" and "why did none of
-this suite run?", and the identities of a suite past the bound are left
-out of the list beneath it, since every one of them is past it by the
-suite's charge and by nothing about itself.
+can still place, and one where no lane can hold any of them places none
+at all. That line is what answers "why is a lane holding one test?" and
+"why did none of this suite run?".
+
+A suite that holds nothing has its identities left out of the list
+beneath it, since the suite's line says what naming each of them would.
+A suite that holds some of them keeps the rest in that list, because what
+puts one of those past the bound is its own time on top of the charge and
+the charge alone does not say which. The count beside the suite is of
+what it can still run, so the two never disagree about the same test.
 
 `--verify` compares the identity set the topology produces against what a
 recorded run actually executed, in both directions: identities a run
@@ -254,7 +259,7 @@ rather than a setting to fix.
 | `FILL_VALUE_SHARE` | 0.6 | share of the run's budget | chosen | Up when expensive high-value tests are crowded out by cheap ones; down when a lane spends its budget on a few slow tests and runs little else. The three shares sum to one. |
 | `FILL_DENSITY_SHARE` | 0.25 | share of the run's budget | chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
 | `FILL_EXPLORATION_SHARE` | 0.15 | share of the run's budget | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
-| `MIN_CORRECTION_SPAN_SECONDS` | 23 | seconds | derived | A tenth of a lane's budget, measured as the widest gap between two batches' charges. Down when a suite's real slope is going unbelieved for too long; up when a slope fitted inside a narrow range is being read far outside it. |
+| `MIN_CORRECTION_SPAN_SECONDS` | 23 | seconds | derived | A tenth of a lane's budget, measured as the widest gap between the time two batches' own tests took. Down when a suite's real slope is going unbelieved for too long; up when a slope fitted inside a narrow range is being read far outside it. |
 | `MIN_CORRECTION_SAMPLES` | 3 | batches | chosen | Up when a slope is being fitted from too little and swinging about; down when a suite's real slope takes too long to be believed. |
 | `MIN_UNIT_SPAN_UNITS` | 50 | units | chosen | The widest gap between two batches' sizes a suite needs before what one more unit costs it is believed. Down when a suite's real per-unit cost is going unbelieved for too long; up when a slope fitted across a few units is being read across hundreds. |
 | `FLAKE_EXCLUSION_RATE` | 0.005 | share of runs | chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |

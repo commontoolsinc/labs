@@ -2258,9 +2258,13 @@ two differ by however wrong the manifest's costs are, and a unit nothing
 has measured is charged a stand-in that can be out by a factor of ten.
 Fitting against the expectation puts that error in the intercept, which
 is charged once to every lane that holds the suite and kept for the whole
-window; a suite whose intercept passes the hard bound can place no
-discretionary identity at all, so an expectation that was briefly wrong
-would hold a whole suite out of every pull request for a week.
+window. An intercept past the planned budget already costs a whole lane
+for each identity of the suite that runs, since a lane holding two things
+stops at that budget; past the hard bound, which is what an identity's
+lone cost is weighed against, the suite places no discretionary identity
+at all. So an expectation that was briefly wrong takes the lanes away
+from everything else, and then holds a whole suite out of every pull
+request, for a week.
 The record format carries one number and calls it a duration, so the unit
 count travels in that field as a count, and the measurement's name is what
 says which of the three figures it is. A batch run

@@ -1023,8 +1023,8 @@ describe("running a lane's work", () => {
         [{
           suite: "workspace-unit",
           fixed: 705,
-          unholdable: true,
           identities: 21889,
+          heldNowhere: 21889,
         }],
         { selections: [], projectedSeconds: 0 },
         LANE_BUDGET_SECONDS,
@@ -1056,8 +1056,8 @@ describe("running a lane's work", () => {
         [{
           suite: "workspace-unit",
           fixed: 250,
-          unholdable: false,
           identities: 12,
+          heldNowhere: 0,
         }],
         { selections: [], projectedSeconds: 0 },
         LANE_BUDGET_SECONDS,
@@ -1068,7 +1068,9 @@ describe("running a lane's work", () => {
       console.log = log;
     }
     expect(lines.join("\n"))
-      .toContain("each of the 12 tests it could run takes a lane to itself");
+      .toContain(
+        "each of the 12 tests it can still run takes a lane to itself",
+      );
   });
 
   it("says what each batch costs and why each test is in it", () => {

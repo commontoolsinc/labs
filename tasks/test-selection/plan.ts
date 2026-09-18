@@ -156,11 +156,20 @@ export interface CrowdingSuite {
   /** Overhead, per-unit charge and capability setup, without any test. */
   fixed: number;
 
-  /** Whether the charge passes the bound a lane is killed at, too. */
-  unholdable: boolean;
-
   /** Discretionary identities of the suite, which is what this costs. */
   identities: number;
+
+  /**
+   * How many of those no lane can hold. All of them where no lane can
+   * hold the suite at all, and fewer where the charge leaves room for
+   * the cheaper of its tests and not the dearer.
+   */
+  heldNowhere: number;
+}
+
+/** Whether no lane can hold any identity of the suite. */
+export function unholdable(suite: CrowdingSuite): boolean {
+  return suite.heldNowhere === suite.identities;
 }
 
 /** What the packer needs beyond the manifest. */
@@ -523,7 +532,7 @@ export function plan(input: PlanInput): Plan {
   for (const [suite, counted] of discretionary) {
     const fixed = fixedCost(manifest, input, counted.one);
     if (fixed <= laneBudget) continue;
-    // Held rather than holdable is read from what the pass above decided
+    // What no lane can hold is read from what the pass above decided
     // rather than from the charge against the bound: a charge inside the
     // bound still holds nothing where the cheapest test the suite has
     // takes it past, and comparing the charge alone would say a suite
@@ -532,8 +541,8 @@ export function plan(input: PlanInput): Plan {
     crowding.push({
       suite,
       fixed,
-      unholdable: counted.unheld === counted.all,
       identities: counted.all,
+      heldNowhere: counted.unheld,
     });
   }
   crowding.sort((a, b) => b.fixed - a.fixed);
@@ -765,12 +774,15 @@ export function costliestUnschedulable(
  * command-line report say the same thing about the same suite.
  */
 export function crowdingLine(suite: CrowdingSuite): string {
+  // The count is of what the sentence is about: every discretionary
+  // identity where none of them ran, and the ones a lane can still hold
+  // where the rest are past the bound by their own time as well.
   return `${suite.suite} costs ${suite.fixed.toFixed(1)}s before it runs ` +
     `anything, so ` +
-    (suite.unholdable
+    (unholdable(suite)
       ? `no lane holds it and none of its ${suite.identities} tests ran`
-      : `each of the ${suite.identities} tests it could run takes a lane ` +
-        `to itself`);
+      : `each of the ${suite.identities - suite.heldNowhere} tests it can ` +
+        `still run takes a lane to itself`);
 }
 
 /** The suites a report says nothing can run any of. */
@@ -778,7 +790,7 @@ export function unholdableSuites(
   crowding: readonly CrowdingSuite[],
 ): ReadonlySet<string> {
   return new Set(
-    crowding.filter((suite) => suite.unholdable).map((suite) => suite.suite),
+    crowding.filter(unholdable).map((suite) => suite.suite),
   );
 }
 

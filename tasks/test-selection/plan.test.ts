@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { testIdentityKey } from "@commonfabric/test-support/records";
 
 import {
+  crowdingLine,
   fullLaneCount,
   plan,
   type PlanInput,
@@ -682,8 +683,8 @@ describe("plan", () => {
       expect(result.crowding).toEqual([{
         suite: "workspace-unit",
         fixed: 446,
-        unholdable: true,
         identities: 40,
+        heldNowhere: 40,
       }]);
       expect(selected(result)).toEqual([]);
     });
@@ -706,8 +707,8 @@ describe("plan", () => {
       expect(result.crowding).toEqual([{
         suite: "workspace-unit",
         fixed: 250,
-        unholdable: false,
         identities: 3,
+        heldNowhere: 0,
       }]);
       // One per lane, and the plan ran out of lanes before tests.
       expect(result.lanes.map((lane) => lane.selections.length))
@@ -738,6 +739,43 @@ describe("plan", () => {
       });
       const result = run(manifest, { boundSeconds: 300, budgetSeconds: 230 });
       expect(result.crowding.map((suite) => suite.identities)).toEqual([2]);
+    });
+
+    it("counts only what a crowded suite can still run", () => {
+      // A charge inside the bound leaves room for the cheaper of the
+      // suite's tests and not the dearer, so some of it runs and some of
+      // it does not. Reporting every identity as one a lane could run
+      // would say the suite runs tests the list beside it names as tests
+      // nothing ran.
+      const manifest = sampleManifest({
+        entries: [
+          ...entries(2, () => ({ cost: 1 })),
+          ...entries(1, () => ({ cost: 90 })),
+        ].map((entry, i) => ({
+          ...entry,
+          test: { ...entry.test, n: `case ${i}` },
+        })),
+        calibration: {
+          setupCost: {},
+          suites: {
+            "workspace-unit": { overhead: 250, correction: 1, unitOverhead: 0 },
+          },
+          prologue: 0,
+        },
+      });
+      const result = run(manifest, { boundSeconds: 300, budgetSeconds: 230 });
+      expect(result.crowding).toEqual([{
+        suite: "workspace-unit",
+        fixed: 250,
+        identities: 3,
+        heldNowhere: 1,
+      }]);
+      expect(crowdingLine(result.crowding[0]!))
+        .toContain("each of the 2 tests it can still run");
+      // The dear one is still named on its own, since what puts it past
+      // the bound is its own time on top of the charge.
+      expect(result.unschedulable.map((entry) => entry.test.n))
+        .toEqual(["case 2"]);
     });
 
     it("says nothing about a suite a lane can fill around", () => {
