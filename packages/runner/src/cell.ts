@@ -825,10 +825,11 @@ function collectionIndexProperties(
   schema: JSONSchema | undefined,
 ): Record<string, JSONSchema> | undefined {
   const resolved = resolveSchema(schema);
-  if (!isObjectNotArray(resolved)) return undefined;
-  const properties = resolved.properties;
-  if (!isObjectNotArray(properties)) return undefined;
-  return schemaPinsLiteral(properties.kind, "collection-index")
+  const properties = isObjectNotArray(resolved)
+    ? resolved.properties
+    : undefined;
+  return isObjectNotArray(properties) &&
+      schemaPinsLiteral(properties.kind, "collection-index")
     ? properties as Record<string, JSONSchema>
     : undefined;
 }
@@ -843,9 +844,8 @@ function declaredCollectionIndexMode(
   schema: JSONSchema | undefined,
 ): "group" | "key" | undefined {
   const properties = collectionIndexProperties(schema);
-  if (properties === undefined) return undefined;
-  if (schemaPinsLiteral(properties.mode, "group")) return "group";
-  if (schemaPinsLiteral(properties.mode, "key")) return "key";
+  if (schemaPinsLiteral(properties?.mode, "group")) return "group";
+  if (schemaPinsLiteral(properties?.mode, "key")) return "key";
   return undefined;
 }
 

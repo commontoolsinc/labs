@@ -45,6 +45,12 @@ describe("collection index lookup", () => {
       rows.set(["a"]);
       expect(() => rows.groupBy(() => "a")).toThrow("groupByWithPattern");
       expect(() => rows.keyBy(() => "a")).toThrow("keyByWithPattern");
+      expect(() => CellImpl.prototype.lookup.call(rows, "a")).toThrow(
+        "lookup requires a collection index",
+      );
+      expect(() => CellImpl.prototype.keys.call(rows)).toThrow(
+        "keys requires a collection index",
+      );
       expect(() => CellImpl.prototype.keyEntries.call(rows)).toThrow(
         "keyEntries requires a collection index",
       );
@@ -77,10 +83,16 @@ describe("collection index lookup", () => {
     expect(proxy.lookup("a")).toEqual([1]);
     expect(proxy.keys()).toEqual(["a"]);
     expect(proxy.keyEntries()).toEqual([{ kind: "value", value: "a" }]);
+    // The schema is supplied, so the gate resolves it and finds an object that
+    // declares no index marker, which is the shape an ordinary typed record
+    // with these field names has.
     const data = runtime.getCell<{ lookup: string; keys: string }>(
       space,
       "proxy-data",
-      undefined,
+      {
+        type: "object",
+        properties: { lookup: { type: "string" }, keys: { type: "string" } },
+      },
       tx,
     );
     data.set({ lookup: "ordinary lookup", keys: "ordinary keys" });
@@ -305,6 +317,84 @@ describe("collection index lookup", () => {
     } finally {
       cancel();
     }
+  });
+  it("refuses a lookup whose index type names neither mode while still enumerating keys", async () => {
+    // `GroupIndex` and `KeyIndex` each name one mode; the descriptor interface
+    // spelled directly names both, so an unpublished lookup through it cannot
+    // tell an empty group from an absent match. Enumeration does not depend on
+    // the mode and answers throughout.
+
+    const compiled = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+        import { pattern, CollectionIndexHandle, CollectionIndexData, computed } from "commonfabric";
+        export default pattern<
+          {index: CollectionIndexHandle<CollectionIndexData<string, number[]>>}
+        >(({index}) => {
+          const bucket = index.lookup("a");
+          const names = index.keys();
+          return {
+            size: computed(() => bucket.length),
+            named: computed(() => names.length),
+          };
+        });
+      `,
+      }],
+    });
+    const errors: Error[] = [];
+    runtime.scheduler.onError((error: Error) => errors.push(error));
+    const tx = runtime.edit();
+    const container = runtime.getCell<
+      { index?: CollectionIndexData<string, number[]> }
+    >(space, "unnamed-mode-container", undefined, tx);
+    container.set({});
+    const result = runtime.run(
+      tx,
+      compiled,
+      { index: container.key("index") },
+      runtime.getCell<{ size: number; named: number }>(
+        space,
+        "unnamed-mode-output",
+        compiled.resultSchema,
+        tx,
+      ),
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    const cancel = result.sink(() => {});
+    try {
+      await runtime.idle();
+      expect(errors.map((error) => error.message)).toEqual([
+        expect.stringContaining("lookup needs the index mode"),
+      ]);
+      expect(await result.key("named").pull()).toBe(0);
+    } finally {
+      cancel();
+    }
+  });
+  it("reads a mode a schema pins with `const` rather than with `enum`", () => {
+    const tx = runtime.edit();
+    const index = runtime.getCell<CollectionIndexData<string, number[]>>(
+      space,
+      "const-schema-index",
+      {
+        type: "object",
+        properties: {
+          kind: { const: "collection-index" },
+          mode: { const: "group" },
+          keys: { type: "array", items: { type: "string" } },
+          keyEntries: { type: "array" },
+          buckets: { type: "object" },
+        },
+      },
+      tx,
+    );
+    expect(index.lookup("a")).toEqual([]);
+    expect(index.keys()).toEqual([]);
+    expect(index.keyEntries()).toEqual([]);
+    tx.abort();
   });
   it("ignores unrelated buckets and key enumeration while following its selected bucket", async () => {
     const compiled = await runtime.patternManager.compilePattern({
