@@ -11,6 +11,7 @@ import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import type { CfcEnforcementMode } from "../src/cfc/types.ts";
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
+import { seedStoredEnvelope } from "./cfc-seed-envelope.ts";
 
 // The write gate says what it turned away, on the logger, without being asked.
 // Two refusals appear below. A `writeAuthorizedBy` field written by a setup
@@ -130,7 +131,7 @@ const withRuntime = async (
 const seedSecret = async (runtime: Runtime, id: string): Promise<void> => {
   const seed = runtime.edit();
   const target = runtime.getCell(signer.did(), id, undefined, seed);
-  seed.writeOrThrow({
+  seedStoredEnvelope(seed, {
     space: signer.did(),
     scope: "space",
     id: target.getAsNormalizedFullLink().id,

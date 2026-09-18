@@ -12,6 +12,7 @@ import type {
   FabricBytes,
   FabricHash,
   FabricPlainObjectPlus,
+  FabricPrimitiveSchemaType,
   FabricValue,
   FabricValuePlus,
 } from "@commonfabric/data-model/api";
@@ -917,12 +918,20 @@ export type CollectionIndexKeyEntry<K extends CollectionIndexKey> = K extends
   : { kind: "value"; value: K };
 
 /** Stored descriptor whose buckets are addressed independently by keyed lookup. */
-export interface CollectionIndexData<K extends CollectionIndexKey, V> {
+export interface CollectionIndexData<
+  K extends CollectionIndexKey,
+  V,
+  M extends "group" | "key" = "group" | "key",
+> {
   /** Descriptor marker used to recognize an index receiver. */
   readonly kind: "collection-index";
 
-  /** Missing-key behavior: an empty group or an absent unique match. */
-  readonly mode: "group" | "key";
+  /**
+   * Missing-key behavior: an empty group or an absent unique match. The
+   * operator that built the index names one, so a lookup reads it from its
+   * receiver's schema when the descriptor has not been published yet.
+   */
+  readonly mode: M;
 
   /** Occupied keys in deterministic typed-key order. */
   readonly keys: K[];
@@ -958,12 +967,12 @@ export interface CollectionIndexHandle<
 
 /** Index whose missing-key lookup yields an empty group. */
 export type GroupIndex<K extends CollectionIndexKey, T> = CollectionIndexHandle<
-  CollectionIndexData<K, T[]>
+  CollectionIndexData<K, T[], "group">
 >;
 
 /** Index whose missing-key lookup yields undefined. */
 export type KeyIndex<K extends CollectionIndexKey, T> = CollectionIndexHandle<
-  CollectionIndexData<K, T | undefined>
+  CollectionIndexData<K, T | undefined, "key">
 >;
 
 /** @internal Preserves an index selector's key kind before result serialization. */
@@ -1727,41 +1736,6 @@ export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
  * Deeply-mutable version of `JSONValue`.
  */
 export type MutableJSONValue = Mutable<JSONValue>;
-
-/**
- * `FabricPrimitive` validation types -- a non-standard addition to the JSON
- * Schema `type` vocabulary. Each name identifies a concrete `FabricPrimitive`
- * class from the data-model, and a value matches by prototype (`instanceof`),
- * not by structure. `"object"` also accepts these values -- every
- * `FabricPrimitive` is a subtype of `"object"` the way an `"integer"` value
- * satisfies a `"number"` schema -- so schemas that predate this vocabulary keep
- * working.
- */
-export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
-  [
-    "FabricBytes",
-    "FabricEpochDay",
-    "FabricEpochNsec",
-    "FabricHash",
-    "FabricKeyPair",
-    "FabricRegExp",
-    "FabricUnavailable",
-  ] as const,
-);
-
-export type FabricPrimitiveSchemaType =
-  typeof FABRIC_PRIMITIVE_SCHEMA_TYPES[number];
-
-const FABRIC_PRIMITIVE_SCHEMA_TYPE_SET: ReadonlySet<string> = new Set(
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
-);
-
-/** Whether the given schema type names a `FabricPrimitive` class. */
-export function isFabricPrimitiveSchemaType(
-  type: string,
-): type is FabricPrimitiveSchemaType {
-  return FABRIC_PRIMITIVE_SCHEMA_TYPE_SET.has(type);
-}
 
 // Valid values for the "type" property of a JSONSchema
 export type JSONSchemaTypes =

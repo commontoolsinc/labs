@@ -1,8 +1,6 @@
 import ts from "typescript";
-import {
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  type MutableJSONSchema,
-} from "@commonfabric/api";
+import type { MutableJSONSchema } from "@commonfabric/api";
+import { fabricPrimitiveClassesByName } from "@commonfabric/data-model/fabric-primitives";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 
 const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
@@ -21,17 +19,16 @@ const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
   RegExp: { type: "object" },
   Uint8Array: { type: "object" },
   // Fields authored against the `FabricPrimitive` classes themselves emit
-  // the `FabricPrimitive` schema vocabulary (`FABRIC_PRIMITIVE_SCHEMA_TYPES` in
-  // `@commonfabric/api`): a value matches by prototype, not by structure.
-  // Guarded in `supportsType` by the `FabricPrimitive` brand so an
-  // unrelated user type sharing a name keeps its structural schema.
-  FabricBytes: { type: "FabricBytes" },
-  FabricEpochDay: { type: "FabricEpochDay" },
-  FabricEpochNsec: { type: "FabricEpochNsec" },
-  FabricHash: { type: "FabricHash" },
-  FabricKeyPair: { type: "FabricKeyPair" },
-  FabricRegExp: { type: "FabricRegExp" },
-  FabricUnavailable: { type: "FabricUnavailable" },
+  // the `FabricPrimitive` schema vocabulary: a value matches by prototype, not
+  // by structure. Each class is keyed by the name a pattern declares it under,
+  // and maps to the `.schemaType` its instances report. Guarded in
+  // `supportsType` by the `FabricPrimitive` brand so an unrelated user type
+  // sharing a name keeps its structural schema.
+  ...Object.fromEntries(
+    Object.entries(fabricPrimitiveClassesByName()).map((
+      [name, cls],
+    ) => [name, { type: cls.prototype.schemaType }]),
+  ),
   // A `URL` converts to a plain string, so this one is accurate as written.
   URL: { type: "string", format: "uri" },
   ArrayBuffer: true,
@@ -89,7 +86,7 @@ const SQLITE_DB_BRAND_PREFIX = "__@SQLITE_DB_BRAND@";
 
 const NATIVE_TYPE_NAMES = new Set(Object.keys(NATIVE_TYPE_SCHEMAS));
 const FABRIC_PRIMITIVE_TYPE_NAMES: ReadonlySet<string> = new Set(
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  Object.keys(fabricPrimitiveClassesByName()),
 );
 const LIB_DECLARED_NATIVE_TYPES = new Set([
   "Date",
@@ -208,7 +205,8 @@ export class NativeTypeFormatter implements TypeFormatter {
   }
 
   /**
-   * Whether the name is one of the `FabricPrimitive` schema-vocabulary names.
+   * Whether the name is one a concrete `FabricPrimitive` class is declared
+   * under, which is the name a TypeScript type referring to the class has.
    */
   public static isFabricPrimitiveTypeName(
     typeName: string | undefined,

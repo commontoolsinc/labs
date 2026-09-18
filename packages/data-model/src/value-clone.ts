@@ -33,7 +33,7 @@ import {
   VALUE_TAGS,
 } from "@/types";
 import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { toDebugKindString } from "./value-debug.ts";
+import { toDebugKindString } from "@/value-debug";
 
 /** Options for `cloneIfNecessary()`. */
 export interface CloneOptions {

@@ -34,7 +34,7 @@
 // annotated from the outbox carriage captured at the original run's
 // seal; the durable outbound-append rows deliver and retire through
 // the outbox; `memo.*`/`outbox.*` counters are live.
-import { toCompactDebugString } from "@commonfabric/data-model";
+import { toLongQuotedDebugString } from "@commonfabric/data-model";
 import {
   type CellScope,
   type ConfirmedRead,
@@ -370,6 +370,18 @@ export type SpaceServerOptions = {
    * turned away. The check happens inside a drain pass, and so does
    * this. */
   onDrainInFlightSkip?: (eventId: string) => void;
+
+  /** DIAGNOSTIC (tests): forwarded to this tenure's outbox — see
+   * `SpaceOutbox`. */
+  onEffectRetired?: () => void;
+
+  /** DIAGNOSTIC (tests): the outcome of each space-root ensure attempt,
+   * reported as the counters beside it move. The counters can only be
+   * polled; a test that has to act once an attempt has landed waits on
+   * this instead. */
+  onRootEnsure?: (
+    outcome: "created" | "resolved" | "skipped-no-owner" | "failed",
+  ) => void;
 };
 
 const DEFAULT_FLUSH_DEADLINE_MS = 100;
@@ -1247,6 +1259,9 @@ export class SpaceServer implements TransactionSealDestination {
       engine,
       sessionId: this.#holder,
       localSeqRef: this.#options.localSeqRef,
+      ...(this.#options.onEffectRetired !== undefined
+        ? { onEffectRetired: this.#options.onEffectRetired }
+        : {}),
       ...(this.#options.policy?.maxOutstandingEffects !== undefined ||
           this.#options.policy?.egressRatePerSecond !== undefined
         ? {
@@ -2151,6 +2166,10 @@ export class SpaceServer implements TransactionSealDestination {
     const principal = info.scopeKeyIdentity?.principal;
     const attributionFromScope = info.kind === "derivation" &&
       info.acting === undefined && principal !== undefined;
+    const sessionId = info.scopeKeyIdentity?.sessionId;
+    const readCeiling = info.kind !== "bookkeeping" && sessionId !== undefined
+      ? this.#options.server.sessionReadCeiling(this.#options.space, sessionId)
+      : undefined;
     // The S-A carriage (OW31; protocol.md §2b): a bookkeeping run
     // sanctioned to cross — the compile-cache / program materialization
     // writeback into the piece's own space — carries the TRIGGERING
@@ -2213,6 +2232,14 @@ export class SpaceServer implements TransactionSealDestination {
       ...(info.scopeKeyIdentity !== undefined
         ? { scopeKeyIdentity: info.scopeKeyIdentity }
         : {}),
+      // The read ceiling of the session this run acts as, read from the
+      // memory server's session record — the seam a declared ceiling (the
+      // client's signed `session.open` descriptor) and a server-assigned
+      // one both reach the run through. Stamped with the identity, before
+      // the run's first read, so the sqlite builtin's request hash and
+      // its flush read one value. Never for bookkeeping: the loop's own
+      // writes act as no session.
+      ...(readCeiling !== undefined ? { readCeiling } : {}),
       ...(info.actionScopeKey !== undefined
         ? { actionScopeKey: info.actionScopeKey }
         : {}),
@@ -3832,9 +3859,7 @@ export class SpaceServer implements TransactionSealDestination {
             this.#options.stats.events.visibilityDeferrals += 1;
             logger.warn("event-view-lag", () => [
               `drain deferring ${entry.eventId}: replica view holds ` +
-              `${
-                toCompactDebugString(viewEntry, { maxLength: 200 })
-              } at index ${index}; ` +
+              `${toLongQuotedDebugString(viewEntry)} at index ${index}; ` +
               "later-arrived events wait behind it",
             ]);
             // The same barrier as above: the deferred entry's
@@ -5158,6 +5183,7 @@ export class SpaceServer implements TransactionSealDestination {
       const owner = server.resolveSpaceOwner(engine, space);
       if (owner === undefined) {
         stats.skippedNoOwner += 1;
+        this.#options.onRootEnsure?.("skipped-no-owner");
         this.#rootEnsureAwaitingOwner = true;
         // Once per tenure (F6): the first skip is the expected
         // fresh-space boot order (activation precedes the genesis ACL;
@@ -5232,12 +5258,16 @@ export class SpaceServer implements TransactionSealDestination {
       }
       stats.runs += 1;
       if (result.outcome === "created") stats.created += 1;
+      this.#options.onRootEnsure?.(
+        result.outcome === "created" ? "created" : "resolved",
+      );
       logger.info?.("space-root-ensure", () => [
         `space ${space}: root ensure ${result.outcome} ` +
         `(owner ${owner}${owner === space ? ", self-owned home" : ""})`,
       ]);
     } catch (error) {
       stats.failures += 1;
+      this.#options.onRootEnsure?.("failed");
       logger.warn("space-root-ensure-failed", () => [
         `space ${space}: root ensure failed; the tenure serves without ` +
         "it and the next activation retries (the client-era creation " +

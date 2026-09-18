@@ -36,6 +36,7 @@ import {
   TOPICS_LIFT_NAMES,
   type TopicsDemand,
   type TopicsFixture,
+  type TopicsFixtureMode,
   type TopicsFixtureOptions,
   type TopicsLiftName,
   type TopicsMeasurement,
@@ -378,6 +379,9 @@ export type PhaseRecord =
 
 /** A measured case: its fixture data, and a record for each of its phases. */
 export interface CaseMeasurement {
+  /** The experimental posture the case's runtimes reported running under. */
+  readonly mode: TopicsFixtureMode;
+
   /** The fixture data the case's options build, before any warm update. */
   readonly fixture: TopicsFixture;
 
@@ -387,6 +391,12 @@ export interface CaseMeasurement {
 
 /** How {@link measureCasePhases} runs a case. */
 export interface CaseMeasurementOptions {
+  /**
+   * The experimental posture each of the case's runtimes is given, defaulting
+   * as {@link measureTopicsFixture} does.
+   */
+  readonly mode?: TopicsFixtureMode;
+
   /** Extra work each of the case's runtimes starts beside its lifts. */
   readonly variant?: TopicsVariant;
 
@@ -406,7 +416,7 @@ export interface CaseMeasurementOptions {
  */
 export async function measureCasePhases(
   probeCase: ProbeCase,
-  { variant, progress }: CaseMeasurementOptions = {},
+  { mode, variant, progress }: CaseMeasurementOptions = {},
 ): Promise<CaseMeasurement> {
   const { id, options, workload } = probeCase;
   if (workload === "board") {
@@ -419,7 +429,7 @@ export async function measureCasePhases(
     fixture,
     `topics-computation-cost ${id}`,
     demandOf(workload),
-    variant,
+    { mode, variant },
   );
   const phases: PhaseRecord[] = [phaseRecord("initialization", measurement)];
   verifyOutputs(measurement, fixture);
@@ -436,7 +446,7 @@ export async function measureCasePhases(
   verifyOutputs(measurement, updated);
   verifyIdleLifts(measurement, reopened);
   verifyReopen(measurement, reopened);
-  return { fixture, phases };
+  return { mode: measurement.mode, fixture, phases };
 }
 
 /** Returns the demand `workload` names, opening the focus topic. */

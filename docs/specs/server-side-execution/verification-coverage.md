@@ -32,6 +32,7 @@ The status corrections in this register are bounded to the rows below:
 | OW56 finding 2 | Closed: source following has one owner, the opener. ON upload and instantiate run on the serving runtime; source updates, other client creation paths, and compiled-byte trust remain separate OW56 work. |
 | OW58 | Closed: resolved-error notice commits release the drain guard. |
 | OW60 | Open: unresolved flag-ON client echoes are still skipped. |
+| OW64 | Closed: a client's read ceiling rides its signed `session.open` descriptor, the SpaceServer stamps it onto every run served as that session, and the served `sqliteQuery` reads under it; pinned end to end. |
 
 The [coverage status audit](../../history/plans/server-execution-v2/optimize/coverage-status-audit-2026-09-09.md)
 records the investigation's inspected head, provenance, probes, and limits.
@@ -1580,21 +1581,16 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   The obligation's substance landed as: the OW26 pin test racing
   authored inputs into the failure window and asserting
   charged/settled/W-advances directly; the three refusal tests'
-  bounded 300 ms drains RETIRED for deterministic kick-and-await-W
-  barriers with authored-seq targets (`settleAnotherWaveFamily` +
-  `authoredSeqOf` in `executor-effect-channel.test.ts` — the
-  reverted barriers' safety, restored by correct arithmetic, is the
-  discharge's acceptance evidence). Standing lesson, binding on test
-  authors: a settled-contract barrier targets the AUTHORED seq of
-  its own kick — never a server seq, which derived echoes inflate
-  (protocol §4's client-use sentence was always the contract; the
-  helper enforces it). The lesson is also PINNED in-suite
-  (2026-08-15, from the Phase-6 independent review): every barrier
-  waits for the trailing derived echo to land BEFORE reading its
-  target, because pre-echo a `serverSeq`-degraded target is correct
-  by accident and the whole suite stayed green under that
-  degradation; post-echo the degraded arithmetic times out at every
-  barrier (mutation-verified red at all four sites, green restored).
+  bounded 300 ms drains RETIRED for an await-W barrier with an
+  authored-seq target. Standing lesson, binding on test authors: a
+  settled-contract barrier targets an AUTHORED seq — never a server
+  seq, which derived echoes inflate (protocol §4's client-use
+  sentence was always the contract). The barrier is `settleServing`
+  in `executor-effect-channel.test.ts`: it drains the client, flushes
+  its manager, reads `highestAuthoredSeq` — `MAX(seq)` over commits
+  whose class is `authored`, so the class the lesson forbids cannot
+  be named — and hands that seq to `waitForSettled`, which sleeps on
+  the watermark doc's own subscription rather than polling for it.
 
 - OW27 — LANDED with Phase 7 (2026-08-15; RULED (a) by the owner
   2026-08-15 — "client-side send pacing in the flag-gated append path,
@@ -2225,7 +2221,9 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   to land times out at 1-min load ≈ 5 (the fan-out-B base tip 2/20,
   the trio's tip 2/16, ≈10 %); a sweep should read a red here as the
   wait budget, not the divert, until the budget or the wake is
-  addressed;
+  addressed — CLEARED 2026-09-15, the file's polling helper having
+  been replaced by event-driven waits with no budget in them, so a red
+  here reads as the divert again;
   (MINOR-4) the `locallyPresent` suppression gate deleted — see
   (vii) above;
   (MINOR-5) same-principal two-session isolation pinned BOTH
@@ -2584,7 +2582,10 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   kick-and-await-W barrier in `executor-effect-channel.test.ts` reads
   its target after the trailing echo, so the `serverSeq` regression
   class is deterministically red (mutation-verified at all four
-  barrier sites).
+  barrier sites). (Superseded 2026-09-15: that suite's polling waits
+  are gone, and with them the echo reads that armed this pin. The
+  class the lesson forbids is now unnameable — see the OW26 row's
+  standing lesson for the barrier that replaced them.)
 - serving-loop §5's env-knob sentence gained +1 binding clause: the
   outstanding-effect cap's env parse is FAIL-CLOSED (literal `0` is
   the only opt-out; garbage/negative → default 16, warned). Pin:
@@ -5800,7 +5801,14 @@ supply; OW29/OW32/OW34 closed):
   worktree, 1/7), so NOT a fix-round regression and NOT the
   receipt-race pin `78959c26c` fixed (different step, different wait);
   left un-fixed here (out of the round's scope), flagged for its own
-  red-first pass.
+  red-first pass. (FIXED 2026-09-15, in two parts. The step's client
+  was opened with a navigations array, which is what gives a client an
+  enactment surface: it enacted the intent, acked the nonce, and the
+  next wave retired the entry, so the wait was racing a state the
+  system is built to clear. That client is headless now
+  (`de5baca1a5`). The wait itself is event-driven: the file's local
+  polling helper — a 20-second deadline over a 20-millisecond poll —
+  is gone, so the step has no deadline left to exceed.)
 
 - **First ON-lane CI gate delta (2026-08-21) — the stack's first-ever
   CI execution of the ON pattern lanes (land-off PR #6096, run
@@ -10137,6 +10145,81 @@ supply; OW29/OW32/OW34 closed):
     one. Unpinned and unmeasured; structural from the code only
     (`wake-shaping.ts`'s per-group `pending` + window tick, and the
     drain's per-entry `queueEvent`).
+  - **OW64 — the runtime read ceiling does not travel with a demand
+    (minted 2026-09-18 from the ON-default rehearsal's one failing
+    unit test, `pieces-controller-connection.test.ts`).**
+    `RuntimeOptions.cfcReadMaxConfidentiality`
+    (`docs/specs/sqlite-builtin/06-cfc.md`, "Runtime read ceiling")
+    bounds only the runtime it is set on. Under the ON arm a client
+    runtime executes no `db.query` of its own — the serving runtime
+    performs it, under ITS option — so a ceiling accepted on a
+    flag-ON client would read as a bounded session whose reads
+    nothing bounds. The constructor refuses that combination
+    (`packages/runner/src/runtime.ts`; pinned in
+    `packages/runner/test/sqlite-runtime-read-ceiling.test.ts`),
+    which made the pieces controller's forwarding test fail at an ON
+    default: the test depended on the ambient default for its arm.
+    **CLOSED (2026-09-18, the same change): the ceiling travels with
+    the session.** RULED by the owner ("do this the right way"; the
+    ceiling is wanted for ordinary client sessions too, where the
+    server will sometimes assign it). Mechanism: the client runtime
+    hands its ceiling to its storage manager before any session
+    opens (`IStorageManager.setSessionReadCeiling`, refused after a
+    session is open), the manager declares it in every session's
+    signed `session.open` descriptor (`SessionDescriptor.readCeiling`,
+    memory-v2 04-protocol.md §4.1.2) and refuses a server that does
+    not advertise the `sessionReadCeiling` protocol flag, the memory
+    server records it on the session (fresh per open; a resume
+    re-declares) and exposes it through `Server.sessionReadCeiling` —
+    the ONE seam a server-assigned ceiling reaches the run through as
+    well — and the SpaceServer's `#stampRun` reads it for the run's
+    `scopeKeyIdentity.sessionId` and carries it as
+    `WaveRunContext.readCeiling`. The sqlite builtin resolves ONE
+    effective ceiling per run (`effectiveReadCeiling`: the serving
+    runtime's option met with the carried one, `onExceed` meeting
+    toward `fail`) and uses it where it used the runtime's option:
+    the session-scoped-result refusal, the request hash
+    (`runtimeReadCeiling`), the row meet and the mode default. The
+    constructor refusal is retired; what it refuses now is a manager
+    that cannot carry the ceiling. Pinned: wire parse, registry and
+    flag in `packages/memory/test/v2-session-read-ceiling.test.ts`;
+    the memory client re-declaring the ceiling on every reopen after a
+    dropped connection (the server takes it fresh per open, so a
+    reopen without it would read unbounded) and refusing, at every
+    open, a server without the flag, in
+    `packages/memory/test/v2-client-read-ceiling.test.ts`; the same
+    refusal through the remote session factory and the
+    late-declaration refusal in
+    `packages/runner/test/memory-v2-remote-session.test.ts`; the
+    constructor handoff and the effective-ceiling meet in
+    `packages/runner/test/sqlite-runtime-read-ceiling.test.ts`; end
+    to end — a bounded and an unbounded client of one space served
+    their own session instances of one `PerSession` query from one
+    labeled row set, and the non-session refusal on both runtimes —
+    in `packages/runner/test/executor-sqlite-read-ceiling.test.ts`;
+    the controller's forwarding on both arms in
+    `packages/piece/test/pieces-controller-connection.test.ts`.
+    cf-harness needs nothing: its `--max-confidentiality` bounds the
+    session on either arm, and its bounded-as-configured attestation
+    over the client runtime's fields stays true because the carried
+    value is those fields. One residual, recorded here rather than
+    hidden: a shared (space- or user-scoped) query result a bounded
+    session reads was computed by whichever run its node probed or
+    narrowed at, and the ceiling never applied to a run that was not
+    the session's — the same seam `RuntimeOptions.cfcReadMaxConfidentiality`'s
+    doc names for the OFF arm, closed the same way (a pattern authored
+    for a bounded run declares its query results per session; a
+    bounded client's own run refuses anything broader). A second
+    residual, fail-OPEN and therefore owed: the stamp reads the LIVE
+    session record, so a run served as a session whose record has
+    expired — an event a bounded client fired and then stayed
+    disconnected past the session's retention — finds no ceiling and
+    reads under the serving runtime's option alone, into that
+    session's instance. A detached session inside its retention keeps
+    its ceiling; past it the server no longer knows the session was
+    bounded. The candidate close is the server-assigned source this
+    seam exists for: a ceiling keyed by principal (or persisted with
+    the event's `firedAt` pair) rather than by a live session.
 
 ## 4. Standing rule
 

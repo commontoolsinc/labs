@@ -26,7 +26,7 @@
  */
 
 import {
-  ALIAS_FILE,
+  ALIAS_DIRECTORY,
   type FlakeEvidence,
   type TestIdentity,
   testIdentityKey,
@@ -887,7 +887,8 @@ export function renderReport(
     out.push("");
     out.push(
       "A test's score is built on what it has caught, over unbounded " +
-        `history, so a renamed test drops to the floor. \`${ALIAS_FILE}\` ` +
+        "history, so a renamed test drops to the floor. A line in " +
+        `\`${ALIAS_DIRECTORY}/\`, in the file named after the test's file, ` +
         "bridges the two halves. A rename is never inferred, so this is a " +
         "suggestion rather than a change: append the line if the pairing " +
         "is right, and ignore it if it is not.",

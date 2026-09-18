@@ -50,7 +50,7 @@ import {
   isObjectOrArray,
 } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
-import { toCompactDebugString } from "@commonfabric/data-model";
+import { toLongQuotedDebugString } from "@commonfabric/data-model";
 
 const logger = getLogger("schema-walk", { level: "warn" });
 
@@ -208,9 +208,9 @@ const warnNotSchema = (
   logger.warn("non-schema", () => [
     `Ignoring \`${key === undefined ? keyword : `${keyword}/${key}`}\`:`,
     `expected ${expected}, found`,
-    toCompactDebugString(found, { maxLength: 120 }),
+    toLongQuotedDebugString(found),
     "in schema",
-    toCompactDebugString(parent, { maxLength: 500 }),
+    toLongQuotedDebugString(parent),
   ]);
 };
 

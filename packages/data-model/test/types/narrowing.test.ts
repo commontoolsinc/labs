@@ -25,7 +25,7 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricUnavailable } from "@/fabric-primitives/FabricUnavailable.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
+import { toCompactDebugString } from "@/value-debug";
 
 describe("narrowing", () => {
   describe("isFabricSpecialObject()", () => {

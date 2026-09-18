@@ -144,12 +144,35 @@ export function above(painted: PaintedLine, text: string): string {
  * exactly as the frame found it. Nothing shuttle draws in a frame can
  * therefore rewrite a line that has already scrolled past.
  *
- * The cursor is hidden for the whole of it. A frame is read rather than typed
- * at, so a cursor in it would sit at whatever column the last row's drawing
- * ended in and read as a place a person could type.
+ * The cursor is hidden as the screen is taken, and each drawing decides for
+ * itself where it goes from there ({@link cursorIn}). It starts hidden because
+ * a frame is read until something is being typed at it, and a cursor sitting
+ * at whatever column the last row's drawing ended in reads as a place a person
+ * could type.
  */
 export function takingScreen(): string {
   return `${term.enterAltScreen}${term.hideCursor}`;
+}
+
+/**
+ * Returns what to send after a frame's rows to put the cursor where `at` says,
+ * or to hide it where nothing is being typed at the frame.
+ *
+ * It is sent with every drawing rather than only when it changes, because a
+ * drawing positions each row from the top and leaves the cursor wherever the
+ * last of them ended: where the cursor goes is therefore a property of the
+ * drawing rather than a state between them, and one sent once would be undone
+ * by the next repaint.
+ *
+ * Showing it comes after the move, so the cursor never appears at the place
+ * the rows left it on the way to the place it belongs.
+ */
+export function cursorIn(
+  at: { readonly row: number; readonly column: number } | undefined,
+): string {
+  return at === undefined
+    ? term.hideCursor
+    : `${term.moveTo(at.row, at.column)}${term.showCursor}`;
 }
 
 /**

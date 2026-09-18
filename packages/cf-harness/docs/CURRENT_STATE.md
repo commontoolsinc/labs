@@ -2,7 +2,7 @@
 
 Status: current implementation reference\
 Last verified: 2026-09-18\
-Revision: `0cccfd338e+revision-verification`
+Revision: `c89aef10a+interactive-checkpoint-review`
 
 The [system map](system-map/README.md) moves in lockstep with this current-state
 reference.
@@ -171,9 +171,12 @@ The current package provides:
   uses implicit caching because it rejects the API `prompt_cache_options` field;
 - interactive NDJSON stdio sessions with optional SQLite session, turn, event,
   replay, cancellation, and restore state; a session's durable transcript
-  advances only at a completed turn, so a failed, canceled, or interrupted turn
-  retains the transcript from before it while its tool and event history stays
-  on the audit trail; a completed turn's history is checked before it is
+  normally advances at a completed turn. On failure, the Loom host can retain
+  the last resumable checkpoint (a validated complete batch or opening handoff),
+  atomically with its matching research/CFC state and omission provenance.
+  Unpaired work, cancellation, and interrupted activity stay on the audit trail;
+  turn-local budget notices stay in audit artifacts and are excluded from
+  resumable history; a completed turn's history is checked before it is
   promoted, and promotion commits with the completion or not at all; and a
   restored session whose recorded history does not pair its tool calls with tool
   results preserves that history and adds explicit unknown-outcome results for
@@ -348,9 +351,12 @@ The current package provides:
   governs only query results declared per session (`PerSession<>`,
   `scope: "session"`, `.asScope("session")`, or a session-scoped db) and the
   runtime refuses any other query under it, so a pattern authored for a bounded
-  run declares its results per session; it is refused without a fabric session,
-  recorded with its source as `readMaxConfidentiality` in `fabricSessionCfc`,
-  printed in the operator summary, and inherited unchanged by a delegated child;
+  run declares its results per session; it bounds the session on either
+  server-execution arm (under server execution the session declares it to the
+  space server, whose runtime reads under it); it is refused without a fabric
+  session, recorded with its source as `readMaxConfidentiality` in
+  `fabricSessionCfc`, printed in the operator summary, and inherited unchanged
+  by a delegated child;
 - an opt-in pattern index (`--pattern-index-url`, or its
   `CF_HARNESS_PATTERN_INDEX_URL` environment fallback), which needs the fabric
   session configuration: index requests are signed with the session identity

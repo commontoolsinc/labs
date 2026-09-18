@@ -12,11 +12,7 @@ import {
   validateSchemaDefinition,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
-import {
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  type FabricPrimitiveSchemaType,
-  isFabricPrimitiveSchemaType,
-} from "@commonfabric/api";
+import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "@commonfabric/runner/fabric-special-object-brand";
 import {
   isObjectNotArray,
@@ -34,17 +30,12 @@ import {
 import { internSchema } from "@commonfabric/data-model-schema";
 import {
   fabricAwareEqual,
-  type FabricPrimitive,
   isKeyableObjectOrArray,
 } from "@commonfabric/data-model";
 import {
-  FabricBytes,
-  FabricEpochDay,
-  FabricEpochNsec,
-  FabricHash,
-  FabricKeyPair,
-  FabricRegExp,
-  FabricUnavailable,
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  fabricPrimitiveClassOfSchemaType,
+  isFabricPrimitiveSchemaType,
 } from "@commonfabric/data-model/fabric-primitives";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
@@ -1352,26 +1343,6 @@ function objectSubsetIssue(
 }
 
 /**
- * The class each `FabricPrimitive` type name matches, by the same `instanceof`
- * mapping `schemaTypeOfFabricPrimitive()` applies to a value. Keyed over the
- * whole vocabulary, so a name added to it stops this compiling until its class
- * is named here. Nothing checks that a name is paired with the right class.
- */
-const FABRIC_PRIMITIVE_CLASSES: {
-  readonly [Type in FabricPrimitiveSchemaType]: {
-    readonly prototype: FabricPrimitive;
-  };
-} = {
-  FabricBytes,
-  FabricEpochDay,
-  FabricEpochNsec,
-  FabricHash,
-  FabricKeyPair,
-  FabricRegExp,
-  FabricUnavailable,
-};
-
-/**
  * Helper for {@link schemaSubsetIssue}, which proves that a value of each
  * `FabricPrimitive` class the source names by `type` carries every key the
  * target's `required` checks on it. The runtime checks those keys on a
@@ -1424,7 +1395,7 @@ function fabricPrimitiveHasRequiredKey(
   key: string,
 ): boolean {
   return key === FABRIC_SPECIAL_OBJECT_BRAND ||
-    key in FABRIC_PRIMITIVE_CLASSES[type].prototype;
+    key in fabricPrimitiveClassOfSchemaType(type).prototype;
 }
 
 /**

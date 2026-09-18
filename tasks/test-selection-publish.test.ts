@@ -416,7 +416,7 @@ function localObject(commit: string, at: string): string {
 function laneObject(
   commit: string,
   at: string,
-  { planned = 40, spent = 92, units = 1, placeless = false, batch = true } = {},
+  { ran = 40, spent = 92, units = 1, placeless = false, batch = true } = {},
 ): string {
   const context: RunContext = {
     schema: 1,
@@ -450,7 +450,7 @@ function laneObject(
     measured("ci-lane batch workspace-unit", spent * 1000),
     ...(batch
       ? [
-        measured("ci-lane planned batch workspace-unit", planned * 1000),
+        measured("ci-lane ran batch workspace-unit", ran * 1000),
         measured("ci-lane units batch workspace-unit", units),
       ]
       : []),
@@ -531,24 +531,26 @@ describe("publish()", () => {
     );
     const manifest = await publishedManifest(created);
     expect(manifest.calibration.setupCost).toEqual({ fuse: 14.8 });
-    // The lane spent 92 seconds on a batch it was charged 40 for. With
-    // one observation there is nothing to say about how that cost grows
-    // with the work, so the whole difference is the suite's fixed cost.
+    // The lane spent 92 seconds on a batch of one unit whose own tests
+    // took 40. With one observation there is nothing to say about how
+    // much of the 52 between them was the batch and how much was the
+    // unit inside it, so the unit carries it: charging it there errs
+    // high for a lane packing more units than that batch held.
     expect(manifest.calibration.suites["workspace-unit"])
-      .toEqual({ overhead: 52, correction: 1, unitOverhead: 0 });
+      .toEqual({ overhead: 0, correction: 1, unitOverhead: 52 });
   });
 
   it("publishes a cost model the manifest reader will carry", async () => {
     // A correction at or below zero is refused, and the whole manifest is
-    // refused with it, so one suite whose batches were packed for more
-    // and more while spending less and less would leave every lane
+    // refused with it, so one suite whose batches held more and more
+    // test time while spending less and less would leave every lane
     // reading no manifest at all.
     const objects = seed();
-    [[30, 300], [60, 200], [90, 100]].forEach(([planned, spent], lane) => {
+    [[30, 300], [60, 200], [90, 100]].forEach(([ran, spent], lane) => {
       objects[CI(DAY, `lane-${lane}`)] = laneObject(
         `c-lane-${lane}`,
         `2026-08-20T0${lane + 3}:00:00.000Z`,
-        { planned, spent },
+        { ran, spent },
       );
     });
     const { store, created } = fakeStore(objects);

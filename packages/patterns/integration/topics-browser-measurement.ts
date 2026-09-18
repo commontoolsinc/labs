@@ -36,6 +36,7 @@ import { RequestType, type RuntimeClient } from "@commonfabric/runtime-client";
 
 import { describeThrown } from "../../integration/describe-thrown.ts";
 import { settleView, waitForRuntimeIdle } from "./cfc-browser-helpers.ts";
+import type { TopicsBrowserPosture } from "./topics-browser-posture.ts";
 import {
   compiledLiftText,
   type CompiledTopicsLift,
@@ -195,6 +196,14 @@ interface TopicsSampleBase {
   /** The caller's name for the operation. */
   readonly label: string;
 
+  /**
+   * What the deployment under measurement says about the posture it ran, and
+   * where the shell's half of that was read from. A sample prints both, and
+   * prints a deployment that declares no posture as `posture undeclared`
+   * rather than as a mode, so no reader takes it for a measured one.
+   */
+  readonly posture: TopicsBrowserPosture;
+
   /** From starting the operation to a settled view over an idle runtime. */
   readonly elapsedMs: number;
 
@@ -216,14 +225,31 @@ export interface TopicsReadSample extends TopicsSampleBase {
   /** One row per named lift, in {@link TOPICS_LIFTS} order. */
   readonly lifts: readonly TopicsLiftRow[];
 
-  /** Every run that is not a named lift's. */
+  /** Every run this sample could not place against a named lift. */
   readonly remaining: ReadTotals;
 
   /** Completed runs with no read sample, having started before accounting. */
   readonly runsWithoutReads: number;
 
+  /**
+   * Completed runs that carried a read sample but no authored source location,
+   * and so could not be placed against a lift. Counted in
+   * {@link TopicsReadSample.remaining} as well; reported here so that a sample
+   * recording no lift runs says which kind of zero it is — one taken beside
+   * runs it could not place, or one taken beside no runs at all.
+   */
+  readonly runsWithoutSource: number;
+
   /** Successful event-commit markers. */
   readonly eventCommits: number;
+
+  /**
+   * Whether the caller declared that the operation may complete no run
+   * carrying an authored source location. A sample with this set and no such
+   * run is a measured zero; without it such an operation fails instead, so the
+   * two are never confused for one another.
+   */
+  readonly mayRunNothing: boolean;
 }
 
 /** An operation timed with telemetry and read accounting off. */
@@ -253,6 +279,14 @@ export interface TopicsOperationOptions {
   /** Names the operation in the sample and in failures. */
   readonly label: string;
 
+  /**
+   * The posture the deployment under measurement runs, which labels the
+   * sample. Read from the deployment once per benchmark run with
+   * `readTopicsBrowserPosture()`, so a sample cannot be labeled with a mode
+   * the run did not exercise.
+   */
+  readonly posture: TopicsBrowserPosture;
+
   /** Drives the page; the helper waits for the view and runtime afterward. */
   readonly operation: () => Promise<unknown>;
 }
@@ -261,6 +295,20 @@ export interface TopicsOperationOptions {
 export interface MeasureTopicsReadsOptions extends TopicsOperationOptions {
   /** The program compiled from the sources the board was seeded from. */
   readonly program: TopicsProgram;
+
+  /**
+   * Declares that the operation may complete no run carrying an authored
+   * source location. Without it, such an operation fails; with it, the sample
+   * records the zero and says the caller declared it.
+   *
+   * It permits a zero rather than asserting one: an operation that does
+   * complete such runs is attributed as usual, so a zero that stops being one
+   * shows up as rows rather than being suppressed. It also reaches only this
+   * one outcome. A run carrying a source location this helper cannot parse is
+   * a sample that cannot be read rather than an absence of work, and fails
+   * whether or not this is declared.
+   */
+  readonly mayRunNothing?: boolean;
 }
 
 /** The part of a `Deno.bench` context that brackets a timed interval. */
@@ -383,12 +431,14 @@ async function compileTopicsProgram(
  *   cannot be attributed to the lifts of `program`, as `confirmSampledLifts()`
  *   decides, each of whose messages names its cause; if the runtime client is
  *   replaced, after read accounting and telemetry are turned off on the client
- *   they were enabled on; or if the operation completes no run with a read
- *   sample, fails an event commit, or raises a page error. When the operation
- *   throws and
- *   disabling accounting or releasing the sample also fails, an
- *   `AggregateError` holds the operation's error first. The sample's hold on
- *   the page is released on every exit.
+ *   they were enabled on; or if the operation fails an event commit or raises
+ *   a page error. It also throws when the operation completes no run carrying
+ *   an authored source location, unless the caller declared `mayRunNothing`;
+ *   that declaration reaches this one failure and none of the others, a run
+ *   whose source location cannot be parsed among them. When the
+ *   operation throws and disabling accounting or releasing the sample also
+ *   fails, an `AggregateError` holds the operation's error first. The sample's
+ *   hold on the page is released on every exit.
  */
 export async function measureTopicsReads(
   page: Page,
@@ -420,12 +470,18 @@ export async function measureTopicsReads(
             `failed: ${state.eventCommitErrors.join("; ")}`,
         );
       }
-      const measuredRuns = Object.values(state.bySrc)
+      // Runs the sample could place: those whose marker carried a `src`. A run
+      // without one is counted apart, because it is a different fact about the
+      // operation from a run carrying a location this helper cannot read, and
+      // only the first is waivable.
+      const attributableRuns = Object.values(state.bySrc)
         .reduce((sum, totals) => sum + totals.runs, 0);
-      if (measuredRuns === 0) {
+      const mayRunNothing = options.mayRunNothing ?? false;
+      if (attributableRuns === 0 && !mayRunNothing) {
         throw new Error(
-          `${options.label}: the measured operation produced no runs with a ` +
-            `read sample`,
+          `${options.label}: the measured operation completed no run carrying ` +
+            "an authored source location; declare `mayRunNothing` for an " +
+            "operation that may complete none",
         );
       }
 
@@ -440,6 +496,7 @@ export async function measureTopicsReads(
         implementation: implementations.get(lift.site),
       }]));
       const remaining = emptyTotals();
+      addTotals(remaining, state.withoutSource);
       for (const [src, totals] of Object.entries(state.bySrc)) {
         const site = parseSrc(src)?.site;
         addTotals(
@@ -450,6 +507,7 @@ export async function measureTopicsReads(
       }
       return {
         label: options.label,
+        posture: options.posture,
         readAccounting: true,
         elapsedMs: measured.elapsedMs,
         graph: { before: measured.before.graph, after: after.graph },
@@ -468,7 +526,9 @@ export async function measureTopicsReads(
         }),
         remaining,
         runsWithoutReads: state.runsWithoutReads,
+        runsWithoutSource: state.withoutSource.runs,
         eventCommits: state.eventCommits,
+        mayRunNothing,
         notes: [ACCOUNTING_ON_NOTE, ATTEMPT_READS_NOTE, TIMING_NOTE],
       };
     }, () => releaseSample(page, token));
@@ -523,11 +583,12 @@ export async function timeTopicsOperation(
         if (workerRuns === 0 && !mayRunNothing) {
           throw new Error(
             `${options.label}: the timed operation ran nothing in the worker; ` +
-              "declare `mayRunNothing` for an operation that may",
+              "declare `mayRunNothing` for an operation that may run nothing",
           );
         }
         return {
           label: options.label,
+          posture: options.posture,
           readAccounting: false,
           accountingTurnedOff: true,
           mayRunNothing,
@@ -563,7 +624,11 @@ export function formatTopicsSample(
 ): string[] {
   const { before, after } = sample.graph;
   const lines = [
-    `${sample.label}: ${sample.elapsedMs.toFixed(0)}ms, read accounting ${
+    `${sample.label} [${
+      sample.posture.declared
+        ? `${sample.posture.mode} via ${sample.posture.clientFrom}`
+        : "posture undeclared"
+    }]: ${sample.elapsedMs.toFixed(0)}ms, read accounting ${
       sample.readAccounting ? "on" : "off"
     }; graph ${before.nodes} -> ${after.nodes} nodes, ${before.edges} -> ${after.edges} edges`,
   ];
@@ -605,12 +670,19 @@ export function formatTopicsSample(
     lines.push(row("remaining", sample.remaining, ""));
     lines.push(
       `  ${sample.runsWithoutReads} runs without a read sample; ` +
-        `${sample.eventCommits} event commits`,
+        `${sample.runsWithoutSource} with a read sample but no source ` +
+        `location; ${sample.eventCommits} event commits${
+          sample.mayRunNothing
+            ? ", declared that it may complete no located run"
+            : ""
+        }`,
     );
   } else {
     lines.push(
       `  ${sample.workerRuns} worker scheduler runs${
-        sample.mayRunNothing ? ", declared that it may run nothing" : ""
+        sample.mayRunNothing
+          ? ", declared that it may run nothing in the worker"
+          : ""
       }; telemetry and read accounting turned off before the interval`,
     );
   }
@@ -636,8 +708,16 @@ export function formatTopicsSample(
 
 /** Run markers summed in the page while a sampling is active. */
 interface PageSampling {
-  /** Totals by run `src`; a run with no `src` is keyed by the empty string. */
+  /**
+   * Totals by run `src`, for the runs that carried one. A run whose marker has
+   * no `src` is counted in {@link PageSampling.withoutSource} instead, so that
+   * a location the helper cannot read stays distinguishable from no location
+   * at all.
+   */
   bySrc: Record<string, ReadTotals>;
+
+  /** Totals over the completed runs whose marker carried no `src`. */
+  withoutSource: ReadTotals;
 
   /** Completed runs that carried no read sample. */
   runsWithoutReads: number;
@@ -765,8 +845,18 @@ async function startSampling(page: Page, token: string): Promise<void> {
       if (!rt) {
         throw new Error("The shell exposes no runtime client to measure");
       }
+      const emptyTotals = () => ({
+        runs: 0,
+        durationMs: 0,
+        proxyAccesses: 0,
+        maxProxyAccesses: 0,
+        linkResolutions: 0,
+        distinctDocuments: 0,
+        registeredDependencies: 0,
+      });
       const sampling: PageSampling = {
         bySrc: {},
+        withoutSource: emptyTotals(),
         runsWithoutReads: 0,
         eventCommits: 0,
         eventCommitErrors: [],
@@ -782,15 +872,9 @@ async function startSampling(page: Page, token: string): Promise<void> {
           sampling.runsWithoutReads++;
           return;
         }
-        const totals = sampling.bySrc[marker.src ?? ""] ??= {
-          runs: 0,
-          durationMs: 0,
-          proxyAccesses: 0,
-          maxProxyAccesses: 0,
-          linkResolutions: 0,
-          distinctDocuments: 0,
-          registeredDependencies: 0,
-        };
+        const totals = marker.src === undefined
+          ? sampling.withoutSource
+          : (sampling.bySrc[marker.src] ??= emptyTotals());
         totals.runs++;
         totals.durationMs += marker.durationMs;
         totals.proxyAccesses += marker.reads.proxyAccesses;

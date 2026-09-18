@@ -25,7 +25,7 @@ import type { FabricValue } from "@/interface.ts";
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
-} from "@/types";
+} from "./interface.ts";
 
 /** The only regex flavor currently representable as a JS `RegExp`. */
 const DEFAULT_FLAVOR = "es2025";
@@ -124,6 +124,11 @@ export class FabricRegExp extends BaseFabricPrimitive
   /** @inheritDoc */
   get [VALUE_TAG](): FabricPrimitiveValueTag {
     return FABRIC_PRIMITIVE_VALUE_TAGS.FabricRegExp;
+  }
+
+  /** @inheritDoc */
+  get schemaType(): "FabricRegExp" {
+    return "FabricRegExp";
   }
 
   /** The pattern source text. */

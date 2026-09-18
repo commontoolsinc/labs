@@ -135,9 +135,11 @@ import {
 } from "./data-uri.ts";
 import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
 import { type LastNode, resolveLink } from "./link-resolution.ts";
+import { areNormalizedLinksSame } from "./link-types.ts";
 import {
   areLinksSame,
   createSigilLinkFromParsedLink,
+  declareStreamSchema,
   isCellLink,
   KeepAsCell,
   type NormalizedFullLink,
@@ -656,7 +658,7 @@ declare module "@commonfabric/api" {
       scope?: CellScope;
       nodes: Set<NodeRef>;
       frame: Frame;
-      value?: FactoryInput<T> | T;
+      kind?: CellKind;
       name?: unknown;
       external?: unknown;
     };
@@ -801,6 +803,60 @@ const cellMethods = new Set<
   "keys",
   "keyEntries",
 ]);
+
+/** Whether `schema` admits `value` and nothing else. */
+function schemaPinsLiteral(
+  schema: JSONSchema | undefined,
+  value: string,
+): boolean {
+  if (!isObjectNotArray(schema)) return false;
+  if (schema.const !== undefined) return schema.const === value;
+  return Array.isArray(schema.enum) && schema.enum.length === 1 &&
+    schema.enum[0] === value;
+}
+
+/**
+ * The property schemas of a receiver whose own schema describes an index, and
+ * `undefined` for one whose schema describes anything else.
+ *
+ * An index's descriptor is published by a separate scheduler action, and until
+ * that action commits it reads as absent. The schema is what tells a consumer
+ * in that window that its receiver is an index rather than ordinary data.
+ */
+function collectionIndexProperties(
+  schema: JSONSchema | undefined,
+): Record<string, JSONSchema> | undefined {
+  const resolved = resolveSchema(schema);
+  const properties = isObjectNotArray(resolved)
+    ? resolved.properties
+    : undefined;
+  return isObjectNotArray(properties) &&
+      schemaPinsLiteral(properties.kind, "collection-index")
+    ? properties as Record<string, JSONSchema>
+    : undefined;
+}
+
+/**
+ * The missing-key behavior an index handle's own schema names, which is what
+ * tells a lookup which empty answer to give before the descriptor carrying it
+ * is published. `groupBy` and `keyBy` each produce a handle whose type names
+ * one; the descriptor interface spelled directly names neither.
+ */
+function declaredCollectionIndexMode(
+  schema: JSONSchema | undefined,
+): "group" | "key" | undefined {
+  const properties = collectionIndexProperties(schema);
+  if (schemaPinsLiteral(properties?.mode, "group")) return "group";
+  if (schemaPinsLiteral(properties?.mode, "key")) return "key";
+  return undefined;
+}
+
+/** Whether an index surface may answer for `cell`, published or not. */
+function isCollectionIndexReceiver(cell: AnyCell<unknown>): boolean {
+  return (cell as Cell<{ kind?: string }>).key("kind").get() ===
+      "collection-index" ||
+    collectionIndexProperties(cell.schema) !== undefined;
+}
 
 /**
  * `schema` for `result`, carrying the whole `ifc` its link schema already
@@ -1114,6 +1170,15 @@ export class CellImpl<T extends FabricValue>
     return this.#kind === "cell" || this.#kind === "readonly";
   }
 
+  /**
+   * The kind this cell was constructed as: `stream` for a handle minted for a
+   * stream position, `cell` otherwise. Read off the handle alone, with nothing
+   * read from storage, which is what a write boundary needs from it.
+   */
+  get kind(): CellKind {
+    return this.#kind;
+  }
+
   [cfcLabelViewSymbol](): CfcLabelView | undefined {
     return cloneCfcLabelView(this.#cfcLabelView);
   }
@@ -1341,14 +1406,7 @@ export class CellImpl<T extends FabricValue>
       });
     }
 
-    // The link's schema may ride as a content-addressed reference; the
-    // stream marker lives on the resolved document.
-    const streamSchema = isObjectNotArray(resolvedToValueLink.schema)
-      ? resolveExternalRootRefForStructure(resolvedToValueLink.schema)
-      : resolvedToValueLink.schema;
-    if (
-      ContextualFlowControl.getAsCellValues(streamSchema).at(0) === "stream"
-    ) {
+    if (ContextualFlowControl.declaresStream(resolvedToValueLink.schema)) {
       return true;
     }
 
@@ -1399,13 +1457,29 @@ export class CellImpl<T extends FabricValue>
     }
 
     logger.timeStart("cell", "get");
-    const value = validateAndTransform(
+    const read = validateAndTransform(
       this.runtime,
       this.tx,
       this.#viewRef,
       [],
       { ...options, synced: this.#synced },
     );
+    // A stream holds no value, so a read of a stream handle returns the
+    // stream. The read finds that out rather than assuming it, because the
+    // kind alone does not decide: a union that offers both `cell` and `stream`
+    // hands a stream handle to a position that holds a value, and that value
+    // is what its read returns. Two outcomes say there is none. The read
+    // finds nothing. Or the handle's own schema names a further handle kind
+    // behind the stream's, as a view node's prop schema leaves `opaque`
+    // there, and the read mints that handle on the very location the stream
+    // names: a handle carrying nothing that says stream, whose `send()` would
+    // write the event into the stream's document.
+    const holdsNoValue = read === undefined ||
+      (isCell(read) &&
+        areNormalizedLinksSame(read.getAsNormalizedFullLink(), this.#link));
+    const value = this.#kind === "stream" && holdsNoValue
+      ? this as unknown as typeof read
+      : read;
     const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
       logger.warn(
@@ -3267,6 +3341,19 @@ export class CellImpl<T extends FabricValue>
     return this.#link;
   }
 
+  /**
+   * The link a serialized reference to this cell is built from. A stream
+   * handle's own link carries the event schema, and what says it is a stream
+   * is the handle's kind, which a reference does not carry. The reference
+   * outlives the handle, and the document it names holds nothing, so the
+   * declaration goes onto the reference's schema.
+   */
+  #linkForReference(): NormalizedFullLink {
+    return this.#kind === "stream"
+      ? { ...this.#link, schema: declareStreamSchema(this.#link.schema) }
+      : this.#link;
+  }
+
   getAsLink(
     options?: {
       base?: Cell<any>;
@@ -3275,7 +3362,7 @@ export class CellImpl<T extends FabricValue>
       keepAsCell?: KeepAsCell;
     },
   ): SigilLink {
-    return createSigilLinkFromParsedLink(this.#link, {
+    return createSigilLinkFromParsedLink(this.#linkForReference(), {
       ...options,
       overwrite: "this",
     });
@@ -3289,7 +3376,7 @@ export class CellImpl<T extends FabricValue>
       keepAsCell?: KeepAsCell;
     },
   ): SigilWriteRedirectLink {
-    return createSigilLinkFromParsedLink(this.#link, {
+    return createSigilLinkFromParsedLink(this.#linkForReference(), {
       ...options,
       overwrite: "redirect",
     }) as SigilWriteRedirectLink;
@@ -3506,7 +3593,8 @@ export class CellImpl<T extends FabricValue>
 
   /**
    * Export cell metadata for introspection, similar to Reactive's export method.
-   * If the cell has a link, it's included as 'external'.
+   * If the cell has a link, it's included as 'external'. `kind` is the cell's
+   * kind, which is what tells a stream from a value cell.
    */
   export(): {
     cell: OpaqueCell<unknown>;
@@ -3515,7 +3603,7 @@ export class CellImpl<T extends FabricValue>
     scope?: CellScope;
     nodes: Set<NodeRef>;
     frame: Frame;
-    value?: FactoryInput<T> | T;
+    kind?: CellKind;
     name?: unknown;
     external?: unknown;
   } {
@@ -3535,10 +3623,7 @@ export class CellImpl<T extends FabricValue>
       scope: isCellScope(this.#_link.scope) ? this.#_link.scope : undefined,
       nodes: cellNodes.get(this.#causeContainer.cell) ?? new Set(),
       frame: this.#frame,
-      // Cast needed: stream sentinel marker isn't actually of type T
-      value: this.#kind === "stream"
-        ? { $stream: true } as unknown as T
-        : undefined,
+      kind: this.#kind,
       name: this.#causeContainer.cause,
       external: this.#_link.id
         ? this.getAsWriteRedirectLink({
@@ -3620,9 +3705,7 @@ export class CellImpl<T extends FabricValue>
           if (
             cellMethods.has(prop as keyof ICell<T>) &&
             (!isSqliteOnlyMethod || cellKind === "sqlite") &&
-            (!isIndexOnlyMethod ||
-              (self as unknown as Cell<{ kind?: string }>).key("kind").get() ===
-                "collection-index") &&
+            (!isIndexOnlyMethod || isCollectionIndexReceiver(self)) &&
             (!arrayOnlyMethods.has(String(prop)) || isArrayMethodReceiver)
           ) {
             return nestedCell.getAsReactiveProxy(
@@ -3806,7 +3889,7 @@ export class CellImpl<T extends FabricValue>
     const index = this as unknown as Cell<
       CollectionIndexData<CollectionIndexKey, unknown>
     >;
-    if (index.key("kind").get() !== "collection-index") {
+    if (!isCollectionIndexReceiver(index)) {
       throw new Error("lookup requires a collection index");
     }
     const resolved = resolveCollectionKey(
@@ -3817,10 +3900,21 @@ export class CellImpl<T extends FabricValue>
     const value = resolved
       ? index.key("buckets").key(collectionKeyBucket(resolved.identity)).get()
       : undefined;
-    return (value === undefined
-      ? (index.key("mode").get() === "group" ? [] : undefined)
-      : value) as T extends CollectionIndexData<CollectionIndexKey, infer V> ? V
+    if (value !== undefined) {
+      return value as T extends CollectionIndexData<CollectionIndexKey, infer V>
+        ? V
         : unknown;
+    }
+    const mode = index.key("mode").get() ??
+      declaredCollectionIndexMode(this.schema);
+    if (mode === undefined) {
+      throw new Error(
+        "lookup needs the index mode to answer a missing key: this index has " +
+          "published no descriptor, and its type names neither mode",
+      );
+    }
+    return (mode === "group" ? [] : undefined) as T extends
+      CollectionIndexData<CollectionIndexKey, infer V> ? V : unknown;
   }
 
   /** Reads occupied-key enumeration separately from bucket lookup. */
@@ -3828,10 +3922,10 @@ export class CellImpl<T extends FabricValue>
     const index = this as unknown as Cell<
       CollectionIndexData<CollectionIndexKey, unknown>
     >;
-    if (index.key("kind").get() !== "collection-index") {
+    if (!isCollectionIndexReceiver(index)) {
       throw new Error("keys requires a collection index");
     }
-    return index.key("keys").get() as T extends
+    return (index.key("keys").get() ?? []) as T extends
       CollectionIndexData<infer K, unknown> ? K[] : unknown[];
   }
 
@@ -3842,10 +3936,10 @@ export class CellImpl<T extends FabricValue>
     const index = this as unknown as Cell<
       CollectionIndexData<CollectionIndexKey, unknown>
     >;
-    if (index.key("kind").get() !== "collection-index") {
+    if (!isCollectionIndexReceiver(index)) {
       throw new Error("keyEntries requires a collection index");
     }
-    return index.key("keyEntries").get() as T extends
+    return (index.key("keyEntries").get() ?? []) as T extends
       CollectionIndexData<infer K, unknown> ? CollectionIndexKeyEntry<K>[]
       : unknown[];
   }
@@ -4082,7 +4176,7 @@ export class CellImpl<T extends FabricValue>
   }
 
   toJSON(): SigilLink | null {
-    // TODO(danfuzz): Remove this method once `value-debug.ts` can correctly
+    // TODO(danfuzz): Remove this method once `value-debug` can correctly
     // render cells without it.
     //
     // The JSON protocol's name for the same link, honored by every renderer

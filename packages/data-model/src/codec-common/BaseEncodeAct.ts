@@ -13,9 +13,9 @@ import type {
   NonterminalCodec,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
+import { debugStr } from "@/value-debug";
 import { BaseCodecAct } from "./BaseCodecAct.ts";
 import { SELF_REP } from "./CodecRegistry.ts";
-import { quotedDebugString } from "./quotedDebugString.ts";
 
 /**
  * One act of encoding: what {@link BaseCodecAct} holds, the walk that turns a
@@ -144,9 +144,7 @@ export abstract class BaseEncodeAct<Encoded, SerializedForm = Encoded>
       const typeName = typeof value;
       const label = (typeName === "object") ? "instance" : typeName;
       throw new Error(
-        `Cannot encode ${label} ${
-          quotedDebugString(value)
-        }: no applicable codec.`,
+        debugStr`Cannot encode ${label} $quote${value}: no applicable codec.`,
       );
     }
   }

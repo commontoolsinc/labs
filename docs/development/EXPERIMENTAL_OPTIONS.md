@@ -363,6 +363,11 @@ server](#clients-that-are-not-built-alongside-their-server).
     new` compiles and materializes on the space's serving runtime rather
     than in the client
     ([`server-pattern-lifecycle.md`](../features/server-pattern-lifecycle.md)),
+    serves a bounded client's `db.query` under the read ceiling that client
+    declared in its signed `session.open` descriptor (a flag-ON client
+    runtime hands its `cfcReadMaxConfidentiality` to its sessions, and
+    the serving loop stamps it onto every run served as one of them —
+    `docs/specs/sqlite-builtin/06-cfc.md`, "Runtime read ceiling"),
     and exposes the §7 `servingLoop` counters on `/api/health/stats`.
     Narrowing writes chain the eager via-user hop (scopes.md §2's MUST).
     Since Phase 2 (speculation.md), a flag-ON CLIENT no longer commits
@@ -593,8 +598,9 @@ expectations and assertions of the built-in default. The
 [reload diagnosis](../history/development/performance/2026-09-15-lazy-reload-diagnosis.md)
 and [navigation-policy follow-up](../history/development/performance/2026-09-15-notebook-reload-navigation-policy.md)
 separate nullable-read errors from a test's assumption about the selected page.
-The owner decision and remaining acceptance work belong to the
-[fast-follow plan](../plans/lazy-materialization-fast-follow.md).
+The flag owner decides whether and when to retire the switch. The
+[fast-follow plan](../plans/lazy-materialization-fast-follow.md) owns remaining
+default-on measurements and guidance; its completion does not require retirement.
 
 One behavior difference is deliberate rather than a defect, and it is the point
 of the mode: a lift that FORWARDS its argument onward without reading through it

@@ -12,6 +12,7 @@ import { parseLink } from "../src/link-utils.ts";
 import { runtimeWritePolicyAuthorization } from "../src/cfc/types.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 
@@ -63,7 +64,7 @@ describe("runtime-owned-store enrollment wiring", () => {
     } as JSONSchema);
     const id = cell.getAsNormalizedFullLink().id;
     writeSeedEnvelopeDoc(seed, space);
-    seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+    seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
       value: { secret: "s3cr3t" },
       cfc: {
         version: 1,

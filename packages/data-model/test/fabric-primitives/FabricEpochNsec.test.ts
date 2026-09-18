@@ -44,6 +44,12 @@ describe("FabricEpochNsec", () => {
   });
 
   describe("instance members", () => {
+    describe(".schemaType", () => {
+      it("is `FabricEpochNsec`", () => {
+        expect(new FabricEpochNsec(0n).schemaType).toBe("FabricEpochNsec");
+      });
+    });
+
     describe(".value", () => {
       it("wraps a `bigint` value", () => {
         const sn = new FabricEpochNsec(1234567890000000000n);

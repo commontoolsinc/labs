@@ -913,6 +913,35 @@ export async function fillCfTextarea(
   }
 }
 
+/**
+ * Write the whole of `data` to `stream`, which one `writeSync` may not do.
+ *
+ * `writeSync` is synchronous, not complete: it returns the number of bytes it
+ * took, and a pipe that is full takes fewer than it was offered. A bench file's
+ * diagnostics reach the Benchmarks workflow through exactly such a pipe and
+ * carry whole sample dumps, so a single call can truncate one with nothing to
+ * say it did.
+ *
+ * `@std/io` is not mapped here, so the loop is written out, as
+ * `packages/cli/lib/view/mod.ts` writes it for stdout.
+ *
+ * @throws If the stream takes no bytes, rather than looping forever offering
+ *   them.
+ */
+export function writeAllSync(
+  stream: { writeSync(data: Uint8Array): number },
+  data: Uint8Array,
+): void {
+  let written = 0;
+  while (written < data.length) {
+    const took = stream.writeSync(data.subarray(written));
+    if (took <= 0) {
+      throw new Error(`The stream accepted no bytes of ${data.length}.`);
+    }
+    written += took;
+  }
+}
+
 export async function waitForRuntimeIdle(
   page: Page,
 ) {

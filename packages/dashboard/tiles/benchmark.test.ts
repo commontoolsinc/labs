@@ -35,7 +35,6 @@ import {
   benchmarkTrend,
   benchmarkTrendRuns,
   benchPage,
-  CALIBRATION_FILE,
   formatNs,
   keyBenchmarks,
   pointsForWindow,
@@ -44,6 +43,7 @@ import {
   trendPct,
   trendStatus,
 } from "./benchmark.ts";
+import { CALIBRATION_FILE } from "../bench-report.ts";
 import {
   CI_HISTORY_MIN_DAYS,
   CI_HISTORY_POINT_TARGET,
@@ -1400,19 +1400,6 @@ Deno.test("benchmark: a run still in flight is not sampled", async () => {
       [],
     );
   });
-});
-
-Deno.test("benchmark: the calibration the tile divides out is the one CI runs", async () => {
-  // The correction is only as good as the artifact carrying it. The tile names
-  // one file, the workflow runs one file, and its validation step fails a run
-  // that produced no calibration. Nothing else keeps those three together.
-  const root = new URL("../../../", import.meta.url);
-  await Deno.stat(new URL(CALIBRATION_FILE, root));
-  const workflow = await Deno.readTextFile(
-    new URL(".github/workflows/benchmarks.yml", root),
-  );
-  assertStringIncludes(workflow, `\n            ${CALIBRATION_FILE} \\\n`);
-  assertStringIncludes(workflow, `"/${CALIBRATION_FILE}",`);
 });
 
 Deno.test("benchmark: returns a failed view after the run list settles", async () => {

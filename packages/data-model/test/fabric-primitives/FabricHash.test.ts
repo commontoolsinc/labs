@@ -81,6 +81,14 @@ describe("FabricHash", () => {
   });
 
   describe("instance members", () => {
+    describe(".schemaType", () => {
+      it("is `FabricHash`", () => {
+        expect(new FabricHash(SAMPLE_HASH, "fid1").schemaType).toBe(
+          "FabricHash",
+        );
+      });
+    });
+
     describe("toString()", () => {
       it("produces `fid1:<base64>` format", () => {
         const cid = new FabricHash(SAMPLE_HASH, "fid1");

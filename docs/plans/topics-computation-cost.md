@@ -251,10 +251,31 @@ last-activity lifts. Opening a topic ran the pivot, that topic's backlinks, and
 its comment count. Returning to the board afterward ran that topic's
 last-activity lift once. The measurement is one small sample, taken with
 [lazy materialization](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization)
-on. [Server execution](../development/EXPERIMENTAL_OPTIONS.md#serverexecution)
-and lazy materialization off are not yet measured. T0 measures both before the
-baseline report, in runs labeled by mode; the scheduled Benchmarks workflow runs
-client execution only. Of those three, the headless tier measures the
+on and with client execution.
+
+Which tier measures a mode is settled by which tier can run it, and every run
+is labeled by mode. The headless tier measures lazy materialization on and off,
+under a `--mode` the probe stamps onto each sample from the flags the runtime
+reports back. It cannot measure
+[server execution](../development/EXPERIMENTAL_OPTIONS.md#serverexecution): the
+ON posture's serving loop is an `ExecutorHost` built over a co-hosted memory
+server, and the headless fixture runs over an emulated storage manager in one
+process with no memory server, so the flag has nothing there to engage. Server
+execution can be measured only in the browser tier, which is the tier that runs
+against a toolshed. A toolshed given the ON flag was measured to construct the
+loop and to serve a deployed Topics board's work, recorded in
+[the engagement probe](../history/development/performance/2026-09-18-topics-lazy-materialization.md),
+which is the engagement the headless tier has no way to produce. That probe
+drove a source-run toolshed with the `cf` CLI rather than the browser benchmark
+environment of a built binary, a baked shell and Chrome, so whether that
+environment runs a coherent arm is open. The cost of server execution is not
+yet measured in either tier. A browser arm holds its two halves to one
+posture: the toolshed serves at it, and the shell it serves is built at it.
+A run whose halves disagree is refused rather than labeled. Server execution
+on and off must both be measured before the baseline report. The scheduled
+Benchmarks workflow runs client execution only.
+
+Of the three demand workloads above, the headless tier measures the
 board-with-one-topic workload with the demand the browser measured, and the
 all-backlinks workload as a scaling probe rather than normal UI behavior: it
 demands the pivot and every topic's backlinks at once, which no browser workload
@@ -264,9 +285,13 @@ comment-count, or last-activity lifts, so there is no work of theirs to measure
 headlessly. The tier's thread cases run under a workload of their own,
 `aggregates`, which demands every topic's present comment count and last
 activity and nothing else. Measure cold initialization, warm updates, and reopen
-or reconnect separately. Hold runtime, source package, data, demand, and feature
-flags constant between comparison arms; alternate repeated timing runs and
-report their distribution rather than a single favorable sample.
+or reconnect separately. T0 measured reopen in the browser tier and not
+reconnect: inducing a transport reconnect needs a storage relay the Benchmarks
+workflow does not run, so the browser tier's `reopen` series re-opens a topic
+within one live client and a browser reconnect is unmeasured. Hold runtime,
+source package, data, demand, and feature flags constant between comparison
+arms; alternate repeated timing runs and report their distribution rather than
+a single favorable sample.
 
 Test mention insertion/removal, same-count destination retargeting, duplicate
 and self-mentions, aliases/scoped references, topic reorder/removal, rename-only
@@ -281,8 +306,11 @@ executions, graph size in nodes and edges, elapsed time, and available storage
 or memory measurements. The browser tier records body reads, graph size, and
 timings; attempt reads come from the headless tier, because the runtime client's
 read-stats request enables body accounting only. Count producer and consumer
-work separately but decide on the complete settled operation. Network claims
-require bytes/subscription measurements in addition to read accounting.
+work separately but decide on the complete settled operation. T0 measured the
+browser tier's reopen workload to run none of the pivot, backlink,
+comment-count, or last-activity lifts, so that one has no producer or consumer
+work to separate. Network claims require bytes/subscription measurements in
+addition to read accounting.
 
 T0 must set numeric baseline-derived acceptance limits before tuning candidates.
 Read budgets are total and per-run, with explicit output/UI demand. Read and

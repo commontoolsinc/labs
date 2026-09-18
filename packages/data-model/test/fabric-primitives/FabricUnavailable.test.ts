@@ -177,6 +177,14 @@ describe("FabricUnavailable", () => {
   });
 
   describe("instance members", () => {
+    describe(".schemaType", () => {
+      it("is `FabricUnavailable`", () => {
+        expect(new FabricUnavailable("pending").schemaType).toBe(
+          "FabricUnavailable",
+        );
+      });
+    });
+
     describe(".reason", () => {
       it("is the reason given at construction", () => {
         for (const [reason, instance] of Object.entries(instancesByReason())) {

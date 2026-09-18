@@ -135,20 +135,20 @@ export const FILL_DENSITY_SHARE = 0.25;
 export const FILL_EXPLORATION_SHARE = 0.15;
 
 /**
- * How far apart a suite's batches must have been charged before its
- * fitted slope is believed: the largest figure any of them was charged,
- * less the smallest.
+ * How far apart a suite's batches must have been in the time their own
+ * tests took before its fitted slope is believed: the largest figure any
+ * of them recorded, less the smallest.
  *
  * A slope says what one more second of test time costs, and it is read
- * far outside the range it was fitted over: a suite charged six seconds
- * in every batch anybody has seen may be charged thousands the first
- * time a lane packs it whole. Inside a narrow range the fixed cost
- * dominates and the slope is noise, so fitting one there and reading it
- * out there is how a lane comes to believe that six thousand seconds of
- * tests are free. A range is narrow wherever it sits, so this is the
- * width of the range rather than where it falls: batches charged 229,
- * 230 and 230 seconds say as little about a slope as batches charged
- * two, three and four.
+ * far outside the range it was fitted over: a suite whose every batch
+ * anybody has seen held six seconds of tests may be charged thousands
+ * the first time a lane packs it whole. Inside a narrow range the fixed
+ * cost dominates and the slope is noise, so fitting one there and
+ * reading it out there is how a lane comes to believe that six thousand
+ * seconds of tests are free. A range is narrow wherever it sits, so this
+ * is the width of the range rather than where it falls: batches of 229,
+ * 230 and 230 seconds say as little about a slope as batches of two,
+ * three and four.
  *
  * Below this the slope is one, which is the reading that needs no
  * evidence: a second of test time costs a second.
@@ -165,26 +165,6 @@ export const MIN_CORRECTION_SPAN_SECONDS = LANE_BUDGET_SECONDS / 10;
  * fitted a slope of zero, which says a second of its tests costs nothing.
  */
 export const MIN_CORRECTION_SAMPLES = 3;
-
-/**
- * How far apart a suite's batches must have been in size before its
- * fitted per-unit cost is believed: the most units any of them held, less
- * the fewest.
- *
- * This is `MIN_CORRECTION_SPAN_SECONDS`'s reasoning in the units the
- * regressor counts, and it is here for the same reason: a slope read far
- * outside the range it was fitted over says whatever that range's noise
- * said. A unit has been measured to cost around half a second, where a
- * batch's wall time on a shared runner moves by several seconds for
- * reasons that have nothing to do with what the batch held, so a slope
- * fitted across a handful of units is describing the runner. Fifty units
- * at half a second is about the width the seconds dial asks for.
- *
- * Below this the slope is zero, which is the reading that needs no
- * evidence, and the suite's intercept carries what a unit costs: a batch
- * of one unit is charged what a batch of many was seen to cost.
- */
-export const MIN_UNIT_SPAN_UNITS = 50;
 
 /** The flake rate above which an item leaves the selectable set. */
 export const FLAKE_EXCLUSION_RATE = 0.005;
@@ -661,10 +641,10 @@ export const DIALS: readonly Dial[] = [
     value: MIN_CORRECTION_SPAN_SECONDS,
     unit: "seconds",
     setBy: "derived",
-    why: "A tenth of a lane's budget, measured as the widest gap between two " +
-      "batches' charges. Down when a suite's real slope is going unbelieved " +
-      "for too long; up when a slope fitted inside a narrow range is being " +
-      "read far outside it.",
+    why: "A tenth of a lane's budget, measured as the widest gap between " +
+      "the time two batches' own tests took. Down when a suite's real slope " +
+      "is going unbelieved for too long; up when a slope fitted inside a " +
+      "narrow range is being read far outside it.",
   },
   {
     name: "MIN_CORRECTION_SAMPLES",
@@ -674,17 +654,6 @@ export const DIALS: readonly Dial[] = [
     why:
       "Up when a slope is being fitted from too little and swinging about; " +
       "down when a suite's real slope takes too long to be believed.",
-  },
-  {
-    name: "MIN_UNIT_SPAN_UNITS",
-    value: MIN_UNIT_SPAN_UNITS,
-    unit: "units",
-    setBy: "chosen",
-    why:
-      "The widest gap between two batches' sizes a suite needs before what " +
-      "one more unit costs it is believed. Down when a suite's real " +
-      "per-unit cost is going unbelieved for too long; up when a slope " +
-      "fitted across a few units is being read across hundreds.",
   },
   {
     name: "FLAKE_EXCLUSION_RATE",

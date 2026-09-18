@@ -1,5 +1,5 @@
 import type { FabricValue } from "@/interface.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
+import { toCompactDebugString } from "@/value-debug";
 import { toReportableState } from "./toReportableState.ts";
 import { toReportableTag } from "./toReportableTag.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";

@@ -21,13 +21,15 @@ import {
   type FabricValueLayer,
   type FabricValuePlusLayer,
 } from "@/interface.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
+import {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+} from "@/fabric-primitives/interface.ts";
+import { debugStr } from "@/value-debug";
 
 import { type PlusTypePredicate } from "./interface.ts";
 import {
   type ConvertibleJsValueTag,
-  FABRIC_PRIMITIVE_VALUE_TAGS,
-  type FabricPrimitiveValueTag,
   type FabricValuePlusTag,
   type FabricValueTag,
   VALUE_TAGS,
@@ -47,8 +49,7 @@ export function tagOfFabricPrimitive(
     return result;
   }
 
-  const desc = toCompactDebugString(value, { backtickQuote: true });
-  throw new Error(`Not a valid \`FabricPrimitive\`: ${desc}`);
+  throw new Error(debugStr`Not a valid \`FabricPrimitive\`: $quote${value}`);
 }
 
 /**
@@ -149,8 +150,9 @@ export function tagOfFabricValue<PlusType = never>(
     return result;
   }
 
-  const desc = toCompactDebugString(value, { backtickQuote: true });
-  throw new Error(`Not possibly a valid \`FabricValue\`: ${desc}`);
+  throw new Error(
+    debugStr`Not possibly a valid \`FabricValue\`: $quote${value}`,
+  );
 }
 
 /**

@@ -43,6 +43,10 @@ import {
   registeredCfcSidecarHostDirs,
 } from "../src/sandbox/docker-runsc.ts";
 import { readDockerRuntimes } from "../src/sandbox/docker-runtimes.ts";
+import {
+  connectorGrantLabel,
+  connectorGrantName,
+} from "../src/well-known-grants.ts";
 import { resolveConnectorGrants } from "./connector-grants.ts";
 import type {
   ConsoleHealthFactWithState,
@@ -425,7 +429,7 @@ export const resolveConsoleLaunchPlan = (
     });
     for (const grant of resolvedConnectors.grants) {
       connectorResolved.push({
-        name: `grant ${grant.name}`,
+        name: `grant ${connectorGrantLabel(grant)}`,
         value: grant.ref,
         source: `\`${instance.handlesJsonPath}\`, classed by ` +
           `\`${grant.source.piece}\` in \`${instance.piecesJsonPath}\``,
@@ -433,23 +437,23 @@ export const resolveConsoleLaunchPlan = (
       connectorHealth.push({
         id: `connector.granted.${grant.name}`,
         group: "connectors",
-        label: grant.source.connection,
+        label: connectorGrantName(grant.source),
         state: "ok",
-        value: `granted as ${grant.name}`,
+        value: `granted: ${connectorGrantLabel(grant)}`,
         source: `${source} (${grant.source.piece})`,
         detail,
       });
     }
     for (const [index, handle] of resolvedConnectors.unnamed.entries()) {
       connectorResolved.push({
-        name: `grant ${handle.connection}`,
+        name: `grant ${connectorGrantName(handle)}`,
         value: `(none: ${handle.reason})`,
         source: `\`${instance.handlesJsonPath}\``,
       });
       connectorHealth.push({
         id: `connector.refused.${index}`,
         group: "connectors",
-        label: handle.connection,
+        label: connectorGrantName(handle),
         state: handle.state,
         value: "not granted",
         source: `${source} (${handle.piece})`,

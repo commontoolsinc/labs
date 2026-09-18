@@ -152,7 +152,11 @@ export const cfcSchemaIsFalse = (schema: JSONSchema): boolean =>
   (isObjectOrArray(schema) && Object.hasOwn(schema, "not") &&
     cfcSchemaIsTrue(schema["not"]!));
 
-const localDefinitionName = (schemaRef: string): string | undefined => {
+/**
+ * The definition name a `#/$defs/<name>` reference names, or `undefined` for any
+ * other reference.
+ */
+export const localDefinitionName = (schemaRef: string): string | undefined => {
   if (!schemaRef.startsWith("#")) return undefined;
   const path = decodeJsonPointer(schemaRef);
   return isRootDefsSchemaPointer(path) ? path[2] : undefined;

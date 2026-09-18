@@ -225,7 +225,7 @@ and `Uint8Array` → `{ type: "object" }`; the seven `FabricPrimitive` classes
 `FabricKeyPair`, `FabricRegExp`, `FabricUnavailable`) → `{ type: "<Name>" }`
 (the `FabricPrimitive`
 schema
-vocabulary, `FABRIC_PRIMITIVE_SCHEMA_TYPES` in `packages/api/index.ts`);
+vocabulary, each name being the `.schemaType` its class's instances report);
 `URL` → `{ type: "string", format:
 "uri" }`; `ArrayBuffer`/`ArrayBufferLike`/`SharedArrayBuffer`/
 `ArrayBufferView`, the remaining ten typed arrays
@@ -245,9 +245,9 @@ that stays a string, because it converts to a plain string rather than to a
 
 A field authored against a `FabricPrimitive` class ITSELF (`blob: FabricBytes`)
 emits that class's schema-vocabulary name, a leaf with no `properties`, no
-`required`, and no `$defs` hoisting. Validation is by prototype
-(`schemaTypeOfFabricPrimitive`,
-`packages/data-model-schema/src/schemaTypeOfFabricPrimitive.ts`); the dialect side is
+`required`, and no `$defs` hoisting. Validation is by prototype: a value
+matches the name it reports as `.schemaType`, which each class under
+`packages/data-model/src/fabric-primitives/` supplies. The dialect side is
 specified in `docs/specs/json_schema.md`.
 
 `NativeTypeFormatter` also claims one type that is not in the name table: the

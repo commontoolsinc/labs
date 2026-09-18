@@ -1,30 +1,14 @@
 /**
  * The tag vocabulary: the names a dispatch returns when asked what a value
- * already is. The dispatches themselves are in `tag-of.ts`; this module imports
- * nothing, so that a class which reports a tag of its own can name the
- * vocabulary without reaching the dispatches, which recognize that class.
+ * already is. The dispatches themselves are in `tag-of.ts`. The tags the
+ * primitive classes report are defined beside those classes, in
+ * `fabric-primitives/interface.ts`, and the tables here that include them take
+ * them from there. That module is this one's only import, and it imports
+ * nothing, so a class which reports a tag of its own can name its vocabulary
+ * without reaching the dispatches, which recognize that class.
  */
 
-/**
- * The tags a `FabricPrimitive` reports, one per primitive class this package
- * defines. These are the only tags a `[VALUE_TAG]` getter may return, and the
- * only ones the primitive dispatch accepts from one.
- */
-export const FABRIC_PRIMITIVE_VALUE_TAGS = Object.freeze(
-  {
-    FabricEpochNsec: "FabricEpochNsec",
-    FabricEpochDay: "FabricEpochDay",
-    FabricHash: "FabricHash",
-    FabricBytes: "FabricBytes",
-    FabricKeyPair: "FabricKeyPair",
-    FabricRegExp: "FabricRegExp",
-    FabricUnavailable: "FabricUnavailable",
-  } as const,
-);
-
-/** One of the `FabricPrimitive` tag strings. */
-export type FabricPrimitiveValueTag =
-  typeof FABRIC_PRIMITIVE_VALUE_TAGS[keyof typeof FABRIC_PRIMITIVE_VALUE_TAGS];
+import { FABRIC_PRIMITIVE_VALUE_TAGS } from "@/fabric-primitives/interface.ts";
 
 /**
  * The tags of the non-fundamental JS classes (that is, neither plain object nor

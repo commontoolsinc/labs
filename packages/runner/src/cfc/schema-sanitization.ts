@@ -1,13 +1,7 @@
-import {
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  isFabricPrimitiveSchemaType,
-  type JSONSchema,
-  type JSONValue,
-} from "@commonfabric/api";
+import type { JSONSchema, JSONValue } from "@commonfabric/api";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import {
   deepFrozenCloneAndInternSchema,
-  schemaTypeOfFabricPrimitive,
 } from "@commonfabric/data-model-schema";
 import { isSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import {
@@ -18,6 +12,10 @@ import {
   type FabricValue,
   isFabricPlainObject,
 } from "@commonfabric/data-model";
+import {
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  isFabricPrimitiveSchemaType,
+} from "@commonfabric/data-model/fabric-primitives";
 import {
   isObjectNotArray,
   isObjectOrArray,
@@ -636,7 +634,7 @@ const typeMatches = (
     default:
       if (isFabricPrimitiveSchemaType(type)) {
         return value instanceof FabricPrimitive &&
-          schemaTypeOfFabricPrimitive(value) === type;
+          value.schemaType === type;
       }
       return !rejectUnknownType;
   }

@@ -24,6 +24,9 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("list result container seed");
 const space = signer.did();
 
+/** Stands in for a coordinator that is not being watched for a re-trigger. */
+const noop = () => {};
+
 /** A logger that keeps every warning rather than printing it. */
 class RecordingLogger extends Logger {
   readonly warnings: Array<{ key: string; messages: LogMessage[] }> = [];
@@ -126,6 +129,7 @@ describe("list-result-container-seed", () => {
         runtime,
         container,
         () => true,
+        noop,
         Promise.resolve(),
         logger,
         "filter/resume-seed/of:absent-after-pull",
@@ -141,6 +145,7 @@ describe("list-result-container-seed", () => {
         runtime,
         container,
         () => true,
+        noop,
         pull.promise,
         logger,
         "filter/resume-seed/of:barrier-held-until-seeded",
@@ -169,6 +174,7 @@ describe("list-result-container-seed", () => {
         runtime,
         container,
         () => true,
+        noop,
         pull.promise,
         logger,
         "filter/resume-seed/of:arrived-during-pull",
@@ -183,17 +189,20 @@ describe("list-result-container-seed", () => {
       expect(logger.warnings).toEqual([]);
     });
 
-    it("writes nothing when the coordinator no longer holds the container", async () => {
+    it("writes nothing and re-triggers nothing when the coordinator no longer holds the container", async () => {
       const container = newContainer("coordinator-torn-down");
+      let rearms = 0;
       await seedResultContainerWhenPullSettles(
         runtime,
         container,
         () => false,
+        () => rearms++,
         Promise.resolve(),
         logger,
         "filter/resume-seed/of:coordinator-torn-down",
       );
       expect(valueOf(container)).toBeUndefined();
+      expect(rearms).toBe(0);
       expect(logger.warnings).toEqual([]);
     });
 
@@ -207,6 +216,7 @@ describe("list-result-container-seed", () => {
         runtime,
         container,
         () => true,
+        noop,
         Promise.reject(pullFailure),
         logger,
         "filter/resume-seed/of:rejected-pull",
@@ -234,6 +244,7 @@ describe("list-result-container-seed", () => {
         runtime,
         container,
         () => held,
+        noop,
         Promise.resolve(),
         logger,
         "filter/resume-seed/of:released-between-attempts",
@@ -256,6 +267,7 @@ describe("list-result-container-seed", () => {
         runtime,
         container,
         () => true,
+        noop,
         Promise.resolve(),
         logger,
         "filter/resume-seed/of:refused-seed",
@@ -294,6 +306,7 @@ describe("list-result-container-seed", () => {
           runtime,
           containers[index],
           () => true,
+          noop,
           pulls[index].promise,
           logger,
           `identity-seed-${index}`,
@@ -343,6 +356,7 @@ describe("list-result-container-seed", () => {
         runtime,
         container,
         () => true,
+        noop,
         Promise.resolve(),
         logger,
         "filter/resume-seed/of:stamped-seed",
@@ -354,6 +368,70 @@ describe("list-result-container-seed", () => {
       ]);
       expect(valueOf(container)).toEqual([]);
       expect(logger.warnings).toEqual([]);
+    });
+
+    it("re-triggers the coordinator after seeding the container", async () => {
+      const container = newContainer("retrigger-after-seed");
+      let rearms = 0;
+      await seedResultContainerWhenPullSettles(
+        runtime,
+        container,
+        () => true,
+        () => rearms++,
+        Promise.resolve(),
+        logger,
+        "map/resume-seed/of:retrigger-after-seed",
+      );
+      expect(valueOf(container)).toEqual([]);
+      expect(rearms).toBe(1);
+      expect(logger.warnings).toEqual([]);
+    });
+
+    it("re-triggers the coordinator when the container already held a value", async () => {
+      // The coordinator defers on its own read of the container, and the seed
+      // decides whether to write from the durable view. The two can disagree:
+      // a client speculation layer standing on the container hides a value the
+      // durable view has, and the coordinator then waits while the seed
+      // declines. Nothing was written, so a wait that ended only on the write
+      // would never end. The pull settling is what ends it.
+      const container = newContainer("retrigger-without-seed");
+      const { error } = await runtime.editWithRetry((tx) => {
+        container.withTx(tx).set(["already here"]);
+      });
+      expect(error).toBeUndefined();
+      let rearms = 0;
+      await seedResultContainerWhenPullSettles(
+        runtime,
+        container,
+        () => true,
+        () => rearms++,
+        Promise.resolve(),
+        logger,
+        "map/resume-seed/of:retrigger-without-seed",
+      );
+      expect(valueOf(container)).toEqual(["already here"]);
+      expect(rearms).toBe(1);
+      expect(logger.warnings).toEqual([]);
+    });
+
+    it("re-triggers the coordinator after a rejected pull", async () => {
+      // A pull that rejects leaves the container as absent as a resolved one
+      // does, and leaves the coordinator waiting the same way.
+      const container = newContainer("retrigger-after-rejected-pull");
+      let rearms = 0;
+      await seedResultContainerWhenPullSettles(
+        runtime,
+        container,
+        () => true,
+        () => rearms++,
+        Promise.reject(new Error("the container pull could not complete")),
+        logger,
+        "map/resume-seed/of:retrigger-after-rejected-pull",
+      );
+      expect(valueOf(container)).toEqual([]);
+      expect(rearms).toBe(1);
+      expect(logger.warnings.length).toBe(1);
+      expect(logger.warnings[0].key).toBe("resume-pull");
     });
 
     it("carries the viewing identity into every deferred seed attempt", async () => {
@@ -381,6 +459,7 @@ describe("list-result-container-seed", () => {
         runtime,
         container,
         () => true,
+        noop,
         pull.promise,
         logger,
         "map/resume-seed/viewing-instance",

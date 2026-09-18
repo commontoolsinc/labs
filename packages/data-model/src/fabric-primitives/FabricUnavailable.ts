@@ -35,11 +35,11 @@ import {
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
+import { debugStr } from "@/value-debug";
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
-} from "@/types";
-import { toCompactDebugString } from "@/value-debug.ts";
+} from "./interface.ts";
 
 /**
  * The reasons a `FabricUnavailable` can give, as a table keyed by itself, so
@@ -150,9 +150,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
       !Object.hasOwn(UNAVAILABLE_REASONS, reason)
     ) {
       throw new Error(
-        `Not an \`UnavailableReason\`: ${
-          toCompactDebugString(reason, { backtickQuote: true })
-        }`,
+        debugStr`Not an \`UnavailableReason\`: $quote${reason}`,
       );
     }
 
@@ -164,16 +162,12 @@ export class FabricUnavailable extends BaseFabricPrimitive
         !Object.hasOwn(UNAVAILABLE_ERROR_KINDS, errorKind)
       ) {
         throw new Error(
-          `Reason \`error\` requires an \`UnavailableErrorKind\`, not ${
-            toCompactDebugString(errorKind, { backtickQuote: true })
-          }.`,
+          debugStr`Reason \`error\` requires an \`UnavailableErrorKind\`, not $quote${errorKind}.`,
         );
       }
       if ((errorMessage !== null) && (typeof errorMessage !== "string")) {
         throw new Error(
-          `Not an \`errorMessage\`: ${
-            toCompactDebugString(errorMessage, { backtickQuote: true })
-          }`,
+          debugStr`Not an \`errorMessage\`: $quote${errorMessage}`,
         );
       }
       // A message equal to the kind's default is stored as none.
@@ -183,9 +177,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
           : errorMessage;
     } else if ((errorKind !== null) || (errorMessage !== null)) {
       throw new Error(
-        `Reason ${
-          toCompactDebugString(reason, { backtickQuote: true })
-        } takes neither an \`errorKind\` nor an \`errorMessage\`.`,
+        debugStr`Reason $quote${reason} takes neither an \`errorKind\` nor an \`errorMessage\`.`,
       );
     }
 
@@ -201,6 +193,11 @@ export class FabricUnavailable extends BaseFabricPrimitive
   /** @inheritDoc */
   get [VALUE_TAG](): FabricPrimitiveValueTag {
     return FABRIC_PRIMITIVE_VALUE_TAGS.FabricUnavailable;
+  }
+
+  /** @inheritDoc */
+  get schemaType(): "FabricUnavailable" {
+    return "FabricUnavailable";
   }
 
   /** Why the data is unavailable. */

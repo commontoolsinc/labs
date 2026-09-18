@@ -9,6 +9,7 @@
     "@/": "./src/",
     "@/comparison": "./src/comparison/index.ts",
     "@/types": "./src/types/index.ts",
+    "@/value-debug": "./src/value-debug/index.ts",
     "@/value-visit": "./src/value-visit/index.ts",
     "@node/crypto": "node:crypto"
   },
@@ -54,6 +55,7 @@
     "./fabric-bases": "./src/fabric-bases/index.ts",
     "./fabric-instances": "./src/fabric-instances/index.ts",
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
+    "./fabric-primitives/for-testing-only": "./src/fabric-primitives/for-testing-only.ts",
     "./frozen-builtins": "./src/frozen-builtins.ts"
   }
 }

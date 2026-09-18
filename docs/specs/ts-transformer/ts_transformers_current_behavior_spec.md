@@ -1176,7 +1176,12 @@ source occurrence. The pattern-owned expression pass skips synthetic computation
 callbacks, preserving ordinary JavaScript conditionals inside the key tagger.
 The computation carries the tagged selector output type into its lift schema.
 Bare terminal returns and fallthrough emit `void 0`, preserving omitted keys
-when a selector binds a local variable named `undefined`.
+when a selector binds a local variable named `undefined`. The schema injected
+for the handle an operator returns names that operator's missing-key mode —
+`group` for `groupBy`, `key` for `keyBy` — because `GroupIndex` and `KeyIndex`
+pin the `mode` field of `CollectionIndexData` (`packages/api/index.ts`); the
+runtime reads the mode from there for an index whose descriptor has not been
+published.
 
 Helper-owned compute branches introduced by ternary / conditional-helper
 rewriting are re-analyzed with synthetic compute ownership. This preserves

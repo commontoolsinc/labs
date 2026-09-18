@@ -31,6 +31,7 @@ import { Identity } from "@commonfabric/identity";
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import type { LabelMapEntry } from "../src/cfc/types.ts";
@@ -108,7 +109,7 @@ describe("cfc-reference-identity-reads", () => {
     ): NormalizedFullLink => {
       const link = rt.getCell(space, cause, undefined, tx)
         .getAsNormalizedFullLink();
-      tx.writeOrThrow({ space, scope: "space", id: link.id, path: [] }, {
+      seedStoredEnvelope(tx, { space, scope: "space", id: link.id, path: [] }, {
         value,
         cfc: {
           version: 1,

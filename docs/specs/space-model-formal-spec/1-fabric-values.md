@@ -85,8 +85,8 @@ conversion layer (Section 8) and represented in `FabricValue` trees as
 > declarations in `api.ts` and `interface.ts`, the conversions in
 > `convertible-js.ts`, the clone helpers in `value-clone.ts`, and the
 > operations a value of any class is subject to -- `deep-freeze.ts`,
-> `value-hash.ts`, `value-debug.ts`, the comparisons in `comparison/`, and the
-> tag vocabulary in `types/`.
+> `value-hash.ts`, the debug renderers in `value-debug/`, the comparisons in
+> `comparison/`, and the tag vocabulary in `types/`.
 > Of those, one is also an exported subpath: `api.ts` as
 > `@commonfabric/data-model/api`, which is how `@commonfabric/api` reaches it.
 > `codec-interface/` is internal in the same way, reached through
@@ -964,6 +964,7 @@ that form the `FabricPrimitive` arm of `FabricValue`.
 // Shown for illustration only.
 // file: packages/data-model/src/interface.ts
 
+import type { FabricPrimitiveSchemaType } from "./api.ts";
 import { FABRIC_INSTANCE_PLUS_BRAND, FABRIC_PRIMITIVE_BRAND } from "./api.ts";
 
 /**
@@ -998,6 +999,15 @@ export abstract class FabricPrimitive extends BaseFabricSpecialObject {
   constructor() {
     super();
   }
+
+  /**
+   * Name of this instance's class in the schema `type` vocabulary: the `type`
+   * a schema names to admit this value by its class. Every instance of a class
+   * reports the same name, which need not be the name of the class. Each
+   * concrete class supplies its own, and the getter reads no instance state,
+   * so that it returns the same name when read off the class's `prototype`.
+   */
+  abstract get schemaType(): FabricPrimitiveSchemaType;
 }
 ```
 
@@ -1007,6 +1017,12 @@ and `#tag: string` for content IDs, `#bytes: Uint8Array` for byte sequences).
 The base class holds no state — its purpose is to provide a single
 `instanceof FabricPrimitive` check where code needs to identify these types
 uniformly (e.g., the conversion functions' freeze-bypass logic).
+
+Its one abstract member, `.schemaType`, is how a value reports the name its
+class has in the schema dialect's `type` vocabulary
+(`docs/specs/json_schema.md`). Every concrete class supplies it as a constant.
+The per-class listings in the sections that follow leave it out, as they leave
+out each class's codecs.
 
 #### 1.4.7 `FabricEpochNsec`
 
@@ -3352,9 +3368,11 @@ registrations. A caller needing classes of its own extends what this returns.
 | `registerSelfRep` | `null`, `boolean`, `number`, `string` | _(none)_ | Self-representing: emitted as-is. `number` is registered both ways; the codec is tried first. |
 
 The canonical tag strings live in `CODEC_TYPE_TAGS`
-(`codec-interface/codec-type-tags.ts`); the structural meta tags (`quote`,
-`hole`, `object`) live in `CODEC_META_TAGS`
-(`codec-interface/codec-meta-tags.ts`).
+(`codec-interface/codec-type-tags.ts`), which takes the `FabricPrimitive`
+classes' entries from `FABRIC_PRIMITIVE_CODEC_TYPE_TAGS`
+(`fabric-primitives/interface.ts`), where they sit with the other vocabularies
+that range over those classes; the structural meta tags (`quote`, `hole`,
+`object`) live in `CODEC_META_TAGS` (`codec-interface/codec-meta-tags.ts`).
 
 An un-codec'd `FabricSpecialObject` reaching the encoder is a **hard
 error** — every wire form is explicitly represented; there is no implicit
@@ -3592,14 +3610,14 @@ The implementation is split across several files for separation of concerns:
 
 | File | Purpose |
 |------|---------|
-| `index.ts` | Public surface, and the package's main entry point: re-exports the conversion functions (from `convertible-js.ts`), the type declarations (from `interface.ts`), the clone helpers (from `value-clone.ts`), the deep freeze (from `deep-freeze.ts`), the hash (from `value-hash.ts`), the debug renderers (from `value-debug.ts`), the tag vocabulary, narrowings, and validators (from `types/`), and the comparisons `valueEqual()` and `fabricAwareEqual()` (from `comparison/`) |
+| `index.ts` | Public surface, and the package's main entry point: re-exports the conversion functions (from `convertible-js.ts`), the type declarations (from `interface.ts`), the clone helpers (from `value-clone.ts`), the deep freeze (from `deep-freeze.ts`), the hash (from `value-hash.ts`), the debug renderers (from `value-debug/`), the tag vocabulary, narrowings, and validators (from `types/`), and the comparisons `valueEqual()` and `fabricAwareEqual()` (from `comparison/`) |
 | `api.ts` | The pattern-visible declarations: the `FabricValue` union and the types beside it, the three base classes and every concrete class as an `interface` plus a `declare const`, and the debug-rendering option types. It has no imports, so that the type module the sandbox is served can inline it; it is also the `./api` export subpath, which `@commonfabric/api` re-exports. |
 | `interface.ts` | The three abstract base classes as classes, the layer types, and the conversion-layer types (`FabricConvertibleJsObject`, `FabricConvertibleJsValue`); re-exports every type `api.ts` declares. Free of runtime imports, so that any module can import it. |
 | `api-agreement.ts` | Asserts that each of the three base classes and its `api.ts` declaration are mutually assignable. Nothing imports it; it exists to be type-checked, and everything in it erases at compile time. |
 | `convertible-js.ts` | Conversion: `fabricFromConvertibleJsValue`, `shallowFabricFromConvertibleJsValue`, `convertibleJsFromFabricValue`, `isValidFabricConvertibleJsValue` |
 | `fabric-bases/` | The abstract bases a concrete `FabricValue` extends, one per branch of the type hierarchy: `BaseFabricInstance.ts`, `BaseFabricPrimitive.ts` (plus an `index.ts` barrel). These are the implementer's half of the hierarchy; `interface.ts` is the client's, and reaching it does not reach these. |
 | `fabric-instances/` | Concrete `FabricInstance` subclasses, each in its own file: `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricLink.ts`, `FabricMap.ts`, `FabricSet.ts` (plus an `index.ts` barrel). `UnknownValue` and `ProblematicValue` are `FabricInstance`s too, but live in `codec-common/`, existing only as products of a decode fault. |
-| `fabric-primitives/` | Concrete `FabricPrimitive` subclasses, each in its own file: `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDay.ts`, `FabricKeyPair.ts`, `FabricRegExp.ts` (plus an `index.ts` barrel). |
+| `fabric-primitives/` | Concrete `FabricPrimitive` subclasses, each in its own file: `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDay.ts`, `FabricKeyPair.ts`, `FabricRegExp.ts`, `FabricUnavailable.ts`. `interface.ts` holds the tag vocabularies that range over those classes and imports nothing, the classes being its importers; `impl.ts` holds the set of classes and what derives from it, `codecClasses()` and the schema `type` names among them; and `index.ts` is the barrel. |
 
 ---
 

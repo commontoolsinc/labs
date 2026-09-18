@@ -56,13 +56,16 @@ files, reformatting, editing bodies, and resharding — shard and slice
 labels, and the section that dispatched a script step, are run context and
 never identity. A configuration is a variant only when its results need a
 separate history. Identity does not survive a change to the reported name; a
-rename splits history, and a line appended to
-`tasks/test-identity-aliases.jsonl` bridges a split worth bridging. That
-file is append-only, maps any identity at most once, must stay acyclic, and
-each line carries the rename's date; readers resolve aliases transitively
-and apply one only to records older than its date
-(`deno task check-test-aliases` enforces the file's shape). Alias lines name
-the three required identity parts and apply the rename to every variant.
+rename splits history, and a line appended under
+`tasks/test-identity-aliases/` bridges a split worth bridging. That
+directory holds files named after test files — by last path segment, so test
+files of one name share a file — plus `whole-scope.jsonl` for whole-scope
+lines, and reads as a single set of aliases. It is append-only file by file,
+maps any identity at most once, must stay acyclic, and each line carries the
+rename's date; readers resolve aliases transitively and apply one only to
+records older than its date (`deno task check-test-aliases` enforces the
+directory's shape). Alias lines name the three required identity parts and
+apply the rename to every variant.
 
 A task-level record may coexist with the per-item records of the same run
 (`pattern-compat` beside `pattern-compat <key>`, `integration.sh` beside
@@ -215,9 +218,10 @@ enumerates them, nothing scores them, and no lane can be asked to run
 one.
 
 Their figures are not all durations. A lane writes three measurements
-per batch — what it spent, what it was packed to spend, and how many
-units it opened — and the record format carries one number and calls it
-a duration, so which of the three a record holds is decided by its name.
+per batch — what the batch spent, what its own tests took between them,
+and how many units it opened — and the record format carries one number
+and calls it a duration, so which of the three a record holds is decided
+by its name.
 A batch that ended badly is written as a failure, and a test in it
 failing is enough to end it badly.
 
@@ -518,10 +522,15 @@ take milliseconds. Anything that cannot is a container to split into the
 tests it actually contains. `tasks/test-records-report.ts` lists the
 identities over the rule from their passing executions, and its `--gate`
 flag is the ratchet, advisory until the list is short enough to enforce.
-The list is over tests: a lane's measurement of one of its batches is not
-one, however long that batch ran. A test that wedges rather than
-finishing slowly records no duration; wedges surface through job
-failures, and the incremental producers bound what a wedged job loses to
-its unflushed lines. An identity with no passing execution in the window
-has no duration either, and is absent from the list for the same reason.
-A test that fails every time it runs surfaces through the job it fails.
+A window the report could not read in full is neither a pass nor a
+failure of the rule, and the ratchet says so with a status of its own:
+the objects a report left out are the ones nothing has been established
+about, and a ratchet that passed on a window read in part would report
+it clean on the strength of what arrived. The list is over tests: a
+lane's measurement of one of its batches is not one, however long that
+batch ran. A test that wedges rather than finishing slowly records no
+duration; wedges surface through job failures, and the incremental
+producers bound what a wedged job loses to its unflushed lines. An
+identity with no passing execution in the window has no duration either,
+and is absent from the list for the same reason. A test that fails every
+time it runs surfaces through the job it fails.

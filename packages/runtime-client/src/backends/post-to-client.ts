@@ -1,15 +1,8 @@
-import { toCompactDebugString } from "@commonfabric/data-model";
+import { debugStr } from "@commonfabric/data-model";
 import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 
 import { type IPCRemotePost, NotificationType } from "@/protocol/mod.ts";
 import { describeFailure } from "@/shared/utils.ts";
-
-/**
- * How much of an undeliverable message to render. Enough to recognize which
- * message it was, short enough that a hostile payload cannot flood the
- * channel it is being reported on.
- */
-const MAX_UNDELIVERABLE_RENDER = 512;
 
 /**
  * Posts one message from the worker to its client, reporting whether what was
@@ -85,9 +78,9 @@ function undeliverableMessageFrom(
   message: IPCRemotePost,
   error: unknown,
 ): IPCRemotePost {
-  const reason = `Undeliverable message: ${describeFailure(error)}: ${
-    toCompactDebugString(message, { maxLength: MAX_UNDELIVERABLE_RENDER })
-  }`;
+  const reason = debugStr`Undeliverable message: ${
+    describeFailure(error)
+  }: $quote,long${message}`;
   const msgId = (message as { msgId?: unknown }).msgId;
 
   return typeof msgId === "number"

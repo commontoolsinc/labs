@@ -330,6 +330,11 @@ Each of these gates fails CI on its own, and none of them run as part of
 - `deno task check-no-waitfor` — an integration test that imports the polling
   `waitFor`. It reads only `integration/` directories under `packages/`, so its
   green says nothing about a poll in a unit test
+- `deno task check-bench-workflow` — a benchmark file the dashboard names by
+  path that `.github/workflows/benchmarks.yml` no longer runs, or a workflow
+  that stopped checking the report it uploads. The dashboard's machine factor
+  and its key benchmarks tile each rest on a benchmark named outright, and a
+  name that reaches nothing costs a chart its series without failing anything
 - `deno task check-docs` — a TypeScript block under `docs/` that stopped
   compiling
 - `deno task check-docs-history-index` — an entry in `docs/history/INDEX.md`
@@ -373,7 +378,10 @@ Each of these gates fails CI on its own, and none of them run as part of
 - `deno task check-baselines-append-only` — a pattern baseline that was deleted
   rather than added to
 - `deno task check-test-aliases` — a test-identity alias line that was edited or
-  removed rather than appended, mapped an identity twice, or formed a cycle
+  removed rather than appended, mapped an identity twice, or formed a cycle. The
+  lines live under `tasks/test-identity-aliases/`, in files named after the last
+  path segment of the test file they cover, so that renames in test files of
+  different names do not meet in one file
 - `deno task check-pattern-tiers` — a legacy or fixture pattern that does not
   open with the marker saying so. `packages/patterns` is example code of unequal
   authority, and the marker is what stops the wrong example being copied by

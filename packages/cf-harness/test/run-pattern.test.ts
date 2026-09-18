@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "../../runner/test/cfc-seed-envelope.ts";
 import { expect } from "@std/expect";
@@ -304,7 +305,7 @@ async function seedLabelledSecret(
   );
   const sourceId = sourceCell.getAsNormalizedFullLink().id;
   writeSeedEnvelopeDoc(seed, space);
-  seed.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
+  seedStoredEnvelope(seed, { space, scope: "space", id: sourceId, path: [] }, {
     value: { secret: "s3cr3t" },
     cfc: {
       version: 1,
@@ -386,7 +387,7 @@ async function seedAccountHolder(
   // A root-linked holder continues into the account document at `account`,
   // so that document carries the field and the label sits on it; the others
   // link straight at the account, labeled at its root.
-  seed.writeOrThrow({ space, scope: "space", id: accountId, path: [] }, {
+  seedStoredEnvelope(seed, { space, scope: "space", id: accountId, path: [] }, {
     value: shape === "root-link" ? { account } : account,
     cfc: {
       version: 1,
@@ -551,17 +552,24 @@ async function seedLabelledComputedSecret(
     seed,
   );
   writeSeedEnvelopeDoc(seed, space);
-  seed.writeOrThrow({ space, scope: "space", id: computedId, path: [] }, {
-    value: { secret: "s3cr3t" },
-    cfc: {
-      version: 1,
-      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
-      labelMap: {
+  seedStoredEnvelope(
+    seed,
+    { space, scope: "space", id: computedId, path: [] },
+    {
+      value: { secret: "s3cr3t" },
+      cfc: {
         version: 1,
-        entries: [{ path: ["secret"], label: { confidentiality: ["secret"] } }],
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: ["secret"],
+            label: { confidentiality: ["secret"] },
+          }],
+        },
       },
     },
-  });
+  );
   expect((await seed.commit()).ok).toBeDefined();
   return createLLMFriendlyLink(sourceCell.getAsNormalizedFullLink(), space);
 }
@@ -1268,7 +1276,12 @@ describe("run-pattern", () => {
         );
         const sourceId = sourceCell.getAsNormalizedFullLink().id;
         writeSeedEnvelopeDoc(seed, space);
-        seed.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
+        seedStoredEnvelope(seed, {
+          space,
+          scope: "space",
+          id: sourceId,
+          path: [],
+        }, {
           value: { secret: "s3cr3t", amount: 2 },
           cfc: {
             version: 1,
@@ -2012,7 +2025,12 @@ describe("run-pattern", () => {
         );
         const sourceId = sourceCell.getAsNormalizedFullLink().id;
         writeSeedEnvelopeDoc(seed, space);
-        seed.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
+        seedStoredEnvelope(seed, {
+          space,
+          scope: "space",
+          id: sourceId,
+          path: [],
+        }, {
           value: {
             expenses: [
               { description: "alpha-secret", amount: 1 },
@@ -2116,7 +2134,7 @@ describe("run-pattern", () => {
           );
           const id = cell.getAsNormalizedFullLink().id;
           writeSeedEnvelopeDoc(seed, space);
-          seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+          seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
             value: { description, amount: i + 1 },
             cfc: {
               version: 1,
