@@ -371,10 +371,13 @@ topics, 19 in 20 at eight. Recording each run's raw source location across 32
 reopen trials and 16 first-open controls in the same environment: every reopen
 run that carried a read sample carried **no** source location, none carried one
 that failed to parse, and the first opens carried 416 parseable locations and
-attributed three lift runs on every one of the 16. A first open also carries
-runs without a location — 342 of them — alongside its parseable ones, which
-is why the attribution check passes there and failed on a reopen, where the
-runs without one were the whole population.
+attributed three lift runs on every one of the 16 — 260 parseable locations
+across the ten controls at a hundred topics and 156 across the six at eight. A
+first open also carries runs without a location, 216 and 126 of them, alongside
+its parseable ones. That is why the attribution check passes there and failed
+on a reopen: the check fails a sample only when everything it is given fails to
+parse, and a reopen's runs without a location were the whole population rather
+than part of it.
 
 The third is the outcome: with the two cases told apart, 20 trials of the
 hundred-topic reopen recorded 20 zeros and no refusals. Thirteen of them saw one
@@ -441,9 +444,12 @@ the two skipped sizes should be enabled as part of whatever lowers it.
 measures one operation a caller drives in a Topics board's browser page, for the
 browser tier of [the Topics computation
 plan](../plans/topics-computation-cost.md). A caller invokes it around the
-operation. Four benchmark series use it: `comment` and `backlink` in the
-navigation benchmark, and `reopen <size>` in the scale benchmark. Each charts
-the interval `timeTopicsOperation()` brackets, and each writes a
+operation. Five benchmark series use it: `comment` and `backlink` in the
+navigation benchmark, and one `reopen <size>` per declared board size in the
+scale benchmark. Three of the five run by default: the two navigation series,
+and `reopen 100`. `CF_TOPIC_BOARD_SCALE_LIMIT` leaves only the hundred-topic
+board in play, so the larger two are skipped with their load counterparts.
+Each charts the interval `timeTopicsOperation()` brackets, and each writes a
 `measureTopicsReads()` sample of the same operation to `diagnostics.log`
 alongside it. `reopen` declares `mayRunNothing` on that sample, because a reopen
 completes no run for the call to attribute and the zero is what it has to

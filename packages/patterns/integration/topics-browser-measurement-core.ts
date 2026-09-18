@@ -385,9 +385,9 @@ export function confirmLiftImplementations(
 
 /**
  * Fails a sample whose runs cannot be attributed to lifts by position. `srcs`
- * are the `src` keys of the runs that carried a read sample, a run with no
- * `src` keyed by the empty string; `running` is {@link liftRunningStates}'s
- * result. Every sample is taken on a page showing the board, so a producer
+ * are the source locations of the runs that carried a read sample and a source
+ * location to carry; a run whose marker had none is counted by the caller and
+ * left out of `srcs`. `running` is {@link liftRunningStates}'s result. Every sample is taken on a page showing the board, so a producer
  * lift's module that is not running means the positions read say nothing
  * about the runs, not that the producer ran nothing.
  *
