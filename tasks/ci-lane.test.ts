@@ -1415,8 +1415,18 @@ describe("the lane's own housekeeping", () => {
     console.error = () => {};
     try {
       // A command line this cannot read is a usage error rather than a
-      // lane that ran nothing and reported success.
-      expect(await main(["--shard", "1/5"], REPOSITORY)).toBe(2);
+      // lane that ran nothing and reported success, and nothing asks
+      // where the manifest is on the way there.
+      let asked = 0;
+      expect(
+        await main(["--shard", "1/5"], REPOSITORY, {
+          manifest: () => {
+            asked += 1;
+            return Promise.resolve({ manifest: manifestOf([{}]) });
+          },
+        }),
+      ).toBe(2);
+      expect(asked).toBe(0);
       expect(
         await main(
           ["--lane", "1", "--of", "1", "--full", "--dry-run"],
