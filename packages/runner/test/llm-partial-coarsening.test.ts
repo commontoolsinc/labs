@@ -20,7 +20,10 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { PARTIAL_BATCH_MS } from "../src/builtins/llm.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { LlmResultState } from "./support/llm-result.ts";
+import {
+  type LlmResultState,
+  waitForLlmSettled,
+} from "./support/llm-result.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("llm partial batch");
@@ -255,4 +258,59 @@ describe("LLM partial batch coarsening (channel 6)", () => {
       },
     );
   }
+
+  it("writes the response of a request whose batched partial has landed", async () => {
+    // The batch window's commit re-runs this node: the run that issued the
+    // request read `partial` in resetting it, so the partial it writes is a
+    // change to something it read. That re-run finds the request in flight
+    // and issues nothing, and the request it found stays the current one, so
+    // the response lands as the result once it arrives.
+    enableMockMode();
+    clearMockResponses();
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const original = LLMClient.prototype.sendRequest;
+    const response = Promise.withResolvers<LLMResponse>();
+    LLMClient.prototype.sendRequest = (_request, partial) => {
+      partial?.("hel");
+      return response.promise;
+    };
+    try {
+      const tx = runtime.edit();
+      const { commonfabric: builder } = createTrustedBuilder(runtime);
+      const testPattern = builder.pattern(() =>
+        builder.llm({ messages: [{ role: "user", content: "settle" }] })
+      );
+      const resultCell = runtime.getCell(
+        space,
+        "llm-partial-settles",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      tx.commit();
+
+      const streamed = Promise.withResolvers<LlmResultState>();
+      const stop = result.sink((value: LlmResultState) => {
+        if (value?.partial === "hel") streamed.resolve(value);
+      });
+      try {
+        expect((await streamed.promise).pending).toBe(true);
+        response.resolve({ id: "settle", role: "assistant", content: "hello" });
+        const settled = await waitForLlmSettled(runtime, result);
+        expect(settled.result).toBe("hello");
+        expect(settled.partial).toBe("hello");
+      } finally {
+        stop();
+      }
+    } finally {
+      LLMClient.prototype.sendRequest = original;
+      resetMockMode();
+      await runtime.dispose({ closeStorage: false });
+      await storageManager.close();
+    }
+  });
 });

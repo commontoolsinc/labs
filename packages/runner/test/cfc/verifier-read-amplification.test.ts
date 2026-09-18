@@ -10,6 +10,7 @@ import { isInternalVerifierRead } from "../../src/storage/reactivity-log.ts";
 import { getTransactionReadActivities } from "../../src/storage/transaction-inspection.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "../cfc-seed-envelope.ts";
 
@@ -42,7 +43,7 @@ describe("prepareBoundaryCommit()", () => {
         const source = runtime.getCell(signer.did(), "source", undefined, seed);
         const sourceAddress = source.getAsNormalizedFullLink();
         writeSeedEnvelopeDoc(seed, signer.did());
-        seed.writeOrThrow({ ...sourceAddress, path: [] }, {
+        seedStoredEnvelope(seed, { ...sourceAddress, path: [] }, {
           value: "trusted",
           cfc: {
             version: 1,

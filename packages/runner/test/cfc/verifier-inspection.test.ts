@@ -14,6 +14,7 @@ import { StorageManager } from "../../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../../src/storage/interface.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "../cfc-seed-envelope.ts";
 
@@ -87,7 +88,7 @@ describe("prepareBoundaryCommit()", () => {
         const source = runtime.getCell(signer.did(), "mutable-source")
           .getAsNormalizedFullLink();
         writeSeedEnvelopeDoc(seed, signer.did());
-        seed.writeOrThrow({ ...source, path: [] }, {
+        seedStoredEnvelope(seed, { ...source, path: [] }, {
           value: { entry: { old: "a", new: "b" } },
           cfc: metadata,
         });

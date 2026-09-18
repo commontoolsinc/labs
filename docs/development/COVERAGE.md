@@ -620,6 +620,19 @@ was the arm, and each of them waits for the process to go in a different way.
 follows the single line from the group-level `+1` down to the one call in
 twenty-seven that covered it.
 
+Ask what stops the child before giving its signal a function of its own, since
+a signal that is not needed goes rather than becoming testable. A child that
+ends on a failed write to a pipe this process owns is stopped by closing that
+pipe — which is a property of that child, held by the ones that write their
+output and die on `SIGPIPE`, and not by one that ignores a failed write or has
+handed the write end to a child of its own. `nearestOnBranch()` in
+`tasks/coverage-gate.ts` reads `git rev-list` until the commit it was asked
+about appears, and leaving the loop that reads it cancels the stream, so git
+ends at its next write and `await child.status` reaps it. Its own
+[investigation record](../history/development/coverage-flake-gate-git-walk-2026-09-17.md)
+has the measurements, and the case that covers a walk stopping while git still
+has output to write.
+
 ### A line two callbacks share
 
 A seventh shape is not a branch only some runs take. Both arms run on every
@@ -895,13 +908,16 @@ a reader outside the gate, and a change to any of them is a change to the tile.
 A later PR run reads its ratchet baseline from the `perf-metrics` artifact of the
 `main` run for the base-branch commit it merged, or of the nearest ancestor of
 that commit which has one; there is no separate history store. It finds that run
-by ordering the recent `main` runs from the nearest ancestor of that commit
-outwards — leaving out the runs for commits it does not contain — and then
-reading one run at a time, stopping as soon as every metric has a baseline.
-Usually the nearest run measured every metric, and that is the only baseline
-artifact read; reading further back happens when a run uploaded nothing, ran
-cold, or measured a metric no nearer run did. The runs the walk read are the
-ones the "Baseline source runs" log group names.
+in the CI workflow's run listing (see "How the ratchet finds that run"), keeping
+the successful pushes to `main` and ordering them from the nearest ancestor of
+that commit outwards — leaving out the runs for commits it does not contain —
+and then reading one run at a time, stopping as soon as every metric has a
+baseline. Usually the nearest run measured every metric, and that is the only
+baseline artifact read; reading further back happens when a run uploaded
+nothing, ran cold, or measured a metric no nearer run did. The walk reads twenty
+runs at most, so a metric no `main` run has measured yet, such as a new
+package's, costs a bounded number of reads. The runs the walk read are the ones
+the "Baseline source runs" log group names.
 
 The workflow downloads the current run's `coverage-profile-*` artifacts before
 starting `tasks/coverage-check.ts`. `COVERAGE_ARTIFACTS_DIR` points the script at
@@ -1012,6 +1028,104 @@ not rewrite `pull_request.base.sha` when it rebuilds the merge ref. And it is
 read with `git cat-file commit HEAD` rather than `git log --format=%P`, because
 `actions/checkout` clones to depth one and git reports a shallow boundary commit
 as having no parents.
+
+### How the ratchet finds that run
+
+The `main` run for a commit is found in the CI workflow's run listing, which
+GitHub returns newest first, a hundred runs to a page. The check asks for that
+listing with no filter and keeps the successful pushes to `main` itself. GitHub
+serves a listing filtered by branch, status or event from a search index
+instead, and that index can return a window of runs that ended weeks earlier,
+with a success status and nothing in the response to say so. A baseline that
+exists then reads as one that does not.
+[The investigation record](../history/development/coverage-ratchet-stale-run-listing-2026-09-17.md)
+has the instances.
+
+The check does not take a listing's word for being current either. The run
+doing the asking was created before the listing was read, so a current listing
+shows it, ahead of every run created before it. Run ids grow with creation, so
+"created before" is a comparison of ids and needs no clock. A listing that shows
+a page of older runs and then a page that still lacks this run, or that ends
+without it, is not current. One page of grace covers two runs created together
+whose order puts a page boundary between them.
+
+A listing that is not current is read again, twice more at most. If it still
+leaves the run out, a pull request's job fails, and says why in its log, in an
+error annotation, in the job summary and in the pull request's coverage comment.
+It fails rather than passes because no baseline found through that listing can
+be trusted, and because the remedy is cheap: re-running the Coverage Check job
+reads the listing again, and the job takes about a minute. Nothing in that
+failure says the pull request regressed coverage. A run the gate compares
+nothing for passes with the warning instead: a `main` run, a pull request that
+changed no source group, and one whose description carries
+`NEW_COVERAGE_BASELINE`. Such a pull request still gets its coverage comment
+resolved, so a failure an earlier run reported does not stay open on it.
+
+The listing is read only as far back as the walk needs. The first reading goes
+back to the run asking, which is on the first page for a run whose tests have
+just finished. When the runs on those pages leave a metric without a baseline,
+the walk asks for the next older page, up to ten pages in all. That happens
+when a job is re-run days after its run was created: the commit it merges is
+as old as the run, and the newest pages hold only runs for commits that landed
+since. Ten pages reach back about three days. A run created longer ago than that
+is out of reach, together with the `main` runs for the commit it merges, and its
+changed groups are reported as not gated.
+
+The nearest ancestor is still the nearest one when the runs span pages. A page
+further back holds runs created earlier, and those are usually the ones for
+commits further from the base-branch commit, but two pushes that land together
+can have their runs created in the other order, with a page boundary between
+them. So before the walk reads the run for an ancestor, every commit nearer the
+base-branch commit has to be accounted for. A commit is accounted for once the
+listing has shown its push run, whatever that run's conclusion: a run still
+going and one that failed are runs the ratchet cannot use, and having seen one
+says there is nothing further back to find. Until then the walk reads another
+page, and it takes the ancestor it has when there are no more.
+
+Nothing but a shown run accounts for a commit. Its date does not: a commit's
+date is whatever the client that made it said it was, so it puts no bound on
+when the commit's run was created. Every commit on `main` normally has a run, so
+the search costs a page only in the case it exists for. A commit with no run at
+all, such as one pushed together with its descendants, costs the rest of the
+page budget on the runs that have to look past it.
+
+### When a changed group is not gated
+
+A pull request is not failed for a baseline that does not exist. That leaves a
+job that compared nothing looking exactly like one that found nothing, so the
+check says which it was. When the gate applied to a group — the pull request
+changed it, and the description accepted nothing for it — and held it against no
+baseline, the run reports it in four places:
+
+- The job's log, under `!!! COVERAGE WAS NOT GATED for …`, and in its last line,
+  which claims the ratchet only for the groups it compared.
+- A warning annotation on the run, which the pull request's checks show.
+- The job summary.
+- The pull request's coverage comment, headed "Test coverage was NOT gated on
+  this run". It is posted even on a pull request that had no coverage comment,
+  and the next run that gates every changed group rewrites it into the
+  collapsed summary.
+
+Each names the groups, and for each group one of three reasons:
+
+- No successful `main` run within reach measured the base-branch commit or an
+  ancestor of it.
+- The base branch changed the group between the nearest measured ancestor and
+  the base-branch commit, so the two totals count different code.
+- The base-branch commit could not be read from the checkout.
+
+A later run of the pull request gates those groups, once a `main` run has
+measured the commit it merges. Re-running the Coverage Check job is enough when
+that `main` run has finished since; updating the branch gives the next run a
+newer commit to merge.
+
+The table header in the job's log is the quick check. `excl` beside a group the
+pull request changed means that group was not compared, and a header reading
+`OK: 0` with every group `excl` means nothing was. `ovrd` is what says an
+`ACCEPT_COVERAGE_DEBT` line took effect. A group with no baseline is held to
+zero, so an accepted rise covers it only when the group's whole count is that
+small; a group carrying any real debt reads `excl` beside its acceptance, and
+the line has accepted nothing on that run.
 
 ## A combined report for IDEs
 

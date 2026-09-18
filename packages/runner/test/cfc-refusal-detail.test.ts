@@ -35,6 +35,7 @@ import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import {
@@ -91,7 +92,7 @@ const seedSecret = async (
   const cell = runtime.getCell(space, name, undefined, seed);
   const id = cell.getAsNormalizedFullLink().id as URI;
   writeSeedEnvelopeDoc(seed, space);
-  seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+  seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
     value: { secret: "rosebud" },
     ...(confidentiality === undefined ? {} : {
       cfc: {
@@ -125,7 +126,7 @@ const seedRootLabeledDoc = async (
   const id = runtime.getCell(space, name, undefined, seed)
     .getAsNormalizedFullLink().id as URI;
   writeSeedEnvelopeDoc(seed, space);
-  seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+  seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
     value: { note: "labeled" },
     cfc: {
       version: 1,

@@ -16,6 +16,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { benchDiagnostic } from "./bench-diagnostics.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 
@@ -56,7 +57,7 @@ for (const entries of [100, 300, 1000]) {
     seed,
   ).getAsNormalizedFullLink();
   writeSeedEnvelopeDoc(seed, signer.did());
-  seed.writeOrThrow({ ...address, path: [] }, {
+  seedStoredEnvelope(seed, { ...address, path: [] }, {
     value,
     cfc: {
       version: 1,

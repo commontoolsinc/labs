@@ -27,6 +27,7 @@
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import { describe, it } from "@std/testing/bdd";
@@ -75,7 +76,7 @@ describe("CFC flow-label probe memo (stage C tuning T1)", () => {
       )
         .getAsNormalizedFullLink();
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({ ...address, path: [] }, {
+      seedStoredEnvelope(seed, { ...address, path: [] }, {
         value: {},
         cfc: {
           version: 1,
@@ -212,7 +213,7 @@ describe("CFC flow-label probe memo (stage C tuning T1)", () => {
         undefined,
       ).getAsNormalizedFullLink().id;
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: sourceId,
@@ -278,7 +279,7 @@ describe("CFC flow-label probe memo (stage C tuning T1)", () => {
         undefined,
       ).getAsNormalizedFullLink().id;
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: targetId,

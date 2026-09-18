@@ -258,11 +258,22 @@ https://storage.googleapis.com/storage/v1/b/cf-ci-metadata/o?prefix=labs/test-re
 
 Objects are gzip-encoded NDJSON served with transcoding, so a plain fetch
 receives text. `packages/test-support/src/records/store-reader.ts` is the
-validating reader; `deno task` scripts built on it:
+validating reader; the readers built on it:
 
 - `tasks/test-records-report.ts` — collisions, high-churn identity
   families, and the over-sixty-seconds list (`--gate` turns that list into
-  the ratchet's exit status).
+  the ratchet's exit status). A single day holds tens of thousands of
+  objects, so it reads them several at a time, and a day it cannot list or
+  an object it cannot read is left out rather than ending the run. Every
+  such day is named on the standard error stream, as are the first fifty
+  such objects, after which one line says the rest are not named. The
+  printed report counts the objects it could not read, however many were
+  named, and the days it could not list, whose objects it has no count of;
+  every figure under those counts is over the objects that were read. A
+  gated run exits 1 for a test over the rule, which is work to do, and 3
+  for a window read in part, which is a ratchet that could not check
+  rather than one that failed. It is run by hand: no workflow and no
+  `deno task` entry invokes it.
 - `tasks/test-records-compact.ts` — rewrites each closed day of raw
   records as a manifest and a few tens of rollup shards under
   `aggregated/`, sized so that a shard is a string a reader can hold;

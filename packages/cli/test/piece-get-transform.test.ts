@@ -25,6 +25,7 @@ import {
 } from "../lib/cell-selection.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "../../runner/test/cfc-seed-envelope.ts";
 
@@ -2559,7 +2560,7 @@ describe("cf cell get transforms", () => {
     const cell = targetRuntime.getCell(space, cause, undefined, seed);
     const id = cell.getAsNormalizedFullLink().id;
     writeSeedEnvelopeDoc(seed, space);
-    seed.writeOrThrow({
+    seedStoredEnvelope(seed, {
       space,
       scope: "space",
       id,

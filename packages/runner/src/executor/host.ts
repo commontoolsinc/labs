@@ -140,12 +140,24 @@ export type ExecutorHostOptions = {
    * turned it away. */
   onDrainInFlightSkip?: (space: MemorySpace, eventId: string) => void;
 
-  /** DIAGNOSTIC (tests): called as each activation attempt ends —
-   * serving, refused by the tenure, or thrown. Activation is driven
-   * from the admission feed and from session opens and finishes on
-   * neither of their edges. See
+  /** DIAGNOSTIC (tests): each tenure's park, with the space and the
+   * reason. The host's own `onParked` handling is unaffected. */
+  onSpaceParked?: (space: MemorySpace, reason: string) => void;
+
+  /** DIAGNOSTIC (tests): forwarded to every SpaceServer this host
+   * builds — see `SpaceServerOptions`. */
+  onEffectRetired?: () => void;
+
+  /** DIAGNOSTIC (tests): called as each activation attempt ends, with
+   * how it ended — `active` once the space's SpaceServer is serving,
+   * `refused` when the tenure declined (no lease, nothing to serve),
+   * `failed` when it threw. Activation is driven from the admission feed
+   * and from session opens and finishes on neither of their edges. See
    * `docs/development/waiting-in-tests.md`. */
-  onActivationSettled?: (space: MemorySpace) => void;
+  onActivationSettled?: (
+    space: MemorySpace,
+    outcome: "active" | "refused" | "failed",
+  ) => void;
 };
 
 export class ExecutorHost {
@@ -605,6 +617,16 @@ export class ExecutorHost {
           }
           : {}),
         onParked: (reason) => {
+          try {
+            this.#options.onSpaceParked?.(space, reason);
+          } catch (error) {
+            // The rest of this handler unregisters the parked server, and
+            // `whenParked` resolves after it.
+            logger.warn("space-parked-observer-failed", () => [
+              `space ${space}: park observer threw`,
+              error,
+            ]);
+          }
           // Loop failure and initialization lease loss extend the backoff
           // streak; an idle park clears it. Other parks
           // that say nothing about the space's health — lease loss,
@@ -650,6 +672,9 @@ export class ExecutorHost {
               this.#options.onDrainInFlightSkip!(space, eventId),
           }
           : {}),
+        ...(this.#options.onEffectRetired !== undefined
+          ? { onEffectRetired: this.#options.onEffectRetired }
+          : {}),
         onWaveCommitted: () => {
           // Real served progress clears the failure streak — the
           // signal a crash-looping tenure never produces (its first
@@ -674,10 +699,10 @@ export class ExecutorHost {
       if (!activated) {
         this.#spaces.delete(space);
         this.#rebufferConsumedWarm(space, consumedWarm);
-        this.#options.onActivationSettled?.(space);
+        this.#options.onActivationSettled?.(space, "refused");
         return lostInitializationLease ? server : undefined;
       }
-      this.#options.onActivationSettled?.(space);
+      this.#options.onActivationSettled?.(space, "active");
       if (this.#closed) {
         // close() ran while this activation was in flight (it awaits us,
         // but park() on a not-yet-active server is a no-op — so the
@@ -689,7 +714,7 @@ export class ExecutorHost {
       this.#spaces.delete(space);
       this.#rebufferConsumedWarm(space, consumedWarm);
       logger.error("activate-failed", `activation of ${space} failed`, error);
-      this.#options.onActivationSettled?.(space);
+      this.#options.onActivationSettled?.(space, "failed");
     }
   }
 

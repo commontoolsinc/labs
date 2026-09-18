@@ -294,16 +294,35 @@ source sharing. Registry changes continue to invalidate compiled sidecar
 surfaces; retained source contains no compiled patterns or schema references.
 
 A piece that pattern code instantiates — a nested pattern, a piece a handler
-creates with `inSpace` — is detached, and stays detached until its owner points
-it somewhere. The code it runs is a module of the instantiating program, so what
-supplies that code is the instantiating piece's own origin, and following the
-route that happens to serve the same file would be following a different thing.
-The consequence is worth naming: such a piece stays on the version of the code
-that made it, and a later release reaches it only through an explicit repoint —
-which for a set of them is the batch lane's,
+creates with `inSpace` — runs a module of the instantiating program, and what it
+claims follows from what that program claims. Where the instantiating piece
+follows a `system:` origin, the child lives in a space of its own, and the
+child's module is one the runtime fetched from the patterns route as part of
+that program, the child claims the `system:` ref naming its own module: the
+runtime resolved that module from the deployment's route, which is the same
+ground on which it claims the ref for the surfaces it instantiates itself. A
+nested node in the parent's own space claims nothing — it is part of the
+parent's graph and is re-instantiated from the parent's program on each release
+of the parent, so an origin of its own would be followed twice. The profile a
+person creates from the profile surfaces is such a child, and follows
+`profile-home.tsx` as the deployment ships it. Both halves are required. A
+module's name alone is author-controlled — a locally compiled program may call a
+file anything — and it is the followed parent that says the name was a route the
+runtime resolved.
+
+Every other such piece is detached, and stays detached until its owner points it
+somewhere: what supplies its code is the instantiating piece's own origin, and
+following a route that happens to serve a file of the same name would be
+following a different thing. The consequence is worth naming: such a piece stays
+on the version of the code that made it, and a later release reaches it only
+through an explicit repoint — which for a set of them is the batch lane's,
 [`docs/features/piece-bulk-operations.md`](../features/piece-bulk-operations.md).
 Recording a detached creation revision for one, so its exact source can be
-restored, is required work below.
+restored, is required work below. A child that claims an origin records it at
+creation and its creation revision as soon as its space holds the source it
+runs; a cross-space child's closure replicates after its run, so it may carry
+the origin ahead of the revision, and is followed from a baseline the first
+adoption records.
 
 In this document, **wishing code into being** means a product authoring
 affordance that asks an LLM to write pattern source. It is distinct from the
@@ -354,7 +373,11 @@ writes.
    origin whose releases this deployment gates adopts its candidate as it
    stands; from any other origin it adopts one only if the candidate is an
    acceptable replacement for what the piece runs, and otherwise leaves the
-   piece unchanged and offers its owner the candidate to accept. A manual
+   piece unchanged and offers its owner the candidate to accept. An
+   unattended update from a gated origin also carries the writer delegation
+   a manual replacement derives — the successor may write what the
+   predecessor's handlers protected (SC-22) — and one from any other origin
+   carries none. A manual
    replacement rejects invalid or unverifiable source, and rejects a candidate
    that cannot use the piece's actual retained input. It may apply an
    incompatible pattern contract or retained link after the user explicitly
@@ -592,7 +615,7 @@ and link that new piece as the space root.
 | Refresh from a `system:` ref | The newly fetched program, if its executable identity, export symbol, or complete-program digest changed and it passed validation | The same `system:` ref and entry export | Append an automatic-update revision when the executable export or retained authored program changes |
 | Instantiate a surface the runtime supplies | The program resolved from the `system:` ref the runtime supplies for it | That ref | Append a create revision naming it |
 | Open a surface the runtime supplies that records no origin | The source it runs, when its space can load that; otherwise the program the `system:` ref currently resolves to | That ref | Append a baseline and a follow revision retaining what it runs; when that cannot be loaded, append a follow revision adopting the ref's program and record the displaced identity |
-| Instantiate a piece from pattern code | The instantiating program's module | None | Append a detached create revision |
+| Instantiate a piece from pattern code | The instantiating program's module | The module's `system:` ref, when the instantiating piece follows a `system:` origin, the child lives in a space of its own, and the module came from the patterns route; else none (a nested node in the parent's own space claims none) | A create revision carrying the claimed origin, appended when the child's space already holds the source it runs; a detached child appends none (required work below), and a cross-space child carries its origin ahead of the revision |
 | Refresh from an external web URL | The newly fetched program, if its executable identity, export symbol, or complete-program digest changed and it passed validation | The same `https://` URL and entry export | Append an automatic-update revision when the executable export or retained authored program changes |
 | Load from a content-addressed URL or a pinned entity-FID URL | The exact executable source graph named by the identity or trailing pin; synthetic retention roots are excluded | The normalized fabric pattern URL and export symbol | Do not append an automatic-update revision because the resolved executable source graph cannot change |
 | Fork a piece | The source currently used by the selected piece | None | Append a fork revision with `forkedFrom`; do not copy the source piece's log |
@@ -1422,7 +1445,7 @@ the actual retained argument is rejected without offering confirmation.
 | Manually push local code with an identity key and create a piece | **Implemented** | `cf piece new` resolves a local file program, writes its content-addressed source closure in the target space, creates a piece, and authenticates through the supplied identity. `cf piece setsrc` updates the same piece. |
 | Wish a new pattern into being with an LLM-backed UI | **Partial** | The `write-and-run` example asks an LLM for pattern code and passes it to `compileAndRun`, whose callback lets the browser worker register the new piece in a space. It is not a general product affordance and does not record a source revision. The runtime `wish()` builtin is discovery, not code generation. [`hosted-pattern-authoring.md`](hosted-pattern-authoring.md) specifies the affordance and its entry points; it needs the complete authored-program manifest this document requires. |
 | Instantiate a surface the runtime supplies | **Implemented** | A `#profile` wish that finds no profile, or several with no default, renders a surface the runtime instantiates from a pattern this deployment serves; so does a multi-result wish's suggestion surface. Each supplies the `system:` ref naming its file, and `SourceReconciler.open` resolves that ref through the same `?identity` route and revalidating fetch reconciliation uses, against the host serving the surface's space. A surface that does not exist yet is answered with what the ref names now, and the run that creates it records that ref with its creation revision. One that exists is opened: a surface from before this claim records the ref with a follow revision, one that already records it follows it, and one its owner has repointed keeps what they chose. A surface from before this claim whose pattern its space can no longer load has nothing for that follow revision to retain, so the same revision adopts the program the ref names now and records the identity it displaced. Opening happens once per surface per process, which is what one look at a piece is. |
-| Instantiate a piece from pattern code | **Creation revision required** | A nested pattern, and a piece a handler creates with `inSpace`, runs a module of the instantiating program and records no origin. That much is the design. What is missing is its history: `Runner.run` appends no creation revision for such a piece, so its exact source cannot be restored and its source panel has nothing to show. A cross-space `inSpace` child needs its source closure replicated into the child's space before one can be written. |
+| Instantiate a piece from pattern code | **Creation revision required** | A nested pattern, and a piece a handler creates with `inSpace`, runs a module of the instantiating program; a child in a space of its own records a `system:` origin when the instantiating piece follows one and the module came from the patterns route, and none otherwise; a nested node in the parent's own space records none. What is missing is the history of the detached case: `Runner.run` appends no creation revision for such a piece, so its exact source cannot be restored and its source panel has nothing to show. A cross-space `inSpace` child needs its source closure replicated into the child's space before one can be written, which is also why a child that claims an origin can carry it ahead of its creation revision. |
 | Manually push code from a source URL and create a piece that remembers it | **CLI URL flow required** | The command-line `new` and `setsrc` commands accept local filesystem entries. `RuntimeClient.createPiece(URL)` fetches an HTTP or HTTPS program and records its canonical URL as the active origin with the creation revision. Fabric resolution can resolve content-addressed patterns and same-toolshed piece references to a source identity, but its result does not carry the export symbol as origin state. The command line still has no general `https://` or `cf://` source-origin operation. `--repository` is descriptive metadata and is not an origin. |
 | Use a UI affordance to push a known source URL into an owned space | **Partial** | A host can call `RuntimeClient.createPiece(URL)` to fetch and run an indexed HTTP or HTTPS program with its canonical URL recorded as the active origin. `fetchProgram` with `compileAndRun` and the omnibox's `fetchAndRunPattern` can also fetch and run indexed web programs, but those paths remain history-free. There is no corresponding fabric URL affordance. |
 | Manually push code from a source URL and create a piece that remembers it | **CLI URL flow required** | The command-line `new` and `setsrc` commands accept local filesystem entries. Fabric resolution can resolve content-addressed patterns and same-toolshed piece references to a source identity, but its result does not carry the export symbol as origin state. The command line has no `cf://` or `system:` source-origin operation. `--repository` is descriptive metadata and is not an origin. |

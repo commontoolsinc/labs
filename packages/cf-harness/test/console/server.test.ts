@@ -760,6 +760,40 @@ describe("console/server", () => {
   });
 
   describe("consoleHealthRows()", () => {
+    it("keeps shared classes on distinct named stores from the launch environment", async () => {
+      const connectorGrants = ["drive", "readwise"].map((connection) => ({
+        name: connection,
+        cfcClass: "document",
+        ref: `/${CELL_ID}`,
+        source: { connection, piece: "resources" },
+      }));
+      const configured = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+        ],
+        { CF_HARNESS_CONNECTOR_GRANTS: JSON.stringify(connectorGrants) },
+        "/console",
+      );
+      expect(configured.connectorGrants).toEqual(connectorGrants);
+      expect(
+        consoleHealthRows(configured).filter((row) =>
+          row.id.startsWith("connector.granted.")
+        ).map(({ id, value }) => ({ id, value })),
+      )
+        .toEqual([
+          { id: "connector.granted.drive", value: "granted: drive (document)" },
+          {
+            id: "connector.granted.readwise",
+            value: "granted: readwise (document)",
+          },
+        ]);
+    });
+
     it("keeps index URL credentials out of the configured value and retained launch evidence", async () => {
       const indexUrl =
         "https://user-secret:password-secret@index.test/api/?token=query-secret#fragment-secret";

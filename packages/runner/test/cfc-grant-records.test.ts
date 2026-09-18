@@ -37,6 +37,7 @@ import { TransactionWrapper } from "../src/storage/extended-storage-transaction.
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { isStorageTransactionInconsistent } from "../src/storage/rejection.ts";
 import { prepareAndCommit } from "./refused-commit.ts";
+import { seedStoredEnvelope } from "./cfc-seed-envelope.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-grant-records");
 
@@ -137,7 +138,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     const seed = runtime.edit();
     const target = runtime.getCell(signer.did(), id, undefined, seed);
     const targetId = target.getAsNormalizedFullLink().id;
-    seed.writeOrThrow({
+    seedStoredEnvelope(seed, {
       space: signer.did(),
       scope: "space",
       id: targetId,
@@ -707,7 +708,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
         });
         const { reasons, result } = await prepareAndCommit(tx);
         expect(reasons).toContain(
-          `unprivileged write to protected cfc path ` +
+          `unprivileged write to protected runtime surface ` +
             `${CFC_GRANT_ID_PREFIX}forged/value`,
         );
         expect(result.error?.name).toBe("CfcCommitRefusalError");
@@ -778,7 +779,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
         expect(result.ok).toBeDefined();
         expect(
           tx.getCfcState().diagnostics.some((note) =>
-            note.includes("unprivileged write to protected cfc path") &&
+            note.includes("unprivileged write to protected runtime surface") &&
             note.includes(CFC_GRANT_ID_PREFIX)
           ),
         ).toBe(true);

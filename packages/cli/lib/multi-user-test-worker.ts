@@ -67,7 +67,7 @@ import {
   snapshotLoggerErrorWarnCounts,
 } from "./console-capture.ts";
 import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
-import { buildActionEvent } from "./trusted-test-event.ts";
+import { buildActionEvent } from "./trusted-action-event.ts";
 
 export interface WorkerRequest {
   id: number;

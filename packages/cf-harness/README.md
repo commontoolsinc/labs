@@ -828,6 +828,13 @@ names the provider and operation, numbers the attempt against
 `outcome` is `transport_error` when no response arrived and `http_response`
 otherwise, with the status and selected headers.
 
+A final assistant reply must contain non-whitespace text. A reply with no text
+and no function tool calls fails the run with `provider-unavailable`, including
+when the provider returned HTTP 200. Tool-only replies continue through normal
+tool dispatch. The normalized assistant message stays in the transcript, and the
+run report retains the model attempts and token usage. This failure does not
+trigger a retry.
+
 A failed attempt carries the provider's own reason wherever the provider stated
 one. `providerError` holds the provider's `type`, `code`, and `message` as the
 provider sent them — from the body of a non-2xx response, from an in-stream
@@ -1611,8 +1618,24 @@ full model-context CFC record atomically with resumable history. A later root
 task retains that goal alongside its current request and inherits those findings
 as historical context, including after SQLite restart. It receives current
 grants independently; earlier bindings are not automatically transferred to a
-child. A failed or canceled turn cannot replace the research checkpoint of the
-last completed turn.
+child. By default, failed and canceled turns retain the previous checkpoint. The
+Loom interactive host opts into `finalizeOnTurnLimit`: a failed provider call
+can retain the last resumable checkpoint: a validated complete tool batch or
+opening-research handoff with matching research, CFC state, and omission
+provenance. Unpaired work, canceled turns, and process interruptions do not
+advance that checkpoint; their evidence remains in the audit trail.
+
+`finalizeOnTurnLimit` reserves the last root model turn for a partial answer
+with harness and native tools disabled. It warns two turns beforehand and
+records `budget_finalized` with a `gave-up` task outcome. Provider failures,
+blank answers, and attempted final tool calls remain failures. Root budgets
+include this final call; provider retries and child budgets are separate.
+Generated budget notices remain in events and durable run artifacts, but are
+excluded from returned transcripts and interactive checkpoints so subsequent
+user turns receive a fresh budget. They also state their turn-local scope for
+explicit artifact resume and opaque provider context that may retain them.
+`CF_HARNESS_CHAT_ARTIFACT_ROOT` supplies the Loom host's default durable run
+root, including for restored sessions without their own artifact root.
 
 SQLite checkpoints also retain the existing transcript-omissions record.
 Restoration verifies every recorded result's unique identity before attaching

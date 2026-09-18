@@ -451,8 +451,8 @@ describe("selection", () => {
         withField("unschedulable", [{ test: TEST, suite: "s", cost: "lots" }]),
       ],
 
-      // The calibration, which is what turns a planned second into the
-      // second a lane really pays.
+      // The calibration, which is what turns a second of test time into
+      // the second a lane really pays.
       ["a calibration that is not a record", withField("calibration", 7)],
       [
         "a setup cost that is not a record",
