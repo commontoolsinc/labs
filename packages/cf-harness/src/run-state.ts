@@ -74,12 +74,14 @@ export interface HarnessOpeningResearch {
 
 /**
  * How a run ended. `assistant_completed` means the model returned a final
- * answer or an admitted task outcome. `setup_error` is a run that died before
+ * answer or an admitted task outcome. `budget_finalized` is a partial answer
+ * produced on the reserved final root turn. `setup_error` is a run that died before
  * its first model turn, while what it holds — skill registry, grants, input
  * cells — was being established; the others end the loop itself.
  */
 export type HarnessRunTerminalReason =
   | "assistant_completed"
+  | "budget_finalized"
   | "max_model_turns"
   | "prompt_loop_error"
   | "setup_error"
