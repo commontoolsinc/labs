@@ -152171,7 +152171,8 @@
     "Server execution is not measured here. The headless fixture builds its runtime over an emulated storage manager with no memory server, so the serving loop has nothing to construct over; both modes hold serverExecution off.",
     "The all-backlinks workload is a scaling probe rather than normal UI behavior, as the plan says. The per-workload split is what separates its cost from the topic-open workload's.",
     "One trial of one case is not a rate. Every figure here comes from the runs in this file.",
-    "The engagement probe used the cf CLI as its client, not a browser, and a source-run toolshed serves no built shell. It establishes that the ON posture constructs and serves; it does not establish that a browser arm runs coherently, which needs a shell built at the same posture."
+    "The engagement probe used the cf CLI as its client, not a browser, and a source-run toolshed serves no built shell. It establishes that the ON posture constructs and serves; it does not establish that a browser arm runs coherently, which needs a shell built at the same posture.",
+    "Every `complete` record in this file carries no `mode` \u2014 the 1 per arm under `arms`, the 5 per arm under `alternatingSubset.arms`, and the `complete` field extracted beside each arm. These runs predate the change that labels that record, so the instrument did not write one; the mode is the one named by the `arms` key the record sits under. Every `environment` and `sample` record here does carry its mode, and no run in this file reached a `limit`. The records are left as the instrument wrote them rather than regenerated to match a later version of it."
   ],
   "alternatingSubset": {
     "purpose": "The same four cases, run on,off,on,off for five rounds, one probe invocation per arm per round, so drift over the sitting falls on both arms rather than correlating with one. This is what the record's timing claims rest on.",
