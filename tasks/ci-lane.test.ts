@@ -1279,7 +1279,7 @@ describe("planning a lane without running it", () => {
         laneCount: false,
         root: REPOSITORY,
       }, {
-        manifest: (at) =>
+        manifest: ({ at }) =>
           Promise.resolve({ absent: `no manifest at ${at}: held out here` }),
       });
     } finally {
@@ -1598,7 +1598,7 @@ describe("the lane's own housekeeping", () => {
         root,
       }, {
         topology: () => Promise.resolve([bare]),
-        manifest: (at) =>
+        manifest: ({ at }) =>
           Promise.resolve({ absent: `no manifest at ${at}: held out here` }),
       });
     } finally {
@@ -1639,7 +1639,7 @@ describe("the lane's own housekeeping", () => {
         root,
       }, {
         topology: () => Promise.resolve([wanting]),
-        manifest: (at) =>
+        manifest: ({ at }) =>
           Promise.resolve({ absent: `no manifest at ${at}: held out here` }),
       })).rejects.toThrow();
     } finally {
@@ -1695,7 +1695,7 @@ describe("the lane's own housekeeping", () => {
               },
             }),
           ]),
-        manifest: (at) =>
+        manifest: ({ at }) =>
           Promise.resolve({ absent: `no manifest at ${at}: held out here` }),
       });
     } finally {

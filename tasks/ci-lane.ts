@@ -1106,10 +1106,10 @@ export function describePlan(
 /** What the lane reaches for beyond its own arguments. */
 export interface LaneDeps {
   /**
-   * Where the manifest comes from. Every caller names one, and the
-   * store is named at the command line alone.
+   * Where the manifest comes from, read at a moment. Every caller names
+   * one, and the store is named at the command line alone.
    */
-  manifest: (at: string) => Promise<ManifestFetch>;
+  manifest: (options: { at: string }) => Promise<ManifestFetch>;
 
   /**
    * Where the suites come from. A caller that supplies them is saying
@@ -1154,7 +1154,7 @@ async function read(
 ): Promise<Reading> {
   const moment = await manifestMoment(options);
   if (moment.note !== undefined) say(`ci-lane: ${moment.note}`);
-  const manifest = await deps.manifest(moment.at);
+  const manifest = await deps.manifest({ at: moment.at });
   // A full run reads the manifest for what things cost and nothing else,
   // and a run with no diff has touched nothing.
   const changed = options.full
@@ -1500,11 +1500,10 @@ export async function main(
   return await runLane(options, deps) ? 0 : 1;
 }
 
+/** What the lane the command line runs reads its manifest from. */
+const store: LaneDeps = { manifest: fetchManifest };
+
 // `Deno.exitCode` rather than `Deno.exit`, which would end the process
 // before the unload handlers run — and one of those is what writes a
 // test run's name map into its spool.
-if (import.meta.main) {
-  Deno.exitCode = await main(Deno.args, Deno.cwd(), {
-    manifest: (at) => fetchManifest({ at }),
-  });
-}
+if (import.meta.main) Deno.exitCode = await main(Deno.args, Deno.cwd(), store);
