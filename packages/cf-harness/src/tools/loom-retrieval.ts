@@ -205,9 +205,9 @@ interface LoomRetrievalRows {
 
 /**
  * Splits a payload into the rows to measure and the summary beside them.
- * A search answers with `hits`, a page discovery with `pages`, a calendar
- * listing with a bare array; every other command answers with one object,
- * which is its single row. Returns `undefined` for a payload of another
+ * A search returns `hits`, a page discovery `pages`, a calendar listing a
+ * bare array; every other command returns one object, which is its single
+ * row. Returns `undefined` for a payload of another
  * shape.
  */
 const rowsOf = (

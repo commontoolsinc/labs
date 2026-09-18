@@ -135,9 +135,9 @@ The four commands the design named from loom's inventory were confirmed against
 the pinned checkout and all four are kept: `people` is a read-only lookup once
 its verbs are refused, `calendar list` opens the store read-only,
 `context where|activity` reads state, and `profile` resolves through the profile
-resolver. Each answers in JSON on `--json`. `loom profile` exits 1 when a
-fallback tier answered, with `hasProfile: false` in the payload; that is read as
-a payload, not a failure.
+resolver. Each prints JSON on `--json`. `loom profile` exits 1 when a fallback
+tier supplied the profile, with `hasProfile: false` in the payload; that is read
+as a payload, not a failure.
 
 ## Errors
 
@@ -152,7 +152,7 @@ quote host paths and identifiers:
   other facets;
 - `command_failed` — the process could not start, exited nonzero, or printed no
   JSON;
-- `host_refused` — the host answered `ok: false`, with its code as `hostCode`;
+- `host_refused` — the host returned `ok: false`, with its code as `hostCode`;
 - `not_found` and `contested` — `loom people`, and `loom search --person`,
   resolved no live person or more than one;
 - `schema_version_mismatch` — a search payload without the pinned version;
