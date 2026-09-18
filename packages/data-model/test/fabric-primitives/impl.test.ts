@@ -1,6 +1,6 @@
 /**
- * What `fabric-primitives/index.ts` derives from its list of classes, and that
- * list's agreement with the vocabularies that range over the classes. Nothing
+ * What `fabric-primitives/impl.ts` derives from its set of classes, and that
+ * set's agreement with the vocabularies that range over the classes. Nothing
  * here names a class: each case ranges over `codecClasses()`, over one of
  * those vocabularies, or over the primitives the shared corpus holds, so a
  * class added to the package is covered without an edit here.
@@ -9,16 +9,15 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import {
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  type FabricPrimitiveSchemaType,
-  isFabricPrimitiveSchemaType,
-} from "@/api.ts";
+import type { FabricPrimitiveSchemaType } from "@/api.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import {
   codecClasses,
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  fabricPrimitiveClassesByName,
   fabricPrimitiveClassOfSchemaType,
-} from "@/fabric-primitives/index.ts";
+  isFabricPrimitiveSchemaType,
+} from "@/fabric-primitives/impl.ts";
 import { FABRIC_PRIMITIVE_CODEC_TYPE_TAGS } from "@/fabric-primitives/interface.ts";
 import { FabricPrimitive } from "@/interface.ts";
 import { LAYER_CORPUS } from "../fabric-value-corpus.ts";
@@ -31,7 +30,7 @@ const PRIMITIVES = LAYER_CORPUS.filter(
     entry[1] instanceof FabricPrimitive,
 );
 
-describe("fabric-primitives/index", () => {
+describe("fabric-primitives/impl", () => {
   describe("codecClasses()", () => {
     it("lists classes which each report a distinct `.schemaType`", () => {
       const names = codecClasses().map((cls) => cls.prototype.schemaType);
@@ -63,6 +62,43 @@ describe("fabric-primitives/index", () => {
       for (const [, value] of PRIMITIVES) {
         expect(classes.has(value.constructor)).toBe(true);
       }
+    });
+  });
+
+  describe("fabricPrimitiveClassesByName()", () => {
+    it("returns exactly the classes `codecClasses()` lists", () => {
+      const named = Object.values(fabricPrimitiveClassesByName());
+      expect(new Set<unknown>(named)).toEqual(new Set<unknown>(codecClasses()));
+      expect(named.length).toBe(codecClasses().length);
+    });
+
+    it("returns a frozen record", () => {
+      expect(Object.isFrozen(fabricPrimitiveClassesByName())).toBe(true);
+    });
+
+    it("keys each class by the class's own `.name`", () => {
+      // The record's keys are written by hand, and this is the run-time check
+      // of them. It holds where tests run, which is unminified.
+
+      for (
+        const [name, cls] of Object.entries(fabricPrimitiveClassesByName())
+      ) {
+        expect(cls.name).toBe(name);
+      }
+    });
+
+    for (const [label, value] of PRIMITIVES) {
+      it(`holds the class of ${label} under that class's name`, () => {
+        const byName: Record<string, unknown> = fabricPrimitiveClassesByName();
+        expect(byName[value.constructor.name]).toBe(value.constructor);
+      });
+    }
+  });
+
+  describe("FABRIC_PRIMITIVE_SCHEMA_TYPES", () => {
+    it("is a frozen array with one entry per listed class", () => {
+      expect(Object.isFrozen(FABRIC_PRIMITIVE_SCHEMA_TYPES)).toBe(true);
+      expect(FABRIC_PRIMITIVE_SCHEMA_TYPES.length).toBe(codecClasses().length);
     });
   });
 

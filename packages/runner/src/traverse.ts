@@ -1,8 +1,4 @@
-import {
-  isFabricPrimitiveSchemaType,
-  type JSONSchemaObj,
-  type SchemaPathSelector,
-} from "@commonfabric/api";
+import type { JSONSchemaObj, SchemaPathSelector } from "@commonfabric/api";
 import {
   FabricInstance,
   FabricPrimitive,
@@ -15,6 +11,7 @@ import {
   toIndentedDebugString,
 } from "@commonfabric/data-model";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import { isFabricPrimitiveSchemaType } from "@commonfabric/data-model/fabric-primitives";
 import {
   DEFAULT_SELECTOR,
   hashSchema,

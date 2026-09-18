@@ -31,7 +31,7 @@
  */
 
 import type { JSONSchema, JSONSchemaTypes } from "@commonfabric/api";
-import { FABRIC_PRIMITIVE_SCHEMA_TYPES } from "@commonfabric/api";
+import { FABRIC_PRIMITIVE_SCHEMA_TYPES } from "@commonfabric/data-model/fabric-primitives";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 /**
