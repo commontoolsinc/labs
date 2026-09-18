@@ -450,8 +450,9 @@ plan](../plans/topics-computation-cost.md). A caller invokes it around the
 operation. Five benchmark series use it: `comment` and `backlink` in the
 navigation benchmark, and one `reopen <size>` per declared board size in the
 scale benchmark. Three of the five run by default: the two navigation series,
-and `reopen 100`. `CF_TOPIC_BOARD_SCALE_LIMIT` leaves only the hundred-topic
-board in play, so the larger two are skipped with their load counterparts.
+and `reopen 100`. The scale limit defaults to the hundred-topic board, so the
+larger two are skipped with their load counterparts until
+`CF_TOPIC_BOARD_SCALE_LIMIT` raises it.
 Each charts the interval `timeTopicsOperation()` brackets, and each writes a
 `measureTopicsReads()` sample of the same operation to `diagnostics.log`
 alongside it. `reopen` declares `mayRunNothing` on that sample, because a reopen

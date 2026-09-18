@@ -182,7 +182,7 @@ export function liftRunningStates(
   for (const src of srcs) {
     const parsed = parseSrc(src);
     if (parsed === undefined) {
-      if (src !== "") unparsed.push(src);
+      unparsed.push(src);
       continue;
     }
     sites.add(parsed.site);

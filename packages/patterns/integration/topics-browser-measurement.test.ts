@@ -317,10 +317,7 @@ describe("topics-browser-measurement", () => {
       // The declaration waives a run that carries no source location. It must
       // not waive one that carries a location this helper cannot read: that is
       // a measurement it cannot place, and zeroing it would be the
-      // misattribution the position checks exist to catch. Zero such runs were
-      // observed in the environments measured for the reopen workload, so the
-      // guard has no counterexample to keep it honest and this case is what
-      // keeps it.
+      // misattribution the position checks exist to catch.
       //
       // The run is made unreadable at its source: a marker is delivered to the
       // page's telemetry carrying a `src` that `parseSrc()` rejects, alongside

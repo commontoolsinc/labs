@@ -263,16 +263,25 @@ function topicsProgram(): Promise<TopicsProgram> {
 
 /**
  * Invocations of each size's reopen case so far, so that the samples written to
- * stderr come from a measured iteration rather than from the warm-up, whose
- * numbers the benchmark itself discards.
+ * stderr come from an iteration the benchmark keeps rather than the one it
+ * discards.
+ *
+ * Measured on Deno 2.9.4: a bench body is invoked `n + 2` times and the first
+ * invocation is the only one dropped, whatever `warmup` is set to. `warmup`
+ * does not control either count — 0, 1, 2 and 5 produce the same invocations
+ * and the same measured set — so skipping one invocation is what makes this
+ * correct, and `WARMUP` is not what to reason from if it changes.
  */
 const invocations = new Map<number, number>();
+
+/** Invocations `Deno.bench` makes but does not measure. */
+const DISCARDED_INVOCATIONS = 1;
 
 /** Whether this invocation of `topicCount` is the one that reports. */
 function reportsThisTime(topicCount: number): boolean {
   const seen = (invocations.get(topicCount) ?? 0) + 1;
   invocations.set(topicCount, seen);
-  return seen === WARMUP + 1;
+  return seen === DISCARDED_INVOCATIONS + 1;
 }
 
 /**
@@ -282,13 +291,15 @@ function reportsThisTime(topicCount: number): boolean {
  * timed has already performed the reopen, so asking it to reopen again would
  * measure a third visit rather than the operation the interval timed.
  *
- * A reopen is expected to complete no run carrying a read sample, so the
- * measurement is declared with `mayRunNothing` and what it records is a zero:
- * each lift's row reading zero runs is the reading, and a reopen that begins
- * doing lift work shows up here as rows rather than as an unexplained change in
- * the timing beside it. The declaration permits that zero without asserting it,
- * and reaches only that one outcome — runs this sample cannot attribute by
- * position still fail it, as does a board whose pivot is not running.
+ * A reopen is expected to complete no run carrying an authored source
+ * location — its runs do carry read samples, which is how they reach the
+ * attribution check at all — so the measurement is declared with
+ * `mayRunNothing` and what it records is a zero: each lift's row reading zero
+ * runs is the reading, and a reopen that begins doing lift work shows up here
+ * as rows rather than as an unexplained change in the timing beside it. The
+ * declaration permits that zero without asserting it, and reaches only that one
+ * outcome — a run carrying a location this sample cannot read still fails it,
+ * as does a board whose pivot is not running.
  */
 async function recordReopenReads(
   topicCount: number,

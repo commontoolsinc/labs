@@ -141,10 +141,25 @@ const PROFILE_CREATE_ACTION = "CreateProfile";
 const VIEWER = "Topic board benchmark viewer";
 
 /**
- * Topics the comment segment needs: one for its read-accounted sample, and one
- * for each iteration including the warm-up.
+ * How many times `Deno.bench` invokes a case's body, and how many of those it
+ * discards.
+ *
+ * Measured on Deno 2.9.4: `n + 2` invocations, of which only the first is
+ * dropped, whatever `warmup` is set to. Setting `warmup` to 0, 1, 2 or 5
+ * produced the same invocation count and the same measured set, so the option
+ * is not what to derive either number from.
  */
-const COMMENT_TOPICS_NEEDED = 1 + WARMUP + ITERATIONS;
+const BENCH_INVOCATIONS = ITERATIONS + 2;
+
+/** Invocations `Deno.bench` makes but does not measure. */
+const DISCARDED_INVOCATIONS = 1;
+
+/**
+ * Topics the comment segment needs: one per invocation of its body, and one
+ * more for the read-accounted sample, which reaches its own starting point in a
+ * browser of its own.
+ */
+const COMMENT_TOPICS_NEEDED = BENCH_INVOCATIONS + 1;
 
 // Checked here, above the seeding below, so a board sized through
 // `CF_TOPIC_BOARD_TOPICS` says so at once rather than after minutes of seeding
@@ -154,6 +169,64 @@ if (TOPIC_COUNT < COMMENT_TOPICS_NEEDED) {
     `The comment segment files one comment per iteration on a topic that has ` +
       `none, so it needs ${COMMENT_TOPICS_NEEDED} topics and ` +
       `CF_TOPIC_BOARD_TOPICS is ${TOPIC_COUNT}`,
+  );
+}
+
+/**
+ * Returns the indices of the topics that cite `index` on a board of
+ * {@link TOPIC_COUNT}
+ * topics, newest first, which are the rows the topic's backlink derivation
+ * produces and the labels its `Referenced by` card shows.
+ */
+function citedBy(index: number): number[] {
+  const citing: number[] = [];
+  for (let candidate = TOPIC_COUNT - 1; candidate >= 0; candidate--) {
+    const targets = crossrefTargets(candidate, { topicCount: TOPIC_COUNT });
+    if (targets.includes(index)) citing.push(candidate);
+  }
+  return citing;
+}
+
+/**
+ * The topic the backlink segment opens: the one the most siblings cite, so the
+ * segment measures the largest set of backlink rows this board produces.
+ *
+ * Which topic that is depends on the board's size, because the fixture points
+ * each citing topic's first citation at its immediate predecessor and spreads
+ * the rest back over everything earlier. The check below is what holds it to
+ * the property the segment needs, rather than this comment naming a topic.
+ */
+const BACKLINK_TOPIC = (() => {
+  let chosen = -1;
+  let mostCitations = 0;
+  for (let index = 0; index < TOPIC_COUNT; index++) {
+    const citations = citedBy(index).length;
+    if (citations > mostCitations) {
+      chosen = index;
+      mostCitations = citations;
+    }
+  }
+  if (chosen < 0) {
+    throw new Error(
+      `No topic on a ${TOPIC_COUNT}-topic board is cited, so the board ` +
+        "produces no backlink rows to measure",
+    );
+  }
+  return chosen;
+})();
+
+/** Titles the backlink segment's topic is cited by, which it waits to see. */
+const BACKLINK_ROWS = citedBy(BACKLINK_TOPIC).map(topicTitle);
+
+// A topic that cites as well as being cited shows both cards, and their rows
+// are both `cf-cell-link`s labelled with a sibling's title, so a wait for a
+// title could be satisfied by the wrong card. Say so here rather than let a
+// board size chosen through `CF_TOPIC_BOARD_TOPICS` measure the wrong thing.
+if (crossrefTargets(BACKLINK_TOPIC, { topicCount: TOPIC_COUNT }).length > 0) {
+  throw new Error(
+    `Topic ${BACKLINK_TOPIC} is the most cited on a ${TOPIC_COUNT}-topic ` +
+      "board and also cites, so a wait for a sibling's title cannot tell its " +
+      `\`${BACKLINKS_HEADING}\` rows from its \`References\` ones`,
   );
 }
 
@@ -280,64 +353,6 @@ function report(message: string): void {
   // write would drop part of one silently.
   Deno.stderr.writeSync(
     encoder.encode(`[topic-board-navigation] ${message}\n`),
-  );
-}
-
-/**
- * Returns the indices of the topics that cite `index` on a board of
- * {@link TOPIC_COUNT}
- * topics, newest first, which are the rows the topic's backlink derivation
- * produces and the labels its `Referenced by` card shows.
- */
-function citedBy(index: number): number[] {
-  const citing: number[] = [];
-  for (let candidate = TOPIC_COUNT - 1; candidate >= 0; candidate--) {
-    const targets = crossrefTargets(candidate, { topicCount: TOPIC_COUNT });
-    if (targets.includes(index)) citing.push(candidate);
-  }
-  return citing;
-}
-
-/**
- * The topic the backlink segment opens: the one the most siblings cite, so the
- * segment measures the largest set of backlink rows this board produces.
- *
- * Which topic that is depends on the board's size, because the fixture points
- * each citing topic's first citation at its immediate predecessor and spreads
- * the rest back over everything earlier. The check below is what holds it to
- * the property the segment needs, rather than this comment naming a topic.
- */
-const BACKLINK_TOPIC = (() => {
-  let chosen = -1;
-  let mostCitations = 0;
-  for (let index = 0; index < TOPIC_COUNT; index++) {
-    const citations = citedBy(index).length;
-    if (citations > mostCitations) {
-      chosen = index;
-      mostCitations = citations;
-    }
-  }
-  if (chosen < 0) {
-    throw new Error(
-      `No topic on a ${TOPIC_COUNT}-topic board is cited, so the board ` +
-        "produces no backlink rows to measure",
-    );
-  }
-  return chosen;
-})();
-
-/** Titles the backlink segment's topic is cited by, which it waits to see. */
-const BACKLINK_ROWS = citedBy(BACKLINK_TOPIC).map(topicTitle);
-
-// A topic that cites as well as being cited shows both cards, and their rows
-// are both `cf-cell-link`s labelled with a sibling's title, so a wait for a
-// title could be satisfied by the wrong card. Say so here rather than let a
-// board size chosen through `CF_TOPIC_BOARD_TOPICS` measure the wrong thing.
-if (crossrefTargets(BACKLINK_TOPIC, { topicCount: TOPIC_COUNT }).length > 0) {
-  throw new Error(
-    `Topic ${BACKLINK_TOPIC} is the most cited on a ${TOPIC_COUNT}-topic ` +
-      "board and also cites, so a wait for a sibling's title cannot tell its " +
-      `\`${BACKLINKS_HEADING}\` rows from its \`References\` ones`,
   );
 }
 
@@ -501,7 +516,8 @@ async function reachBacklink(
 
 /**
  * Invocations of each case so far, so that the read-accounted sample is taken
- * around a measured iteration rather than the warm-up the benchmark discards.
+ * around an iteration the benchmark keeps rather than the one it discards. See
+ * {@link BENCH_INVOCATIONS} for what `Deno.bench` actually does here.
  */
 const invocations = new Map<string, number>();
 
@@ -509,7 +525,7 @@ const invocations = new Map<string, number>();
 function samplesThisTime(name: string): boolean {
   const seen = (invocations.get(name) ?? 0) + 1;
   invocations.set(name, seen);
-  return seen === WARMUP + 1;
+  return seen === DISCARDED_INVOCATIONS + 1;
 }
 
 /**
