@@ -62,7 +62,9 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  *
  * Every concrete `FabricPrimitive` subclass needs an instanceof-capable
  * declaration here, that being an interface, a constructor interface, and a
- * `declare const` combining the two.
+ * `declare const` combining the two. The interface narrows `.schemaType` to
+ * the one name its class reports, and that name is listed in
+ * `FABRIC_PRIMITIVE_SCHEMA_TYPES`.
  *
  * This module has no imports, and can have none. `@commonfabric/api`
  * re-exports it to patterns, and the script that builds the type file the
