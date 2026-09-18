@@ -81,6 +81,7 @@ const DIVIDER_PATTERN = /\n\n--\n(?:\n|$)/;
 const WHOLE_RENDERING_OPTIONS: DebugValueOptions = {
   maxDepth: Infinity,
   maxArrayLength: Infinity,
+  maxBufferLength: Infinity,
   maxProperties: Infinity,
   maxStringLength: Infinity,
   maxStringLines: Infinity,
