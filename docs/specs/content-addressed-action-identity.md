@@ -109,8 +109,10 @@ exports by export name, hoisted/non-exported artifacts by their `__cfReg` key
 (see `docs/specs/module-loading.md` and the op-by-identity migration that
 introduced the `$patternRef` sentinel, `builtins/op-pattern-ref.ts`).
 
-`piece setsrc` supplies the one explicit update-chain exception to strict hash
-equality. Its old and new entries match each other, the rest of their
+Two updates supply the update-chain exception to strict hash equality, and
+derive the same chain: an explicit `piece setsrc`, and an unattended update
+from a `system:` origin — a release the deployment gated — through the source
+reconciler. In both, the old and new entries match each other, the rest of their
 recursive source closures are matched by canonical full filename — directly,
 or under the root substitution the two entry names define — and successor
 module documents accumulate the predecessor hashes they may act as. A loaded

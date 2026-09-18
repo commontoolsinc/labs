@@ -612,12 +612,15 @@ skipped on a read only for a full hit whose bodies came from an integrity-gated
 load (`trustedBodies`); a miss or partial hit always re-verifies (see the threat
 model).
 
-### Module update delegation (`piece setsrc`)
+### Module update delegation (`piece setsrc`, and a `system:` release)
 
 `piece setsrc` is the temporary authority handoff while pattern files remain
-local, content-addressed modules. Compilation persists artifacts without
-granting update authority. Setup prepares a proposal from the current and
-candidate entries' verified recursive source closures. The two entries match
+local, content-addressed modules; an unattended update from a `system:`
+origin — a release the deployment gated, adopted by the source reconciler —
+derives the same handoff, and an update from any other origin derives none.
+Compilation persists artifacts without granting update authority. Setup
+prepares a proposal from the current and candidate entries' verified
+recursive source closures. The two entries match
 each other outright, since the update is what names the one as the other's
 successor. Every other module matches by canonical full authored filename
 (resolved relative imports meet at the same stored path; basenames are never
