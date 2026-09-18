@@ -1,8 +1,6 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
-
 import {
   type ServedBundle,
   topicsBrowserPostureOf,
@@ -60,13 +58,18 @@ describe("topicsBrowserPostureOf()", () => {
     ).toThrow(/names no `EXPERIMENTAL_SERVER_EXECUTION` build define/);
   });
 
-  it("records `default` as the client half's source when no bundle could be read", () => {
-    const posture = topicsBrowserPostureOf({
-      experimental: { serverExecution: SERVER_EXECUTION_DEFAULT_ENABLED },
-      shellServerExecutionDefine: null,
-    });
-    expect(posture.client).toBe(SERVER_EXECUTION_DEFAULT_ENABLED);
-    expect(posture.clientFrom).toBe("default");
+  it("throws naming the reason when no bundle could be read", () => {
+    expect(() =>
+      topicsBrowserPostureOf(
+        {
+          experimental: { serverExecution: false },
+          shellServerExecutionDefine: null,
+        },
+        { kind: "unreachable", reason: "`/scripts/index.js` gave 404" },
+      )
+    ).toThrow(
+      /no served shell could be read \(`\/scripts\/index\.js` gave 404\)/,
+    );
   });
 
   it("throws naming both halves when the toolshed and its shell run opposite postures", () => {

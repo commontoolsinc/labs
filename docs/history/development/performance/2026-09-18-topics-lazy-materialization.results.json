@@ -10,66 +10,464 @@
     "memoryGiB": 32,
     "runtime": "Deno 2.9.4 aarch64-apple-darwin",
     "loadAveragesDuringMatrixArms": [
-      "16:38:11 20.68 26.10 21.94",
-      "16:39:11 23.67 25.88 22.13",
-      "16:40:11 24.68 25.78 22.35",
-      "16:41:11 39.59 29.57 23.98",
-      "16:42:11 39.43 31.68 25.17",
-      "16:43:11 36.86 32.39 25.88",
-      "16:44:11 34.90 33.23 26.67",
-      "16:45:11 26.19 31.05 26.30",
-      "16:46:11 26.42 30.02 26.22",
-      "16:47:11 20.04 27.58 25.57",
-      "16:48:11 28.99 27.94 25.79",
-      "16:49:11 26.78 27.51 25.77",
-      "16:50:11 33.92 29.07 26.44",
-      "16:51:11 18.50 25.61 25.33",
-      "16:52:11 29.47 26.11 25.46",
-      "16:53:11 20.63 24.49 24.92",
-      "16:54:11 13.99 22.01 23.97",
-      "16:55:11 12.82 20.18 23.15",
-      "16:56:11 13.32 19.10 22.54",
-      "16:57:11 11.17 17.45 21.69",
-      "16:58:11 12.21 16.33 20.96",
-      "16:59:11 11.91 15.72 20.43",
-      "17:04:26 7.66 13.82 19.40",
-      "17:49:13 14.57 13.64 18.04",
-      "17:50:13 9.45 12.29 17.23",
-      "17:51:13 14.88 13.41 17.31",
-      "17:52:13 20.51 15.13 17.68",
-      "17:53:13 24.24 17.19 18.28",
-      "17:54:13 22.51 17.60 18.33",
-      "17:55:13 20.12 17.94 18.42",
-      "17:56:13 14.93 16.90 18.00",
-      "17:57:13 17.33 17.09 17.99",
-      "17:58:13 13.42 16.15 17.58",
-      "17:59:13 9.99 14.63 16.91",
-      "18:00:13 8.58 13.40 16.29",
-      "18:01:13 7.48 12.18 15.63",
-      "18:02:13 10.30 12.11 15.37",
-      "18:03:13 6.97 10.85 14.68",
-      "18:04:13 13.46 11.66 14.70",
-      "18:05:13 7.55 10.34 14.00",
-      "18:06:13 10.16 10.40 13.76",
-      "18:07:13 7.87 9.73 13.28",
-      "18:08:13 8.03 9.32 12.87",
-      "18:09:13 7.42 8.88 12.47",
-      "18:10:13 16.98 10.57 12.81",
-      "18:11:13 13.47 11.26 12.95",
-      "18:12:13 10.18 10.69 12.62",
-      "18:13:13 6.62 9.65 12.10"
+      {
+        "at": "16:38:11",
+        "load1": 20.68,
+        "load5": 26.1,
+        "load15": 21.94
+      },
+      {
+        "at": "16:39:11",
+        "load1": 23.67,
+        "load5": 25.88,
+        "load15": 22.13
+      },
+      {
+        "at": "16:40:11",
+        "load1": 24.68,
+        "load5": 25.78,
+        "load15": 22.35
+      },
+      {
+        "at": "16:41:11",
+        "load1": 39.59,
+        "load5": 29.57,
+        "load15": 23.98
+      },
+      {
+        "at": "16:42:11",
+        "load1": 39.43,
+        "load5": 31.68,
+        "load15": 25.17
+      },
+      {
+        "at": "16:43:11",
+        "load1": 36.86,
+        "load5": 32.39,
+        "load15": 25.88
+      },
+      {
+        "at": "16:44:11",
+        "load1": 34.9,
+        "load5": 33.23,
+        "load15": 26.67
+      },
+      {
+        "at": "16:45:11",
+        "load1": 26.19,
+        "load5": 31.05,
+        "load15": 26.3
+      },
+      {
+        "at": "16:46:11",
+        "load1": 26.42,
+        "load5": 30.02,
+        "load15": 26.22
+      },
+      {
+        "at": "16:47:11",
+        "load1": 20.04,
+        "load5": 27.58,
+        "load15": 25.57
+      },
+      {
+        "at": "16:48:11",
+        "load1": 28.99,
+        "load5": 27.94,
+        "load15": 25.79
+      },
+      {
+        "at": "16:49:11",
+        "load1": 26.78,
+        "load5": 27.51,
+        "load15": 25.77
+      },
+      {
+        "at": "16:50:11",
+        "load1": 33.92,
+        "load5": 29.07,
+        "load15": 26.44
+      },
+      {
+        "at": "16:51:11",
+        "load1": 18.5,
+        "load5": 25.61,
+        "load15": 25.33
+      },
+      {
+        "at": "16:52:11",
+        "load1": 29.47,
+        "load5": 26.11,
+        "load15": 25.46
+      },
+      {
+        "at": "16:53:11",
+        "load1": 20.63,
+        "load5": 24.49,
+        "load15": 24.92
+      },
+      {
+        "at": "16:54:11",
+        "load1": 13.99,
+        "load5": 22.01,
+        "load15": 23.97
+      },
+      {
+        "at": "16:55:11",
+        "load1": 12.82,
+        "load5": 20.18,
+        "load15": 23.15
+      },
+      {
+        "at": "16:56:11",
+        "load1": 13.32,
+        "load5": 19.1,
+        "load15": 22.54
+      },
+      {
+        "at": "16:57:11",
+        "load1": 11.17,
+        "load5": 17.45,
+        "load15": 21.69
+      },
+      {
+        "at": "16:58:11",
+        "load1": 12.21,
+        "load5": 16.33,
+        "load15": 20.96
+      },
+      {
+        "at": "16:59:11",
+        "load1": 11.91,
+        "load5": 15.72,
+        "load15": 20.43
+      },
+      {
+        "at": "17:04:26",
+        "load1": 7.66,
+        "load5": 13.82,
+        "load15": 19.4
+      },
+      {
+        "at": "17:49:13",
+        "load1": 14.57,
+        "load5": 13.64,
+        "load15": 18.04
+      },
+      {
+        "at": "17:50:13",
+        "load1": 9.45,
+        "load5": 12.29,
+        "load15": 17.23
+      },
+      {
+        "at": "17:51:13",
+        "load1": 14.88,
+        "load5": 13.41,
+        "load15": 17.31
+      },
+      {
+        "at": "17:52:13",
+        "load1": 20.51,
+        "load5": 15.13,
+        "load15": 17.68
+      },
+      {
+        "at": "17:53:13",
+        "load1": 24.24,
+        "load5": 17.19,
+        "load15": 18.28
+      },
+      {
+        "at": "17:54:13",
+        "load1": 22.51,
+        "load5": 17.6,
+        "load15": 18.33
+      },
+      {
+        "at": "17:55:13",
+        "load1": 20.12,
+        "load5": 17.94,
+        "load15": 18.42
+      },
+      {
+        "at": "17:56:13",
+        "load1": 14.93,
+        "load5": 16.9,
+        "load15": 18.0
+      },
+      {
+        "at": "17:57:13",
+        "load1": 17.33,
+        "load5": 17.09,
+        "load15": 17.99
+      },
+      {
+        "at": "17:58:13",
+        "load1": 13.42,
+        "load5": 16.15,
+        "load15": 17.58
+      },
+      {
+        "at": "17:59:13",
+        "load1": 9.99,
+        "load5": 14.63,
+        "load15": 16.91
+      },
+      {
+        "at": "18:00:13",
+        "load1": 8.58,
+        "load5": 13.4,
+        "load15": 16.29
+      },
+      {
+        "at": "18:01:13",
+        "load1": 7.48,
+        "load5": 12.18,
+        "load15": 15.63
+      },
+      {
+        "at": "18:02:13",
+        "load1": 10.3,
+        "load5": 12.11,
+        "load15": 15.37
+      },
+      {
+        "at": "18:03:13",
+        "load1": 6.97,
+        "load5": 10.85,
+        "load15": 14.68
+      },
+      {
+        "at": "18:04:13",
+        "load1": 13.46,
+        "load5": 11.66,
+        "load15": 14.7
+      },
+      {
+        "at": "18:05:13",
+        "load1": 7.55,
+        "load5": 10.34,
+        "load15": 14.0
+      },
+      {
+        "at": "18:06:13",
+        "load1": 10.16,
+        "load5": 10.4,
+        "load15": 13.76
+      },
+      {
+        "at": "18:07:13",
+        "load1": 7.87,
+        "load5": 9.73,
+        "load15": 13.28
+      },
+      {
+        "at": "18:08:13",
+        "load1": 8.03,
+        "load5": 9.32,
+        "load15": 12.87
+      },
+      {
+        "at": "18:09:13",
+        "load1": 7.42,
+        "load5": 8.88,
+        "load15": 12.47
+      },
+      {
+        "at": "18:10:13",
+        "load1": 16.98,
+        "load5": 10.57,
+        "load15": 12.81
+      },
+      {
+        "at": "18:11:13",
+        "load1": 13.47,
+        "load5": 11.26,
+        "load15": 12.95
+      },
+      {
+        "at": "18:12:13",
+        "load1": 10.18,
+        "load5": 10.69,
+        "load15": 12.62
+      },
+      {
+        "at": "18:13:13",
+        "load1": 6.62,
+        "load5": 9.65,
+        "load15": 12.1
+      }
     ],
-    "loadAveragesDuringRepeatSubset": [
-      "18:18:14 2.68 5.67 9.53",
-      "18:19:14 4.36 5.62 9.24",
-      "18:20:14 3.76 5.19 8.83",
-      "18:21:14 3.44 4.86 8.46",
-      "18:22:14 3.09 4.50 8.08",
-      "18:23:14 3.45 4.38 7.79",
-      "18:24:14 6.57 4.98 7.77",
-      "18:25:14 6.63 5.37 7.73"
+    "caveat": "The two matrix arms ran on a shared machine under unrelated Deno, Python and Xcode load, and under markedly asymmetric contention: the on arm's one-minute load had a median of 24.18 over 22 samples, the off arm's 10.24 over 26. The more contended arm is the faster one, so contention does not account for the elapsed-time difference between them; two single samples do not make a latency baseline either way. The alternating repeat subset, which the timing claims rest on, ran later at a median one-minute load of 6.54 over 16 samples, and alternates the arms so that drift falls on both.",
+    "loadAveragesDuringBatchedRepeatSubset": [
+      {
+        "at": "18:18:14",
+        "load1": 2.68,
+        "load5": 5.67,
+        "load15": 9.53
+      },
+      {
+        "at": "18:19:14",
+        "load1": 4.36,
+        "load5": 5.62,
+        "load15": 9.24
+      },
+      {
+        "at": "18:20:14",
+        "load1": 3.76,
+        "load5": 5.19,
+        "load15": 8.83
+      },
+      {
+        "at": "18:21:14",
+        "load1": 3.44,
+        "load5": 4.86,
+        "load15": 8.46
+      },
+      {
+        "at": "18:22:14",
+        "load1": 3.09,
+        "load5": 4.5,
+        "load15": 8.08
+      },
+      {
+        "at": "18:23:14",
+        "load1": 3.45,
+        "load5": 4.38,
+        "load15": 7.79
+      },
+      {
+        "at": "18:24:14",
+        "load1": 6.57,
+        "load5": 4.98,
+        "load15": 7.77
+      },
+      {
+        "at": "18:25:14",
+        "load1": 6.63,
+        "load5": 5.37,
+        "load15": 7.73
+      }
     ],
-    "caveat": "The two matrix arms ran on a shared machine carrying load averages of roughly 20 to 40 against 10 logical CPUs, with unrelated Deno, Python and Xcode processes competing, and two toolsheds and a `cf piece new` were started during the off arm. Their elapsed times are two single samples under contention and are not a latency baseline. The repeat subset ran later at load averages of 2.7 to 6.7."
+    "loadAveragesDuringAlternatingSubset": [
+      {
+        "at": "18:48:11",
+        "load1": 4.91,
+        "load5": 11.54,
+        "load15": 10.38
+      },
+      {
+        "at": "18:48:41",
+        "load1": 4.08,
+        "load5": 10.72,
+        "load15": 10.12
+      },
+      {
+        "at": "18:49:11",
+        "load1": 5.55,
+        "load5": 10.47,
+        "load15": 10.05
+      },
+      {
+        "at": "18:49:41",
+        "load1": 8.71,
+        "load5": 10.82,
+        "load15": 10.2
+      },
+      {
+        "at": "18:50:11",
+        "load1": 9.23,
+        "load5": 10.76,
+        "load15": 10.19
+      },
+      {
+        "at": "18:50:41",
+        "load1": 10.13,
+        "load5": 10.87,
+        "load15": 10.25
+      },
+      {
+        "at": "18:51:11",
+        "load1": 10.31,
+        "load5": 10.96,
+        "load15": 10.31
+      },
+      {
+        "at": "18:51:41",
+        "load1": 7.91,
+        "load5": 10.32,
+        "load15": 10.1
+      },
+      {
+        "at": "18:52:11",
+        "load1": 6.7,
+        "load5": 9.8,
+        "load15": 9.92
+      },
+      {
+        "at": "18:52:41",
+        "load1": 8.83,
+        "load5": 10.2,
+        "load15": 10.07
+      },
+      {
+        "at": "18:53:11",
+        "load1": 6.86,
+        "load5": 9.6,
+        "load15": 9.86
+      },
+      {
+        "at": "18:53:41",
+        "load1": 6.39,
+        "load5": 9.22,
+        "load15": 9.71
+      },
+      {
+        "at": "18:54:11",
+        "load1": 5.66,
+        "load5": 8.78,
+        "load15": 9.54
+      },
+      {
+        "at": "18:54:41",
+        "load1": 5.83,
+        "load5": 8.53,
+        "load15": 9.42
+      },
+      {
+        "at": "18:55:11",
+        "load1": 5.14,
+        "load5": 8.12,
+        "load15": 9.24
+      },
+      {
+        "at": "18:55:41",
+        "load1": 5.21,
+        "load5": 7.87,
+        "load15": 9.11
+      }
+    ],
+    "oneMinuteLoadByArm": {
+      "matrixOn": {
+        "samples": 22,
+        "min": 11.17,
+        "median": 24.18,
+        "max": 39.59
+      },
+      "matrixOff": {
+        "samples": 26,
+        "min": 6.62,
+        "median": 10.24,
+        "max": 24.24
+      },
+      "alternatingSubset": {
+        "samples": 16,
+        "min": 4.08,
+        "median": 6.54,
+        "max": 10.31
+      }
+    }
   },
   "units": {
     "elapsedMs": "milliseconds",
@@ -151764,12 +152162,12 @@
       "offArmBodyTotal": 0,
       "offArmAttemptTotal": 0
     },
-    "determinism": "Every case of the repeat subset produced one distinct set of counters across its five rounds in each arm, and that set equals the matrix arm's counters for the same case."
+    "determinism": "Every case of the alternating subset produced one distinct set of counters across its five rounds in each arm, and each set equals the matrix arm's counters for the same case."
   },
   "limitations": [
     "The matrix arms' elapsed times are single samples taken on a loaded shared machine and support no latency conclusion. The repeat subset is where the timing claims come from.",
     "The repeat subset was first run batched, five rounds of one arm then five of the other, and re-run alternating. Both are kept; the alternating run is what the timing claims rest on. The two disagree by up to 16% on individual ratios and disagree on whether the 4-topic case separates, which is why the ordering is recorded rather than left to be inferred.",
-    "The repeat subset ran at a later head than the matrix arms (2303bcc1511c84af9228031091bcb3c4dc0503cc against fd9fa9a44b1d04c53cea863e5c46c48692d0da57); the commit between them touched browser benchmark files and documentation only, and the subset's counters equal the matrix arms', which is the evidence that the difference is inert for this measurement.",
+    "The repeat subset was first run batched, five rounds of one arm then five of the other, at 2303bcc151, and re-run alternating at 2b6d7244b3. The alternating run is what every timing claim rests on. The two differ by up to 16% on individual ratios and disagree about whether the 4-topic case separates, which is why the ordering is recorded rather than left to be inferred. Only the alternating run's raw samples are kept.",
     "Server execution is not measured here. The headless fixture builds its runtime over an emulated storage manager with no memory server, so the serving loop has nothing to construct over; both modes hold serverExecution off.",
     "The all-backlinks workload is a scaling probe rather than normal UI behavior, as the plan says. The per-workload split is what separates its cost from the topic-open workload's.",
     "One trial of one case is not a rate. Every figure here comes from the runs in this file.",
@@ -151780,7 +152178,7 @@
     "ordering": "on,off repeated five times",
     "head": "2b6d7244b3965173c0ada39e223246ee070852eb",
     "workingTreeDirtyFromRound": 2,
-    "dirtyTreeNote": "Rounds 2 to 5 ran with uncommitted edits to browser benchmark files and documentation, which the headless probe does not load. Their counters equal round 1's and equal the matrix arms', which is the evidence that the edits are inert here rather than an assertion that they are. Alternating also puts any such effect on both arms.",
+    "dirtyTreeNote": "Rounds 2 to 5 ran with uncommitted edits in the tree. Those edits reached topics-headless-fixture.ts, which the probe does load, as well as browser benchmark files and documentation, which it does not; the fixture's were comment-only. What establishes that none of it moved a number is that these rounds' counters equal round 1's, taken with a clean tree, and equal the matrix arms'. Alternating also puts any effect they could have had on both arms.",
     "arms": {
       "lazy-materialization-on": {
         "records": [
@@ -203420,7 +203818,90 @@
         "separationMs": 339.1,
         "rounds": 5
       }
-    }
+    },
+    "roundLog": [
+      {
+        "round": 1,
+        "arm": "lazy-materialization-on",
+        "exitCode": 0,
+        "wallClockSeconds": 32,
+        "finishedAt": "18:48:43Z",
+        "oneMinuteLoadAtFinish": 4.96
+      },
+      {
+        "round": 1,
+        "arm": "lazy-materialization-off",
+        "exitCode": 0,
+        "wallClockSeconds": 64,
+        "finishedAt": "18:49:48Z",
+        "oneMinuteLoadAtFinish": 9.29
+      },
+      {
+        "round": 2,
+        "arm": "lazy-materialization-on",
+        "exitCode": 0,
+        "wallClockSeconds": 36,
+        "finishedAt": "18:50:24Z",
+        "oneMinuteLoadAtFinish": 9.62
+      },
+      {
+        "round": 2,
+        "arm": "lazy-materialization-off",
+        "exitCode": 0,
+        "wallClockSeconds": 63,
+        "finishedAt": "18:51:27Z",
+        "oneMinuteLoadAtFinish": 9.12
+      },
+      {
+        "round": 3,
+        "arm": "lazy-materialization-on",
+        "exitCode": 0,
+        "wallClockSeconds": 34,
+        "finishedAt": "18:52:01Z",
+        "oneMinuteLoadAtFinish": 7.47
+      },
+      {
+        "round": 3,
+        "arm": "lazy-materialization-off",
+        "exitCode": 0,
+        "wallClockSeconds": 63,
+        "finishedAt": "18:53:04Z",
+        "oneMinuteLoadAtFinish": 7.29
+      },
+      {
+        "round": 4,
+        "arm": "lazy-materialization-on",
+        "exitCode": 0,
+        "wallClockSeconds": 32,
+        "finishedAt": "18:53:36Z",
+        "oneMinuteLoadAtFinish": 6.42
+      },
+      {
+        "round": 4,
+        "arm": "lazy-materialization-off",
+        "exitCode": 0,
+        "wallClockSeconds": 63,
+        "finishedAt": "18:54:39Z",
+        "oneMinuteLoadAtFinish": 5.83
+      },
+      {
+        "round": 5,
+        "arm": "lazy-materialization-on",
+        "exitCode": 0,
+        "wallClockSeconds": 32,
+        "finishedAt": "18:55:11Z",
+        "oneMinuteLoadAtFinish": 5.14
+      },
+      {
+        "round": 5,
+        "arm": "lazy-materialization-off",
+        "exitCode": 0,
+        "wallClockSeconds": 60,
+        "finishedAt": "18:56:11Z",
+        "oneMinuteLoadAtFinish": 5.16
+      }
+    ],
+    "orderingEvidence": "roundLog carries each invocation's finishing timestamp in the order they ran, so the interleaving is readable from the data rather than asserted."
   },
   "serverExecutionEngagementProbe": {
     "purpose": "Whether server execution's ON posture engages at all, since the headless tier's flag had nothing to engage. Two source-run toolsheds on one revision, identical but for EXPERIMENTAL_SERVER_EXECUTION.",
@@ -203623,6 +204104,10 @@
             "followerSessions": 5,
             "mixedFlushes": 4
           }
+        },
+        "activeSpacesDuringSession": {
+          "observed": 2,
+          "note": "Read live from /api/health/stats while the cf piece new session was open. The capture in servingLoopAfterDeployingTopics was taken after that session closed, so its activeSpaces gauge reads 0; this observation is not in the captured file. The cumulative counters beside it are."
         }
       },
       "off": {
@@ -203635,6 +204120,7 @@
     },
     "workloadDriven": "cf piece new packages/patterns/topics/main.tsx --root packages/patterns, against the ON toolshed",
     "finding": "The ON toolshed constructed an ExecutorHost and served the deployed board's work: activeSpaces reached 2 while the session was open, and the cumulative counters recorded 10 waves, 2 authored transactions seen and 10 derived commits across two spaces, with no structure-load failures. The OFF toolshed carried no servingLoop block at all. activeSpaces is a gauge and reads 0 once the session closes; the cumulative counters are the durable evidence.",
-    "notMeasured": "The cost of that posture. This establishes engagement only, with the cf CLI as the client rather than a browser."
+    "notMeasured": "The cost of that posture. This establishes engagement only, with the cf CLI as the client rather than a browser.",
+    "environment": "A toolshed-backed deployment driven by the cf CLI: two source-run toolsheds, no compiled binary, no served shell and no browser. This is not the browser benchmark environment, which runs a built toolshed binary serving a baked shell under Chrome; whether that environment runs a coherent ON arm is not established here."
   }
 }

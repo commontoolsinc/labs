@@ -261,12 +261,15 @@ back. It cannot measure
 ON posture's serving loop is an `ExecutorHost` built over a co-hosted memory
 server, and the headless fixture runs over an emulated storage manager in one
 process with no memory server, so the flag has nothing there to engage. Server
-execution is measured in the browser tier, which runs against a toolshed: a
+execution is measured in the browser tier, which runs against a toolshed. A
 toolshed given the ON flag was measured to construct the loop and to serve a
 deployed Topics board's work, recorded in
 [the engagement probe](../history/development/performance/2026-09-18-topics-lazy-materialization.md),
-which is the engagement the headless tier has no way to produce. The cost of
-server execution is not yet measured in either tier. A browser arm holds its
+which is the engagement the headless tier has no way to produce. That probe
+drove a source-run toolshed with the `cf` CLI rather than the browser
+benchmark environment of a built binary, a baked shell and Chrome, so whether
+that environment runs a coherent arm is open. The cost of server execution is
+not yet measured in either tier. A browser arm holds its
 two halves to one posture — the toolshed serves at it, and the shell it serves
 is built at it — and a run whose halves disagree is refused rather than
 labeled. Server execution on and off must both be measured before the baseline

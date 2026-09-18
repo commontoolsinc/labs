@@ -476,23 +476,30 @@ read-accounted half's elapsed time cannot speak for.
 ### The posture a sample is labeled with
 
 Every sample carries the server-execution posture the deployment under
-measurement ran, printed in square brackets after the sample's label, so a
-diagnostics line says which mode produced it without a reader knowing how the
+measurement ran, printed in square brackets after the sample's label as
+`[<mode> via <source>]`, so a diagnostics line says which mode produced it and
+which statement of the posture that came from, without a reader knowing how the
 run was started. `topics-browser-posture.ts` reads it from the deployment
 rather than from the benchmark process's own `EXPERIMENTAL_SERVER_EXECUTION`,
 which would label whatever it was told: the toolshed reports the posture it
 serves at on `/api/meta`, and the shell it serves states its own through the
-build define — from `shellServerExecutionDefine`, from the define baked into
-the served bundle, or, where neither names one, from the first-party default
-the shell itself falls back to. The worker refuses to initialize when its
-resolved posture disagrees with the shell's declaration, so a page that loaded
-at all ran the posture its shell declared.
+build define, read from `shellServerExecutionDefine` or from the define baked
+into the served bundle. The worker refuses to initialize when its resolved
+posture disagrees with the shell's declaration, so a page that loaded at all
+ran the posture its shell declared.
 
-A run whose two halves disagree is refused rather than labeled, because a
-client and a server on opposite postures exercise neither. A source-run
-toolshed given the ON flag is one such case: it serves no built shell, so the
-shell a browser would load follows the first-party default, and the pair is a
-mixed posture.
+No path labels a run from an assumption. A deployment that states its shell's
+posture in neither place — a bundle carrying no define, or no bundle that can
+be read — is refused rather than labeled from the first-party default, a
+constant compiled into the benchmark process rather than something the
+deployment said. Refusing costs a benchmark nothing, since a deployment with no
+readable shell has none to drive either.
+
+A run whose two halves disagree is refused as well, because a client and a
+server on opposite postures exercise neither. A source-run toolshed given the
+ON flag is one such case where it also serves a shell built at the opposite
+posture; serving no readable shell at all, it is refused by the rule above
+instead.
 
 ### What a sample records
 

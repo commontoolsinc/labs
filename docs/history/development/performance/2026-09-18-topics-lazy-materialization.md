@@ -2,7 +2,7 @@
 status: historical
 created: 2026-09-18
 archived: 2026-09-18
-reason: "Measurement record of the headless Topics computation-cost matrix under lazy materialization on and off, with the server-execution engagement probe beside it."
+reason: "Measurement of the Topics matrix under lazy materialization on and off, with a server-execution engagement probe."
 ---
 
 # Topics computation cost under lazy materialization on and off
@@ -14,8 +14,9 @@ whether server execution's ON posture engages at all. Taken for the
 which asks for both modes measured before the baseline report, in runs labeled
 by mode.
 
-Every sample, both arms, both orderings of the repeat subset, the engagement
-probe, the machine's load samples, and the derived per-workload figures are in
+Every sample of both matrix arms, the alternating repeat subset's samples and
+the batched ordering's derived timings, the engagement probe, the machine's
+load samples, and the derived per-workload figures are in
 [`2026-09-18-topics-lazy-materialization.results.json`](2026-09-18-topics-lazy-materialization.results.json)
 beside this file. The figures below come from that file. This record says what
 was measured and under what conditions; the interpretation belongs to the
@@ -49,9 +50,10 @@ is measured:
 | `all-backlinks` | 24 | 24 | 2.95x to 1019.69x |
 | `aggregates` | 7 | 0 | no backlinks demanded |
 
-The `none`-graph cases at 32 and 128 topics are the two of each pivot
-workload's 26 where mention removal is not measured, for the reason the probe
-records: no topic mentions the focus topic.
+The `none`-graph cases at 32 and 128 topics are the two cases of each of
+`topic-open` and `all-backlinks` where mention removal is not measured, for the
+reason the probe records: no topic mentions the focus topic. Each of those two
+workloads holds 26 cases, of which 24 measure that phase.
 
 `aggregates` is a third answer rather than a variant of the other two: that
 workload demands every topic's comment count and last activity and no
@@ -80,26 +82,32 @@ takes the default mode and refuses `--mode`.
 
 ## Timings
 
-The two matrix arms ran on a shared machine carrying load averages of roughly
-20 to 40 against 10 logical CPUs, with unrelated Deno, Python and Xcode
-processes competing, and two toolsheds and a `cf piece new` were started during
-the off arm. Their elapsed times are two single samples under contention. They
-support no latency conclusion and the 1311-against-1488-second comparison
-should not be read as one. The load samples are in the results file.
+The two matrix arms ran on a shared machine against 10 logical CPUs, with
+unrelated Deno, Python and Xcode processes competing, and two toolsheds and a
+`cf piece new` were started during the off arm. Contention was markedly
+asymmetric between them: the on arm's one-minute load average had a median of
+24.18 over 22 samples, the off arm's 10.24 over 26. That asymmetry runs against
+the elapsed-time difference rather than explaining it — the arm under roughly
+half the contention is the slower one — so load does not account for the gap.
+Neither does one sample per arm establish it. The 1311-against-1488-second
+comparison is not a latency result in either direction, and every load sample
+is in the results file.
 
 The timing claims come instead from a repeat subset of four `high-degree`
 `all-backlinks` cases — `mentions-3/topics-4`, `mentions-4/topics-32`,
 `mentions-4/topics-128` and `mentions-16/topics-128` — which the probe selects
 by `--filter`. The three 512-topic `all-backlinks` cases are left out because
-they account for 1090 of the matrix's 2799 seconds.
+they account for 1090 of the 1390 seconds of measured phase time the matrix
+spent across both arms, 78% of it.
 
 That subset was run twice. The first run was batched, five rounds of one arm
 then five of the other; the second alternated, on and off in turn for five
 rounds, as the plan requires so that drift over a sitting falls on both arms
-rather than correlating with one. Both are in the results file. **Only the
-alternating run is used below**, and the two disagree enough to matter: they
-differ by up to 16% on individual ratios, and they disagree about whether the
-4-topic case separates at all.
+rather than correlating with one. The results file keeps the alternating
+run's samples and the batched run's derived timings. **Only the alternating run
+is used below**, and the two disagree enough to matter: they differ by up to
+16% on individual ratios, and they disagree about whether the 4-topic case
+separates at all.
 
 Alternating, five rounds per arm, phase time summed over each run, in
 milliseconds:
@@ -111,13 +119,18 @@ milliseconds:
 | `mentions-4/topics-128` | 4335.2 / 4718.9 / 4972.8 | 10657.4 / 11346.4 / 11665.8 | 2.40x | 5,685 |
 | `mentions-16/topics-128` | 5914.5 / 6108.5 / 6974.4 | 24615.5 / 25440.7 / 27329.3 | 4.17x | 17,641 |
 
-The two arms' ranges do not overlap on any of the four. On the three larger
-cases the gap between them runs from 339 milliseconds to 17.6 seconds, far
-wider than the spread within either arm, and those three support a latency
-statement. The 4-topic case is separated by 0.5 milliseconds on a
-116-millisecond operation: its five rounds happen to fall either side of a
-line, the batched run put it the other way, and it is better read as suggestive
-than as established.
+The two arms' ranges do not overlap on any of the four, and the four separate
+by very different margins.
+
+On the two 128-topic cases the gap is 5.6 and 6.5 times the wider arm's own
+spread, and those two support a latency statement without qualification. At 32
+topics the gap is 339.1 milliseconds against an off-arm spread of 338.0: the
+ranges clear each other, but by about one arm's worth of variation, so the
+direction is solid and the ratio is the soft part. The 4-topic case is
+separated by 0.5 milliseconds on a 116-millisecond operation, against spreads
+of 6.8 milliseconds within the on arm and 12.9 within the off; its five rounds
+happen to fall either side of a line, the batched run put it the other way, and
+it is better read as suggestive than as established.
 
 ## What the counters do not vary with
 
@@ -140,8 +153,13 @@ serving loop is an `ExecutorHost` constructed over a co-hosted memory server.
 Both modes above hold `serverExecution` off, and nothing in the matrix
 exercises that posture.
 
-A separate probe established that the posture does engage where a toolshed
-runs. Two source-run toolsheds on `fd9fa9a44b`, identical but for
+A separate probe established that the posture does engage in a toolshed-backed
+deployment driven by the `cf` CLI. That is not the browser benchmark
+environment, which runs a built toolshed binary serving a baked shell under
+Chrome; what follows says nothing about whether that environment runs a
+coherent ON arm.
+
+Two source-run toolsheds on `fd9fa9a44b`, identical but for
 `EXPERIMENTAL_SERVER_EXECUTION`: the ON one logged its serving loop starting,
 carried a `servingLoop` block on `/api/health/stats`, and reported
 `serverExecution: true` on `/api/meta`; the OFF one did none of the three. That
@@ -149,14 +167,11 @@ block is present exactly when an `ExecutorHost` runs in the process, so its
 presence is the host running rather than a proxy for it.
 
 Deploying the Topics pattern at the ON toolshed with `cf piece new` moved the
-counters: `activeSpaces` reached 2 while the session was open, and the
-cumulative counters recorded 10 waves, 2 authored transactions seen and 10
-derived commits across two spaces, with no structure-load failures. So the loop
-served the work rather than merely existing. `activeSpaces` is a gauge and
-reads 0 once the session closes; the cumulative counters are what persist.
+cumulative counters, which are what the captured stats hold: 10 waves, 2
+authored transactions seen, and 10 derived commits across two spaces, with no
+structure-load failures. So the loop served the work rather than merely
+existing. `activeSpaces` is a gauge rather than a counter and reads 0 in the
+capture, which was taken after the session closed; it was observed at 2 during
+the session, and that observation is not in the captured file.
 
-That probe establishes engagement only. Its client was the `cf` CLI rather than
-a browser, and a source-run toolshed serves no built shell, so it says nothing
-about whether a browser arm runs coherently — which needs a shell built at the
-same posture as the toolshed serves at. The cost of server execution is not
-measured in either tier.
+The cost of server execution is not measured in either tier.

@@ -18,17 +18,15 @@
  * initialize when its resolved posture disagrees with that declaration, so a
  * page that loaded at all ran the posture its shell declared.
  *
- * One path states the shell's posture from a constant compiled into this
- * process rather than from anything the deployment said: where no served
- * bundle could be read at all, the shell is taken to follow the first-party
- * default, as it does with no define baked. That is an assumption, and every
- * posture carries {@link TopicsBrowserPosture.clientFrom} so that a reader of
- * a sample can tell it from a posture the deployment reported. A bundle that
- * was read and carries no define is refused instead: having the shell's own
- * script in hand and guessing anyway is what this module exists to avoid.
+ * No path labels a run from an assumption. Where the deployment states the
+ * shell's posture neither on `/api/meta` nor in the bundle it serves, the run
+ * is refused rather than labeled from the first-party default, which is a
+ * constant compiled into this process and not something the deployment said.
+ * Refusing costs nothing a benchmark needs: with no shell to read there is no
+ * shell to drive either. Every posture still carries
+ * {@link TopicsBrowserPosture.clientFrom}, which a sample prints, so a reader
+ * sees which of the two statements a label came from.
  */
-
-import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 
 /** Names the posture a browser-tier sample was taken under. */
 export type TopicsBrowserMode =
@@ -40,13 +38,7 @@ export type ClientPostureSource =
   /** `shellServerExecutionDefine`, which the toolshed reports of its shell. */
   | "meta"
   /** The build define baked into the served shell's bundle. */
-  | "bundle"
-  /**
-   * The first-party default, which an unset define leaves the shell on. This
-   * one is assumed rather than reported: no bundle could be read, so nothing
-   * the deployment said states the shell's posture.
-   */
-  | "default";
+  | "bundle";
 
 /** The posture a browser-tier Topics measurement ran under. */
 export interface TopicsBrowserPosture {
@@ -103,13 +95,12 @@ const BAKED_DEFINE =
  *
  * It settles the shell's half from the first of these that states it: the
  * `shellServerExecutionDefine` the toolshed reports, and the define baked into
- * a bundle that was read. Where no bundle could be read, the shell is taken to
- * follow the first-party default, and the posture records that its client half
- * came from there rather than from the deployment.
+ * a bundle that was read.
  *
  * @throws Error when the toolshed reports no resolved `serverExecution`, when
- * a statement of the posture is not a boolean spelling, when a bundle was read
- * and carries no define, or when the two halves disagree.
+ * a statement of the posture is not a boolean spelling, when neither statement
+ * is available — a bundle read that carries no define, or no bundle to read —
+ * or when the two halves disagree.
  */
 export function topicsBrowserPostureOf(
   meta: PostureMeta,
@@ -154,24 +145,26 @@ function clientPosture(
   if (declared !== undefined && declared !== null) {
     return { client: booleanNamed(declared, "meta"), clientFrom: "meta" };
   }
-  if (bundle.kind === "read") {
-    const baked = BAKED_DEFINE.exec(bundle.source);
-    if (baked === null) {
-      throw new Error(
-        "The served shell's entry script names no " +
-          "`EXPERIMENTAL_SERVER_EXECUTION` build define, so what posture it " +
-          "runs cannot be read from it. Build the shell at the posture the " +
-          "run is measuring rather than leaving it to the first-party " +
-          "default, which this refuses to assume with the shell's own script " +
-          "in hand.",
-      );
-    }
-    return { client: booleanNamed(baked[1], "bundle"), clientFrom: "bundle" };
+  if (bundle.kind === "unreachable") {
+    throw new Error(
+      "The toolshed names no baked define and no served shell could be read " +
+        `(${bundle.reason}), so nothing the deployment says states what ` +
+        "posture its shell runs. Labeling that from the first-party default " +
+        "would state a constant compiled into this process as though the " +
+        "deployment had reported it, and a deployment serving no readable " +
+        "shell has none to drive either.",
+    );
   }
-  return {
-    client: SERVER_EXECUTION_DEFAULT_ENABLED,
-    clientFrom: "default",
-  };
+  const baked = BAKED_DEFINE.exec(bundle.source);
+  if (baked === null) {
+    throw new Error(
+      "The served shell's entry script names no " +
+        "`EXPERIMENTAL_SERVER_EXECUTION` build define, so what posture it " +
+        "runs cannot be read from it. Build the shell at the posture the run " +
+        "is measuring.",
+    );
+  }
+  return { client: booleanNamed(baked[1], "bundle"), clientFrom: "bundle" };
 }
 
 /**
@@ -192,7 +185,8 @@ function booleanNamed(value: unknown, from: ClientPostureSource): boolean {
 /**
  * Returns the posture the deployment at `apiUrl`, serving the shell at
  * `frontendUrl`, is running, by reading `/api/meta` and, where that names no
- * baked define, the served shell's entry script.
+ * baked define, the served shell's entry script. A deployment that states its
+ * shell's posture in neither place is refused rather than assumed.
  *
  * @throws Error when `/api/meta` cannot be read, and as
  * {@link topicsBrowserPostureOf} does.
