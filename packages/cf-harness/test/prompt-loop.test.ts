@@ -10425,9 +10425,17 @@ describe("CfHarnessPromptLoop budget finalization", () => {
           message.content.startsWith("Host turn budget:")
         ).map((message) => message.content),
       ).toEqual([userText]);
-      expect(createHarnessTranscriptOmissions(checkpoint).results).toHaveLength(
-        1,
-      );
+      expect(
+        createHarnessTranscriptOmissions(checkpoint).results.find((entry) =>
+          entry.toolCallId === "research-handoff"
+        )?.rules,
+      ).toEqual([{
+        rule: "artifact-only",
+        locations: [{
+          artifactPath: "/private.json",
+          jsonPointer: "/research",
+        }],
+      }]);
       const audit = JSON.parse(
         await Deno.readTextFile(join(artifactStore.runRoot, "transcript.json")),
       ) as HarnessTranscriptMessage[];
@@ -10465,8 +10473,17 @@ describe("CfHarnessPromptLoop budget finalization", () => {
       });
       expect(followupCalls).toBe(1);
       expect(result.finalAssistantText).toBe("Verified findings.");
-      expect(createHarnessTranscriptOmissions(result.transcript).results)
-        .toHaveLength(1);
+      expect(
+        createHarnessTranscriptOmissions(result.transcript).results.find((
+          entry,
+        ) => entry.toolCallId === "research-handoff")?.rules,
+      ).toEqual([{
+        rule: "artifact-only",
+        locations: [{
+          artifactPath: "/private.json",
+          jsonPointer: "/research",
+        }],
+      }]);
     } finally {
       await Deno.remove(root, { recursive: true });
     }
