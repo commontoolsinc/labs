@@ -169,6 +169,7 @@ export class AgentResultWriteError extends Error {
   /** The storage error's own text, for the run's artifact. */
   readonly rawCauseMessage?: string;
 
+  /** A failure with `code`, the caller-facing `message`, and artifact detail. */
   constructor(
     code: AgentResultWriteFailureCode,
     message: string,
@@ -197,6 +198,7 @@ export const agentResultReferentCause = (
   token,
 });
 
+/** A position in the result value: object keys and array indices from the root. */
 type Path = readonly (string | number)[];
 
 /** What one position of the result resolved to. */
