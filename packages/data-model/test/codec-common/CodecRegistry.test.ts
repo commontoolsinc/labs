@@ -24,7 +24,7 @@ import { expect } from "@std/expect";
 
 import type { Constructor } from "@commonfabric/utils/types";
 
-import { toCompactDebugString } from "@/value-debug.ts";
+import { toCompactDebugString } from "@/value-debug";
 import { CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
 import {
   CODEC,

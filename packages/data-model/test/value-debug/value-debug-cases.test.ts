@@ -20,7 +20,7 @@
  * compact rendering reads, `maxLength` and `backtickQuote`, therefore reach the
  * compact rendering alone. A recorded rendering is a fact about the renderer,
  * to be read as such when it changes. What `maxLength` does to a compact
- * rendering is `value-debug.test.ts`'s to check, so no case here is cut by one.
+ * rendering is `impl.test.ts`'s to check, so no case here is cut by one.
  *
  * The expression is evaluated with every `FabricInstance` and
  * `FabricPrimitive` class in scope under its own name, along with the three
@@ -34,7 +34,7 @@
  *
  * ```
  * UPDATE_GOLDENS=1 deno test --allow-read --allow-write --allow-env \
- *   test/value-debug-cases.test.ts
+ *   test/value-debug/value-debug-cases.test.ts
  * ```
  */
 
@@ -57,7 +57,7 @@ import {
   toCompactDebugString,
   toIndentedDebugString,
   toStructuredDebugValue,
-} from "@/value-debug.ts";
+} from "@/value-debug";
 
 /** Directory holding the case files. */
 const CASES_DIR = new URL("./value-debug-cases/", import.meta.url);

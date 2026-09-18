@@ -8,9 +8,8 @@
  * large to print whole. Producing something useful and bounded matters more
  * than producing something complete, which is what the length limit is for.
  *
- * The compact and indented forms differ only in spacing, while the kind string
- * names what a value is without rendering it at all. The custom inspector is
- * how all of this reaches a `console.log()`. The renderings themselves are
+ * The compact and indented forms differ only in spacing. The custom inspector
+ * is how all of this reaches a `console.log()`. The renderings themselves are
  * recorded as case files under `value-debug-cases/`, which
  * `value-debug-cases.test.ts` checks, a file's `/options` binding covering the
  * renderings under other than the default options; what is tested here is
@@ -26,19 +25,15 @@ import {
 } from "@/interface.ts";
 import {
   toCompactDebugString,
-  toDebugKindString,
   toIndentedDebugString,
   toLongQuotedDebugString,
   toShortQuotedDebugString,
-} from "@/value-debug.ts";
+} from "@/value-debug";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
-import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
-import { FabricMap } from "@/fabric-instances/FabricMap.ts";
-import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
-describe("value-debug", () => {
+describe("impl", () => {
   describe("toCompactDebugString", () => {
     // The renderings themselves are recorded as case files in
     // `value-debug-cases/`. What is here is what a case file cannot express:
@@ -192,69 +187,6 @@ describe("value-debug", () => {
       expect(() =>
         toIndentedDebugString({}, null as unknown as DebugValueOptions)
       ).toThrow("`options` must be a plain object or `undefined`; got `null`");
-    });
-  });
-
-  describe("toDebugKindString", () => {
-    it("renders `null` and `undefined` literally", () => {
-      expect(toDebugKindString(null)).toBe("null");
-      expect(toDebugKindString(undefined)).toBe("undefined");
-    });
-
-    it("renders plain objects as 'object'", () => {
-      expect(toDebugKindString({})).toBe("object");
-      expect(toDebugKindString({ a: 1 })).toBe("object");
-      expect(toDebugKindString(Object.create(null))).toBe("object");
-    });
-
-    it("renders arrays as 'array'", () => {
-      expect(toDebugKindString([])).toBe("array");
-      expect(toDebugKindString([1, 2, 3])).toBe("array");
-    });
-
-    it("renders JS primitives as their typeof", () => {
-      expect(toDebugKindString(42)).toBe("number");
-      expect(toDebugKindString(42n)).toBe("bigint");
-      expect(toDebugKindString("hi")).toBe("string");
-      expect(toDebugKindString(true)).toBe("boolean");
-      expect(toDebugKindString(Symbol("s"))).toBe("symbol");
-      expect(toDebugKindString(() => {})).toBe("function");
-    });
-
-    it("renders FabricInstance subclasses with their constructor name", () => {
-      expect(toDebugKindString(FabricError.fromNativeError(new Error("x"))))
-        .toBe("FabricInstance (FabricError)");
-      expect(toDebugKindString(new FabricMap(new Map())))
-        .toBe("FabricInstance (FabricMap)");
-    });
-
-    it("renders FabricPrimitive subclasses with their constructor name", () => {
-      expect(toDebugKindString(new FabricEpochNsec(123n)))
-        .toBe("FabricPrimitive (FabricEpochNsec)");
-      expect(toDebugKindString(new FabricBytes(new Uint8Array([1, 2, 3]))))
-        .toBe("FabricPrimitive (FabricBytes)");
-      expect(toDebugKindString(new FabricRegExp(/abc/g)))
-        .toBe("FabricPrimitive (FabricRegExp)");
-    });
-
-    it("renders a non-`FabricSpecialObject` instance with its constructor name", () => {
-      expect(toDebugKindString(new Date())).toBe("Date");
-      expect(toDebugKindString(new Map())).toBe("Map");
-      expect(toDebugKindString(new Set())).toBe("Set");
-      expect(toDebugKindString(new Error("oops"))).toBe("Error");
-      expect(toDebugKindString(/abc/)).toBe("RegExp");
-
-      class Foo {}
-      expect(toDebugKindString(new Foo())).toBe("Foo");
-    });
-
-    it("falls back to 'object' when constructor name is unavailable", () => {
-      // An object whose prototype was sliced out has no usable
-      // `constructor` chain; the predicate returns "object" as a final
-      // fallback.
-
-      const weird = Object.create({ constructor: undefined as unknown });
-      expect(toDebugKindString(weird)).toBe("object");
     });
   });
 

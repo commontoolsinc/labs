@@ -85,8 +85,8 @@ conversion layer (Section 8) and represented in `FabricValue` trees as
 > declarations in `api.ts` and `interface.ts`, the conversions in
 > `convertible-js.ts`, the clone helpers in `value-clone.ts`, and the
 > operations a value of any class is subject to -- `deep-freeze.ts`,
-> `value-hash.ts`, `value-debug.ts`, the comparisons in `comparison/`, and the
-> tag vocabulary in `types/`.
+> `value-hash.ts`, the debug renderers in `value-debug/`, the comparisons in
+> `comparison/`, and the tag vocabulary in `types/`.
 > Of those, one is also an exported subpath: `api.ts` as
 > `@commonfabric/data-model/api`, which is how `@commonfabric/api` reaches it.
 > `codec-interface/` is internal in the same way, reached through
@@ -3609,7 +3609,7 @@ The implementation is split across several files for separation of concerns:
 
 | File | Purpose |
 |------|---------|
-| `index.ts` | Public surface, and the package's main entry point: re-exports the conversion functions (from `convertible-js.ts`), the type declarations (from `interface.ts`), the clone helpers (from `value-clone.ts`), the deep freeze (from `deep-freeze.ts`), the hash (from `value-hash.ts`), the debug renderers (from `value-debug.ts`), the tag vocabulary, narrowings, and validators (from `types/`), and the comparisons `valueEqual()` and `fabricAwareEqual()` (from `comparison/`) |
+| `index.ts` | Public surface, and the package's main entry point: re-exports the conversion functions (from `convertible-js.ts`), the type declarations (from `interface.ts`), the clone helpers (from `value-clone.ts`), the deep freeze (from `deep-freeze.ts`), the hash (from `value-hash.ts`), the debug renderers (from `value-debug/`), the tag vocabulary, narrowings, and validators (from `types/`), and the comparisons `valueEqual()` and `fabricAwareEqual()` (from `comparison/`) |
 | `api.ts` | The pattern-visible declarations: the `FabricValue` union and the types beside it, the three base classes and every concrete class as an `interface` plus a `declare const`, and the debug-rendering option types. It has no imports, so that the type module the sandbox is served can inline it; it is also the `./api` export subpath, which `@commonfabric/api` re-exports. |
 | `interface.ts` | The three abstract base classes as classes, the layer types, and the conversion-layer types (`FabricConvertibleJsObject`, `FabricConvertibleJsValue`); re-exports every type `api.ts` declares. Free of runtime imports, so that any module can import it. |
 | `api-agreement.ts` | Asserts that each of the three base classes and its `api.ts` declaration are mutually assignable. Nothing imports it; it exists to be type-checked, and everything in it erases at compile time. |

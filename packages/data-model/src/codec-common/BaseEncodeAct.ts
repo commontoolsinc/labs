@@ -13,7 +13,7 @@ import type {
   NonterminalCodec,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { toShortQuotedDebugString } from "@/value-debug.ts";
+import { toShortQuotedDebugString } from "@/value-debug";
 import { BaseCodecAct } from "./BaseCodecAct.ts";
 import { SELF_REP } from "./CodecRegistry.ts";
 

@@ -180,8 +180,8 @@ description that wraps well.
 Changing a description renames the test. The description string, together with
 the `describe()` chain above it, is the test's identity in the run-record
 store, so a reworded description starts a fresh identity and leaves the old
-one's history where it was. Append a line to
-`tasks/test-identity-aliases.jsonl` to join the two halves, as described in
+one's history where it was. Append a line under
+`tasks/test-identity-aliases/` to join the two halves, as described in
 [test records](test-records.md). No gate reports a rename that was never
 bridged.
 

@@ -9,6 +9,7 @@ import {
   type Gate,
   HISTORY_GATES,
   loadGateSuites,
+  REACHED_BY_ABSENT_PATHS,
   WORKING_TREE_GATES,
 } from "./gates.ts";
 import { entryNames, type Suite } from "./suite.ts";
@@ -93,6 +94,9 @@ describe("the repository's gate suites", () => {
       [byId("repo-gates"), byId("repo-history-gates")]
         .flatMap((suite) => [...suite.unitsForChange!(new Set(changed))])
         .toSorted();
+    expect(reached("tasks/test-identity-aliases/tags.test.ts.jsonl")).toEqual([
+      "check-test-aliases",
+    ]);
     expect(reached("tasks/test-identity-aliases.jsonl")).toEqual([
       "check-test-aliases",
     ]);
@@ -163,6 +167,7 @@ describe("the repository's gate suites", () => {
     for (const gate of gates) {
       for (const entry of gate.reachedBy) {
         const at = entry.replace(/^!/, "");
+        if (REACHED_BY_ABSENT_PATHS.has(entry)) continue;
         if (!files.some((path) => entryNames(at, path))) {
           over.push(`${gate.name} names ${entry}, which the tree has not`);
         }
@@ -223,6 +228,12 @@ describe("the repository's gate suites", () => {
         // An entry carrying a `**` segment names no one path, and the
         // bounds test is what holds it to reaching something.
         if (at.includes("**/")) continue;
+        // A path recorded as absent is declared missing, and is held to it.
+        if (REACHED_BY_ABSENT_PATHS.has(entry)) {
+          found.push(`${entry} ${await kindOf(at)}`);
+          declared.push(`${entry} missing`);
+          continue;
+        }
         found.push(`${entry} ${await kindOf(at)}`);
         declared.push(`${entry} ${at.endsWith("/") ? "directory" : "file"}`);
       }

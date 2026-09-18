@@ -10,7 +10,7 @@
  */
 
 import { FabricPrimitive } from "@/interface.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
+import { toCompactDebugString } from "@/value-debug";
 import type { FabricPrimitiveValueTag } from "@/fabric-primitives/interface.ts";
 
 /**
