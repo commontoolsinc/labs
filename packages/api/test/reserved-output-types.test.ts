@@ -144,6 +144,27 @@ function reservedOutputTypeChecks() {
     count: 3,
   }));
 
+  // What `object` lets through, recorded rather than left to be discovered.
+  //
+  // `object` rejects a primitive and nothing else, so an array and a view node
+  // both compile under [VIEWS] today even though neither is a map of named
+  // groups. That is a decision, not an oversight: the alternative that would
+  // reject them, `Record<string, unknown>`, also rejects a group map declared
+  // as an `interface` — see `viewsFromInterface` above — and rejecting the
+  // idiom a group is written in costs more than admitting two shapes nobody
+  // writes by accident. These two pins are here so that tightening the field
+  // later is a deliberate act with a test to update, rather than a silent
+  // narrowing; the two `@ts-expect-error` cases above would not notice.
+  const viewsArrayCompilesToday = pattern(() => ({
+    [VIEWS]: [1, 2, 3],
+    count: 3,
+  }));
+
+  const viewsVNodeCompilesToday = pattern(() => ({
+    [VIEWS]: plainVNode,
+    count: 3,
+  }));
+
   return {
     valid,
     reactive,
@@ -159,6 +180,8 @@ function reservedOutputTypeChecks() {
     viewsFromInterface,
     badViews,
     badViewsString,
+    viewsArrayCompilesToday,
+    viewsVNodeCompilesToday,
   };
 }
 

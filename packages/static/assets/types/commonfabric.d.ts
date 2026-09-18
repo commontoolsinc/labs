@@ -3110,10 +3110,17 @@ export interface BuiltInCompileAndRunState<T> {
  * `[VIEWS]` is typed as an object and no further. What a group holds is the
  * pattern's to declare and a consumer's to demand through a schema, so the
  * framework types the field that carries them rather than their members — a
- * value that is not a group map at all is the error worth catching here. It is
- * `object` rather than `Record<string, unknown>` because an interface, which
- * is how a group is usually declared, has no implicit index signature and the
- * stricter type would reject it.
+ * value that is not a group map at all is the error worth catching here.
+ *
+ * `object` is the looser of two live choices, and what it buys is the
+ * `interface` idiom. It rejects a primitive and nothing else, so an array or a
+ * view node under this key compiles — pinned in `reserved-output-types.test.ts`
+ * so that narrowing the field later is a deliberate act rather than a silent
+ * one. `Record<string, unknown>` would reject both, and would also reject a
+ * group map declared as an `interface`, which has no implicit index signature.
+ * A `type` alias does satisfy it, so the stricter field is available for one
+ * keyword of author cost, at the price of a compile error on the declaration
+ * form a group is most naturally written in.
  */
 type ReservedOutput = {
   [NAME]?: FactoryInput<string>;
