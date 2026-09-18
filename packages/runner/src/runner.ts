@@ -1,5 +1,6 @@
 import {
   convertibleJsFromFabricValue,
+  debugStr,
   fabricFromConvertibleJsValue,
   FabricInstance,
   type FabricValue,
@@ -10,7 +11,6 @@ import {
   isWalkableObjectOrArray,
   refuseFabricInstance,
   toCompactDebugString,
-  toLongQuotedDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
@@ -12007,9 +12007,7 @@ function describeHandlerStreamFailure(
   }'s $event input`;
 
   if (eventTarget.link === undefined) {
-    return `${prefix} is not a stream reference (got: ${
-      toLongQuotedDebugString(eventTarget.value)
-    })`;
+    return debugStr`${prefix} is not a stream reference (got: $quote,long${eventTarget.value})`;
   }
 
   const where = `${eventTarget.link.id}${
@@ -12038,9 +12036,7 @@ function describeHandlerStreamFailure(
   }
 
   return `${prefix} resolves to ${where}, whose value is not a stream ` +
-    `marker — { "$stream": true } was overwritten (found: ${
-      toLongQuotedDebugString(eventTarget.value)
-    })`;
+    debugStr`marker — { "$stream": true } was overwritten (found: $quote,long${eventTarget.value})`;
 }
 
 /**
