@@ -33,6 +33,7 @@ import type { SessionFactory } from "../../src/storage/v2.ts";
 import { TestStorageManager } from "../memory-v2-test-utils.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "../cfc-seed-envelope.ts";
 
@@ -95,7 +96,7 @@ describe("wish-profile-readiness", () => {
       }];
       const seed = runtime.edit();
       writeSeedEnvelopeDoc(seed, user.did());
-      seed.writeOrThrow({ ...address, path: [] }, {
+      seedStoredEnvelope(seed, { ...address, path: [] }, {
         value: { name: "Labeled profile" },
         cfc: {
           version: 1,
@@ -135,6 +136,8 @@ describe("wish-profile-readiness", () => {
       }
     } finally {
       cancels.forEach((cancel) => cancel());
+      await manager.synced();
+      await runtime.idle();
       await runtime.dispose();
     }
   });
@@ -547,9 +550,31 @@ describe("wish-profile-readiness", () => {
         )
           .toBeUndefined();
         expect([...runtime.runner.cancels.keys()]).toHaveLength(0);
+
+        // Arriving data wakes the existing subscription after a provider error.
+        provider.sync = originalSync;
+        const arrivedProfile = runtime.edit();
+        profile.withTx(arrivedProfile).set({ name: "Recovered profile" });
+        runtime.prepareTxForCommit(arrivedProfile);
+        expect((await arrivedProfile.commit()).error).toBeUndefined();
+        const arrived = runtime.edit();
+        home.withTx(arrived).setRaw({
+          defaultPattern: defaultPattern.getAsLink(),
+        });
+        defaultPattern.withTx(arrived).setRaw({ profiles: roster.getAsLink() });
+        roster.withTx(arrived).setRaw([profile.getAsLink()]);
+        runtime.prepareTxForCommit(arrived);
+        expect((await arrived.commit()).error).toBeUndefined();
+        await runtime.idle();
+        expect(output!.withTx(undefined).key("error").get()).toBeUndefined();
+        expect(output!.withTx(undefined).key("result").key("name").get())
+          .toBe("Recovered profile");
+        expect([...runtime.runner.cancels.keys()]).toHaveLength(0);
       } finally {
         provider.sync = originalSync;
         cancels.forEach((cancel) => cancel());
+        await manager.synced();
+        await runtime.idle();
         await runtime.dispose();
       }
     });

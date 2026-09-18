@@ -158,9 +158,10 @@ can remain unset. Confirmation re-runs the wish even when a document is absent
 and no data arrives. A confirmed empty roster opens profile creation. An entry
 confirmed absent is skipped when another valid profile remains. A failed load,
 or absent entries leaving no valid profile, produces an error surface instead.
-Failed confirmations do not retry automatically: a fresh Wish instance or a
-replica reset can request another load, and document arrival through another
-load remains a recovery signal for the existing Wish.
+Failed confirmations do not schedule another load on their own. Every re-run
+checks the current document before consulting a cached failure, so document
+arrival allows the same Wish instance to recover. A fresh Wish instance or a
+replica reset can request another load.
 
 The picker is the **switching affordance**, not the source of `.result`:
 selection is _state_, not a channel. When the picker's "Use" writes `mru` or

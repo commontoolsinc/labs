@@ -484,6 +484,7 @@ function getProfileCandidateCells(
   ctx: WishContext,
 ): { ordered: Cell<unknown>[]; defaultValid: boolean } {
   const homeSpaceCell = getHomeSpaceCell(ctx);
+  // These checks gate loading; confirmed absence yields an empty roster below.
   ctx.profileReadiness.requireDocument(homeSpaceCell, ctx.tx);
   const defaultPattern = homeSpaceCell.key("defaultPattern").resolveAsCell();
   ctx.profileReadiness.requireDocument(defaultPattern, ctx.tx);
