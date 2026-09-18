@@ -802,6 +802,60 @@ const cellMethods = new Set<
   "keyEntries",
 ]);
 
+/** Whether `schema` admits `value` and nothing else. */
+function schemaPinsLiteral(
+  schema: JSONSchema | undefined,
+  value: string,
+): boolean {
+  if (!isObjectNotArray(schema)) return false;
+  if (schema.const !== undefined) return schema.const === value;
+  return Array.isArray(schema.enum) && schema.enum.length === 1 &&
+    schema.enum[0] === value;
+}
+
+/**
+ * The property schemas of a receiver whose own schema describes an index, and
+ * `undefined` for one whose schema describes anything else.
+ *
+ * An index's descriptor is published by a separate scheduler action, and until
+ * that action commits it reads as absent. The schema is what tells a consumer
+ * in that window that its receiver is an index rather than ordinary data.
+ */
+function collectionIndexProperties(
+  schema: JSONSchema | undefined,
+): Record<string, JSONSchema> | undefined {
+  const resolved = resolveSchema(schema);
+  if (!isObjectNotArray(resolved)) return undefined;
+  const properties = resolved.properties;
+  if (!isObjectNotArray(properties)) return undefined;
+  return schemaPinsLiteral(properties.kind, "collection-index")
+    ? properties as Record<string, JSONSchema>
+    : undefined;
+}
+
+/**
+ * The missing-key behavior an index handle's own schema names, which is what
+ * tells a lookup which empty answer to give before the descriptor carrying it
+ * is published. `groupBy` and `keyBy` each produce a handle whose type names
+ * one; the descriptor interface spelled directly names neither.
+ */
+function declaredCollectionIndexMode(
+  schema: JSONSchema | undefined,
+): "group" | "key" | undefined {
+  const properties = collectionIndexProperties(schema);
+  if (properties === undefined) return undefined;
+  if (schemaPinsLiteral(properties.mode, "group")) return "group";
+  if (schemaPinsLiteral(properties.mode, "key")) return "key";
+  return undefined;
+}
+
+/** Whether an index surface may answer for `cell`, published or not. */
+function isCollectionIndexReceiver(cell: AnyCell<unknown>): boolean {
+  return (cell as Cell<{ kind?: string }>).key("kind").get() ===
+      "collection-index" ||
+    collectionIndexProperties(cell.schema) !== undefined;
+}
+
 /**
  * `schema` for `result`, carrying the whole `ifc` its link schema already
  * declares. A node factory labels the cell it mints from that node's inputs,
@@ -3620,9 +3674,7 @@ export class CellImpl<T extends FabricValue>
           if (
             cellMethods.has(prop as keyof ICell<T>) &&
             (!isSqliteOnlyMethod || cellKind === "sqlite") &&
-            (!isIndexOnlyMethod ||
-              (self as unknown as Cell<{ kind?: string }>).key("kind").get() ===
-                "collection-index") &&
+            (!isIndexOnlyMethod || isCollectionIndexReceiver(self)) &&
             (!arrayOnlyMethods.has(String(prop)) || isArrayMethodReceiver)
           ) {
             return nestedCell.getAsReactiveProxy(
@@ -3806,7 +3858,7 @@ export class CellImpl<T extends FabricValue>
     const index = this as unknown as Cell<
       CollectionIndexData<CollectionIndexKey, unknown>
     >;
-    if (index.key("kind").get() !== "collection-index") {
+    if (!isCollectionIndexReceiver(index)) {
       throw new Error("lookup requires a collection index");
     }
     const resolved = resolveCollectionKey(
@@ -3817,10 +3869,21 @@ export class CellImpl<T extends FabricValue>
     const value = resolved
       ? index.key("buckets").key(collectionKeyBucket(resolved.identity)).get()
       : undefined;
-    return (value === undefined
-      ? (index.key("mode").get() === "group" ? [] : undefined)
-      : value) as T extends CollectionIndexData<CollectionIndexKey, infer V> ? V
+    if (value !== undefined) {
+      return value as T extends CollectionIndexData<CollectionIndexKey, infer V>
+        ? V
         : unknown;
+    }
+    const mode = index.key("mode").get() ??
+      declaredCollectionIndexMode(this.schema);
+    if (mode === undefined) {
+      throw new Error(
+        "lookup needs the index mode to answer a missing key: this index has " +
+          "published no descriptor, and its type names neither mode",
+      );
+    }
+    return (mode === "group" ? [] : undefined) as T extends
+      CollectionIndexData<CollectionIndexKey, infer V> ? V : unknown;
   }
 
   /** Reads occupied-key enumeration separately from bucket lookup. */
@@ -3828,10 +3891,10 @@ export class CellImpl<T extends FabricValue>
     const index = this as unknown as Cell<
       CollectionIndexData<CollectionIndexKey, unknown>
     >;
-    if (index.key("kind").get() !== "collection-index") {
+    if (!isCollectionIndexReceiver(index)) {
       throw new Error("keys requires a collection index");
     }
-    return index.key("keys").get() as T extends
+    return (index.key("keys").get() ?? []) as T extends
       CollectionIndexData<infer K, unknown> ? K[] : unknown[];
   }
 
@@ -3842,10 +3905,10 @@ export class CellImpl<T extends FabricValue>
     const index = this as unknown as Cell<
       CollectionIndexData<CollectionIndexKey, unknown>
     >;
-    if (index.key("kind").get() !== "collection-index") {
+    if (!isCollectionIndexReceiver(index)) {
       throw new Error("keyEntries requires a collection index");
     }
-    return index.key("keyEntries").get() as T extends
+    return (index.key("keyEntries").get() ?? []) as T extends
       CollectionIndexData<infer K, unknown> ? CollectionIndexKeyEntry<K>[]
       : unknown[];
   }

@@ -170,6 +170,142 @@ describe("collection index lookup", () => {
       cancel();
     }
   });
+  it("returns an empty group while the group index descriptor has not been written", async () => {
+    // The handle points at a spot that holds no value, which is how an index
+    // reads before its descriptor is published there. The consumer gets what
+    // an index with no occupants returns, and follows the descriptor once it
+    // is written. A resumed `groupBy` reaching this state through its own
+    // coordinator is covered in collection-index-resume.test.ts.
+
+    const compiled = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+        import { pattern, GroupIndex, computed } from "commonfabric";
+        export default pattern<{index: GroupIndex<string, number>}>(({index}) => {
+          const bucket = index.lookup("a");
+          const names = index.keys();
+          return {
+            size: computed(() => bucket.length),
+            named: computed(() => names.length),
+          };
+        });
+      `,
+      }],
+    });
+    const errors: Error[] = [];
+    runtime.scheduler.onError((error: Error) => errors.push(error));
+    let tx = runtime.edit();
+    const container = runtime.getCell<
+      { index?: CollectionIndexData<string, number[]> }
+    >(space, "unwritten-group-container", undefined, tx);
+    container.set({});
+    const index = container.key("index");
+    const result = runtime.run(
+      tx,
+      compiled,
+      { index },
+      runtime.getCell<{ size: number; named: number }>(
+        space,
+        "unwritten-group-output",
+        compiled.resultSchema,
+        tx,
+      ),
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    const cancel = result.sink(() => {});
+    try {
+      await runtime.idle();
+      expect(errors.map((error) => error.message)).toEqual([]);
+      expect(await result.key("size").pull()).toBe(0);
+      expect(await result.key("named").pull()).toBe(0);
+      tx = runtime.edit();
+      index.withTx(tx).set({
+        kind: "collection-index",
+        mode: "group",
+        keys: ["a"],
+        keyEntries: [{ kind: "value", value: "a" }],
+        buckets: {
+          [collectionKeyBucket({ kind: "string", value: "a" })]: [1, 2],
+        },
+      });
+      await tx.commit();
+      await runtime.idle();
+      expect(errors.map((error) => error.message)).toEqual([]);
+      expect(await result.key("size").pull()).toBe(2);
+      expect(await result.key("named").pull()).toBe(1);
+    } finally {
+      cancel();
+    }
+  });
+  it("returns `undefined` while the key index descriptor has not been written", async () => {
+    // `undefined` is both the right answer here and what a run that failed
+    // leaves behind, so the empty `errors` and the `named` count are what
+    // separate the two; `matched` alone could not.
+
+    const compiled = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+        import { pattern, KeyIndex, computed } from "commonfabric";
+        export default pattern<{index: KeyIndex<string, number>}>(({index}) => {
+          const match = index.lookup("a");
+          const names = index.keys();
+          return {
+            matched: computed(() => match !== undefined),
+            named: computed(() => names.length),
+          };
+        });
+      `,
+      }],
+    });
+    const errors: Error[] = [];
+    runtime.scheduler.onError((error: Error) => errors.push(error));
+    let tx = runtime.edit();
+    const container = runtime.getCell<
+      { index?: CollectionIndexData<string, number | undefined> }
+    >(space, "unwritten-key-container", undefined, tx);
+    container.set({});
+    const index = container.key("index");
+    const result = runtime.run(
+      tx,
+      compiled,
+      { index },
+      runtime.getCell<{ matched: boolean; named: number }>(
+        space,
+        "unwritten-key-output",
+        compiled.resultSchema,
+        tx,
+      ),
+    );
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    const cancel = result.sink(() => {});
+    try {
+      await runtime.idle();
+      expect(errors.map((error) => error.message)).toEqual([]);
+      expect(await result.key("matched").pull()).toBe(false);
+      expect(await result.key("named").pull()).toBe(0);
+      tx = runtime.edit();
+      index.withTx(tx).set({
+        kind: "collection-index",
+        mode: "key",
+        keys: ["a"],
+        keyEntries: [{ kind: "value", value: "a" }],
+        buckets: { [collectionKeyBucket({ kind: "string", value: "a" })]: 4 },
+      });
+      await tx.commit();
+      await runtime.idle();
+      expect(errors.map((error) => error.message)).toEqual([]);
+      expect(await result.key("matched").pull()).toBe(true);
+      expect(await result.key("named").pull()).toBe(1);
+    } finally {
+      cancel();
+    }
+  });
   it("ignores unrelated buckets and key enumeration while following its selected bucket", async () => {
     const compiled = await runtime.patternManager.compilePattern({
       main: "/main.tsx",
