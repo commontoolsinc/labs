@@ -196,7 +196,12 @@ interface TopicsSampleBase {
   /** The caller's name for the operation. */
   readonly label: string;
 
-  /** The server-execution posture the deployment under measurement ran. */
+  /**
+   * The server-execution posture the deployment under measurement ran, and
+   * where its client half was read from — which a sample prints, so that a
+   * posture assumed from the first-party default never reads the same as one
+   * the deployment reported.
+   */
   readonly posture: TopicsBrowserPosture;
 
   /** From starting the operation to a settled view over an idle runtime. */
@@ -619,7 +624,7 @@ export function formatTopicsSample(
 ): string[] {
   const { before, after } = sample.graph;
   const lines = [
-    `${sample.label} [${sample.posture.mode}]: ${
+    `${sample.label} [${sample.posture.mode} via ${sample.posture.clientFrom}]: ${
       sample.elapsedMs.toFixed(0)
     }ms, read accounting ${
       sample.readAccounting ? "on" : "off"

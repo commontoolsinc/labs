@@ -1053,9 +1053,13 @@ memory server; see
 is measured in the browser tier, which has a toolshed to serve.
 
 A measured case's label comes from the flags its runtime reports back once it
-has resolved what it was given, not from the option asked for, and a runtime
-whose resolved flags are not the ones the mode names fails the case. A `board`
-case starts no runtime, so its sample carries the run's mode.
+has resolved what it was given, not from the option asked for, so the label
+reads the same field the runner acts on. Every mode sets both flags explicitly
+and a runtime keeps an explicit value, so the two cannot part today; the probe
+checks them against each other anyway, against a flag that later resolves
+against an ambient control point. A `board` case starts no runtime at all, so
+its sample carries the mode the run was given rather than one a runtime
+reported.
 
 ### The heap the 512-topic cases need
 
@@ -1191,12 +1195,12 @@ everything a case's process prints.
 - A `limit` line records a case whose process exhausted its heap, which the
   probe recognizes by V8's out-of-memory message on the process's stderr. It
   names the run's `mode`, the case, its series (the ID with the scaled count
-  written as `*`), the
-  `size` that failed, `largestBuilt` (the largest smaller size of the series
-  with a sample, or `null`), the heap limit the process ran under, how long it
-  ran, the signal or exit code that ended it, and the out-of-memory message. No
-  size of the series from `size` up runs again, and `skipped` lists the larger
-  ones; an earlier round may already have sampled them.
+  written as `*`), the `size` that failed, `largestBuilt` (the largest smaller
+  size of the series with a sample, or `null`), the heap limit the process ran
+  under, how long it ran, the signal or exit code that ended it, and the
+  out-of-memory message. No size of the series from `size` up runs again, and
+  `skipped` lists the larger ones; an earlier round may already have sampled
+  them.
 - The last line has the `kind` `complete`, with the number of `samples` the run
   wrote and the `limitedSeries` that recorded a limit. A case that fails in any
   other way ends the run with an error and no `complete` line.

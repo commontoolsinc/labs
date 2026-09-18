@@ -17,6 +17,15 @@
  * shell declares its posture from the build define, and the worker refuses to
  * initialize when its resolved posture disagrees with that declaration, so a
  * page that loaded at all ran the posture its shell declared.
+ *
+ * One path states the shell's posture from a constant compiled into this
+ * process rather than from anything the deployment said: where no served
+ * bundle could be read at all, the shell is taken to follow the first-party
+ * default, as it does with no define baked. That is an assumption, and every
+ * posture carries {@link TopicsBrowserPosture.clientFrom} so that a reader of
+ * a sample can tell it from a posture the deployment reported. A bundle that
+ * was read and carries no define is refused instead: having the shell's own
+ * script in hand and guessing anyway is what this module exists to avoid.
  */
 
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
@@ -32,7 +41,11 @@ export type ClientPostureSource =
   | "meta"
   /** The build define baked into the served shell's bundle. */
   | "bundle"
-  /** The first-party default, which an unset define leaves the shell on. */
+  /**
+   * The first-party default, which an unset define leaves the shell on. This
+   * one is assumed rather than reported: no bundle could be read, so nothing
+   * the deployment said states the shell's posture.
+   */
   | "default";
 
 /** The posture a browser-tier Topics measurement ran under. */
@@ -50,18 +63,32 @@ export interface TopicsBrowserPosture {
   readonly clientFrom: ClientPostureSource;
 }
 
-/** What `/api/meta` says about a deployment's posture. */
+/**
+ * What `/api/meta` says about a deployment's posture. Both fields arrive as
+ * JSON from a server this process does not control, so each is `unknown` and
+ * checked rather than trusted, and each may arrive as `null`.
+ */
 export interface PostureMeta {
   /** The flags the deployment serves at, as it resolved them. */
   readonly experimental?: { readonly serverExecution?: unknown };
 
   /**
-   * The raw `EXPERIMENTAL_SERVER_EXECUTION` baked into the shell this toolshed
-   * serves, or `null` where the shell carries no define — a source-run
-   * toolshed, which serves no built shell, reports `null` as well.
+   * The raw `EXPERIMENTAL_SERVER_EXECUTION` the shell this toolshed serves
+   * baked as its build define. `null` covers four situations the field does
+   * not tell apart: the value was unset at build time and the shell follows
+   * the first-party default, the toolshed runs from source and serves no
+   * built shell, and the build marker was unreadable or malformed — the last
+   * two being the failure posture `readBuildInfoFrom` gives the whole marker.
    */
   readonly shellServerExecutionDefine?: unknown;
 }
+
+/** The served shell's entry script, or why it was not read. */
+export type ServedBundle =
+  /** The script's text, as fetched from the shell being served. */
+  | { readonly kind: "read"; readonly source: string }
+  /** No script could be read, with what the attempt came to. */
+  | { readonly kind: "unreachable"; readonly reason: string };
 
 /**
  * Matches the build define in a served shell's bundle. The bundler emits the
@@ -72,22 +99,21 @@ const BAKED_DEFINE =
   /EXPERIMENTAL_SERVER_EXECUTION_DEFINE\s*=\s*true\s*\?\s*"([^"]*)"/;
 
 /**
- * Returns the posture `meta` and the served shell's `bundle` agree on, with
- * `bundle` the text of the shell's entry script, or `undefined` where it was
- * not read.
+ * Returns the posture `meta` and the served shell's `bundle` agree on.
  *
  * It settles the shell's half from the first of these that states it: the
- * `shellServerExecutionDefine` the toolshed reports, the define baked into
- * `bundle`, and the first-party default, which is what an unset define leaves
- * the shell on.
+ * `shellServerExecutionDefine` the toolshed reports, and the define baked into
+ * a bundle that was read. Where no bundle could be read, the shell is taken to
+ * follow the first-party default, and the posture records that its client half
+ * came from there rather than from the deployment.
  *
  * @throws Error when the toolshed reports no resolved `serverExecution`, when
- * either statement of the posture is not a boolean spelling, or when the two
- * halves disagree.
+ * a statement of the posture is not a boolean spelling, when a bundle was read
+ * and carries no define, or when the two halves disagree.
  */
 export function topicsBrowserPostureOf(
   meta: PostureMeta,
-  bundle?: string,
+  bundle: ServedBundle = { kind: "unreachable", reason: "none was fetched" },
 ): TopicsBrowserPosture {
   const served = meta.experimental?.serverExecution;
   if (typeof served !== "boolean") {
@@ -117,18 +143,29 @@ export function topicsBrowserPostureOf(
  * Helper for {@link topicsBrowserPostureOf}, which returns the posture the
  * served shell runs and the statement it was read from.
  *
- * @throws Error when a statement it reads is neither `true` nor `false`.
+ * @throws Error when a statement it reads is neither `true` nor `false`, and
+ * when `bundle` was read and names no define.
  */
 function clientPosture(
   meta: PostureMeta,
-  bundle?: string,
+  bundle: ServedBundle,
 ): { client: boolean; clientFrom: ClientPostureSource } {
   const declared = meta.shellServerExecutionDefine;
   if (declared !== undefined && declared !== null) {
     return { client: booleanNamed(declared, "meta"), clientFrom: "meta" };
   }
-  const baked = bundle === undefined ? null : BAKED_DEFINE.exec(bundle);
-  if (baked !== null) {
+  if (bundle.kind === "read") {
+    const baked = BAKED_DEFINE.exec(bundle.source);
+    if (baked === null) {
+      throw new Error(
+        "The served shell's entry script names no " +
+          "`EXPERIMENTAL_SERVER_EXECUTION` build define, so what posture it " +
+          "runs cannot be read from it. Build the shell at the posture the " +
+          "run is measuring rather than leaving it to the first-party " +
+          "default, which this refuses to assume with the shell's own script " +
+          "in hand.",
+      );
+    }
     return { client: booleanNamed(baked[1], "bundle"), clientFrom: "bundle" };
   }
   return {
@@ -178,9 +215,12 @@ export async function readTopicsBrowserPosture(
   ) {
     return topicsBrowserPostureOf(meta);
   }
-  const bundle = await fetch(new URL("scripts/index.js", frontendUrl));
+  const script = new URL("scripts/index.js", frontendUrl);
+  const bundle = await fetch(script);
   return topicsBrowserPostureOf(
     meta,
-    bundle.ok ? await bundle.text() : undefined,
+    bundle.ok
+      ? { kind: "read", source: await bundle.text() }
+      : { kind: "unreachable", reason: `\`${script}\` gave ${bundle.status}` },
   );
 }

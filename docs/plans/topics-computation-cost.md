@@ -263,13 +263,16 @@ server, and the headless fixture runs over an emulated storage manager in one
 process with no memory server, so the flag has nothing there to engage. Server
 execution is measured in the browser tier, which runs against a toolshed: a
 toolshed given the ON flag was measured to construct the loop and to serve a
-deployed Topics board's work, which is the engagement the headless tier has no
-way to produce. That posture's cost is not yet measured. A browser arm holds
-its two halves to one posture — the toolshed serves at it, and the shell it
-serves is built at it — and a run whose halves disagree is refused rather than
-labeled. Both postures must be measured before the baseline report. The
-scheduled Benchmarks workflow runs client execution only. Of those three, the
-headless tier measures the
+deployed Topics board's work, recorded in
+[the engagement probe](../history/development/performance/2026-09-18-topics-lazy-materialization.md),
+which is the engagement the headless tier has no way to produce. The cost of
+server execution is not yet measured in either tier. A browser arm holds its
+two halves to one posture — the toolshed serves at it, and the shell it serves
+is built at it — and a run whose halves disagree is refused rather than
+labeled. Server execution on and off must both be measured before the baseline
+report. The scheduled Benchmarks workflow runs client execution only.
+
+Of the three demand workloads above, the headless tier measures the
 board-with-one-topic workload with the demand the browser measured, and the
 all-backlinks workload as a scaling probe rather than normal UI behavior: it
 demands the pivot and every topic's backlinks at once, which no browser workload

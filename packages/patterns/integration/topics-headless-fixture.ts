@@ -594,8 +594,9 @@ export const DEFAULT_TOPICS_FIXTURE_MODE: TopicsFixtureMode =
 
 /**
  * Returns the mode whose flags `experimental` holds, as a runtime reports them
- * back once it has resolved what it was given. Deriving a sample's label this
- * way is what keeps the label and the semantics measured from parting.
+ * back once it has resolved what it was given. Deriving a sample's label from
+ * the runtime's own report is what keeps the label reading the same field the
+ * runner acts on.
  *
  * It reads the flags {@link TOPICS_FIXTURE_MODES} names and no others, so two
  * runtimes it calls the same mode may still differ in a flag no mode pins.
@@ -976,9 +977,11 @@ async function openTopicsSession(
   });
   stack.defer(() => runtime.dispose({ closeStorage: false }));
 
-  // The runtime resolves what it was given against its own defaults and its
-  // ambient control points, so its report of the flags, and not the name asked
-  // for, is what every sample of this session is labeled with.
+  // The label comes from the runtime's own report of its flags rather than
+  // from the name asked for, so a sample says what ran. Every mode sets both
+  // flags explicitly and the runtime keeps an explicit value, so today the two
+  // always agree and this guard cannot fire; it is here for a flag that later
+  // resolves against an ambient control point, where they could part.
   const resolved = topicsFixtureModeOf(runtime.experimental);
   if (resolved !== mode) {
     throw new Error(

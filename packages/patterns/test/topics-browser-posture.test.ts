@@ -3,11 +3,18 @@ import { describe, it } from "@std/testing/bdd";
 
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 
-import { topicsBrowserPostureOf } from "./topics-browser-posture.ts";
+import {
+  type ServedBundle,
+  topicsBrowserPostureOf,
+} from "../integration/topics-browser-posture.ts";
 
-/** A bundle carrying the build define `value` the way the bundler emits it. */
-function bundleWith(value: string): string {
-  return `var EXPERIMENTAL_SERVER_EXECUTION_DEFINE = true ? "${value}" : void 0;`;
+/** A served bundle carrying the build define `value` as the bundler emits it. */
+function bundleWith(value: string): ServedBundle {
+  return {
+    kind: "read",
+    source:
+      `var EXPERIMENTAL_SERVER_EXECUTION_DEFINE = true ? "${value}" : void 0;`,
+  };
 }
 
 describe("topicsBrowserPostureOf()", () => {
@@ -44,7 +51,16 @@ describe("topicsBrowserPostureOf()", () => {
     expect(posture.clientFrom).toBe("bundle");
   });
 
-  it("falls back to the first-party default when neither the toolshed nor a bundle names a define", () => {
+  it("throws when a bundle was read and names no define", () => {
+    expect(() =>
+      topicsBrowserPostureOf(
+        { experimental: { serverExecution: false } },
+        { kind: "read", source: "var somethingElse = 1;" },
+      )
+    ).toThrow(/names no `EXPERIMENTAL_SERVER_EXECUTION` build define/);
+  });
+
+  it("records `default` as the client half's source when no bundle could be read", () => {
     const posture = topicsBrowserPostureOf({
       experimental: { serverExecution: SERVER_EXECUTION_DEFAULT_ENABLED },
       shellServerExecutionDefine: null,
