@@ -7,14 +7,15 @@ entries to read `list.length`.
 
 A **view** does that work per path instead. It is a proxy over a
 `(link, schema)` pair that resolves each property as the reader asks for it,
-narrowing the schema by that step. What nobody reads is never built, never
-link-resolved and never registered.
+narrowing the schema by that step. Ordinary containers defer their children.
+Combinators and fallback decisions evaluate a selected subtree when that
+position is accessed, as described below.
 
 ## Where a view comes from
 
 The transaction decides, not the call site. `tx.markLazyMaterialize(true)` puts
-a transaction in the mode; every read through it is lazy, and nothing else in
-the runtime changes behavior. The runner marks the transaction it runs a lift's
+a transaction in the mode; reads through it use views where validation can be
+decided per child. The runner marks the transaction it runs a lift's
 argument read and body on, and unmarks it afterwards.
 
 `validateAndTransform` in
@@ -37,13 +38,22 @@ the schema's `required` keys — that the value carries each of them, and that t
 schema selects each one it requires. Both come off the container read a
 view takes anyway, so neither descends.
 
-Everything below is checked where the reader touches it. **A subtree the reader
-never reads is never validated.** That is the one behavior change a pattern
-author can observe: today a broken field five levels down collapses the whole
-argument and the lift does not run; under a view the lift runs, because nothing
-ever asked. It is bounded in the direction that matters — a reader that touches
-broken data still refuses — and it removes a class of whole-argument collapses
-caused by data the reader had no interest in.
+Children of an ordinary container are checked where the reader touches them.
+An unread child is not validated. Three boundaries require evaluation of a whole
+selected subtree at access time, through the same traverser an eager read uses:
+
+- `anyOf`, `oneOf`, and `allOf` must validate entire branches before selecting
+  and merging successful results. A shallow prefilter cannot decide whether a
+  branch matches, and combining candidate property schemas loses relationships
+  between the properties of a branch.
+- A property with a non-null default must validate its selected value before
+  deciding whether to replace it with that default.
+- An array item whose schema permits `undefined` or `null` must validate its
+  selected value before deciding whether to substitute one of those values.
+
+Accessing one of these boundaries therefore registers reads throughout its
+selected subtree. An untouched sibling remains deferred. Cell handles retain
+their ordinary traversal boundaries.
 
 A mismatch the reader does touch surfaces at the **nearest enclosing property**,
 which is where an eager read decides the same question:
@@ -53,7 +63,8 @@ which is where an eager read decides the same question:
   leaves a property whose traversal fails out of the object rather than voiding
   it.
 
-Either way the read that failed is registered first.
+A declared non-null property default takes precedence over either outcome. The
+read that failed is registered first, including when a default replaces it.
 
 ## Returning "nothing is there" still owes a read
 
@@ -67,7 +78,7 @@ goes on reading its default however late the value arrives.
 ## Agreeing with an eager read
 
 A view and an eager read must agree; where they do not, the view is
-wrong. Six rules exist only to hold that:
+wrong. These rules hold that agreement:
 
 - **The last link hop's schema is combined in.** Eager traversal walks *through*
   a link and combines the link's schema — which describes the value at its
@@ -75,18 +86,25 @@ wrong. Six rules exist only to hold that:
   re-enters per property instead of walking through, so the entry point does
   that combining. Without it, a property the reader asked for that the link's
   own schema does not name reads as one the schema does not select.
-- **A union's own keywords ride onto the branch it narrows to.** Its
-  `properties`, `required` and `default` apply to whichever branch matches, so a
-  branch alone accepts values the schema rejects. Its `$defs` ride along too: a
-  branch is routinely a `$ref` into them. Subscription-selector matching resolves a
-  union branch against those definitions, in place of any `$defs` the branch
-  declares of its own.
-- **A default comes from the schema's own top level**, never out of a branch of
-  a union — a branch is reached by evaluating it against a value, and an absent
-  value gets no branch evaluated.
+- **Combinators use eager branch evaluation at the accessed position.** Outer
+  keywords, `$defs`, handle selection, and merging of successful results are
+  decided by the traverser. `oneOf` requires exactly one match; `allOf` requires
+  every branch to match. A failed branch cannot contribute properties to an
+  `anyOf` result.
+- **Object property defaults follow filtering.** A missing or rejected
+  declared property takes its non-null default, including when it is required.
+  A property default of `null` does not fill an absent or rejected property.
+  At the top level an absent value can take a `null` default. Both paths share
+  the property-default selector in `traverse.ts`.
+- **Invalid array items take a permitted substitute.** `undefined` takes
+  precedence over `null`; when neither is permitted, the mismatch refuses.
+  Both paths use the same fallback selector. An unavailable linked document
+  still raises the lazy read's `UnresolvedInputError`: its value is not known
+  to be invalid, so an array substitute does not satisfy that refusal.
 - **An inline array element is identified by its value.** `toCell` on such an
-  element must not name the array's index; written elsewhere that link would
-  follow whatever lands at the index next. Eager traversal rebases it onto a
+  element, including a nested array, must not name the array's index; written
+  elsewhere that link would follow whatever lands at the index next. Eager
+  traversal rebases it onto a
   [`data:` identifier](data-uri-identifiers.md), and the view does the same. The
   read stays on the slot, and recursively: the identity is derived from the whole
   element value.
@@ -153,7 +171,7 @@ The reads it took stay registered, including the one that failed, so it runs
 again when the data changes and may then find it valid.
 
 The view withdraws the record for a refusal it catches itself — the optional
-property above, whose answer is absence rather than a refusal. It clears only
+property, a property default, or an array-item substitute. It clears only
 that exact refusal; another one held on the same transaction is somebody else's.
 
 ## A view describes the instant it was taken
