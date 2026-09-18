@@ -1,3 +1,10 @@
+/**
+ * Drives the `cf profile` action bodies in-process with a stubbed
+ * `createProfile()` and `readWish()` (the `wish-command.test.ts` idiom), so
+ * flag handling, the home-space target and the output shapes are covered
+ * without a server. The create itself is covered in `profile-create.test.ts`.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { ValidationError } from "@cliffy/command";
@@ -11,11 +18,6 @@ import {
 } from "../commands/profile.ts";
 import type { CreatedProfile, ProfileCreateConfig } from "../lib/profile.ts";
 import type { WishReadConfig, WishReadResult } from "../lib/wish.ts";
-
-// Drives the `cf profile` action bodies in-process with a stubbed
-// createProfile/readWish (the wish-command.test.ts idiom), so flag handling,
-// the home-space target and the output shapes are covered without a server.
-// The create itself is covered in test/profile-create-trusted.test.ts.
 
 const CREATED: CreatedProfile = {
   name: "Ada Lovelace",
