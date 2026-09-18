@@ -730,6 +730,12 @@ function prepareAnyOfBranch(
  * A stream position holds no value — its handle is minted from the schema
  * alone — so its absence from a value says nothing about the value's shape.
  * `undefined` when the schema admits no object or requires nothing.
+ *
+ * The same exemption applies inside a union's branches, so a required stream
+ * never tells two branches apart: branches that differ only by one all match,
+ * `anyOf` merges them and mints a handle for each branch's stream, and
+ * `oneOf` reports more than one match. Discriminating such branches by
+ * whether the data names the stream is a follow-up.
  */
 function requiredValueProperties(
   resolved: JSONSchemaObj,

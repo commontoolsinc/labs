@@ -391,6 +391,32 @@ describe("stream declaration", () => {
     }
   });
 
+  it("does not tell union branches apart by a required stream", async () => {
+    // The exemption that lets a required stream be absent from the data also
+    // holds inside a union's branches, so branches that differ only by one
+    // all match: `anyOf` merges them and mints a handle for each branch's
+    // stream, the second of which addresses a position no handler is
+    // registered on. Pinned as the limitation it is; discriminating such
+    // branches by whether the data names the stream is a follow-up.
+    const { cell } = await runProgram(COUNTER, "counter-union");
+    const view = cell.asSchema({
+      anyOf: [
+        {
+          type: "object",
+          required: ["bump"],
+          properties: { bump: { asCell: ["stream"] } },
+        },
+        {
+          type: "object",
+          required: ["poke"],
+          properties: { poke: { asCell: ["stream"] } },
+        },
+      ],
+    } as JSONSchema).get() as unknown as { bump: unknown; poke: unknown };
+    expect(isStream(view.bump)).toBe(true);
+    expect(isStream(view.poke)).toBe(true);
+  });
+
   describe("a declaration read through references", () => {
     const event = { asCell: ["stream"], type: "number" } as JSONSchema & object;
 
