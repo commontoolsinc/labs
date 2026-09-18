@@ -49,7 +49,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
+                  "moduleIdentity": "xrzDkydr3t1Mek_TSqOx4RdVTsvVIVHQT4LzYU-rLJk",
                   "path": [
                     "setAvatar"
                   ]
@@ -75,7 +75,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
+                  "moduleIdentity": "xrzDkydr3t1Mek_TSqOx4RdVTsvVIVHQT4LzYU-rLJk",
                   "path": [
                     "setBio"
                   ]
@@ -100,7 +100,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
+                  "moduleIdentity": "xrzDkydr3t1Mek_TSqOx4RdVTsvVIVHQT4LzYU-rLJk",
                   "path": [
                     "mutateElements"
                   ]
@@ -129,7 +129,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
+                  "moduleIdentity": "xrzDkydr3t1Mek_TSqOx4RdVTsvVIVHQT4LzYU-rLJk",
                   "path": [
                     "mutateExternalProfileLinks"
                   ]
@@ -158,7 +158,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
+                  "moduleIdentity": "xrzDkydr3t1Mek_TSqOx4RdVTsvVIVHQT4LzYU-rLJk",
                   "path": [
                     "setInbox"
                   ]
@@ -189,7 +189,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
+                  "moduleIdentity": "xrzDkydr3t1Mek_TSqOx4RdVTsvVIVHQT4LzYU-rLJk",
                   "path": [
                     "setName"
                   ]
@@ -269,7 +269,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "yOTn4t4s0HqGhdqKBHQ0TOk7oiByXaRgoJiFi3Xy6fc",
+                  "moduleIdentity": "xrzDkydr3t1Mek_TSqOx4RdVTsvVIVHQT4LzYU-rLJk",
                   "path": [
                     "publishVerifiedIdentities"
                   ]
@@ -670,7 +670,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-create.tsx",
-              "moduleIdentity": "k2wwgP8km8KeZ49hbTrcLU1_DVTL4FEkz-U66bGnFKg",
+              "moduleIdentity": "vlf8xpNTXFApfVKvhZXK-wc5G2EayZbEq5IvDh2iGww",
               "path": [
                 "submitProfileCreation"
               ]
@@ -686,7 +686,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-create.tsx",
-              "moduleIdentity": "k2wwgP8km8KeZ49hbTrcLU1_DVTL4FEkz-U66bGnFKg",
+              "moduleIdentity": "vlf8xpNTXFApfVKvhZXK-wc5G2EayZbEq5IvDh2iGww",
               "path": [
                 "submitProfileCreation"
               ]
@@ -706,7 +706,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-create.tsx",
-              "moduleIdentity": "k2wwgP8km8KeZ49hbTrcLU1_DVTL4FEkz-U66bGnFKg",
+              "moduleIdentity": "vlf8xpNTXFApfVKvhZXK-wc5G2EayZbEq5IvDh2iGww",
               "path": [
                 "setMruProfile"
               ]
@@ -730,7 +730,7 @@
             "writeAuthorizedBy": {
               "__ctWriterIdentityOf": {
                 "file": "/packages/patterns/system/profile-create.tsx",
-                "moduleIdentity": "k2wwgP8km8KeZ49hbTrcLU1_DVTL4FEkz-U66bGnFKg",
+                "moduleIdentity": "vlf8xpNTXFApfVKvhZXK-wc5G2EayZbEq5IvDh2iGww",
                 "path": [
                   "setMruProfile"
                 ]

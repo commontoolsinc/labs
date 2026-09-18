@@ -55,6 +55,68 @@ describe("pattern-break-registry-guards", () => {
     })).toEqual([]);
   });
 
+  it("returns a finding for a `requiredPatternOverride` naming nobody", () => {
+    const findings = guardBreakRegistryEntries({
+      entries: [entry({
+        pattern: "system/home.tsx",
+        requiredPatternOverride: {
+          rulingBy: "  ",
+          on: "2026-09-18",
+          reason: "no deployed root holds the old shape",
+        },
+      })],
+      requiredPatternKeys: new Set(["system/home.tsx"]),
+      recordExists: () => true,
+    });
+    expect(findings.map((finding) => finding.detail)).toEqual([
+      "carries a `requiredPatternOverride` that names nobody in `rulingBy` — a ruling is a person's",
+    ]);
+  });
+
+  it("returns a finding for a `requiredPatternOverride` whose date is not `YYYY-MM-DD`", () => {
+    const findings = guardBreakRegistryEntries({
+      entries: [entry({
+        pattern: "system/home.tsx",
+        requiredPatternOverride: {
+          rulingBy: "Someone",
+          on: "18 Sep 2026",
+          reason: "no deployed root holds the old shape",
+        },
+      })],
+      requiredPatternKeys: new Set(["system/home.tsx"]),
+      recordExists: () => true,
+    });
+    expect(findings.length).toBe(1);
+    expect(findings[0].detail).toContain("`YYYY-MM-DD`");
+  });
+
+  it("returns a finding for a `requiredPatternOverride` with a blank reason", () => {
+    const findings = guardBreakRegistryEntries({
+      entries: [entry({
+        pattern: "system/home.tsx",
+        requiredPatternOverride: {
+          rulingBy: "Someone",
+          on: "2026-09-18",
+          reason: "",
+        },
+      })],
+      requiredPatternKeys: new Set(["system/home.tsx"]),
+      recordExists: () => true,
+    });
+    expect(findings.length).toBe(1);
+    expect(findings[0].detail).toContain("carries no `reason`");
+  });
+
+  it("ignores a malformed `requiredPatternOverride` on a pattern no required key addresses", () => {
+    expect(guardBreakRegistryEntries({
+      entries: [entry({
+        requiredPatternOverride: { rulingBy: "", on: "", reason: "" },
+      })],
+      requiredPatternKeys: new Set(["system/home.tsx"]),
+      recordExists: () => true,
+    })).toEqual([]);
+  });
+
   it("still returns the record finding for an overridden entry whose record does not exist", () => {
     const findings = guardBreakRegistryEntries({
       entries: [entry({

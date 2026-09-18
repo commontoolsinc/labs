@@ -1,4 +1,4 @@
-import { action, assert, equals, pattern, TESTS } from "commonfabric";
+import { action, assert, equals, NAME, pattern, TESTS } from "commonfabric";
 import ProfileHome from "./profile-home.tsx";
 
 export default pattern(() => {
@@ -52,10 +52,13 @@ export default pattern(() => {
   );
   // Both cards keep their content through every pointer write: the pointer
   // is re-bound and cleared in place, never written through into a card.
+  // Each card's name is read back through its cell, so a write that reached
+  // a card's document — or re-bound a card's slot to the other card — reads
+  // as the wrong name, not as an object of some kind.
   const assert_both_cards_intact = assert(() =>
     profile.elements.length === 2 &&
-    typeof profile.elements[0]?.cell === "object" &&
-    typeof profile.elements[1]?.cell === "object"
+    profile.elements[0]?.cell?.[NAME] === "Profile card" &&
+    profile.elements[1]?.cell?.[NAME] === "Second card"
   );
   const assert_inbox_cleared = assert(() => profile.inbox?.piece === undefined);
   const action_remove_second_card = action(() => {

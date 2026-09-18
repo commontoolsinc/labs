@@ -151,6 +151,28 @@ function namesRequiredPattern(
   return false;
 }
 
+/**
+ * Why an override cannot stand as the ruling it claims to be, or `undefined`
+ * when it can: each of its three fields is present and non-blank, and the
+ * date is spelled `YYYY-MM-DD`. Shape only — nothing here judges whether the
+ * person named ruled what the reason says.
+ */
+function overrideProblem(
+  override: RequiredPatternOverride,
+): string | undefined {
+  if (override.rulingBy.trim() === "") {
+    return "names nobody in \`rulingBy\` — a ruling is a person's";
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(override.on)) {
+    return `dates the ruling "${override.on}" — \`on\` is spelled ` +
+      `\`YYYY-MM-DD\``;
+  }
+  if (override.reason.trim() === "") {
+    return "carries no \`reason\` — the ruling is quoted or summarized there";
+  }
+  return undefined;
+}
+
 /** Both shipped registries, flattened to the shape the guards judge. */
 export function collectBreakRegistryEntries(): BreakRegistryEntry[] {
   return [
@@ -175,17 +197,26 @@ export function guardBreakRegistryEntries(options: {
 }): BreakRegistryFinding[] {
   const findings: BreakRegistryFinding[] = [];
   for (const entry of options.entries) {
-    if (
-      namesRequiredPattern(options.requiredPatternKeys, entry.pattern) &&
-      entry.requiredPatternOverride === undefined
-    ) {
-      findings.push({
-        registry: entry.registry,
-        pattern: entry.pattern,
-        detail: `names a required pattern — an auto-updating root takes an ` +
-          `accepted break only under a \`requiredPatternOverride\` naming ` +
-          `who ruled it`,
-      });
+    if (namesRequiredPattern(options.requiredPatternKeys, entry.pattern)) {
+      const override = entry.requiredPatternOverride;
+      if (override === undefined) {
+        findings.push({
+          registry: entry.registry,
+          pattern: entry.pattern,
+          detail: `names a required pattern — an auto-updating root takes ` +
+            `an accepted break only under a \`requiredPatternOverride\` ` +
+            `naming who ruled it`,
+        });
+      } else {
+        const problem = overrideProblem(override);
+        if (problem !== undefined) {
+          findings.push({
+            registry: entry.registry,
+            pattern: entry.pattern,
+            detail: `carries a \`requiredPatternOverride\` that ${problem}`,
+          });
+        }
+      }
     }
     const pathProblem = recordPathProblem(entry.record);
     if (pathProblem !== undefined) {
