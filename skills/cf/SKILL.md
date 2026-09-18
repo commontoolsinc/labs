@@ -204,6 +204,13 @@ speculatively against a space you do not intend to touch.
 
 ## Quick Command Reference
 
+`cf profile` is a person's profile from the command line.
+`cf profile create <name>` is the shell's create form as a command: the profile
+is made by the home pattern's own handler, in a space of its own, and its
+address printed. `cf profile show` prints the address and name `#profile`
+resolves to. Both take `-i`/`-a` and target the identity's home space; there is
+no `--space`.
+
 | Operation          | Command                                                                                                                     |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
 | Type check         | `deno task cf check pattern.tsx --no-run`                                                                                   |
@@ -227,6 +234,8 @@ speculatively against a space you do not intend to touch.
 | Replayable call    | `deno task cf piece call --cell ID --invocation my-id-1 handlerName ...` (same pair retries settle on the original outcome) |
 | Detached call      | `deno task cf piece call --cell ID --no-wait --invocation my-id-1 handlerName ...` (exits at commit with `receipt` address) |
 | Collect a receipt  | `deno task cf cell get --cell <receipt> ...` (the envelope's `receipt` string, later, from any process)                     |
+| Create a profile   | `deno task cf profile create "Ada Lovelace" -i key -a url` (the shell's create form, from the CLI; prints the address)      |
+| Show the profile   | `deno task cf profile show -i key -a url` (the address and name `#profile` resolves to, as JSON)                            |
 | List pieces        | `deno task cf piece ls -i key -a url -s space` (registry only — a handler-created piece appears only if sent to `addPiece`) |
 | Describe a piece   | `deno task cf piece describe --cell ID ...` (name, purpose, state, inputs, verbs; `--json`, `--all`)                        |
 | List slugs         | `deno task cf piece slugs ...`                                                                                              |
