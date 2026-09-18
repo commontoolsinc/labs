@@ -1,17 +1,3 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
-
-import { Identity } from "@commonfabric/identity";
-import type { URI } from "@commonfabric/memory/interface";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-
-import type { Cell } from "../src/cell.ts";
-import type { RuntimeProgram } from "../src/harness/types.ts";
-import { Runtime } from "../src/runtime.ts";
-import type { SealedCommitVerdict } from "../src/storage/interface.ts";
-import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { newSharedServer } from "./memory-v2-test-utils.ts";
-
 // The wait a resuming list coordinator takes on its result container.
 //
 // A resume reconcile that reads an undefined container waits rather than
@@ -43,6 +29,20 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
 // coordinator that keeps waiting renders nothing however many rounds it is
 // given, so the bound decides how long the test takes and not what it
 // concludes.
+
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+
+import { Identity } from "@commonfabric/identity";
+import type { URI } from "@commonfabric/memory/interface";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+
+import type { Cell } from "../src/cell.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { SealedCommitVerdict } from "../src/storage/interface.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("list resume container redefer");
 const space = signer.did();
