@@ -593,8 +593,9 @@ expectations and assertions of the built-in default. The
 [reload diagnosis](../history/development/performance/2026-09-15-lazy-reload-diagnosis.md)
 and [navigation-policy follow-up](../history/development/performance/2026-09-15-notebook-reload-navigation-policy.md)
 separate nullable-read errors from a test's assumption about the selected page.
-The owner decision and remaining acceptance work belong to the
-[fast-follow plan](../plans/lazy-materialization-fast-follow.md).
+The flag owner decides whether and when to retire the switch. The
+[fast-follow plan](../plans/lazy-materialization-fast-follow.md) owns remaining
+default-on measurements and guidance; its completion does not require retirement.
 
 One behavior difference is deliberate rather than a defect, and it is the point
 of the mode: a lift that FORWARDS its argument onward without reading through it
