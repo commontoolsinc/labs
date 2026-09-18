@@ -43,6 +43,7 @@ import type { Pattern } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
 import { prepareSourceClosureVerification } from "./compilation-cache/cell-cache.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
+import type { PreparedSourceUpdate } from "./pattern-manager.ts";
 import {
   classifyPieceOriginString,
   type PieceOriginKind,
@@ -62,7 +63,6 @@ import {
   samePieceReconciliation,
   setPieceReconciliation,
 } from "./runner.ts";
-import type { PreparedSourceUpdate } from "./pattern-manager.ts";
 import type { Runtime } from "./runtime.ts";
 import { fabricAuthorityMatchesSpaceHost } from "./space-host.ts";
 import type { MemorySpace } from "./storage/interface.ts";
@@ -1088,9 +1088,8 @@ export class SourceReconciler {
     // running pattern's handler protects would refuse the successor's write
     // and the update could not commit. For a `system:` origin — a release the
     // deployment gated — the successor inherits the predecessor's authority
-    // the way an explicit `setsrc` grants it (SC-22, owner decision
-    // 2026-09-17). Every other origin stays as it is: nobody promised
-    // anything about what it ships.
+    // the way an explicit `setsrc` grants it (SC-22). Every other origin
+    // stays as it is: nobody promised anything about what it ships.
     const sourceUpdate = origin.kind === "system" && baseline.kind === "retain"
       ? await runtime.patternManager.prepareSourceUpdate(
         state.space,
