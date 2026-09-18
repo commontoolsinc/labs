@@ -84,10 +84,12 @@ describe("Interactive budget checkpoints", () => {
         });
         let resumed: readonly HarnessTranscriptMessage[] = [];
         let confidentiality: readonly unknown[] = [];
+        let restoredLoops = 0;
         const restored = new HarnessInteractiveChatService({
           sessionStore: store,
           basePromptLoopOptions: { finalizeOnTurnLimit: true },
           createPromptLoop: (options) => {
+            restoredLoops += 1;
             confidentiality =
               options.inheritedCfcModelContext?.label.confidentiality ?? [];
             return {
@@ -107,6 +109,12 @@ describe("Interactive budget checkpoints", () => {
           input: { text: "Summarize" },
         });
         await restored.waitForTurn("research", "next");
+        expect(restoredLoops).toBe(1);
+        expect(
+          restored.listTurns({ sessionId: "research" }).turns.find((entry) =>
+            entry.turn.turnId === "next"
+          )?.turn.status,
+        ).toBe("completed");
         expect(resumed.filter((m) => m.role === "tool").length).toBe(
           completed === 2 ? 2 : 0,
         );

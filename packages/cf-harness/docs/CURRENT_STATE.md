@@ -2,7 +2,7 @@
 
 Status: current implementation reference\
 Last verified: 2026-09-18\
-Revision: `0cccfd338e+revision-verification`
+Revision: `b1627ec9f+interactive-checkpoint-review`
 
 The [system map](system-map/README.md) moves in lockstep with this current-state
 reference.
@@ -171,10 +171,12 @@ The current package provides:
   uses implicit caching because it rejects the API `prompt_cache_options` field;
 - interactive NDJSON stdio sessions with optional SQLite session, turn, event,
   replay, cancellation, and restore state; a session's durable transcript
-  normally advances at a completed turn. The Loom host also retains complete
-  batches and opening research on failure, atomically with their matching
-  research/CFC state and omission provenance; canceled and interrupted activity
-  stays on the audit trail; a completed turn's history is checked before it is
+  normally advances at a completed turn. On failure, the Loom host can retain
+  the last resumable checkpoint (a validated complete batch or opening handoff),
+  atomically with its matching research/CFC state and omission provenance.
+  Unpaired work, cancellation, and interrupted activity stay on the audit trail;
+  turn-local budget notices stay in audit artifacts and are excluded from
+  resumable history; a completed turn's history is checked before it is
   promoted, and promotion commits with the completion or not at all; and a
   restored session whose recorded history does not pair its tool calls with tool
   results preserves that history and adds explicit unknown-outcome results for
