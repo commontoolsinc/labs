@@ -107,6 +107,7 @@ import {
   TILE_UI,
   TYPE,
   UI,
+  VIEWS,
   WebhookConfigSchema,
 } from "./types.ts";
 import {
@@ -310,6 +311,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     CHIP_UI,
     FS,
     TESTS,
+    VIEWS,
 
     // Schema utilities
     schema: runtimeSchema,
