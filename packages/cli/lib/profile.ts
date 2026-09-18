@@ -157,14 +157,15 @@ function sendCreate(
 
 /**
  * Helper for {@link createProfile}, which runs the created profile once so
- * that its computed outputs — `name` among them, which the profile derives
- * from the `initialName` the event carried — are stored where a runtime
- * that never runs the piece reads them.
+ * that the piece's outputs are materialized — stored where a runtime that
+ * never runs the piece reads them. The name is not derived here: the create
+ * handler's seed step stores it on the new profile, and this run is what
+ * makes that stored name, and the rest of the outputs, readable headlessly.
  *
  * The create handler sets the piece up and nothing runs it until a shell
  * opens it. `cf profile show` and the `#profile` wish loom resolves a viewer
  * through read the stored `name` and run nothing, so without this step they
- * find a profile with no name.
+ * find a profile whose outputs were never written.
  *
  * The run goes through a connection of its own, scoped to the profile's
  * space, rather than through the home connection that sent the create: in

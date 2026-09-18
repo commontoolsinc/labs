@@ -392,12 +392,13 @@ export const TypeMismatchError = (
 
 /**
  * Rendering options for the two values an inconsistency message compares:
- * arrays, objects, and strings whole, so that a change past the renderer's
- * default limits shows as a difference rather than as two identical
- * renderings.
+ * arrays, buffers, objects, and strings whole, so that a change past the
+ * renderer's default limits shows as a difference rather than as two
+ * identical renderings.
  */
 const INCONSISTENCY_RENDER_OPTIONS: DebugValueOptions = {
   maxArrayLength: Infinity,
+  maxBufferLength: Infinity,
   maxProperties: Infinity,
   maxStringLines: Infinity,
 };

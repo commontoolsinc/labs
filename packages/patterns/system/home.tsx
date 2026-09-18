@@ -14,6 +14,7 @@ import FavoritesManager from "./favorites-manager.tsx";
 import Self from "../self.tsx";
 import {
   type CreateProfileEvent,
+  seedProfileName,
   submitProfileCreation,
   type TrustedDefaultProfile,
   type TrustedProfileList,
@@ -204,6 +205,7 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
   // create a profile. The actual create UI lives in the profile picker below.
   const createProfileStream = submitProfileCreation({
     profiles: profiles as any,
+    seedName: seedProfileName({ profiles: profiles as any }),
   });
   // The home Profile tab IS the profile picker: it lists profiles natively,
   // sets the default, stamps MRU on selection, and creates more inline.

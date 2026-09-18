@@ -61,10 +61,6 @@ export class DebugStringifier {
   readonly #spacer: string;
   readonly #colon: string;
 
-  /** `#renderRealmState()` as a function, for passing to a renderer of parts. */
-  readonly #renderRealmStateFn = (v: PrimitiveState, i: string): string =>
-    this.#renderRealmState(v, i);
-
   /**
    * Constructs an instance which renders using `indent` spaces per nesting
    * level when given, and on a single line when not. A value which turns up
@@ -105,32 +101,13 @@ export class DebugStringifier {
    * is indented by `indent`.
    */
   #renderArray(value: readonly FabricValue[], indent: string): string {
-    const inner = this.#innerIndent(indent);
-    const parts: string[] = [];
-
-    // Iterated by index rather than by element, so that a hole is noticed. A
-    // hole renders as `void`, and a run of holes as a single `void` times the
-    // length of the run. The length form the conversion leaves at the end of
-    // a truncated array is an element like any other, so a run of holes ends
-    // at it.
-    for (let i = 0; i < value.length; i++) {
-      if (i in value) {
-        parts.push(this.#renderSubvalue(value[i], inner));
-        continue;
-      }
-
-      let holeCount = 1;
-      while (((i + 1) < value.length) && !((i + 1) in value)) {
-        holeCount++;
-        i++;
-      }
-      parts.push(
-        (holeCount === 1)
-          ? "void"
-          : `void${this.#spacer}*${this.#spacer}${holeCount}`,
-      );
-    }
-
+    // The length form the conversion leaves at the end of a truncated array is
+    // an element like any other, so a run of holes ends at it.
+    const parts = this.#renderElements(
+      value,
+      indent,
+      (v, i) => this.#renderSubvalue(v, i),
+    );
     return this.#renderContainer("[", "]", parts, indent);
   }
 
@@ -152,6 +129,40 @@ export class DebugStringifier {
 
     const inner = this.#innerIndent(indent);
     return `${open}\n${inner}${parts.join(`,\n${inner}`)}\n${indent}${close}`;
+  }
+
+  /**
+   * Renders the elements of an array, one part per element or run of holes,
+   * for a container whose closing bracket is indented by `indent`, each
+   * element rendered by `render`. A hole renders as `void`, and a run of holes
+   * as a single `void` times the length of the run.
+   */
+  #renderElements<T>(
+    value: readonly T[],
+    indent: string,
+    render: (value: T, indent: string) => string,
+  ): string[] {
+    const inner = this.#innerIndent(indent);
+    const parts: string[] = [];
+    const pushHoles = (count: number): void => {
+      if (count === 1) {
+        parts.push("void");
+      } else if (count > 1) {
+        parts.push(`void${this.#spacer}*${this.#spacer}${count}`);
+      }
+    };
+
+    // `forEach()` skips a hole, so a gap between one index it passes and the
+    // next is a run of holes.
+    let nextIndex = 0;
+    value.forEach((element, index) => {
+      pushHoles(index - nextIndex);
+      parts.push(render(element, inner));
+      nextIndex = index + 1;
+    });
+    pushHoles(value.length - nextIndex);
+
+    return parts;
   }
 
   /**
@@ -184,48 +195,73 @@ export class DebugStringifier {
     const open = `${DebugStringifier.#renderTypeName(typeName)}(`;
 
     if (isPlainObject(state)) {
-      const parts = this.#renderProperties(
-        state as { readonly [key: string]: PrimitiveState },
-        indent,
-        this.#renderRealmStateFn,
-        false,
-      );
+      const parts = this.#renderRealmProperties(state, indent, 0);
       return this.#renderContainer(open, ")", parts, indent);
     } else {
-      return `${open}${this.#renderRealmState(state, indent)})`;
+      return `${open}${this.#renderRealmState(state, indent, 0)})`;
     }
   }
 
   /**
-   * Renders a realm-crossing encoding, or a piece of one. The encoding's own
-   * terminal, an `ArrayBuffer`, is rendered as `buf [...]`; its containers are
-   * walked as they stand; and anything else takes the ordinary path through
-   * the conversion.
+   * Renders the properties of a plain object within a realm-crossing encoding,
+   * one part per property, given the nesting depth of the object within the
+   * encoding.
    */
-  #renderRealmState(value: PrimitiveState, indent: string): string {
+  #renderRealmProperties(
+    value: { readonly [key: string]: PrimitiveState },
+    indent: string,
+    depth: number,
+  ): string[] {
+    return this.#renderEntries(
+      Object.entries(value),
+      undefined,
+      indent,
+      (v, i) => this.#renderRealmState(v, i, depth + 1),
+    );
+  }
+
+  /**
+   * Renders a realm-crossing encoding, or a piece of one, which is at the
+   * indicated nesting depth within the encoding. The encoding's own terminal,
+   * an `ArrayBuffer`, is rendered as `buf [...]`; its containers are walked as
+   * they stand, within the limits; and anything else takes the ordinary path
+   * through the conversion. A container at the maximum nesting depth is
+   * elided, and an array with more elements than the maximum array length has
+   * the elements at indices below that limit rendered and then its length.
+   */
+  #renderRealmState(
+    value: PrimitiveState,
+    indent: string,
+    depth: number,
+  ): string {
     if (value instanceof ArrayBuffer) {
       return this.#renderBuffer(value);
-    } else if (Array.isArray(value)) {
-      const inner = this.#innerIndent(indent);
-      const parts = value.map((element) =>
-        this.#renderRealmState(element, inner)
-      );
-      return this.#renderContainer("[", "]", parts, indent);
-    } else if (isPlainObject(value)) {
-      const parts = this.#renderProperties(
-        value as { readonly [key: string]: PrimitiveState },
-        indent,
-        this.#renderRealmStateFn,
-        false,
-      );
-      return this.#renderContainer("{", "}", parts, indent);
-    } else {
+    }
+
+    const isArray = Array.isArray(value);
+    if (!(isArray || isPlainObject(value))) {
       const converted = new DebugConverter(
         value,
         this.#limits,
         this.#replacer,
       ).convert();
       return this.#renderSubvalue(converted, indent);
+    } else if (depth >= this.#limits.maxDepth) {
+      return "...";
+    } else if (isArray) {
+      const maxLength = this.#limits.maxArrayLength;
+      const parts = this.#renderElements(
+        value.slice(0, maxLength),
+        indent,
+        (v, i) => this.#renderRealmState(v, i, depth + 1),
+      );
+      if (value.length > maxLength) {
+        parts.push(this.#renderElision("length", value.length));
+      }
+      return this.#renderContainer("[", "]", parts, indent);
+    } else {
+      const parts = this.#renderRealmProperties(value, indent, depth);
+      return this.#renderContainer("{", "}", parts, indent);
     }
   }
 
@@ -249,7 +285,7 @@ export class DebugStringifier {
       return `${open}...)`;
     } else if (isPlainObject(payload)) {
       const tagged = DebugStringifier.#taggedFormOf(
-        payload as FabricPlainObject,
+        payload,
       );
 
       if (tagged !== undefined) {
@@ -257,8 +293,8 @@ export class DebugStringifier {
         // properties.
         return `${open}${this.#renderTaggedForm(tagged, indent)})`;
       } else {
-        const parts = this.#renderProperties(
-          payload as FabricPlainObject,
+        const parts = this.#renderConvertedProperties(
+          payload,
           indent,
         );
         return this.#renderContainer(open, ")", parts, indent);
@@ -280,56 +316,69 @@ export class DebugStringifier {
     if (tagged !== undefined) {
       return this.#renderTaggedForm(tagged, indent);
     } else {
-      const parts = this.#renderProperties(value, indent);
+      const parts = this.#renderConvertedProperties(value, indent);
       return this.#renderContainer("{", "}", parts, indent);
     }
   }
 
   /**
-   * Renders the properties of a plain object, one part per property, for a
-   * container whose closing bracket is indented by `indent`, each value
-   * rendered by `render` (by default, as a converted value). When `converted`
-   * is `true` (the default), the object came through the conversion: a key is
-   * rendered as the original value's key, the slash the conversion prefixes
-   * to a key that starts with one and to an unsafe key coming back off here,
-   * and a final `/...` property is the property-count form, rendered as the
-   * count it carries. Otherwise the object is laid out as it stands, and one
-   * with more properties than the maximum property count has the first that
-   * many rendered and then the count of the whole.
+   * Renders the properties of a plain object which came through the
+   * conversion, one part per property, for a container whose closing bracket
+   * is indented by `indent`. A key is rendered as the original value's key,
+   * the slash the conversion prefixes to a key that starts with one and to an
+   * unsafe key coming back off here, and a final `/...` property is the
+   * property-count form, rendered as the count it carries.
    */
-  #renderProperties<T>(
-    value: { readonly [key: string]: T },
+  #renderConvertedProperties(
+    value: FabricPlainObject,
     indent: string,
-    render: (value: T, indent: string) => string = (v, i) =>
-      this.#renderSubvalue(v as unknown as FabricValue, i),
-    converted = true,
   ): string[] {
-    const inner = this.#innerIndent(indent);
     const entries = Object.entries(value);
-    let count: number | undefined;
+    const last = entries.at(-1);
+    const count = (last?.[0] === "/...")
+      ? DebugStringifier.#countOf(last[1])
+      : undefined;
 
-    if (converted) {
-      const last = entries.at(-1);
-      const lastCount = (last?.[0] === "/...")
-        ? DebugStringifier.#countOf(last[1] as FabricValue)
-        : undefined;
-      if (lastCount !== undefined) {
-        count = lastCount;
-        entries.pop();
-      }
+    if (count !== undefined) {
+      entries.pop();
     }
 
-    if (entries.length > this.#limits.maxProperties) {
+    return this.#renderEntries(
+      entries.map(([key, subvalue]) => [
+        (key[0] === "/") ? key.slice(1) : key,
+        subvalue,
+      ]),
+      count,
+      indent,
+      (v, i) => this.#renderSubvalue(v, i),
+    );
+  }
+
+  /**
+   * Renders the entries of an object, one part per entry, for a container
+   * whose closing bracket is indented by `indent`, each value rendered by
+   * `render`. When there are more entries than the maximum property count,
+   * the first that many are rendered. A final part says the count of the
+   * whole: `count` when given, which is for an object already cut short, or
+   * the number of entries when that is what exceeded the maximum.
+   */
+  #renderEntries<T>(
+    entries: readonly (readonly [key: string, value: T])[],
+    count: number | undefined,
+    indent: string,
+    render: (value: T, indent: string) => string,
+  ): string[] {
+    const inner = this.#innerIndent(indent);
+    const maxProperties = this.#limits.maxProperties;
+
+    if (entries.length > maxProperties) {
       count = entries.length;
-      entries.length = this.#limits.maxProperties;
+      entries = entries.slice(0, maxProperties);
     }
 
     const parts = entries.map(([key, subvalue]) => {
-      const original = (converted && (key[0] === "/")) ? key.slice(1) : key;
       const rendered = render(subvalue, inner);
-      return `${
-        DebugStringifier.#renderKey(original)
-      }${this.#colon}${rendered}`;
+      return `${DebugStringifier.#renderKey(key)}${this.#colon}${rendered}`;
     });
 
     if (count !== undefined) {
@@ -485,14 +534,21 @@ export class DebugStringifier {
   /**
    * Renders an `ArrayBuffer` as `buf [...]`, the space being the spacer, with
    * its bytes in hexadecimal and a space after every fourth byte in either
-   * mode.
+   * mode. A buffer with more bytes than the maximum buffer length has that
+   * many rendered, and after them, set off by a space in either mode, its
+   * length.
    */
   #renderBuffer(buffer: ArrayBuffer): string {
-    const hex = [...new Uint8Array(buffer)]
+    const length = buffer.byteLength;
+    const cut = Math.min(length, this.#limits.maxBufferLength);
+    const hex = [...new Uint8Array(buffer, 0, cut)]
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("")
       .replace(/.{8}(?=.)/g, "$& ");
-    return `buf${this.#spacer}[${hex}]`;
+    const elision = (cut < length)
+      ? ` ${this.#renderElision("length", length)}`
+      : "";
+    return `buf${this.#spacer}[${hex}${elision}]`;
   }
 
   /**
@@ -606,7 +662,7 @@ export class DebugStringifier {
       return undefined;
     }
 
-    const measure = (value as FabricPlainObject)[name];
+    const measure = value[name];
     return (typeof measure === "number") ? measure : undefined;
   }
 
@@ -631,17 +687,18 @@ export class DebugStringifier {
    * number and whose `excerpt` is a string, and `undefined` when it is not.
    */
   static #partialStringOf(value: FabricValue): PartialString | undefined {
-    const length = DebugStringifier.#lengthOf(value);
     // deno-coverage-ignore-start
     // The conversion shapes the form no other way; see the `partialString`
     // arm of `#renderTaggedForm()`.
-    if (length === undefined) {
+    if (!isPlainObject(value)) {
       return undefined;
     }
     // deno-coverage-ignore-stop
 
-    const { excerpt } = value as FabricPlainObject;
-    return (typeof excerpt === "string") ? { length, excerpt } : undefined;
+    const { length, excerpt } = value;
+    return ((typeof length === "number") && (typeof excerpt === "string"))
+      ? { length, excerpt }
+      : undefined;
   }
 
   /**

@@ -19,9 +19,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import {
   type CompactDebugStringOptions,
   type DebugValueOptions,
+  FabricPrimitive,
 } from "@/interface.ts";
 import {
   toCompactDebugString,
@@ -91,6 +93,38 @@ describe("impl", () => {
       }
     });
 
+    it("renders a `FabricPrimitive` whose state holds itself down to the depth limit", () => {
+      class Circular extends FabricPrimitive {
+        static get [REALM_CODEC]() {
+          return {
+            tagForValue: () => "Circular@1",
+            encode: () => {
+              const state: Record<string, unknown> = { n: 1 };
+              state.self = state;
+              return state;
+            },
+          };
+        }
+      }
+
+      expect(toCompactDebugString(new Circular(), { maxDepth: 2 }))
+        .toBe("/Circular(n:1,self:{n:1,self:...})");
+    });
+
+    describe("with `maxBufferLength`", () => {
+      it("renders no more than 100000 bytes given a larger limit", () => {
+        const value = new FabricBytes(new Uint8Array(100001));
+        for (const limit of [500000, Infinity]) {
+          const result = toCompactDebugString(value, {
+            maxBufferLength: limit,
+          });
+          const [hex, elision] = result.split(" ...");
+          expect(hex?.match(/[0-9a-f]{2}/g)?.length).toBe(100000);
+          expect(elision).toBe("length:100001])");
+        }
+      });
+    });
+
     describe("with `backtickQuote`", () => {
       it("renders the truncated result as the code span, when both are asked for", () => {
         const options = { maxLength: 8, backtickQuote: true };
@@ -109,6 +143,7 @@ describe("impl", () => {
       const names = [
         "maxDepth",
         "maxArrayLength",
+        "maxBufferLength",
         "maxProperties",
         "maxStringLength",
         "maxStringLines",
