@@ -111,6 +111,20 @@ describe("impl", () => {
         .toBe("/Circular(n:1,self:{n:1,self:...})");
     });
 
+    describe("with `maxBufferLength`", () => {
+      it("renders no more than 100000 bytes given a larger limit", () => {
+        const value = new FabricBytes(new Uint8Array(100001));
+        for (const limit of [500000, Infinity]) {
+          const result = toCompactDebugString(value, {
+            maxBufferLength: limit,
+          });
+          const [hex, elision] = result.split(" ...");
+          expect(hex?.match(/[0-9a-f]{2}/g)?.length).toBe(100000);
+          expect(elision).toBe("length:100001])");
+        }
+      });
+    });
+
     describe("with `backtickQuote`", () => {
       it("renders the truncated result as the code span, when both are asked for", () => {
         const options = { maxLength: 8, backtickQuote: true };
