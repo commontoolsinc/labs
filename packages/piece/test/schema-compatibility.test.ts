@@ -8,7 +8,7 @@ import {
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
   FabricBytes,
 } from "@commonfabric/data-model/fabric-primitives";
-import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@commonfabric/data-model/fabric-primitives/for-testing-only";
+import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@commonfabric/data-model/for-testing-only";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "@commonfabric/runner/fabric-special-object-brand";
 import {
   assertPatternSchemasBackwardCompatible,
