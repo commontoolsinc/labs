@@ -2,12 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
 import { validateSchemaValue } from "@commonfabric/runner/cfc";
-import {
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  type FabricPrimitiveSchemaType,
-} from "@commonfabric/api";
+import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
 import type { FabricPrimitive } from "@commonfabric/data-model";
 import {
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
   FabricBytes,
   FabricEpochDay,
   FabricEpochNsec,

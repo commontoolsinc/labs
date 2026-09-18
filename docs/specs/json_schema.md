@@ -257,9 +257,12 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   matches a `FabricRegExp` even though its `source` is a string. Schemas
   generated from the real class types cannot express such a mismatch; only
   hand-written schemas can, and they get no shape enforcement on opaque
-  leaves. The authoritative name list is `FABRIC_PRIMITIVE_SCHEMA_TYPES` in
-  `packages/data-model/src/api.ts`, which `@commonfabric/api` re-exports, and
-  each name is the one its class's instances report as `.schemaType`.
+  leaves. Each name is the one its class's instances report as `.schemaType`,
+  and no list of them is written out: the type `FabricPrimitiveSchemaType`
+  (`packages/data-model/src/api.ts`, which `@commonfabric/api` re-exports) is
+  derived from the class declarations there, and the runtime list
+  `FABRIC_PRIMITIVE_SCHEMA_TYPES`
+  (`packages/data-model/src/fabric-primitives/index.ts`) from the classes.
 
 A generated schema places each named type in its root `$defs` and refers to
 it by `#/$defs/<name>`. The full TypeScript→schema mapping is specified in

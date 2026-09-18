@@ -9,15 +9,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import {
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  type FabricPrimitiveSchemaType,
-  isFabricPrimitiveSchemaType,
-} from "@/api.ts";
+import type { FabricPrimitiveSchemaType } from "@/api.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import {
   codecClasses,
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  fabricPrimitiveClassesByName,
   fabricPrimitiveClassOfSchemaType,
+  isFabricPrimitiveSchemaType,
 } from "@/fabric-primitives/index.ts";
 import { FABRIC_PRIMITIVE_CODEC_TYPE_TAGS } from "@/fabric-primitives/interface.ts";
 import { FabricPrimitive } from "@/interface.ts";
@@ -63,6 +62,25 @@ describe("fabric-primitives/index", () => {
       for (const [, value] of PRIMITIVES) {
         expect(classes.has(value.constructor)).toBe(true);
       }
+    });
+  });
+
+  describe("fabricPrimitiveClassesByName()", () => {
+    it("returns exactly the classes `codecClasses()` lists", () => {
+      const named = Object.values(fabricPrimitiveClassesByName());
+      expect(new Set<unknown>(named)).toEqual(new Set<unknown>(codecClasses()));
+      expect(named.length).toBe(codecClasses().length);
+    });
+
+    it("returns a frozen record", () => {
+      expect(Object.isFrozen(fabricPrimitiveClassesByName())).toBe(true);
+    });
+  });
+
+  describe("FABRIC_PRIMITIVE_SCHEMA_TYPES", () => {
+    it("is a frozen array with one entry per listed class", () => {
+      expect(Object.isFrozen(FABRIC_PRIMITIVE_SCHEMA_TYPES)).toBe(true);
+      expect(FABRIC_PRIMITIVE_SCHEMA_TYPES.length).toBe(codecClasses().length);
     });
   });
 
