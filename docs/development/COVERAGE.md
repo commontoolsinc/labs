@@ -620,6 +620,19 @@ was the arm, and each of them waits for the process to go in a different way.
 follows the single line from the group-level `+1` down to the one call in
 twenty-seven that covered it.
 
+Ask what stops the child before giving its signal a function of its own, since
+a signal that is not needed goes rather than becoming testable. A child that
+ends on a failed write to a pipe this process owns is stopped by closing that
+pipe — which is a property of that child, held by the ones that write their
+output and die on `SIGPIPE`, and not by one that ignores a failed write or has
+handed the write end to a child of its own. `nearestOnBranch()` in
+`tasks/coverage-gate.ts` reads `git rev-list` until the commit it was asked
+about appears, and leaving the loop that reads it cancels the stream, so git
+ends at its next write and `await child.status` reaps it. Its own
+[investigation record](../history/development/coverage-flake-gate-git-walk-2026-09-17.md)
+has the measurements, and the case that covers a walk stopping while git still
+has output to write.
+
 ### A line two callbacks share
 
 A seventh shape is not a branch only some runs take. Both arms run on every
