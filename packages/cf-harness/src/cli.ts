@@ -72,10 +72,7 @@ import type {
 } from "./contracts/transcript.ts";
 import { CfHarnessEngine } from "./engine.ts";
 import { resolveHarnessFabricSessionConfig } from "./fabric-session-options.ts";
-import {
-  type HarnessFabricSessionFactory,
-  resolveHarnessFabricSessionPosture,
-} from "./fabric-session.ts";
+import type { HarnessFabricSessionFactory } from "./fabric-session.ts";
 import {
   establishHarnessSessionContext,
   type HarnessSessionConfig,
@@ -571,10 +568,7 @@ Options:
   --max-confidentiality <json>  Read ceiling for the fabric session's runtime: a
                                 JSON array of confidentiality clauses every
                                 db.query the run issues is bounded by, met with
-                                any the run manifest declares (never widened).
-                                Refused before the run starts when the deployment
-                                runs under server execution, where the ceiling
-                                would bound nothing
+                                any the run manifest declares (never widened)
   --space-db <path>             The space database the run's per-cell label
                                 snapshot reads. Give it when this run's working
                                 directory shares no ancestor with the server's,
@@ -3196,26 +3190,7 @@ export const runCfHarnessCli = async (
         }
       }
       : undefined;
-    // A bounded fabric session has its posture resolved now, so a ceiling
-    // the deployment's server execution would leave bounding nothing is
-    // refused before the run spends a model turn, and the session is later
-    // built under the posture that refusal was decided on. An injected
-    // session replaces the deployment, so there is nothing to ask; an
-    // unbounded session resolves its posture when it is built.
-    const fabricSession = parsed.fabricSession !== undefined &&
-        deps.fabricSessionFactory === undefined &&
-        (parsed.fabricSession.cfcReadMaxConfidentiality !== undefined ||
-          runManifest?.cfc?.maxConfidentiality !== undefined)
-      ? await resolveHarnessFabricSessionPosture(parsed.fabricSession, {
-        env: (key) =>
-          deps.env !== undefined ? deps.env[key] : Deno.env.get(key),
-        ...(deps.fetchFn !== undefined ? { fetch: deps.fetchFn } : {}),
-      })
-      : parsed.fabricSession;
-    const sessionOptions = harnessSessionEngineOptions({
-      ...parsed,
-      ...(fabricSession !== undefined ? { fabricSession } : {}),
-    });
+    const sessionOptions = harnessSessionEngineOptions(parsed);
     const skillsShSearchClientFactory = parsed.skillsSh !== undefined &&
         deps.fetchFn !== undefined
       ? createHarnessSkillsShSearchClientFactory(

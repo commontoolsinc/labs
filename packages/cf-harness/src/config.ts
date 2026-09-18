@@ -15,7 +15,6 @@ import {
 } from "@commonfabric/runner/cfc";
 import {
   type CfcPosture,
-  type ExperimentalOptions,
   MAX_ENFORCEMENT_CFC_OPTIONS,
   presetCfcOptions,
 } from "@commonfabric/runner";
@@ -89,17 +88,6 @@ export interface HarnessFabricSessionConfig {
 
   /** Its `onExceed` default (`RuntimeOptions.cfcReadOnExceed`). */
   cfcReadOnExceed?: CfcReadOnExceed;
-
-  /**
-   * The experimental posture the session's runtime runs under, when the
-   * harness resolved it from the deployment at startup
-   * (`resolveHarnessFabricSessionPosture`): a bounded session is refused
-   * before the run starts if that posture is server execution, and the
-   * runtime is then built under the posture the refusal was decided on.
-   * Absent, the controller resolves the posture itself when the session is
-   * built.
-   */
-  experimental?: ExperimentalOptions;
 }
 
 /** Where a resolved session's read ceiling came from. */

@@ -352,11 +352,8 @@ The current package provides:
   `scope: "session"`, `.asScope("session")`, or a session-scoped db) and the
   runtime refuses any other query under it, so a pattern authored for a bounded
   run declares its results per session; it is refused without a fabric session,
-  and refused at startup — naming the flag and the deployment — when the
-  deployment runs under server execution, where the space server's runtime
-  serves the session's queries beyond the ceiling's reach; it is recorded with
-  its source as `readMaxConfidentiality` in `fabricSessionCfc`, printed in the
-  operator summary, and inherited unchanged by a delegated child;
+  recorded with its source as `readMaxConfidentiality` in `fabricSessionCfc`,
+  printed in the operator summary, and inherited unchanged by a delegated child;
 - an opt-in pattern index (`--pattern-index-url`, or its
   `CF_HARNESS_PATTERN_INDEX_URL` environment fallback), which needs the fabric
   session configuration: index requests are signed with the session identity
