@@ -32,7 +32,7 @@ The status corrections in this register are bounded to the rows below:
 | OW56 finding 2 | Closed: source following has one owner, the opener. ON upload and instantiate run on the serving runtime; source updates, other client creation paths, and compiled-byte trust remain separate OW56 work. |
 | OW58 | Closed: resolved-error notice commits release the drain guard. |
 | OW60 | Open: unresolved flag-ON client echoes are still skipped. |
-| OW64 | Open: a client's runtime read ceiling does not travel with its demand, so a bounded client session exists only on the OFF arm; the ON-arm refusal is pinned at the constructor, the pieces controller, and cf-harness. |
+| OW64 | Closed: a client's read ceiling rides its signed `session.open` descriptor, the SpaceServer stamps it onto every run served as that session, and the served `sqliteQuery` reads under it; pinned end to end. |
 
 The [coverage status audit](../../history/plans/server-execution-v2/optimize/coverage-status-audit-2026-09-09.md)
 records the investigation's inspected head, provenance, probes, and limits.
@@ -10159,31 +10159,51 @@ supply; OW29/OW32/OW34 closed):
     `packages/runner/test/sqlite-runtime-read-ceiling.test.ts`),
     which made the pieces controller's forwarding test fail at an ON
     default: the test depended on the ambient default for its arm.
-    DISPOSITION: the refusal stands and every consumer states the
-    arm. `PiecesController.initialize` takes the posture its runtime
-    runs under, so a host resolves it once and the runtime runs what
-    the host checked; the controller's tests pin forwarding on the
-    explicit OFF arm and the refusal on the explicit ON arm
-    (`packages/piece/test/pieces-controller-connection.test.ts`).
-    cf-harness — the production consumer, whose
-    `--max-confidentiality` reaches the controller through
-    `runtimePresets.remoteClient` and, unset, the first-party default
-    — resolves the deployment's posture at startup for a bounded
-    session and refuses before the first model turn, naming the flag
-    and the deployment
-    (`packages/cf-harness/src/fabric-session.ts`,
-    `resolveHarnessFabricSessionPosture`; pinned in
-    `packages/cf-harness/test/fabric-session.test.ts` and
-    `packages/cf-harness/test/cli.test.ts`). The preset table's
-    `cfcReadMaxConfidentiality` row says it is an OFF-arm dial.
-    STILL OWED: carrying a run's ceiling with its demand to the
-    runtime that serves it — into the served run context, the request
-    hash beside `runtimeReadCeiling`, and the effect key, with the
-    harness's bounded-as-configured attestation re-keyed on the served
-    runtime — which is a protocol.md / serving-loop.md ruling before it
-    is code. Until then a bounded client session exists only on the
-    OFF arm, and the post-soak flag removal (Phase 7) must rule on
-    this row before deleting that arm.
+    **CLOSED (2026-09-18, the same change): the ceiling travels with
+    the session.** RULED by the owner ("do this the right way"; the
+    ceiling is wanted for ordinary client sessions too, where the
+    server will sometimes assign it). Mechanism: the client runtime
+    hands its ceiling to its storage manager before any session
+    opens (`IStorageManager.setSessionReadCeiling`, refused after a
+    session is open), the manager declares it in every session's
+    signed `session.open` descriptor (`SessionDescriptor.readCeiling`,
+    memory-v2 04-protocol.md §4.1.2) and refuses a server that does
+    not advertise the `sessionReadCeiling` protocol flag, the memory
+    server records it on the session (fresh per open; a resume
+    re-declares) and exposes it through `Server.sessionReadCeiling` —
+    the ONE seam a server-assigned ceiling reaches the run through as
+    well — and the SpaceServer's `#stampRun` reads it for the run's
+    `scopeKeyIdentity.sessionId` and carries it as
+    `WaveRunContext.readCeiling`. The sqlite builtin resolves ONE
+    effective ceiling per run (`effectiveReadCeiling`: the serving
+    runtime's option met with the carried one, `onExceed` meeting
+    toward `fail`) and uses it where it used the runtime's option:
+    the session-scoped-result refusal, the request hash
+    (`runtimeReadCeiling`), the row meet and the mode default. The
+    constructor refusal is retired; what it refuses now is a manager
+    that cannot carry the ceiling. Pinned: wire parse, registry and
+    flag in `packages/memory/test/v2-session-read-ceiling.test.ts`;
+    the client capability gate and the late-declaration refusal in
+    `packages/runner/test/memory-v2-remote-session.test.ts`; the
+    constructor handoff and the effective-ceiling meet in
+    `packages/runner/test/sqlite-runtime-read-ceiling.test.ts`; end
+    to end — a bounded and an unbounded client of one space served
+    their own session instances of one `PerSession` query from one
+    labeled row set, and the non-session refusal on both runtimes —
+    in `packages/runner/test/executor-sqlite-read-ceiling.test.ts`;
+    the controller's forwarding on both arms in
+    `packages/piece/test/pieces-controller-connection.test.ts`.
+    cf-harness needs nothing: its `--max-confidentiality` bounds the
+    session on either arm, and its bounded-as-configured attestation
+    over the client runtime's fields stays true because the carried
+    value is those fields. One residual, recorded here rather than
+    hidden: a shared (space- or user-scoped) query result a bounded
+    session reads was computed by whichever run its node probed or
+    narrowed at, and the ceiling never applied to a run that was not
+    the session's — the same seam `RuntimeOptions.cfcReadMaxConfidentiality`'s
+    doc names for the OFF arm, closed the same way (a pattern authored
+    for a bounded run declares its query results per session; a
+    bounded client's own run refuses anything broader).
 
 ## 4. Standing rule
 

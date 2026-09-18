@@ -732,9 +732,17 @@ export interface RuntimeOptions {
    * reads are governed by the commit-boundary gates, and a host's direct
    * sqlite bridge refuses labeled tables outright. Validated and deep-frozen
    * at construction; an empty list, which admits nothing, is refused (omit
-   * the option for no ceiling), and so is a ceiling on a client under
-   * server execution, whose queries the space server's runtime serves
-   * outside this ceiling's reach.
+   * the option for no ceiling).
+   *
+   * A client under server execution executes no query of its own: the
+   * space server's runtime serves them. Its ceiling travels with its
+   * sessions instead — declared through the storage manager
+   * (`setSessionReadCeiling`) into every signed `session.open` descriptor
+   * before a session opens — and the serving loop stamps it onto every run
+   * it serves as one of those sessions, whose queries then read under the
+   * serving runtime's option met with it. Such a client refuses a storage
+   * manager that cannot carry the ceiling, and a server that does not
+   * record one (`sessionReadCeiling` absent from its protocol flags).
    */
   cfcReadMaxConfidentiality?: readonly CfcConfClause[];
 

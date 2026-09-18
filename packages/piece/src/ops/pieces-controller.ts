@@ -321,7 +321,8 @@ export class PiecesController<T = unknown> {
       // The runtime-wide read ceiling for this controller's session (the
       // remoteClient preset's host-controlled pair): every `db.query` the
       // session issues reads under it, and a query's own ceiling only
-      // tightens it.
+      // tightens it. Under server execution the session declares it to the
+      // space server, whose runtime reads under it for the session's runs.
       cfcReadMaxConfidentiality?: readonly CfcConfClause[];
       cfcReadOnExceed?: CfcReadOnExceed;
     },
