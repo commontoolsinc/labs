@@ -74,7 +74,6 @@ import {
   gatedSinkRequestExists,
   type ImplementationIdentity,
   isCfcEnforcementMode,
-  isCfcMetadata,
   type OrderedWriteAttempt,
   type PolicySnapshot,
   type PostCommitSideEffect,
@@ -226,44 +225,27 @@ const reservedSiblingPresent = (
   sibling === "cfc" ? cfcMetadataPresent(value) : value !== undefined;
 
 /**
- * Whether a written reserved sibling says what the stored one says.
+ * Whether a written reserved sibling is the stored one carried forward.
  *
- * Two version-1 `cfc` envelopes are compared on their canonical form, which
- * is what `prepareBoundaryCommit()` compares when it decides a derived label
- * map is the map already stored. A rebuilt envelope can differ from the
- * stored one byte-wise while holding the same labels — entry order, and the
- * order of an OR-clause's alternatives — and an envelope saying what the
- * stored one says changes no label.
- *
- * A version-2 envelope names its labels by content hash, and that hash is
- * taken over the canonical label, so two spellings of one label already
- * arrive as one reference. Comparing those envelopes by value is therefore
- * the same comparison. So is comparing a `source`, which nothing interprets,
- * and comparing a version-1 envelope against a version-2 one, which name
- * their labels differently enough that saying they hold the same labels
- * means resolving the references.
+ * What a whole-document write owes a reserved sibling is the value the
+ * document already holds, which is what reading the stored envelope and
+ * spreading it produces. An envelope assembled some other way is one this
+ * transaction composed rather than carried, and the guard records it whether
+ * or not the labels it names work out the same. Holding the rule at the value
+ * keeps one answer across every spelling a stored envelope takes: a version-1
+ * envelope carrying its labels, a version-2 one naming the large ones by
+ * content hash and holding the small ones inline, and a version the build
+ * does not read at all.
  */
-const reservedSiblingUnchanged = (
-  sibling: ReservedSibling,
+const reservedSiblingCarriedForward = (
   carried: unknown,
   stored: unknown,
-): boolean => {
+): boolean =>
   // `valueEqual` refuses a function, which is not a `FabricValue`. Such a
-  // value reaches the sibling like any other, so it is a change, and the
-  // storage layer reports it as the error it is.
-  if (typeof carried === "function") return false;
-  if (
-    sibling === "cfc" &&
-    isCfcMetadata(carried) && carried.version === 1 &&
-    isCfcMetadata(stored) && stored.version === 1
-  ) {
-    return deepEqual(
-      canonicalizeCfcMetadata(carried),
-      canonicalizeCfcMetadata(stored),
-    );
-  }
-  return valueEqual(carried as FabricValue, stored as FabricValue);
-};
+  // value is not what the document holds, so it records, and the storage
+  // layer reports it as the error it is.
+  typeof carried !== "function" &&
+  valueEqual(carried as FabricValue, stored as FabricValue);
 
 type CfcInstrumentationHooks = {
   onRelevantTx?(): void;
@@ -1489,7 +1471,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         },
       }).ok?.value;
       if (reservedSiblingPresent(sibling, carried)) {
-        if (reservedSiblingUnchanged(sibling, carried, stored)) continue;
+        if (reservedSiblingCarriedForward(carried, stored)) continue;
         this.markCfcRelevant(`unprivileged-${sibling}-forgery`);
       } else {
         if (!reservedSiblingPresent(sibling, stored)) continue;

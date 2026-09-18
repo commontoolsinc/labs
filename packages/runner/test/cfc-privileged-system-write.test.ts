@@ -517,12 +517,13 @@ describe("CFC privileged system write (S18)", () => {
     }
   });
 
-  it("does not gate a rebuilt envelope that says what the stored one says", async () => {
-    // What counts as the same map is what the persistence pass counts: two
-    // version-1 envelopes are compared on their canonical form. An OR clause
-    // holding the same alternatives in another order is the same label, so a
-    // writer that rebuilds the envelope rather than spreading what it read
-    // still carries the stored map forward.
+  it("gates a rebuilt envelope whose labels work out the same", async () => {
+    // What a whole-document write owes the sibling is the value the document
+    // holds. An OR clause listing the same alternatives in another order
+    // names the same label, and the envelope around it is still one this
+    // writer composed rather than the one it read, so it records. The rule
+    // holds at the value, which is the one answer that fits every spelling a
+    // stored envelope takes.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -566,8 +567,13 @@ describe("CFC privileged system write (S18)", () => {
           labelMap: { version: 1, entries: [entry("beta", "alpha")] },
         },
       });
-      expect(tx.getCfcState().unprivilegedSystemWrites).toEqual([]);
-      expect((await tx.commit()).ok).toBeDefined();
+      expect(tx.getCfcState().unprivilegedSystemWrites).toEqual([
+        `${address.id}/cfc`,
+      ]);
+      expect(tx.getCfcState().diagnostics).toContain(
+        "unprivileged-cfc-forgery",
+      );
+      expect((await tx.commit()).error).toBeDefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();

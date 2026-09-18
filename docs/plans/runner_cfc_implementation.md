@@ -389,14 +389,16 @@ therefore carries its own guard:
   version this build cannot read. Nothing interprets `source`, so definedness
   is the whole account there.
 - Whether the sibling that is there is the stored one decides the rest, and
-  what counts as the same map is what `prepareBoundaryCommit()` counts: two
-  version-1 envelopes are compared on their canonical form, so a rebuild that
-  reorders entries or an OR-clause's alternatives says what the stored envelope
-  says and passes. Everything else is compared as the value it is, which for a
-  version-2 envelope is the same comparison, because it names each label by a
-  hash taken over the label's canonical form. So an envelope whose `version`
-  this build cannot read is recorded when it differs from the stored one, and
-  passes when it is the stored one carried forward.
+  what a whole-document write owes it is the value the document already holds.
+  Reading the stored envelope and spreading it produces that value; an
+  envelope assembled some other way is one the transaction composed rather
+  than carried, and it is recorded whether or not the labels it names work out
+  the same. So a rebuild that reorders entries, or the alternatives inside an
+  OR clause, is recorded even though the label it names is unchanged. Holding
+  the rule at the value is what gives one answer across every spelling a
+  stored envelope takes: a version-1 envelope carrying its labels, a version-2
+  one naming the large ones by content hash and holding the small ones inline,
+  and a version this build does not read at all.
 - Nothing outside the runtime is given a way past this. A fixture still needs
   stored label state in shapes the derivation pass does not produce — a forged
   atom, a version this build cannot read, a record carrying no label map — and

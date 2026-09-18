@@ -255,7 +255,6 @@ export {
 } from "./denial-report.ts";
 export {
   cfcMetadataPresent,
-  isCfcMetadata,
   readStoredCfcMetadata,
   StoredCfcMetadataError,
   UnknownCfcMetadataVersionError,
