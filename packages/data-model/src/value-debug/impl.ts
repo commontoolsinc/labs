@@ -14,64 +14,52 @@ import { DebugConverter } from "./DebugConverter.ts";
 import { DebugStringifier } from "./DebugStringifier.ts";
 
 /**
- * Nesting depth a conversion stops at whatever its options say, so that
- * converting cannot blow out the stack.
+ * The limits a conversion stops at whatever its options say, so that a result
+ * is bounded in size whatever the input.
  */
-const ABSOLUTE_MAX_DEPTH = 100;
+const ABSOLUTE_LIMITS: ConversionLimits = Object.freeze({
+  /** Nesting depth, bounded so that converting cannot blow out the stack. */
+  maxDepth: 100,
 
-/** Nesting depth a conversion stops at, when its options do not say. */
-const DEFAULT_MAX_DEPTH = 10;
+  /** Number of array elements. */
+  maxArrayLength: 10000,
 
-/**
- * Number of array elements a conversion stops at whatever its options say, so
- * that a result is bounded in size whatever the input.
- */
-const ABSOLUTE_MAX_ARRAY_LENGTH = 10000;
+  /** Number of bytes of a buffer. */
+  maxBufferLength: 100000,
 
-/** Number of array elements a conversion stops at, when its options do not say. */
-const DEFAULT_MAX_ARRAY_LENGTH = 100;
+  /** Number of properties of an object. */
+  maxProperties: 10000,
 
-/**
- * Number of bytes of a buffer a rendering stops at whatever its options say,
- * so that a result is bounded in size whatever the input.
- */
-const ABSOLUTE_MAX_BUFFER_LENGTH = 100000;
+  /** Length of a string carried whole. */
+  maxStringLength: 100000,
 
-/** Number of bytes of a buffer a rendering stops at, when its options do not say. */
-const DEFAULT_MAX_BUFFER_LENGTH = 200;
+  /** Number of lines of a string carried whole. */
+  maxStringLines: 1000,
+});
 
-/**
- * Number of properties of an object a conversion stops at whatever its
- * options say, so that a result is bounded in size whatever the input.
- */
-const ABSOLUTE_MAX_PROPERTIES = 10000;
+/** The limits a conversion stops at, when its options do not say. */
+const DEFAULT_LIMITS: ConversionLimits = Object.freeze({
+  /** Nesting depth. */
+  maxDepth: 10,
 
-/**
- * Number of properties of an object a conversion stops at, when its options
- * do not say.
- */
-const DEFAULT_MAX_PROPERTIES = 100;
+  /** Number of array elements. */
+  maxArrayLength: 100,
 
-/**
- * Length of a string a conversion carries whole whatever its options say, so
- * that a result is bounded in size whatever the input.
- */
-const ABSOLUTE_MAX_STRING_LENGTH = 100000;
+  /** Number of bytes of a buffer. */
+  maxBufferLength: 200,
 
-/** Length of a string a conversion carries whole, when its options do not say. */
-const DEFAULT_MAX_STRING_LENGTH = 200;
+  /** Number of properties of an object. */
+  maxProperties: 100,
 
-/**
- * Number of lines of a string a conversion carries whole whatever its options
- * say, so that a result is bounded in size whatever the input.
- */
-const ABSOLUTE_MAX_STRING_LINES = 1000;
+  /**
+   * Length of a string carried whole. `checkedLimits()` uses `Infinity`
+   * instead when the options state a line count.
+   */
+  maxStringLength: 200,
 
-/**
- * Number of lines of a string a conversion carries whole, when its options do
- * not say.
- */
-const DEFAULT_MAX_STRING_LINES = 5;
+  /** Number of lines of a string carried whole. */
+  maxStringLines: 5,
+});
 
 /** Length `toShortQuotedDebugString()` cuts a rendering to. */
 const SHORT_MAX_LENGTH = 50;
@@ -139,6 +127,23 @@ function checkedLimit(
 }
 
 /**
+ * Helper for `checkedLimits()`, which makes a `ConversionLimits` by calling
+ * `limitFor` with the name of each limit in turn.
+ */
+function mapLimits(
+  limitFor: (name: keyof ConversionLimits) => number,
+): ConversionLimits {
+  return {
+    maxDepth: limitFor("maxDepth"),
+    maxArrayLength: limitFor("maxArrayLength"),
+    maxBufferLength: limitFor("maxBufferLength"),
+    maxProperties: limitFor("maxProperties"),
+    maxStringLength: limitFor("maxStringLength"),
+    maxStringLines: limitFor("maxStringLines"),
+  };
+}
+
+/**
  * Helper for the entry points, which validates `options` and returns the limits
  * they call for: each limit stated, or when not, its default, all capped at
  * their absolute maximums. The string length defaults to `Infinity` rather than
@@ -154,48 +159,13 @@ function checkedLimits(
 
   // A caller who states a line count and no length gets a line bound alone,
   // not the default length on top of it.
-  const defaultMaxStringLength = (options?.maxStringLines === undefined)
-    ? DEFAULT_MAX_STRING_LENGTH
-    : Infinity;
+  const defaults: ConversionLimits = (options?.maxStringLines === undefined)
+    ? DEFAULT_LIMITS
+    : { ...DEFAULT_LIMITS, maxStringLength: Infinity };
 
-  return {
-    maxDepth: checkedLimit(
-      "maxDepth",
-      options?.maxDepth,
-      DEFAULT_MAX_DEPTH,
-      ABSOLUTE_MAX_DEPTH,
-    ),
-    maxArrayLength: checkedLimit(
-      "maxArrayLength",
-      options?.maxArrayLength,
-      DEFAULT_MAX_ARRAY_LENGTH,
-      ABSOLUTE_MAX_ARRAY_LENGTH,
-    ),
-    maxBufferLength: checkedLimit(
-      "maxBufferLength",
-      options?.maxBufferLength,
-      DEFAULT_MAX_BUFFER_LENGTH,
-      ABSOLUTE_MAX_BUFFER_LENGTH,
-    ),
-    maxProperties: checkedLimit(
-      "maxProperties",
-      options?.maxProperties,
-      DEFAULT_MAX_PROPERTIES,
-      ABSOLUTE_MAX_PROPERTIES,
-    ),
-    maxStringLength: checkedLimit(
-      "maxStringLength",
-      options?.maxStringLength,
-      defaultMaxStringLength,
-      ABSOLUTE_MAX_STRING_LENGTH,
-    ),
-    maxStringLines: checkedLimit(
-      "maxStringLines",
-      options?.maxStringLines,
-      DEFAULT_MAX_STRING_LINES,
-      ABSOLUTE_MAX_STRING_LINES,
-    ),
-  };
+  return mapLimits((name) =>
+    checkedLimit(name, options?.[name], defaults[name], ABSOLUTE_LIMITS[name])
+  );
 }
 
 /**
