@@ -46,7 +46,7 @@ availability tables.
 - [ ] Confirm each of `people`, `calendar list`, `context`, `profile` against
       the pinned loom checkout (`~/looms/primary/src/bin/loom`): read-only,
       JSON output, argument list. Drop from the union any that is not; record
-      the dropped ones and why in `docs/LOOM_RETRIEVAL.md`.
+      the dropped ones and why in `packages/cf-harness/docs/LOOM_RETRIEVAL.md`.
 - [ ] `src/tools/loom-retrieval.ts` — one `HarnessToolDefinition` per tool
       (`loom_search`, `loom_page_discover`, `loom_page_inspect`,
       `loom_page_read`, `loom_people`, `loom_calendar_list`, `loom_context`,
@@ -85,9 +85,11 @@ availability tables.
       unlabeled hit refused; a hit above the ceiling sealed; the notice
       attached; availability gating in the descriptor tables; capability
       description lists the tools only when configured.
-- [ ] Documents: `docs/LOOM_RETRIEVAL.md` (new, the sibling of
-      `LOOM_AUTHORING.md`), `docs/IMPLEMENTATION_PROFILE.md` tool list,
-      `docs/CURRENT_STATE.md` supported surfaces, `README.md` where it lists
+- [ ] Documents: `packages/cf-harness/docs/LOOM_RETRIEVAL.md` (new, the
+      sibling of `packages/cf-harness/docs/LOOM_AUTHORING.md`),
+      `packages/cf-harness/docs/IMPLEMENTATION_PROFILE.md` tool list,
+      `packages/cf-harness/docs/CURRENT_STATE.md` supported surfaces,
+      `packages/cf-harness/README.md` where it lists
       Loom tools; `deno task check-skill-facts` if a skill cites a path.
 
 *Exit:* a batch run with `--loom-retrieval-config` and a scripted model answers
@@ -137,8 +139,8 @@ a run reaches its structured result. It is not a model tool.
       any write; a handle at a non-`asCell` position still becomes a link; a
       value above a declared ceiling at an `asCell` position is sealed rather
       than written.
-- [ ] Documents: `docs/IMPLEMENTATION_PROFILE.md` (the writer as a trusted
-      host path, AH-TOOL-7), `docs/CURRENT_STATE.md`.
+- [ ] Documents, under `packages/cf-harness/`: `docs/IMPLEMENTATION_PROFILE.md`
+      (the writer as a trusted host path, AH-TOOL-7), `docs/CURRENT_STATE.md`.
 
 *Exit:* the stage-2 test file passes and CFC inspection (`cf inspect`) of the
 written space shows the labels the test asserts.
@@ -167,10 +169,15 @@ written space shows the labels the test asserts.
         `createFrozenRequestSnapshot`, hash it;
       - memo: an existing `AgentRun` record for this `requestHash` in this
         instance means no new record and `pending`/`result` derive from it;
+        a stored `requestHash` with no record and no result — the request
+        committed and its effect did not run — is a new request and is staged
+        again, the way `generateObject` treats a stored hash with neither
+        result nor error;
       - stage the sink request under sink `agent` through
         `enqueueSinkRequestPostCommitEffect`, whose post-commit effect
         *creates the `AgentRun` record* (stage 4's schema) in the requesting
-        space, `PerUser`, with the request fields, and appends a `{link, host}`
+        space, `PerUser`, with the request fields — keyed by `requestHash`, so
+        an effect that runs twice creates one record — and appends a `{link, host}`
         entry to the requester's home index through the `.inSpace` crossing;
       - derive `pending`, `result`, `error` from the record's `state`,
         `result`, `outcome`, and `errorCode` by reading the record reactively;
@@ -217,7 +224,8 @@ and a result link, and observes `pending: false` and `result` on the node.
 ## Stage 4 — Records, index, runner
 
 **Packages:** `packages/patterns/system` (record and index schemas),
-`packages/cli` (the runner). **Depends on:** stages 2 and 3.
+`packages/runner` (the `#agent_queue` wish target), `packages/cli` (the
+runner). **Depends on:** stages 2 and 3.
 
 - [ ] Record schema — `packages/patterns/system/agent-run.tsx` exporting the
       `AgentRun` type of design §2.3 as a pattern-facing schema with `PerUser`
@@ -231,13 +239,19 @@ and a result link, and observes `pending: false` and `result` on the node.
       move the runner-written fields to `AgentRunProgress`, a sibling document
       the runner creates on claim and the record links to, and update design
       §2.3 in the same change.
-- [ ] Home index — `packages/patterns/system/agent-queue.tsx`: a piece whose
-      output carries `#agent_queue` in its schema description, holding
+- [ ] Home index — `packages/patterns/system/agent-queue.tsx`: a piece holding
       `entries: { run: link, host: string }[]` and the `agentRunner` entry
       `{ host, tools, registeredAt, lastClaimAt }` owner-protected the way
-      `ProfileInboxPointer` is on `profile-home.tsx`; registered once in the
-      home space by `home.tsx` the way favorites are, and discovered with
-      `wish({ query: "#agent_queue", scope: ["~"], headless: true })`.
+      `ProfileInboxPointer` is on `profile-home.tsx`; held by `home.tsx` in an
+      `agentQueue` field of the home default pattern, beside `favorites` and
+      `journal`, and discovered with
+      `wish({ query: "#agent_queue", headless: true })`.
+- [ ] `packages/runner/src/builtins/wish.ts` — `#agent_queue` as a well-known
+      home-space target resolving to `defaultPattern.agentQueue` of the home
+      space, beside `#journal` and `#learned`. A hashtag search under
+      `scope: ["~"]` reads favorites only, so it would not find the piece.
+      Tests beside the existing well-known-target tests; the target added to
+      the well-known list in `docs/common/conventions/wish.md`.
 - [ ] Runner — `packages/cli/commands/agent.ts` with subcommand `runner`,
       registered in `commands/main.ts`. Configuration: identity, cloud and
       local API URLs, `--loom-retrieval-config`, `--max-concurrent` (default
@@ -246,7 +260,8 @@ and a result link, and observes `pending: false` and `result` on the node.
       1. open client sessions to both toolsheds as the identity;
       2. write or refresh the `agentRunner` entry;
       3. subscribe to the index; on change, claim the oldest `queued` record
-         under the concurrency cap by committing `state: claimed`, `claim`;
+         under the concurrency cap by committing `state: claimed`, `claim`,
+         and `attempts` incremented;
       4. build a `HarnessSessionConfig` — input handles from the record's
          request links, `cfc.maxConfidentiality` from the request, tools
          from `tools`, `loomRetrieval` from the config, prompt-slot role
@@ -261,20 +276,21 @@ and a result link, and observes `pending: false` and `result` on the node.
       7. on a typed harness failure write `failed` with the taxonomy code; on
          a writer refusal write `refused`; on `cancel` abort through the
          harness's `signal` and write `cancelled`;
-      8. on start, and on each index change, re-queue once any `running`
-         record whose `leaseUntil` has passed and whose retry count is zero,
-         and fail one whose count is one.
+      8. on start, and on each index change, take any `claimed` or `running`
+         record whose `leaseUntil` has passed: re-queue it when its `attempts`
+         is one, and fail it as `RUNNER_LOST` when its `attempts` is two.
 - [ ] Error taxonomy — one module in `packages/runner` (or `packages/api`)
       exporting the codes `INVALID_INPUT`, `LIMIT_REACHED`, `PROVIDER_FAILURE`,
       `RUNNER_LOST`, `CANCELLED`, `REFUSED`, shared with the verb-refusal
       taxonomy the retention plan owes; the design document's §2.3 names it.
 - [ ] Tests: `packages/cli/test/agent-runner.test.ts` with a fake executor
       (an injected `createPromptLoop` returning a scripted loop, the seam
-      `src/cli.ts` already exposes as `deps.createPromptLoop`) over two
+      `packages/cf-harness/src/cli.ts` already exposes as
+      `deps.createPromptLoop`) over two
       in-process test toolsheds (the multi-runtime harness, one memory server
       per toolshed): every state transition; the memo hit creates no record;
-      two runners racing claim once; a killed runner's record re-queues once
-      then fails; `cancel` mid-run ends `cancelled`; the `agentRunner` entry
+      two runners racing claim once; a killed runner's record, left `claimed`
+      or left `running`, re-queues once then fails; `cancel` mid-run ends `cancelled`; the `agentRunner` entry
       appears and refreshes on claim; a cloud-hosted record is found from a
       local runner through a `{link, host}` entry. Pattern tests for
       `agent-queue.tsx` and `agent-run.tsx` under `packages/patterns/system`.
@@ -351,12 +367,13 @@ may start earlier.
       so a labeled cell outside the ceiling reads as withheld
       (`packages/runner/src/cfc/read-ceiling.ts` and the transaction read
       path); retire the session-scope requirement `run_pattern`'s description
-      states; update `IMPLEMENTATION_PROFILE.md` deviation 9 and
-      `README.md` §ceiling.
+      states; update `packages/cf-harness/docs/IMPLEMENTATION_PROFILE.md`
+      deviation 9 and `packages/cf-harness/README.md` §ceiling.
 - [ ] Deviation 8 / CT-2217: `delegate_task` carries the parent's observation
       ceiling into the child profile and rejects an inherited handle whose
       resolved value exceeds it (AH-CFC-12a); retire the AUD-23 known-defect
-      row in `audit/checks/known-defects.ts` and `conformance-manifest.ts`.
+      row in `packages/cf-harness/audit/checks/known-defects.ts` and
+      `packages/cf-harness/audit/conformance-manifest.ts`.
 - [ ] Group ceilings: a runner test with `maxConfidentiality:
       [{anyOf:[User(A),User(B)]}]` over cells labeled `User(A)`, `User(B)`,
       and `[User(A),User(B)]`, asserting which enter model context.
