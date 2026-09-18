@@ -20,6 +20,7 @@
 // from the engine's notion of value identity.
 
 import { hashOf } from "@commonfabric/data-model";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import type { SpaceDb } from "./db.ts";
 import { type EntityModel, listEntityModels } from "./model.ts";
@@ -237,18 +238,18 @@ export function generatedInternalCellIds(
 
 /** `{ $generated: N }` — the compiler's anonymous per-build ordinal. */
 function isGeneratedCause(cause: unknown): boolean {
-  return typeof cause === "object" && cause !== null && "$generated" in cause;
+  return isObjectOrArray(cause) && "$generated" in cause;
 }
 
 /** The link target id of a manifest entry (`{ partialCause, link }`). */
 function manifestLinkId(entry: unknown): string | undefined {
-  if (typeof entry !== "object" || entry === null) return undefined;
+  if (!isObjectOrArray(entry)) return undefined;
   const link = (entry as Record<string, unknown>).link;
-  if (typeof link !== "object" || link === null) return undefined;
+  if (!isObjectOrArray(link)) return undefined;
   const envelope = (link as Record<string, unknown>)["/"];
-  if (typeof envelope !== "object" || envelope === null) return undefined;
+  if (!isObjectOrArray(envelope)) return undefined;
   const payload = (envelope as Record<string, unknown>)["link@1"];
-  if (typeof payload !== "object" || payload === null) return undefined;
+  if (!isObjectOrArray(payload)) return undefined;
   const id = (payload as Record<string, unknown>).id;
   return typeof id === "string" ? id : undefined;
 }

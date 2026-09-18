@@ -8,6 +8,7 @@ import { Identity } from "@commonfabric/identity";
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -87,7 +88,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     const cell = rt.getCell(space, cause, undefined, seed);
     const id = cell.getAsNormalizedFullLink().id;
     writeSeedEnvelopeDoc(seed, space);
-    seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+    seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
       value,
       cfc: {
         version: 1,
@@ -394,7 +395,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     const seed = rt.edit();
     const cell0 = rt.getCell(space, "occ-carry-forward", undefined, seed);
     const id = cell0.getAsNormalizedFullLink().id;
-    seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+    seedStoredEnvelope(seed, { space, scope: "space", id, path: [] }, {
       value: { slot: { "/": { "link@1": {} } }, other: 1 },
       cfc: {
         version: 1,

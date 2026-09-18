@@ -6,6 +6,7 @@ import {
   type MutableFabricPlainObjectLayer,
   shallowMutableClone,
   taggedHashStringOf,
+  valueEqual,
 } from "@commonfabric/data-model";
 import { walkSchemaDocumentClosure } from "@commonfabric/data-model-schema/schema-closure";
 import {
@@ -108,6 +109,11 @@ import {
   rawMetaWriteAuthorized,
   storedMetaFields,
 } from "../meta-seam.ts";
+import {
+  isReservedSibling,
+  RESERVED_SIBLINGS,
+  type ReservedSibling,
+} from "../reserved-sibling-seam.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import { lookupSchemaDocument } from "../schema-registry.ts";
@@ -201,6 +207,44 @@ const createOnlyMarkKey = (
   link: { id: string; scope?: unknown },
 ): string =>
   `${normalizeCellScope(link.scope as CellScope | undefined)}\0${link.id}`;
+
+/**
+ * Whether a value at a reserved sibling leaves the document carrying that
+ * sibling, as the sibling's own reader accounts for it.
+ *
+ * `cfc` has such a reader, and `cfcMetadataPresent` is its account: `null` and
+ * a record with no `version` are values a document reads as carrying no label
+ * map. Nothing interprets `source`, so definedness is the whole account there,
+ * which is how the meta seam reads its own fields.
+ */
+const reservedSiblingPresent = (
+  sibling: ReservedSibling,
+  value: unknown,
+): boolean =>
+  sibling === "cfc" ? cfcMetadataPresent(value) : value !== undefined;
+
+/**
+ * Whether a written reserved sibling is the stored one carried forward.
+ *
+ * What a whole-document write owes a reserved sibling is the value the
+ * document already holds, which is what reading the stored envelope and
+ * spreading it produces. An envelope assembled some other way is one this
+ * transaction composed rather than carried, and the guard records it whether
+ * or not the labels it names work out the same. Holding the rule at the value
+ * keeps one answer across every spelling a stored envelope takes: a version-1
+ * envelope carrying its labels, a version-2 one naming the large ones by
+ * content hash and holding the small ones inline, and a version the build
+ * does not read at all.
+ */
+const reservedSiblingCarriedForward = (
+  carried: unknown,
+  stored: unknown,
+): boolean =>
+  // `valueEqual` refuses a function, which is not a `FabricValue`. Such a
+  // value is not what the document holds, so it records, and the storage
+  // layer reports it as the error it is.
+  typeof carried !== "function" &&
+  valueEqual(carried as FabricValue, stored as FabricValue);
 
 type CfcInstrumentationHooks = {
   onRelevantTx?(): void;
@@ -299,7 +343,7 @@ const throwCfcReadOnly = (): never => {
 // Exported for tests: the bypass vectors (descriptor recovery, Map
 // iteration leaks) are pinned by unit-testing the helper directly.
 export const readOnlyCfcView = <T>(value: T): T => {
-  if (value === null || typeof value !== "object") return value;
+  if (!isObjectOrArray(value)) return value;
   if (Object.isFrozen(value)) return value;
   const cached = readOnlyCfcViews.get(value);
   if (cached !== undefined) return cached as T;
@@ -667,15 +711,33 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   /**
    * The prepared-digest input and epoch-bound computation, which tests and
-   * benchmarks drive directly to check binding and cache reuse.
+   * benchmarks drive directly to check binding and cache reuse, and the
+   * privileged write a fixture installs stored runtime state with.
+   *
+   * `privilegedSystemWrite()` runs one write inside the privileged
+   * persistence scope, so it lands a document's reserved siblings the way
+   * `prepareBoundaryCommit()` lands a derived label map. A fixture needs it
+   * because the states it seeds are ones the derivation pass does not
+   * produce: a forged atom, a version this build cannot read, a record with
+   * no label map. Seeding through the ordinary write surface would be
+   * recorded as the forgery it resembles, and the commit would fail closed.
    */
   get accessForTestingOnly(): {
     buildPreparedDigestInput(): PreparedDigestInput;
     preparedDigest(): string;
+    privilegedSystemWrite(
+      address: IMemorySpaceAddress,
+      value: FabricValue,
+      options?: IWriteOptions,
+    ): void;
   } {
     return {
       buildPreparedDigestInput: () => this.#buildPreparedDigestInput(),
       preparedDigest: () => this.#preparedDigest(),
+      privilegedSystemWrite: (address, value, options) =>
+        this.#runPrivilegedSystemWrite(() =>
+          this.writeOrThrow(address, value, options)
+        ),
     };
   }
 
@@ -1166,9 +1228,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * (`#`) and absent from `IExtendedStorageTransaction`, so handler code
    * reaching `cell.tx` cannot enter the scope —
    * `(cell.tx as any).#runPrivilegedSystemWrite` is a `TypeError`, not a bypass
-   * (audit S18). Tests that need stored `["cfc"]` metadata seed it instead via
-   * an ungated path-`[]` full-document write (the same shape hydration
-   * delivers), never through this scope.
+   * (audit S18). A fixture that needs stored `["cfc"]` metadata reaches one
+   * write inside this scope through `accessForTestingOnly`, which names what
+   * it is for.
    */
   #runPrivilegedSystemWrite<T>(fn: () => T): T {
     this.#privilegedSystemWriteDepth += 1;
@@ -1314,54 +1376,56 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           `is emitted as a patch and rejected by the memory server.`,
       );
     }
-    // A path-[] write replaces the whole document envelope, so it reaches the
-    // label map without naming it.
+    // A path-[] write replaces the whole document envelope, so it reaches
+    // every reserved sibling without naming one.
     if (address.path.length === 0) {
       this.#noteRootEnvelopeWrite(address, value);
       return;
     }
-    // The ["cfc"] document field holds the persisted label map. A value-path
-    // write (path[0] is a user key) is not it.
-    if (address.path[0] !== "cfc") return;
-    this.markCfcRelevant("unprivileged-cfc-metadata-write");
+    // An address that names a reserved sibling, or a path inside one. The
+    // ["cfc"] sibling holds the persisted label map and ["source"] names the
+    // entity a document was derived from; a value-path write (path[0] is
+    // "value") is neither.
+    const sibling = address.path[0];
+    if (!isReservedSibling(sibling)) return;
+    this.markCfcRelevant(`unprivileged-${sibling}-write`);
     this.#cfcState.unprivilegedSystemWrites.push(
       `${address.id}/${address.path.join("/")}`,
     );
   }
 
   /**
-   * Records a path-`[]` whole-document write that erases the stored `["cfc"]`
-   * label map. Such a write replaces every sibling of `value`, so an envelope
-   * that leaves the document without a label map erases the one it held, and a
-   * labeled document reads afterwards as an unlabeled one. That is the
-   * downgrade the `["cfc"]`-path arm of `#noteSystemWrite()` catches, reached
-   * by omission rather than by overwrite, so it lands in the same record and
-   * yields the same fail-closed reason.
+   * Records a path-`[]` whole-document write that changes a reserved sibling.
+   * A root write replaces every sibling of `value`, so it reaches each of them
+   * at once, by omission as much as by overwrite. An envelope that leaves the
+   * document without a label map erases the one it held, and a labeled
+   * document reads afterwards as an unlabeled one. An envelope that leaves a
+   * map behind that is not the stored one installs a map the derivation pass
+   * never derived, and a document's map is what decides the label it claims —
+   * the runtime-evidence atoms a prompt-injection screen trusts included. Both
+   * are the downgrade the addressed arm of `#noteSystemWrite()` catches,
+   * reached by replacing the envelope rather than by naming the sibling, so
+   * both land in the same record and yield the same fail-closed reason.
    *
-   * Both halves ask `cfcMetadataPresent()`, the reader's own account of what
-   * presents a label map, so the arm fires on the change a reader would see
-   * rather than on the presence of a key. An envelope carrying `cfc: null`, or
-   * any other value the reader reports as absent, erases the map as surely as
-   * one carrying no `cfc` at all. A stored value the reader reports as absent
-   * is not a map to erase.
+   * A sibling is compared on what a reader would see, so the arm fires on a
+   * change rather than on the presence of a key. For `cfc` that account is
+   * `cfcMetadataPresent()`: an envelope carrying `cfc: null`, or any other
+   * value the reader reports as absent, erases the map as surely as one
+   * carrying no `cfc` at all, and a stored value the reader reports as absent
+   * is not a map to erase. Nothing interprets `source`, so for that sibling
+   * the account is definedness, which is how the meta seam reads its own
+   * fields.
    *
-   * What this does _not_ reach is a root write that leaves a label map behind
-   * but not the stored one — minting a map where the document had none, or
-   * substituting one for another. Both are the S18 forgery this seam still
-   * stands open on, and the CFC test suite seeds stored label state through
-   * exactly those shapes, so closing them means giving those fixtures another
-   * way to seed first.
-   *
-   * The guard read is transaction-local, and it bounds what this arm
+   * The guard reads are transaction-local, and that bounds what this arm
    * establishes. A transaction whose view does not hold the document answers
-   * the same no-map-here that a document with no map answers, so a writer that
-   * has not synced the document erases its label map and commits. There is no
-   * race in that: the map is present throughout, and the writer simply never
-   * looked. What the arm establishes is that a root envelope write cannot erase
-   * a label map _this transaction has loaded_, which is narrower than the seam
-   * needs. Closing the rest means forcing the document into view before
-   * deciding — the read-modify-write this design declines — or making the
-   * commit boundary establish what the space holds.
+   * the same nothing-here that a document with nothing answers, so a writer
+   * that has not synced the document erases its label map and commits. There
+   * is no race in that: the map is present throughout, and the writer simply
+   * never looked. The bound falls on erasure alone — a forgery is decided from
+   * the envelope, which the writer supplied, so an unsynced writer that mints
+   * a map is recorded like any other. Closing the erasure half means forcing
+   * the document into view before deciding — the read-modify-write this design
+   * declines — or making the commit boundary establish what the space holds.
    * `cfc-privileged-system-write.test.ts` pins the bypass, so it fails when
    * either lands.
    */
@@ -1369,37 +1433,51 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     value: FabricValue | undefined,
   ): void {
-    // The arm fires only when a map is there to erase: creating a document,
-    // and replacing one that carries no label map, pass through. Hydration
-    // passes through as well — an envelope delivered from storage carries the
-    // `cfc` it was stored with — and the runtime's own root writes (`cid:`
-    // schema documents) return at the privileged-scope check above before
-    // reaching here.
+    // A root write that carries the stored sibling forward unchanged changes
+    // nothing and passes, which is what `ACLManager` does by spreading the
+    // envelope it read. Creating a document, and replacing one that carries no
+    // reserved sibling, change nothing either. Hydration passes through as
+    // well — an envelope delivered from storage carries the siblings it was
+    // stored with — the runtime's own root writes (`cid:` schema documents)
+    // return at the privileged-scope check above before reaching here, and a
+    // writer that speaks for the runtime from outside that scope marks its
+    // write instead.
     //
-    // The read carries no weight of its own, the way the meta seam's guard
-    // read above carries none. It goes through the inner transaction, so it
-    // stays out of the outer transaction's reactivity log and flow join; it
-    // names the `["cfc"]` member rather than the document root, so it does not
-    // widen what the transaction counts as consumed; and `ignoreReadForCommit`
-    // keeps it out of the conflict set, so a blind root write stays blind
-    // rather than becoming a read-modify-write that loses the race against
-    // any advance of the document it replaces. `internalVerifierRead` says
-    // what the read is: the runtime resolving a label, the same mark
-    // `readStoredCfcMetadata()` carries.
-    const carried = isObjectOrArray(value)
-      ? (value as { cfc?: unknown }).cfc
+    // The reads carry no weight of their own, the way the meta seam's guard
+    // read above carries none. They go through the inner transaction, so they
+    // stay out of the outer transaction's reactivity log, and
+    // `ignoreReadForCommit` keeps them out of the conflict set, so a blind
+    // root write stays blind rather than becoming a read-modify-write that
+    // loses the race against any advance of the document it replaces. They
+    // name a member rather than the document root, which the meta seam's guard
+    // cannot do: the logical path a raw meta member reads is the one a user
+    // field of the same name is labeled at, so reading `["slug"]` would
+    // consume `value.slug`. A reserved sibling's raw path is excluded from the
+    // flow join by name, so reading it consumes nothing whatever a user field
+    // called `cfc` holds. `internalVerifierRead` says what the read is: the
+    // runtime resolving a label, the same mark `readStoredCfcMetadata()`
+    // carries.
+    const envelope = isObjectOrArray(value)
+      ? value as { readonly [key in ReservedSibling]?: FabricValue }
       : undefined;
-    if (cfcMetadataPresent(carried)) return;
-    const stored = this.tx.read({ ...address, path: ["cfc"] }, {
-      meta: {
-        ...ignoreReadForScheduling,
-        ...ignoreReadForCommit,
-        ...internalVerifierRead,
-      },
-    });
-    if (!cfcMetadataPresent(stored.ok?.value)) return;
-    this.markCfcRelevant("unprivileged-cfc-metadata-erasure");
-    this.#cfcState.unprivilegedSystemWrites.push(`${address.id}/cfc`);
+    for (const sibling of RESERVED_SIBLINGS) {
+      const carried = envelope?.[sibling];
+      const stored = this.tx.read({ ...address, path: [sibling] }, {
+        meta: {
+          ...ignoreReadForScheduling,
+          ...ignoreReadForCommit,
+          ...internalVerifierRead,
+        },
+      }).ok?.value;
+      if (reservedSiblingPresent(sibling, carried)) {
+        if (reservedSiblingCarriedForward(carried, stored)) continue;
+        this.markCfcRelevant(`unprivileged-${sibling}-forgery`);
+      } else {
+        if (!reservedSiblingPresent(sibling, stored)) continue;
+        this.markCfcRelevant(`unprivileged-${sibling}-erasure`);
+      }
+      this.#cfcState.unprivilegedSystemWrites.push(`${address.id}/${sibling}`);
+    }
   }
 
   /**
@@ -2598,7 +2676,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // A vouched ingest still needs its provenance mark minted even where
       // CFC enforcement is disabled (an explicit `cfcEnforcementMode:
       // "disabled"` opt-in — no shipped host today; toolshed passes no CFC
-      // options and so runs the enforce-explicit default). The mint is a
+      // options and so runs the enforce-strict default). The mint is a
       // builtin-authored boundary-commit step that never rejects, so run
       // prepare for it explicitly rather than forcing the enforcement dial up
       // (which would desync ingest txs from the runtime's real mode). The
@@ -3199,12 +3277,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // throw propagate past the commit, which is what every caller does
       // today). See `writeValuesOrThrow` partial-batch coverage in
       // `packages/runner/test/memory-v2-acl-mutation.test.ts`.
-      // The value reaches the chokepoint's meta-seam and label-map arms,
-      // both of which read the envelope of a document-root write. A batch
-      // addresses its writes by link, and `toMemorySpaceAddress` prefixes
-      // "value", so no batch write is addressed at a document root; the value
-      // travels anyway, so the batch and single-write paths ask the
-      // chokepoint the same question.
+      // The value reaches the chokepoint's meta-seam and reserved-sibling
+      // arms, both of which read the envelope of a document-root write. A
+      // batch addresses its writes by link, and `toMemorySpaceAddress`
+      // prefixes "value", so no batch write is addressed at a document root
+      // or at a sibling; the value travels anyway, so the batch and
+      // single-write paths ask the chokepoint the same question. A batch
+      // carries no options, so it authorizes nothing either.
       const noteSystemWrite = (
         address: IMemorySpaceAddress,
         value: FabricValue,

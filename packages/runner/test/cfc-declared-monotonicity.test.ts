@@ -15,6 +15,7 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
+import { seedStoredEnvelope } from "./cfc-seed-envelope.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-declared-mono");
 
@@ -214,7 +215,7 @@ const rewriteStoredEntries = async (
     };
   };
   cloned.cfc.labelMap.entries = mutate(cloned.cfc.labelMap.entries);
-  tx.writeOrThrow({
+  seedStoredEnvelope(tx, {
     space: signer.did(),
     id: docId as URI,
     type: "application/json",

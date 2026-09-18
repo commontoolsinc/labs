@@ -13,6 +13,7 @@ import type {
   SpaceMembershipProvider,
 } from "@commonfabric/runner/cfc";
 import type { CellRef, JSONValue } from "@commonfabric/runtime-client";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { VDomOp } from "../vdom-ops.ts";
 
 /**
@@ -66,11 +67,7 @@ export type WorkerJSXElement = WorkerVNode | Cell<WorkerVNode>;
  * Check if a value is a WorkerVNode.
  */
 export function isWorkerVNode(value: unknown): value is WorkerVNode {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as WorkerVNode).type === "vnode"
-  );
+  return isObjectOrArray(value) && value.type === "vnode";
 }
 
 /**
@@ -343,7 +340,7 @@ export function normalizeRenderConfidentialityCeiling(
   value: unknown,
 ): RenderConfidentialityCeiling | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "object" || value === null) return {};
+  if (!isObjectOrArray(value)) return {};
   const { atoms, caveatKinds } = value as {
     atoms?: unknown;
     caveatKinds?: unknown;

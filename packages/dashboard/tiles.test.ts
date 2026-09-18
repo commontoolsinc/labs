@@ -678,15 +678,15 @@ Deno.test("registry: unique ids and positive intervals", () => {
   }
 });
 
-Deno.test("every tile's drill-down link reaches a route the wall serves", () => {
-  // An unrecognized path falls through to the wall itself, so a tile linking
-  // at a page nobody serves lands the viewer back where they started.
+Deno.test("every tile's drill-down link reaches a route the dashboard serves", () => {
+  // An unrecognized path falls through to the dashboard itself, so a tile
+  // linking at a page nobody serves lands the viewer back where they started.
   const served = new Set(
     TILES.flatMap((tile) => tile.routes ?? []).map((route) => route.path),
   );
   for (const { id, view } of TILE_LAYOUT_FIXTURES) {
     if (view.href === undefined || /^https?:/.test(view.href)) continue;
-    const path = new URL(view.href, "http://wall").pathname;
+    const path = new URL(view.href, "http://dashboard").pathname;
     assert(
       served.has(path),
       `${id} links to ${path}, which no registered tile serves`,

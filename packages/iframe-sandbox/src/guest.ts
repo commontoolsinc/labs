@@ -12,6 +12,7 @@ import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
   BRIDGE_PROTOCOL,
@@ -255,7 +256,7 @@ export class RemoteCell<T = FabricValue> {
     let value: unknown = this.get();
     let hasValue = this.#snapshot.status === "ready";
     for (const key of keys) {
-      if (value === null || typeof value !== "object") {
+      if (!isObjectOrArray(value)) {
         hasValue = false;
         break;
       }

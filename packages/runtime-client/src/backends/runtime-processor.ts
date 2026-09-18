@@ -3,7 +3,7 @@ import {
   cloneIfNecessary,
   fabricFromConvertibleJsValue,
   type FabricValue,
-  toCompactDebugString,
+  toLongQuotedDebugString,
   toStructuredDebugValue,
 } from "@commonfabric/data-model";
 import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
@@ -112,7 +112,11 @@ import {
   resetAllTimingBaselines,
 } from "@commonfabric/utils/logger";
 import { backtickQuote } from "@commonfabric/utils/markdown";
-import { isPlainObject } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  isPlainObject,
+} from "@commonfabric/utils/types";
 
 import { postToClient } from "./post-to-client.ts";
 import {
@@ -662,7 +666,7 @@ export function toConsoleDebugValue(value: unknown): FabricValue {
 export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
   schema === true ||
   (schema !== undefined && schema !== false &&
-    typeof schema === "object" && schema !== null &&
+    isObjectOrArray(schema) &&
     Object.keys(schema).length > 0);
 
 /**
@@ -1898,7 +1902,7 @@ export class RuntimeProcessor {
     await cell.pull();
     const raw = cell.getRaw({ lastNode: "value" });
     const missing = raw === undefined ||
-      (raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
+      (isObjectNotArray(raw) &&
         Object.keys(raw).length === 0);
     if (missing) {
       // A resolved scoped target can be demanded while its lazy factory write
@@ -2145,7 +2149,7 @@ export class RuntimeProcessor {
       // is bounded because the argument is a caller's data.
       throw new Error(
         `A piece's argument must be a record, not: ${
-          toCompactDebugString(argument, { maxLength: 120 })
+          toLongQuotedDebugString(argument)
         }`,
       );
     }

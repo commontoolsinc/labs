@@ -21,7 +21,7 @@ import {
   type FabricValueLayer,
   type FabricValuePlusLayer,
 } from "@/interface.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
+import { toShortQuotedDebugString } from "@/value-debug";
 
 import { type PlusTypePredicate } from "./interface.ts";
 import {
@@ -47,7 +47,7 @@ export function tagOfFabricPrimitive(
     return result;
   }
 
-  const desc = toCompactDebugString(value, { backtickQuote: true });
+  const desc = toShortQuotedDebugString(value);
   throw new Error(`Not a valid \`FabricPrimitive\`: ${desc}`);
 }
 
@@ -149,7 +149,7 @@ export function tagOfFabricValue<PlusType = never>(
     return result;
   }
 
-  const desc = toCompactDebugString(value, { backtickQuote: true });
+  const desc = toShortQuotedDebugString(value);
   throw new Error(`Not possibly a valid \`FabricValue\`: ${desc}`);
 }
 

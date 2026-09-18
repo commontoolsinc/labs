@@ -121,7 +121,7 @@ describe("store", () => {
     it("breaks a tie on the name by code point, not by locale", () => {
       // Every reader orders a name the same way, and a locale's order is
       // not that: two manifests created in one millisecond would leave a
-      // lane and the wall obeying different ones. A locale collation
+      // lane and the dashboard obeying different ones. A locale collation
       // sorts a capital after the small letter it matches, where a code
       // point puts every capital first.
       const createdAt = "2026-08-20T04:00:00.000Z";

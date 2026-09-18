@@ -844,6 +844,104 @@ export async function readCfInputValue(
   return probe.value;
 }
 
+/**
+ * Fill the native `<textarea>` a `cf-textarea` wraps, and let the blur commit
+ * it.
+ *
+ * Separate from {@link fillCfInput} because that one drives an `<input>`: it
+ * resolves `element.shadowRoot?.querySelector("input")` and gives up on a host
+ * that has none. This drives the field as a person does — focus, set the value,
+ * dispatch `input` and `change`, then blur.
+ *
+ * The blur is what commits the draft, and it is load-bearing rather than
+ * tidiness. `cf-textarea` defaults to the `debounce` timing strategy at 300ms,
+ * and its blur handler reaches `InputTimingController.onBlur` by way of its
+ * cell controller; that method runs the pending callback at once rather than
+ * waiting the timer out. Without the blur the write waits out the debounce
+ * instead, which a caller clicking a submit control on the next line does not
+ * wait for.
+ *
+ * There is no `commit()` to call on this host: `cf-input` declares one and
+ * `cf-textarea` does not.
+ *
+ * Presentation mode does not animate this fill. `typeIntoCfInput`, the
+ * presentation path {@link fillCfInput} routes through, resolves an
+ * `HTMLInputElement` and throws for anything else, so a recorded run shows the
+ * text arriving in the field rather than being typed into it.
+ */
+export async function fillCfTextarea(
+  page: Page,
+  selector: string,
+  value: string,
+) {
+  await waitForRuntimeIdle(page);
+  const field = await page.waitForSelector(selector, {
+    strategy: "pierce",
+  });
+  // Two ways to come back empty-handed, reported apart: a selector that names
+  // no textarea is a different defect from one that names a textarea the fill
+  // did not take, and a single message for both asserts whichever cause it
+  // happens to name.
+  const outcome = await field.evaluate((element: Element, nextValue) => {
+    const textarea = element instanceof HTMLTextAreaElement
+      ? element
+      : element.shadowRoot?.querySelector("textarea");
+    if (!(textarea instanceof HTMLTextAreaElement)) return "no-textarea";
+    textarea.focus();
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )?.set;
+    if (setter) setter.call(textarea, nextValue);
+    else textarea.value = nextValue;
+    textarea.dispatchEvent(
+      new Event("input", { bubbles: true, composed: true }),
+    );
+    textarea.dispatchEvent(
+      new Event("change", { bubbles: true, composed: true }),
+    );
+    textarea.blur();
+    return textarea.value === nextValue ? "filled" : "value-mismatch";
+  }, { args: [value] });
+  if (outcome === "no-textarea") {
+    throw new Error(`"${selector}" did not resolve to a textarea`);
+  }
+  if (outcome !== "filled") {
+    throw new Error(
+      `"${selector}" resolved a textarea that did not take the value`,
+    );
+  }
+}
+
+/**
+ * Write the whole of `data` to `stream`, which one `writeSync` may not do.
+ *
+ * `writeSync` is synchronous, not complete: it returns the number of bytes it
+ * took, and a pipe that is full takes fewer than it was offered. A bench file's
+ * diagnostics reach the Benchmarks workflow through exactly such a pipe and
+ * carry whole sample dumps, so a single call can truncate one with nothing to
+ * say it did.
+ *
+ * `@std/io` is not mapped here, so the loop is written out, as
+ * `packages/cli/lib/view/mod.ts` writes it for stdout.
+ *
+ * @throws If the stream takes no bytes, rather than looping forever offering
+ *   them.
+ */
+export function writeAllSync(
+  stream: { writeSync(data: Uint8Array): number },
+  data: Uint8Array,
+): void {
+  let written = 0;
+  while (written < data.length) {
+    const took = stream.writeSync(data.subarray(written));
+    if (took <= 0) {
+      throw new Error(`The stream accepted no bytes of ${data.length}.`);
+    }
+    written += took;
+  }
+}
+
 export async function waitForRuntimeIdle(
   page: Page,
 ) {

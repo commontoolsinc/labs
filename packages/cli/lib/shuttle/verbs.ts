@@ -46,6 +46,7 @@ import {
   resolvePieceReference,
   SlugResolutionError,
 } from "@commonfabric/piece";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
   callFromCommand,
@@ -1111,8 +1112,9 @@ async function watch(
   }
   // Made and handed over before anything is held, so the lens has its owner
   // before it holds a subscription, and a handover that throws has nothing to
-  // undo.
-  const lens = new ValueLens(armed.label);
+  // undo. It is given both names the watch carries: the short one the frame is
+  // titled with, and the reference `e` composes a line out of.
+  const lens = new ValueLens(armed.label, armed.key);
   deps.adoptLens?.(lens);
   const watching = await subscribed(shuttle, place, at.input, deps, (value) => {
     armed.settled(value);
@@ -1646,8 +1648,16 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
       "armed watch writes one line above the prompt per settled\nchange, " +
       "naming the cell that changed rather than what it changed to.\n" +
       "The view scrolls with `j`/`k` and the arrows, `g` and `G` are its " +
-      "ends, and\n`ctrl-c` closes it as `q` does — the whole of what it " +
-      "answers to. It repaints\nonce per quiet runtime rather than once per " +
+      "ends, and\n`ctrl-c` closes it as `q` does — where nothing is being " +
+      "typed at the view and no\nline it asked for is running, those being " +
+      "what a `ctrl-c` reaches first. `/`\nfinds text in the " +
+      "rendering and `n`/`N`\nmove between the matches; `e` opens the " +
+      "watched cell in `$EDITOR`, as\n`edit` does; and `:` runs any shuttle " +
+      "line without leaving the view — where\na line typed at the prompt " +
+      "runs, under the same `ctrl-c`, its output\njoining the transcript " +
+      "when the view gives the screen back. The frame's\nbottom edge offers " +
+      "what it answers to in whichever of those states it is\nin. It " +
+      "repaints\nonce per quiet runtime rather than once per " +
       "value on the way there.\n\nA cell already watched is refused: two " +
       "watches on one cell write two of\nevery line. The line numbers what " +
       "is armed as it arms one, so `unwatch %n`\nneeds no `watches` first.",
@@ -2465,7 +2475,7 @@ async function resolveTarget(
  * is a wish that resolved to no address at all.
  */
 function addressIn(result: unknown): string | undefined {
-  if (result === null || typeof result !== "object") return undefined;
+  if (!isObjectOrArray(result)) return undefined;
   const address = (result as Record<string, unknown>)[LINK_MARKER_KEY];
   return typeof address === "string" ? address : undefined;
 }
@@ -2707,7 +2717,7 @@ function unwritableInJson(
   if (typeof value === "number" && unwritableNumber(value)) {
     return { what: numberIs(value), at };
   }
-  if (value === null || typeof value !== "object") return undefined;
+  if (!isObjectOrArray(value)) return undefined;
   if (isFabricSpecialObject(value)) {
     return { what: `a \`${classOf(value)}\``, at };
   }

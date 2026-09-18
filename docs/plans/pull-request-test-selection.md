@@ -1644,14 +1644,14 @@ allowed to prove itself.
 **The rule reaches a repository gate as well.** Formatting, linting and
 the drift guard are tests of the tree, and the rule says nothing about
 one of them that it does not say about a unit test. A gate above the
-flake threshold leaves the selectable set, and appears on the wall as the
-defect in the gate that it is.
+flake threshold leaves the selectable set, and appears on the dashboard
+as the defect in the gate that it is.
 
 The exception the rule carries reaches a gate through the paths the gate
 declares a change reaches it by. A gate's unit is the name of a gate
 rather than a path, so the suite maps a change onto its units from a list
 each gate carries: `check-test-aliases` names
-`tasks/test-identity-aliases.jsonl`, `check-action-pins` names
+`tasks/test-identity-aliases/`, `check-action-pins` names
 `.github/`, and a change touching one of those makes that gate mandatory.
 The pull request that fixes a gate too flaky to judge by therefore runs
 it, which is what the exception is for.
@@ -1719,14 +1719,15 @@ catches, worth 0.75 on `proven`, becomes worth 0.05. It will still run,
 because an unknown identity is mandatory, but only once, and then it
 disappears into the tail.
 
-`tasks/test-identity-aliases.jsonl` already solves this and the mechanism
-needs no changes. A line maps an old identity, or a whole scope for a
+`tasks/test-identity-aliases/` already solves this and the mechanism
+needs no changes. The directory holds one file of lines per test-file
+name and reads as a single set. A line maps an old identity, or a whole scope for a
 package rename, to its replacement with the date of the rename. Readers
 resolve transitively, prefer a full-identity mapping over a whole-scope
 one, and apply an alias only to records from days strictly before its
 date, so the two halves of a test's history join under today's name.
-`deno task check-test-aliases` holds the file to append-only, at most one
-mapping per identity, and acyclic. The scope form matters more here than
+`deno task check-test-aliases` holds each file to append-only, and the
+directory as a whole to at most one mapping per identity and to acyclic. The scope form matters more here than
 it looks: the topology maps records by kind, scope, and optional variant,
 so a package rename without one orphans every configuration of the suite
 at once.
@@ -1736,8 +1737,8 @@ every variant. Resolution preserves the record's variant, so one rename
 bridges the default and every non-default history without joining those
 histories to each other.
 
-The mechanism is there and so, by now, is the practice: the file holds
-219 lines across nine dates, so renames are being bridged as they happen
+The mechanism is there and so, by now, is the practice: as of this
+writing the directory holds 2168 lines across 24 dates, so renames are being bridged as they happen
 rather than swept up once. What the reporter's suggestion adds is the
 case nobody notices — a rename whose author had no reason to think the
 history mattered.
@@ -1956,9 +1957,9 @@ days, because what shows a test has settled is running without
 disagreeing, and a test left untouched for three weeks has shown nothing.
 
 Both counts are published beside the share. A share cannot be weighed
-without them, and everything that shows a person this figure — the wall
-and the report a red `main` leaves — shows the counts with it. They are
-counted flat, so they are not what the share divides.
+without them, and everything that shows a person this figure — the
+dashboard and the report a red `main` leaves — shows the counts with it.
+They are counted flat, so they are not what the share divides.
 
 Two things follow from knowing it.
 
@@ -2143,10 +2144,10 @@ Three things elsewhere have to move with this rule.
 
 Nothing is masked. Every run is recorded, every failure is scored by the
 same rules as any other, the job summary names each non-gating failure and
-the identity it belongs to, and the wall and the deflake work queue read
-exactly these records. The failure no longer fails the build, and only for
-tests whose measured share says they cannot tell a good change from a bad
-one.
+the identity it belongs to, and the dashboard and the deflake work queue
+read exactly these records. The failure no longer fails the build, and
+only for tests whose measured share says they cannot tell a good change
+from a bad one.
 
 **The first rule alone is a real option, and it is worth saying why it was
 not taken.** Running an excluded identity several times on `main` and
@@ -2218,11 +2219,12 @@ however few units the batch holds. A suite whose whole set is expensive
 then prices out its own smallest batch.
 
 So the model is fitted instead. Every batch the lane runner executes
-records what it was planned to take, what it actually took, and how many
-units it opened. The publisher regresses those per suite over the last
-week — the intercept is `suiteOverhead`, the slope on the planned seconds
-multiplies into `correction`, and the slope on the unit count is
-`unitOverhead` — and publishes the result in the next manifest. They start
+records what its own tests took between them, what the batch actually
+took, and how many units it opened. The publisher regresses those per
+suite over the last week — the intercept is `suiteOverhead`, the slope on
+the tests' own seconds multiplies into `correction`, and the slope on the
+unit count is `unitOverhead` — and publishes the result in the next
+manifest. They start
 at zero, one and zero, and converge within a few days of lanes running.
 Three numbers per suite, all measured, none maintained by hand.
 
@@ -2232,8 +2234,8 @@ observations and half the lanes would otherwise run past the budget they
 were packed against. A slope is fitted at all only once a suite has enough
 batches, spread far enough apart in what that slope reads, for it to mean
 something: each is read far outside the range it was fitted over, since a
-suite charged six seconds in every batch anybody has seen may be charged
-thousands the first time a lane packs it whole, and one that has never
+suite whose every batch anybody has seen held six seconds of tests may be
+charged thousands the first time a lane packs it whole, and one that has never
 held more than five units may be asked to hold nine hundred. A suite whose
 batches all held the same seconds of tests per unit says nothing that
 separates the two slopes, and keeps the one it has always been fitted.
@@ -2245,12 +2247,25 @@ charged in proportion.
 The measurements travel through the machinery that already exists: the
 lane runner writes them as ordinary test records of kind `gate` and
 scope `ci`, named `ci-lane setup <capability>` and `ci-lane batch
-<suite>`. A batch is written three times, the others named `ci-lane
-planned batch <suite>` and `ci-lane units batch <suite>`, because neither
-what the packer expected its tests to take nor how many units it opened
-can be recovered from the records the batch produced: those say what the
-tests took rather than what the packer thought they would, and a unit
-whose tests all recorded nothing leaves no trace of having been opened.
+<suite>`. A batch is written three times, the others named `ci-lane ran
+batch <suite>` and `ci-lane units batch <suite>`, because neither what its
+tests took between them nor how many units it opened can be recovered
+from the records the batch produced: a reader of a report cannot tell
+which of its records came from which batch, and a unit whose tests all
+recorded nothing leaves no trace of having been opened.
+
+The tests' own time, rather than what the packer expected it to be. The
+two differ by however wrong the manifest's costs are, and a unit nothing
+has measured is charged a stand-in that can be out by a factor of ten.
+Fitting against the expectation puts that error in the intercept, which
+is charged once to every lane that holds the suite and kept for the whole
+window. An intercept past the planned budget already costs a whole lane
+for each identity of the suite that runs, since a lane holding two things
+stops at that budget; past the hard bound, which is what an identity's
+lone cost is weighed against, the suite places no discretionary identity
+at all. So an expectation that was briefly wrong takes the lanes away
+from everything else, and then holds a whole suite out of every pull
+request, for a week.
 The record format carries one number and calls it a duration, so the unit
 count travels in that field as a count, and the measurement's name is what
 says which of the three figures it is. A batch run
@@ -2405,10 +2420,9 @@ The manifest still carries an `unschedulable` list for new items that do
 not fit, and the report tool surfaces it. The general fix is the 60-second
 rule that
 [`tasks/test-records-report.ts`](../development/test-records.md#reading-the-data)
-already ratchets. 12 distinct identities currently break that rule; their
-15 executions hold 18 percent of all measured test time. Getting them
-split is valuable independently of this plan and becomes more valuable
-with it.
+already ratchets. The identities that break it are what that tool's
+over-sixty-seconds list names. Getting them split is valuable
+independently of this plan and becomes more valuable with it.
 
 ### Why the lanes do not coordinate the plan
 
@@ -2841,8 +2855,9 @@ What the runner does, in order:
 7. Set up the union of the capabilities the batches need, recording each
    one's duration.
 8. Run each batch execution with fresh spool and JUnit output paths,
-   recording planned and actual durations and continuing past a failure so
-   that one failure does not hide later batches or repeats.
+   recording what the batch spent and what its own tests took, and
+   continuing past a failure so that one failure does not hide later
+   batches or repeats.
 9. Immediately after each execution, gather its direct records and
    described JUnit outputs into the lane spool through the shared gather
    function. Validate record surfaces and apply the suite's optional
@@ -3066,7 +3081,7 @@ red build for one uncovered line would make `main`'s color mean nothing.
 Narrower measurements do still gate pull requests, and they are the
 subject of [the next section](#the-measured-set).
 
-It is a dashboard tile instead, and the tile follows [the wall's
+It is a dashboard tile instead, and the tile follows [the dashboard's
 rules](../../packages/dashboard/README.md#philosophy-and-values). It shows
 the count of uncovered lines and, under it, what a median day does to that
 count, which is the part somebody can act on. It is not a percentage:
@@ -3505,11 +3520,11 @@ pull request's own run could not have:
 
 ### Keeping this on the right side of the line
 
-The wall's rule is "report on the system, never on individuals: no
+The dashboard's rule is "report on the system, never on individuals: no
 per-person leaderboards, no 'who broke the build', nothing that turns the
-wall into a place to rank or shame people." A comment naming the change
-that introduced a regression is close enough to that line to be worth
-being deliberate about which side it is on.
+dashboard into a place to rank or shame people." A comment naming the
+change that introduced a regression is close enough to that line to be
+worth being deliberate about which side it is on.
 
 It sits on the right side, and these are the properties that keep it
 there, each of which is a constraint on the implementation rather than an
@@ -3534,8 +3549,8 @@ observation about it:
 
 If it ever stops being all five of those, it should be removed rather than
 tuned. A notification people learn to resent is worse than no
-notification, for the same reason a wall of red tiles is worse than no
-wall.
+notification, for the same reason a board of red tiles is worse than no
+board.
 
 ## Consequences we are choosing
 
@@ -3649,7 +3664,7 @@ is pinned to the commit's date. And if none of that settles it,
 | A fork pull request | Works unchanged. The manifest is world-readable, and the existing member gate decides whether the fork's records ship. |
 | A re-run of one failed lane | Runs the same set, because the manifest is resolved by the commit's date, which no attempt changes. |
 | Both `pr-tests` and `full-tests` skip | `Status` fails. Its second clause requires one of them to have succeeded, so a pull request that ran no tests can never report green. |
-| A test too flaky for pull requests fails on `main` | The run stays green and the job summary names the failure and its identity. The records are scored as any others, so the failure feeds the share, the wall, and the deflake work queue. |
+| A test too flaky for pull requests fails on `main` | The run stays green and the job summary names the failure and its identity. The records are scored as any others, so the failure feeds the share, the dashboard, and the deflake work queue. |
 | A batch on `main` does not account for every identity it was asked to run | The lane fails. Nothing has shown the failures it did record to be the whole of what went wrong, and missing evidence is read as a real failure. |
 | A test too flaky for pull requests genuinely regresses | `main` stays green and the change ships. The regression is found when somebody deflakes the test, or from the reporter's comment where every run failed at the commit and every run passed at its parent. That comment says a bad runner produces the same record. |
 | A repository gate goes above the flake threshold | It leaves pull requests as any test does, and it goes on failing `main`. The non-gating rule is for tests, so a gate never stops gating the branch it is a gate on. |

@@ -65,6 +65,7 @@ import type {
   HarnessModelProviderId,
 } from "../src/config.ts";
 import type { CfcPosture } from "@commonfabric/runner";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   type HarnessChatError,
   type HarnessChatEventEnvelope,
@@ -75,6 +76,10 @@ import { HARNESS_CREDENTIAL_OWNER_REF_TYPE } from "../src/contracts/run-manifest
 import { createCliPromptSlotBinding } from "../src/contracts/prompt-slot.ts";
 import type { HarnessInputCellSpec } from "../src/contracts/input-cells.ts";
 import type { HarnessConnectorGrantSpec } from "../src/contracts/well-known-grants.ts";
+import {
+  connectorGrantLabel,
+  connectorGrantName,
+} from "../src/well-known-grants.ts";
 import {
   DEFAULT_SUBAGENT_PROFILE,
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
@@ -231,9 +236,9 @@ const DEFAULT_FABRIC_API_URL = "http://localhost:8000";
  * sinks. `--fabric-cfc-posture none` turns it off for a run that wants the
  * first-party default instead.
  *
- * The bundle leaves the enforcement pin at `enforce-explicit`; raising to
- * `enforce-strict` stays a deliberate per-session move, so it has its own flag
- * and no default here.
+ * The bundle names no enforcement mode, so the session keeps the core's
+ * `enforce-strict` pin. Lowering to `enforce-explicit` is a deliberate
+ * per-session move, so it has its own flag and no default here.
  */
 const DEFAULT_FABRIC_CFC_POSTURE: CfcPosture = "max-enforcement";
 
@@ -356,7 +361,7 @@ const parseTaskInputCells = (
   const specs: HarnessInputCellSpec[] = [];
   const names = new Set<string>();
   for (const entry of value) {
-    if (typeof entry !== "object" || entry === null) {
+    if (!isObjectOrArray(entry)) {
       throw new Error("each input cell must be an object");
     }
     const { name, ref } = entry as { name?: unknown; ref?: unknown };
@@ -435,7 +440,7 @@ const parseTaskPatternRefs = (
   const specs: HarnessPatternRefSpec[] = [];
   const ids = new Set<string>();
   for (const entry of value) {
-    if (typeof entry !== "object" || entry === null) {
+    if (!isObjectOrArray(entry)) {
       throw new Error("each pattern reference must be an object");
     }
     const { patternId } = entry as { patternId?: unknown };
@@ -1032,8 +1037,8 @@ export const consoleHealthRows = (
     rows.push(...config.connectorGrants.map((grant): ConsoleHealthRow => ({
       id: `connector.granted.${grant.name}`,
       group: "connectors",
-      label: grant.source.connection,
-      value: `granted as ${grant.name}`,
+      label: connectorGrantName(grant.source),
+      value: `granted: ${connectorGrantLabel(grant)}`,
       source: "console connector configuration",
       detail: "CF_HARNESS_CONNECTOR_GRANTS",
       state: "ok",
@@ -1645,7 +1650,7 @@ export class ConsoleServer {
       inputCells?: unknown;
       patternRefs?: unknown;
       loomId?: unknown;
-    } = typeof parsed === "object" && parsed !== null ? parsed : {};
+    } = isObjectOrArray(parsed) ? parsed : {};
     if (
       body.loomId !== undefined &&
       (typeof body.loomId !== "string" ||
@@ -1750,17 +1755,17 @@ export class ConsoleServer {
         status: 400,
       });
     }
-    const envelope: { fn?: unknown; body?: unknown } =
-      typeof parsed === "object" && parsed !== null ? parsed : {};
+    const envelope: { fn?: unknown; body?: unknown } = isObjectOrArray(parsed)
+      ? parsed
+      : {};
     if (!isIndexFunction(envelope.fn)) {
       return Response.json({
         error: `fn must be one of ${INDEX_FUNCTIONS.join(", ")}`,
       }, { status: 400 });
     }
-    const body: Record<string, unknown> =
-      typeof envelope.body === "object" && envelope.body !== null
-        ? envelope.body as Record<string, unknown>
-        : {};
+    const body: Record<string, unknown> = isObjectOrArray(envelope.body)
+      ? envelope.body as Record<string, unknown>
+      : {};
     if (envelope.fn === "getPattern" && typeof body.patternId !== "string") {
       return Response.json({ error: "patternId is required" }, { status: 400 });
     }
@@ -1797,11 +1802,10 @@ export class ConsoleServer {
         status: 400,
       });
     }
-    const { patternId, verdict } =
-      (typeof parsed === "object" && parsed !== null ? parsed : {}) as {
-        patternId?: unknown;
-        verdict?: unknown;
-      };
+    const { patternId, verdict } = (isObjectOrArray(parsed) ? parsed : {}) as {
+      patternId?: unknown;
+      verdict?: unknown;
+    };
     if (typeof patternId !== "string" || patternId === "") {
       return Response.json({ error: "patternId is required" }, { status: 400 });
     }

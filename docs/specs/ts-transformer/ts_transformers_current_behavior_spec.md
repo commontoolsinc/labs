@@ -1176,7 +1176,12 @@ source occurrence. The pattern-owned expression pass skips synthetic computation
 callbacks, preserving ordinary JavaScript conditionals inside the key tagger.
 The computation carries the tagged selector output type into its lift schema.
 Bare terminal returns and fallthrough emit `void 0`, preserving omitted keys
-when a selector binds a local variable named `undefined`.
+when a selector binds a local variable named `undefined`. The schema injected
+for the handle an operator returns names that operator's missing-key mode —
+`group` for `groupBy`, `key` for `keyBy` — because `GroupIndex` and `KeyIndex`
+pin the `mode` field of `CollectionIndexData` (`packages/api/index.ts`); the
+runtime reads the mode from there for an index whose descriptor has not been
+published.
 
 Helper-owned compute branches introduced by ternary / conditional-helper
 rewriting are re-analyzed with synthetic compute ownership. This preserves
@@ -1637,6 +1642,33 @@ adjustments:
   `table[indexes.findIndex(...)]?.mentionedBy ?? []` — marks the root wildcard,
   which disables shrinking for the whole parameter: its declared shape is
   emitted intact, without the capability wrappers a walked operand would derive
+- a tracked value that leaves the body whole, whether named by an identifier
+  or by a member expression such as `w.row`, is a full-shape read of its path
+  as well as a plain one: returned from an inline callback, put in an array
+  literal, projected into an object literal alias resolution cannot follow,
+  assigned to anything but a local its own function declares, or handed to a
+  callee with no summary, it is read wherever it lands by members the analysis
+  never sees, so a member the body did read on the way must not narrow it to
+  that member. The left operand of `??` and `||` is the expression's value
+  whenever it is there, so it leaves when the expression does. A helper's
+  summary carries what the helper let leave whole, and the caller charges it to
+  the argument it passed. What a helper returns counts: a function declaration,
+  or a function bound to a variable or a property, hands its result straight
+  back into the caller's body, so a parameter it returns has left whole. A
+  primitive has nothing below it to keep and is left alone. A
+  value bound to a local or written into a local collection stays tracked and
+  narrows as its reads say. So does a value handed on by reference, which the
+  runtime stores as a link so that whatever reads through it does so under a
+  schema of its own: an argument to a runtime call (a builder, an applied lift,
+  `ifElse`, a cell factory), the payload of a write through a cell (`set`,
+  `update`, `send`, `push` and the other writer methods), a JSX prop, and what
+  a builder's callback returns, the analyzed one or one lowered inside it.
+  `Array.isArray` asks a value's shape and reads nothing below it, so it is not
+  an escape either (`wholeValueDestination` / `escapesWhole` in
+  `policy/capability-analysis.ts`;
+  `test/policy/capability-analysis-whole-value-escapes.test.ts`; the by-reference
+  routes are held in place at runtime by
+  `packages/patterns/kept-element-references.test.tsx`)
 - capability analysis reads through the operand recording an `assert(...)` body
   wraps a method call's receiver in. `AssertDiagnosticsTransformer` (stage 11)
   rewrites `event.details.includes(text)` so that `includes` is called on

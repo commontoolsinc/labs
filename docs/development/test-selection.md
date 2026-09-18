@@ -44,7 +44,7 @@ Each of those is printed on its own, because they are not alternatives: a
 withheld identity a change reaches runs anyway, so an answer that picked
 one of them would be leaving out something true.
 
-The identity resolves through `tasks/test-identity-aliases.jsonl` first,
+The identity resolves through `tasks/test-identity-aliases/` first,
 so asking about a renamed test under either name finds the joined history.
 
 ### `dials`
@@ -78,6 +78,20 @@ different numbers and the plan beneath it is over the first. A manifest is
 hours old, so it names units the tree has since dropped and misses units
 the tree has since gained; the reconciliation of the two is what gets
 packed, and it is what is counted here.
+
+It also names any suite a lane cannot fill around: one whose overhead,
+per-unit charge and capability setup together pass a lane's budget before
+it runs anything. Such a suite takes a whole lane for each identity it
+can still place, and one where no lane can hold any of them places none
+at all. That line is what answers "why is a lane holding one test?" and
+"why did none of this suite run?".
+
+A suite that holds nothing has its identities left out of the list
+beneath it, since the suite's line says what naming each of them would.
+A suite that holds some of them keeps the rest in that list, because what
+puts one of those past the bound is its own time on top of the charge and
+the charge alone does not say which. The count beside the suite is of
+what it can still run, so the two never disagree about the same test.
 
 `--verify` compares the identity set the topology produces against what a
 recorded run actually executed, in both directions: identities a run
@@ -245,7 +259,7 @@ rather than a setting to fix.
 | `FILL_VALUE_SHARE` | 0.6 | share of the run's budget | chosen | Up when expensive high-value tests are crowded out by cheap ones; down when a lane spends its budget on a few slow tests and runs little else. The three shares sum to one. |
 | `FILL_DENSITY_SHARE` | 0.25 | share of the run's budget | chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
 | `FILL_EXPLORATION_SHARE` | 0.15 | share of the run's budget | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
-| `MIN_CORRECTION_SPAN_SECONDS` | 23 | seconds | derived | A tenth of a lane's budget, measured as the widest gap between two batches' charges. Down when a suite's real slope is going unbelieved for too long; up when a slope fitted inside a narrow range is being read far outside it. |
+| `MIN_CORRECTION_SPAN_SECONDS` | 23 | seconds | derived | A tenth of a lane's budget, measured as the widest gap between the time two batches' own tests took. Down when a suite's real slope is going unbelieved for too long; up when a slope fitted inside a narrow range is being read far outside it. |
 | `MIN_CORRECTION_SAMPLES` | 3 | batches | chosen | Up when a slope is being fitted from too little and swinging about; down when a suite's real slope takes too long to be believed. |
 | `MIN_UNIT_SPAN_UNITS` | 50 | units | chosen | The widest gap between two batches' sizes a suite needs before what one more unit costs it is believed. Down when a suite's real per-unit cost is going unbelieved for too long; up when a slope fitted across a few units is being read across hundreds. |
 | `FLAKE_EXCLUSION_RATE` | 0.005 | share of runs | chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |
@@ -324,8 +338,18 @@ in one place.
 
 A lane looks past such a body to the newest one behind it, over
 `MANIFESTS_LOOKED_BACK` manifests, because a lane with no manifest runs
-the whole corpus. The wall reports a fault instead and shows nothing,
-which costs a person a figure rather than costing a run its selection.
+the whole corpus. The dashboard looks past one the same way and over the
+same stretch, so that the figure a person reads is taken from the manifest
+a pull request would obey rather than from an older one the dashboard
+alone settled for.
+
+A reader that passed over every body it looked at says so, naming the
+newest shape it passed over. Reporting nothing there would say the store
+holds no manifest, which is the one thing a reader that far behind its
+publisher must not say. Anything else unreadable ends the search where it
+stands: a corrupt object is not a reader waiting to be deployed, and
+answering from an older body would report a figure while passing silently
+over a store that is damaged.
 
 **Nothing gates on it.** When the publisher fails, the previous manifest is
 still the newest one and consumers keep using it. A manifest going stale
@@ -598,18 +622,33 @@ enumerates them and no lane can be asked to run one, so no suite has a
 unit for them and none should. `isLaneMeasurement` is what says so, and
 everything that reads a recorded identity asks it: the drift guard, the
 publisher, and the fold that carries the surfaces from one run to the
-next.
+next. Each asks it of the identity the lane wrote, before the alias file
+rewrites anything, so no line in that file can turn a lane's overhead
+into a test's score.
 
 Left out of everything scored, they are not discarded. The publisher
 keeps them in its rolling aggregate over `COST_WINDOW_DAYS`, the same
 window it measures a test's cost over, and fits `setupCost`,
 `suiteOverhead`, `correction` and `unitOverhead` from them for the next
 manifest. A lane writes one record per capability it opens and three per
-batch — what it spent, what it was packed to spend, and how many units it
-opened — and it is the second and third that make a fit possible. Neither
-can be recovered from the records the batch produced: those say what the
-tests took rather than what the packer expected them to take, and a unit
-whose tests all recorded nothing leaves no trace of having been opened.
+batch — what the batch spent, what its own tests took between them, and
+how many units it opened — and it is the second and third that make a fit
+possible. Neither can be recovered from the records the batch produced: a
+reader of a report cannot tell which of its records came from which
+batch, and a unit whose tests all recorded nothing leaves no trace of
+having been opened.
+
+What its tests took, rather than what the packer expected them to take.
+The two differ by however wrong the manifest's costs are, and a unit
+nothing has measured is charged a stand-in that can be out by a factor of
+ten. Fitting against the expectation would put that error in the
+intercept, which is charged once to every lane that holds the suite and
+kept for the whole window, long after the costs behind it were measured.
+A suite whose intercept passes `LANE_BOUND_SECONDS` can place no
+discretionary identity at all, so an expectation that was briefly wrong
+would hold a whole suite out of every pull request for a week. What a
+suite's cost model should carry is the machine's error, which is what the
+tests' own time leaves.
 
 The publisher leaves all of those out rather than putting an entry in the
 manifest that no lane could run. The next record that says enough puts the
@@ -744,8 +783,8 @@ object the publisher folds for the first time gives up its lane
 measurements, so one run puts a figure in the model and seven days of
 runs fill the window `COST_WINDOW_DAYS` names. Until then the model is
 not merely thin. Every figure in it is a maximum — the worst capability
-opening seen, and the largest gap between what a batch was charged and
-what it took — so a model fitted over part of a window reads lower than
+opening seen, and the largest gap between what a batch's own tests took
+and what the batch took — so a model fitted over part of a window reads lower than
 one fitted over all of it, and reading low is the direction that
 overruns a lane. A suite with nothing at all in the window is charged
 nothing.
@@ -793,7 +832,7 @@ for, and a runner that exited zero having run none of its unit has. So a
 unit that recorded nothing fails the lane, and an excusal holds only for
 an invocation that accounted for every identity it was asked to run.
 
-## What the wall shows
+## What the dashboard shows
 
 Two tiles read the newest manifest. The flake tile reports how many tests
 are too noisy to judge a change by. The selection tile reports what share
@@ -815,7 +854,7 @@ running on main. Activity and new manifests are checked every 30 seconds.
 Activity requires the dashboard's GitHub token; the public measurements remain
 available when that lookup fails.
 
-Both follow [the wall's rules](../../packages/dashboard/README.md#philosophy-and-values):
+Both follow [the dashboard's rules](../../packages/dashboard/README.md#philosophy-and-values):
 they report on the system, they name tests, and nothing about either is
 aggregated per person.
 
@@ -934,8 +973,8 @@ itself.
   extra runs are what make the observation possible, so this note is
   silent until they land.
 - **A rename that discarded history**, with the number of catches it
-  would bring back and the line to append to
-  `tasks/test-identity-aliases.jsonl`. Four things have to hold: the
+  would bring back and the line to append under
+  `tasks/test-identity-aliases/`. Four things have to hold: the
   departing test caught something; the unit it lived in produced records
   in this run, so its absence is a test that left rather than a suite
   that did not run; the arriving name is one the store has never seen;
@@ -950,7 +989,7 @@ itself.
   if it is not.
 
 Five properties keep this on the right side of
-[the wall's rule](../../packages/dashboard/README.md#philosophy-and-values)
+[the dashboard's rule](../../packages/dashboard/README.md#philosophy-and-values)
 that reporting is about the system and never about individuals. The
 comment's subject is a commit and a test, and no author is named. Nothing
 is counted per author, per team, or per anything, and no history is kept:
@@ -988,8 +1027,8 @@ of the identity being the reported name:
 - Prefer stable, content-derived wording over positional counters or
   interpolated identifiers, which mint a new identity every time they
   shift.
-- A rename splits history unless a line is appended to
-  `tasks/test-identity-aliases.jsonl`. Most renames cost nothing, because
+- A rename splits history unless a line is appended under
+  `tasks/test-identity-aliases/`. Most renames cost nothing, because
   most tests have never caught anything; a rename of a test that has is
   worth the line.
 

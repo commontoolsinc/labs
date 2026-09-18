@@ -20,7 +20,10 @@ piece's `bgUpdater` stream. The default interval is 60 seconds.
   `deno task add-admin-piece` in this package. Skipping it surfaces as
   `AuthorizationError` rather than as anything mentioning the admin piece.
 - A space DID is derived, not looked up:
-  `Identity.fromPassphrase("common user").derive(spaceName).did()`.
+  `Identity.fromPassphrase("common user").derive(spaceName).did()`. That
+  derivation supports the legacy space names used during development and nothing
+  else, and is removed once those development-only spaces have been migrated
+  ([random space identities](../../docs/plans/random-space-identities.md)).
 - `CompilerError: no exported member 'pattern'` means the binaries are stale
   against the current source, not that the piece is wrong. Rebuild them.
 

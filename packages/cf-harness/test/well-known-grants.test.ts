@@ -69,6 +69,62 @@ const stubSession = (
   }) as unknown as HarnessFabricSession;
 
 describe("well-known-grants", () => {
+  it("carries named stores and their classes through minting and restored context", async () => {
+    const specs = [{
+      name: "gmail-work",
+      cfcClass: "email",
+      ref: MAIL_REF,
+      source: MAIL_GRANT.source,
+    }, {
+      name: "gmail-work#calendar",
+      cfcClass: "calendar",
+      ref: `/of:fid1:${"D".repeat(43)}`,
+      source: { ...MAIL_GRANT.source, companionKey: "calendar" },
+    }, {
+      name: "loom.calendar",
+      cfcClass: "calendar",
+      ref: `/of:fid1:${"E".repeat(43)}`,
+      source: { connection: "loom.calendar", piece: "resources" },
+    }];
+    const refs = await resolveWellKnownGrantRefs(stubSession(), specs);
+    const { table, grants } = await mintWellKnownGrants(
+      undefined,
+      "named-stores",
+      refs,
+    );
+    const restored: HarnessWellKnownGrant[] = JSON.parse(
+      JSON.stringify(grants),
+    );
+    for (const grant of restored) checkRecordedWellKnownGrant(grant);
+    expect(restored.slice(1).map(({ token: _token, ...record }) => record))
+      .toEqual(specs);
+    expect(
+      restored.slice(1).map(({ token }) =>
+        resolveHandleToken(table, token)?.ref
+      ),
+    )
+      .toEqual(specs.map(({ ref }) => ref));
+    const message = wellKnownGrantsContextMessage(restored);
+    expect(message).toContain("gmail-work (email)");
+    expect(message).toContain("gmail-work / calendar (calendar)");
+    expect(message).toContain("loom.calendar (calendar)");
+    expect(message).not.toContain(MAIL_REF);
+  });
+
+  it("rejects malformed CFC metadata when restoring a named store", () => {
+    const grant = JSON.parse(
+      JSON.stringify({
+        ...MAIL_GRANT,
+        name: "gmail-work",
+        cfcClass: null,
+        token: "cfh:a:abcdefgh",
+      }),
+    );
+    expect(() => checkRecordedWellKnownGrant(grant)).toThrow(
+      "CFC class must match",
+    );
+  });
+
   describe("resolveWellKnownGrantRefs()", () => {
     it("resolves the piece registry to its canonical in-space reference", async () => {
       const refs = await resolveWellKnownGrantRefs(stubSession());
@@ -244,6 +300,10 @@ describe("well-known-grants", () => {
       }]);
       expect(message).toContain("cfh:a:abcdefgh");
       expect(message).toContain("piece registry");
+      expect(message).toContain("a refused name read leaves the name unknown");
+      expect(message).toContain(
+        "not a fallback for identifying an unspecified target",
+      );
       expect(message).not.toContain(REGISTRY_ID);
     });
 
@@ -255,7 +315,7 @@ describe("well-known-grants", () => {
         source: MAIL_GRANT.source,
       }]);
       expect(message).toContain("cfh:a:ijklmnop");
-      expect(message).toContain("`email` connector database");
+      expect(message).toContain("gmail-work (email)");
       expect(message).toContain("describe_handle");
       expect(message).not.toContain(MAIL_ID);
     });

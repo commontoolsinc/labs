@@ -54,10 +54,14 @@ import {
 import { collectRecords } from "./test-records-gather.ts";
 import { fetchManifest, type ManifestFetch } from "./test-selection/store.ts";
 import {
+  costliestUnschedulable,
+  crowdingLine,
+  type CrowdingSuite,
   fullLaneCount,
   plan,
   type Selection,
   type SelectionReason,
+  unholdableSuites,
 } from "./test-selection/plan.ts";
 import { type Census, census, isStandIn } from "./test-selection/census.ts";
 import {
@@ -67,8 +71,13 @@ import {
   measuredSetName,
   measuredSets,
 } from "./test-selection/coverage.ts";
-import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
+import type {
+  Manifest,
+  UnschedulableEntry,
+  WithheldReason,
+} from "./test-selection/manifest.ts";
 import { LANES } from "./test-selection/policy.ts";
+import { say } from "./step-summary.ts";
 import { writeLcovReport } from "./write-coverage-lcov.ts";
 import {
   batchMeasurementName,
@@ -629,7 +638,6 @@ export async function runBatch(
   spool: string | undefined,
   env: Record<string, string>,
   coverage?: BatchCoverage,
-  plannedSeconds = 0,
 ): Promise<{
   ok: boolean;
   records: TestRecord[];
@@ -726,13 +734,19 @@ export async function runBatch(
   if (spool !== undefined) {
     spoolRecords(spool, [
       ...records,
-      // What the batch spent, what it was packed to spend, and how many
-      // units it opened. All three are known only here: what the packer
-      // expected the tests to take cannot be recovered from the records
-      // the batch produced, because those say what the tests took, and a
-      // unit that recorded nothing at all leaves no trace of having been
-      // opened. The publisher fits a suite's cost beyond its tests from
-      // the three together.
+      // What the batch spent, what its tests took between them, and how
+      // many units it opened. The publisher fits a suite's cost beyond
+      // its tests from the three together: the first two differ by
+      // everything the batch paid that no test's duration holds, and the
+      // third is the part of that which grows with the units opened.
+      //
+      // The tests' own time is summed here rather than read back from
+      // the records, because a reader has no way to tell which of a
+      // report's records came from which batch, and a unit that recorded
+      // nothing at all leaves no trace of having been opened. A record
+      // off the suite's surfaces counts once like any other: whatever is
+      // wrong with its metadata, the batch spent that time running it,
+      // and leaving it out would move that time into the overhead.
       timingRecord(
         batchMeasurementName(batch.suite.id, coverage !== undefined),
         seconds,
@@ -742,9 +756,9 @@ export async function runBatch(
         batchMeasurementName(
           batch.suite.id,
           coverage !== undefined,
-          "planned",
+          "ran",
         ),
-        plannedSeconds,
+        records.reduce((total, record) => total + record.durationMs, 0) / 1000,
         ok,
       ),
       measurementRecord(
@@ -916,16 +930,6 @@ export async function describeCapabilityLogs(
   }
 }
 
-/** Says something both on the lane's output and in the job summary. */
-function say(lines: readonly string[]): void {
-  const text = `${lines.join("\n")}\n`;
-  console.log(text);
-  const summary = Deno.env.get("GITHUB_STEP_SUMMARY");
-  if (summary !== undefined && summary.length > 0) {
-    Deno.writeTextFileSync(summary, text, { append: true });
-  }
-}
-
 /**
  * Names the records this lane produced that no suite describes, which is
  * the only report they get before the store half of the drift guard
@@ -1014,7 +1018,8 @@ export function describePlan(
   batches: readonly Batch[],
   capabilities: readonly CapabilityId[],
   manifest: { objectName?: string; absent?: string },
-  unschedulable: readonly string[],
+  unschedulable: readonly UnschedulableEntry[],
+  crowding: readonly CrowdingSuite[],
   chosen: { selections: readonly Selection[]; projectedSeconds: number },
   budget: number,
   unmeasured: number,
@@ -1055,11 +1060,45 @@ export function describePlan(
         `${share.why} |`,
     );
   }
-  if (unschedulable.length > 0) {
+  // An identity of a suite no lane can hold is past the bound by that
+  // suite's fixed charge and by nothing about itself, so the suite's own
+  // line below says everything naming it would.
+  const unholdable = unholdableSuites(crowding);
+  const expensive = unschedulable.filter((entry) =>
+    !unholdable.has(entry.suite)
+  );
+  if (expensive.length > 0) {
+    // A discretionary identity costing more than a lane's hard bound
+    // runs nowhere, because a lane holding it would be killed before it
+    // reported anything. Naming it is what turns that into something
+    // somebody can act on; the sixty-second rule is where such a test
+    // gets split.
     lines.push("");
     lines.push("Nothing can run these, so nothing did:");
     lines.push("");
-    for (const entry of unschedulable) lines.push(`- ${entry}`);
+    // The summary has the withheld and coverage reports to hold after
+    // this one, so this one takes a fixed share of it and the count
+    // says how much there is.
+    const { named, rest } = costliestUnschedulable(expensive);
+    for (const entry of named) {
+      lines.push(
+        `- ${entry.suite}: ${testIdentityKey(entry.test)} costs ` +
+          `${entry.cost.toFixed(0)}s, more than a lane can hold`,
+      );
+    }
+    if (rest.length > 0) lines.push(`- and ${rest.length} more`);
+  }
+  if (crowding.length > 0) {
+    // What a lane pays before it runs anything of a suite. Past a lane's
+    // budget nothing can share a lane with one of that suite's tests, so
+    // the suite takes a lane per test it places; past the bound no lane
+    // can hold it at all. Either way the tests named above are not what
+    // is expensive, and a plan that only named them would send somebody
+    // to look at the wrong thing.
+    lines.push("");
+    lines.push("Suites a lane cannot fill around:");
+    lines.push("");
+    for (const suite of crowding) lines.push(`- ${crowdingLine(suite)}`);
   }
   say(lines);
 }
@@ -1242,16 +1281,8 @@ export async function runLane(
     );
   }
   const batches = batchesOf(suites, seen.manifest, mine.selections);
-  // A discretionary identity costing more than a lane's hard bound
-  // runs nowhere, because a lane holding it would be killed before it
-  // reported anything. Naming it is what turns that into something
-  // somebody can act on; the sixty-second rule is where such a test
-  // gets split. A mandatory one is placed however much it costs, and
-  // the over-budget line below is where a lane says it ran long.
-  const unschedulable = laid.unschedulable.map((entry) =>
-    `${entry.suite}: ${testIdentityKey(entry.test)} costs ` +
-    `${entry.cost.toFixed(0)}s, more than a lane can hold`
-  );
+  // A mandatory identity is placed however much it costs, and this is
+  // where a lane says it ran long.
   if (laid.overBudgetSeconds > 0) {
     console.log(
       `ci-lane: the mandatory set puts a lane ` +
@@ -1269,7 +1300,8 @@ export async function runLane(
     batches,
     [...needs].sort(),
     fetched,
-    unschedulable,
+    laid.unschedulable,
+    laid.crowding,
     { selections: mine.selections, projectedSeconds: mine.projectedSeconds },
     laid.budgetSeconds,
     seen.unmeasured,
@@ -1333,7 +1365,6 @@ export async function runLane(
         // lane.
         opened.envFor(batch.suite.needs),
         batchCoverage(options, batch.suite.id, seen.coverage),
-        chosenFor(batch.suite.id, mine.selections).seconds,
       );
       conflicts.push(...result.conflicts);
       // The records decide, rather than the command's exit status: a

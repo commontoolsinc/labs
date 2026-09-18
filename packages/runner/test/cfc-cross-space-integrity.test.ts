@@ -5,9 +5,11 @@ import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -99,7 +101,12 @@ const seedLabeledDoc = async (
   const cell = runtime.getCell(space, id, undefined, seed);
   const docId = cell.getAsNormalizedFullLink().id as URI;
   writeSeedEnvelopeDoc(seed, space);
-  seed.writeOrThrow({ space, id: docId, type: "application/json", path: [] }, {
+  seedStoredEnvelope(seed, {
+    space,
+    id: docId,
+    type: "application/json",
+    path: [],
+  }, {
     value,
     cfc: {
       version: 1,
@@ -122,7 +129,7 @@ const isLinkReference = (atom: unknown): atom is {
   source: EndorsementAddress;
   target: EndorsementAddress;
 } =>
-  typeof atom === "object" && atom !== null &&
+  isObjectOrArray(atom) &&
   (atom as { type?: unknown }).type ===
     "https://commonfabric.org/cfc/atom/LinkReference";
 

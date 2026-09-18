@@ -49,7 +49,6 @@ function saw(
   return {
     test: TEST,
     outcome,
-    durationMs: 100,
     day: "2026-08-20",
     startedAt: "2026-08-20T00:00:00.000Z",
     commit: "c1",

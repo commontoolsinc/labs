@@ -5,6 +5,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import { expect } from "@std/expect";
+import { unattachedTurnContext } from "./support/session-store-fixtures.ts";
 import { join } from "@std/path";
 import {
   createPatternSkillsFixture,
@@ -1604,9 +1605,11 @@ Deno.test("a completed turn promotes its transcript independently of the loop's 
   });
   await service.waitForTurn("session-1", "turn-2");
 
-  assertEquals(seenTranscripts[1], [
+  expect(seenTranscripts[1]).toEqual([
+    ...unattachedTurnContext(),
     { role: "user", content: "Hi" },
     { role: "assistant", content: "Done." },
+    ...unattachedTurnContext(),
     { role: "user", content: "Again" },
   ]);
 });
@@ -1802,7 +1805,7 @@ for (const resultsBeforeFault of FAULT_POINTS) {
         input: { text: "Try again" },
       });
       await service.waitForTurn("session-1", "turn-2");
-      assertEquals(nextTurnTranscripts, [[{
+      expect(nextTurnTranscripts).toEqual([[...unattachedTurnContext(), {
         role: "user",
         content: "Try again",
       }]]);

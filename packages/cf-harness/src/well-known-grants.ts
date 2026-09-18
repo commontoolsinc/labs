@@ -14,13 +14,9 @@
  * reading anything behind the token means running a pattern over it, where
  * the CFC boundary rules as it does for every other flow.
  *
- * A connector grant's NAME is the one thing here that is read rather than
- * authored: it is the CFC class a loom instance's own table contract declares
- * for that handle's columns, which is what makes `email` and `finance` the
- * words a session is given. The reading happens in the console launcher, off
- * records on the operator's machine rather than off the fabric; what this
- * module holds it to is the name shape an operator's own `--input-cell` name
- * is held to, so a declared class cannot smuggle structure into a prompt.
+ * Connection identities and CFC classes come from the operator's Loom
+ * records. Each is validated before interpolation into model-facing text.
+ * The name selects a store; its class describes the data that store holds.
  */
 
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
@@ -49,16 +45,38 @@ export type {
  */
 const GRANT_DESCRIPTIONS: Record<HarnessWellKnownGrantName, string> = {
   "piece-registry":
-    "the space's piece registry: an array of references to every registered piece. Wire it into run_pattern `inputs` to compute over what the space holds — each entry's `$NAME` field is its display name. A name computed from protected data taints a result that reads it, so if a name-reading run is refused, fall back to a pattern that returns the entry references without reading any values.",
+    "the space's piece registry: an array of references to every registered piece. Wire it into run_pattern `inputs` to compute over what the space holds — each entry's `$NAME` field is its display name. A name computed from protected data taints a result that reads it, so a refused name read leaves the name unknown. For an explicit reference-listing task, a pattern can return entry references without reading values; that is not a fallback for identifying an unspecified target.",
 };
+
+const CONNECTION_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
+const COMPANION_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/** The Loom store identity, independent of which piece exposes it. */
+export const connectorGrantName = (
+  source: HarnessConnectorGrantSource,
+): string =>
+  source.companionKey === undefined
+    ? source.connection
+    : `${source.connection}#${source.companionKey}`;
+
+/** Human-readable connection and class, shared by prompts and launch reports. */
+export const connectorGrantLabel = (grant: HarnessConnectorGrantSpec): string =>
+  `${grant.source.connection}${
+    grant.source.companionKey === undefined
+      ? ""
+      : ` / ${grant.source.companionKey}`
+  } (${grant.cfcClass ?? grant.name})`;
 
 /**
  * Model-facing description of one connector grant. Harness-authored except
- * for the grant's name, which the caller has already held to
- * {@link HANDLE_NAME_PATTERN}.
+ * for the validated connection identity and declared class.
  */
-const connectorGrantDescription = (name: string): string =>
-  `the space's \`${name}\` connector database: a read-only SQLite handle whose columns carry \`${name}\` CFC labels. Wire it into run_pattern \`inputs\` and read it with \`db.query\`; use describe_handle first to see its tables and how full each column is, because a column that is empty for every row is a filter that returns nothing.`;
+const connectorGrantDescription = (grant: HarnessConnectorGrantSpec): string =>
+  `${
+    connectorGrantLabel(grant)
+  }: a read-only connector database whose columns carry \`${
+    grant.cfcClass ?? grant.name
+  }\` CFC labels. Wire it into run_pattern \`inputs\` and read it with \`db.query\`; use describe_handle first to see its tables and how full each column is, because a column that is empty for every row is a filter that returns nothing. Refer to the connection by its human name when speaking to the user, never by a handle token.`;
 
 /**
  * Holds one connector grant to the rule its handle is minted under: a name
@@ -72,10 +90,44 @@ const connectorGrantDescription = (name: string): string =>
 export const checkConnectorGrantSpec = (
   spec: HarnessConnectorGrantSpec,
 ): void => {
-  if (!HANDLE_NAME_PATTERN.test(spec.name)) {
+  if (
+    spec.source.connection.trim() === "" || spec.source.piece.trim() === ""
+  ) {
+    throw new Error(
+      `connector grant \`${spec.name}\` records no connection and piece`,
+    );
+  }
+  if (!CONNECTION_NAME_PATTERN.test(spec.source.connection)) {
+    throw new Error(
+      `connector connection must match ${CONNECTION_NAME_PATTERN}`,
+    );
+  }
+  if (
+    spec.source.companionKey !== undefined &&
+    (typeof spec.source.companionKey !== "string" ||
+      !COMPANION_KEY_PATTERN.test(spec.source.companionKey))
+  ) {
+    throw new Error(
+      `connector companion key must match ${COMPANION_KEY_PATTERN}`,
+    );
+  }
+  if (spec.cfcClass === undefined && !HANDLE_NAME_PATTERN.test(spec.name)) {
     throw new Error(
       `connector grant name must match ${HANDLE_NAME_PATTERN}, got \`${spec.name}\``,
     );
+  }
+  if (spec.cfcClass !== undefined) {
+    if (
+      typeof spec.cfcClass !== "string" ||
+      !HANDLE_NAME_PATTERN.test(spec.cfcClass)
+    ) {
+      throw new Error(`connector CFC class must match ${HANDLE_NAME_PATTERN}`);
+    }
+    if (spec.name !== connectorGrantName(spec.source)) {
+      throw new Error(
+        "connector grant name must match its connection and companion key",
+      );
+    }
   }
   if (spec.ref.trim() === "") {
     throw new Error(`connector grant \`${spec.name}\` names no reference`);
@@ -99,18 +151,7 @@ export const checkRecordedWellKnownGrant = (
   if (grant.source === undefined) {
     return;
   }
-  checkConnectorGrantSpec({
-    name: grant.name,
-    ref: grant.ref,
-    source: grant.source,
-  });
-  if (
-    grant.source.connection.trim() === "" || grant.source.piece.trim() === ""
-  ) {
-    throw new Error(
-      `connector grant \`${grant.name}\` records no connection and piece`,
-    );
-  }
+  checkConnectorGrantSpec(grant);
 };
 
 /**
@@ -120,7 +161,7 @@ export const checkRecordedWellKnownGrant = (
  */
 export type HarnessWellKnownGrantRef =
   | { name: HarnessWellKnownGrantName; ref: string; source?: undefined }
-  | { name: string; ref: string; source: HarnessConnectorGrantSource };
+  | HarnessConnectorGrantSpec;
 
 /**
  * Resolves the canonical references behind every well-known grant. The
@@ -163,7 +204,7 @@ export const resolveWellKnownGrantRefs = async (
       throw new Error(`well-known grants name \`${spec.name}\` twice`);
     }
     names.add(spec.name);
-    refs.push({ name: spec.name, ref: spec.ref, source: spec.source });
+    refs.push({ ...spec });
   }
   return refs;
 };
@@ -194,6 +235,7 @@ export const mintWellKnownGrants = async (
         ? { name: grant.name, token: minted.token, ref: entry.ref }
         : {
           name: grant.name,
+          ...(grant.cfcClass === undefined ? {} : { cfcClass: grant.cfcClass }),
           token: minted.token,
           ref: entry.ref,
           source: grant.source,
@@ -214,7 +256,8 @@ export const mintWellKnownGrants = async (
  */
 const grantDescription = (grant: HarnessWellKnownGrant): string => {
   if (grant.source !== undefined) {
-    return connectorGrantDescription(grant.name);
+    checkConnectorGrantSpec(grant);
+    return connectorGrantDescription(grant);
   }
   // Read through `Object.hasOwn` rather than indexed directly: run state is
   // JSON this process may not have written, so a resumed record can carry a

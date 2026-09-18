@@ -31,6 +31,7 @@ const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
   FabricHash: { type: "FabricHash" },
   FabricKeyPair: { type: "FabricKeyPair" },
   FabricRegExp: { type: "FabricRegExp" },
+  FabricUnavailable: { type: "FabricUnavailable" },
   // A `URL` converts to a plain string, so this one is accurate as written.
   URL: { type: "string", format: "uri" },
   ArrayBuffer: true,

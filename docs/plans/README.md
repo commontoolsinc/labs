@@ -10,6 +10,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Security and privacy roadmap](security-privacy-roadmap.md) gives an overview
+  of current trust boundaries and the path from runtime security to operator
+  exclusion, with remaining work and technical references in an appendix.
 - [Discovering Loom resources with wish](loom-resource-discovery.md) proposes
   publishing existing database and companion-cell references once per Loom
   environment, with a staged person-inbox migration and compiled integration
@@ -166,9 +169,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   sequences how long an invocation record is kept and what the runtime knows
   about who caused it — the `AgentActor` mint, trusted ingress, and metadata
   confidentiality. Gated on a CFC review that has not happened.
-- [Random space identities](random-space-identities.md) replaces publicly
-  derived named-space keys with fresh random identities whose authority ends
-  after ACL genesis. It implements the
+- [Random space identities](random-space-identities.md) gives every newly
+  created space a fresh random identity whose authority ends after ACL genesis,
+  while every space that already exists keeps its DID and the name that reaches
+  it. It implements the
   [random space identity specification](../specs/random-space-identities.md),
   uses existing DID routes, and is complete without a public name registry.
 - [CFC runner implementation](runner_cfc_implementation.md) defines the

@@ -12,6 +12,7 @@
 
 import { sha256 } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import {
   defaultHarnessFetch,
@@ -149,9 +150,7 @@ interface GithubTreeEntry {
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
+  isObjectNotArray(value) ? value as Record<string, unknown> : undefined;
 
 const safeHostileText = (value: unknown): string =>
   sanitizeRegistryString(

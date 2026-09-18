@@ -38,6 +38,7 @@ import {
   PieceInputPathError,
   type PiecePatternRef,
   PiecesController,
+  type PieceSourceActionResult,
 } from "@commonfabric/piece/ops";
 import {
   Cell,
@@ -491,7 +492,7 @@ function storageManagerCloseNow(
   storageManager: unknown,
 ): (() => Promise<unknown>) | undefined {
   if (
-    typeof storageManager === "object" && storageManager !== null &&
+    isObjectOrArray(storageManager) &&
     "closeNow" in storageManager
   ) {
     const closeNow = Reflect.get(storageManager, "closeNow");
@@ -1156,7 +1157,7 @@ async function searchTextMatches(
     }
     const current = next.value.value;
 
-    if (current !== null && typeof current === "object" && isCell(current)) {
+    if (isObjectOrArray(current) && isCell(current)) {
       if (!isReadableCell(current)) continue;
 
       try {
@@ -1202,7 +1203,7 @@ async function searchTextMatches(
       }
     }
 
-    if (current === null || typeof current !== "object") {
+    if (!isObjectOrArray(current)) {
       if (
         typeof current !== "function" &&
         foldedSearchTextContains(String(current), query)
@@ -1975,6 +1976,52 @@ async function updateOnServer(
 }
 
 /**
+ * Points a piece at `origin` and adopts what that origin currently serves,
+ * in one source transition (`repoint`). From then on the piece follows the
+ * origin: opening it adopts each later release the origin ships.
+ *
+ * This is how a piece created detached — a profile made before the runtime
+ * claimed origins for children of system pieces, say — is put on the
+ * lifecycle a release reaches. Unlike `setsrc`, which detaches, the origin
+ * is recorded with the revision. The transition carries the same writer
+ * delegation a `setsrc` does, since it is the owner's explicit act.
+ *
+ * @throws Error when the deployment serves piece lifecycle verbs (the served
+ * update takes no origin), when the piece cannot be resolved, or when the
+ * origin cannot be read or does not compile.
+ */
+export async function followPieceSource(
+  config: PieceConfig,
+  origin: string,
+  deps: PieceOperationDependencies = {},
+): Promise<PieceSourceActionResult> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  // Against a serving deployment a source transition is the serving
+  // runtime's to commit, and the served update verb carries no origin yet;
+  // a client-side repoint there would commit outside the served lifecycle.
+  if (servesLifecycleVerbs(pieces)) {
+    throw new Error(
+      "This deployment serves piece lifecycle verbs, and `follow` is not " +
+        "served yet; the served update takes no origin.",
+    );
+  }
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps,
+  );
+  const piece = await pieces.get(
+    resolvedConfig.piece,
+    false,
+    undefined,
+    resolvedConfig.pieceScope,
+  );
+  const result = await piece.changeSource({ kind: "repoint", url: origin });
+  if (result.status === "applied") noteWroteTo(config.space);
+  return result;
+}
+
+/**
  * Replaces the piece's source and returns its setup transaction receipt.
  * Against a serving deployment the update is the serving runtime's to
  * commit; a piece addressed at a scope keeps the client-side path, since
@@ -2189,7 +2236,7 @@ async function tryResolvePieceCallableAt(
  */
 function probeForcedStreamCell(cell: any, name: string): any | null {
   if (
-    typeof cell !== "object" || cell === null ||
+    !isObjectOrArray(cell) ||
     typeof cell.asSchema !== "function"
   ) {
     return null;
@@ -4027,7 +4074,7 @@ export async function linkPieces(
       // Check source path resolves
       let current: any = sourceData;
       for (const segment of resolvedSourcePath) {
-        if (current == null || typeof current !== "object") {
+        if (!isObjectOrArray(current)) {
           errors.push(
             `Source path "${
               resolvedSourcePath.join("/")
@@ -4083,7 +4130,7 @@ export async function linkPieces(
       );
       let current: unknown = targetData;
       for (const segment of resolvedTargetPath) {
-        if (current == null || typeof current !== "object") {
+        if (!isObjectOrArray(current)) {
           current = undefined;
           break;
         }

@@ -1997,7 +1997,10 @@ async function clientOptionsFor(
   extraOptions: Partial<RuntimeClientOptions> = {},
 ): Promise<RuntimeClientOptions> {
   // If a space identity was created, replace it with a transferrable
-  // key in Deno using the same derivation as Session
+  // key in Deno using the same derivation as Session. That derivation supports
+  // the legacy space names used during development and nothing else, and is
+  // removed once those development-only spaces have been migrated
+  // (docs/plans/random-space-identities.md).
   if (session.spaceIdentity && session.spaceName) {
     session.spaceIdentity = await (
       await Identity.fromPassphrase("common user", keyConfig)

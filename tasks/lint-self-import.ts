@@ -36,6 +36,7 @@
 
 import { parse as parseJsonc } from "@std/jsonc";
 import { dirname, relative, resolve } from "@std/path";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isTestFile } from "./test-files.ts";
 
 /** The file names a Deno configuration is allowed to take. */
@@ -86,9 +87,7 @@ function readConfig(directory: string): Record<string, unknown> | null {
     } catch {
       return {};
     }
-    return parsed !== null && typeof parsed === "object"
-      ? parsed as Record<string, unknown>
-      : {};
+    return isObjectOrArray(parsed) ? parsed as Record<string, unknown> : {};
   }
   return null;
 }
@@ -98,7 +97,7 @@ function exportMap(exports: unknown): ReadonlyMap<string, string> {
   const map = new Map<string, string>();
   if (typeof exports === "string") {
     map.set(".", exports);
-  } else if (exports !== null && typeof exports === "object") {
+  } else if (isObjectOrArray(exports)) {
     for (const [key, value] of Object.entries(exports)) {
       if (typeof value === "string") map.set(key, value);
     }

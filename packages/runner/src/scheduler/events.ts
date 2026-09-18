@@ -1,5 +1,6 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { createRef } from "../create-ref.ts";
 import { toURI } from "../uri-utils.ts";
@@ -230,7 +231,7 @@ function normalizeEventCommitRejection(reason: unknown): EventCommitError {
   if (reason instanceof Error) {
     return reason as EventCommitError;
   }
-  if (reason !== null && typeof reason === "object") {
+  if (isObjectOrArray(reason)) {
     const candidate = reason as Partial<EventCommitError>;
     const precondition = candidate.precondition === "origin-committed" ||
         candidate.precondition === "receipt-exists"

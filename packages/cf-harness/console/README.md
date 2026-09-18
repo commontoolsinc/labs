@@ -600,14 +600,14 @@ gating on, installs the standard prompt-caveat policy, and gives the
 network-fetch sinks public-only confidentiality ceilings. The server prints the
 posture it resolved at startup, so what a run ran under is never a guess.
 
-The bundle leaves the enforcement pin at `enforce-explicit`; `enforce-strict`
-stays a deliberate per-session raise. Each dial has a flag, and the flag wins:
+The bundle names no enforcement mode, so the session keeps the core's
+`enforce-strict` pin. Each dial has a flag, and the flag wins:
 
 | Flag                            | Environment                              | Default                            |
 | ------------------------------- | ---------------------------------------- | ---------------------------------- |
 | `--fabric-cfc-posture`          | `CF_HARNESS_FABRIC_CFC_POSTURE`          | `max-enforcement` (`none` to drop) |
 | `--fabric-cfc-flow-labels`      | `CF_HARNESS_FABRIC_CFC_FLOW_LABELS`      | the posture's `persist`            |
-| `--fabric-cfc-enforcement-mode` | `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE` | `enforce-explicit`                 |
+| `--fabric-cfc-enforcement-mode` | `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE` | `enforce-strict`                   |
 
 These govern the runtime `run_pattern` deploys patterns into. The harness's own
 `cfcEnforcementMode`, which governs tool policy and the sandbox, is a separate
@@ -934,15 +934,21 @@ is what lets a bare task reach the fabric's own mail and bank data without the
 caller attaching anything: a request that names no `inputCells` at all still
 opens holding them.
 
-A grant is named by the CFC class loom's own table contract declares for the
-handle's columns, so a session is told `email` for a mail database and `finance`
-for a bank one. Two of the instance's records decide that, and the launcher
-reads both. `sqlite-injection/handles.json` — the receipt loom's daemon writes,
-and what `loom connector handles` prints — says which handles exist and what
-each one's reference is, and records no class. `pieces.json` declares each
+A grant is named by its Loom connection, with `#companion_key` appended for a
+second store on that connection. Its declared CFC class is separate metadata:
+the prompt describes `gmail-work (email)` or `readwise (document)`, and a
+companion as `gmail-work / calendar (calendar)`. Connections sharing a class
+remain separately reachable. Two of the instance's records decide that, and the
+launcher reads both. `sqlite-injection/handles.json` — the receipt loom's daemon
+writes, and what `loom connector handles` prints — says which handles exist and
+what each one's reference is, and records no class. `pieces.json` declares each
 connector piece's `sqlite_sources`, whose table contract carries the per-column
 `ifc` the daemon seeded, and that is where the class is written down. They join
-on the piece and connection loom names in both.
+on the piece, connection, and optional companion key Loom names in both.
+Repeated receipts for the same connection/store, reference, and class yield one
+grant. Conflicting references or classes for that store are reported and
+withheld. Persisted grants without a separate `cfcClass` retain their legacy
+class-as-name interpretation.
 
 What a grant does not do is decide anything a reference does not already decide.
 It discloses a token and a harness-authored sentence; the address stays
@@ -953,10 +959,9 @@ does for every other flow.
 Three cases the launch printout states rather than resolving silently:
 
 - A handle whose declared contract carries no CFC class, or more than one, is
-  printed as `grant <connection>  (none: <reason>)` and is not granted. A name
-  guessed at is a name a session would be told means something it does not.
-- A second handle declaring a class the first already took is printed the same
-  way, naming the connection that holds the name.
+  printed as `grant <connection>  (none: <reason>)` and is not granted.
+- An ambiguous store identity or invalid connection name, companion key, or
+  class is reported with the deciding record and a remedy.
 - A receipt that does not parse refuses the launch. A console that came up
   holding no grants while its report claimed two is the silent misconfiguration
   this launch path exists to rule out; an absent receipt, by contrast, is simply

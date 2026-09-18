@@ -7,10 +7,12 @@ import {
 } from "@commonfabric/runner/cfc";
 import {
   isObjectNotArray,
+  isObjectOrArray,
   type ReadonlyRecord,
 } from "@commonfabric/utils/types";
 import { isAbsolute, relative } from "@std/path";
 
+import { PIECE_TARGETING_GUIDANCE } from "./piece-targeting.ts";
 import {
   type HarnessModelProviderId,
   isHarnessModelProviderId,
@@ -193,6 +195,7 @@ import {
   researchPatternRecords,
   selectResearchContext,
 } from "./research/context.ts";
+import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
 import { projectHarnessResearchKitForModel } from "./research/model-projection.ts";
 import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
@@ -236,6 +239,10 @@ export interface CreateHarnessPromptLoopOptions
   apiKeySource?: string;
   fetchFn?: HarnessFetch;
   maxModelTurns?: number;
+
+  /** Reserves the last root model turn for a partial answer without tools. */
+  finalizeOnTurnLimit?: boolean;
+
   allowedToolIds?: readonly BuiltinToolId[];
   allowedSubagentProfiles?: readonly HarnessSubagentProfile[];
   nativeModelToolIds?: readonly HarnessNativeModelToolId[];
@@ -284,6 +291,17 @@ export interface RunHarnessTranscriptOptions {
   model?: string;
   promptSlotBinding?: PromptSlotBinding;
   signal?: AbortSignal;
+
+  /**
+   * Completed tool batch or opening handoff with matching research and model
+   * influence, excluding turn-local budget notices. Message and run-state
+   * objects borrow loop state; retained checkpoints must copy them.
+   */
+  onCheckpoint?: (checkpoint: {
+    transcript: readonly HarnessTranscriptMessage[];
+    runState: ReturnType<CfHarnessEngine["getRunState"]>;
+  }) => void | Promise<void>;
+
   onTranscriptEvent?: (
     event: HarnessTranscriptEvent,
   ) => void | Promise<void>;
@@ -296,6 +314,7 @@ export interface HarnessPromptLoopResult {
   /** User-facing disposition; absent on older injected loop results. */
   taskOutcome?: HarnessTaskOutcome;
 
+  /** Resumable history; turn-local budget notices remain only in audit artifacts. */
   transcript: HarnessTranscriptMessage[];
   modelTurns: number;
 
@@ -433,7 +452,7 @@ const annotatePromptLoopError = (
   error: unknown,
   modelTurns: number,
 ): void => {
-  if (typeof error !== "object" || error === null) {
+  if (!isObjectOrArray(error)) {
     return;
   }
   try {
@@ -449,7 +468,7 @@ const annotatePromptLoopError = (
 const promptLoopModelTurnsFromError = (
   error: unknown,
 ): number | undefined => {
-  if (typeof error !== "object" || error === null) {
+  if (!isObjectOrArray(error)) {
     return undefined;
   }
   const modelTurns = (error as PromptLoopErrorWithModelTurns)[
@@ -645,7 +664,7 @@ const summarizeToolInput = async (
       const edits = Array.isArray(input.edits) ? input.edits : [];
       for (const edit of edits) {
         if (
-          typeof edit === "object" && edit !== null &&
+          isObjectOrArray(edit) &&
           "oldText" in edit &&
           typeof edit.oldText === "string"
         ) {
@@ -654,7 +673,7 @@ const summarizeToolInput = async (
           oldTextDigests.push(summary.digest);
         }
         if (
-          typeof edit === "object" && edit !== null &&
+          isObjectOrArray(edit) &&
           "newText" in edit &&
           typeof edit.newText === "string"
         ) {
@@ -1145,7 +1164,7 @@ const mapSubagentReturnText = (
   if (Array.isArray(value)) {
     return value.map((entry) => mapSubagentReturnText(entry, transform));
   }
-  if (value !== null && typeof value === "object") {
+  if (isObjectOrArray(value)) {
     return Object.fromEntries(
       Object.entries(value).map(([key, entry]) => [
         transform(key),
@@ -1264,7 +1283,7 @@ const restrictedSkillContextToken = (
     }
     return undefined;
   }
-  if (value !== null && typeof value === "object") {
+  if (isObjectOrArray(value)) {
     for (const [key, entry] of Object.entries(value)) {
       const keyMatch = restrictedSkillContextToken(
         table,
@@ -1323,6 +1342,7 @@ const buildSubagentSystemPrompt = (
     "You start with a fresh context and do not know the parent conversation.",
     "Use only the task and context provided in this child run.",
     "Report missing inputs or choices to the parent through your failure-return contract; the parent owns questions to the user. Do not repeat authoring to discover a source the granted references do not hold. Unavailable, refused, or unsettled reads remain unknown, not absent.",
+    PIECE_TARGETING_GUIDANCE,
     "Do not attempt to delegate further; nested subagents are not available.",
     `Subagent profile: ${profileConfig.profile}`,
     ...(profileConfig.hostToolIds.length > 0
@@ -1445,11 +1465,12 @@ const buildSubagentSystemPrompt = (
         "Use describe_handle on a reference you were given to see its shape before authoring against it. It returns a shape, and for a database its tables and how full each of them is, never the data itself.",
         "The references you were granted are the only data sources this run has, and there is nowhere to look another one up: a task or a part naming data you hold no reference for is not runnable, so return the failure branch naming the input you are missing rather than standing a different reference in its place. Before you build on a source, check what it holds — describe_handle reports each table's rows and how many of them each column is non-NULL on, and a pattern that counts rows settles it where that is absent — because an empty result is data rather than a failure: the query settles, everything derived from it is empty in turn, and nothing reports a problem. A query result also carries an `error`, and a refused read arrives there rather than as rows — a table describe_handle reports `rowLabelReads` for refuses any query that does not select those columns, naming the one it wants — so read `error` before you treat a result as empty, and render what it says instead of an empty state, which would report as a fact about the data something no read established.",
         'To read what the pattern computed, pass run_pattern a `resultSchema` describing the fields you want; without one you get a reference and no value at all. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. Numbers, booleans and enum strings come back as themselves; unconstrained strings and anything the schema does not model are withheld as text and come back as reference tokens addressing those positions, which you can describe_handle or wire into a later pattern. You do not need to declare $NAME or $UI.',
-        `Return the resultRef run_pattern gave you for the pattern you ran last and the one-line \`describes\`${
+        REVISION_VERIFICATION_GUIDANCE,
+        `Return the resultRef of the working piece from run_pattern or revise_piece and the one-line \`describes\`${
           profileConfig.allowedToolIds.includes("search_patterns")
             ? ", plus the `hashtags` you published it under"
             : ""
-        }. Do not return the data, sample rows, counts, names, or any other content read out of the space, and do not return source under any of those names.`,
+        }. A verification probe is separate: return its reference as verificationRef, not as the piece. Do not return the data, sample rows, counts, names, or any other content read out of the space, and do not return source under any of those names.`,
         `When you cannot produce a working pattern — the compile loop does not converge, the task is impossible against the references you hold, or you are running out of turns — return the failure branch of your return schema: {"ok": false, "code": <one of ${
           SUBAGENT_FAILURE_REASON_CODES.join(", ")
         }>} with an optional free-text "detail".`,
@@ -2821,6 +2842,7 @@ export class CfHarnessPromptLoop {
   readonly modelClient: HarnessModelClient;
   readonly #gatewayClient?: OpenAICompatibleGatewayClient;
   readonly #maxModelTurns: number;
+  readonly #finalizeOnTurnLimit: boolean;
   readonly #allowedToolIds: ReadonlySet<BuiltinToolId>;
   readonly #nativeModelToolIds: readonly HarnessNativeModelToolId[];
   readonly #parentToolAllowanceMode: HarnessParentToolAllowance;
@@ -2902,6 +2924,7 @@ export class CfHarnessPromptLoop {
       }
     }
     this.#maxModelTurns = options.maxModelTurns ?? DEFAULT_MAX_MODEL_TURNS;
+    this.#finalizeOnTurnLimit = options.finalizeOnTurnLimit ?? false;
     this.#parentToolAllowanceMode = options.allowedToolIds === undefined
       ? "all-builtins"
       : "restricted";
@@ -3472,6 +3495,12 @@ export class CfHarnessPromptLoop {
     }
     this.engine.bindRunModel(model);
     const transcript: HarnessTranscriptMessage[] = [...options.transcript];
+    // Keep audit history intact while excluding this loop's own control messages
+    // from session replay. Identity preserves user quotations and host-only
+    // omission annotations; content matching or deep cloning would lose either.
+    const budgetNotices = new Set<HarnessTranscriptMessage>();
+    const resumableTranscript = () =>
+      transcript.filter((message) => !budgetNotices.has(message));
     // The attachment first, so a search this run also made — which carries
     // the ranking evidence a by-id read has none of — refines it.
     this.#seedAttachedPatternRecords(initialRunState.patternRefs ?? []);
@@ -3639,18 +3668,47 @@ export class CfHarnessPromptLoop {
           }
         }
       }
+      if (openingResearch !== undefined) {
+        options.signal?.throwIfAborted();
+        await options.onCheckpoint?.({
+          transcript: resumableTranscript(),
+          runState: this.engine.getRunState(),
+        });
+      }
       while (modelTurns < maxModelTurns) {
         options.signal?.throwIfAborted();
         modelTurns += 1;
+        const finalizing = this.#finalizeOnTurnLimit &&
+          modelTurns === maxModelTurns;
+        if (
+          finalizing ||
+          (this.#finalizeOnTurnLimit && modelTurns === maxModelTurns - 2)
+        ) {
+          const budgetMessage: HarnessTranscriptMessage = {
+            role: "user",
+            content: finalizing
+              ? "Host turn budget: provide your final response now. Tools are unavailable. Summarize verified findings with source citations, explicitly identify unread material and uncertainty, and do not claim exhaustive coverage. This notice applies only to this user turn; subsequent user requests have a fresh budget."
+              : "Host turn budget: two root turns remain after this call, with the last reserved for your final response. Prioritize essential source reads and prepare verified findings and remaining gaps. This notice applies only to this user turn; subsequent user requests have a fresh budget.",
+          };
+          budgetNotices.add(budgetMessage);
+          transcript.push(budgetMessage);
+          await this.engine.persistTranscript(transcript);
+          await options.onTranscriptEvent?.({
+            message: budgetMessage,
+            transcript,
+          });
+        }
         let response;
         try {
           response = await this.modelClient.complete({
             model,
             transcript,
-            tools: BUILTIN_TOOLS.filter((tool) =>
-              this.#allowedToolIds.has(tool.descriptor.toolId)
-            ).map((tool) => tool.descriptor),
-            nativeModelToolIds: this.#nativeModelToolIds,
+            tools: finalizing
+              ? []
+              : BUILTIN_TOOLS.filter((tool) =>
+                this.#allowedToolIds.has(tool.descriptor.toolId)
+              ).map((tool) => tool.descriptor),
+            nativeModelToolIds: finalizing ? [] : this.#nativeModelToolIds,
             runId: this.engine.getRunState().runId,
             ...(this.#cacheAffinityKey !== undefined
               ? { cacheAffinityKey: this.#cacheAffinityKey }
@@ -3705,8 +3763,27 @@ export class CfHarnessPromptLoop {
         });
         options.signal?.throwIfAborted();
         const toolCalls = assistantMessage.toolCalls ?? [];
+        if (finalizing && toolCalls.length > 0) {
+          throw new HarnessControlError(
+            "provider-unavailable",
+            "The model requested tools during its final response",
+          );
+        }
         if (toolCalls.length === 0) {
+          if (assistantMessage.content.trim().length === 0) {
+            throw new HarnessControlError(
+              "provider-unavailable",
+              "The model returned an empty assistant response with no tool calls",
+            );
+          }
           finalAssistantText = assistantMessage.content;
+          if (finalizing) {
+            taskOutcome = {
+              outcome: "gave-up",
+              reason:
+                "Root model turn budget reached; response contains partial findings.",
+            };
+          }
           break;
         }
         const followupMessages: HarnessTranscriptMessage[] = [];
@@ -3787,6 +3864,10 @@ export class CfHarnessPromptLoop {
           );
         }
         options.signal?.throwIfAborted();
+        await options.onCheckpoint?.({
+          transcript: resumableTranscript(),
+          runState: this.engine.getRunState(),
+        });
         if (finalAssistantText !== undefined) break;
       }
     } catch (error) {
@@ -3815,13 +3896,17 @@ export class CfHarnessPromptLoop {
       await persistRunReport();
       throw turnLimitError;
     }
-    await this.engine.completeRun("assistant_completed");
+    await this.engine.completeRun(
+      this.#finalizeOnTurnLimit && modelTurns === maxModelTurns
+        ? "budget_finalized"
+        : "assistant_completed",
+    );
     await persistRunReport(finalAssistantText, taskOutcome);
     return {
       model,
       finalAssistantText,
       taskOutcome,
-      transcript,
+      transcript: resumableTranscript(),
       modelTurns,
       ...(modelUsage.length > 0
         ? {

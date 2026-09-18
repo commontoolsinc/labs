@@ -32,6 +32,7 @@ import {
   namesCoverageSourceGroup,
 } from "./ci-check-lib.ts";
 import { collectMeasuredSetDebt } from "./coverage-metrics.ts";
+import { say } from "./step-summary.ts";
 import { readWorkspaceMembers } from "./workspace-tests.ts";
 import { loadTopology } from "./test-topology.ts";
 import type { Suite } from "./test-topology/suite.ts";
@@ -464,16 +465,6 @@ export function formatGateReport(report: GateReport): string[] {
   return lines;
 }
 
-/** Says something both on the job's output and in its summary. */
-function say(lines: readonly string[]): void {
-  const text = `${lines.join("\n")}\n`;
-  console.log(text);
-  const summary = Deno.env.get("GITHUB_STEP_SUMMARY");
-  if (summary !== undefined && summary.length > 0) {
-    Deno.writeTextFileSync(summary, text, { append: true });
-  }
-}
-
 /**
  * Which of a set of commits the tree under test holds most recently, or
  * nothing where it holds none of them.
@@ -487,44 +478,34 @@ export function nearestOnBranch(
   return async (commits: readonly string[]) => {
     if (commits.length === 0) return undefined;
     const wanted = new Set(commits);
-    // The tree's own history, newest first, read until one of them
-    // appears. Git stops on its own once nothing is reading, so what
-    // this walks is the distance back to the answer rather than the
-    // whole of the history.
+    // The tree's own history, every commit ahead of the ones it descends
+    // from, read until one of them appears. Git stops on its own once
+    // nothing is reading, so what this walks is the distance back to the
+    // answer rather than the whole of the history.
     const child = new Deno.Command("git", {
-      args: ["rev-list", "HEAD"],
+      args: ["rev-list", "--topo-order", "HEAD"],
       cwd: root,
       stdout: "piped",
       stderr: "null",
     }).spawn();
-    const reader = child.stdout.getReader();
     const decoder = new TextDecoder();
     let carried = "";
     let found: string | undefined;
-    try {
-      while (found === undefined) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        carried += decoder.decode(value, { stream: true });
-        const lines = carried.split("\n");
-        carried = lines.pop() ?? "";
-        for (const line of lines) {
-          if (wanted.has(line)) {
-            found = line;
-            break;
-          }
+    // Leaving the loop cancels the stream, which is what leaves nothing
+    // reading. Awaiting the status is what reaps git.
+    for await (const chunk of child.stdout) {
+      carried += decoder.decode(chunk, { stream: true });
+      const lines = carried.split("\n");
+      carried = lines.pop() ?? "";
+      for (const line of lines) {
+        if (wanted.has(line)) {
+          found = line;
+          break;
         }
       }
-    } finally {
-      await reader.cancel().catch(() => {});
-      try {
-        child.kill();
-      } catch {
-        // It ended on its own, which is what reaching the root of the
-        // history or losing its reader does.
-      }
-      await child.status;
+      if (found !== undefined) break;
     }
+    await child.status;
     return found;
   };
 }

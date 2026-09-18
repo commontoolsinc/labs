@@ -2,6 +2,7 @@ import { basename, isAbsolute, relative } from "@std/path";
 
 import type { JSONSchema } from "@commonfabric/api";
 import type { CfcLabelView, CfcSandboxResult } from "@commonfabric/runner/cfc";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
   normalizeCdpOrigin,
@@ -91,8 +92,7 @@ export interface RunSkillScriptToolOutput {
 export const isRunSkillScriptToolSuccessOutput = (
   output: unknown,
 ): output is RunSkillScriptToolOutput =>
-  typeof output === "object" &&
-  output !== null &&
+  isObjectOrArray(output) &&
   "type" in output &&
   output.type === "cf-harness.run-skill-script-output" &&
   "status" in output &&

@@ -29,6 +29,7 @@ import {
 } from "../../src/storage/reactivity-log.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "../cfc-seed-envelope.ts";
 
@@ -153,7 +154,7 @@ describe("deriveFlowJoin()", () => {
       const address = runtime.getCell(signer.did(), "corpus", undefined, seed)
         .getAsNormalizedFullLink();
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({ ...address, path: [] }, {
+      seedStoredEnvelope(seed, { ...address, path: [] }, {
         value: {},
         cfc: {
           version: 1,

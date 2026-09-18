@@ -20,6 +20,8 @@ export interface SchedulerGateState {
 
 export interface SchedulerNode {
   readonly action: Action;
+  /** Whether this registration has an accepted result to retain while gated. */
+  hasCommittedResult?: boolean;
   /** The latest sealed run that can still owe dependency-withdrawal recovery. */
   pendingWaveRun?: object;
 
@@ -163,6 +165,7 @@ export class NodeRegistry {
     const record = this.#records.get(action);
     if (!record) return undefined;
     record.registrationToken = {};
+    delete record.hasCommittedResult;
     delete record.pendingWaveRun;
     record.adoptedViewIdentity = undefined;
     record.cancelLocalReadWake?.();

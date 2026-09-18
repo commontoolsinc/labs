@@ -697,11 +697,11 @@ describe("runtime-processor", () => {
       };
 
       expect(await refusalFor([1, 2]))
-        .toBe("A piece's argument must be a record, not: [1,2]");
+        .toBe("A piece's argument must be a record, not: `[1,2]`");
       expect(await refusalFor(null))
-        .toBe("A piece's argument must be a record, not: null");
+        .toBe("A piece's argument must be a record, not: `null`");
       expect(await refusalFor("a bare string"))
-        .toBe('A piece\'s argument must be a record, not: "a bare string"');
+        .toBe('A piece\'s argument must be a record, not: `"a bare string"`');
     });
 
     it("refuses a fabric class instance as the whole argument", async () => {
@@ -5202,8 +5202,8 @@ describe("runtime-processor", () => {
           >[2],
         ),
       );
-      expect(options.cfcEnforcementMode).toBe("enforce-explicit");
-      expect(options.cfcFlowLabels).toBeUndefined();
+      expect(options.cfcEnforcementMode).toBe("enforce-strict");
+      expect(options.cfcFlowLabels).toBe("persist");
       expect(options.cfcReadMaxConfidentiality).toBeUndefined();
       expect(options.cfcReadOnExceed).toBeUndefined();
     });

@@ -18,6 +18,7 @@ import {
   testIdentityKey,
   testIdentityOfKey,
 } from "@commonfabric/test-support/records";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   costSeconds,
   type DaySamples,
@@ -185,7 +186,7 @@ export function parseAggregate(text: string): AggregateState | undefined {
   } catch {
     return undefined;
   }
-  if (typeof value !== "object" || value === null) return undefined;
+  if (!isObjectOrArray(value)) return undefined;
   const state = value as Record<string, unknown>;
   // An aggregate written under an older shape is read forward, field by
   // field, the way each field below says. Refusing it instead would cost
@@ -201,8 +202,7 @@ export function parseAggregate(text: string): AggregateState | undefined {
   // keyed by index. Every such key fails to name an identity, so the
   // aggregate would be read as holding nothing rather than refused.
   if (
-    typeof state.states !== "object" || state.states === null ||
-    Array.isArray(state.states)
+    !isObjectNotArray(state.states)
   ) {
     return undefined;
   }
@@ -241,7 +241,7 @@ export function parseAggregate(text: string): AggregateState | undefined {
   // and reading it wrongly would decide which identities the manifest
   // holds, so the aggregate is refused instead.
   const files = state.files === undefined ? {} : state.files;
-  if (typeof files !== "object" || files === null || Array.isArray(files)) {
+  if (!isObjectNotArray(files)) {
     return undefined;
   }
   for (const file of Object.values(files as Record<string, unknown>)) {
@@ -384,14 +384,16 @@ export function readReport(
       ...laneObservationsOf(report.objectName, group.records, day),
     );
     for (const record of group.records) {
-      const test = resolver.resolve(record.test, day);
       // A lane measuring its own setup or one of its batches is not a
       // test, so nothing here scores it: a catch, a flake observation and
       // a churn rate are all statements about a test, and a lane is
       // neither passing nor failing in the sense they read. It reaches
       // the store as an ordinary record so that it travels the path every
-      // record travels, and this is where that path parts.
-      if (isLaneMeasurement(test)) continue;
+      // record travels, and this is where that path parts. What a record
+      // is, is asked of the identity the lane wrote, so no line in the
+      // alias file decides whether a measurement is scored as a test.
+      if (isLaneMeasurement(record.test)) continue;
+      const test = resolver.resolve(record.test, day);
       const key = testIdentityKey(test);
       // A record with no file names its own identity as the unit, which
       // is all an unmapped record can say. Where another record of the
@@ -404,7 +406,6 @@ export function readReport(
       observations.push({
         test,
         outcome: record.outcome,
-        durationMs: record.durationMs,
         day,
         startedAt: group.context.startedAt,
         commit: group.context.commit,

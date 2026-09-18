@@ -49,6 +49,8 @@ export interface FanOutInstance {
 }
 
 interface InstanceRecord {
+  /** Whether this instance has an accepted result to retain while gated. */
+  hasCommittedResult?: boolean;
   /** The latest sealed publication; write-free reruns retain its obligation. */
   pendingWaveRun?: object;
 

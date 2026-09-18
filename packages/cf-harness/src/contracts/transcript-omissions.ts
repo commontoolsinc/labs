@@ -10,6 +10,7 @@
  * helper.
  */
 
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import type {
   HarnessToolTranscriptMessage,
   HarnessTranscriptMessage,
@@ -74,7 +75,7 @@ type AnnotatedTranscriptMessage = HarnessTranscriptMessage & {
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+  isObjectNotArray(value);
 
 /** Whether `value` is a supported omission rule. */
 export const isHarnessTranscriptOmissionRule = (

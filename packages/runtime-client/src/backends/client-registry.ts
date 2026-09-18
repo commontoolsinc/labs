@@ -15,7 +15,7 @@
  * test builds from a `MessageChannel` are the same thing here.
  */
 
-import { toCompactDebugString } from "@commonfabric/data-model";
+import { toLongQuotedDebugString } from "@commonfabric/data-model";
 import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray } from "@commonfabric/utils/types";
@@ -67,13 +67,6 @@ const ipcLogger = getLogger("runtime-worker.ipc", { enabled: false });
 // A slow client round-trip decomposes as delivery (worker starved) vs handle
 // (handler awaited something slow) vs the residue (response return path).
 const ipcTimingLogger = getLogger("runner.ipc", { enabled: false });
-
-/**
- * How much of an unreadable request to render in the report about it. Enough
- * to recognize which message it was, short enough that a hostile payload
- * cannot flood the channel it is being reported on.
- */
-const MAX_INVALID_REQUEST_RENDER = 512;
 
 export interface RuntimeClientsOptions {
   /**
@@ -252,11 +245,7 @@ export class RuntimeClients {
         // `bigint` anywhere in the tree -- replacing this report with one that
         // names nothing -- and renders a `FabricPrimitive` as `{}`.
         throw new Error(
-          `Invalid IPC request: ${
-            toCompactDebugString(message, {
-              maxLength: MAX_INVALID_REQUEST_RENDER,
-            })
-          }`,
+          `Invalid IPC request: ${toLongQuotedDebugString(message)}`,
         );
       }
       const { msgId, data: request } = message;

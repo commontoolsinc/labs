@@ -9,6 +9,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 
@@ -40,7 +41,7 @@ const setup = async (separateChild = false) => {
     const tx = runtime.edit();
     writeSeedEnvelopeDoc(tx, space);
     if (separateChild) child.withTx(tx).set(1);
-    tx.writeOrThrow({ ...address, path: [] }, {
+    seedStoredEnvelope(tx, { ...address, path: [] }, {
       value: { trigger, child: separateChild ? child.getAsLink() : 1 },
       cfc: {
         version: 1,

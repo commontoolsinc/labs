@@ -1,4 +1,4 @@
-import { toCompactDebugString } from "@commonfabric/data-model";
+import { toShortQuotedDebugString } from "@commonfabric/data-model";
 import { isDID } from "@commonfabric/identity/did";
 import {
   isLinkRef,
@@ -287,9 +287,7 @@ export function parseLinkPrimitive(
     };
   }
   throw new Error(
-    `Link is not a primitive: ${
-      toCompactDebugString(value, { backtickQuote: true })
-    }`,
+    `Link is not a primitive: ${toShortQuotedDebugString(value)}`,
   );
 }
 

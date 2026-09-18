@@ -315,6 +315,7 @@ form.
 | `FabricEpochNsec` | `EpochNsec@1` | `bigint` |
 | `FabricKeyPair` | `KeyPair@1` | `{ algorithm: string, publicKey: ArrayBuffer, privateKey: ArrayBuffer }`, or `{ publicKey: CryptoKey, privateKey: CryptoKey }` |
 | `FabricRegExp` | `RegExp@1` | `{ source, flags, flavor }` |
+| `FabricUnavailable` | `Unavailable@1` | `{ reason }`, or for reason `error` `{ reason, errorKind }` or `{ reason, errorKind, errorMessage }` |
 | `symbol` | `Symbol@1` | `string` (the registry key) |
 
 Bytes travel as a bare `ArrayBuffer` rather than as a view onto one, that being
@@ -323,16 +324,16 @@ the transferable object in the tree rather than having to reach through a view
 and reason about its offset. Both byte-carrying types do this. A bare
 `Uint8Array` is therefore not a form this format emits.
 
-Three of these differ from their JSON counterparts in kind rather than in
+Four of these differ from their JSON counterparts in kind rather than in
 spelling, which is most of the reason this format exists, and they differ along
 two axes.
 
 `FabricBytes` carries bytes as bytes, where JSON must represent them as
-base64url text. `FabricRegExp` is terminal here and nonterminal under JSON —
-concrete proof that terminality belongs to the pair (class, format) rather than
-to the class. `FabricHash` differs on **both** axes at once: terminal here and
-nonterminal under JSON, and carrying its hash as a bare `ArrayBuffer` where
-JSON carries base64url text.
+base64url text. `FabricRegExp` and `FabricUnavailable` are terminal here and
+nonterminal under JSON — concrete proof that terminality belongs to the pair
+(class, format) rather than to the class. `FabricHash` differs on **both** axes
+at once: terminal here and nonterminal under JSON, and carrying its hash as a
+bare `ArrayBuffer` where JSON carries base64url text.
 
 `FabricKeyPair` differs from the others in that its state depends on the value
 rather than only on its class. A pair holding key material encodes to two
@@ -555,3 +556,9 @@ to `es2025`, and `source` and `flags` to the empty string, so `{}` decodes to
 an empty `es2025` pattern. That is what lets a narrower encoder omit what it
 has nothing to say about. `{ source: undefined }` is refused, being a `source`
 that is present and not a string.
+
+`Unavailable@1` has the same distinction on its two optional fields. An absent
+`errorKind` is the state of a transient reason and an absent `errorMessage`
+that of an error with no stored message; `{ reason: "error", errorKind:
+undefined }` and `{ reason: "error", errorKind: "sync", errorMessage:
+undefined }` are refused, each being a field that is present and not a string.

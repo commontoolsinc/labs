@@ -90,14 +90,20 @@ public `"common user"` passphrase and the name. Any valid name therefore
 resolves even when it is not listed. DIDs (`did:key:...`, `did:ucan:...`) are
 used as-is without derivation.
 
-The target after the
-[random space identity cutover](../../plans/random-space-identities.md) resolves
-names only through the mount's explicit name-to-DID index. Names no longer
-derive DIDs or create spaces. Under the dormant
-[Common Fabric URL](../fabric-urls.md) concept, a discovered mapping could be
-added to that index without changing the space DID. No such resolver is planned
-for deployment. FUSE lookup does not perform an implicit network registration
-or claim.
+After the
+[random space identity cutover](../../plans/random-space-identities.md) a name
+still resolves through that derivation, which survives as a resolver with no
+authority: it yields a DID and never a key, and creating a space does not call
+it. What changes is that resolving a name creates nothing. A name whose space
+has no history opens nothing rather than bringing one into being, and a space is
+created by the create operation, which takes no name and yields a random DID.
+
+The `.spaces.json` index below lists what a mount knows about; it is not
+consulted to resolve a name, because the derivation answers without it. Under
+the dormant [Common Fabric URL](../fabric-urls.md) concept, a discovered mapping
+could be added to that index without changing the space DID. No such resolver is
+planned for deployment. FUSE lookup does not perform an implicit network
+registration or claim.
 
 ### Space Index
 

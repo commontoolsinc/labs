@@ -75,7 +75,7 @@ export function resolveCellPath<T>(
       );
     }
     if (value == null || !Object.hasOwn(value, segment)) {
-      const availableKeys = value != null && typeof value === "object"
+      const availableKeys = isObjectOrArray(value)
         ? Object.keys(value).filter((key) => !key.startsWith("$")).sort()
         : [];
       const hint = availableKeys.length > 0

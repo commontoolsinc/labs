@@ -2,7 +2,21 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
 import { validateSchemaValue } from "@commonfabric/runner/cfc";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  type FabricPrimitiveSchemaType,
+} from "@commonfabric/api";
+import type { FabricPrimitive } from "@commonfabric/data-model";
+import {
+  FabricBytes,
+  FabricEpochDay,
+  FabricEpochNsec,
+  FabricHash,
+  FabricKeyPair,
+  FabricRegExp,
+  FabricUnavailable,
+} from "@commonfabric/data-model/fabric-primitives";
+import { FABRIC_SPECIAL_OBJECT_BRAND } from "@commonfabric/runner/fabric-special-object-brand";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
@@ -41,6 +55,45 @@ const oldPattern = pattern(
     required: ["doubled"],
   },
 );
+
+/**
+ * A value of each `FabricPrimitive` class, keyed by the schema type name that
+ * matches it. The `satisfies` closes the classes over the vocabulary's names.
+ */
+const FABRIC_PRIMITIVE_VALUES = {
+  FabricBytes: new FabricBytes(new Uint8Array([1])),
+  FabricEpochDay: new FabricEpochDay(0n),
+  FabricEpochNsec: new FabricEpochNsec(0n),
+  FabricHash: new FabricHash(new Uint8Array(32), "fid1"),
+  FabricKeyPair: new FabricKeyPair(
+    "ExampleAlgorithm",
+    new Uint8Array([1]),
+    new Uint8Array([2]),
+  ),
+  FabricRegExp: new FabricRegExp(/a/),
+  FabricUnavailable: new FabricUnavailable("error", "general", "boom"),
+} satisfies Record<FabricPrimitiveSchemaType, FabricPrimitive>;
+
+/**
+ * Returns every string-keyed member on the prototype chain of a value in
+ * {@link FABRIC_PRIMITIVE_VALUES} below `Object.prototype`, together with a
+ * name none of those values has and the brand key.
+ */
+function fabricPrimitiveMemberNames(): Set<string> {
+  const names = new Set(["absentFromEveryClass", FABRIC_SPECIAL_OBJECT_BRAND]);
+  for (const value of Object.values(FABRIC_PRIMITIVE_VALUES)) {
+    for (
+      let prototype = Object.getPrototypeOf(value);
+      prototype !== Object.prototype;
+      prototype = Object.getPrototypeOf(prototype)
+    ) {
+      for (const name of Object.getOwnPropertyNames(prototype)) {
+        names.add(name);
+      }
+    }
+  }
+  return names;
+}
 
 /** An object whose `maxProperties` a second merged member would break. */
 const boundedObject: JSONSchema = {
@@ -1193,6 +1246,7 @@ describe("piece schema compatibility", () => {
     const stableSource: JSONSchema = {
       type: "object",
       properties,
+      required: ["y"],
       additionalProperties: false,
     };
     const stableTarget: JSONSchema = {
@@ -1201,7 +1255,7 @@ describe("piece schema compatibility", () => {
         ...properties,
         x: { type: "number", default: 0 },
       },
-      required: ["x"],
+      required: ["x", "y"],
       additionalProperties: false,
     };
     expect(() => assertSchemaSubset(stableSource, stableTarget)).not.toThrow();
@@ -2413,11 +2467,15 @@ describe("piece schema compatibility", () => {
   });
 
   it("fills an unconstrained required member's default for links but refuses its introduction from `true` during evolution", () => {
+    // The link source requires a key no `FabricPrimitive` has, which keeps
+    // every value it admits a record that can receive the default.
+
     const target: JSONSchema = {
       required: ["count"],
       properties: { count: { default: 1 } },
     };
-    expect(() => assertSchemaSubset(true, target)).not.toThrow();
+    expect(() => assertSchemaSubset({ required: ["title"] }, target)).not
+      .toThrow();
     expect(() =>
       assertPatternSchemasBackwardCompatible(
         pattern(true, true),
@@ -3036,6 +3094,361 @@ describe("piece schema compatibility", () => {
     }
   });
 
+  describe("finite literal subsets", () => {
+    it("does not throw for listed values excluded by the source's declared type", () => {
+      for (
+        const [source, target] of [
+          [
+            { type: "string", enum: ["open", null] },
+            { enum: ["open", "closed"] },
+          ],
+          [{ type: "integer", enum: [1, 2.5] }, { const: 1 }],
+          [{ type: "number", enum: [1, "open"] }, { enum: [1, 2] }],
+          [{ type: "null", enum: [null, "open"] }, { const: null }],
+          [
+            { type: "string", const: "open", enum: ["open", null] },
+            { enum: ["open", "closed"] },
+          ],
+        ] satisfies [JSONSchema, JSONSchema][]
+      ) {
+        expect(() => assertSchemaSubset(source, target)).not.toThrow();
+      }
+    });
+
+    it("throws when the target excludes a value admitted by the source's type", () => {
+      expect(() =>
+        assertSchemaSubset(
+          { type: "number", enum: [1, 2.5] },
+          { type: "integer", enum: [1, 2.5] },
+        )
+      ).toThrow();
+      expect(() =>
+        assertSchemaSubset(
+          { type: "unknown", enum: ["open", null] },
+          { enum: ["open", "closed"] },
+        )
+      ).toThrow(/enum\/const/);
+    });
+
+    it("does not throw for a `null` type against an enum or const admitting `null`", () => {
+      for (const source of [{ type: "null" }, { type: ["null"] }] as const) {
+        expect(() => assertSchemaSubset(source, { enum: [null] })).not
+          .toThrow();
+        expect(() => assertSchemaSubset(source, { const: null })).not
+          .toThrow();
+        expect(() => assertSchemaSubset(source, { enum: ["open"] })).toThrow();
+      }
+    });
+
+    it("permits nullable literal argument widening and result narrowing", () => {
+      const wider: JSONSchema = { enum: ["open", "closed", null] };
+      for (
+        const narrower of [
+          { type: "null" },
+          { anyOf: [{ type: "string", enum: ["open"] }, { type: "null" }] },
+        ] satisfies JSONSchema[]
+      ) {
+        expect(() => assertSchemaSubset(narrower, wider)).not.toThrow();
+        expect(() => assertSchemaSubset(wider, narrower)).toThrow();
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(narrower, wider),
+            pattern(wider, narrower),
+          )
+        ).not.toThrow();
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(wider, true),
+            pattern(narrower, true),
+          )
+        ).toThrow(/argument:/);
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(true, narrower),
+            pattern(true, wider),
+          )
+        ).toThrow(/result:/);
+      }
+    });
+
+    for (
+      const [name, source] of [
+        ["a type list", { type: ["string", "null"], enum: ["open", null] }],
+        ["an `anyOf` sibling", { enum: ["open", null], anyOf: [{}] }],
+        ["an `anyOf` branch", { anyOf: [{ enum: ["open", null] }] }],
+        [
+          "a nested `anyOf` branch",
+          { anyOf: [{ anyOf: [{ enum: ["open", null] }] }] },
+        ],
+        [
+          "a type list inside `anyOf`",
+          { anyOf: [{ type: ["string", "null"], enum: ["open", null] }] },
+        ],
+      ] satisfies [string, JSONSchema][]
+    ) {
+      it(`compares mixed enums in ${name} against each target branch`, () => {
+        const target: JSONSchema = {
+          anyOf: [{ enum: ["open", "closed"] }, { type: "null" }],
+        };
+        for (const value of ["open", null]) {
+          expect(validateSchemaValue(source, value, source)).toBeUndefined();
+          expect(validateSchemaValue(target, value, target)).toBeUndefined();
+        }
+        expect(() => assertSchemaSubset(source, target)).not.toThrow();
+        expect(() => assertSchemaSubset(source, { type: ["string", "null"] }))
+          .not.toThrow();
+        expect(() =>
+          assertSchemaSubset(source, {
+            anyOf: [{ enum: ["closed"] }, { type: "null" }],
+          })
+        ).toThrow();
+        expect(() =>
+          assertSchemaSubset(source, { type: ["string", "integer"] })
+        ).toThrow();
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(source, target),
+            pattern(target, source),
+          )
+        ).not.toThrow();
+      });
+    }
+
+    for (
+      const [name, metadata] of [
+        ["asCell", { asCell: ["cell"] }],
+        ["readOnly", { readOnly: true }],
+        ["default", { default: "open" }],
+      ] satisfies [string, Exclude<JSONSchema, boolean>][]
+    ) {
+      it(`accepts mixed-enum widening in a branch retaining its \`${name}\``, () => {
+        const withValues = (values: string[]): JSONSchema => ({
+          anyOf: [
+            { type: "number" },
+            { enum: [...values, null], ...metadata },
+          ],
+        });
+        const narrower = withValues(["open", "closed"]);
+        const wider = withValues(["open", "closed", "archived"]);
+        expect(() => assertSchemaSubset(narrower, wider)).not.toThrow();
+        expect(() => assertSchemaSubset(wider, narrower)).toThrow(
+          /schema alternative accepted previously/,
+        );
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(narrower, wider),
+            pattern(wider, narrower),
+          )
+        ).not.toThrow();
+      });
+    }
+
+    for (
+      const [name, nested, definitions] of [
+        ["on the union", {
+          anyOf: [
+            { type: "number" },
+            { enum: ["open", "closed", null] },
+          ],
+          default: "open",
+        }, {}],
+        ["on a child branch", {
+          anyOf: [
+            { type: "number" },
+            { enum: ["open", "closed", null], default: "open" },
+          ],
+        }, {}],
+        ["in a referenced child branch", {
+          anyOf: [
+            { $ref: "#/$defs/state" },
+            { enum: [1, true] },
+          ],
+        }, {
+          state: { enum: ["open", "closed", null], default: "open" },
+        }],
+        ["when child defaults conflict", {
+          anyOf: [
+            { type: "number", default: 1 },
+            { enum: ["open", "closed", null], default: "open" },
+          ],
+        }, {}],
+      ] satisfies [
+        string,
+        Exclude<JSONSchema, boolean>,
+        Record<string, JSONSchema>,
+      ][]
+    ) {
+      it(`preserves defaults in an unchanged nested union ${name}`, () => {
+        const branch = { ...nested, asCell: ["cell"] } as const;
+        const narrower: JSONSchema = {
+          anyOf: [{ type: "string" }, branch],
+          $defs: definitions,
+        };
+        const wider: JSONSchema = {
+          anyOf: [{ type: "string" }, { type: "boolean" }, branch],
+          $defs: definitions,
+        };
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(narrower, wider),
+            pattern(wider, narrower),
+          )
+        ).not.toThrow();
+      });
+    }
+
+    it("refuses changed effective defaults in a nested union", () => {
+      const withDefault = (fallback: string): JSONSchema => ({
+        anyOf: [{
+          anyOf: [
+            { type: "number" },
+            { enum: ["open", "closed", null] },
+          ],
+          default: fallback,
+          asCell: ["cell"],
+        }],
+      });
+      const previous = withDefault("open");
+      const candidate = withDefault("closed");
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(previous, true),
+          pattern(candidate, true),
+        )
+      ).toThrow(/argument: defaults changed/);
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(true, previous),
+          pattern(true, candidate),
+        )
+      ).toThrow(/result: defaults changed/);
+    });
+
+    it("partitions a defaulted source union for a link without migrating its default", () => {
+      const source: JSONSchema = {
+        anyOf: [{
+          anyOf: [{ type: "number" }, { enum: ["open", "closed", null] }],
+          default: "open",
+        }],
+      };
+      const target: JSONSchema = {
+        anyOf: [
+          { type: ["null", "number"] },
+          { type: "string", enum: ["closed", "open"] },
+        ],
+      };
+      expect(() => assertSchemaSubset(source, target)).not.toThrow();
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(source, true),
+          pattern(target, true),
+        )
+      ).toThrow(/argument: defaults changed/);
+    });
+
+    it("accepts an unchanged type-list sibling while widening a mixed enum", () => {
+      const withValues = (values: string[]): JSONSchema => ({
+        anyOf: [
+          { type: ["null", "number"] },
+          { enum: [...values, 1] },
+        ],
+      });
+      const narrower = withValues(["open"]);
+      const wider = withValues(["open", "closed"]);
+      expect(() => assertSchemaSubset(narrower, wider)).not.toThrow();
+      expect(() => assertSchemaSubset(wider, narrower)).toThrow(
+        /schema alternative accepted previously/,
+      );
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(narrower, wider),
+          pattern(wider, narrower),
+        )
+      ).not.toThrow();
+    });
+
+    it("compares a referenced mixed enum against the whole target enum", () => {
+      const source: JSONSchema = {
+        anyOf: [{ $ref: "#/$defs/state" }],
+        $defs: { state: { enum: ["open", null] } },
+      };
+      expect(() =>
+        assertSchemaSubset(source, { enum: ["open", "closed", null] })
+      ).not.toThrow();
+      expect(() => assertSchemaSubset(source, { enum: ["open", "closed"] }))
+        .toThrow(/schema alternative accepted previously/);
+    });
+
+    it("retains sibling constraints and branch extensions when splitting enums", () => {
+      const source: JSONSchema = {
+        enum: ["open", null],
+        anyOf: [{ type: "string", minLength: 4 }, { type: "null" }],
+      };
+      const target: JSONSchema = {
+        anyOf: [{ type: "string", minLength: 5 }, { type: "null" }],
+      };
+      expect(validateSchemaValue(source, "open", source)).toBeUndefined();
+      expect(validateSchemaValue(target, "open", target)).toBeDefined();
+      expect(() => assertSchemaSubset(source, target)).toThrow(
+        /schema alternative accepted previously/,
+      );
+      expect(() =>
+        assertSchemaSubset(
+          { anyOf: [{ enum: ["open", null], readOnly: true }] },
+          { type: ["string", "null"] },
+        )
+      ).toThrow(/schema alternative accepted previously/);
+    });
+
+    it("leaves mixed enums containing an unclassified value whole", () => {
+      const value = FABRIC_PRIMITIVE_VALUES.FabricBytes;
+      const source = { enum: ["open", value] } as unknown as JSONSchema;
+      const target = {
+        anyOf: [{ type: "string" }, { enum: [value] }],
+      } as unknown as JSONSchema;
+      for (const admitted of ["open", value]) {
+        expect(validateSchemaValue(source, admitted, source)).toBeUndefined();
+        expect(validateSchemaValue(target, admitted, target)).toBeUndefined();
+      }
+      expect(() => assertSchemaSubset(source, target)).toThrow(
+        /schema alternative accepted previously/,
+      );
+    });
+
+    it("retains `FabricPrimitive` values while splitting a declared type list", () => {
+      const source = {
+        type: ["string", "null", "object"],
+        enum: ["open", null, FABRIC_PRIMITIVE_VALUES.FabricBytes],
+      } as unknown as JSONSchema;
+      const target: JSONSchema = { type: ["string", "null"] };
+      expect(
+        validateSchemaValue(
+          source,
+          FABRIC_PRIMITIVE_VALUES.FabricBytes,
+          source,
+        ),
+      )
+        .toBeUndefined();
+      expect(() => assertSchemaSubset(source, target)).toThrow();
+    });
+
+    it("refuses changed descendant defaults beneath a split object enum", () => {
+      const source: JSONSchema = { anyOf: [{ enum: ["open", {}] }] };
+      const target: JSONSchema = {
+        anyOf: [
+          { type: "string" },
+          { type: "object", properties: { count: { default: 1 } } },
+        ],
+      };
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(source, true),
+          pattern(target, true),
+        )
+      ).toThrow(/not stable under default insertion/);
+    });
+  });
+
   describe("bare enums spanning several types", () => {
     // A literal union with `null` among its members compiles to one bare enum,
     // `{enum: ["open", "closed", null]}`, and a `string | null` consumer to a
@@ -3233,6 +3646,234 @@ describe("piece schema compatibility", () => {
     expect(() =>
       assertSchemaSubset({ type: "FabricBytes" }, { type: "FabricHash" })
     ).toThrow(/type FabricBytes is not accepted/);
+  });
+
+  describe("`required` against a `FabricPrimitive`-typed source", () => {
+    // The runtime checks a target's `required` keys on a `FabricPrimitive`
+    // with `in` when the target declares no `type` or its type list includes
+    // `object`, excusing the brand key, and leaves them unchecked under a
+    // target typed some other way. Each case reads the validator's verdict on
+    // a value of the source's class beside the proof's, so the two agree on
+    // the spelling in front of them.
+
+    const bytesSource: JSONSchema = { type: "FabricBytes" };
+    const bytes = new FabricBytes(new Uint8Array([1]));
+
+    it("refuses an `object` target requiring a key `FabricBytes` does not carry", () => {
+      const target: JSONSchema = { type: "object", required: ["source"] };
+      expect(validateSchemaValue(target, bytes, target)).toBe(
+        "missing required property source",
+      );
+      expect(() => assertSchemaSubset(bytesSource, target)).toThrow(
+        /value\.source: required field is not a member of `FabricBytes`/,
+      );
+    });
+
+    it("accepts an `object` target requiring a member every `FabricBytes` carries", () => {
+      const target: JSONSchema = { type: "object", required: ["length"] };
+      expect(validateSchemaValue(target, bytes, target)).toBeUndefined();
+      expect(() => assertSchemaSubset(bytesSource, target)).not.toThrow();
+    });
+
+    it("accepts a `FabricBytes` target requiring a key `FabricBytes` does not carry", () => {
+      const target: JSONSchema = { type: "FabricBytes", required: ["source"] };
+      expect(validateSchemaValue(target, bytes, target)).toBeUndefined();
+      expect(() => assertSchemaSubset(bytesSource, target)).not.toThrow();
+    });
+
+    it("refuses the missing key under an untyped target, a type list including `object`, and a required `anyOf` base", () => {
+      // A type list is proved branch by branch, and an `anyOf` as its base
+      // beside each branch, so these reach the proof by other routes than a
+      // node typed `object` does.
+
+      const cases: [JSONSchema, RegExp][] = [
+        [
+          { required: ["source"] },
+          /value\.source: required field is not a member of `FabricBytes`/,
+        ],
+        [
+          { type: ["FabricBytes", "object"], required: ["source"] },
+          /a schema alternative accepted previously is not accepted/,
+        ],
+        [
+          { type: ["unknown", "object"], required: ["source"] },
+          /a schema alternative accepted previously is not accepted/,
+        ],
+        [
+          { anyOf: [{ type: "FabricBytes" }], required: ["source"] },
+          /a schema alternative accepted previously is not accepted/,
+        ],
+      ];
+      for (const [target, issue] of cases) {
+        expect(validateSchemaValue(target, bytes, target)).toBe(
+          "missing required property source",
+        );
+        expect(() => assertSchemaSubset(bytesSource, target)).toThrow(issue);
+      }
+    });
+
+    it("accepts the missing key under a target typed `unknown` or by a type list without `object`", () => {
+      for (
+        const target of [
+          { type: "unknown", required: ["source"] },
+          { type: ["FabricBytes", "string"], required: ["source"] },
+        ] satisfies JSONSchema[]
+      ) {
+        expect(validateSchemaValue(target, bytes, target)).toBeUndefined();
+        expect(() => assertSchemaSubset(bytesSource, target)).not.toThrow();
+      }
+    });
+
+    it("refuses exactly the member names the validator finds missing, for every class in the vocabulary", () => {
+      const verdicts: { type: string; name: string; accepted: boolean }[] = [];
+      const disagreements: typeof verdicts = [];
+      for (const type of FABRIC_PRIMITIVE_SCHEMA_TYPES) {
+        for (const name of fabricPrimitiveMemberNames()) {
+          const target: JSONSchema = { type: "object", required: [name] };
+          const accepted = validateSchemaValue(
+            target,
+            FABRIC_PRIMITIVE_VALUES[type],
+            target,
+          ) === undefined;
+          let proved = true;
+          try {
+            assertSchemaSubset({ type }, target);
+          } catch {
+            proved = false;
+          }
+          verdicts.push({ type, name, accepted });
+          if (proved !== accepted) disagreements.push({ type, name, accepted });
+        }
+      }
+      expect(disagreements).toEqual([]);
+      expect(verdicts).toContainEqual({
+        type: "FabricHash",
+        name: "tag",
+        accepted: true,
+      });
+      expect(verdicts).toContainEqual({
+        type: "FabricBytes",
+        name: "tag",
+        accepted: false,
+      });
+    });
+  });
+
+  describe("a newly required field's default against a source admitting a `FabricPrimitive`", () => {
+    // Default insertion cannot add a key to a `FabricPrimitive`, since every
+    // instance is frozen, and the runtime checks `required` keys on one with
+    // `in`. Each link case reads the validator's verdict on a value beside the
+    // proof's, so the two agree on the spelling in front of them.
+
+    const bytes = FABRIC_PRIMITIVE_VALUES.FabricBytes;
+    const hash = FABRIC_PRIMITIVE_VALUES.FabricHash;
+    const defaulted = (key: string, required: string[] = []): JSONSchema => ({
+      type: "object",
+      properties: { [key]: { default: 1 } },
+      required: [...required, key],
+    });
+
+    it("throws for a link whose `object`, `true`, or `unknown` source admits a `FabricBytes` lacking the field", () => {
+      // The runtime does not check `required` under `type: "unknown"`, so the
+      // `unknown` source admits every `FabricPrimitive` whatever it requires.
+
+      const untypedTarget: JSONSchema = {
+        properties: { x: { default: 1 } },
+        required: ["x"],
+      };
+      const cases: [JSONSchema, JSONSchema][] = [
+        [{ type: "object" }, defaulted("x")],
+        [true, untypedTarget],
+        [{ type: "unknown", required: ["title"] }, untypedTarget],
+      ];
+      for (const [source, target] of cases) {
+        expect(validateSchemaValue(source, bytes, source)).toBeUndefined();
+        expect(validateSchemaValue(target, bytes, target)).toBe(
+          "missing required property x",
+        );
+        expect(() => assertSchemaSubset(source, target)).toThrow(
+          /value\.x: newly required field is not a member of `FabricBytes`, which takes no default/,
+        );
+      }
+    });
+
+    it("does not throw for a link whose source requires a key no `FabricPrimitive` has", () => {
+      const source: JSONSchema = {
+        type: "object",
+        properties: { title: { type: "string" } },
+        required: ["title"],
+      };
+      const target: JSONSchema = {
+        type: "object",
+        properties: { title: { type: "string" }, x: { default: 1 } },
+        required: ["title", "x"],
+      };
+      expect(validateSchemaValue(source, bytes, source)).toBe(
+        "missing required property title",
+      );
+      expect(() => assertSchemaSubset(source, target)).not.toThrow();
+    });
+
+    it("throws for a field a `FabricHash` the source's `required` admits lacks, and not for one it has", () => {
+      // `required: ["length"]` admits a `FabricBytes` and a `FabricHash`. Both
+      // have `copyInto`, and only the `FabricBytes` has `slice`.
+
+      const source: JSONSchema = { type: "object", required: ["length"] };
+      expect(validateSchemaValue(source, hash, source)).toBeUndefined();
+
+      const copyInto = defaulted("copyInto", ["length"]);
+      expect(validateSchemaValue(copyInto, hash, copyInto)).toBeUndefined();
+      expect(() => assertSchemaSubset(source, copyInto)).not.toThrow();
+
+      const slice = defaulted("slice", ["length"]);
+      expect(validateSchemaValue(slice, hash, slice)).toBe(
+        "missing required property slice",
+      );
+      expect(() => assertSchemaSubset(source, slice)).toThrow(
+        /value\.slice: newly required field is not a member of `FabricHash`/,
+      );
+    });
+
+    it("throws for exactly the fields some value of the vocabulary fails the validator on, under an `object` source", () => {
+      const verdicts: { name: string; accepted: boolean }[] = [];
+      const disagreements: typeof verdicts = [];
+      for (const name of fabricPrimitiveMemberNames()) {
+        const target = defaulted(name);
+        const accepted = Object.values(FABRIC_PRIMITIVE_VALUES).every((value) =>
+          validateSchemaValue(target, value, target) === undefined
+        );
+        let proved = true;
+        try {
+          assertSchemaSubset({ type: "object" }, target);
+        } catch {
+          proved = false;
+        }
+        verdicts.push({ name, accepted });
+        if (proved !== accepted) disagreements.push({ name, accepted });
+      }
+      expect(disagreements).toEqual([]);
+      expect(verdicts).toContainEqual({ name: "constructor", accepted: true });
+      expect(verdicts).toContainEqual({ name: "length", accepted: false });
+    });
+
+    it("does not throw for a pattern update adding the field under an `object` argument slot", () => {
+      // An update keeps the default. Setup validates the stored argument
+      // against the candidate and refuses a `FabricPrimitive` lacking the
+      // field (`packages/runner/test/pattern-update-argument-validation.test.ts`).
+
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(
+            { type: "object", properties: { stamp: { type: "object" } } },
+            { type: "object" },
+          ),
+          pattern(
+            { type: "object", properties: { stamp: defaulted("zone") } },
+            { type: "object" },
+          ),
+        )
+      ).not.toThrow();
+    });
   });
 
   it("compares Fabric enum and const values canonically", () => {

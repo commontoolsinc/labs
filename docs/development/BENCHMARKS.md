@@ -4,6 +4,11 @@ How the repository's `deno bench` files run in CI, where their results are
 charted, and the constraints a bench file must satisfy for that tracking to
 work.
 
+It also holds the measurement helpers and the demonstration that share those
+files' subject matter without being bench files themselves — the Topics browser
+measurement and the Topics board demo below are both of that kind — so that a
+reader looking for how a workload is measured finds all of it in one place.
+
 ## The pipeline
 
 The Benchmarks workflow (`.github/workflows/benchmarks.yml`) runs every four
@@ -118,13 +123,19 @@ covers one proof against unchanged values.
 **Stdout must stay pure JSON.** The workflow redirects all of stdout to
 `results.json`. One stray line printed by any bench file corrupts the
 artifact for every benchmark in the run, not just the offending file. A
-validation step fails the run when the artifact is not valid JSON, lists no
-benches, or carries no machine calibration, so each of those shows up as a red
-run in the Actions tab. What keeps corruption off the charts is the dashboard
-applying the same test to the artifact it downloads, rather than the run's
-color: a red run's measurements are charted like any other run's. This
-applies to module-scope code as well as bench bodies. Write diagnostics to
-stderr. Module-scope diagnostics may use `console.error`. The JSON reporter
+validation step (`tasks/check-bench-report.ts`) fails the run when stdout
+carried no report, a report that will not parse, or anything besides the
+report, and when the report is missing what every tile needs of it: the
+processor identity, a product measurement, the machine calibration, and each
+of the two key benchmarks. That last is a set rather than the whole report — a
+product benchmark that stopped reporting passes it, and shows up as its own
+series ending on the chart — and each of these shows up as a red run in the
+Actions tab. What keeps a corrupt artifact off the charts is the dashboard
+dropping one it cannot parse, rather than the run's color: a red run's
+measurements are charted like any other run's. This applies to
+module-scope code as well as bench bodies. Write diagnostics to stderr.
+Module-scope
+diagnostics may use `console.error`. The JSON reporter
 captures console output from benchmark bodies, so body diagnostics that need
 to reach the workflow must write to `Deno.stderr` directly. The workflow copies
 stderr to `diagnostics.log` in the uploaded artifact and also shows it in the
@@ -162,7 +173,14 @@ and misses others.
 **Names identify chart series.** The dashboard tracks each benchmark by its
 origin file, group, and verbatim name. Renaming a bench or its group breaks
 the series: history stays under the old name and the renamed bench starts
-over. So:
+over. Two of those keys are written out in `KEY_BENCHMARKS` in
+`packages/dashboard/bench-report.ts`, and the key benchmarks tile trends those
+and nothing else, so moving or renaming one of them costs that tile half of
+what it reads and both of them leave it nothing at all. Two things hold that
+in place: `deno task check-bench-workflow` fails a change that leaves one of
+those files out of the workflow's `deno bench` list, and the validation step
+fails a run whose report is missing either, which together keep such a change
+to a red check or one red run instead of a hole in the history. So:
 
 - Keep names stable. Never interpolate values that change as unrelated commits
   land: content hashes, byte counts, module counts, dates. If a name must
@@ -221,6 +239,36 @@ board carrying dozens of topics, signing in, the cards appearing, opening a
 topic, and following a crossref to a sibling. Its `topic board` group charts
 each of those as its own series plus a `journey` series for the whole sequence,
 so a regression lands on the segment that caused it.
+
+Two further series in that group measure the Topics derivations rather than the
+navigation over them, for the browser tier of [the Topics computation
+plan](../plans/topics-computation-cost.md). Each charts a timed interval and
+writes one read-accounted sample of the same operation to stderr; the reads and
+the graph sizes are there rather than on a chart because a sample taken with
+accounting on carries its overhead in the elapsed time and is not a latency
+measurement.
+
+- `comment` is a warm update: sending a comment on an open topic, which moves
+  that topic's comment count and its last activity. It runs against a board of
+  its own, in its own space, because sending a comment is a durable write that
+  makes the commented topic the board's first card, which would leave `crossref`
+  and `journey` opening a card with no citation to follow. Each iteration
+  comments on a topic that has none, so every iteration measures the same thing;
+  how cost grows with thread length is the headless probe's question, and its
+  thread cases run at 10, 100, and 1,000 comments.
+- `backlink` opens the topic the most siblings cite and waits for every row the
+  topic's backlink derivation produces. `crossref` cannot measure that: it
+  follows a citation outward from the board's first card, which is the newest
+  topic, and nothing cites the newest topic. The segment reaches its topic
+  through the shell's own navigation rather than by clicking, because a topic in
+  the middle of the board is on no card or link the page is showing.
+
+The comment segment needs the viewer to have a Profile, since the composer's
+send button is disabled until `#profile` resolves to a named one. The field
+beside it is not gated, so the draft is typed either way and it is the send that
+waits. The first session of a run creates one through the wish's own create
+surface; later sessions find it already there. One wait tells those two states
+apart, so nothing races and nothing polls.
 
 The `load` segment ends after the shell publishes its ready application and
 selects the requested board route. Shell readiness is an explicit notification
@@ -282,9 +330,98 @@ thing — a signed-in cold load, timed until every card has rendered — across
 board sizes of 100, 1000, and 10000, in a `topic board scale` group whose
 series are named for the sizes. The boards carry no crossrefs, so the numbers
 describe the cost of the list rather than of the join over it.
-`CF_TOPIC_BOARD_DEMAND=full` selects full-result seeding.
-The navigation fixture's citations and the scale fixture's lack of citations
-are distinct workloads, so their timings do not form a size-only comparison.
+`CF_TOPIC_BOARD_DEMAND=full` selects full-result seeding. The navigation
+fixture's citations and the scale fixture's lack of citations are distinct
+workloads, so their timings do not form a size-only comparison.
+
+A second series per size, named `reopen <size>`, measures a reopen for the
+browser tier of [the Topics computation
+plan](../plans/topics-computation-cost.md): a topic this page has already opened
+once, opened again, so that what it measures is reaching the topic rather than
+computing it for the first time. It asks whether that cost grows with the board
+behind the topic, which is the question this file exists for and which the
+navigation benchmark's single board cannot answer. Reopening writes nothing, so
+both series of a size share its one seeded board, and a size skipped for one is
+skipped for the other.
+
+It charts a timed interval and writes two samples per size to stderr: the timed
+one, carrying that operation's graph size and timing, and a read-accounted one
+of the same operation, paired with it as the lunch-poll read-scaling benchmark
+pairs its diagnostic vote with its timed vote. What the read-accounted half
+records is a zero — a row per lift reading no runs — and the zero is the
+finding. It is recorded rather than omitted so that a reopen which begins doing
+lift work shows up as rows, instead of as an unexplained shift in the timing
+beside it.
+
+The sample declares `mayRunNothing`, which waives one failure and only one: an
+operation completing no run that carried an authored source location. A run
+carrying a location the helper cannot parse still fails the measurement,
+declared or not, because that is a reading it cannot place rather than an
+absence of work.
+
+Three measurements stand behind that shape, all against a local toolshed with
+client execution. The first asked whether the absence belongs to the operation
+or to where the interval is drawn. Four boundaries, each a re-open within one
+live runtime client, on an eight-topic board with citations:
+
+| boundary                                         | attributable runs                                       |
+| ------------------------------------------------ | ------------------------------------------------------- |
+| open a topic already opened once, from the board | none; 1 scheduler run                                   |
+| a third visit to the same topic                  | none; **0** scheduler runs                              |
+| reopen with another topic opened in between      | runs carried a read sample, but no source location      |
+| the whole round trip, topic → board → topic      | `lastActivityOf` once; the other three lifts not at all |
+
+Only the last yields a lift run, and for the wrong leg: measuring the return to
+the board on its own records that same single `lastActivityOf` run with the same
+counters, while the reopen beside it records none. Widening the boundary that
+far would charge this series for a board render, which the `<size>` series
+already measures and which at a hundred topics costs an order of magnitude more
+than the reopen.
+
+The second classified the runs themselves, because a reopen at first refused
+the read-accounted sample on every attempt. It refused by one of two paths: the
+attribution check, when a run keyed by the empty string was the whole
+population, on 14 of 20 trials at a hundred topics and 19 of 20 at eight; and
+the old no-runs guard on the rest, when the operation completed no run at all.
+Recording each run's raw source location across 32
+reopen trials and 16 first-open controls in the same environment: every reopen
+run that carried a read sample carried **no** source location, none carried one
+that failed to parse, and the first opens carried 416 parseable locations and
+attributed three lift runs on every one of the 16 — 260 parseable locations
+across the ten controls at a hundred topics and 156 across the six at eight. A
+first open also carries runs without a location, 216 and 126 of them, alongside
+its parseable ones. That is why the attribution check passes there and failed
+on a reopen: the check fails a sample only when everything it is given fails to
+parse, and a reopen's runs without a location were the whole population rather
+than part of it.
+
+The third is the outcome: with the two cases told apart, 20 trials of the
+hundred-topic reopen recorded 20 zeros and no refusals. Thirteen of them saw one
+run carrying no source location and seven saw none at all, which the sample
+reports as `runsWithoutSource` so that the two zeros do not print identically.
+
+What does not apply to this workload is separating producer from consumer work,
+there being no lift work to separate; [the
+plan](../plans/topics-computation-cost.md) records that.
+
+A reopen may run nothing in the worker at all, and the series declares
+`mayRunNothing` because that was observed rather than to quiet the check in
+advance: on a 100-topic board one iteration recorded a single scheduler run and
+a later one recorded none, and the third visit in the table above recorded none.
+What the interval times is the shell reaching a topic whose values are already
+computed, so the worker having nothing to do is the substance of the
+measurement. Each sample records the declaration beside its run count, so a
+reopen that starts doing work again is visible rather than hidden.
+
+What `reopen` does not measure is worth stating, because the plan's phrase is
+"reopen or reconnect" and only the first half of it is measured here. The page,
+its shell, its worker and its runtime client stay up throughout, so this is not
+a runtime restart and not a reconnect. Neither is measured here. A page reload
+is out of the helper's reach outright, discarding the realm that holds the
+sample; a transport reconnect is not induced at all, since that needs a storage
+relay the Benchmarks workflow does not run. Cold initialization is
+measured separately, by the navigation benchmark's `load`, `sign in`, `board`
+and `open topic` segments, and a warm update by its `comment` segment.
 
 Only the 100-topic board runs today. The other two are declared and skipped,
 because a board of that size cannot be built:
@@ -323,8 +460,18 @@ the two skipped sizes should be enabled as part of whatever lowers it.
 measures one operation a caller drives in a Topics board's browser page, for the
 browser tier of [the Topics computation
 plan](../plans/topics-computation-cost.md). A caller invokes it around the
-operation. It adds no benchmark series of its own, and the plan's T0 work wires
-it into the scale and navigation benchmarks.
+operation. Five benchmark series use it: `comment` and `backlink` in the
+navigation benchmark, and one `reopen <size>` per declared board size in the
+scale benchmark. Three of the five run by default: the two navigation series,
+and `reopen 100`. The scale limit defaults to the hundred-topic board, so the
+larger two are skipped with their load counterparts until
+`CF_TOPIC_BOARD_SCALE_LIMIT` raises it.
+Each charts the interval `timeTopicsOperation()` brackets, and each writes a
+`measureTopicsReads()` sample of the same operation to `diagnostics.log`
+alongside it. `reopen` declares `mayRunNothing` on that sample, because a reopen
+completes no run for the call to attribute and the zero is what it has to
+record; it writes its timed sample as well, for the graph and timing the
+read-accounted half's elapsed time cannot speak for.
 
 `measureTopicsReads()` turns telemetry and body read accounting on in the
 shell's runtime client, runs the operation, waits until the view has settled and
@@ -380,11 +527,23 @@ when its module has not started during the operation and no action's `src` names
 the module's file under any path. A `src` naming that file under another path,
 or the module itself under another root, fails the measurement instead.
 
-A measured operation fails when it completes no runs with a read sample, when an
-event commit fails, or when the page raises an error. It also fails when its
-runs cannot be attributed by position: when the runs with a read sample carry no
-source location, or when the board's pivot module is not running, since a
-measurement is taken on a page showing the board. A timed operation fails on a
+A measured operation fails when it completes no run carrying an authored source
+location, when an event commit fails, or when the page raises an error. The
+first of those is waived by declaring `mayRunNothing`, which permits a zero
+rather than asserting one: an operation that does complete such runs is
+attributed as usual, and the sample records the declaration, so a measured zero
+is distinguishable from an operation nobody measured. A run whose marker carried
+no source location is counted apart, as `runsWithoutSource`, and reported beside
+the zero so that a zero taken next to runs the sample could not place reads
+differently from one taken next to no runs at all.
+
+It also fails when its runs cannot be attributed by position: when the runs that
+did carry a source location all carry one the helper cannot parse, or when the
+board's pivot module is not running, since a measurement is taken on a page
+showing the board. Neither of those is waived — a location that cannot be read
+is a measurement that cannot be placed rather than an absence of work, and
+`mayRunNothing` does not reach it. `topics-browser-measurement.test.ts` holds
+that case with the declaration in force. A timed operation fails on a
 page error, and when the worker's `scheduler/run` timing records no run, unless
 the caller declares with `mayRunNothing` that the operation may run nothing; the
 sample records that declaration. The count is of action runs the worker's
@@ -454,6 +613,40 @@ from `runtime.scheduler` without a browser. The instrumented preview is one of
 the same kind, from a board whose runtime collects pattern coverage, which
 writes a `__cfPatternCoverage?.hit(` call before each statement; that call is
 all the cases reading that preview ask of it.
+
+## The Topics board demo
+
+`packages/patterns/integration/topic-board-demo.test.ts` is not a benchmark. It
+is the browser demonstration the [Topics computation
+plan](../plans/topics-computation-cost.md) asks T0 for and T5 records before and
+after a change, so it sits beside that plan's browser tier rather than in the
+testing guide.
+
+It shows four actions on one board, as a single journey: the board listing its
+topics, a topic opened from its own card, the backlink on that topic followed to
+the topic citing it, and a comment added that the thread then shows. Its board
+comes from `seedTopicBoard`, shaped so exactly one topic cites exactly one
+earlier one. That fixture derives every title and body from the topic's index,
+so two runs of the same size build boards holding the same material, and the
+demo seeds into a space of its own so nothing else a shard left in the shared
+space appears on it. `CF_TOPICS_DEMO_TOPICS` sets how many topics that board
+carries; the default is small because CI runs this on every pull request.
+
+Record it with:
+
+```bash
+deno task demo patterns topic-board-demo
+```
+
+which needs FFmpeg, as [the demo
+command](TESTING.md#recording-browser-integration-tests-as-video-demos)
+describes. `deno task integration patterns topic-board-demo` runs the same file
+without recording it.
+
+It asserts what it shows, so a broken behavior fails it rather than producing a
+recording that looks right. The file itself states which of its properties a
+candidate may change without invalidating a before-and-after comparison and
+which it may not; read that before weakening an assertion in it.
 
 ## The multiplayer contention benchmark
 

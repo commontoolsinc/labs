@@ -93,6 +93,12 @@ export interface ReadPieceSourceToolSuccessOutput {
    */
   sourceRevisionId?: string;
 
+  /**
+   * Reference to this piece's bound argument cell. Wire it into run_pattern
+   * to verify a revision against the same inputs under the session's labels.
+   */
+  inputRef: string;
+
   provenance: PieceSourceProvenance;
 
   /**
@@ -165,7 +171,7 @@ export const readPieceSourceToolDescriptor: HarnessToolDescriptor = {
   toolId: "read_piece_source",
   title: "Read Piece Source",
   description:
-    "Read the current authored source of a piece behind a handle token, so you can revise a piece that already exists rather than write a replacement blind. Returns the source files, the revision they belong to, where that source came from, and the CFC labels the piece carries — reading it puts this context under those labels, so what you may release afterwards is measured against them. Pass the sourceRevisionId back to revise_piece so a piece that moved in the meantime refuses the write instead of taking it.",
+    "Read the current authored source of a piece behind a handle token, so you can revise a piece that already exists rather than write a replacement blind. Returns the source files, their revision, an inputRef to the piece's bound arguments, where the source came from, and its CFC labels. Wire inputRef into run_pattern for a before/after check against the actual inputs; it is a reference, not their contents. Reading source puts this context under its labels. Pass sourceRevisionId back to revise_piece so a piece that moved in the meantime refuses the write.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -199,6 +205,7 @@ export const readPieceSourceToolDescriptor: HarnessToolDescriptor = {
       },
       dataFiles: { type: "array", items: { type: "string" } },
       sourceRevisionId: { type: "string" },
+      inputRef: { type: "string" },
       provenance: {
         enum: [
           "deployment-served",
@@ -390,8 +397,13 @@ export const readPieceSourceTool: HarnessToolDefinition<
     const piece = await resolvePiece("read_piece_source", session.pieces, ref);
     if (!piece.ok) return fail(piece.message);
     let state: PieceSourceState;
+    let inputRef: string;
     try {
       state = await readPieceSourceState(session.pieces.runtime, piece.cell);
+      inputRef = createLLMFriendlyLink(
+        session.pieces.getArgument(piece.cell).getAsNormalizedFullLink(),
+        session.pieces.getSpace(),
+      );
     } catch (error) {
       return fail(
         `read_piece_source could not read the piece's source: ${
@@ -411,6 +423,7 @@ export const readPieceSourceTool: HarnessToolDefinition<
     return {
       outputId,
       status: "ok",
+      inputRef,
       ...(state.entry !== undefined ? { entry: state.entry } : {}),
       files: state.files.map((file) => ({ ...file })),
       ...(state.dataFiles !== undefined

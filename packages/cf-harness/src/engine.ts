@@ -20,6 +20,7 @@ import {
   mergeCfcLabelViews,
 } from "@commonfabric/runner/cfc";
 import { mergeLabel } from "@commonfabric/runner/cfc/label-view-core";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
   createFileSystemHarnessArtifactStore,
@@ -464,8 +465,7 @@ export interface BuiltinToolInvocationResult<
 }
 
 const isToolOutputWithId = (value: unknown): value is ToolOutputWithId =>
-  typeof value === "object" &&
-  value !== null &&
+  isObjectOrArray(value) &&
   "outputId" in value &&
   typeof value.outputId === "string";
 
@@ -928,12 +928,10 @@ export class CfHarnessEngine {
     // either record win silently. A run resumed without a session keeps its
     // record as history (no runtime exists for it to contradict). A LEGACY
     // record — one that never captured a posture — stays absent rather than
-    // being backfilled, and stays frozen as history: resuming such a run
-    // with plain session dials is allowed (the flags may simply restate the
-    // original invocation, which the record predates), but resuming it under
-    // the named posture bundle is refused — no legacy run can have run the
-    // bundle, so that resume would execute enforcement the artifacts cannot
-    // attest.
+    // being backfilled. Resuming one under the named posture bundle is
+    // refused, because no legacy run can have run the bundle and that resume
+    // would execute enforcement the artifacts cannot attest. Resuming one
+    // under a session that names no bundle proceeds.
     if (options.runState !== undefined && fabricSessionCfc !== undefined) {
       const recorded = options.runState.fabricSessionCfc;
       if (recorded === undefined) {
@@ -2611,6 +2609,7 @@ export class CfHarnessEngine {
       researchGoal: this.#runState.researchGoal,
       ...(researchTaskCfcLabel !== undefined ? { researchTaskCfcLabel } : {}),
       patternRefs: this.#runState.patternRefs ?? [],
+      inputCells: this.#runState.inputCells ?? [],
       recordResearchRun: (run: HarnessResearchRunSummary) => {
         this.recordResearchRun(run);
       },

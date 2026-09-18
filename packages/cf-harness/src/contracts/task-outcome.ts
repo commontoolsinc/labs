@@ -3,6 +3,8 @@
  * run failures; a question or a give-up leaves the conversation reusable.
  */
 
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 /** The task's result, independent of whether the model loop ran successfully. */
 export type HarnessTaskOutcome =
   | { outcome: "completed" }
@@ -18,7 +20,7 @@ export const readHarnessTaskOutcome = (
   value: unknown,
 ): HarnessTaskOutcome | undefined => {
   if (value === undefined) return { outcome: "completed" };
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isObjectNotArray(value)) {
     return undefined;
   }
   const record = value as Record<string, unknown>;
@@ -36,8 +38,7 @@ export const readHarnessTaskOutcome = (
     case "question": {
       const question = record.question;
       if (
-        !Object.hasOwn(record, "question") || typeof question !== "object" ||
-        question === null || Array.isArray(question) ||
+        !Object.hasOwn(record, "question") || !isObjectNotArray(question) ||
         !Object.hasOwn(question, "text")
       ) {
         return undefined;

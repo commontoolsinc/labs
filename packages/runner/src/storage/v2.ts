@@ -836,7 +836,7 @@ const defaultGenesisAcl = (owner: string): ACL => ({
  *  a space with `"*": "OWNER"` is owned by everyone, and a document that
  *  did not say so is not what stands (a non-object has none). */
 const ownersOf = (document: unknown): string[] =>
-  typeof document === "object" && document !== null
+  isObjectOrArray(document)
     ? Object.entries(document as Record<string, unknown>)
       .filter(([, capability]) => capability === "OWNER")
       .map(([principal]) => principal)
@@ -2664,21 +2664,20 @@ export class StorageManager implements IStorageManager {
       releaseLoad(error);
       throw error;
     }
-    return work.then(
-      (result) => {
-        // Same silent-collapse hazard as syncCell: a link-target pull that
-        // resolves while carrying an error reads as an absent target.
-        if (result.error !== undefined) {
-          this.#logSyncLoadFailure(address.space, address.id, result.error);
-        }
-        releaseLoad(result.error);
-        return result;
-      },
-      (error) => {
-        releaseLoad(error);
-        throw error;
-      },
-    );
+    const failLoad = (error: unknown): never => {
+      releaseLoad(error);
+      throw error;
+    };
+
+    return work.then((result) => {
+      // Same silent-collapse hazard as syncCell: a link-target pull that
+      // resolves while carrying an error reads as an absent target.
+      if (result.error !== undefined) {
+        this.#logSyncLoadFailure(address.space, address.id, result.error);
+      }
+      releaseLoad(result.error);
+      return result;
+    }, failLoad);
   }
 
   #resolveCrossSpace(resolve: () => void): Promise<void> {
@@ -2833,9 +2832,7 @@ export class StorageManager implements IStorageManager {
     if (isKeyableObjectOrArray(value)) {
       for (const key of Object.keys(value)) {
         const child = value[key];
-        if (
-          child === null || child === undefined || typeof child !== "object"
-        ) {
+        if (!isObjectOrArray(child)) {
           continue;
         }
         const childSchema = schema

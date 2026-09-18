@@ -451,6 +451,88 @@ export interface FabricRegExpConstructor {
 
 export declare const FabricRegExp: FabricRegExpConstructor;
 
+/**
+ * Why a `FabricUnavailable` stands where data would otherwise be. The two
+ * transient reasons say the data is on its way; `error` says producing it
+ * failed, and is the one reason that carries a kind and a message.
+ */
+export type UnavailableReason = "pending" | "syncing" | "error";
+
+/**
+ * The kinds of failure a `FabricUnavailable` with reason `error` sorts into.
+ * `general` is the kind for a failure none of the others describes.
+ */
+export type UnavailableErrorKind =
+  | "general"
+  | "schemaMismatch"
+  | "invalidInput"
+  | "network"
+  | "decode"
+  | "compile"
+  | "provider"
+  | "sync";
+
+/**
+ * A marker standing in for data that is not available, saying why. It holds
+ * no data of its own: the reason, and for the `error` reason the kind of
+ * error and a message, are the whole of what it says. Only the `error` reason
+ * carries a kind, and it always does; only the `error` reason may carry a
+ * message, and `errorMessage` supplies one for its kind when none was given.
+ * For the other two reasons every error member is `null`.
+ */
+export interface FabricUnavailable extends FabricPrimitive {
+  /** Why the data is unavailable. */
+  readonly reason: UnavailableReason;
+
+  /** The kind of error, when the reason is `error`; `null` otherwise. */
+  readonly errorKind: UnavailableErrorKind | null;
+
+  /**
+   * The message, when the reason is `error`: the one given at construction,
+   * or the kind's default when none was. `null` for a transient reason.
+   */
+  readonly errorMessage: string | null;
+
+  /**
+   * The message as given at construction, with no default supplied: `null`
+   * for a transient reason, and for an `error` whose message is its kind's
+   * default or was never given.
+   */
+  readonly rawErrorMessage: string | null;
+
+  /** Whether the reason is `pending`. */
+  isPending(): boolean;
+
+  /** Whether the reason is `syncing`. */
+  isSyncing(): boolean;
+
+  /**
+   * Whether the reason is `error`, narrowing `errorKind` and `errorMessage`
+   * to the non-`null` values the `error` reason always carries.
+   */
+  isError(): this is {
+    readonly errorKind: UnavailableErrorKind;
+    readonly errorMessage: string;
+  };
+
+  /**
+   * Whether the data is on its way rather than failed: `true` for the
+   * `pending` and `syncing` reasons, `false` for `error` whatever its kind.
+   */
+  isTransient(): boolean;
+}
+
+export interface FabricUnavailableConstructor {
+  new (
+    reason: UnavailableReason,
+    errorKind?: UnavailableErrorKind | null,
+    errorMessage?: string | null,
+  ): FabricUnavailable;
+  prototype: FabricUnavailable;
+}
+
+export declare const FabricUnavailable: FabricUnavailableConstructor;
+
 //
 // Concrete `FabricInstance` classes
 //

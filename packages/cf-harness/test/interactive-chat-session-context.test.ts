@@ -22,6 +22,7 @@ import type {
 } from "../src/contracts/pattern-refs.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import type { CfHarnessEngine } from "../src/engine.ts";
+import { REVISION_VERIFICATION_GUIDANCE } from "../src/revision-verification.ts";
 import {
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
@@ -114,14 +115,16 @@ const runTurn = async (
 
 const startedService = async (
   seen: HarnessTranscriptMessage[][],
-  established: {
+  established?: {
     inputCells: readonly HarnessInputCellSpec[];
     patternRefs?: readonly HarnessPatternRef[];
     unknownPatternId?: string;
   },
 ): Promise<HarnessInteractiveChatService> => {
   const service = new HarnessInteractiveChatService({
-    basePromptLoopOptions: { engine: stubEngine(established) },
+    ...(established === undefined ? {} : {
+      basePromptLoopOptions: { engine: stubEngine(established) },
+    }),
     createPromptLoop: recordingLoop(seen),
   });
   await service.handleRequest({
@@ -139,6 +142,62 @@ const startedService = async (
 };
 
 describe("interactive chat session context", () => {
+  it("supplies target-selection context to an unconfigured interactive turn", async () => {
+    const seen: HarnessTranscriptMessage[][] = [];
+    const service = await startedService(seen);
+    await runTurn(
+      service,
+      "turn-unconfigured",
+      "add a total to this bills pane",
+    );
+
+    expect(seen[0].map((message) => message.content)).toContain(
+      REVISION_VERIFICATION_GUIDANCE,
+    );
+
+    const context = seen[0].map((message) => message.content).join("\n");
+    expect(context).toContain("No input cells are attached for this run");
+    expect(context).toContain("make zero registry reads and ask the user");
+    expect(context).toContain("at most one registry read");
+    expect(seen[0].at(-1)?.content).toBe("add a total to this bills pane");
+  });
+
+  it("supplies target-selection guidance without a seeded system prompt", async () => {
+    const seen: HarnessTranscriptMessage[][] = [];
+    const service = await startedService(seen, { inputCells: [] });
+
+    await runTurn(service, "turn-1", "add a total to this bills pane");
+
+    const context = seen[0].map((message) => message.content).join("\n");
+    expect(context).toContain("No input cells are attached for this run");
+    expect(context).toContain("make zero registry reads and ask the user");
+    expect(context).toContain("at most one registry read");
+    expect(context).toContain(
+      "released evidence identifies exactly one matching piece",
+    );
+    expect(context).toContain("Do not delegate discovery of an unnamed target");
+    expect(seen[0].at(-1)?.content).toBe("add a total to this bills pane");
+  });
+
+  it("supplies revision verification guidance before an attached task", async () => {
+    const seen: HarnessTranscriptMessage[][] = [];
+    const service = await startedService(seen, {
+      inputCells: [{ name: "bills", ref: "/of:fid1:bills" }],
+    });
+    await runTurn(
+      service,
+      "turn-verify",
+      "Stop treating alert emails as bills.",
+    );
+
+    expect(seen[0].map((message) => message.content)).toContain(
+      REVISION_VERIFICATION_GUIDANCE,
+    );
+    expect(seen[0].at(-1)?.content).toBe(
+      "Stop treating alert emails as bills.",
+    );
+  });
+
   it("opens a turn with the granted references of its own space", async () => {
     const seen: HarnessTranscriptMessage[][] = [];
     const service = await startedService(seen, { inputCells: [] });

@@ -238,7 +238,7 @@ network confinement model.
   - `observe`
   - `enforce-explicit`
   - `enforce-strict`
-- default CFC mode of `enforce-explicit`, which fails closed on an observation
+- default CFC mode of `enforce-strict`, which fails closed on an observation
   whose trusted mediation metadata is absent
 - spec-aligned `PromptSlotBound` prompt-slot evidence
 - Loom run manifest intake through `--run-manifest`
@@ -437,6 +437,26 @@ An admitted call persists its ordinary policy decision, artifact, and paired
 transcript result, then ends the loop without another provider request.
 Malformed or withheld calls remain recoverable tool errors. Children retain
 their failure-return contract and cannot call `finish_task`.
+
+For a request about an existing piece, the parent first uses an explicit
+attachment, a user-supplied reference, or an unambiguous target established in
+the conversation. With none of those and no piece name from the user, it asks
+which piece to use with zero registry reads. A user-supplied name permits at
+most one registry read across the parent and its children, proceeding only on
+exactly one released match. An ambiguous, missing, or unreadable match leads to
+a question, without candidate inspection, retrying discovery through another
+delegation, or replacement authoring. The one lookup must return the match count
+and usable reference or requested data together; a lost reference or missing
+requested value is a reason to ask for an attachment, not to reread the registry
+or infer a value from the piece name. This is shared model guidance, not a
+runtime quota, and does not limit an explicit request to list or analyze the
+space.
+
+Private research receives the same explicit input-cell names and tokens as the
+parent, separately from the general handle inventory. Registry and connector
+grants therefore do not stand in for attachments, and a piece attachment stays
+identifiable even when its schema describes the piece's result. The bound
+reference behind the attachment remains private.
 
 These dispositions keep the run lifecycle `completed` and the conversation
 reusable. `run-report.json` records `taskOutcome`, a union discriminated by
@@ -808,6 +828,13 @@ names the provider and operation, numbers the attempt against
 `outcome` is `transport_error` when no response arrived and `http_response`
 otherwise, with the status and selected headers.
 
+A final assistant reply must contain non-whitespace text. A reply with no text
+and no function tool calls fails the run with `provider-unavailable`, including
+when the provider returned HTTP 200. Tool-only replies continue through normal
+tool dispatch. The normalized assistant message stays in the transcript, and the
+run report retains the model attempts and token usage. This failure does not
+trigger a retry.
+
 A failed attempt carries the provider's own reason wherever the provider stated
 one. `providerError` holds the provider's `type`, `code`, and `message` as the
 provider sent them — from the body of a non-2xx response, from an in-stream
@@ -917,10 +944,12 @@ What the model receives is a token and fixed prose, never data. Reading anything
 behind the token means running a pattern over it, where the CFC boundary rules
 as it does for every other flow — in particular, a piece's `$NAME` is a value,
 and a name computed from labeled data taints a name-listing pattern's result,
-which strict enforcement refuses whole. The announcement says so and names the
-fallback: a pattern that returns the entry references without reading any
-values, which cannot taint and whose addresses come back as tokens through the
-ordinary outbound swap.
+which strict enforcement refuses whole. A refused name read leaves the name
+unknown. For an explicit reference-listing task, a pattern can return entry
+references without reading values, with addresses returned as tokens through the
+ordinary outbound swap. This does not authorize crawling references to identify
+an unspecified edit target; the shared target-selection guidance applies to the
+registry announcement too.
 
 The grants are recorded in run state (`wellKnownGrants`), replayed rather than
 re-minted on resume, and reported in the operator summary as `fabricGrants:`. A
@@ -1589,8 +1618,24 @@ full model-context CFC record atomically with resumable history. A later root
 task retains that goal alongside its current request and inherits those findings
 as historical context, including after SQLite restart. It receives current
 grants independently; earlier bindings are not automatically transferred to a
-child. A failed or canceled turn cannot replace the research checkpoint of the
-last completed turn.
+child. By default, failed and canceled turns retain the previous checkpoint. The
+Loom interactive host opts into `finalizeOnTurnLimit`: a failed provider call
+can retain the last resumable checkpoint: a validated complete tool batch or
+opening-research handoff with matching research, CFC state, and omission
+provenance. Unpaired work, canceled turns, and process interruptions do not
+advance that checkpoint; their evidence remains in the audit trail.
+
+`finalizeOnTurnLimit` reserves the last root model turn for a partial answer
+with harness and native tools disabled. It warns two turns beforehand and
+records `budget_finalized` with a `gave-up` task outcome. Provider failures,
+blank answers, and attempted final tool calls remain failures. Root budgets
+include this final call; provider retries and child budgets are separate.
+Generated budget notices remain in events and durable run artifacts, but are
+excluded from returned transcripts and interactive checkpoints so subsequent
+user turns receive a fresh budget. They also state their turn-local scope for
+explicit artifact resume and opaque provider context that may retain them.
+`CF_HARNESS_CHAT_ARTIFACT_ROOT` supplies the Loom host's default durable run
+root, including for restored sessions without their own artifact root.
 
 SQLite checkpoints also retain the existing transcript-omissions record.
 Restoration verifies every recorded result's unique identity before attaching
@@ -1659,8 +1704,9 @@ than a run failure, and the next tool call retries the construction.
 Three further flags set the session runtime's CFC dials, and each needs the
 three session flags present. `--fabric-cfc-enforcement-mode`
 (`CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE`) accepts `enforce-explicit` or
-`enforce-strict` — raise-only, since the session's runtime preset already pins
-`enforce-explicit`; under `enforce-strict`, a pattern whose writes carry
+`enforce-strict`; the session's runtime preset already pins `enforce-strict`, so
+stating the dial either restates that rung or lowers the session to
+`enforce-explicit`. Under `enforce-strict`, a pattern whose writes carry
 confidentiality its target's declared policy does not admit has its commit
 refused. `--fabric-cfc-flow-labels` (`CF_HARNESS_FABRIC_CFC_FLOW_LABELS`)
 accepts `off`, `observe`, or `persist`; `persist` stamps the derived flow labels
@@ -1677,14 +1723,17 @@ two per-dial flags still apply over the bundle, so
 --fabric-cfc-enforcement-mode enforce-strict`
 is the full-strictness configuration. These dials govern the fabric session's
 runtime only — `--cfc-enforcement-mode` remains the harness's own dial for tool
-policy and the sandbox. The two are set independently up to one tie: under a
-session raised to `enforce-strict`, a harness dial nobody set follows the
-session rather than the harness default (recorded as source `fabric-session`),
-and a harness dial stated weaker than the session refuses startup naming both
-flags. A resume has no such tie to settle: the recorded mode stands, and a
-session that would raise the harness dial above it refuses the resume. Nothing
-else about the two families is derived; `--fabric-cfc-posture` sets the
-flow-label dial, not the enforcement mode.
+policy and the sandbox. The two are set independently up to one tie, which fires
+only where the session outranks what the harness dial would otherwise resolve.
+Both default to `enforce-strict`, so a run that states neither has no tie to
+settle and records source `default`. Where something weaker reaches the harness
+dial — an inherited mode, or one a run manifest names — a session at
+`enforce-strict` carries it up, recorded as source `fabric-session`. A harness
+dial stated weaker than the session refuses startup naming both flags. A resume
+has no such tie to settle: the recorded mode stands, and a session that would
+raise the harness dial above it refuses the resume. Nothing else about the two
+families is derived; `--fabric-cfc-posture` sets the flow-label dial, not the
+enforcement mode.
 
 A run states both postures rather than leaving them to be inferred: the resolved
 fabric-session posture — each dial's value and whether the operator configured
@@ -2311,6 +2360,35 @@ skill registry, the child preloads the `pattern-dev`, `pattern-schema`, and
 root does not carry them, or that resolved no skills root at all, still gets the
 same child with the same tools, just without the preloaded guidance.
 
+For an existing piece, `read_piece_source` returns its current source and
+revision, plus an opaque `inputRef` to its bound arguments. The author wires
+that reference into `run_pattern` to check the inputs the piece actually uses.
+`revise_piece` applies a compatible revision in place; a successful receipt
+establishes the source update, not the behavior the user asked for.
+
+For a classifier or filter change, the child is instructed to evaluate the old
+and new predicates over the same bounded sample before applying the revision.
+The check retains the existing readers, session scope, and filters. Its result
+reports `ready`, `sampleSize`, `beforeCount`, `afterCount`, and `changedCount`;
+the last counts rows whose inclusion changes, rather than subtracting totals.
+Pending reads, errors, and `outputConcerns` must be resolved before treating any
+counts as evidence. Sampling establishes the effect on that sample only.
+
+Either branch of the child return can carry an opaque `verificationRef` to that
+comparison. The parent reads it through ordinary `run_pattern` and
+`resultSchema`, under the existing release rules. The actual revised piece stays
+in `resultRef`; comparison counts, rows, and sender names get no new return
+channel. A zero delta, empty sample, or unavailable check leads to a
+`finish_task` question with the released finding and what the user can clarify.
+The rule remains unchanged. A nonzero check supports applying the tested rule
+and reporting its sampled delta, subject to any refresh warning.
+
+For styling, a supplied computed-surface observation can establish the pane
+background. Source colors alone cannot. Without that observation or a permitted
+tool to obtain it, the response says that the rendered appearance was not
+checked. These are model instructions, not host validation of arbitrary rule
+semantics or a new browser inspection capability.
+
 The child's job is author, run, and hand back a reference: a pattern it did not
 run is not an answer, and source never crosses back in any form. Its guidance
 says so as a refusal rather than a preference — a delegation that asks for
@@ -2354,6 +2432,7 @@ it hands back is the point of the profile.
       "properties": {
         "ok": { "type": "boolean", "const": true },
         "resultRef": { "type": "string" },
+        "verificationRef": { "type": "string" },
         "describes": { "type": "string" },
         "hashtags": {
           "type": "array",
@@ -2378,7 +2457,8 @@ it hands back is the point of the profile.
             "other"
           ]
         },
-        "detail": { "type": "string" }
+        "detail": { "type": "string" },
+        "verificationRef": { "type": "string" }
       },
       "required": ["ok", "code"],
       "additionalProperties": false
@@ -2392,7 +2472,9 @@ cannot produce a working pattern — the compile loop does not converge, the tas
 is impossible against the references it holds, its turns run out — returns the
 failure branch, and a failure carries no `resultRef` at all. That is what stops
 a failed delegation from being answered with some other step's reference: the
-parent reads `ok`, and a reference exists only on the branch that produced one.
+parent reads `ok`, and the piece's `resultRef` exists only on the success
+branch. An optional `verificationRef` on either branch points to a separate
+check and does not represent a completed revision.
 
 The failure branch says why in a fixed vocabulary rather than in prose. A `code`
 is inert by construction — one of a closed set, carrying nothing read out of a

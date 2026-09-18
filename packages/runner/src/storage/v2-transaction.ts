@@ -316,10 +316,7 @@ const invalidateFrozenReadsOnChain = (
 };
 
 const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
-  if (
-    value === undefined || value === null ||
-    typeof value !== "object"
-  ) {
+  if (!isObjectOrArray(value)) {
     return value;
   }
   // What isolates a read from later mutation of its source is frozen-ness,
@@ -2582,9 +2579,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const writeSpace = this.#writeSpace;
     if (!writeSpace) {
-      const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#finish(result);
-      return result;
+      return this.#finishEmptyCommit();
     }
 
     const native = withCommitTiming(
@@ -2598,9 +2593,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       operations.length === 0 &&
       !hasCommitPreconditions && !hasSqliteOps
     ) {
-      const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#finish(result);
-      return result;
+      return this.#finishEmptyCommit();
     }
 
     const validation = withCommitTiming(
@@ -2680,9 +2673,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     if (commits.length === 0) {
-      const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#finish(result);
-      return result;
+      return this.#finishEmptyCommit();
     }
 
     const validation = this.#validate();
@@ -2915,9 +2906,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     if (commits.length === 0) {
-      const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#finish(result);
-      return result;
+      return this.#finishEmptyCommit();
     }
 
     const validation = this.#validate();
@@ -3310,6 +3299,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   #validateReplicaRoute(
     space: MemorySpace,
     branch: SpaceBranch,
+    emptyReactiveCommit?: true,
   ): Result<Unit, IStorageTransactionInconsistent> {
     const currentReplica = this.#storage.open(space).replica;
     if (currentReplica === branch.replica) return { ok: {} };
@@ -3336,8 +3326,98 @@ export class V2StorageTransaction implements IStorageTransaction {
         expected,
         actual,
         space,
+        emptyReactiveCommit,
       }),
     };
+  }
+
+  /**
+   * Validates a reactive run before accepting its unchanged output. An input
+   * can change before the scheduler installs the run's read subscriptions;
+   * rejecting that stale snapshot lets its normal retry observe the change.
+   */
+  #finishEmptyCommit(): Result<Unit, CommitError> {
+    if ((this as IStorageTransaction).validateReactiveReads) {
+      const validation = this.#validateReactiveReads();
+      if (validation.error) {
+        // Retain the read activity so the scheduler can subscribe and retry.
+        this.#state = { status: "done", result: validation };
+        return validation;
+      }
+    }
+    const result = { ok: {} } satisfies Result<Unit, CommitError>;
+    this.#finish(result);
+    return result;
+  }
+
+  /** Checks exactly the deep and shallow reads that wake a reactive run. */
+  #validateReactiveReads(): Result<Unit, StorageTransactionFailed> {
+    for (const [space, branch] of this.#branches) {
+      const route = this.#validateReplicaRoute(space, branch, true);
+      if (route.error) return route;
+    }
+    const log = this.getReactivityLog();
+    for (
+      const [reads, shallow] of [
+        [log.reads, false],
+        [log.shallowReads, true],
+      ] as const
+    ) {
+      for (const address of reads) {
+        const branch = this.#branches.get(address.space);
+        const doc = branch?.docs.get(this.#docKey(address));
+        // Read recording creates both before adding activity. If a future
+        // read path violates that invariant, fail closed before storage.
+        if (branch === undefined || doc === undefined) {
+          return {
+            error: TransactionAborted(
+              `Reactive read has no transaction snapshot: ${address.space}/${address.id}`,
+            ),
+          };
+        }
+        const replica = branch.replica;
+        const current = toTransactionDocumentValue(
+          isDurableReadTx(this) && replica.getNonSpeculativeDocument
+            ? replica.getNonSpeculativeDocument(
+              address.id,
+              address.scope,
+              this.#scopeKeyIdentity,
+            )
+            : replica.getDocument(
+              address.id,
+              address.scope,
+              this.#scopeKeyIdentity,
+            ),
+        );
+        const expected = readValueAtPath(doc.initial.value, address.path, {
+          allowArrayLength: true,
+        });
+        const actual = readValueAtPath(current, address.path, {
+          allowArrayLength: true,
+        });
+        if (
+          hasValueAtPath(doc.initial.value, address.path, {
+              allowArrayLength: true,
+            }) !== hasValueAtPath(current, address.path, {
+              allowArrayLength: true,
+            }) ||
+          (shallow
+            ? shallowStructureChanged(expected, actual)
+            : !valueEqual(expected, actual))
+        ) {
+          return {
+            error: StateInconsistency({
+              address,
+              space: address.space,
+              expected,
+              actual,
+              emptyReactiveCommit: true,
+            }),
+          };
+        }
+      }
+    }
+    return { ok: {} };
   }
 
   /**

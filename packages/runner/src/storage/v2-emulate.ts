@@ -18,10 +18,13 @@ export const newLoopbackServer = (options?: {
   subscriptionRefreshDelayMs?: number | "manual";
   store?: URL;
 
-  /** The session registry's detached-session TTL (tests): how long a
-   * closed connection's sessions — and their watches, i.e. their DEMAND
-   * — linger before pruning. Default 30 s (the server's resume window). */
-  sessionTtlMs?: number;
+  /** A registry the caller owns (tests): the registry's own detached-session
+   * TTL decides how long a closed connection's sessions — and their watches,
+   * i.e. their DEMAND — linger, and pruning against it is lazy, so a test
+   * that has to observe a session GONE removes it rather than waiting the
+   * window out. Absent, the server's default registry and resume window
+   * apply. */
+  sessions?: MemoryV2Server.SessionRegistry;
 }): MemoryV2Server.Server =>
   new MemoryV2Server.Server({
     authorizeSessionOpen(message) {
@@ -36,13 +39,7 @@ export const newLoopbackServer = (options?: {
       ? { subscriptionRefreshDelayMs: options.subscriptionRefreshDelayMs }
       : {}),
     ...(options?.store !== undefined ? { store: options.store } : {}),
-    ...(options?.sessionTtlMs !== undefined
-      ? {
-        sessions: new MemoryV2Server.SessionRegistry({
-          ttlMs: options.sessionTtlMs,
-        }),
-      }
-      : {}),
+    ...(options?.sessions !== undefined ? { sessions: options.sessions } : {}),
   });
 
 class EmulatedSessionFactory implements SessionFactory {

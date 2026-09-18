@@ -5,7 +5,7 @@
  *
  * An object whose schema this reader does not implement is fetched once
  * and then remembered for as long as the process runs, so a refresh does
- * not pay for it again. A manifest is the largest thing the wall fetches
+ * not pay for it again. A manifest is the largest thing the dashboard fetches
  * and a whole store of them is tens of megabytes, against a refresh every
  * half minute. That opinion is held in memory and never written to the
  * cache file, because what a reader can validate is a property of the
@@ -18,7 +18,10 @@
 import { pooledMap } from "@std/async/pool";
 import { z } from "zod";
 
-import type { Manifest } from "@commonfabric/test-support/records";
+import {
+  type Manifest,
+  MANIFESTS_LOOKED_BACK,
+} from "@commonfabric/test-support/records";
 
 import { dashboardCacheFile } from "./history-files.ts";
 import { escapeHtml, friendlyError, memo, multiSparkline } from "./lib.ts";
@@ -118,29 +121,40 @@ export function makeTestSelectionSource(options: {
   let persisted = "";
 
   const newest = memo(MANIFEST_SHARE_MS, async () => {
-    const name = (await list()).at(-1);
-    if (name === undefined) {
+    const names = (await list()).slice(-MANIFESTS_LOOKED_BACK).reverse();
+    if (names.length === 0) {
       current = undefined;
-      return { name, manifest: undefined };
+      return { name: undefined, manifest: undefined };
     }
-    if (current?.name !== name) {
-      const known = refused.get(name);
-      if (known !== undefined) {
-        current = { name, error: known };
-      } else {
+    // The newest body this reader can read, over the same stretch of the
+    // store a lane looks back across. A body from further ahead is passed
+    // over; anything else unreadable ends the search, because a reader
+    // that half understands a body should not answer from it.
+    let newestAhead: { name: string; error: ManifestSchemaError } | undefined;
+    for (const name of names) {
+      if (current?.name === name && "manifest" in current) return current;
+      let known = refused.get(name);
+      if (known === undefined) {
         try {
           current = { name, manifest: await readManifest(name, options) };
+          return current;
         } catch (error) {
-          // The version a body declares cannot change, so it is kept and
-          // the object is not fetched again. Every other failure may come
-          // back differently on the next read.
+          // The shape a body declares cannot change, so it is kept and the
+          // object is not fetched again. Every other failure may come back
+          // differently on the next read.
           if (!(error instanceof ManifestSchemaError)) return { name, error };
           refused.set(name, error);
-          current = { name, error };
+          known = error;
         }
       }
+      newestAhead ??= { name, error: known };
     }
-    return current;
+    // Every body looked at is written further ahead than this reader.
+    // Reporting nothing would say the store holds no manifest, which is
+    // the one thing a reader this far behind its publisher must not say,
+    // so it reports the newest shape it passed over.
+    current = newestAhead;
+    return newestAhead ?? { name: undefined, manifest: undefined };
   });
 
   const latest: ManifestReader = async () => {
@@ -194,7 +208,7 @@ export function makeTestSelectionSource(options: {
             if (counts === undefined && known !== undefined) {
               // The object is not fetched again, and the refusal is
               // reported on every pass it still applies to, so the warning
-              // the wall carries lasts as long as the condition does.
+              // the dashboard carries lasts as long as the condition does.
               keptRefusals.set(name, known);
               errors.push(`${name}: ${known.message}`);
             } else if (counts === undefined) {
@@ -256,7 +270,7 @@ export function makeTestSelectionSource(options: {
 /**
  * What a tile says under its dash when the latest manifest could not be
  * read. A schema this reader does not implement is a named condition and
- * the wall says it; anything else is a source that did not answer, which
+ * the dashboard says it; anything else is a source that did not answer, which
  * `friendlyError` has the words for.
  */
 export function collectionSub(error: unknown): string {

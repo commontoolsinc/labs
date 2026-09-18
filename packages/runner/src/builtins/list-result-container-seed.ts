@@ -3,6 +3,7 @@ import type { Logger } from "@commonfabric/utils/logger";
 
 import type { Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
+import { markDurableReadTx } from "../storage/reactivity-log.ts";
 
 /**
  * Seed a list coordinator's result container with `[]` once `pull` settles, if
@@ -12,10 +13,16 @@ import type { Runtime } from "../runtime.ts";
  * reconciling against a value that has not arrived, and pulls the container so
  * that the value's arrival re-triggers the reconcile. A container that was
  * never persisted has no value to arrive: the pull settles with the container
- * still undefined, and the coordinator waits for a re-trigger that nothing will
- * send. The seed ends that wait by writing the empty array a fresh coordinator
- * would have written, which re-triggers the reconcile the same way a durable
- * value would have.
+ * still undefined. The seed writes the empty array a fresh coordinator would
+ * have written, so the next reconcile has a value to build on.
+ *
+ * The pull settling is what ends the deferring coordinator's wait: `rearm`
+ * re-triggers its reconcile once this chain completes, whatever the container
+ * turned out to hold. A seed that writes nothing — because the container's
+ * durable value arrived, or was already there — leaves no notification behind,
+ * and the coordinator deferred on a read that may disagree with the durable
+ * view a write is decided against, so a wait that ended only on the write is a
+ * wait that can never end.
  *
  * The seed belongs to the deferral that started it, so it writes to `container`
  * and to nothing else. `stillHeld` reports whether the coordinator is still
@@ -50,6 +57,16 @@ import type { Runtime } from "../runtime.ts";
  * commits exactly as unstamped txs do (the overlay routes only
  * derivation-kind runs).
  *
+ * The seed reads the durable replica view. Its question is whether a value
+ * has reached the store, and its own write is the value the deferral is
+ * waiting for, so a client speculation layer standing on the container must
+ * neither answer that question nor enter the commit's read basis: a basis
+ * naming one of those layers is refused terminally (speculation.md §6), and
+ * a refused seed strands the coordinator on a container that never arrives.
+ * The mark excludes the process-local speculation layers alone, so a durable
+ * in-flight layer still stands the seed down. A no-op on a serving runtime,
+ * which holds no speculation overlay.
+ *
  * The chain is registered with the storage manager's settle barrier, so
  * `Cell.pull()` and `storageManager.synced()` hold until the seed's write has
  * settled. The pull reaches that barrier through the replica's own sync
@@ -68,6 +85,7 @@ export function seedResultContainerWhenPullSettles(
   runtime: Runtime,
   container: Cell<any[]>,
   stillHeld: () => boolean,
+  rearm: () => void,
   pull: Promise<unknown>,
   logger: Logger,
   seedActionId: string,
@@ -77,6 +95,7 @@ export function seedResultContainerWhenPullSettles(
     if (!stillHeld()) return Promise.resolve();
     return runtime.editWithRetry((seedTx) => {
       if (!stillHeld()) return;
+      markDurableReadTx(seedTx);
       if (identity !== undefined) seedTx.tx.scopeKeyIdentity = identity;
       runtime.stampServerRun(seedTx, {
         actionId: seedActionId,
@@ -100,7 +119,9 @@ export function seedResultContainerWhenPullSettles(
     (error: unknown) => {
       logger.warn("resume-pull", "resume container pull rejected", { error });
     },
-  );
+  ).finally(() => {
+    if (stillHeld()) rearm();
+  });
   runtime.storageManager.trackUntilSettled(settled);
   return settled;
 }

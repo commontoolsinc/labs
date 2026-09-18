@@ -14,6 +14,7 @@
  */
 
 import { dirname, join, relative, resolve } from "@std/path";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   type Environment,
   readEnv,
@@ -97,13 +98,13 @@ interface ParsedNameMap {
 
 /** One map off disk, or undefined for anything that is not one. */
 function asNameMap(parsed: unknown): ParsedNameMap | undefined {
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+  if (!isObjectNotArray(parsed)) {
     return undefined;
   }
   const { dir, names } = parsed as { dir?: unknown; names?: unknown };
   // An array is an object, and its entries are index keys against the
   // values, so names written as one would register a test named "0".
-  if (typeof names !== "object" || names === null || Array.isArray(names)) {
+  if (!isObjectNotArray(names)) {
     return undefined;
   }
   return {
@@ -335,7 +336,7 @@ export function parseSkipList(text: string): SkipList | undefined {
   } catch {
     return undefined;
   }
-  if (typeof parsed !== "object" || parsed === null) return undefined;
+  if (!isObjectOrArray(parsed)) return undefined;
   if (Array.isArray(parsed)) return undefined;
   const skips: SkipList = {};
   for (const [file, names] of Object.entries(parsed)) {
@@ -534,7 +535,7 @@ export function asDefinition(
   const isBody = (value: unknown): value is Deno.TestDefinition["fn"] =>
     typeof value === "function";
   const isOptions = (value: unknown): value is Record<string, unknown> =>
-    typeof value === "object" && value !== null;
+    isObjectOrArray(value);
 
   if (typeof first === "string") {
     if (isBody(second)) return { name: first, fn: second };

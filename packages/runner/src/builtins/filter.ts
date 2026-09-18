@@ -172,6 +172,9 @@ function createFilterInstance(
   // `reconcile`) — the identity the scheduler is keyed by, so the one a
   // re-arm must name.
   let registeredAction: Action | undefined;
+  const rearmReconcile = (): void => {
+    if (registeredAction) runtime.scheduler.invalidateAction(registeredAction);
+  };
 
   const { awaitingResult, awaitPendingThenRepublish } = createResumeRepublisher(
     {
@@ -190,11 +193,7 @@ function createFilterInstance(
         if (included) out.push(inputElement);
         else if (included === undefined) return "pending";
       },
-      rearmReconcile: () => {
-        if (registeredAction) {
-          runtime.scheduler.invalidateAction(registeredAction);
-        }
-      },
+      rearmReconcile,
     },
   );
 
@@ -348,10 +347,11 @@ function createFilterInstance(
       elementAwaitSync &&
       probeScoped(() => resultWithLog.get()) === undefined
     ) {
-      // The container's durable value is still streaming in; its arrival
-      // re-triggers this reconcile (the read above is journaled). A container
-      // that was never persisted has nothing to stream in, so the seed below
-      // ends the wait once the pull settles. The id names the seed's
+      // The container's durable value is still streaming in; the pull
+      // below is what ends this wait, whatever the container turns out to
+      // hold: it re-triggers this reconcile once it settles, and seeds the
+      // empty array a fresh coordinator would have written when the
+      // container was never persisted. The id names the seed's
       // out-of-band recovery write; the helper stamps it with the sanctioned
       // bookkeeping kind (serving-loop.md §3d) so a SERVING runtime's wave
       // accepts the seal. Same shape in map.ts/flatmap.ts.
@@ -360,6 +360,7 @@ function createFilterInstance(
         runtime,
         container,
         () => active && result === container,
+        rearmReconcile,
         syncCellForIdentity(container, identity),
         logger,
         `filter/resume-seed/${parentCell.sourceURI}`,

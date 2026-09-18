@@ -61,6 +61,7 @@ import {
   parseLink,
 } from "../link-utils.ts";
 import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
+import { isReservedSibling } from "../reserved-sibling-seam.ts";
 import { arrayMatchesPositionally } from "../schema-match.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
@@ -1709,8 +1710,7 @@ export const storedSchemaCoversCandidateEnvelope = (
         return false;
       }
     }
-    return typeof stored.additionalProperties === "object" &&
-      stored.additionalProperties !== null &&
+    return isObjectOrArray(stored.additionalProperties) &&
       storedSchemaCoversCandidateEnvelope(
         stored.additionalProperties,
         candidateRest,
@@ -1748,8 +1748,8 @@ export const storedSchemaCoversCandidateEnvelope = (
   }
 
   if (
-    typeof candidate.items === "object" && candidate.items !== null &&
-    typeof stored.items === "object" && stored.items !== null
+    isObjectOrArray(candidate.items) &&
+    isObjectOrArray(stored.items)
   ) {
     return storedSchemaCoversCandidateEnvelope(stored.items, candidate.items);
   }
@@ -2000,24 +2000,26 @@ const valueWriteTargets = (
     for (const write of tx.getWriteDetails?.(space) ?? []) {
       const rawPath = write.address.path;
       const writePath = canonicalizeLogicalPath(rawPath);
-      // The `cfc`/`source` surface exclusions key on the RAW storage path:
-      // the runtime-internal surfaces are document-root siblings of `value`
+      // The reserved-sibling exclusion keys on the RAW storage path: the
+      // runtime-internal surfaces are document-root siblings of `value`
       // (raw `["cfc", ...]`/`["source", ...]`), while user fields of the
       // same names live under `["value", ...]` and canonicalize to identical
       // logical paths. Keying on the canonical path would let a user write
       // to `value.source` dodge schema write policy and flow-label
-      // attachment (#4011 review). The link-valued `internal` exclusion
-      // stays canonical on purpose: it covers the runtime's link plumbing
-      // both at the root surface and inside process-doc values; link writes
-      // carry their labels via the link-write machinery, not here.
+      // attachment (#4011 review). The write chokepoint records every
+      // unauthorized write that reaches one of those siblings, so the writes
+      // excluded here are the runtime's own.
+      // The link-valued `internal` exclusion stays canonical on purpose: it
+      // covers the runtime's link plumbing both at the root surface and
+      // inside process-doc values; link writes carry their labels via the
+      // link-write machinery, not here.
       if (
         write.address.id.startsWith("cid:") ||
         (
           isReservedCfcDocumentId(write.address.id) &&
           !forgedSystemDocuments.has(write.address.id)
         ) ||
-        rawPath[0] === "cfc" ||
-        rawPath[0] === "source" ||
+        isReservedSibling(rawPath[0]) ||
         (
           writePath[0] === "internal" &&
           isPrimitiveCellLink(write.value)
@@ -2209,10 +2211,7 @@ const isDeclarablePolicyPath = (
 export const flowReadExcluded = (
   id: string,
   rawPath: readonly string[],
-): boolean =>
-  id.startsWith("cid:") ||
-  rawPath[0] === "cfc" ||
-  rawPath[0] === "source";
+): boolean => id.startsWith("cid:") || isReservedSibling(rawPath[0]);
 
 // A written value made entirely of references (links at every leaf, or
 // empty structure) carries no readable content of its own: the per-slot
@@ -6480,14 +6479,18 @@ export const prepareBoundaryCommit = (
   const prefixProvenance = instrumentation?.onPrefixProvenance !== undefined
     ? createPrefixProvenanceSummary()
     : undefined;
-  // A write to a document's ["cfc"] label-map path made outside the runtime's
-  // privileged persistence scope forges the metadata that drives CFC derivation
-  // for other writes (audit S18). Each was recorded at the extended-tx write
-  // chokepoint; surface one fail-closed reason apiece so it rejects in enforce
-  // mode and diagnoses in observe, uniformly with every other reason here.
+  // A write that reaches a document's reserved siblings of `value` from
+  // outside the runtime's privileged persistence scope forges the ["cfc"]
+  // metadata that drives CFC derivation for other writes (audit S18), or moves
+  // data through a surface this pass excludes from its own accounting. Each was recorded at the extended-tx
+  // write chokepoint; surface one fail-closed reason apiece so it rejects in
+  // enforce mode and diagnoses in observe, uniformly with every other reason
+  // here.
   for (const target of state.unprivilegedSystemWrites ?? []) {
     reasons.push(
-      verdictReason(`unprivileged write to protected cfc path ${target}`),
+      verdictReason(
+        `unprivileged write to protected runtime surface ${target}`,
+      ),
     );
   }
   const identityForInput = (

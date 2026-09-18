@@ -333,7 +333,7 @@ function asExtraParams(value: unknown): Record<string, unknown> {
 }
 
 export function runtimeErrorLog(runtime: unknown): CliRuntimeErrorRecord[] {
-  if (typeof runtime !== "object" || runtime === null) {
+  if (!isObjectOrArray(runtime)) {
     return [];
   }
   const log = (runtime as { [CF_RUNTIME_ERROR_LOG]?: unknown })[
@@ -344,7 +344,7 @@ export function runtimeErrorLog(runtime: unknown): CliRuntimeErrorRecord[] {
 
 function errorMessage(error: unknown): string {
   if (
-    typeof error === "object" && error !== null && "reason" in error &&
+    isObjectOrArray(error) && "reason" in error &&
     (error as { reason?: unknown }).reason != null
   ) {
     // A StorageTransactionAborted carries the abort's cause as `reason`, and
@@ -356,7 +356,7 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
-  if (typeof error === "object" && error !== null && "message" in error) {
+  if (isObjectOrArray(error) && "message" in error) {
     const message = (error as { message?: unknown }).message;
     if (typeof message === "string") {
       return message;
@@ -517,7 +517,7 @@ function firstUndeclaredEventField(
   position: string,
   atRoot: boolean,
 ): UndeclaredEventField | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
+  if (!isObjectOrArray(value)) return undefined;
   // A link is not an object whose fields can be judged. Its `/` key is the
   // envelope's own structure, not a name the caller chose, and the document it
   // points at is not read at dispatch — so there is nothing here to compare a
@@ -1364,7 +1364,7 @@ export function collectInvocationResultLinks(
     // "/" when the result itself is live — but the walk never goes inside:
     // its properties are the runtime's, not the result's, and they refer
     // back to themselves.
-    if (typeof val !== "object" || val === null || isInstance(val)) return;
+    if (!isObjectOrArray(val) || isInstance(val)) return;
     const keys = Array.isArray(val)
       ? val.map((_, index) => String(index))
       : Object.keys(val);
@@ -1469,7 +1469,7 @@ export class CyclicResultError extends Error {
 function locateResultCycle(value: unknown): string | undefined {
   const ancestors = new Set<object>();
   const walk = (node: unknown, path: string[]): string | undefined => {
-    if (typeof node !== "object" || node === null) return undefined;
+    if (!isObjectOrArray(node)) return undefined;
     if (ancestors.has(node)) return encodeJsonPointer(["", ...path]);
     if (typeof (node as { toJSON?: unknown }).toJSON === "function") {
       return undefined;

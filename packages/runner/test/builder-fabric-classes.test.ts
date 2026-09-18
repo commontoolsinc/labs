@@ -28,6 +28,7 @@ import {
   FabricHash,
   FabricKeyPair,
   FabricRegExp,
+  FabricUnavailable,
 } from "@commonfabric/data-model/fabric-primitives";
 import { createBuilder } from "../src/builder/factory.ts";
 import { getRuntimeModuleExports } from "../src/sandbox/runtime-modules.ts";
@@ -52,6 +53,7 @@ const expectedBindings: Record<string, unknown> = {
   FabricBytes,
   FabricRegExp,
   FabricKeyPair,
+  FabricUnavailable,
   FabricError,
 };
 
@@ -162,6 +164,20 @@ describe("commonfabric `FabricSpecialObject` classes", () => {
       expect(instance.privateKeyBytes.slice()).toEqual(
         new Uint8Array([4, 5, 6]),
       );
+    });
+  });
+
+  describe("FabricUnavailable", () => {
+    it("constructs an instance from a reason, a kind, and a message", () => {
+      const BoundFabricUnavailable = commonfabric
+        .FabricUnavailable as typeof FabricUnavailable;
+      const instance = new BoundFabricUnavailable("error", "network", "boom");
+
+      expect(instance).toBeInstanceOf(FabricUnavailable);
+      expect(instance.reason).toBe("error");
+      expect(instance.errorKind).toBe("network");
+      expect(instance.errorMessage).toBe("boom");
+      expect(instance.isError()).toBe(true);
     });
   });
 

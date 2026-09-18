@@ -270,7 +270,7 @@ describe("editWithRetry rejection classification", () => {
       expect(actions).toBe(1);
       expect(result.error?.name).toBe("CfcCommitRefusalError");
       expect(result.error?.message).toContain(
-        "unprivileged write to protected cfc path",
+        "unprivileged write to protected runtime surface",
       );
     } finally {
       await runtime.dispose();

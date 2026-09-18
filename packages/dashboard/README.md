@@ -1,6 +1,6 @@
-# Fabric wall — modular dev/company dashboard
+# Dashboard — modular dev/company status board
 
-A small Deno server that renders a glanceable wall of status tiles and
+A small Deno server that renders a glanceable board of status tiles and
 updates their markup in place over Server-Sent Events. Every tile is one file
 with a fixed interface; a single file registers them.
 
@@ -214,9 +214,9 @@ That's it. Remove a tile by deleting its line from `registry.ts` (and its file).
 
 ### Philosophy and values
 
-The wall is something people glance at all day, often out of the corner of an
-eye, so a tile's first duty is to inform without adding anxiety. Keep it calm by
-default. There are only three signals — good, warn, and bad, plus a gray
+The dashboard is something people glance at all day, often out of the corner of
+an eye, so a tile's first duty is to inform without adding anxiety. Keep it calm
+by default. There are only three signals — good, warn, and bad, plus a gray
 "unknown" when a source is missing or a collector fails — because green should
 mean "fine," red should mean "a person should act on this now," and there is
 little in between worth manufacturing. Red has to stay rare and trustworthy: if
@@ -231,10 +231,10 @@ what a person who cannot separate red from green is doing all day.
 The first is color, chosen so the four stay apart for that person too. Green
 sits at a teal and amber at an orange rather than at a yellow, which puts the
 two on the blue/yellow axis; red/green color blindness leaves that axis
-working, and good against warn is otherwise the hardest pair on the wall. Every
-pair of statuses is measured in `palette.test.ts`, which simulates the two
-common forms of red/green color blindness and fails if any pair comes within
-reach of reading as one color.
+working, and good against warn is otherwise the hardest pair on the dashboard.
+Every pair of statuses is measured in `palette.test.ts`, which simulates the
+two common forms of red/green color blindness and fails if any pair comes
+within reach of reading as one color.
 
 The second is the shape of the header dot: a circle for good, a triangle for
 warn, a diamond for bad, and a hollow ring for unknown. A shape survives any
@@ -242,8 +242,8 @@ kind of color vision, and any distance at which the dot is still visible at all.
 
 The third is weight. A tile's background wash and its border both get stronger
 as its status gets more serious, so a good tile is the quietest thing on the
-wall and a red one the loudest. That ordering holds with the color taken away
-altogether.
+dashboard and a red one the loudest. That ordering holds with the color taken
+away altogether.
 
 The fourth is texture, behind the tile. A gray tile is covered in a grid of
 tiny dots, an amber tile in broad wavy lines, and a red tile in zig-zags. The
@@ -251,13 +251,13 @@ lines are wide and faint rather than fine and dark, which puts enough of the
 pattern on the tile to catch the eye without any one line drawing it. The
 zig-zag covers a little under half of a red tile, and the longer, gentler wave
 about a third of an amber one. Green tiles
-are left plain, which is the calm the rest of the wall is measured against.
+are left plain, which is the calm the rest of the dashboard is measured against.
 Every texture fades out down the tile: it is whole for the tile's top seventh,
 thins from there, and is gone seven tenths of the way down, which leaves the
 sub line and the foot of a chart on plain color.
 
-Everything the wall draws over a texture has to stay legible against it, and
-the faintest marks are the ones that decide how strong a texture can be: a
+Everything the dashboard draws over a texture has to stay legible against it,
+and the faintest marks are the ones that decide how strong a texture can be: a
 tile's title, its drill-down hint, its running badge, and the times, dividers
 and pop-out arrows down the recent-runs list. Those are set against the lightest the background
 reaches under a texture band rather than against the tile's flat color. The
@@ -279,13 +279,13 @@ measures. Prefer an honest gray "unknown" over a false green — a tile that
 can't tell "healthy" from "I couldn't reach the source," and stays green while
 blind, is worse than one that admits it doesn't know. Report on the system,
 never on individuals: no per-person leaderboards, no "who broke the build,"
-nothing that turns the wall into a place to rank or shame people. And be wary of
-the number that looks like progress but isn't — coverage percentage, lines of
-code, raw PR counts — anything that becomes a bad target the moment someone
-optimizes for it, or whose only job is to look busy. If a metric would quietly
-pressure people into gaming it, leave it off. This is a quiet instrument panel a
-tired person should be able to trust at 2am, not a scoreboard and not a
-surveillance tool.
+nothing that turns the dashboard into a place to rank or shame people. And be
+wary of the number that looks like progress but isn't — coverage percentage,
+lines of code, raw PR counts — anything that becomes a bad target the moment
+someone optimizes for it, or whose only job is to look busy. If a metric would
+quietly pressure people into gaming it, leave it off. This is a quiet
+instrument panel a tired person should be able to trust at 2am, not a
+scoreboard and not a surveillance tool.
 
 A tile is about as wide as a business card, and every line on it is set without
 wrapping. A line longer than that width is not shortened by the renderer so much
@@ -335,7 +335,7 @@ figure is the age badge in the header.
 | commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent main runs | `GH_TOKEN` |
 | CI duration history → `/bench?view=ci` | labs and loom job, shard-group, and end-to-end workflow duration trends. The duration tiles open their matching repository view | `GH_TOKEN` |
 | CI run Gantt → `/bench?view=gantt` | detailed labs or loom job phases from `scripts/ci-gantt.ts`, backed by the CI history cache | `GH_TOKEN` |
-| flaky tests | how many tests the test-selection publisher measured disagreeing with themselves often enough to keep off pull requests, read from the newest selection manifest. The headline names what it counts, so it reads `25 flaky tests`, or `no flaky tests` when there are none. The line under it says what the count was drawn from: the span of history a flake share is measured over, which the manifest's `FLAKE_WINDOW_DAYS` dial names, and how long ago the publisher measured. The sparkline plots the count across every available manifest. Which tests they are is on the page behind it. Amber from one, red from ten. Gray with a dash when no manifest is available, the latest manifest has an empty corpus, or the latest manifest cannot be read. Readable history remains visible when the latest object cannot be read | optional `GH_TOKEN` for publisher activity |
+| flaky tests | how many tests the test-selection publisher measured disagreeing with themselves often enough to keep off pull requests, read from the newest selection manifest. The headline names what it counts, so it reads `25 flaky tests`, or `no flaky tests` when there are none. The line under it says what the count was drawn from: the span of history a flake share is measured over, which the manifest's `FLAKE_WINDOW_DAYS` dial names, and how long ago the publisher measured. The sparkline plots the count across every available manifest. Which tests they are is on the page behind it. Amber from one, red from ten. Gray with a dash when no manifest is available, the newest readable manifest has an empty corpus, or none of the manifests it looked at can be read, naming the shape it found in that last case. Readable history remains visible when the newest object cannot be read | optional `GH_TOKEN` for publisher activity |
 | test selection | what share of the corpus the newest selection manifest would have a pull request run, read from the same manifest. The manifest's packing is built with nothing mandatory, so the share is the one a pull request touching no test would get; a real one re-packs against its own diff and spends part of the same budget on what that diff makes mandatory. Amber once that manifest is over eight hours old, because selection quality decays with it, and amber too while the corpus holds a test costing more on its own than a whole lane's budget, since no packing can place one and a pull request then runs it only where its own diff makes it mandatory. Red when a lane's projected work is past the budget the manifest was packed to. Both of the last two take the sub line off the corpus count, the red one first. The sparkline plots the selected percentage across every available manifest, using each manifest's own corpus size. Gray on the same conditions as the flaky tests tile, including an empty latest corpus | optional `GH_TOKEN` for publisher activity |
 | test selection detail → `/test-selection` | the manifest behind both test tiles, at full width: every lane against its budget and how many tests it holds, every test held back as flaky with the rate it was measured at, and every test no lane can hold. Both tiles link here, the flaky tests tile straight to its flaky section | none |
 | coverage debt | the repository's whole uncovered-line count and what a median day does to it, read from the `perf-metrics` artifact of each day's newest successful `main` run (`docs/development/COVERAGE.md`). The headline is the count; under it a signed rate gives the median day's move over the last three weeks, and the chart spans eight weeks with those days highlighted. Its vertical scale uses the highlighted days, so older extremes can extend outside the chart. Amber means that median is a rise, which takes more than half the days in the window, so a day that added debt says nothing on its own. It never turns red, and it goes gray rather than stand on a stale number: when five days have passed with nothing measured, and until the window holds a week of days to take a median over. A run whose pattern compile cache missed is passed over, because a cold run reaches branches a warm one does not and reads about a tenth of a percent low. It looks for a landing every five minutes, which costs one request when none has happened; the figure itself cannot exist until a run's Coverage Check uploads it, about twelve minutes after the commit lands | `GH_TOKEN` |
@@ -377,16 +377,19 @@ available manifest at its generation time. The listing determines the chart's
 span; the dashboard imposes no date window. A successful refresh removes cached
 counts for objects that are no longer listed.
 
-An object whose body names a manifest schema version other than the one this
-dashboard reads is read once and then left alone for as long as the process runs, so
-a refresh does not fetch it again; the tiles and the detail page say which
-version was found rather than the phrase they give a source that went quiet.
-A body naming this dashboard's own version and failing validation anyway is an
-ordinary failed read.
-That is held in memory rather than in the cache file, because what a reader
-can validate belongs to the build holding it and a later build may accept what
-this one refused. Every other failed read is tried again on the next
-refresh.
+A stored body says which shape it was written in, and this dashboard reads
+anything at or under its own. A body from further ahead it passes over, taking
+the newest one behind it, across the same stretch of the store a lane looks
+back over. Where it can read none of them it says so and names the shape it
+found, rather than reporting the store empty. Anything else unreadable ends the
+search where it stands, because a corrupt object is not a reader waiting to be
+deployed.
+
+Each object passed over is read once and then left alone for as long as the
+process runs, so neither the walk nor a refresh fetches it again. That is held
+in memory rather than in the cache file, because what a reader can validate
+belongs to the build holding it and a later build may accept what this one
+passed over. Every other failed read is tried again on the next refresh.
 
 An empty corpus or an unreadable manifest leaves a gap. Connected stretches
 share one vertical scale, and an isolated measurement appears as a dot. A

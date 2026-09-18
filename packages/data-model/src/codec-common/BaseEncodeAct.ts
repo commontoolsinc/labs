@@ -1,5 +1,9 @@
 import { backtickQuote } from "@commonfabric/utils/markdown";
-import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
+import {
+  isObjectOrArray,
+  isPlainObject,
+  isUnsafeObjectKey,
+} from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
 import { isFabricSpecialObject } from "@/types";
@@ -9,9 +13,9 @@ import type {
   NonterminalCodec,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
+import { toShortQuotedDebugString } from "@/value-debug";
 import { BaseCodecAct } from "./BaseCodecAct.ts";
 import { SELF_REP } from "./CodecRegistry.ts";
-import { quotedDebugString } from "./quotedDebugString.ts";
 
 /**
  * One act of encoding: what {@link BaseCodecAct} holds, the walk that turns a
@@ -141,7 +145,7 @@ export abstract class BaseEncodeAct<Encoded, SerializedForm = Encoded>
       const label = (typeName === "object") ? "instance" : typeName;
       throw new Error(
         `Cannot encode ${label} ${
-          quotedDebugString(value)
+          toShortQuotedDebugString(value)
         }: no applicable codec.`,
       );
     }
@@ -149,7 +153,7 @@ export abstract class BaseEncodeAct<Encoded, SerializedForm = Encoded>
 
   /** Encodes one value through the codec the registry matched to it. */
   #encodeTagged(value: FabricValue, matched: CodecForFormat<Encoded>): Encoded {
-    const isObject = (value !== null) && (typeof value === "object");
+    const isObject = isObjectOrArray(value);
 
     if (isObject) {
       this.enter(value as object);

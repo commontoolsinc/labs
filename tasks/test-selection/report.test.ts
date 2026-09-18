@@ -53,6 +53,13 @@ function key(name: string, scope = "bakery"): string {
   return testIdentityKey(test(name, scope));
 }
 
+/** One batch a lane measured about itself, which is not a test. */
+const laneBatch: TestIdentity = {
+  k: "gate",
+  s: "ci",
+  n: "ci-lane batch bakery-unit",
+};
+
 /** One run's verdicts, written as a name-to-verdict list. */
 function run(
   entries: readonly (readonly [string, Verdict])[],
@@ -173,6 +180,24 @@ describe("report", () => {
       expect(outcomesOf([record("kneads", "skip")]).get(key("kneads")))
         .toBe("skip");
     });
+
+    // A lane writes what its setup and each of its batches cost through
+    // the record machinery every test uses, and a batch that ended badly
+    // is written as a failure. Nothing enumerates those measurements and
+    // no lane can be asked to run one, so none of them is a test.
+    it("gives no verdict on a lane measuring itself", () => {
+      const outcomes = outcomesOf([
+        record("kneads", "fail"),
+        {
+          line: "record",
+          test: laneBatch,
+          outcome: "fail",
+          durationMs: 391_400,
+        },
+      ]);
+      expect(outcomes.get(key("kneads"))).toBe("fail");
+      expect(outcomes.has(testIdentityKey(laneBatch))).toBe(false);
+    });
   });
 
   describe("selectionOf()", () => {
@@ -267,6 +292,32 @@ describe("report", () => {
       const failures = firstFailures(input({
         previous: run([["kneads", "pass"]]),
         current: run([["kneads", "fail"]]),
+      }));
+      expect(failures.map((failure) => failure.test.n)).toEqual(["kneads"]);
+    });
+
+    // A batch is written as a failure when a test in it failed. What
+    // this commit is said to have broken is that test, once.
+    it("names the test a batch failed on rather than the batch", () => {
+      const failures = firstFailures(input({
+        previous: new Map<string, Verdict>([
+          ...run([["kneads", "pass"]]),
+          [testIdentityKey(laneBatch), "pass"],
+        ]),
+        current: outcomesOf([
+          {
+            line: "record",
+            test: test("kneads"),
+            outcome: "fail",
+            durationMs: 12,
+          },
+          {
+            line: "record",
+            test: laneBatch,
+            outcome: "fail",
+            durationMs: 391_400,
+          },
+        ]),
       }));
       expect(failures.map((failure) => failure.test.n)).toEqual(["kneads"]);
     });
@@ -1100,7 +1151,7 @@ describe("report", () => {
 
     it("gives the alias line as something to paste", () => {
       const body = renderReport(buildReport(everything()), context)!;
-      expect(body).toContain("tasks/test-identity-aliases.jsonl");
+      expect(body).toContain("`tasks/test-identity-aliases/`");
       expect(body).toContain('{"date":"2026-09-07","from":');
     });
 

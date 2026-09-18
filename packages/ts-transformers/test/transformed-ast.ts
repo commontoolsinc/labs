@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 // Structural queries over transformer output. Tests parse the printed output
 // back into an AST and assert on real nodes instead of matching substrings.
@@ -193,7 +194,7 @@ export function emittedSchemas(root: ts.Node): Record<string, unknown>[] {
     )
     .map((node) => literalToValue(node.expression))
     .filter((value): value is Record<string, unknown> =>
-      typeof value === "object" && value !== null && !Array.isArray(value)
+      isObjectNotArray(value)
     );
 }
 

@@ -29,6 +29,10 @@ import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import {
+  FabricUnavailable,
+  UNAVAILABLE_PENDING,
+} from "@/fabric-primitives/FabricUnavailable.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import * as nodeCrypto from "@node/crypto";
 
@@ -488,6 +492,84 @@ describe("value-hash", () => {
         expect(hex(hashBytesOf(nsec))).not.toBe(hex(hashBytesOf(days)));
       });
     });
+    describe("FabricUnavailable (dedicated TAG_UNAVAILABLE primitive tag)", () => {
+      it('matches a hand-computed byte stream for `FabricUnavailable("pending")`', () => {
+        // TAG_UNAVAILABLE (0x2D), the reason as a tagged string, then the
+        // absent kind and the absent message each as TAG_NULL (0x20).
+        const expected = sha256([
+          0x2d,
+          0x24,
+          0x07,
+          ...new TextEncoder().encode("pending"),
+          0x20,
+          0x20,
+        ]);
+        expect(hashBytesOf(new FabricUnavailable("pending"))).toEqual(expected);
+      });
+
+      it('matches a hand-computed byte stream for `FabricUnavailable("error", "network", "boom")`', () => {
+        // TAG_UNAVAILABLE (0x2D), then the reason, the kind, and the message
+        // each as a tagged string.
+        const expected = sha256([
+          0x2d,
+          0x24,
+          0x05,
+          ...new TextEncoder().encode("error"),
+          0x24,
+          0x07,
+          ...new TextEncoder().encode("network"),
+          0x24,
+          0x04,
+          ...new TextEncoder().encode("boom"),
+        ]);
+        expect(hashBytesOf(new FabricUnavailable("error", "network", "boom")))
+          .toEqual(expected);
+      });
+
+      it("feeds `TAG_NULL` for the message of an error given none", () => {
+        const expected = sha256([
+          0x2d,
+          0x24,
+          0x05,
+          ...new TextEncoder().encode("error"),
+          0x24,
+          0x07,
+          ...new TextEncoder().encode("network"),
+          0x20,
+        ]);
+        expect(hashBytesOf(new FabricUnavailable("error", "network")))
+          .toEqual(expected);
+      });
+
+      it("produces the same hash for a prefab and a fresh instance with its reason", () => {
+        expect(hex(hashBytesOf(UNAVAILABLE_PENDING)))
+          .toBe(hex(hashBytesOf(new FabricUnavailable("pending"))));
+      });
+
+      it("produces the same hash for an error given its kind's default message and one given none", () => {
+        const given = new FabricUnavailable("error", "network");
+        expect(hex(hashBytesOf(
+          new FabricUnavailable("error", "network", given.errorMessage),
+        ))).toBe(hex(hashBytesOf(given)));
+      });
+
+      it("produces different hashes for different reasons", () => {
+        expect(hex(hashBytesOf(new FabricUnavailable("pending"))))
+          .not.toBe(hex(hashBytesOf(new FabricUnavailable("syncing"))));
+      });
+
+      it("produces different hashes for different kinds", () => {
+        expect(hex(hashBytesOf(new FabricUnavailable("error", "network"))))
+          .not.toBe(hex(hashBytesOf(new FabricUnavailable("error", "decode"))));
+      });
+
+      it("produces different hashes for different messages", () => {
+        expect(hex(hashBytesOf(new FabricUnavailable("error", "general", "a"))))
+          .not.toBe(
+            hex(hashBytesOf(new FabricUnavailable("error", "general", "b"))),
+          );
+      });
+    });
     describe("FabricError (FabricInstance via [CODEC])", () => {
       it("matches a byte stream built from `[CODEC]` `encode()` output for `FabricError`", () => {
         // Build the expected byte stream programmatically because the encoded
@@ -764,6 +846,7 @@ describe("value-hash", () => {
           new FabricEpochNsec(0n),
           new FabricEpochDay(0n),
           new FabricBytes(new Uint8Array([1])),
+          new FabricUnavailable("pending"),
           FabricError.fromNativeError(new Error("x")),
         ];
         for (const v of values) {

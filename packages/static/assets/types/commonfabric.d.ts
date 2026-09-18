@@ -494,6 +494,88 @@ export interface FabricRegExpConstructor {
 
 export declare const FabricRegExp: FabricRegExpConstructor;
 
+/**
+ * Why a `FabricUnavailable` stands where data would otherwise be. The two
+ * transient reasons say the data is on its way; `error` says producing it
+ * failed, and is the one reason that carries a kind and a message.
+ */
+export type UnavailableReason = "pending" | "syncing" | "error";
+
+/**
+ * The kinds of failure a `FabricUnavailable` with reason `error` sorts into.
+ * `general` is the kind for a failure none of the others describes.
+ */
+export type UnavailableErrorKind =
+  | "general"
+  | "schemaMismatch"
+  | "invalidInput"
+  | "network"
+  | "decode"
+  | "compile"
+  | "provider"
+  | "sync";
+
+/**
+ * A marker standing in for data that is not available, saying why. It holds
+ * no data of its own: the reason, and for the `error` reason the kind of
+ * error and a message, are the whole of what it says. Only the `error` reason
+ * carries a kind, and it always does; only the `error` reason may carry a
+ * message, and `errorMessage` supplies one for its kind when none was given.
+ * For the other two reasons every error member is `null`.
+ */
+export interface FabricUnavailable extends FabricPrimitive {
+  /** Why the data is unavailable. */
+  readonly reason: UnavailableReason;
+
+  /** The kind of error, when the reason is `error`; `null` otherwise. */
+  readonly errorKind: UnavailableErrorKind | null;
+
+  /**
+   * The message, when the reason is `error`: the one given at construction,
+   * or the kind's default when none was. `null` for a transient reason.
+   */
+  readonly errorMessage: string | null;
+
+  /**
+   * The message as given at construction, with no default supplied: `null`
+   * for a transient reason, and for an `error` whose message is its kind's
+   * default or was never given.
+   */
+  readonly rawErrorMessage: string | null;
+
+  /** Whether the reason is `pending`. */
+  isPending(): boolean;
+
+  /** Whether the reason is `syncing`. */
+  isSyncing(): boolean;
+
+  /**
+   * Whether the reason is `error`, narrowing `errorKind` and `errorMessage`
+   * to the non-`null` values the `error` reason always carries.
+   */
+  isError(): this is {
+    readonly errorKind: UnavailableErrorKind;
+    readonly errorMessage: string;
+  };
+
+  /**
+   * Whether the data is on its way rather than failed: `true` for the
+   * `pending` and `syncing` reasons, `false` for `error` whatever its kind.
+   */
+  isTransient(): boolean;
+}
+
+export interface FabricUnavailableConstructor {
+  new (
+    reason: UnavailableReason,
+    errorKind?: UnavailableErrorKind | null,
+    errorMessage?: string | null,
+  ): FabricUnavailable;
+  prototype: FabricUnavailable;
+}
+
+export declare const FabricUnavailable: FabricUnavailableConstructor;
+
 //
 // Concrete `FabricInstance` classes
 //
@@ -1560,12 +1642,20 @@ export type CollectionIndexKeyEntry<K extends CollectionIndexKey> = K extends
   : { kind: "value"; value: K };
 
 /** Stored descriptor whose buckets are addressed independently by keyed lookup. */
-export interface CollectionIndexData<K extends CollectionIndexKey, V> {
+export interface CollectionIndexData<
+  K extends CollectionIndexKey,
+  V,
+  M extends "group" | "key" = "group" | "key",
+> {
   /** Descriptor marker used to recognize an index receiver. */
   readonly kind: "collection-index";
 
-  /** Missing-key behavior: an empty group or an absent unique match. */
-  readonly mode: "group" | "key";
+  /**
+   * Missing-key behavior: an empty group or an absent unique match. The
+   * operator that built the index names one, so a lookup reads it from its
+   * receiver's schema when the descriptor has not been published yet.
+   */
+  readonly mode: M;
 
   /** Occupied keys in deterministic typed-key order. */
   readonly keys: K[];
@@ -1601,12 +1691,12 @@ export interface CollectionIndexHandle<
 
 /** Index whose missing-key lookup yields an empty group. */
 export type GroupIndex<K extends CollectionIndexKey, T> = CollectionIndexHandle<
-  CollectionIndexData<K, T[]>
+  CollectionIndexData<K, T[], "group">
 >;
 
 /** Index whose missing-key lookup yields undefined. */
 export type KeyIndex<K extends CollectionIndexKey, T> = CollectionIndexHandle<
-  CollectionIndexData<K, T | undefined>
+  CollectionIndexData<K, T | undefined, "key">
 >;
 
 /** @internal Preserves an index selector's key kind before result serialization. */
@@ -2388,6 +2478,7 @@ export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
     "FabricHash",
     "FabricKeyPair",
     "FabricRegExp",
+    "FabricUnavailable",
   ] as const,
 );
 

@@ -118,6 +118,7 @@
     "npm:@types/leaflet@^1.9.21": "1.9.21",
     "npm:@types/react-dom@19.2.5": "19.2.5_@types+react@19.2.18",
     "npm:@types/react@19.2.18": "19.2.18",
+    "npm:@types/ws@^8.18.1": "8.18.1",
     "npm:@viz-js/viz@3.26.0": "3.26.0",
     "npm:@xyflow/react@^12.11.5": "12.11.5_@types+react@19.2.18_@types+react-dom@19.2.5__@types+react@19.2.18_react@19.2.8_react-dom@19.2.8__react@19.2.8",
     "npm:ai@^7.0.31": "7.0.31_zod@4.4.3",
@@ -155,6 +156,7 @@
     "npm:turndown@^7.2.4": "7.2.4",
     "npm:typescript@6.0.3": "6.0.3",
     "npm:unicode-case-folding@1.1.1": "1.1.1",
+    "npm:ws@^8.21.3": "8.21.3",
     "npm:zod@^4.4.3": "4.4.3"
   },
   "jsr": {
@@ -1343,6 +1345,12 @@
         "@types/geojson"
       ]
     },
+    "@types/node@26.3.0": {
+      "integrity": "sha512-L3fgrnchriRC2ExBflb8j4uZZURHZfQsmQeyVzhjcHW4kkwVyo8/0h1B2MVzMTrYUJYu6G7EWs14hW/L9putqw==",
+      "dependencies": [
+        "undici-types"
+      ]
+    },
     "@types/react-dom@19.2.5_@types+react@19.2.18": {
       "integrity": "sha512-fMPwH9v7r/pp43yUd2/Mbiex5KouJwwR3dzHkhLREUC6764VyDsqxhAxv6OFEYR1RhjOyD1naqba8ECDBe7ZQg==",
       "dependencies": [
@@ -1357,6 +1365,12 @@
     },
     "@types/trusted-types@2.0.7": {
       "integrity": "sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw=="
+    },
+    "@types/ws@8.18.1": {
+      "integrity": "sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==",
+      "dependencies": [
+        "@types/node"
+      ]
     },
     "@vercel/oidc@3.2.0": {
       "integrity": "sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug=="
@@ -2696,6 +2710,9 @@
       "integrity": "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==",
       "bin": true
     },
+    "undici-types@8.3.0": {
+      "integrity": "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="
+    },
     "unicode-case-folding@1.1.1": {
       "integrity": "sha512-ZAYziAnMTBisO2dT5tyGvBFMNsIfonOS/BZTd3UZaKWtXMOZqK8s8HRUCrlKxGCTeCxCuCjS/6HW+4a6G+rbzw=="
     },
@@ -2726,6 +2743,9 @@
     },
     "wrappy@1.0.2": {
       "integrity": "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ=="
+    },
+    "ws@8.21.3": {
+      "integrity": "sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw=="
     },
     "yaml@2.9.0": {
       "integrity": "sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==",
@@ -2923,8 +2943,10 @@
         "dependencies": [
           "jsr:@db/sqlite@0.13.0",
           "npm:@opentelemetry/api@^1.9.1",
+          "npm:@types/ws@^8.18.1",
           "npm:ses@^2.2.0",
-          "npm:typescript@6.0.3"
+          "npm:typescript@6.0.3",
+          "npm:ws@^8.21.3"
         ]
       },
       "packages/schema-generator": {

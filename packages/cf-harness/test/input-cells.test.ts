@@ -425,8 +425,13 @@ describe("input-cells", () => {
   });
 
   describe("inputCellsContextMessage()", () => {
-    it("returns undefined for an empty input-cell list", () => {
-      expect(inputCellsContextMessage([])).toBeUndefined();
+    it("states that there are no attachments without discarding the conversation target", () => {
+      const message = inputCellsContextMessage([]);
+      expect(message).toContain("No input cells are attached for this run");
+      expect(message).toContain("conversation can still be the target");
+      expect(message).toContain(
+        "registry or connector references are not attachments",
+      );
     });
 
     it("pairs each token with the operator's name and never discloses the ref", () => {

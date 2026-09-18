@@ -18,6 +18,10 @@ import { rootCacheDir } from "./remote.ts";
 // space by name (`/<space-name>/…`); we mirror that derivation so
 // `cf inspect <name>` resolves the same DB the runtime would, without anyone
 // copying a DID around.
+//
+// The derivation supports the legacy space names used during development, and
+// nothing else. It is removed once those development-only spaces have been
+// migrated; `docs/plans/random-space-identities.md` carries the migration.
 const SPACE_ROOT_PASSPHRASE = "common user";
 let spaceRoot: Promise<Identity> | undefined;
 

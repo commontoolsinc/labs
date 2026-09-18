@@ -10,6 +10,8 @@
 // Config (from environment)
 //
 
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 export const REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "commonfabric/labs";
 
 /** Where the repository is hosted; a workflow run names it. */
@@ -66,6 +68,10 @@ export const COVERAGE_COMMENT_FILE = "coverage-comment.json";
  *
  * - `state: "regressed"` carries the full comment `body`. The poster posts it as
  *   a new comment, or updates an existing coverage comment in place.
+ * - `state: "ungated"` carries the full comment `body` too, and is posted the
+ *   same way. It says the run held one or more changed source groups against no
+ *   baseline, so that a run which checked nothing does not read as one that
+ *   found nothing.
  * - `state: "resolved"` carries `improvedLines`, the net reduction in uncovered
  *   lines versus baseline across the changed, gated coverage groups, and
  *   `groups`, the per-group baseline-versus-this-PR breakdown. When the gate
@@ -76,9 +82,9 @@ export const COVERAGE_COMMENT_FILE = "coverage-comment.json";
  */
 export interface CoverageCommentPayload {
   prNumber: number;
-  state: "regressed" | "resolved";
+  state: "regressed" | "ungated" | "resolved";
 
-  /** Present when `state` is "regressed". */
+  /** Present when `state` is "regressed" or "ungated". */
   body?: string;
 
   /** Present when `state` is "resolved". */
@@ -336,7 +342,8 @@ function githubRetryDelayMs(attempt: number, resp?: Response): number {
   );
 }
 
-function sleep(ms: number): Promise<void> {
+/** Resolves after `ms` milliseconds, or at once when `ms` is not positive. */
+export function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -480,7 +487,6 @@ export function newestArtifactsByName(artifacts: Artifact[]): Artifact[] {
   return [...byName.values()];
 }
 
-/** The GitHub page of a workflow run: the URL the baseline file records. */
 /**
  * The API path listing the runs a coverage baseline could come from:
  * successful pushes to the default branch, newest first.
@@ -489,6 +495,11 @@ export function newestArtifactsByName(artifacts: Artifact[]): Artifact[] {
  * belong to has to be the same for everything that compares against a
  * baseline, and a second copy is a second place to update when the run
  * moves to another workflow.
+ *
+ * GitHub serves a listing that carries a filter from a search index, and that
+ * index can return a window of runs that ended weeks ago with no error to say
+ * so. A reader that cannot tolerate that reads {@link workflowRunsPagePath}
+ * and applies {@link isBaselineCandidateRun} itself.
  */
 export function workflowRunsPathForBaseline(perPage: number): string {
   const params = new URLSearchParams({
@@ -500,6 +511,40 @@ export function workflowRunsPathForBaseline(perPage: number): string {
   return `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?${params}`;
 }
 
+/** Runs on one page of {@link workflowRunsPagePath}: GitHub's maximum. */
+export const WORKFLOW_RUNS_PAGE_SIZE = 100;
+
+/**
+ * The API path of one page of every run of the workflow, newest first, with
+ * `1` as the first page.
+ *
+ * It carries no filter, which is what keeps GitHub from serving it out of the
+ * search index {@link workflowRunsPathForBaseline} describes. The pull request
+ * details are left out because nothing here reads them and they are most of
+ * the response.
+ */
+export function workflowRunsPagePath(page: number): string {
+  const params = new URLSearchParams({
+    per_page: String(WORKFLOW_RUNS_PAGE_SIZE),
+    page: String(page),
+    exclude_pull_requests: "true",
+  });
+  return `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?${params}`;
+}
+
+/**
+ * Returns whether a run could serve as a coverage baseline: a push to the
+ * default branch that concluded successfully. The same runs
+ * {@link workflowRunsPathForBaseline} asks GitHub to select.
+ */
+export function isBaselineCandidateRun(
+  run: Pick<WorkflowRun, "event" | "head_branch" | "conclusion">,
+): boolean {
+  return run.event === "push" && run.head_branch === "main" &&
+    run.conclusion === "success";
+}
+
+/** The GitHub page of a workflow run: the URL the baseline file records. */
 export function workflowRunUrl(runId: number): string {
   return `${SERVER_URL}/${REPO}/actions/runs/${runId}`;
 }
@@ -773,7 +818,7 @@ export function parseCacheStateFiles(
 
     const record = parsed as Partial<CacheStateRecord> | null;
     if (
-      record === null || typeof record !== "object" ||
+      !isObjectOrArray(record) ||
       typeof record.family !== "string" ||
       typeof record.shard !== "string" ||
       typeof record.matchedKey !== "string" ||
@@ -1454,6 +1499,152 @@ export function buildCoverageDebtUnattributedComment(
   return out.join("\n");
 }
 
+/** Why the gate held a changed source group against no baseline. */
+export type CoverageNotGatedReason =
+  /** GitHub's listing of the workflow's runs left out the run asking for it. */
+  | "listing-not-current"
+  /** The checkout did not name the base-branch commit the run merged. */
+  | "no-base-commit"
+  /** No `main` run within reach measured that commit or an ancestor of it. */
+  | "no-baseline"
+  /** The base branch changed the group since the nearest measured ancestor. */
+  | "base-branch-moved";
+
+/** A source group the pull request changed and the gate did not hold. */
+export interface CoverageNotGatedGroup {
+  /** The source group, named as an `ACCEPT_COVERAGE_DEBT` line names it. */
+  group: string;
+
+  reason: CoverageNotGatedReason;
+
+  /** The commit the nearest baseline measured, when there is one. */
+  baselineSha?: string;
+}
+
+/**
+ * What a report of an ungated run says: which groups, and why. It says nothing
+ * of how the job ended, because a group with no baseline decides that only when
+ * the reason is the run listing: a regression in another group fails the same
+ * job.
+ */
+export interface CoverageNotGatedInput {
+  /** The groups the gate applied to and compared against nothing. */
+  groups: CoverageNotGatedGroup[];
+
+  /** The run that went ungated, and the base-branch commit it merged. */
+  measurement?: CoverageMeasurement;
+}
+
+/**
+ * Returns whether `groups` went ungated because the run listing was not
+ * current. That reason is the one that fails the job by itself, and the one
+ * whose remedy is reading the listing again.
+ */
+export function coverageListingNotCurrent(
+  groups: CoverageNotGatedGroup[],
+): boolean {
+  return groups.some((group) => group.reason === "listing-not-current");
+}
+
+/** The headline every surface reporting an ungated run opens with. */
+export const COVERAGE_NOT_GATED_HEADLINE =
+  "Test coverage was NOT gated on this run";
+
+/** How a sentence names the base-branch commit, read or not. */
+function baseCommitPhrase(baseSha: string | undefined): string {
+  return baseSha
+    ? `base-branch commit \`${baseSha.slice(0, 8)}\``
+    : "the base-branch commit";
+}
+
+/** One sentence saying why `group` was not gated. */
+function coverageNotGatedReasonText(
+  group: CoverageNotGatedGroup,
+  baseSha: string | undefined,
+): string {
+  switch (group.reason) {
+    case "listing-not-current":
+      return "GitHub's listing of this workflow's runs left out this run, so " +
+        "no `main` run it named could be trusted as a baseline.";
+    case "no-base-commit":
+      return "The base-branch commit this run merges into could not be read " +
+        "from the checkout.";
+    case "no-baseline":
+      return "No successful `main` run within reach measured " +
+        `${baseCommitPhrase(baseSha)} or an ancestor of it.`;
+    case "base-branch-moved": {
+      const ancestor = group.baselineSha
+        ? ` (\`${group.baselineSha.slice(0, 8)}\`)`
+        : "";
+      return "`main` changed this group between the nearest measured " +
+        `ancestor${ancestor} and ${baseCommitPhrase(baseSha)}.`;
+    }
+  }
+}
+
+/**
+ * The Markdown saying which changed source groups went ungated, why, and what
+ * gates them. The pull request comment and the job summary both render it, so
+ * the two say the same thing.
+ */
+export function coverageNotGatedNotice(input: CoverageNotGatedInput): string[] {
+  const baseSha = input.measurement?.baseSha;
+  const groups = input.groups.map((group) => `\`${group.group}\``).join(", ");
+  const listingNotCurrent = coverageListingNotCurrent(input.groups);
+  const out: string[] = [];
+
+  out.push(
+    listingNotCurrent
+      ? "The **Coverage Check** job failed because it could not find a " +
+        `baseline to hold ${groups} against. Nothing here says this pull ` +
+        "request regressed coverage, and nothing says it did not."
+      : `The **Coverage Check** job did not hold ${groups} against a ` +
+        "baseline, so it would not have caught a coverage regression there.",
+  );
+  out.push("");
+  out.push("| Source group | Why it was not gated |");
+  out.push("| --- | --- |");
+  for (const group of input.groups) {
+    out.push(
+      `| \`${group.group}\` | ${coverageNotGatedReasonText(group, baseSha)} |`,
+    );
+  }
+  out.push("");
+  out.push(
+    listingNotCurrent
+      ? "Re-run the **Coverage Check** job to ask GitHub for the listing again."
+      : "A later run of this pull request gates these groups, once a `main` " +
+        "run has measured the commit it merges. Re-running the **Coverage " +
+        "Check** job is enough when that `main` run has finished since; " +
+        "updating the branch gives the next run a newer commit to merge.",
+  );
+  if (input.measurement?.runUrl) {
+    out.push("");
+    out.push(`Measured by ${input.measurement.runUrl}.`);
+  }
+  return out;
+}
+
+/**
+ * Build the Markdown body of the coverage comment for a run that held one or
+ * more changed source groups against no baseline. Carries the same hidden
+ * marker as the other coverage comments, so the poster keeps updating the one
+ * comment, and stays open so the state is read without a click.
+ */
+export function buildCoverageNotGatedComment(
+  input: CoverageNotGatedInput,
+): string {
+  return [
+    COVERAGE_SUGGESTION_MARKER,
+    "<details open>",
+    coverageSummary(COVERAGE_NOT_GATED_HEADLINE),
+    "",
+    ...coverageNotGatedNotice(input),
+    "",
+    "</details>",
+  ].join("\n");
+}
+
 /**
  * Describe how a group's uncovered-line count moved between its `main` baseline
  * and this PR, for the "Change" column of the resolved comment's table.
@@ -1466,20 +1657,22 @@ function coverageChangeText(baseline: number, current: number): string {
 }
 
 /**
- * Build the Markdown body of the coverage comment once the gate passes again
- * after an earlier regression. Leads with the same hidden marker so the poster
- * keeps finding the one comment, keeps the disclosure collapsed (no `open`), and
- * replaces the regression body with a short summary of where the PR left
- * coverage.
+ * Build the Markdown body of the coverage comment once the gate passes, in
+ * place of what an earlier run left there: a regression, or a notice that the
+ * run went ungated. Leads with the same hidden marker so the poster keeps
+ * finding the one comment, keeps the disclosure collapsed (no `open`), and
+ * replaces the earlier body with a short summary of where the PR left coverage.
  *
  * `improvedLines` is the net reduction in the overall (workspace) uncovered-line
  * count versus its `main` baseline: when positive the summary reports the
- * reduction, otherwise it just notes the regression is resolved. `groups` lists
+ * reduction, otherwise it just notes the debt is within the ratchet. `groups` lists
  * the changed source groups the gate ratchets, each with its `main` baseline and
  * the count this PR produced, rendered as a before-and-after table. When
  * `overridden` is set the gate passed only because the debt was accepted with an
  * override or the reset marker, so the summary says the metric was overridden
- * rather than implying the new code is covered.
+ * rather than implying the new code is covered. An overridden run with no
+ * `groups` compared nothing, which is a reset whose run listing was not
+ * current, and the comment says that in place of the table.
  *
  * `files` names where those uncovered lines are, and is rendered only under an
  * override. This comment replaces an earlier regression body in place, and that
@@ -1498,7 +1691,7 @@ export function buildCoverageResolvedComment(
     ? "Code coverage debt accepted with an override."
     : improvedLines > 0
     ? `Code coverage debt reduced by ${uncoveredLineCount(improvedLines)}!`
-    : "Code coverage regression resolved.";
+    : "Code coverage debt is within the ratchet.";
 
   const out: string[] = [COVERAGE_SUGGESTION_MARKER];
   out.push("<details>");
@@ -1510,11 +1703,13 @@ export function buildCoverageResolvedComment(
         "PR's coverage debt was accepted with an override rather than covered " +
         "by new tests. Here is where it left each changed source group:"
       : improvedLines > 0
-      ? "The coverage gate in the **Coverage Check** job passes again. This " +
-        `PR now covers ${uncoveredLineCount(improvedLines)} that no test ` +
-        "reached on `main`. Here is where it left each changed source group:"
-      : "The coverage gate in the **Coverage Check** job passes again. Here " +
-        "is where this PR left each changed source group:",
+      ? "The coverage gate in the **Coverage Check** job passes. This PR " +
+        `now covers ${
+          uncoveredLineCount(improvedLines)
+        } that no test reached ` +
+        "on `main`. Here is where it left each changed source group:"
+      : "The coverage gate in the **Coverage Check** job passes. Here is " +
+        "where this PR left each changed source group:",
   );
   out.push("");
 
@@ -1530,8 +1725,11 @@ export function buildCoverageResolvedComment(
     }
   } else {
     out.push(
-      "Every changed source group is at or below its `main` baseline for " +
-        "uncovered lines.",
+      overridden
+        ? "This run compared no source group against a baseline, so there " +
+          "are no counts to show."
+        : "Every changed source group is at or below its `main` baseline " +
+          "for uncovered lines.",
     );
   }
 

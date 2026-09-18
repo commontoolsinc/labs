@@ -565,12 +565,10 @@ const mergeSchemaNode = (
   // every undeclared key) — the record twin of the prefixItems/items rule
   // below. So a key only one side names still merges with the other side's
   // rest claim rather than winning wholesale.
-  const leftAdditional = typeof left.additionalProperties === "object" &&
-      left.additionalProperties !== null
+  const leftAdditional = isObjectOrArray(left.additionalProperties)
     ? left.additionalProperties
     : undefined;
-  const rightAdditional = typeof right.additionalProperties === "object" &&
-      right.additionalProperties !== null
+  const rightAdditional = isObjectOrArray(right.additionalProperties)
     ? right.additionalProperties
     : undefined;
   const mergedProperties: Record<string, JSONSchema> = {};

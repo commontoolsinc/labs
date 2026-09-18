@@ -83,6 +83,7 @@ import {
   type StreamEventEntry,
   type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { Runtime, ServerRunInfo } from "../runtime.ts";
 import type {
   CommitError,
@@ -1203,7 +1204,7 @@ export class SpeculationOverlayDestination
     let visits = 0;
     const consider = (candidate: unknown): void => {
       visits += 1;
-      if (candidate === null || typeof candidate !== "object") return;
+      if (!isObjectOrArray(candidate)) return;
       const entry = candidate as StreamEventEntry;
       if (typeof entry.eventId !== "string" || !pending.has(entry.eventId)) {
         return;

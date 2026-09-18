@@ -3,6 +3,7 @@ import {
   SchemaGenerator,
 } from "@commonfabric/schema-generator";
 import { numberFromExpression } from "@commonfabric/schema-generator/numeric-expression";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import ts from "typescript";
 
 import {
@@ -247,7 +248,7 @@ function resolvePolicyOfMarkers(
       resolvePolicyOfMarkers(entry, context, diagnosticNode)
     );
   }
-  if (value === null || typeof value !== "object") return value;
+  if (!isObjectOrArray(value)) return value;
   const record = value as Record<string, unknown>;
   const marker = record.__ctPolicyIdentityOf;
   if (marker && typeof marker === "object" && !Array.isArray(marker)) {
@@ -437,7 +438,7 @@ function attachUiContractFromSchemaHints(
       ifc: { uiContract: hint },
     };
   }
-  if (typeof schema !== "object" || schema === null) {
+  if (!isObjectOrArray(schema)) {
     return schema;
   }
 
@@ -461,8 +462,7 @@ function getUiPropertySchema(
 ): Record<string, unknown> | boolean | undefined {
   if (
     !schema.properties ||
-    typeof schema.properties !== "object" ||
-    schema.properties === null
+    !isObjectOrArray(schema.properties)
   ) {
     return undefined;
   }
@@ -471,7 +471,7 @@ function getUiPropertySchema(
   if (typeof uiProperty === "boolean") {
     return uiProperty;
   }
-  return typeof uiProperty === "object" && uiProperty !== null
+  return isObjectOrArray(uiProperty)
     ? uiProperty as Record<string, unknown>
     : undefined;
 }

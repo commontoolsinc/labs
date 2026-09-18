@@ -7,6 +7,7 @@ import type { URI } from "@commonfabric/memory/interface";
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -68,8 +69,9 @@ const makeRuntime = (opts: {
       : {}),
   });
 
-// Seed a doc's stored CFC metadata directly via an ungated path-[] full-document
-// write (how the runtime persists it), so a later link to it carries the label.
+// Seed a doc's stored CFC metadata with a path-[] full-document write made
+// inside the runtime's privileged persistence scope, so a later link to it
+// carries the label. An ordinary write there is recorded as label forgery.
 const seedLabeledDoc = async (
   runtime: Runtime,
   id: string,
@@ -81,7 +83,7 @@ const seedLabeledDoc = async (
   const cell = runtime.getCell(signer.did(), id, undefined, seed);
   const docId = cell.getAsNormalizedFullLink().id as URI;
   writeSeedEnvelopeDoc(seed, signer.did());
-  seed.writeOrThrow({
+  seedStoredEnvelope(seed, {
     space: signer.did(),
     id: docId,
     type: "application/json",

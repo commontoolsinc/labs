@@ -32,8 +32,10 @@ magnitude more payload — which is what the projection exists to avoid.
 When the result is present, carry `TOPIC` into the next command. `NAME` is the
 member name the board allocated — read it here rather than from the Topic's own
 `shortName`, which is a derivation that may not have produced a value when the
-call returns. Use JSON encoding or schema-derived flags for multiline Markdown;
-do not interpolate unescaped content into JSON.
+call returns, and which publishes nothing at all while `SHOW_TOPIC_NUMBERS` in
+`packages/patterns/topics/topic.tsx` is off (`references/naming.md`). Use JSON
+encoding or schema-derived flags for multiline Markdown; do not interpolate
+unescaped content into JSON.
 
 Current Estuary calls have a known observation asymmetry. `addTopic` has
 reported an error after committing and has reported success without committing.

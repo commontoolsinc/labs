@@ -9,6 +9,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import { toCell } from "../src/back-to-cell.ts";
@@ -245,7 +246,7 @@ describe("CFC label view helpers", () => {
       );
       const sourceLink = parseLink(source.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: sourceLink.id!,
         type: "application/json",
@@ -306,7 +307,7 @@ describe("CFC label view helpers", () => {
       );
       const sourceLink = parseLink(source.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: sourceLink.id!,
         type: "application/json",
@@ -340,7 +341,7 @@ describe("CFC label view helpers", () => {
       );
       const targetLink = parseLink(target.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: targetLink.id!,
         type: "application/json",
@@ -423,7 +424,7 @@ describe("CFC label view helpers", () => {
       const targetLink = parseLink(target.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
       // The link and its label map are seeded in one whole-envelope write.
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: targetLink.id!,
         type: "application/json",
@@ -526,7 +527,7 @@ describe("CFC label view helpers", () => {
       );
       const sourceLink = parseLink(source.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: sourceLink.id!,
         type: "application/json",
@@ -560,7 +561,7 @@ describe("CFC label view helpers", () => {
       );
       const targetLink = parseLink(target.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: targetLink.id!,
         type: "application/json",
@@ -696,7 +697,7 @@ describe("CFC label view helpers", () => {
       );
       const sourceLink = parseLink(source.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: sourceLink.id!,
         type: "application/json",
@@ -724,7 +725,7 @@ describe("CFC label view helpers", () => {
       );
       const targetLink = parseLink(target.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: targetLink.id!,
         type: "application/json",
@@ -785,7 +786,7 @@ describe("CFC label view helpers", () => {
       );
       const sourceLink = parseLink(source.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: sourceLink.id!,
         type: "application/json",
@@ -817,7 +818,7 @@ describe("CFC label view helpers", () => {
       );
       const targetLink = parseLink(target.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: targetLink.id!,
         type: "application/json",
@@ -877,7 +878,7 @@ describe("CFC label view helpers", () => {
       );
       const sourceLink = parseLink(source.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: sourceLink.id!,
         type: "application/json",
@@ -962,7 +963,7 @@ describe("CFC label view helpers", () => {
       );
       const sourceLink = parseLink(source.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: sourceLink.id!,
         type: "application/json",
@@ -1000,7 +1001,7 @@ describe("CFC label view helpers", () => {
       );
       const targetLink = parseLink(target.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: targetLink.id!,
         type: "application/json",
@@ -1073,7 +1074,7 @@ describe("CFC label view helpers", () => {
         ] as const
       ) {
         writeSeedEnvelopeDoc(tx, signer.did());
-        tx.writeOrThrow({
+        seedStoredEnvelope(tx, {
           space: signer.did(),
           id: link.id!,
           type: "application/json",
@@ -1102,7 +1103,7 @@ describe("CFC label view helpers", () => {
       );
       const listLink = parseLink(list.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: listLink.id!,
         type: "application/json",
@@ -1179,7 +1180,7 @@ describe("CFC label view helpers", () => {
       );
       const sourceLink = parseLink(source.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: sourceLink.id!,
         type: "application/json",
@@ -1207,7 +1208,7 @@ describe("CFC label view helpers", () => {
       );
       const listLink = parseLink(list.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: listLink.id!,
         type: "application/json",
@@ -1301,7 +1302,7 @@ describe("CFC label view helpers", () => {
       ) {
         const link = parseLink(cell.getAsLink());
         writeSeedEnvelopeDoc(seedTx, signer.did());
-        seedTx.writeOrThrow({
+        seedStoredEnvelope(seedTx, {
           space: signer.did(),
           id: link.id!,
           type: "application/json",
@@ -1418,7 +1419,7 @@ describe("CFC label view helpers", () => {
       );
       const sourceLink = parseLink(source.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         id: sourceLink.id!,
         type: "application/json",
@@ -1635,7 +1636,7 @@ describe("CFC label view helpers", () => {
       const writeDoc = (integrityAtom: string) => {
         const tx = runtime.edit();
         writeSeedEnvelopeDoc(tx, signer.did());
-        tx.writeOrThrow({
+        seedStoredEnvelope(tx, {
           space: signer.did(),
           id,
           type: "application/json",

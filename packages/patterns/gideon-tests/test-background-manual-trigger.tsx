@@ -23,6 +23,9 @@
  *    - CLI: curl -X POST localhost:8000/api/integrations/bg -d '{"pieceId":"...","space":"did:key:...","integration":"..."}'
  *    - UI: <cf-updater> component (has CORS issue locally)
  * 2. Space DID derivation: Identity.fromPassphrase("common user").derive(spaceName).did()
+ *    This supports the legacy space names used during development and nothing
+ *    else, and is removed once those development-only spaces have been
+ *    migrated (docs/plans/random-space-identities.md).
  * 3. System space: did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88 (common user + toolshed-system)
  * 4. Service requires ACL authorization to access system space
  * 5. Start: cd packages/background-piece-service && IDENTITY=<keyfile> API_URL=localhost:8000 deno task start

@@ -376,6 +376,52 @@ describe("build", () => {
       expect([...read.durations.keys()]).toEqual([KEY]);
     });
 
+    it("asks the alias file nothing about a lane measuring itself", () => {
+      // What a record is, is read from the identity the lane wrote, so a
+      // line in the alias file settles neither half: it cannot score a
+      // lane's overhead as the test it renames to, and it cannot take
+      // that overhead away from the cost model either.
+      const read = readReport(
+        stored(CI_NAME, context(), [
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+            durationMs: 92_000,
+          }),
+          record({
+            test: {
+              k: "gate",
+              s: "ci",
+              n: "ci-lane ran batch workspace-unit",
+            },
+            durationMs: 40_000,
+          }),
+          record({
+            test: {
+              k: "gate",
+              s: "ci",
+              n: "ci-lane units batch workspace-unit",
+            },
+            durationMs: 17,
+          }),
+        ]),
+        new AliasResolver([{
+          date: "2026-08-21",
+          from: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+          to: { k: "unit", s: "memory", n: "space > writes" },
+        }]),
+      );
+      expect(read.observations).toEqual([]);
+      expect([...read.surfaces.keys()]).toEqual([]);
+      expect([...read.durations.keys()]).toEqual([]);
+      expect(read.lanes).toEqual([{
+        day: "2026-08-20",
+        suite: "workspace-unit",
+        ran: 40,
+        spent: 92,
+        units: 17,
+      }]);
+    });
+
     it("keeps a lane's measurements of itself for the cost model", () => {
       // Left out of everything scored, and not discarded either: what
       // the packer charges a lane beyond its tests is fitted from them.
@@ -396,7 +442,7 @@ describe("build", () => {
             test: {
               k: "gate",
               s: "ci",
-              n: "ci-lane planned batch workspace-unit",
+              n: "ci-lane ran batch workspace-unit",
             },
             durationMs: 40_000,
           }),
@@ -416,7 +462,7 @@ describe("build", () => {
         {
           day: "2026-08-20",
           suite: "workspace-unit",
-          planned: 40,
+          ran: 40,
           spent: 92,
           units: 17,
         },
@@ -1033,7 +1079,7 @@ describe("build", () => {
         {
           day: "2026-08-20",
           suite: "runner-unit",
-          planned: 10,
+          ran: 10,
           spent: 30,
           units: 4,
         },
@@ -1054,15 +1100,15 @@ describe("build", () => {
       >;
       older.lanes = [
         { day: "2026-08-20", capability: "fuse", seconds: "a while" },
-        { day: "2026-08-20", suite: "runner-unit", planned: 10, units: 4 },
+        { day: "2026-08-20", suite: "runner-unit", ran: 10, units: 4 },
         {
           day: "2026-08-20",
           suite: "runner-unit",
-          planned: NaN,
+          ran: NaN,
           spent: 30,
           units: 4,
         },
-        { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
+        { day: "2026-08-20", suite: "runner-unit", ran: 10, spent: 30 },
         { day: 7, capability: "fuse", seconds: 1 },
         "fuse took a while",
         null,
@@ -1663,7 +1709,7 @@ describe("a report holding a whole day", () => {
 });
 
 describe("the days a fold keeps a lane's measurements over", () => {
-  /** One lane's artifact: what a batch took, beside what it was charged. */
+  /** One lane's artifact: what a batch took, beside what its tests did. */
   function laneRanOn(day: string, spentSeconds: number) {
     return stored(
       `labs/test-records/submissions/ci/v1/${
@@ -1676,7 +1722,7 @@ describe("the days a fold keeps a lane's measurements over", () => {
           durationMs: spentSeconds * 1000,
         }),
         record({
-          test: { k: "gate", s: "ci", n: "ci-lane planned batch runner-unit" },
+          test: { k: "gate", s: "ci", n: "ci-lane ran batch runner-unit" },
           durationMs: 10_000,
         }),
         record({
@@ -1702,7 +1748,7 @@ describe("the days a fold keeps a lane's measurements over", () => {
       {
         day: "2026-08-20",
         suite: "runner-unit",
-        planned: 10,
+        ran: 10,
         spent: 30,
         units: 4,
       },
@@ -1761,7 +1807,7 @@ describe("the days a fold keeps a lane's measurements over", () => {
       {
         day: "2026-08-20",
         suite: "runner-unit",
-        planned: 10,
+        ran: 10,
         spent: 30,
         units: 4,
       },

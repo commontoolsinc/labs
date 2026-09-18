@@ -1,7 +1,11 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  isPlainObject,
+  unsafeObjectKeyIn,
+} from "@commonfabric/utils/types";
 
 import {
   type ClientCommit,
@@ -2363,7 +2367,7 @@ const requireSessionOpenAuthMetadata = (
       "memory server did not provide session.open authentication metadata",
     );
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isObjectNotArray(value)) {
     throw protocolError(
       "memory server sent malformed session.open authentication metadata",
     );
@@ -2388,11 +2392,7 @@ const requireSessionOpenAuthMetadata = (
       "memory server sent malformed session.open authentication metadata",
     );
   }
-  if (
-    typeof sessionOpen.challenge !== "object" ||
-    sessionOpen.challenge === null ||
-    Array.isArray(sessionOpen.challenge)
-  ) {
+  if (!isObjectNotArray(sessionOpen.challenge)) {
     throw protocolError(
       "memory server sent malformed session.open authentication metadata",
     );

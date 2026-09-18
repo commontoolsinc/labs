@@ -67,7 +67,7 @@ import {
   snapshotLoggerErrorWarnCounts,
 } from "./console-capture.ts";
 import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
-import { buildActionEvent } from "./trusted-test-event.ts";
+import { buildActionEvent } from "./trusted-action-event.ts";
 
 export interface WorkerRequest {
   id: number;
@@ -360,8 +360,7 @@ const handlers: Record<
       memoryHost: new URL(args.apiUrl as string),
     });
     // `runtimePresets.patternTest` carries the shared first-party posture
-    // (CT-1814), including the enforce-explicit CFC pin this site previously
-    // restated — and the same env-honored experimental flags as the
+    // (CT-1814) and the same env-honored experimental flags as the
     // single-user runner (this worker previously ignored EXPERIMENTAL_*, so
     // the two harness modes could run under different flags).
     runtime = new Runtime(runtimePresets.patternTest({

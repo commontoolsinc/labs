@@ -44,9 +44,8 @@ export type {
 /**
  * A handle's name is the whole of what a model is told the token stands for,
  * so it is held to a shape that cannot smuggle structure: word characters and
- * hyphens. Shared with the connector grants the console launcher resolves,
- * whose names are read from a loom instance's records rather than authored by
- * an operator and are held to the same rule for the same reason.
+ * hyphens. Connector connection identities have their own name grammar in
+ * `well-known-grants.ts`.
  */
 export const HANDLE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
@@ -374,13 +373,14 @@ export const mintInputCellHandles = async (
 /**
  * The context message announcing `inputCells` to the model: one line per
  * input cell, pairing the token with the operator's name for it. An empty
- * list yields no message at all rather than an empty header.
+ * list explicitly records that this run has no input-cell attachments; conversation
+ * history may still identify a target.
  */
 export const inputCellsContextMessage = (
   inputCells: readonly HarnessInputCell[],
-): string | undefined => {
+): string => {
   if (inputCells.length === 0) {
-    return undefined;
+    return "No input cells are attached for this run. A piece unambiguously selected in the conversation can still be the target; granted registry or connector references are not attachments.";
   }
   return [
     "Input cells for this run, named by the operator:",

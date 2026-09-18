@@ -1,6 +1,7 @@
 // Types used by the `common-iframe-sandbox` IPC.
 
 import type { FabricValue } from "@commonfabric/data-model";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 // Diagram of the messages between the Host environment, the intermediary outer
 // frame, and the guest in the inner frame.
@@ -113,7 +114,7 @@ export function isIPCGuestMessage(
   message: unknown,
 ): message is IPCGuestMessage {
   if (
-    typeof message !== "object" || message === null || !("type" in message)
+    !isObjectOrArray(message) || !("type" in message)
   ) {
     return false;
   }
@@ -139,8 +140,7 @@ export type GuestError = {
 };
 
 export function isGuestError(e: object): e is GuestError {
-  return typeof e === "object" &&
-    e !== null &&
+  return isObjectOrArray(e) &&
     "description" in e && typeof e.description === "string" &&
     "source" in e && typeof e.source === "string" &&
     "lineno" in e && typeof e.lineno === "number" &&
@@ -282,7 +282,7 @@ export type BridgeHostMessage = BridgeResponse | BridgeEvent | BridgeFlushAck;
 const hasBridgeHeader = (
   message: unknown,
 ): message is Record<string, unknown> =>
-  typeof message === "object" && message !== null &&
+  isObjectOrArray(message) &&
   (message as Record<string, unknown>).protocol === BRIDGE_PROTOCOL &&
   (message as Record<string, unknown>).version === BRIDGE_VERSION;
 
@@ -347,7 +347,7 @@ export function isBridgeHostMessage(
     typeof message.ok !== "boolean"
   ) return false;
   if (message.ok) return true;
-  return typeof message.error === "object" && message.error !== null &&
+  return isObjectOrArray(message.error) &&
     typeof (message.error as BridgeError).code === "string" &&
     typeof (message.error as BridgeError).message === "string" &&
     (!("resource" in message.error) ||
@@ -357,7 +357,7 @@ export function isBridgeHostMessage(
 export type GuestAlarm = { type: "error"; data: GuestError };
 
 export function isGuestAlarm(message: unknown): message is GuestAlarm {
-  return typeof message === "object" && message !== null &&
+  return isObjectOrArray(message) &&
     (message as { type?: unknown }).type === "error" &&
     "data" in message && isGuestError(message.data as object);
 }
@@ -372,7 +372,7 @@ export function isGuestAlarm(message: unknown): message is GuestAlarm {
 export type GuestFlush = { type: "flush"; nonce: string };
 
 export function isGuestFlush(message: unknown): message is GuestFlush {
-  return typeof message === "object" && message !== null &&
+  return isObjectOrArray(message) &&
     (message as { type?: unknown }).type === "flush" &&
     typeof (message as { nonce?: unknown }).nonce === "string";
 }

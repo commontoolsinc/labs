@@ -1,4 +1,4 @@
-import { isPlainObject } from "@commonfabric/utils/types";
+import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { codecOf } from "@/codec-common/codecOf.ts";
@@ -11,7 +11,7 @@ import {
   type FabricValue,
 } from "@/interface.ts";
 import { isFabricSpecialObject } from "@/types";
-import { toCompactDebugString } from "@/value-debug.ts";
+import { toShortQuotedDebugString } from "@/value-debug";
 import { cachedHashStringOf, hashStringOf } from "@/value-hash.ts";
 
 /**
@@ -34,10 +34,7 @@ import { cachedHashStringOf, hashStringOf } from "@/value-hash.ts";
  */
 export function valueEqual(a: FabricValue, b: FabricValue): boolean {
   if (Object.is(a, b)) return true;
-  if (
-    a === null || b === null ||
-    typeof a !== "object" || typeof b !== "object"
-  ) {
+  if (!isObjectOrArray(a) || !isObjectOrArray(b)) {
     if (typeof a === "function" || typeof b === "function") {
       throw new Error("Cannot compare a function value.");
     }
@@ -188,9 +185,7 @@ function objectSubtypeOf(
     return "plain";
   } else {
     throw new Error(
-      `Cannot compare value ${
-        toCompactDebugString(value, { backtickQuote: true })
-      }`,
+      `Cannot compare value ${toShortQuotedDebugString(value)}`,
     );
   }
 }

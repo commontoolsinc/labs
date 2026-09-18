@@ -34,13 +34,19 @@
 import { isDID } from "@commonfabric/identity/did";
 import { parseArgs } from "@std/cli/parse-args";
 import { join } from "@std/path";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
+import { DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE } from "../src/config.ts";
 import type { HarnessConnectorGrantSpec } from "../src/contracts/well-known-grants.ts";
 import {
   DEFAULT_DOCKER_BINARY,
   registeredCfcSidecarHostDirs,
 } from "../src/sandbox/docker-runsc.ts";
 import { readDockerRuntimes } from "../src/sandbox/docker-runtimes.ts";
+import {
+  connectorGrantLabel,
+  connectorGrantName,
+} from "../src/well-known-grants.ts";
 import { resolveConnectorGrants } from "./connector-grants.ts";
 import type {
   ConsoleHealthFactWithState,
@@ -229,7 +235,7 @@ const parseJsonRecord = (
       }`,
     );
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+  if (!isObjectNotArray(parsed)) {
     throw new Error(`\`${path}\` does not hold a JSON object`);
   }
   return parsed as Record<string, unknown>;
@@ -261,9 +267,7 @@ const objectField = (
   key: string,
 ): Record<string, unknown> => {
   const value = record[key];
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  return isObjectNotArray(value) ? value as Record<string, unknown> : {};
 };
 
 /**
@@ -425,7 +429,7 @@ export const resolveConsoleLaunchPlan = (
     });
     for (const grant of resolvedConnectors.grants) {
       connectorResolved.push({
-        name: `grant ${grant.name}`,
+        name: `grant ${connectorGrantLabel(grant)}`,
         value: grant.ref,
         source: `\`${instance.handlesJsonPath}\`, classed by ` +
           `\`${grant.source.piece}\` in \`${instance.piecesJsonPath}\``,
@@ -433,23 +437,23 @@ export const resolveConsoleLaunchPlan = (
       connectorHealth.push({
         id: `connector.granted.${grant.name}`,
         group: "connectors",
-        label: grant.source.connection,
+        label: connectorGrantName(grant.source),
         state: "ok",
-        value: `granted as ${grant.name}`,
+        value: `granted: ${connectorGrantLabel(grant)}`,
         source: `${source} (${grant.source.piece})`,
         detail,
       });
     }
     for (const [index, handle] of resolvedConnectors.unnamed.entries()) {
       connectorResolved.push({
-        name: `grant ${handle.connection}`,
+        name: `grant ${connectorGrantName(handle)}`,
         value: `(none: ${handle.reason})`,
         source: `\`${instance.handlesJsonPath}\``,
       });
       connectorHealth.push({
         id: `connector.refused.${index}`,
         group: "connectors",
-        label: handle.connection,
+        label: connectorGrantName(handle),
         state: handle.state,
         value: "not granted",
         source: `${source} (${handle.piece})`,
@@ -523,7 +527,8 @@ export const resolveConsoleLaunchPlan = (
       : `.cf-harness-console-${instance.id}-${port}`);
   const posture = options.posture ?? "max-enforcement";
   const flowLabels = options.flowLabels ?? "persist";
-  const enforcementMode = options.enforcementMode ?? "enforce-explicit";
+  const enforcementMode = options.enforcementMode ??
+    DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE;
 
   const deploymentDefault = "labs deployment default";
   const registrationSourceName =
