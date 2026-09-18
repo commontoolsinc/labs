@@ -14,6 +14,7 @@ import {
 import ProfileHome, {
   type BackwardsCompatibleProfile,
   type ProfileHomeOutput,
+  type SetProfileNameEvent,
 } from "./profile-home.tsx";
 
 // Trusted UI surfaces / actions. The create surface authorizes appending a new
@@ -74,7 +75,16 @@ export type CreateProfileEvent = {
 // user AND per creation event, stable across the cross-space-commit retry. The
 // display name flows ONLY to `initialName` (editable later, independent of the
 // space identity). Existing profiles keep their already-baked concrete DID link.
-export type SeedProfileNameEvent = { name?: string };
+export type SeedProfileNameEvent = { name?: string; index?: number };
+
+// What the seed step needs of each profile in the list: the stored name (to
+// write only where none is stored yet) and the stream it writes through.
+// `setName` stays optional here so a stored profile of a vintage without it
+// can never keep this handler from running for the profiles created after.
+type SeedProfileTarget = {
+  name: string;
+  setName?: Stream<SetProfileNameEvent>;
+};
 
 // Stores the creation name in the new profile's `name` cell, through
 // `setName` — the cell's owner-protected writer — so every `#profile` reader
@@ -89,35 +99,39 @@ export type SeedProfileNameEvent = { name?: string };
 // runner runs the frame's reactives as a result pattern), so inside the body
 // its streams do not exist yet and a send there reaches nothing. This event
 // is queued behind the create in the same runtime and runs once the create
-// has committed, when the profile — its `setName` stream and its lifts — is
-// live. The profile is found by what the create established: the newest
-// entry whose display name (`initialNameApplied`, `initialName` until a name
-// is stored) is this name and whose stored `name` is still empty. A profile
-// already named — a re-delivery of this event, or another device's create
-// under the same name that seeded first — is left alone, and a profile of
-// another name is never touched.
+// has committed. The profile is addressed by position: the create handler
+// reads the list's length before its push and sends it here as `index`.
+// Position rather than the profile's display name, because the profile's
+// lifts may not have run in this runtime by the time this step does (CI's
+// slower lanes reached it first and a name match failed silently), and the
+// argument is not on the result (re-exporting it changes the stored-profile
+// schema every embedder carries, which the pattern-update gate refuses). The
+// read of the list in the create handler keeps the append in the conflict
+// set, so another device's create landing first conflicts and re-runs the
+// create — re-deriving the index — instead of merging under it.
+//
+// The list is bound as a VALUE, not a link: the runner resolves a handler's
+// argument against this schema before the body runs, and a profile whose
+// docs the replica has not loaded yet reads as undefined — the runner then
+// withdraws the dispatch and runs it again once the loads land (scheduler
+// events.ts, the cold-argument arm). Reading the new profile in the body
+// instead — through its link, right after the cross-space commit — raced
+// that load: the send found no stream and reached nothing. Only a profile
+// whose stored `name` is still empty is written: a re-delivery of this
+// event, or the same profile seeded elsewhere, is left alone.
 export const seedProfileName = handler<
   SeedProfileNameEvent,
   {
-    profiles: Writable<BackwardsCompatibleProfile[]>;
+    profiles: SeedProfileTarget[];
   }
 >((event, { profiles }) => {
   const name = (event.name ?? "").trim();
-  if (!name) return;
-  const links = ((profiles as any).asSchema(profileLinkListSchema()).get() ??
-    []) as Cell<BackwardsCompatibleProfile>[];
-  for (let index = links.length - 1; index >= 0; index--) {
-    const profile = links[index];
-    const stored = (profile as any).key("name").asSchema({ type: "string" })
-      .get() as string | undefined;
-    const shown = (profile as any).key("initialNameApplied").asSchema({
-      type: "string",
-    }).get() as string | undefined;
-    if ((stored ?? "") === "" && shown === name) {
-      (profile as any).key("setName").send({ name });
-      return;
-    }
-  }
+  const index = event.index;
+  if (!name || typeof index !== "number") return;
+  const target = profiles[index];
+  if (target === undefined || target.setName === undefined) return;
+  if ((target.name ?? "") !== "") return;
+  target.setName.send({ name });
 });
 
 export const submitProfileCreation = handler<
@@ -141,6 +155,12 @@ export const submitProfileCreation = handler<
   const name = (event.name ?? event.detail?.message ?? event.target?.value ??
     "").trim();
   if (name) {
+    // Where the push lands; the seed step below addresses the profile by it.
+    // Read as link cells (see `profileLinkListSchema`): a deep read collapses
+    // to undefined when any entry lives in a space this runtime has not
+    // loaded, which every freshly created profile's does.
+    const index = ((profiles as any).asSchema(profileLinkListSchema()).get() ??
+      []).length as number;
     profiles.push(
       ProfileHome.inSpace()({
         initialName: name,
@@ -152,7 +172,7 @@ export const submitProfileCreation = handler<
     );
     // Queued behind this create; stores the name once the profile is live
     // (see `seedProfileName`).
-    seedName.send({ name });
+    seedName.send({ name, index });
   }
 });
 
