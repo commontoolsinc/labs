@@ -188,8 +188,8 @@ record on their own. Three consequences worth knowing while writing one:
   content-derived wording over positional counters (`#${i}`) or
   interpolated identifiers, which mint a new identity every time they
   shift; renames split history unless bridged in
-  `tasks/test-identity-aliases/`, in the file named after the test file
-  (`docs/development/test-records.md`).
+  `tasks/test-identity-aliases/`, in the file named after the test file;
+  `docs/development/test-records.md` states the naming rule.
 - The name has to be unique within its scope — the whole describe chain
   plus the `it()` description, or the bare `Deno.test` name, across every
   test file of the package. Two tests under one name are one identity, so

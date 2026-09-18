@@ -331,6 +331,20 @@ export const WORKING_TREE_GATES: readonly Gate[] = [
 ];
 
 /**
+ * Entries of a gate's `reachedBy` that name a path the tree never holds,
+ * because the path's presence is what the gate fails on. A change that adds
+ * such a path has to reach the gate, and nothing else about the entry can
+ * be checked against the tree.
+ */
+export const REACHED_BY_ABSENT_PATHS: ReadonlySet<string> = new Set([
+  // TODO(danfuzz): Remove this entry, and its line in
+  // `check-test-aliases`'s `reachedBy`, once the branches cut while the
+  // aliases were this single file can all be expected to have merged
+  // `main` — a couple of weeks after 2026-09-18.
+  "tasks/test-identity-aliases.jsonl",
+]);
+
+/**
  * The gates that hold a file to being appended to. Each reads the file as
  * it stood at the merge base with the revision the change is measured
  * against, which takes a checkout carrying history.
@@ -358,11 +372,14 @@ export const HISTORY_GATES: readonly Gate[] = [
     args: ({ baseRef }) => [baseRef],
     // The alias files, and the module holding the line format the task
     // parses and the graph rules it applies; the task itself is a
-    // `git show` wrapper around those.
+    // `git show` wrapper around those. The `.jsonl` file beside the
+    // directory is one the gate fails on sight, so a change adding it has
+    // to reach the gate; `REACHED_BY_ABSENT_PATHS` records it as absent.
     reachedBy: [
       "packages/test-support/",
       "tasks/check-test-aliases.ts",
       "tasks/test-identity-aliases/",
+      "tasks/test-identity-aliases.jsonl",
     ],
   },
 ];
