@@ -2,7 +2,7 @@
 status: historical
 created: 2026-09-09
 archived: 2026-09-09
-reason: "Measurement record: the topics benchmarks with server execution ON against OFF at f7f942ad42 and at 3cdf2ab489 (#7193), the serving loop's own account of where the ON time goes, four single-mechanism ablations, and the improvements they point at."
+reason: "Measurement record: the topics benchmarks with server execution ON against OFF at f7f942ad42 and at 3cdf2ab489 (#7193), the serving loop's own account of where the ON time goes, four single-mechanism ablations, and the improvements they point at. Of those, §5's second — the incremental `session.watch.add` — shipped as #7251; the first is open, and a 2026-09-18 re-measurement found it still the dominant ON term."
 ---
 
 # Server execution ON against OFF on the topics benchmarks (2026-09-09)
@@ -358,6 +358,15 @@ not the fix.
    size on every one of its adds. Maintaining the tracked set by delta
    removes the second factor of the product in 1 whatever becomes of the
    first, and it reaches every session, browsers included.
+
+   **Shipped 2026-09-11 as
+   [#7251](https://github.com/commonfabric/labs/pull/7251)** ("perf(memory):
+   stage incremental watch maintenance"), which maintains the tracked set by
+   delta and stages the entity map and graph state without enumerating them.
+   A re-measurement on 2026-09-18 was taken with that change already in the
+   tree, so the per-add cost it reports is the cost that remains after this
+   item. Annotated here rather than left to mislead; the recommendation above
+   is the 2026-09-09 text, unedited.
 3. **Let the event drain wait for frame delivery before it defers**
    (`space-server.ts`, the `event-view-lag` arm of `#drainStreamEvents`).
    The ablation form — `server.idle()`, `inputSynced()`, one macrotask,
