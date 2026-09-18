@@ -393,14 +393,26 @@ pre-cleanup schemas.
   Non-generic aliases retain their resolved declaration node so payload
   defaults remain available to schema generation.
 - Capability re-wrap fidelity: when a **synthetic** node narrows a capability
-  brand (the transformer re-wraps `Cell<T>` as `ReadonlyCell<T>`) and the
-  node's own inner degrades to `any`, the resolved type's inner supplies the
-  `$ref`/`$defs` fidelity — only for capability kinds
+  brand (the transformer re-wraps `Cell<T>` as `ReadonlyCell<T>`), the node's
+  own inner is read first, so that structure only the node carries — a shrunk
+  shape, an `| undefined` member — reaches the schema. The resolved type's
+  inner supplies the value schema instead in two cases. One is a bare named
+  reference that degrades to `any`. The other is an inner holding a member
+  that node-based analysis cannot read from a synthetic position, of which the
+  printer produces two: `import("./mod.ts").T` for a name the emitting module
+  does not import, and the `T & { readonly [DEFAULT_MARKER]: V }` arm of an
+  expanded `Default`. Node-based analysis formats such a member as
+  accept-anything, and a union with one such member accepts anything as a
+  whole, which would leave the cell with no value schema at all. Both cases
+  apply only for capability kinds
   (`CELL_CAPABILITY_KIND_MAP`, `common-fabric-formatter.ts`: the five
   cell-capability kinds true; `Stream`/`SqliteDb`/`Reactive` false; exhaustive
-  over `CellWrapperKind`). Non-synthetic disagreeing nodes defer to the
-  semantic kind (tested: capability-wrapper-types "uses
-  semantic wrapper kind…" / "allows registered synthetic wrapper nodes…").
+  over `CellWrapperKind`), and only where a resolved wrapper type exists: a
+  synthetic wrapper with no resolved type keeps the node-driven result.
+  Non-synthetic disagreeing nodes defer to the semantic kind (tested:
+  capability-wrapper-types "uses semantic wrapper kind…" / "allows registered
+  synthetic wrapper nodes…" / "a synthetic node narrowing a resolved
+  wrapper").
 - Wrapper unions: a union whose non-null/undefined members are **all** wrappers
   formats member-wise, preserving `{ type: "undefined" }` / `{ type: "null" }`,
   skipping conditional/type-parameter members, deduping identical member

@@ -445,13 +445,14 @@ export class CommonFabricFormatter implements TypeFormatter {
       innerType = context.typeChecker.getAnyType();
     }
 
-    // Only adopt the resolved type's inner when the node's inner is a bare named
-    // reference (a `TypeReferenceNode`) that degrades to `any` — the case where
-    // node-driven formatting can recover NOTHING and would emit `{}`, dropping
-    // the inner `$ref`/`$defs`. Structured inner nodes (unions, literals, arrays)
-    // carry recoverable shape even when the checker resolves them to `any` from a
-    // synthetic position, so the node-driven result must win there (e.g. a
-    // `string | undefined` inner whose `| undefined` lives only on the node).
+    // Ahead of formatting, adopt the resolved type's inner only when the node's
+    // inner is a bare named reference (a `TypeReferenceNode`) that degrades to
+    // `any` — the case where node-driven formatting can recover NOTHING and
+    // would emit `{}`, dropping the inner `$ref`/`$defs`. Structured inner nodes
+    // (unions, literals, arrays) carry recoverable shape even when the checker
+    // resolves them to `any` from a synthetic position, so the node-driven
+    // result is tried first there (e.g. a `string | undefined` inner whose
+    // `| undefined` lives only on the node).
     if (
       this.#isUnusableInnerType(innerType) && fallbackInnerTypeRef &&
       ts.isTypeReferenceNode(innerTypeNode)
@@ -476,11 +477,34 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    const innerSchema = this.#schemaGenerator.formatChildType(
+    const uninterpreted: ts.TypeNode[] = [];
+    let innerSchema = this.#schemaGenerator.formatChildType(
       innerType,
-      childContext,
+      { ...childContext, uninterpretedTypeNodes: uninterpreted },
       innerTypeNode,
     );
+
+    // A structured inner node wins over the resolved type only while it can be
+    // read. The printer emits forms that node-based analysis cannot interpret
+    // from a synthetic position — `import("./mod.ts").T` for a name the
+    // emitting module does not import, and the `T & { [DEFAULT_MARKER]: V }`
+    // arm of an expanded `Default` — and one such member turns a whole union
+    // into accept-anything. The resolved wrapper's inner needs no guessing, so
+    // it supplies the value schema instead, at the cost of any narrowing the
+    // node carried: the schema is then that of the whole stored value.
+    if (uninterpreted.length > 0) {
+      const resolvedInner = fallbackInnerTypeRef?.typeArguments?.[0];
+      if (resolvedInner && !this.#isUnusableInnerType(resolvedInner)) {
+        innerType = resolvedInner;
+        innerSchema = this.#schemaGenerator.formatChildType(
+          resolvedInner,
+          childContext,
+          undefined,
+        );
+      } else {
+        context.uninterpretedTypeNodes?.push(...uninterpreted);
+      }
+    }
 
     if (wrapperKind === "Stream") {
       if (typeof innerSchema === "boolean") {
