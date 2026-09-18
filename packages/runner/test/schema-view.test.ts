@@ -1164,9 +1164,64 @@ describe("schema-view", () => {
           const value = lazy.get() as Record<string, unknown>;
           expect("id" in value).toBe(true);
           expect(value.id).toBe("a");
+          expect(Object.keys(value)).toEqual(["id"]);
+          expect("driver" in value).toBe(false);
         } finally {
           await eager.tx.commit();
           await lazy.tx.commit();
+        }
+      });
+
+      describe("reached through", () => {
+        // The plain shape is one path; each of these reaches the same
+        // refusal by another — the union arm of the narrowing, a `$ref`, the
+        // default a value takes, a child link — so a regression in one is not
+        // caught by pinning the others.
+
+        const rows: Array<[string, JSONSchema, string[]]> = [
+          ["a `type` list", { ...closed, type: ["object", "null"] }, []],
+          ["a schema with no `type`", { additionalProperties: false }, []],
+          [
+            "a `$ref`",
+            { $defs: { Closed: closed }, $ref: "#/$defs/Closed" },
+            [],
+          ],
+          ["a `default`", { ...closed, default: { id: "d" } }, []],
+          [
+            "a named property",
+            { type: "object", properties: { row: closed } },
+            ["row"],
+          ],
+        ];
+
+        for (const [route, schema, path] of rows) {
+          it(`leaves out every property behind ${route}, as an eager read does`, async () => {
+            const value = path.length === 0
+              ? { id: "a", driver: "x" }
+              : { row: { id: "a", driver: "x" } };
+            const read = await seeded(
+              `turned-down-via-${route}`,
+              value,
+              schema,
+            );
+            const dig = (root: unknown): Record<string, unknown> =>
+              path.reduce(
+                (cursor, part) => (cursor as Record<string, unknown>)[part],
+                root,
+              ) as Record<string, unknown>;
+            const eager = read(false);
+            const lazy = read(true);
+            try {
+              expect(Object.keys(dig(eager.get()))).toEqual([]);
+              const row = dig(lazy.get());
+              expect(Object.keys(row)).toEqual([]);
+              expect("driver" in row).toBe(false);
+              expect(row.driver).toBe(undefined);
+            } finally {
+              await eager.tx.commit();
+              await lazy.tx.commit();
+            }
+          });
         }
       });
 
@@ -1191,27 +1246,100 @@ describe("schema-view", () => {
           await lazy.tx.commit();
         }
       });
+
+      it("hands over every property where the schema refuses none", async () => {
+        // Naming no properties turns nothing down; refusing the unnamed ones is
+        // what does.
+        const read = await seeded(
+          "names-none-refuses-none",
+          { id: "a", driver: "x" },
+          { type: "object" } as const,
+        );
+        const eager = read(false);
+        const lazy = read(true);
+        try {
+          expect(Object.keys(eager.get() as object)).toEqual(["id", "driver"]);
+          const value = lazy.get() as Record<string, unknown>;
+          expect(Object.keys(value)).toEqual(["id", "driver"]);
+          expect("driver" in value).toBe(true);
+          expect(value.driver).toBe("x");
+        } finally {
+          await eager.tx.commit();
+          await lazy.tx.commit();
+        }
+      });
     });
 
-    it("hands over every property under a schema that names none and refuses none", async () => {
-      // Naming no properties turns nothing down; refusing the unnamed ones is
-      // what does.
-      const read = await seeded(
-        "names-none-refuses-none",
-        { id: "a", driver: "x" },
-        { type: "object" } as const,
-      );
-      const eager = read(false);
-      const lazy = read(true);
-      try {
-        expect(Object.keys(eager.get() as object)).toEqual(["id", "driver"]);
-        const value = lazy.get() as Record<string, unknown>;
-        expect(Object.keys(value)).toEqual(["id", "driver"]);
-        expect("driver" in value).toBe(true);
-        expect(value.driver).toBe("x");
-      } finally {
-        await eager.tx.commit();
-        await lazy.tx.commit();
+    describe("beside an `allOf`, under a schema that refuses what it does not name", () => {
+      // An eager read merges the keywords beside an `allOf` into each part
+      // before it looks at a key, and the part's own keywords win. So a part
+      // admits a key by naming it or by an `additionalProperties` that does not
+      // refuse it, and a key no part admits stays refused.
+
+      const named = {
+        type: "object",
+        properties: { id: { type: "string" } },
+      } as const;
+      const shapes: Array<[string, Record<string, unknown>, string[]]> = [
+        ["a part that names nothing", { allOf: [{ type: "object" }] }, []],
+        ["a part that is `true`", { allOf: [true] }, []],
+        [
+          "a part that refuses the rest itself",
+          { allOf: [{ type: "object", additionalProperties: false }] },
+          [],
+        ],
+        [
+          "a part whose `additionalProperties` is a schema",
+          {
+            allOf: [
+              { type: "object", additionalProperties: { type: "string" } },
+            ],
+          },
+          ["id", "driver"],
+        ],
+        [
+          "a part that is a `$ref` to a schema naming one key",
+          { $defs: { Named: named }, allOf: [{ $ref: "#/$defs/Named" }] },
+          ["id"],
+        ],
+        [
+          "a part naming one key through an `anyOf` of its own",
+          { allOf: [{ anyOf: [named] }] },
+          ["id"],
+        ],
+        [
+          "a part naming one key beside `properties` naming another",
+          { properties: { q: { type: "number" } }, allOf: [named] },
+          ["id"],
+        ],
+      ];
+
+      for (const [shape, keywords, keys] of shapes) {
+        it(`reads the keys an eager read does for ${shape}`, async () => {
+          const read = await seeded(
+            `turned-down-allof-${shape}`,
+            { id: "a", driver: "x" },
+            {
+              type: "object",
+              additionalProperties: false,
+              ...keywords,
+            } as JSONSchema,
+          );
+          const eager = read(false);
+          const lazy = read(true);
+          try {
+            expect(Object.keys(eager.get() as object)).toEqual(keys);
+            const value = lazy.get() as Record<string, unknown>;
+            expect(Object.keys(value)).toEqual(keys);
+            expect("driver" in value).toBe(keys.includes("driver"));
+            expect(JSON.parse(JSON.stringify(value))).toEqual(
+              JSON.parse(JSON.stringify(eager.get())),
+            );
+          } finally {
+            await eager.tx.commit();
+            await lazy.tx.commit();
+          }
+        });
       }
     });
 

@@ -92,7 +92,10 @@ wrong. Six rules exist only to hold that:
   element value.
 - **A property the schema turns down is settled off the schema, not by reading
   it.** Declaring it `false` turns it down, and so does leaving it unnamed by a
-  schema that refuses the properties it does not name. Either way it is absent
+  schema that refuses the properties it does not name — unless a part of an
+  `allOf` beside it admits the key, by naming it or by an
+  `additionalProperties` of its own, since an eager read merges the schema's
+  keywords into each part and lets the part's win. Either way it is absent
   to a reader — from `in`, from enumeration and from a plain access alike — and
   the link under it is never followed. Deciding it by reading and letting the
   read fail would fetch the document first, which is the cost the declaration
