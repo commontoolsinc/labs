@@ -876,6 +876,76 @@ describe("piece source lifecycle", () => {
     }
   });
 
+  it("applies compiled boolean anyOf argument widening while retaining both stored values", async () => {
+    const program = (stateType: string): RuntimeProgram => ({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+          import { type Cell, pattern } from "commonfabric";
+          export default pattern<{ state: ${stateType} }, { active: boolean }>(
+            () => ({ active: true }),
+          );
+        `,
+      }],
+    });
+    const narrower = program("Cell<boolean> | number");
+    const wider = program('Cell<boolean | "auto"> | number');
+    for (const source of [narrower, wider]) {
+      const compiled = await runtime.patternManager.compilePattern(source, {
+        space: pieces.getSpace(),
+      });
+      expect(compiled.argumentSchema).toMatchObject({
+        properties: { state: { anyOf: expect.any(Array) } },
+      });
+    }
+    for (const value of [false, true]) {
+      const piece = await pieces.create(narrower, { input: { state: value } });
+      await piece.setPattern(wider);
+      expect(await piece.input.get(["state"])).toBe(value);
+      expect(await piece.result.get(["active"])).toBe(true);
+      const state = await readPieceSourceState(runtime, piece.getCell());
+      expect(state.history.at(-1)?.operation).toBe("edit");
+      await expect(piece.setPattern(narrower)).rejects.toThrow(
+        "Pattern schemas are not backward compatible",
+      );
+    }
+  });
+
+  it("applies compiled boolean anyOf result narrowing and refuses its reverse", async () => {
+    const program = (stateType: string): RuntimeProgram => ({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+          import { type Cell, pattern } from "commonfabric";
+          export default pattern<{ seed: number }, { state: ${stateType} }>(
+            () => ({ state: 42 }),
+          );
+        `,
+      }],
+    });
+    const narrower = program("Cell<boolean> | number");
+    const wider = program('Cell<boolean | "auto"> | number');
+    for (const source of [narrower, wider]) {
+      const compiled = await runtime.patternManager.compilePattern(source, {
+        space: pieces.getSpace(),
+      });
+      expect(compiled.resultSchema).toMatchObject({
+        properties: { state: { anyOf: expect.any(Array) } },
+      });
+    }
+    const piece = await pieces.create(wider, { input: { seed: 7 } });
+    await piece.setPattern(narrower);
+    expect(await piece.input.get(["seed"])).toBe(7);
+    expect(await piece.result.get(["state"])).toBe(42);
+    const state = await readPieceSourceState(runtime, piece.getCell());
+    expect(state.history.at(-1)?.operation).toBe("edit");
+    await expect(piece.setPattern(wider)).rejects.toThrow(
+      "Pattern schemas are not backward compatible",
+    );
+  });
+
   it("applies a compiled union widening that retains a mixed-enum cell branch", async () => {
     const program = (stateType: string): RuntimeProgram => ({
       main: "/main.tsx",

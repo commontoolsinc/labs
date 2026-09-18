@@ -3199,14 +3199,21 @@ describe("piece schema compatibility", () => {
     });
 
     it("permits boolean argument widening and result narrowing through unions", () => {
-      const wider: JSONSchema = { enum: [false, true, null, "auto"] };
+      const literalUnion: JSONSchema = { enum: [false, true, null, "auto"] };
       for (
-        const narrower of [
-          { type: "boolean" },
-          { type: ["boolean", "null"] },
-          { anyOf: [{ type: "boolean" }, { type: "null" }] },
-          { anyOf: [{ anyOf: [{ type: "boolean" }, { type: "null" }] }] },
-        ] satisfies JSONSchema[]
+        const [narrower, wider] of [
+          [{ type: "boolean" }, literalUnion],
+          [{ type: ["boolean", "null"] }, literalUnion],
+          [{ anyOf: [{ type: "boolean" }, { type: "null" }] }, literalUnion],
+          [
+            { anyOf: [{ anyOf: [{ type: "boolean" }, { type: "null" }] }] },
+            literalUnion,
+          ],
+          [
+            { anyOf: [{ type: "boolean" }, { type: "null" }] },
+            { anyOf: [{ enum: [false, true, "auto"] }, { type: "null" }] },
+          ],
+        ] satisfies [JSONSchema, JSONSchema][]
       ) {
         expect(() => assertSchemaSubset(narrower, wider)).not.toThrow();
         expect(() => assertSchemaSubset(wider, narrower)).toThrow();
