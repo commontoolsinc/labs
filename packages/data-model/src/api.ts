@@ -647,8 +647,10 @@ export interface DebugValueOptions {
    * Maximum depth of result nesting: a positive integer, or `Infinity` for as
    * deep as the conversion allows. An item which would require further
    * nesting is instead converted into a form suggestive of the elided
-   * information. When absent, the depth is ten levels. A large value is capped;
-   * there is no guarantee about the _actual_ possible maximum depth.
+   * information. The contents of a `FabricPrimitive` are nested to this depth
+   * in their own right, whatever the depth of the `FabricPrimitive` itself.
+   * When absent, the depth is ten levels. A large value is capped; there is no
+   * guarantee about the _actual_ possible maximum depth.
    */
   readonly maxDepth?: number;
 
@@ -657,8 +659,10 @@ export interface DebugValueOptions {
    * integer, or `Infinity` for as many as the conversion allows. An array
    * with more elements than this has only the elements at indices below the
    * limit converted, and in place of the rest a form suggestive of the
-   * elision, which includes the array's actual length. When absent, the limit
-   * is one hundred. A large value is capped.
+   * elision, which includes the array's actual length. This applies to the
+   * contents of a `FabricPrimitive` too, both to an array there and to the
+   * bytes of a buffer there. When absent, the limit is one hundred. A large
+   * value is capped.
    */
   readonly maxArrayLength?: number;
 

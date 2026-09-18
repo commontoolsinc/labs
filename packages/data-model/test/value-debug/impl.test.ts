@@ -19,9 +19,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import {
   type CompactDebugStringOptions,
   type DebugValueOptions,
+  FabricPrimitive,
 } from "@/interface.ts";
 import {
   toCompactDebugString,
@@ -89,6 +91,24 @@ describe("impl", () => {
           );
         });
       }
+    });
+
+    it("renders a `FabricPrimitive` whose state holds itself down to the depth limit", () => {
+      class Circular extends FabricPrimitive {
+        static get [REALM_CODEC]() {
+          return {
+            tagForValue: () => "Circular@1",
+            encode: () => {
+              const state: Record<string, unknown> = { n: 1 };
+              state.self = state;
+              return state;
+            },
+          };
+        }
+      }
+
+      expect(toCompactDebugString(new Circular(), { maxDepth: 2 }))
+        .toBe("/Circular(n:1,self:{n:1,self:...})");
     });
 
     describe("with `backtickQuote`", () => {

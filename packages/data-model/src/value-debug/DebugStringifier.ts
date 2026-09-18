@@ -61,10 +61,6 @@ export class DebugStringifier {
   readonly #spacer: string;
   readonly #colon: string;
 
-  /** `#renderRealmState()` as a function, for passing to a renderer of parts. */
-  readonly #renderRealmStateFn = (v: PrimitiveState, i: string): string =>
-    this.#renderRealmState(v, i);
-
   /**
    * Constructs an instance which renders using `indent` spaces per nesting
    * level when given, and on a single line when not. A value which turns up
@@ -184,48 +180,72 @@ export class DebugStringifier {
     const open = `${DebugStringifier.#renderTypeName(typeName)}(`;
 
     if (isPlainObject(state)) {
-      const parts = this.#renderProperties(
-        state as { readonly [key: string]: PrimitiveState },
-        indent,
-        this.#renderRealmStateFn,
-        false,
-      );
+      const parts = this.#renderRealmProperties(state, indent, 0);
       return this.#renderContainer(open, ")", parts, indent);
     } else {
-      return `${open}${this.#renderRealmState(state, indent)})`;
+      return `${open}${this.#renderRealmState(state, indent, 0)})`;
     }
   }
 
   /**
-   * Renders a realm-crossing encoding, or a piece of one. The encoding's own
-   * terminal, an `ArrayBuffer`, is rendered as `buf [...]`; its containers are
-   * walked as they stand; and anything else takes the ordinary path through
-   * the conversion.
+   * Renders the properties of a plain object within a realm-crossing encoding,
+   * one part per property, given the nesting depth of the object within the
+   * encoding.
    */
-  #renderRealmState(value: PrimitiveState, indent: string): string {
+  #renderRealmProperties(
+    value: PrimitiveState,
+    indent: string,
+    depth: number,
+  ): string[] {
+    return this.#renderProperties(
+      value as { readonly [key: string]: PrimitiveState },
+      indent,
+      (v, i) => this.#renderRealmState(v, i, depth + 1),
+      false,
+    );
+  }
+
+  /**
+   * Renders a realm-crossing encoding, or a piece of one, which is at the
+   * indicated nesting depth within the encoding. The encoding's own terminal,
+   * an `ArrayBuffer`, is rendered as `buf [...]`; its containers are walked as
+   * they stand, within the limits; and anything else takes the ordinary path
+   * through the conversion. A container at the maximum nesting depth is
+   * elided, and an array with more elements than the maximum array length has
+   * the elements at indices below that limit rendered and then its length.
+   */
+  #renderRealmState(
+    value: PrimitiveState,
+    indent: string,
+    depth: number,
+  ): string {
     if (value instanceof ArrayBuffer) {
       return this.#renderBuffer(value);
-    } else if (Array.isArray(value)) {
-      const inner = this.#innerIndent(indent);
-      const parts = value.map((element) =>
-        this.#renderRealmState(element, inner)
-      );
-      return this.#renderContainer("[", "]", parts, indent);
-    } else if (isPlainObject(value)) {
-      const parts = this.#renderProperties(
-        value as { readonly [key: string]: PrimitiveState },
-        indent,
-        this.#renderRealmStateFn,
-        false,
-      );
-      return this.#renderContainer("{", "}", parts, indent);
-    } else {
+    }
+
+    const isArray = Array.isArray(value);
+    if (!(isArray || isPlainObject(value))) {
       const converted = new DebugConverter(
         value,
         this.#limits,
         this.#replacer,
       ).convert();
       return this.#renderSubvalue(converted, indent);
+    } else if (depth >= this.#limits.maxDepth) {
+      return "...";
+    } else if (isArray) {
+      const inner = this.#innerIndent(indent);
+      const maxLength = this.#limits.maxArrayLength;
+      const parts = value.slice(0, maxLength).map((element) =>
+        this.#renderRealmState(element, inner, depth + 1)
+      );
+      if (value.length > maxLength) {
+        parts.push(this.#renderElision("length", value.length));
+      }
+      return this.#renderContainer("[", "]", parts, indent);
+    } else {
+      const parts = this.#renderRealmProperties(value, indent, depth);
+      return this.#renderContainer("{", "}", parts, indent);
     }
   }
 
@@ -485,14 +505,21 @@ export class DebugStringifier {
   /**
    * Renders an `ArrayBuffer` as `buf [...]`, the space being the spacer, with
    * its bytes in hexadecimal and a space after every fourth byte in either
-   * mode.
+   * mode. A buffer with more bytes than the maximum array length has that
+   * many rendered, and after them, set off by a space in either mode, its
+   * length.
    */
   #renderBuffer(buffer: ArrayBuffer): string {
-    const hex = [...new Uint8Array(buffer)]
+    const length = buffer.byteLength;
+    const cut = Math.min(length, this.#limits.maxArrayLength);
+    const hex = [...new Uint8Array(buffer, 0, cut)]
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("")
       .replace(/.{8}(?=.)/g, "$& ");
-    return `buf${this.#spacer}[${hex}]`;
+    const elision = (cut < length)
+      ? ` ${this.#renderElision("length", length)}`
+      : "";
+    return `buf${this.#spacer}[${hex}${elision}]`;
   }
 
   /**
