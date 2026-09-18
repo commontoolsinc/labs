@@ -74,12 +74,59 @@ export type CreateProfileEvent = {
 // user AND per creation event, stable across the cross-space-commit retry. The
 // display name flows ONLY to `initialName` (editable later, independent of the
 // space identity). Existing profiles keep their already-baked concrete DID link.
-export const submitProfileCreation = handler<
-  CreateProfileEvent,
+export type SeedProfileNameEvent = { name?: string };
+
+// Stores the creation name in the new profile's `name` cell, through
+// `setName` — the cell's owner-protected writer — so every `#profile` reader
+// (Topics, `cf profile show`, the loom lobby), which reads the stored `name`
+// and runs nothing, finds the name from the moment of creation. The cell is
+// initialized statically in profile-home.tsx so it keeps its identity across
+// releases; a default derived from `initialName` would not (see the `name`
+// initializer there), so the value is written once, here, by the creator.
+//
+// A second step rather than a send in `submitProfileCreation`: the child a
+// handler instantiates is materialized after the handler body returns (the
+// runner runs the frame's reactives as a result pattern), so inside the body
+// its streams do not exist yet and a send there reaches nothing. This event
+// is queued behind the create in the same runtime and runs once the create
+// has committed, when the profile — its `setName` stream and its lifts — is
+// live. The profile is found by what the create established: the newest
+// entry whose display name (`initialNameApplied`, `initialName` until a name
+// is stored) is this name and whose stored `name` is still empty. A profile
+// already named — a re-delivery of this event, or another device's create
+// under the same name that seeded first — is left alone, and a profile of
+// another name is never touched.
+export const seedProfileName = handler<
+  SeedProfileNameEvent,
   {
     profiles: Writable<BackwardsCompatibleProfile[]>;
   }
 >((event, { profiles }) => {
+  const name = (event.name ?? "").trim();
+  if (!name) return;
+  const links = ((profiles as any).asSchema(profileLinkListSchema()).get() ??
+    []) as Cell<BackwardsCompatibleProfile>[];
+  for (let index = links.length - 1; index >= 0; index--) {
+    const profile = links[index];
+    const stored = (profile as any).key("name").asSchema({ type: "string" })
+      .get() as string | undefined;
+    const shown = (profile as any).key("initialNameApplied").asSchema({
+      type: "string",
+    }).get() as string | undefined;
+    if ((stored ?? "") === "" && shown === name) {
+      (profile as any).key("setName").send({ name });
+      return;
+    }
+  }
+});
+
+export const submitProfileCreation = handler<
+  CreateProfileEvent,
+  {
+    profiles: Writable<BackwardsCompatibleProfile[]>;
+    seedName: Stream<SeedProfileNameEvent>;
+  }
+>((event, { profiles, seedName }) => {
   // The submitted name rides the event: the create surface is a
   // `cf-submit-input`, whose submit-button click carries the typed text as
   // `event.target.value` (and the trusted surface's UI integrity). The handler
@@ -103,6 +150,9 @@ export const submitProfileCreation = handler<
         // unknown vintage).
       }) as ProfileHomeOutput,
     );
+    // Queued behind this create; stores the name once the profile is live
+    // (see `seedProfileName`).
+    seedName.send({ name });
   }
 });
 
@@ -245,8 +295,10 @@ export type ProfileCreateOutput = {
 
 export default pattern<ProfileCreateInput, ProfileCreateOutput>(
   ({ profiles, inputId, defaultName }) => {
+    const seedName = seedProfileName({ profiles: profiles as any });
     const createProfile = submitProfileCreation({
       profiles: profiles as any,
+      seedName,
     });
     return {
       [NAME]: "Create Profile",
