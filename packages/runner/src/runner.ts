@@ -10,7 +10,6 @@ import {
   isKeyableObjectOrArray,
   isWalkableObjectOrArray,
   refuseFabricInstance,
-  toCompactDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
@@ -9032,7 +9031,7 @@ export class Runner {
       // TODO(seefeld): Implement, a dynamic node
       return undefined;
     } else {
-      throw new Error(`Unknown module: ${toCompactDebugString(module)}`);
+      throw new Error(debugStr`Unknown module: $quote${module}`);
     }
   }
 
