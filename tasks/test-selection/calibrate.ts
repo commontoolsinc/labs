@@ -15,12 +15,34 @@
  *
  * The inputs are the lane's own measurements of itself, which travel to
  * the store as ordinary records. A lane writes one per capability it
- * opened and three per batch: what it spent, what it was packed to
- * spend, and how many units it opened. The second and third are what
- * make a fit possible at all — neither can be recovered from the records
- * the batch produced, because those say what the tests took rather than
- * what the packer thought they would, and a unit whose tests all recorded
- * nothing leaves no trace of having been opened.
+ * opened and three per batch: what the batch spent, what its tests took
+ * between them, and how many units it opened. The second and third are
+ * what make a fit possible at all — neither can be recovered from the
+ * records the batch produced, because a reader cannot tell which of a
+ * report's records came from which batch, and a unit whose tests all
+ * recorded nothing leaves no trace of having been opened.
+ *
+ * What the batch's tests took, rather than what the packer expected them
+ * to take. The two differ by however wrong the manifest's costs are, and
+ * a unit nothing has measured is charged a stand-in that can be wrong by
+ * a factor of ten. Fitting against the expectation would put that error
+ * in the intercept, where it is charged once per lane for as long as the
+ * measurement is kept, long after the costs behind it were measured, and
+ * a suite whose intercept passes the bound a lane is killed at places no
+ * discretionary identity at all. The error a suite's cost model should
+ * carry is the machine's, which is what the tests' own time leaves.
+ *
+ * What that costs is worth being plain about, because it is charged to
+ * every lane rather than to the occasional bad window. The packer reads
+ * the fitted slope against a manifest cost, which is the largest of the
+ * days' ninetieth percentiles and so is deliberately above what a test
+ * usually takes. A slope fitted against what tests usually take, read
+ * against a figure padded above that, over-charges by the padding. So a
+ * lane is packed short of what it could hold, by whatever margin the
+ * cost figures carry, and the headroom that keeps a lane inside its
+ * bound is that padding rather than this intercept. Under-packing is the
+ * direction every figure here errs in; it is the price of an intercept
+ * that measures the machine rather than the manifest.
  *
  * Every figure here errs high. A cost model that under-estimates puts a
  * lane past the bound it is killed at, where one that over-estimates
@@ -48,7 +70,7 @@ export type LaneObservation =
   | {
     day: string;
     suite: string;
-    planned: number;
+    ran: number;
     spent: number;
     units: number;
   };
@@ -69,7 +91,7 @@ export function isLaneObservation(value: unknown): value is LaneObservation {
   const one = value as Record<string, unknown>;
   if (typeof one.day !== "string") return false;
   if (typeof one.capability === "string") return finite(one.seconds);
-  return typeof one.suite === "string" && finite(one.planned) &&
+  return typeof one.suite === "string" && finite(one.ran) &&
     finite(one.spent) && finite(one.units);
 }
 
@@ -79,20 +101,19 @@ export interface BatchObservation {
   suite: string;
 
   /**
-   * Seconds the batch's own tests were expected to take: the sum over
-   * its identities of the cost the manifest gives each, times the times
-   * each is repeated. The suite's overhead and correction are not in it,
-   * because they are what is fitted from it.
+   * Seconds the batch's own tests took, summed over every execution of
+   * every unit it ran. The suite's overhead and correction are not in
+   * it, because they are what is fitted from it.
    */
-  planned: number;
+  ran: number;
 
   /** Seconds the batch took. */
   spent: number;
 
   /**
-   * Units the batch was asked to run. A unit's own tests are in
-   * `planned`; what this counts is the runner started and the modules
-   * loaded to reach them, which no test's duration holds.
+   * Units the batch was asked to run. A unit's own tests are in `ran`;
+   * what this counts is the runner started and the modules loaded to
+   * reach them, which no test's duration holds.
    */
   units: number;
 }
@@ -125,7 +146,7 @@ export function laneObservations(
     } else {
       batches.push({
         suite: one.suite,
-        planned: one.planned,
+        ran: one.ran,
         spent: one.spent,
         units: one.units,
       });
@@ -154,7 +175,7 @@ export function observationsOf(
   runs: Iterable<{ run: string; records: Iterable<TestRecord> }>,
 ): Observations {
   const setup = new Map<string, number[]>();
-  const planned = new Map<string, number>();
+  const ran = new Map<string, number>();
   const spent = new Map<string, number>();
   const units = new Map<string, number>();
   const suiteOf = new Map<string, string>();
@@ -178,25 +199,25 @@ export function observationsOf(
       // The suite and the coverage marker, not the name: a batch's three
       // measurements are named differently, and that is what tells them
       // apart. The marker is in the key so that a batch run with
-      // coverage on pairs with its own planned figure rather than with
-      // an uninstrumented batch's.
+      // coverage on pairs with the time its own tests took rather than
+      // with an uninstrumented batch's.
       const key = `${run}\t${batch.suite}\t${batch.measured}`;
       suiteOf.set(key, batch.suite);
       // A count is not a duration. The record format carries one number
       // and calls it a duration, and the name is what says which of the
       // three this is, so the count is read back as it was written.
       if (batch.kind === "units") units.set(key, record.durationMs);
-      else (batch.kind === "planned" ? planned : spent).set(key, seconds);
+      else (batch.kind === "ran" ? ran : spent).set(key, seconds);
     }
   }
   const batches: BatchObservation[] = [];
   for (const [key, took] of spent) {
-    const charged = planned.get(key);
+    const tests = ran.get(key);
     const opened = units.get(key);
-    if (charged === undefined || opened === undefined) continue;
+    if (tests === undefined || opened === undefined) continue;
     batches.push({
       suite: suiteOf.get(key)!,
-      planned: charged,
+      ran: tests,
       spent: took,
       units: opened,
     });
@@ -222,7 +243,7 @@ export function laneObservationsOf(
     ...seen.batches.map((batch) => ({
       day,
       suite: batch.suite,
-      planned: batch.planned,
+      ran: batch.ran,
       spent: batch.spent,
       units: batch.units,
     })),
@@ -231,7 +252,7 @@ export function laneObservationsOf(
 
 /** The two slopes a suite's cost is fitted with. */
 interface Slopes {
-  /** What one second of the batch's own planned test time costs. */
+  /** What one second of the batch's own test time costs. */
   correction: number;
 
   /** What one more unit costs a batch that already runs others. */
@@ -301,12 +322,12 @@ function independentSpan(
  */
 function bothSlopes(observations: readonly BatchObservation[]): Slopes {
   const n = observations.length;
-  const meanP = observations.reduce((t, o) => t + o.planned, 0) / n;
+  const meanP = observations.reduce((t, o) => t + o.ran, 0) / n;
   const meanU = observations.reduce((t, o) => t + o.units, 0) / n;
   const meanY = observations.reduce((t, o) => t + o.spent, 0) / n;
   let pp = 0, uu = 0, pu = 0, py = 0, uy = 0;
   for (const o of observations) {
-    const dp = o.planned - meanP;
+    const dp = o.ran - meanP;
     const du = o.units - meanU;
     const dy = o.spent - meanY;
     pp += dp * dp;
@@ -324,7 +345,7 @@ function bothSlopes(observations: readonly BatchObservation[]): Slopes {
 
 /** The correction alone, with a unit costing the nothing it starts at. */
 function correctionAlone(observations: readonly BatchObservation[]): Slopes {
-  const correction = slopeOf(observations, (o) => o.planned, (o) => o.spent);
+  const correction = slopeOf(observations, (o) => o.ran, (o) => o.spent);
   return correction > 0 ? { ...UNFITTED, correction } : UNFITTED;
 }
 
@@ -337,18 +358,18 @@ function unitsAlone(observations: readonly BatchObservation[]): Slopes {
   const unitOverhead = slopeOf(
     observations,
     (o) => o.units,
-    (o) => o.spent - o.planned,
+    (o) => o.spent - o.ran,
   );
   return unitOverhead > 0 ? { ...UNFITTED, unitOverhead } : UNFITTED;
 }
 
 /**
  * What a batch costs in proportion to what it holds: a slope on the
- * seconds its tests were planned to take, and a slope on the units it
+ * seconds its own tests took, and a slope on the units it
  * opened.
  *
- * A slope is read far outside the range it was fitted over: a suite
- * charged six seconds in every batch anybody has seen may be charged
+ * A slope is read far outside the range it was fitted over: a suite whose
+ * every batch anybody has seen held six seconds of tests may be charged
  * thousands the first time a lane packs it whole, and one that has never
  * held more than five units may be asked to hold nine hundred. So each is
  * fitted only where the suite's batches have disagreed enough about that
@@ -372,12 +393,11 @@ function unitsAlone(observations: readonly BatchObservation[]): Slopes {
  */
 function slopes(observations: readonly BatchObservation[]): Slopes {
   if (observations.length < MIN_CORRECTION_SAMPLES) return UNFITTED;
-  const planned = (o: BatchObservation) => o.planned;
+  const ran = (o: BatchObservation) => o.ran;
   const units = (o: BatchObservation) => o.units;
-  const plannedWide = span(observations, planned) >=
-    MIN_CORRECTION_SPAN_SECONDS;
+  const ranWide = span(observations, ran) >= MIN_CORRECTION_SPAN_SECONDS;
   // The width the unit count has to clear is in the part of it the
-  // planned seconds do not account for. The two are asked different
+  // tests' own seconds do not account for. The two are asked different
   // questions because their readings without evidence differ: a
   // correction of one says a second of test time costs a second, which
   // is a claim about the machine, where a per-unit cost of zero says
@@ -390,9 +410,9 @@ function slopes(observations: readonly BatchObservation[]): Slopes {
   // usually means more tests — and leave the suite charged as though
   // opening a unit were free.
   const unitsWide = span(observations, units) >= MIN_UNIT_SPAN_UNITS &&
-    (!plannedWide ||
-      independentSpan(observations, units, planned) >= MIN_UNIT_SPAN_UNITS);
-  if (!plannedWide) return unitsWide ? unitsAlone(observations) : UNFITTED;
+    (!ranWide ||
+      independentSpan(observations, units, ran) >= MIN_UNIT_SPAN_UNITS);
+  if (!ranWide) return unitsWide ? unitsAlone(observations) : UNFITTED;
   if (!unitsWide) return correctionAlone(observations);
   const both = bothSlopes(observations);
   if (both.correction > 0 && both.unitOverhead > 0) return both;
@@ -423,7 +443,7 @@ export function fitSuite(
     (most, o) =>
       Math.max(
         most,
-        o.spent - fitted.correction * o.planned - fitted.unitOverhead * o.units,
+        o.spent - fitted.correction * o.ran - fitted.unitOverhead * o.units,
       ),
     0,
   );

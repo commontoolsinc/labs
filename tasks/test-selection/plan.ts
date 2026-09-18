@@ -129,6 +129,38 @@ export interface Plan {
    * what says how far past its budget that put a lane.
    */
   unschedulable: UnschedulableEntry[];
+
+  /**
+   * Suites a lane cannot fill around, and the fixed charge that says so.
+   *
+   * A lane pays a suite's overhead, its per-unit charge and its
+   * capabilities' setup before it runs anything of that suite. Where
+   * those alone pass what a lane holding two things may take, nothing
+   * can share a lane with one of its identities, so the suite takes a
+   * whole lane per identity it places and the lanes around it hold
+   * everything else. Where they pass the hard bound as well, no lane can
+   * hold it at all and every discretionary identity it has is in
+   * `unschedulable`.
+   *
+   * Neither reading changes what the packer does; both are what makes it
+   * answerable. A lane holding one test, and four lanes holding the rest
+   * of the corpus, is otherwise a plan with no line in it saying why.
+   */
+  crowding: CrowdingSuite[];
+}
+
+/** A suite whose fixed charge alone is past what a lane can fill around. */
+export interface CrowdingSuite {
+  suite: string;
+
+  /** Overhead, per-unit charge and capability setup, without any test. */
+  fixed: number;
+
+  /** Whether the charge passes the bound a lane is killed at, too. */
+  unholdable: boolean;
+
+  /** Discretionary identities of the suite, which is what this costs. */
+  identities: number;
 }
 
 /** What the packer needs beyond the manifest. */
@@ -231,6 +263,20 @@ function loneCost(
 
 function capabilityCost(manifest: Manifest, capability: string): number {
   return manifest.calibration.setupCost[capability] ?? 0;
+}
+
+/**
+ * What a lane pays to hold one identity of a suite, before that
+ * identity's own time. It is one identity's lone cost with the time
+ * taken out, read through the same function the packer charges by, so
+ * that a term added there is in this the moment it is added there.
+ */
+function fixedCost(
+  manifest: Manifest,
+  input: PlanInput,
+  entry: ManifestEntry,
+): number {
+  return loneCost(manifest, input, { ...entry, cost: 0 });
 }
 
 /** How a lane names one unit of one suite among the units it has opened. */
@@ -415,33 +461,10 @@ export function plan(input: PlanInput): Plan {
     )
     : input.mandatory;
 
-  // An identity whose own measured time is past the hard bound shares a
-  // lane with nothing, so a discretionary one is reported rather than
-  // placed in a lane that would then be killed at its bound. A mandatory
-  // one is placed anyway: the change is not tested without it, and a lane
-  // running long says so, where dropping it leaves the run reporting a
-  // pass over a test that never ran. Its suite's correction is applied
-  // first, because that is what the time will actually be.
-  const unschedulable: UnschedulableEntry[] = [];
-  for (const entry of manifest.entries) {
-    if (requiredOf.has(testIdentityKey(entry.test))) continue;
-    // What an empty lane would pay for it: its own corrected time plus
-    // every overhead and setup that lane would open. Charging only the
-    // test's own time would schedule an identity whose suite, unit, and
-    // capabilities together put the lane past the bound it is killed at.
-    const cost = loneCost(manifest, input, entry);
-    if (cost <= bound) continue;
-    // That whole figure is what is reported, so whoever reads it is told
-    // the number the bound was compared against.
-    unschedulable.push({ test: entry.test, suite: entry.suite, cost });
-  }
-
   // What must not run, unless the change edits the test itself or its
   // suite maps the change onto its unit, in which case it is very likely
   // a fix and must be allowed to prove itself.
-  const excluded = new Set<string>(
-    unschedulable.map((entry) => testIdentityKey(entry.test)),
-  );
+  const excluded = new Set<string>();
   for (const held of manifest.withheld) {
     const key = testIdentityKey(held.test);
     if (!requiredOf.has(key)) excluded.add(key);
@@ -452,6 +475,68 @@ export function plan(input: PlanInput): Plan {
       excluded.add(key);
     }
   }
+
+  // An identity whose own measured time is past the hard bound shares a
+  // lane with nothing, so a discretionary one is reported rather than
+  // placed in a lane that would then be killed at its bound. A mandatory
+  // one is placed anyway: the change is not tested without it, and a lane
+  // running long says so, where dropping it leaves the run reporting a
+  // pass over a test that never ran. Its suite's correction is applied
+  // first, because that is what the time will actually be.
+  const unschedulable: UnschedulableEntry[] = [];
+  // Per suite, the identities its own charge is the whole of what stops,
+  // and how many of those no lane can hold. One held back for a reason of
+  // its own is in neither, because it is not running whatever the charge
+  // comes to.
+  const discretionary = new Map<
+    string,
+    { all: number; unheld: number; one: ManifestEntry }
+  >();
+  for (const entry of manifest.entries) {
+    const key = testIdentityKey(entry.test);
+    if (requiredOf.has(key)) continue;
+    const counted = !excluded.has(key);
+    if (counted) {
+      const seen = discretionary.get(entry.suite) ??
+        { all: 0, unheld: 0, one: entry };
+      seen.all += 1;
+      discretionary.set(entry.suite, seen);
+    }
+    // What an empty lane would pay for it: its own corrected time plus
+    // every overhead and setup that lane would open. Charging only the
+    // test's own time would schedule an identity whose suite, unit, and
+    // capabilities together put the lane past the bound it is killed at.
+    const cost = loneCost(manifest, input, entry);
+    if (cost <= bound) continue;
+    // That whole figure is what is reported, so whoever reads it is told
+    // the number the bound was compared against.
+    unschedulable.push({ test: entry.test, suite: entry.suite, cost });
+    excluded.add(key);
+    if (counted) discretionary.get(entry.suite)!.unheld += 1;
+  }
+
+  // Read once per suite rather than once per identity, because it is the
+  // same figure for every identity the suite has: a suite whose fixed
+  // charge passes the budget is one that thousands of identical lines
+  // would otherwise report, each naming a test that is not the problem.
+  const crowding: CrowdingSuite[] = [];
+  for (const [suite, counted] of discretionary) {
+    const fixed = fixedCost(manifest, input, counted.one);
+    if (fixed <= laneBudget) continue;
+    // Held rather than holdable is read from what the pass above decided
+    // rather than from the charge against the bound: a charge inside the
+    // bound still holds nothing where the cheapest test the suite has
+    // takes it past, and comparing the charge alone would say a suite
+    // ran a test to a lane while the list beside it named that test as
+    // one nothing ran.
+    crowding.push({
+      suite,
+      fixed,
+      unholdable: counted.unheld === counted.all,
+      identities: counted.all,
+    });
+  }
+  crowding.sort((a, b) => b.fixed - a.fixed);
 
   const taken = new Set<string>();
   const remaining = (): ManifestEntry[] =>
@@ -633,6 +718,7 @@ export function plan(input: PlanInput): Plan {
     nonGating: everything ? excused(manifest) : [],
     overBudgetSeconds: overBudget,
     unschedulable,
+    crowding,
   };
 }
 
@@ -671,6 +757,29 @@ export function costliestUnschedulable(
     named: costliest.slice(0, NAMED_UNSCHEDULABLE),
     rest: costliest.slice(NAMED_UNSCHEDULABLE),
   };
+}
+
+/**
+ * What a crowded suite costs a plan, in one sentence. Written here rather
+ * than at each place that prints it, so that the job summary and the
+ * command-line report say the same thing about the same suite.
+ */
+export function crowdingLine(suite: CrowdingSuite): string {
+  return `${suite.suite} costs ${suite.fixed.toFixed(1)}s before it runs ` +
+    `anything, so ` +
+    (suite.unholdable
+      ? `no lane holds it and none of its ${suite.identities} tests ran`
+      : `each of the ${suite.identities} tests it could run takes a lane ` +
+        `to itself`);
+}
+
+/** The suites a report says nothing can run any of. */
+export function unholdableSuites(
+  crowding: readonly CrowdingSuite[],
+): ReadonlySet<string> {
+  return new Set(
+    crowding.filter((suite) => suite.unholdable).map((suite) => suite.suite),
+  );
 }
 
 /**

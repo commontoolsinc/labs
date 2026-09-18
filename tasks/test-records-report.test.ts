@@ -150,7 +150,7 @@ describe("test-records-report", () => {
             test: {
               k: "gate",
               s: "ci",
-              n: "ci-lane planned batch runner-unit",
+              n: "ci-lane ran batch runner-unit",
             },
             outcome: "pass",
             durationMs: 60_600,

@@ -391,7 +391,7 @@ describe("build", () => {
             test: {
               k: "gate",
               s: "ci",
-              n: "ci-lane planned batch workspace-unit",
+              n: "ci-lane ran batch workspace-unit",
             },
             durationMs: 40_000,
           }),
@@ -416,7 +416,7 @@ describe("build", () => {
       expect(read.lanes).toEqual([{
         day: "2026-08-20",
         suite: "workspace-unit",
-        planned: 40,
+        ran: 40,
         spent: 92,
         units: 17,
       }]);
@@ -442,7 +442,7 @@ describe("build", () => {
             test: {
               k: "gate",
               s: "ci",
-              n: "ci-lane planned batch workspace-unit",
+              n: "ci-lane ran batch workspace-unit",
             },
             durationMs: 40_000,
           }),
@@ -462,7 +462,7 @@ describe("build", () => {
         {
           day: "2026-08-20",
           suite: "workspace-unit",
-          planned: 40,
+          ran: 40,
           spent: 92,
           units: 17,
         },
@@ -1079,7 +1079,7 @@ describe("build", () => {
         {
           day: "2026-08-20",
           suite: "runner-unit",
-          planned: 10,
+          ran: 10,
           spent: 30,
           units: 4,
         },
@@ -1100,15 +1100,15 @@ describe("build", () => {
       >;
       older.lanes = [
         { day: "2026-08-20", capability: "fuse", seconds: "a while" },
-        { day: "2026-08-20", suite: "runner-unit", planned: 10, units: 4 },
+        { day: "2026-08-20", suite: "runner-unit", ran: 10, units: 4 },
         {
           day: "2026-08-20",
           suite: "runner-unit",
-          planned: NaN,
+          ran: NaN,
           spent: 30,
           units: 4,
         },
-        { day: "2026-08-20", suite: "runner-unit", planned: 10, spent: 30 },
+        { day: "2026-08-20", suite: "runner-unit", ran: 10, spent: 30 },
         { day: 7, capability: "fuse", seconds: 1 },
         "fuse took a while",
         null,
@@ -1709,7 +1709,7 @@ describe("a report holding a whole day", () => {
 });
 
 describe("the days a fold keeps a lane's measurements over", () => {
-  /** One lane's artifact: what a batch took, beside what it was charged. */
+  /** One lane's artifact: what a batch took, beside what its tests did. */
   function laneRanOn(day: string, spentSeconds: number) {
     return stored(
       `labs/test-records/submissions/ci/v1/${
@@ -1722,7 +1722,7 @@ describe("the days a fold keeps a lane's measurements over", () => {
           durationMs: spentSeconds * 1000,
         }),
         record({
-          test: { k: "gate", s: "ci", n: "ci-lane planned batch runner-unit" },
+          test: { k: "gate", s: "ci", n: "ci-lane ran batch runner-unit" },
           durationMs: 10_000,
         }),
         record({
@@ -1748,7 +1748,7 @@ describe("the days a fold keeps a lane's measurements over", () => {
       {
         day: "2026-08-20",
         suite: "runner-unit",
-        planned: 10,
+        ran: 10,
         spent: 30,
         units: 4,
       },
@@ -1807,7 +1807,7 @@ describe("the days a fold keeps a lane's measurements over", () => {
       {
         day: "2026-08-20",
         suite: "runner-unit",
-        planned: 10,
+        ran: 10,
         spent: 30,
         units: 4,
       },

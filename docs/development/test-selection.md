@@ -79,6 +79,15 @@ hours old, so it names units the tree has since dropped and misses units
 the tree has since gained; the reconciliation of the two is what gets
 packed, and it is what is counted here.
 
+It also names any suite a lane cannot fill around: one whose overhead,
+per-unit charge and capability setup together pass a lane's budget before
+it runs anything. Such a suite takes a whole lane for each identity it
+places, and one past the hard bound as well places none at all. That line
+is what answers "why is a lane holding one test?" and "why did none of
+this suite run?", and the identities of a suite past the bound are left
+out of the list beneath it, since every one of them is past it by the
+suite's charge and by nothing about itself.
+
 `--verify` compares the identity set the topology produces against what a
 recorded run actually executed, in both directions: identities a run
 produced that no suite claims, and units the topology enumerates that the
@@ -617,11 +626,24 @@ keeps them in its rolling aggregate over `COST_WINDOW_DAYS`, the same
 window it measures a test's cost over, and fits `setupCost`,
 `suiteOverhead`, `correction` and `unitOverhead` from them for the next
 manifest. A lane writes one record per capability it opens and three per
-batch — what it spent, what it was packed to spend, and how many units it
-opened — and it is the second and third that make a fit possible. Neither
-can be recovered from the records the batch produced: those say what the
-tests took rather than what the packer expected them to take, and a unit
-whose tests all recorded nothing leaves no trace of having been opened.
+batch — what the batch spent, what its own tests took between them, and
+how many units it opened — and it is the second and third that make a fit
+possible. Neither can be recovered from the records the batch produced: a
+reader of a report cannot tell which of its records came from which
+batch, and a unit whose tests all recorded nothing leaves no trace of
+having been opened.
+
+What its tests took, rather than what the packer expected them to take.
+The two differ by however wrong the manifest's costs are, and a unit
+nothing has measured is charged a stand-in that can be out by a factor of
+ten. Fitting against the expectation would put that error in the
+intercept, which is charged once to every lane that holds the suite and
+kept for the whole window, long after the costs behind it were measured.
+A suite whose intercept passes `LANE_BOUND_SECONDS` can place no
+discretionary identity at all, so an expectation that was briefly wrong
+would hold a whole suite out of every pull request for a week. What a
+suite's cost model should carry is the machine's error, which is what the
+tests' own time leaves.
 
 The publisher leaves all of those out rather than putting an entry in the
 manifest that no lane could run. The next record that says enough puts the
@@ -756,8 +778,8 @@ object the publisher folds for the first time gives up its lane
 measurements, so one run puts a figure in the model and seven days of
 runs fill the window `COST_WINDOW_DAYS` names. Until then the model is
 not merely thin. Every figure in it is a maximum — the worst capability
-opening seen, and the largest gap between what a batch was charged and
-what it took — so a model fitted over part of a window reads lower than
+opening seen, and the largest gap between what a batch's own tests took
+and what the batch took — so a model fitted over part of a window reads lower than
 one fitted over all of it, and reading low is the direction that
 overruns a lane. A suite with nothing at all in the window is charged
 nothing.

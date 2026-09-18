@@ -658,6 +658,126 @@ describe("plan", () => {
       expect(result.unschedulable).toEqual([]);
     });
 
+    it("names a suite nothing can share a lane with, once", () => {
+      // Every identity of the suite is past the bound by the same fixed
+      // charge and by nothing about itself, so the suite is what there is
+      // to say. Naming each of them instead is one line per test saying
+      // what one line per suite already said, and it sends whoever reads
+      // it to look at a test that costs a thousandth of the figure.
+      const manifest = sampleManifest({
+        entries: entries(40, () => ({ cost: 0.001 })),
+        calibration: {
+          setupCost: { fuse: 45 },
+          suites: {
+            "workspace-unit": { overhead: 400, correction: 1, unitOverhead: 1 },
+          },
+          prologue: 0,
+        },
+      });
+      const result = run(manifest, {
+        boundSeconds: 300,
+        budgetSeconds: 230,
+        capabilities: new Map([["workspace-unit", ["fuse"]]]),
+      });
+      expect(result.crowding).toEqual([{
+        suite: "workspace-unit",
+        fixed: 446,
+        unholdable: true,
+        identities: 40,
+      }]);
+      expect(selected(result)).toEqual([]);
+    });
+
+    it("names a suite that can only be placed one test to a lane", () => {
+      // Between the budget and the bound a lane may hold one of the
+      // suite's identities and nothing else, which is a plan that spends
+      // a whole lane on one test and says nothing about why.
+      const manifest = sampleManifest({
+        entries: entries(3, () => ({ cost: 1 })),
+        calibration: {
+          setupCost: {},
+          suites: {
+            "workspace-unit": { overhead: 250, correction: 1, unitOverhead: 0 },
+          },
+          prologue: 0,
+        },
+      });
+      const result = run(manifest, { boundSeconds: 300, budgetSeconds: 230 });
+      expect(result.crowding).toEqual([{
+        suite: "workspace-unit",
+        fixed: 250,
+        unholdable: false,
+        identities: 3,
+      }]);
+      // One per lane, and the plan ran out of lanes before tests.
+      expect(result.lanes.map((lane) => lane.selections.length))
+        .toEqual([1, 1, 1, 0, 0]);
+    });
+
+    it("leaves an identity held back for its own sake out of the count", () => {
+      // The count says what the suite's charge costs. A withheld identity
+      // and one its flake rate keeps out are not running whatever the
+      // charge comes to, so counting them would report them as lost to
+      // something that is not why they did not run.
+      const all = entries(4, () => ({ cost: 1 }));
+      all[0]!.flakeRate = 1;
+      const manifest = sampleManifest({
+        entries: all,
+        withheld: [{
+          test: all[1]!.test,
+          suite: all[1]!.suite,
+          reason: "flaky",
+        }],
+        calibration: {
+          setupCost: {},
+          suites: {
+            "workspace-unit": { overhead: 400, correction: 1, unitOverhead: 0 },
+          },
+          prologue: 0,
+        },
+      });
+      const result = run(manifest, { boundSeconds: 300, budgetSeconds: 230 });
+      expect(result.crowding.map((suite) => suite.identities)).toEqual([2]);
+    });
+
+    it("says nothing about a suite a lane can fill around", () => {
+      const manifest = sampleManifest({
+        entries: entries(3, () => ({ cost: 1 })),
+        calibration: {
+          setupCost: {},
+          suites: {
+            "workspace-unit": { overhead: 10, correction: 1, unitOverhead: 0 },
+          },
+          prologue: 0,
+        },
+      });
+      expect(run(manifest, { boundSeconds: 300, budgetSeconds: 230 }).crowding)
+        .toEqual([]);
+    });
+
+    it("leaves a suite the change forces in out of the count", () => {
+      // Mandatory identities are placed whatever the charge, so they are
+      // not what a crowded suite costs, and a suite with nothing else is
+      // not crowding anything.
+      const manifest = sampleManifest({
+        entries: entries(2, () => ({ cost: 1 })),
+        calibration: {
+          setupCost: {},
+          suites: {
+            "workspace-unit": { overhead: 400, correction: 1, unitOverhead: 0 },
+          },
+          prologue: 0,
+        },
+      });
+      const mandatory = new Map(
+        manifest.entries.map((
+          entry,
+        ) => [testIdentityKey(entry.test), "changed" as const]),
+      );
+      expect(run(manifest, { mandatory, boundSeconds: 300 }).crowding)
+        .toEqual([]);
+    });
+
     it("says how far past its budget forcing one put a lane", () => {
       // The lane running long is the whole signal that the bound may need
       // raising, so the figure has to come out even though nothing failed.

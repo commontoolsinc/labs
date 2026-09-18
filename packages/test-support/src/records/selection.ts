@@ -230,9 +230,8 @@ export interface Calibration {
   setupCost: Record<string, number>;
 
   /**
-   * Per suite: the intercept, the slope on what its tests were planned to
-   * take, and what one more of its units costs a batch already running
-   * others.
+   * Per suite: the intercept, the slope on what its own tests take, and
+   * what one more of its units costs a batch already running others.
    */
   suites: Record<
     string,

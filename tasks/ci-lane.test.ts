@@ -979,6 +979,7 @@ describe("running a lane's work", () => {
           suite: "binaries",
           cost: 900,
         }],
+        [],
         { selections: [], projectedSeconds: 0 },
         LANE_BUDGET_SECONDS,
         0,
@@ -993,6 +994,81 @@ describe("running a lane's work", () => {
     expect(printed).toContain("workspace-unit");
     // What no lane can hold is named rather than left silently absent.
     expect(printed).toContain("build-binary toolshed");
+  });
+
+  it("names a suite no lane can hold instead of each test in it", () => {
+    // Thousands of identities of one suite are all past the bound by the
+    // suite's fixed charge and by nothing about themselves. The summary
+    // names the costliest few, so left in they are all it has room for,
+    // and every one of them names a test that is not the problem while
+    // the suite that is goes unnamed.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describePlan(
+        lane,
+        [],
+        [],
+        { objectName: "manifest-x.json.gz" },
+        [{
+          test: { k: "unit", s: "bakery", n: "glaze > sets" },
+          suite: "workspace-unit",
+          cost: 706,
+        }, {
+          test: { k: "unit", s: "toolshed", n: "build-binary toolshed" },
+          suite: "binaries",
+          cost: 900,
+        }],
+        [{
+          suite: "workspace-unit",
+          fixed: 705,
+          unholdable: true,
+          identities: 21889,
+        }],
+        { selections: [], projectedSeconds: 0 },
+        LANE_BUDGET_SECONDS,
+        0,
+        0,
+      );
+    } finally {
+      console.log = log;
+    }
+    const printed = lines.join("\n");
+    expect(printed).toContain("workspace-unit costs 705.0s before it runs");
+    expect(printed).toContain("21889 tests");
+    expect(printed).not.toContain("glaze > sets");
+    // A suite a lane can hold still names the test that cannot fit in it.
+    expect(printed).toContain("build-binary toolshed");
+  });
+
+  it("says a suite is taking a lane per test where it is", () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describePlan(
+        lane,
+        [],
+        [],
+        { objectName: "manifest-x.json.gz" },
+        [],
+        [{
+          suite: "workspace-unit",
+          fixed: 250,
+          unholdable: false,
+          identities: 12,
+        }],
+        { selections: [], projectedSeconds: 0 },
+        LANE_BUDGET_SECONDS,
+        0,
+        0,
+      );
+    } finally {
+      console.log = log;
+    }
+    expect(lines.join("\n"))
+      .toContain("each of the 12 tests it could run takes a lane to itself");
   });
 
   it("says what each batch costs and why each test is in it", () => {
@@ -1022,6 +1098,7 @@ describe("running a lane's work", () => {
         ["deno"],
         { objectName: "manifest-x.json.gz" },
         [],
+        [],
         {
           selections: [{ entry, reason: "value", repeats: 2 }],
           projectedSeconds: 96,
@@ -1049,6 +1126,7 @@ describe("running a lane's work", () => {
         [],
         [],
         { absent: "the store is unreachable" },
+        [],
         [],
         { selections: [], projectedSeconds: 0 },
         LANE_BUDGET_SECONDS,
@@ -1415,6 +1493,7 @@ describe("the lane's own housekeeping", () => {
         [],
         { objectName: "manifest-x.json.gz" },
         [],
+        [],
         { selections: [], projectedSeconds: 0 },
         LANE_BUDGET_SECONDS,
         0,
@@ -1452,6 +1531,7 @@ describe("the lane's own housekeeping", () => {
         [],
         { objectName: "manifest-x.json.gz" },
         tooSlow,
+        [],
         { selections: [], projectedSeconds: 0 },
         LANE_BUDGET_SECONDS,
         0,
@@ -1753,26 +1833,50 @@ describe("what a lane records about itself", () => {
     );
   });
 
-  it("writes what a batch spent beside what it was packed to spend", async () => {
+  it("writes what a batch spent beside what its tests took", async () => {
     // The publisher fits a suite's cost beyond its tests from the pair,
-    // and reads a batch only where both halves are there. What the packer
-    // expected cannot be recovered from the records the batch produced,
-    // because those say what the tests took instead.
-    const workDir = await Deno.makeTempDir({ prefix: "lane-planned-" });
+    // and reads a batch only where both halves are there. The tests' own
+    // time is summed as the batch runs rather than read back afterwards,
+    // because a reader of the report cannot tell which of its records
+    // came from which batch.
+    const workDir = await Deno.makeTempDir({ prefix: "lane-ran-" });
     const spool = await Deno.makeTempDir({ prefix: "lane-spool-" });
+    // The second is off the suite's declared surfaces, so it arrives as a
+    // conflict rather than as one of the batch's records. The batch spent
+    // that time all the same, so it is in the figure.
+    const records = [
+      { k: "unit", s: "workspace", n: "takes 250ms", durationMs: 250 },
+      { k: "unit", s: "elsewhere", n: "takes 1750ms", durationMs: 1750 },
+    ].map(({ durationMs, ...test }) =>
+      JSON.stringify({ line: "record", test, outcome: "pass", durationMs })
+    ).join("\n");
     try {
       await runBatch(
         {
-          suite: suite({ id: "workspace-unit", units: ["one"] }),
-          units: [],
-          runs: new Map(),
+          suite: suite({
+            id: "workspace-unit",
+            units: ["one"],
+            recordSurfaces: [{ kind: "unit", scope: "workspace" }],
+            command: (_units, context) =>
+              Promise.resolve([{
+                command: [
+                  Deno.execPath(),
+                  "eval",
+                  `Deno.writeTextFileSync(
+                    Deno.env.get("CF_TEST_RECORDS_DIR") + "/fragment-a.ndjson",
+                    ${JSON.stringify(records + "\n")},
+                  )`,
+                ],
+                cwd: context.root,
+              }]),
+          }),
+          units: [{ unit: "one", skip: [] }],
+          runs: new Map([["one", 1]]),
         },
         lane,
         workDir,
         spool,
         {},
-        undefined,
-        42.5,
       );
       const written: string[] = [];
       for await (const entry of Deno.readDir(spool)) {
@@ -1782,9 +1886,13 @@ describe("what a lane records about itself", () => {
       }
       const spooled = written.join("");
       expect(spooled).toContain('ci-lane batch workspace-unit"');
-      expect(spooled).toContain('ci-lane planned batch workspace-unit"');
-      // The figure travels as a duration, so it arrives in milliseconds.
-      expect(spooled).toContain('"durationMs":42500');
+      expect(spooled).toContain('ci-lane ran batch workspace-unit"');
+      // Both records' own time and nothing else. The figure travels as a
+      // duration, so it arrives in milliseconds.
+      expect(spooled).toContain(
+        '"n":"ci-lane ran batch workspace-unit"},"outcome":"pass"' +
+          ',"durationMs":2000',
+      );
     } finally {
       await Deno.remove(workDir, { recursive: true });
       await Deno.remove(spool, { recursive: true });

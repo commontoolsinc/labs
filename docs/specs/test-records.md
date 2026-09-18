@@ -215,9 +215,10 @@ enumerates them, nothing scores them, and no lane can be asked to run
 one.
 
 Their figures are not all durations. A lane writes three measurements
-per batch — what it spent, what it was packed to spend, and how many
-units it opened — and the record format carries one number and calls it
-a duration, so which of the three a record holds is decided by its name.
+per batch — what the batch spent, what its own tests took between them,
+and how many units it opened — and the record format carries one number
+and calls it a duration, so which of the three a record holds is decided
+by its name.
 A batch that ended badly is written as a failure, and a test in it
 failing is enough to end it badly.
 
