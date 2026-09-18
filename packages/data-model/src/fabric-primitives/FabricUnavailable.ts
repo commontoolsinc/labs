@@ -35,7 +35,7 @@ import {
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
-import { debugStr } from "@/value-debug";
+import { toShortQuotedDebugString } from "@/value-debug";
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
@@ -150,7 +150,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
       !Object.hasOwn(UNAVAILABLE_REASONS, reason)
     ) {
       throw new Error(
-        debugStr`Not an \`UnavailableReason\`: $quote${reason}`,
+        `Not an \`UnavailableReason\`: ${toShortQuotedDebugString(reason)}`,
       );
     }
 
@@ -162,12 +162,14 @@ export class FabricUnavailable extends BaseFabricPrimitive
         !Object.hasOwn(UNAVAILABLE_ERROR_KINDS, errorKind)
       ) {
         throw new Error(
-          debugStr`Reason \`error\` requires an \`UnavailableErrorKind\`, not $quote${errorKind}.`,
+          `Reason \`error\` requires an \`UnavailableErrorKind\`, not ${
+            toShortQuotedDebugString(errorKind)
+          }.`,
         );
       }
       if ((errorMessage !== null) && (typeof errorMessage !== "string")) {
         throw new Error(
-          debugStr`Not an \`errorMessage\`: $quote${errorMessage}`,
+          `Not an \`errorMessage\`: ${toShortQuotedDebugString(errorMessage)}`,
         );
       }
       // A message equal to the kind's default is stored as none.
@@ -177,7 +179,9 @@ export class FabricUnavailable extends BaseFabricPrimitive
           : errorMessage;
     } else if ((errorKind !== null) || (errorMessage !== null)) {
       throw new Error(
-        debugStr`Reason $quote${reason} takes neither an \`errorKind\` nor an \`errorMessage\`.`,
+        `Reason ${
+          toShortQuotedDebugString(reason)
+        } takes neither an \`errorKind\` nor an \`errorMessage\`.`,
       );
     }
 
