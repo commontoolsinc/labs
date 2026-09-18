@@ -1,6 +1,7 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import {
   getServerExecutionConfig,
   resolveScopeKey,
@@ -17,6 +18,8 @@ import { newSharedServer } from "../memory-v2-test-utils.ts";
 const owner = await Identity.fromPassphrase("terminal confirmation owner");
 const service = await Identity.fromPassphrase("terminal confirmation service");
 const space = owner.did();
+const elsewhere = (await Identity.fromPassphrase("terminal confirmation other"))
+  .did();
 const ids = [
   "of:confirmation-a",
   "of:confirmation-b",
@@ -50,9 +53,21 @@ describe("SpaceServer", () => {
     }
   });
 
-  /** Creates a durable owning chain and exposes only its root as demand. */
-  async function openFixture(scope: "space" | "user" = "space") {
+  /**
+   * Creates a durable owning chain and exposes only its root as demand.
+   *
+   * Each document's `result` backlink names the next one. The last document
+   * names `onward` where that is given, so the chain resolves there instead.
+   */
+  async function openFixture(
+    scope: "space" | "user" = "space",
+    onward?: { space: MemorySpace; id: URI },
+  ) {
     const engine = await server.engineForSpace(space);
+    const next = [
+      ...ids.slice(1).map((id) => ({ space, id })),
+      ...(onward === undefined ? [] : [onward]),
+    ];
     const manager = EmulatedStorageManager.connectTo(server, { as: service });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -75,14 +90,15 @@ describe("SpaceServer", () => {
           scope,
           value: {
             value: { plain: 1 },
-            ...(index === ids.length - 1 ? {} : {
-              result: runtime.getCellFromLink({
-                space,
-                id: ids[index + 1],
-                scope,
-                path: [],
-              }).getAsWriteRedirectLink(),
-            }),
+            ...(index < next.length
+              ? {
+                result: runtime.getCellFromLink({
+                  ...next[index],
+                  scope,
+                  path: [],
+                }).getAsWriteRedirectLink(),
+              }
+              : {}),
           },
         })),
       },
@@ -368,6 +384,59 @@ describe("SpaceServer", () => {
           expect(fixture.stats.structureLoadRearmed).toBe(0);
         });
       }
+
+      it("re-asks a chain whose terminus is in another space", async () => {
+        // The engine co-hosted with this tenure holds its own space alone, so
+        // it cannot answer for a terminus in another one: both traversals
+        // sync all four documents.
+
+        const fixture = await openFixture("space", {
+          space: elsewhere,
+          id: "of:confirmation-elsewhere",
+        });
+        expect(await settle(fixture.serving.activate())).toBe(true);
+        expect(fixture.stats.structureLoadTerminal).toBe(1);
+        expect(fixture.stats.structureLoadConfirmationsSkipped).toBe(0);
+        expect(fixture.syncCount()).toBe(8);
+      });
+
+      it("re-asks the chain once the engine's database has closed", async () => {
+        // The server closes, and its engine with it, between the first
+        // traversal's last read and the confirmation. Nothing past the load
+        // pass can run against a closed engine, so the settle that follows
+        // it waits until the tenure has parked.
+
+        const fixture = await openFixture();
+        const sync = fixture.manager.syncCell.bind(fixture.manager);
+        let closed = false;
+        fixture.manager.syncCell = async (cell, options) => {
+          const result = await sync(cell, options);
+          if (
+            cell.getAsNormalizedFullLink().id === ids[2] &&
+            cell.tx?.tx.immediate && !closed
+          ) {
+            closed = true;
+            await server.close();
+          }
+          return result;
+        };
+        const release = Promise.withResolvers<void>();
+        const idle = fixture.runtime.idle.bind(fixture.runtime);
+        fixture.runtime.idle = async () => {
+          if (closed) await release.promise;
+          return await idle();
+        };
+        try {
+          expect(await settle(fixture.serving.activate())).toBe(true);
+          expect(fixture.stats.structureLoadTerminal).toBe(1);
+          expect(fixture.stats.structureLoadConfirmationsSkipped).toBe(0);
+          expect(fixture.syncCount()).toBe(6);
+        } finally {
+          const parked = fixture.serving.park("confirmation-test");
+          release.resolve();
+          await settle(parked);
+        }
+      });
 
       it("re-asks the chain and starts a piece the replica is behind on", async () => {
         const fixture = await openFixture();
