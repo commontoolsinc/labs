@@ -4029,11 +4029,11 @@ from the very rule that gives `/` its meaning.
 | Convention | Where Produced and Recognized | Example | Unified Form |
 |------------|-------------------------------|---------|--------------|
 | Link-ref envelope | Links (`runner/src/sigil-types.ts`, chokepointed on `data-model/cell-rep`) | `{ "/": { "link@1": { id, path, space } } }` | `{ "/Link@1": { id, path, space } }` |
-| `$stream` marker | Retired; read from older documents only (`runner/src/builder/types.ts`) | `{ "$stream": true }` | none — the schema declares the stream |
+| `$stream` marker | Retired; still recognized as a fallback by the readers that classify a position from its stored value, until no stored document holds one (`runner/src/builder/types.ts`, `runner/src/query-result-proxy.ts`, `runner/src/cell.ts`, `fuse/callables.ts`, `cli/lib/shuttle/listing.ts`, `state-inspector/model.ts`) | `{ "$stream": true }` | none — the schema declares the stream |
 
 > **Note on `$stream`:** the marker is retired rather than renamed. A stream
 > position is declared by `asCell: ["stream"]` on its schema — carried by the
-> links that reach it and by the stream document's `schema` metadata — and
+> links that reach it, and by the manifest link its owner keeps for it — and
 > stores nothing, so no `/Stream@1` tagged type replaces it. What the wire
 > still meets is the sentinel in documents written before the declaration was
 > stored, and readers recognize that until none remain.

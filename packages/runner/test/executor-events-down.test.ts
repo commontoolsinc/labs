@@ -31,10 +31,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
-import {
-  resultSchemaMetaSpelling,
-  writeResultSchemaMeta,
-} from "../src/result-schema-meta.ts";
+import { resultSchemaMetaSpelling } from "../src/result-schema-meta.ts";
 import {
   decodeMemoryBoundary,
   eventAttentionEntryKey,
@@ -3176,16 +3173,14 @@ describe("Phase 3 events-down (serving side)", () => {
       clientSigner,
     ));
     const engine = await server.engineForSpace(space);
-    // A stream document holds no value; what setup leaves on it is the
-    // schema meta declaring the stream, and the served appends land on it.
+    // A stream document holds no value, and nothing on it says what it is:
+    // the handle that reaches it declares the stream, and the served appends
+    // land on the document.
     const mkStream = async (name: string) => {
       const cell = clientRuntime.getCell<unknown>(space, name, {
         asCell: ["stream"],
       });
       await cell.sync();
-      const tx = clientRuntime.edit();
-      writeResultSchemaMeta(cell.withTx(tx), { asCell: ["stream"] });
-      expect((await tx.commit()).error).toBeUndefined();
       return cell;
     };
     const mkDoc = async (name: string) => {

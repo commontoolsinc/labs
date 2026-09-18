@@ -35,34 +35,6 @@ describe("Schema - Streams and Promises", () => {
   });
 
   describe("Stream Support", () => {
-    it("should create a stream for properties marked with asCell stream", () => {
-      // Nothing is stored where the stream stands; the schema declares it.
-      const c = runtime.getCell<{ name: string }>(
-        space,
-        "should create a stream for properties marked with asStream 1",
-        undefined,
-        tx,
-      );
-      c.set({ name: "Test Doc" });
-
-      const schema = {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          events: {
-            type: "object",
-            asCell: ["stream"],
-          },
-        },
-      } as const satisfies JSONSchema;
-
-      const cell = c.asSchema(schema);
-      const value = cell.get();
-
-      expect(value.name).toBe("Test Doc");
-      expect(isStream(value.events)).toBe(true);
-    });
-
     it("should handle nested streams in objects", () => {
       const c = runtime.getCell<{ user: { profile: { name: string } } }>(
         space,

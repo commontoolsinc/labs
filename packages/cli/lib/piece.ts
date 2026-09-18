@@ -4730,11 +4730,14 @@ interface ReadPathVerb {
 
 /**
  * Classify a `cf cell get` path whose last segment CERTAINLY lands on a
- * verb. The guard refuses on one definite stored signal: the link-derived
- * schema answers as a stream (`isHandlerCell` on the `asSchemaFromLinks`
- * cell — that schema comes from the stored links and the document's own
- * `schema` meta, never from a caller-supplied cast). A stream's document
- * holds no value, so nothing at the position itself can say what it is. It
+ * verb. The guard refuses on two definite stored signals, both read off the
+ * child by `detectCallableKind`: the link-derived schema declaring a stream
+ * (`isHandlerCell` on the `asSchemaFromLinks` cell — that schema comes from
+ * the stored links, never from a caller-supplied cast), and the stored value
+ * being the retired `{ $stream: true }` sentinel, which `detectCallableKind`
+ * reads through `getRaw()` until no stored document holds one. A stream's
+ * document written since holds no value, so for it the schema is the whole
+ * of what can say what it is. It
  * NEVER refuses on the forced-stream probe: the probe is deliberately
  * permissive for the dispatcher and the listing — over-inclusion there is an
  * extra listing row or a call the caller asked for — but the cast's stream

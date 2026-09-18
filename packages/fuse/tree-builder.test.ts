@@ -1102,6 +1102,28 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
   assertEquals(parsed.search, { "/tool": "search" });
 });
 
+Deno.test("buildJsonTree - a root key the classifier names a callable projects no value", () => {
+  // A declared stream is a callable whatever stands at it, so what stands
+  // there is not projected beside the callable's own file.
+  const tree = new FsTree();
+  buildJsonTree(
+    tree,
+    tree.rootIno,
+    "result",
+    { count: 3, events: 7 },
+    undefined,
+    0,
+    undefined,
+    (key) => (key === "events" ? "handler" : null),
+  );
+
+  const resultIno = tree.lookup(tree.rootIno, "result")!;
+  assertEquals(getFileContent(tree, resultIno, "count"), "3");
+  assertEquals(tree.lookup(resultIno, "events"), undefined);
+  const parsed = JSON.parse(getFileContent(tree, tree.rootIno, "result.json"));
+  assertEquals(parsed.events, { "/handler": "events" });
+});
+
 Deno.test("callable scripts begin with a cf exec shebang and shell fallback", () => {
   const tree = new FsTree();
   const resultIno = tree.addDir(tree.rootIno, "result", "object");

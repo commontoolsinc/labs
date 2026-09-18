@@ -559,6 +559,10 @@ function buildJsonTreeNode(
 
   for (const [key, val] of Object.entries(obj)) {
     if (isStreamValue(val) || isHandlerCell(val)) continue;
+    // At the root, a key the classifier names a callable is projected as its
+    // callable file, whatever stands at it, so what stands there is not
+    // projected as a value beside that file.
+    if (depth === 0 && build.classifyCallableEntry?.(key, val)) continue;
     if (build.skipEntry?.(val)) continue;
     build.queue.push({
       parentIno: dirIno,

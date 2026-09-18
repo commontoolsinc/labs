@@ -1,9 +1,13 @@
 /**
  * Hermetic test for the unified entity model + encoded commit decoding. Seeds a
  * modern piece (patternIdentity → module, argument, internal manifest), an
- * owned cell, three streams, and a free cell, then checks classification +
- * lineage. Two of the streams hold no value and are known by their `schema`
- * meta alone, one inline and one by reference to a schema document.
+ * owned cell, five streams, and a free cell, then checks classification +
+ * lineage. Four of the streams hold no value and are known by the manifest
+ * link their owner keeps for each: declared inline on the link, by reference
+ * to a schema document, through a `$ref` into the link schema's own `$defs`,
+ * and through a `cid:…#/$defs/<name>` fragment. Beside them, a back-link-only
+ * document whose owner's manifest carries a declaration outside the grammar,
+ * and one whose owner the space does not hold, classify as owned cells.
  *
  * It also seeds one entity for each way an entity ends up carrying no document
  * — a tombstone, a payload that does not decode, and a `set` that stored no
@@ -37,9 +41,13 @@ CREATE TABLE revision (
 
 const MODULE_IDENTITY = "pf1v3J_M5Nep7cq-Uh8EYG0ZQaE217FfDfcjbwGdjVI";
 
-/** A plain-JSON sigil link to an entity id. */
-function link(id: string) {
-  return { "/": { "link@1": { id, path: [] } } };
+/** A plain-JSON sigil link to an entity id, carrying `schema` where given. */
+function link(id: string, schema?: unknown) {
+  return {
+    "/": {
+      "link@1": { id, path: [], ...(schema === undefined ? {} : { schema }) },
+    },
+  };
 }
 
 function seed(path: string) {
@@ -87,7 +95,42 @@ function seed(path: string) {
     JSON.stringify({
       value: { $NAME: "My Notebook", $UI: { type: "vnode" } },
       argument: link("of:input"),
-      internal: [{ partialCause: "query", link: link("of:owned") }],
+      // The manifest links declare the streams: one inline, one by reference
+      // to a schema document, one through a `$ref` into the link schema's own
+      // `$defs`, one through a fragment into a schema document, and one that
+      // puts a keyword beside a `cid:` reference, which the grammar refuses.
+      internal: [
+        { partialCause: "query", link: link("of:owned") },
+        {
+          partialCause: "inline",
+          link: link("of:stream-inline", {
+            asCell: ["stream"],
+            type: "object",
+          }),
+        },
+        {
+          partialCause: "ref",
+          link: link("of:stream-ref", { $ref: "cid:streamschema" }),
+        },
+        {
+          partialCause: "defs",
+          link: link("of:stream-defs", {
+            $ref: "#/$defs/Ev",
+            $defs: { Ev: { asCell: ["stream"], type: "object" } },
+          }),
+        },
+        {
+          partialCause: "frag",
+          link: link("of:stream-frag", { $ref: "cid:streamdefs#/$defs/Ev" }),
+        },
+        {
+          partialCause: "hybrid",
+          link: link("of:stream-hybrid", {
+            $ref: "cid:streamschema",
+            asCell: ["stream"],
+          }),
+        },
+      ],
       patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
       schema: { type: "object", properties: {}, $defs: {} },
     }),
@@ -179,9 +222,9 @@ function seed(path: string) {
     12,
   );
 
-  // Two streams whose documents hold no value: what says they are streams is
-  // the `schema` meta, held inline on one and, on the other, by a reference
-  // to the schema document that holds it.
+  // Streams whose documents hold nothing but the back-link to their owner:
+  // what says they are streams is the manifest link the owner keeps for each.
+  // The two schema documents are what two of those links reference.
   commit.run(19, session, 19, "{}");
   op.run(
     "cid:streamschema",
@@ -198,25 +241,33 @@ function seed(path: string) {
   );
   commit.run(20, session, 20, "{}");
   op.run(
-    "of:stream-inline",
+    "cid:streamdefs",
     20,
     "set",
     JSON.stringify({
-      result: link("of:piece"),
-      schema: { asCell: ["stream"], type: "object" },
+      value: { $defs: { Ev: { asCell: ["stream"], type: "object" } } },
     }),
     20,
   );
+  const backLinked = JSON.stringify({ result: link("of:piece") });
   commit.run(21, session, 21, "{}");
+  op.run("of:stream-inline", 21, "set", backLinked, 21);
+  commit.run(22, session, 22, "{}");
+  op.run("of:stream-ref", 22, "set", backLinked, 22);
+  commit.run(23, session, 23, "{}");
+  op.run("of:stream-defs", 23, "set", backLinked, 23);
+  commit.run(24, session, 24, "{}");
+  op.run("of:stream-frag", 24, "set", backLinked, 24);
+  commit.run(25, session, 25, "{}");
+  op.run("of:stream-hybrid", 25, "set", backLinked, 25);
+  // A back-link-only document whose owner the space does not hold.
+  commit.run(26, session, 26, "{}");
   op.run(
-    "of:stream-ref",
-    21,
+    "of:stream-orphan",
+    26,
     "set",
-    JSON.stringify({
-      result: link("of:piece"),
-      schema: { $ref: "cid:streamschema" },
-    }),
-    21,
+    JSON.stringify({ result: link("of:nowhere") }),
+    26,
   );
 
   db.close();
@@ -252,22 +303,43 @@ Deno.test("unified entity model + encoded commit decode", async (t) => {
         assertEquals(byId["of:piece"].label, "My Notebook");
         assertEquals(byId["of:piece"].regime, "modern");
         assertEquals(byId["of:piece"].lineage.argument, "of:input");
-        assertEquals(byId["of:piece"].lineage.internal, ["of:owned"]);
+        assertEquals(byId["of:piece"].lineage.internal, [
+          "of:owned",
+          "of:stream-inline",
+          "of:stream-ref",
+          "of:stream-defs",
+          "of:stream-frag",
+          "of:stream-hybrid",
+        ]);
         // patternIdentity resolves to the module entity by matching value.identity.
         assertEquals(byId["of:piece"].lineage.pattern?.moduleId, "of:mod");
 
         // A stream beats ownership; an owned cell carries a back-link.
         assertEquals(byId["of:stream"].kind, "stream");
-        // A stream document holds no value: its `schema` meta is what says
-        // it is one, whether the schema is inline or in a schema document.
+        // A stream document holds no value: the manifest link its owner keeps
+        // for it is what says it is one — declared inline on the link, by
+        // reference to a schema document, through a `$ref` into the link
+        // schema's own `$defs`, or through a fragment into a schema document.
         assertEquals(byId["of:stream-inline"].kind, "stream");
         assertEquals(byId["of:stream-inline"].valueShape, "absent");
         assertEquals(byId["of:stream-ref"].kind, "stream");
         assertEquals(byId["of:stream-ref"].owned, true);
+        assertEquals(byId["of:stream-defs"].kind, "stream");
+        assertEquals(byId["of:stream-frag"].kind, "stream");
+        // A declaration outside the schema-meta grammar declares nothing, and
+        // a back-link naming no document the space holds finds no owner.
+        assertEquals(byId["of:stream-hybrid"].kind, "owned-cell");
+        assertEquals(byId["of:stream-orphan"].kind, "owned-cell");
         assertEquals(
           listEntityModels(space, { kind: "stream" }).entities.map((e) => e.id)
             .sort(),
-          ["of:stream", "of:stream-inline", "of:stream-ref"],
+          [
+            "of:stream",
+            "of:stream-defs",
+            "of:stream-frag",
+            "of:stream-inline",
+            "of:stream-ref",
+          ],
         );
         assertEquals(byId["of:owned"].kind, "owned-cell");
         assertEquals(byId["of:owned"].owned, true);
@@ -291,7 +363,7 @@ Deno.test("unified entity model + encoded commit decode", async (t) => {
           );
           assertEquals(piece.pattern?.symbol, "default");
           assertEquals(piece.input?.id, "of:input");
-          assertEquals(piece.ownedCells.length, 1);
+          assertEquals(piece.ownedCells.length, 6);
           assertEquals(piece.ownedCells[0].id, "of:owned");
           assert(piece.resultKeys.includes("$NAME"));
         },

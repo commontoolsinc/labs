@@ -200,7 +200,7 @@ export function buildSpaceGraph(
   }
 
   for (const [id, doc] of docs) {
-    const c = classifyDocument(doc, readDocument);
+    const c = classifyDocument(doc, { id, readDocument });
     // pattern: piece → module (resolve patternIdentity via the module index;
     // classifyDocument leaves moduleId unset — that's modelFromDocument's job).
     const moduleId = c.lineage.pattern

@@ -38,6 +38,7 @@ import {
   scanLimit,
   spaceDocumentReader,
   storedSchemaOf,
+  streamDeclarationOf,
   visibleEntityRows,
 } from "./model.ts";
 
@@ -358,7 +359,7 @@ function detailFromDoc(
   ctx: DetailContext,
   versions: VersionRow[],
 ): EntityDetail {
-  const c = classifyDocument(doc, ctx.readDocument);
+  const c = classifyDocument(doc, { id, readDocument: ctx.readDocument });
   const value = doc.value;
   const spec = importSpecifier(value);
   const named = ctx.nameOf.get(id);
@@ -457,15 +458,31 @@ function detailFromDoc(
     ? Object.keys(own.schema)
     : undefined;
   let schemaSource: string | undefined = own?.via === "document"
-    ? `schema document · ${String((doc.schema as { $ref: string }).$ref)}`
+    ? `schema document · ${own.ref}`
     : undefined;
   let streamPayload: boolean | undefined = own !== undefined &&
       c.kind === "stream"
     ? true
     : undefined;
-  // A named owned cell without a schema of its own — a value cell, or a
-  // stream set up before its document carried one — takes the DECLARED one
-  // from the owner piece that names it.
+  // A stream carries no schema of its own: the one shown is the DECLARED one,
+  // read from the manifest link its owner keeps for it, and the source names
+  // that manifest and, where the link held a reference, the schema document
+  // it was followed into.
+  if (schema === undefined && c.kind === "stream") {
+    const decl = streamDeclarationOf(id, doc, ctx.readDocument);
+    if (decl) {
+      schema = annotate(decl.schema);
+      schemaKeys = isObjectNotArray(decl.schema)
+        ? Object.keys(decl.schema)
+        : undefined;
+      streamPayload = true;
+      schemaSource = `declared in owner manifest · ${decl.owner}` +
+        (decl.via === "document" ? ` · schema document · ${decl.ref}` : "");
+    }
+  }
+  // A named owned cell with no schema read so far — a value cell, or a stream
+  // no manifest declares — takes the DECLARED one from the owner piece that
+  // names it.
   if (schema === undefined && named) {
     const decl = declaredSchemaFor(ctx.docs.get(named.owner), named.key);
     if (decl) {
@@ -599,7 +616,7 @@ export function buildAllDetails(
   // base labels (refined by import specifier / context name).
   const nameOf = new Map<string, { owner: string; key: string }>();
   for (const [id, doc] of docs) {
-    const c = classifyDocument(doc, readDocument);
+    const c = classifyDocument(doc, { id, readDocument });
     // Only MODERN piece result values carry semantic names as keys (createProfile,
     // profiles, …). A legacy PROCESS cell's top-level keys are control-plane
     // ($TYPE/resultRef/internal/argument) — naming children by those is noise.
@@ -613,7 +630,7 @@ export function buildAllDetails(
     }
   }
   for (const [id, doc] of docs) {
-    const c = classifyDocument(doc, readDocument);
+    const c = classifyDocument(doc, { id, readDocument });
     const spec = importSpecifier(doc.value);
     const named = nameOf.get(id);
     let label = c.label;

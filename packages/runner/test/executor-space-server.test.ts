@@ -23,7 +23,6 @@ import { Identity } from "@commonfabric/identity";
 import { getLogger } from "@commonfabric/utils/logger";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
-import { writeResultSchemaMeta } from "../src/result-schema-meta.ts";
 import {
   insertExecutionOutboxRows,
   selectPendingExecutionOutboxRows,
@@ -1446,13 +1445,12 @@ describe("stage G SpaceServer recovery seams", () => {
           "lt6-stream-early",
         ]
       ) {
+        // A stream document holds no value, and nothing on it says what it
+        // is: the handle that reaches it declares the stream.
         const stream = creator.getCell<unknown>(space, name, {
           asCell: ["stream"],
         });
         await stream.sync();
-        const tx = creator.edit();
-        writeResultSchemaMeta(stream.withTx(tx), { asCell: ["stream"] });
-        expect((await tx.commit()).error).toBeUndefined();
       }
       for (
         const name of [
