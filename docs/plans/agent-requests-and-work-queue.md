@@ -626,7 +626,9 @@ sums; nothing in the first take depends on it.
 
 ## Phases
 
-Each phase lands on its own and is testable without an LLM provider: the
+[The implementation plan](agent-requests-implementation.md) sequences these
+as stages with files, tests, and gates; read it for order and this section
+for what each phase is for. Each phase lands on its own and is testable without an LLM provider: the
 harness has a scripted model client (`test/research.test.ts`,
 `ScriptedModelClient`), and the runner's admission and settlement are
 exercised with a fake executor the way hosted authoring's stage 1 prescribes.

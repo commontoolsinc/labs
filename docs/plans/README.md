@@ -20,6 +20,11 @@ a record: archive it to `docs/history/plans/` following the procedure in
   cost evidence when it finishes. The harness writes the result itself, and a
   per-user runner on the Loom host pulls work from the cloud home space.
   Carries the rulings and the assumptions the first take rests on.
+- [Agent requests — implementation plan](agent-requests-implementation.md)
+  sequences that design as seven stages with the files, tests, gates, and
+  exit criteria of each: Loom retrieval tools, the harness result writer, the
+  `agent` builtin, records and runner, inspection, the book-recommendation
+  demonstration, and the ceiling deviations to retire.
 - [Discovering Loom resources with wish](loom-resource-discovery.md) proposes
   publishing existing database and companion-cell references once per Loom
   environment, with a staged person-inbox migration and compiled integration
