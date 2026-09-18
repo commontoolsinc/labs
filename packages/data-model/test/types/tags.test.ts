@@ -46,11 +46,11 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricUnavailable } from "@/fabric-primitives/FabricUnavailable.ts";
-import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@/fabric-primitives/for-testing-only.ts";
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
 } from "@/fabric-primitives/interface.ts";
+import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@/for-testing-only.ts";
 import {
   FabricPrimitive,
   type FabricValue,

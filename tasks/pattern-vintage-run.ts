@@ -30,6 +30,7 @@ import {
   type ReplayFailure,
   stampFor,
   vintageFileName,
+  vintageRecordName,
   type VintageRef,
 } from "./pattern-vintage-lib.ts";
 import {
@@ -1037,8 +1038,7 @@ export async function replayAll(
       test: {
         k: "gate",
         s: "repo",
-        n: `pattern-vintage ${vintage.testKey} ${vintage.tier} ` +
-          vintage.stamp,
+        n: vintageRecordName(vintage),
       },
       outcome: report.failures.length > 0 ? "fail" : "pass",
       durationMs: Math.round(performance.now() - replayStarted),
