@@ -87,9 +87,6 @@ export class DebugConverter {
     const length: number = value.length;
     const maxLength = this.#limits.maxArrayLength;
     const result: FabricValue[] = [];
-    // An array is indexable by property name directly, so the index names
-    // `Object.keys()` yields are used as they come.
-    const byName = result as unknown as Record<string, FabricValue>;
 
     result.length = Math.min(length, maxLength);
     for (const key of Object.keys(value)) {
@@ -99,15 +96,16 @@ export class DebugConverter {
         continue;
       }
 
-      if (Number(key) >= maxLength) {
+      const index = Number(key);
+      if (index >= maxLength) {
         // It's an element past the limit, which the length form stands for.
         continue;
       }
 
       try {
-        byName[key] = this.#convertSubvalue(value[key], depth + 1);
+        result[index] = this.#convertSubvalue(value[index], depth + 1);
       } catch (e) {
-        byName[key] = DebugConverter.#makeUnconvertibleResult(e);
+        result[index] = DebugConverter.#makeUnconvertibleResult(e);
       }
     }
 

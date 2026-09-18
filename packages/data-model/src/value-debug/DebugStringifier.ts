@@ -193,15 +193,15 @@ export class DebugStringifier {
    * encoding.
    */
   #renderRealmProperties(
-    value: PrimitiveState,
+    value: { readonly [key: string]: PrimitiveState },
     indent: string,
     depth: number,
   ): string[] {
-    return this.#renderProperties(
-      value as { readonly [key: string]: PrimitiveState },
+    return this.#renderEntries(
+      Object.entries(value),
+      undefined,
       indent,
       (v, i) => this.#renderRealmState(v, i, depth + 1),
-      false,
     );
   }
 
@@ -269,7 +269,7 @@ export class DebugStringifier {
       return `${open}...)`;
     } else if (isPlainObject(payload)) {
       const tagged = DebugStringifier.#taggedFormOf(
-        payload as FabricPlainObject,
+        payload,
       );
 
       if (tagged !== undefined) {
@@ -277,8 +277,8 @@ export class DebugStringifier {
         // properties.
         return `${open}${this.#renderTaggedForm(tagged, indent)})`;
       } else {
-        const parts = this.#renderProperties(
-          payload as FabricPlainObject,
+        const parts = this.#renderConvertedProperties(
+          payload,
           indent,
         );
         return this.#renderContainer(open, ")", parts, indent);
@@ -300,56 +300,69 @@ export class DebugStringifier {
     if (tagged !== undefined) {
       return this.#renderTaggedForm(tagged, indent);
     } else {
-      const parts = this.#renderProperties(value, indent);
+      const parts = this.#renderConvertedProperties(value, indent);
       return this.#renderContainer("{", "}", parts, indent);
     }
   }
 
   /**
-   * Renders the properties of a plain object, one part per property, for a
-   * container whose closing bracket is indented by `indent`, each value
-   * rendered by `render` (by default, as a converted value). When `converted`
-   * is `true` (the default), the object came through the conversion: a key is
-   * rendered as the original value's key, the slash the conversion prefixes
-   * to a key that starts with one and to an unsafe key coming back off here,
-   * and a final `/...` property is the property-count form, rendered as the
-   * count it carries. Otherwise the object is laid out as it stands, and one
-   * with more properties than the maximum property count has the first that
-   * many rendered and then the count of the whole.
+   * Renders the properties of a plain object which came through the
+   * conversion, one part per property, for a container whose closing bracket
+   * is indented by `indent`. A key is rendered as the original value's key,
+   * the slash the conversion prefixes to a key that starts with one and to an
+   * unsafe key coming back off here, and a final `/...` property is the
+   * property-count form, rendered as the count it carries.
    */
-  #renderProperties<T>(
-    value: { readonly [key: string]: T },
+  #renderConvertedProperties(
+    value: FabricPlainObject,
     indent: string,
-    render: (value: T, indent: string) => string = (v, i) =>
-      this.#renderSubvalue(v as unknown as FabricValue, i),
-    converted = true,
   ): string[] {
-    const inner = this.#innerIndent(indent);
     const entries = Object.entries(value);
-    let count: number | undefined;
+    const last = entries.at(-1);
+    const count = (last?.[0] === "/...")
+      ? DebugStringifier.#countOf(last[1])
+      : undefined;
 
-    if (converted) {
-      const last = entries.at(-1);
-      const lastCount = (last?.[0] === "/...")
-        ? DebugStringifier.#countOf(last[1] as FabricValue)
-        : undefined;
-      if (lastCount !== undefined) {
-        count = lastCount;
-        entries.pop();
-      }
+    if (count !== undefined) {
+      entries.pop();
     }
 
-    if (entries.length > this.#limits.maxProperties) {
+    return this.#renderEntries(
+      entries.map(([key, subvalue]) => [
+        (key[0] === "/") ? key.slice(1) : key,
+        subvalue,
+      ]),
+      count,
+      indent,
+      (v, i) => this.#renderSubvalue(v, i),
+    );
+  }
+
+  /**
+   * Renders the entries of an object, one part per entry, for a container
+   * whose closing bracket is indented by `indent`, each value rendered by
+   * `render`. When there are more entries than the maximum property count,
+   * the first that many are rendered. A final part says the count of the
+   * whole: `count` when given, which is for an object already cut short, or
+   * the number of entries when that is what exceeded the maximum.
+   */
+  #renderEntries<T>(
+    entries: readonly (readonly [key: string, value: T])[],
+    count: number | undefined,
+    indent: string,
+    render: (value: T, indent: string) => string,
+  ): string[] {
+    const inner = this.#innerIndent(indent);
+    const maxProperties = this.#limits.maxProperties;
+
+    if (entries.length > maxProperties) {
       count = entries.length;
-      entries.length = this.#limits.maxProperties;
+      entries = entries.slice(0, maxProperties);
     }
 
     const parts = entries.map(([key, subvalue]) => {
-      const original = (converted && (key[0] === "/")) ? key.slice(1) : key;
       const rendered = render(subvalue, inner);
-      return `${
-        DebugStringifier.#renderKey(original)
-      }${this.#colon}${rendered}`;
+      return `${DebugStringifier.#renderKey(key)}${this.#colon}${rendered}`;
     });
 
     if (count !== undefined) {
@@ -633,7 +646,7 @@ export class DebugStringifier {
       return undefined;
     }
 
-    const measure = (value as FabricPlainObject)[name];
+    const measure = value[name];
     return (typeof measure === "number") ? measure : undefined;
   }
 
