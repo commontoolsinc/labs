@@ -1,6 +1,6 @@
 import type { FabricValue } from "@/interface.ts";
 import { isValidFabricValue } from "@/types";
-import { toCompactDebugString } from "@/value-debug.ts";
+import { toCompactDebugString } from "@/value-debug";
 
 /** How much of a rendered state to keep. */
 const MAX_RENDERED_LENGTH = 200;

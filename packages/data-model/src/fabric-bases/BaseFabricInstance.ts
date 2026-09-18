@@ -16,7 +16,7 @@
  */
 
 import { FabricInstance, type FabricValue } from "@/interface.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
+import { toCompactDebugString } from "@/value-debug";
 // Used only inside method bodies: this import participates in a module cycle
 // with `deep-freeze.ts` (which imports this module's symbols and class for its
 // generic dispatch), which is safe for call-time function use but must not be

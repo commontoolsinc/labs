@@ -21,7 +21,7 @@ import {
   type FabricValueLayer,
   type FabricValuePlusLayer,
 } from "@/interface.ts";
-import { toShortQuotedDebugString } from "@/value-debug.ts";
+import { toShortQuotedDebugString } from "@/value-debug";
 
 import { type PlusTypePredicate } from "./interface.ts";
 import {
