@@ -4,14 +4,16 @@ import type {
   NonterminalCodec,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
+import {
+  toCompactDebugString,
+  toShortQuotedDebugString,
+} from "@/value-debug.ts";
 import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 import { UnknownValue } from "./UnknownValue.ts";
 import type { FabricValue } from "@/interface.ts";
 import { BaseCodecAct } from "./BaseCodecAct.ts";
 import { ProblematicStateError } from "./ProblematicStateError.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
-import { quotedDebugString } from "./quotedDebugString.ts";
 
 /**
  * The state of one act of decoding: what {@link BaseCodecAct} holds, plus how
@@ -236,7 +238,7 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
       return this.reportMalformed(
         tag,
         this.decodeValue(rawState),
-        `tagged value has a malformed tag: ${quotedDebugString(tag)}`,
+        `tagged value has a malformed tag: ${toShortQuotedDebugString(tag)}`,
       );
     }
 

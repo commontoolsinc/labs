@@ -28,6 +28,8 @@ import {
   toCompactDebugString,
   toDebugKindString,
   toIndentedDebugString,
+  toLongQuotedDebugString,
+  toShortQuotedDebugString,
 } from "@/value-debug.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
@@ -253,6 +255,54 @@ describe("value-debug", () => {
 
       const weird = Object.create({ constructor: undefined as unknown });
       expect(toDebugKindString(weird)).toBe("object");
+    });
+  });
+
+  describe("toShortQuotedDebugString", () => {
+    it("returns the compact rendering as a backtick-quoted code span", () => {
+      expect(toShortQuotedDebugString({ a: [1, "x"] })).toBe('`{a:[1,"x"]}`');
+    });
+
+    it("returns a rendering cut to fifty characters, ellipsis included", () => {
+      const value = { text: "x".repeat(100) };
+      const whole = toCompactDebugString(value);
+      expect(whole.length).toBeGreaterThan(50);
+      expect(toShortQuotedDebugString(value)).toBe(
+        `\`${whole.slice(0, 47)}...\``,
+      );
+    });
+
+    it("returns a quoted rendering for a value the renderer cannot read", () => {
+      const value = {
+        get boom(): number {
+          throw new Error("nope");
+        },
+      };
+      expect(toShortQuotedDebugString(value)).toBe(
+        '`{boom:/unconvertible("nope")}`',
+      );
+    });
+  });
+
+  describe("toLongQuotedDebugString", () => {
+    it("returns the compact rendering as a backtick-quoted code span", () => {
+      expect(toLongQuotedDebugString({ a: [1, "x"] })).toBe('`{a:[1,"x"]}`');
+    });
+
+    it("returns a rendering the short form would cut, whole", () => {
+      const value = { text: "x".repeat(100) };
+      const whole = toCompactDebugString(value);
+      expect(whole.length).toBeGreaterThan(50);
+      expect(toLongQuotedDebugString(value)).toBe(`\`${whole}\``);
+    });
+
+    it("returns a rendering cut to five hundred characters, ellipsis included", () => {
+      const value = Array.from({ length: 100 }, () => "abcdef");
+      const whole = toCompactDebugString(value);
+      expect(whole.length).toBeGreaterThan(500);
+      expect(toLongQuotedDebugString(value)).toBe(
+        `\`${whole.slice(0, 497)}...\``,
+      );
     });
   });
 

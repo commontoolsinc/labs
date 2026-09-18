@@ -39,7 +39,7 @@ import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
 } from "@/types";
-import { toCompactDebugString } from "@/value-debug.ts";
+import { toShortQuotedDebugString } from "@/value-debug.ts";
 
 /**
  * The reasons a `FabricUnavailable` can give, as a table keyed by itself, so
@@ -150,9 +150,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
       !Object.hasOwn(UNAVAILABLE_REASONS, reason)
     ) {
       throw new Error(
-        `Not an \`UnavailableReason\`: ${
-          toCompactDebugString(reason, { backtickQuote: true })
-        }`,
+        `Not an \`UnavailableReason\`: ${toShortQuotedDebugString(reason)}`,
       );
     }
 
@@ -165,15 +163,13 @@ export class FabricUnavailable extends BaseFabricPrimitive
       ) {
         throw new Error(
           `Reason \`error\` requires an \`UnavailableErrorKind\`, not ${
-            toCompactDebugString(errorKind, { backtickQuote: true })
+            toShortQuotedDebugString(errorKind)
           }.`,
         );
       }
       if ((errorMessage !== null) && (typeof errorMessage !== "string")) {
         throw new Error(
-          `Not an \`errorMessage\`: ${
-            toCompactDebugString(errorMessage, { backtickQuote: true })
-          }`,
+          `Not an \`errorMessage\`: ${toShortQuotedDebugString(errorMessage)}`,
         );
       }
       // A message equal to the kind's default is stored as none.
@@ -184,7 +180,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
     } else if ((errorKind !== null) || (errorMessage !== null)) {
       throw new Error(
         `Reason ${
-          toCompactDebugString(reason, { backtickQuote: true })
+          toShortQuotedDebugString(reason)
         } takes neither an \`errorKind\` nor an \`errorMessage\`.`,
       );
     }

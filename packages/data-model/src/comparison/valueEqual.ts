@@ -11,7 +11,7 @@ import {
   type FabricValue,
 } from "@/interface.ts";
 import { isFabricSpecialObject } from "@/types";
-import { toCompactDebugString } from "@/value-debug.ts";
+import { toShortQuotedDebugString } from "@/value-debug.ts";
 import { cachedHashStringOf, hashStringOf } from "@/value-hash.ts";
 
 /**
@@ -185,9 +185,7 @@ function objectSubtypeOf(
     return "plain";
   } else {
     throw new Error(
-      `Cannot compare value ${
-        toCompactDebugString(value, { backtickQuote: true })
-      }`,
+      `Cannot compare value ${toShortQuotedDebugString(value)}`,
     );
   }
 }
