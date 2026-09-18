@@ -149,13 +149,16 @@ class DebugConverter {
   constructor(
     /** Value to convert. */
     value: unknown,
-    /** Limits to convert within. */
+    /** Limits the result is to stay within. */
     limits: ConversionLimits,
     /** Replacer function. */
     replacer?: (value: any) => any,
   ) {
     this.#value = value;
-    this.#limits = limits;
+    // We subtract one from `maxDepth` because the "suggestive forms" for elided
+    // data use a layer of depth. The array-length and string-length forms use
+    // two, and so can run one level past the limit.
+    this.#limits = { ...limits, maxDepth: limits.maxDepth - 1 };
     this.#replacer = replacer;
   }
 
@@ -477,8 +480,8 @@ class DebugConverter {
  * are what records them.
  */
 class DebugStringifier {
-  readonly #options: DebugValueOptions;
   readonly #limits: ConversionLimits;
+  readonly #replacer: undefined | ((value: any) => any);
   readonly #singleIndent: string | undefined;
   readonly #spacer: string;
   readonly #colon: string;
@@ -490,16 +493,17 @@ class DebugStringifier {
   /**
    * Constructs an instance which renders using `indent` spaces per nesting
    * level when given, and on a single line when not. A value which turns up
-   * unconverted while rendering is converted with `options`, and what the
-   * rendering lays out itself, unconverted, is bounded by `limits`.
+   * unconverted while rendering is converted within `limits`, consulting
+   * `replacer` when given, and what the rendering lays out itself,
+   * unconverted, is bounded by `limits`.
    */
   constructor(
-    options: DebugValueOptions,
     limits: ConversionLimits,
+    replacer?: (value: any) => any,
     indent?: number,
   ) {
-    this.#options = options;
     this.#limits = limits;
+    this.#replacer = replacer;
     this.#singleIndent = (indent === undefined)
       ? undefined
       : " ".repeat(indent);
@@ -641,10 +645,12 @@ class DebugStringifier {
       );
       return this.#renderContainer("{", "}", parts, indent);
     } else {
-      return this.#renderSubvalue(
-        toStructuredDebugValue(value, this.#options),
-        indent,
-      );
+      const converted = new DebugConverter(
+        value,
+        this.#limits,
+        this.#replacer,
+      ).convert();
+      return this.#renderSubvalue(converted, indent);
     }
   }
 
@@ -1218,7 +1224,7 @@ function renderDebugString(
 
   try {
     const converted = toStructuredDebugValue(value, converterOptions);
-    return new DebugStringifier(converterOptions, limits, indent)
+    return new DebugStringifier(limits, options?.replacer, indent)
       .render(converted);
     // deno-coverage-ignore-start
   } catch {
@@ -1409,12 +1415,5 @@ export function toStructuredDebugValue(
 ): FabricValue {
   const limits = checkedLimits(options);
 
-  // We subtract one from `maxDepth` because the "suggestive forms" for elided
-  // data use a layer of depth. The array-length and string-length forms use
-  // two, and so can run one level past the limit.
-  return new DebugConverter(
-    value,
-    { ...limits, maxDepth: limits.maxDepth - 1 },
-    options?.replacer,
-  ).convert();
+  return new DebugConverter(value, limits, options?.replacer).convert();
 }
