@@ -223,7 +223,21 @@ type ProfileDefaultPattern = {
   addElement: Stream<AddProfileElementEvent>;
   removeElement: Stream<{ cell: Cell<unknown> }>;
   setBio: Stream<SetProfileBioEvent>;
+  inbox?: ProfileInboxPointer;
+  setInbox: Stream<SetProfileInboxEvent>;
   initialNameApplied: string;
+};
+
+type ProfileInboxPointer = {
+  space: string;
+  host: string;
+  piece?: string;
+};
+
+type SetProfileInboxEvent = {
+  space?: string;
+  host?: string;
+  piece?: string;
 };
 ```
 
@@ -241,6 +255,27 @@ outside Common Fabric, such as GitHub, LinkedIn, or a personal site. Entries
 contain a display label and an `http(s)` URL; unsafe schemes are rejected before
 storage and never render as live anchors. The list is owner-protected and is
 mutated only through `addExternalLink` / `removeExternalLink`.
+
+`inbox` is the owner's share inbox pointer: where other people's daemons
+deliver things shared with the owner. `space` is the DID of the inbox space
+the owner's daemon minted, `host` the http(s) origin of the memory host that
+space lives on, and `piece` the id of the inbox piece in that space, in the
+bare spelling the CLI takes (`baedreia…`, without the `of:` prefix a link
+carries). The piece is named because an inbox space can hold more than one
+inbox piece (each mint adds one), and a sender that picks one by listing the
+space can pick one the owner's reader never reads. The pointer holds no
+secret — the inbox space's ACL is the gate — and is owner-protected, written
+only through `setInbox`, which stores a pointer whole (a `did:key` space and
+an origin host, with the piece carried when given and a leading `of:`
+dropped), clears it when every part is blank, and drops anything else, a
+piece alone included. A stored profile predating the field has no `inbox`
+property, and one written without a piece has no `piece` property.
+
+`piece` is a plain id beside `space` rather than a link replacing it because
+this type is embedded in the home pattern's stored-profile contract, which the
+pattern-update gate holds to additive changes. The shape it stands in for is a
+link to the inbox piece (space and piece id together) plus `host`, to be taken
+once a shape change of that contract is admissible.
 
 `verifiedIdentities` is an opt-in list of identifiers that Loom observed only
 after a connector successfully authenticated as the profile owner. Each

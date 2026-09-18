@@ -81,6 +81,29 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     record: "docs/history/profile-inbox-pointer-break.md",
   },
   {
+    // A SECOND entry for the picker, and no baseline here appears above: the
+    // pairs stay disjoint because the gate keys accepted pairs into a Map,
+    // so a baseline named twice would take the later path set in place of
+    // the earlier one.
+    //
+    // The inbox pointer gained an optional `piece`, the id of the inbox
+    // piece in the inbox space. Home and the profile carry the addition
+    // compatibly; the picker's `defaultProfile` argument is a union, and
+    // beneath a union alternative the proof runs without the evolution
+    // policy that admits a new optional property, so the addition reads as
+    // an alternative the candidate does not accept. A stored profile of
+    // either shape validates against the candidate.
+    pattern: "system/profile-picker.tsx",
+    baselines: [
+      "20260915T064957Z-Idjl03Ljo7Yyeecn",
+      "20260918T000350Z-TY78mWqtLnHDoZtN",
+    ],
+    paths: ["argument.defaultProfile"],
+    reason:
+      "the inbox pointer's new optional piece id reads as an unaccepted alternative beneath the picker's union-typed defaultProfile argument",
+    record: "docs/history/profile-inbox-piece-break.md",
+  },
+  {
     // The Join verb's event opens: `Record<PropertyKey, never>` compiled to
     // a closed empty object the runner's closed-world gate now enforces, so
     // the rendered button's serialized DOM event was refused and the roster

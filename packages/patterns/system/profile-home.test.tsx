@@ -48,6 +48,16 @@ export default pattern(() => {
       host: "https://estuary.example.ts.net",
     });
   });
+  const action_set_inbox_with_a_piece = action(() => {
+    profile.setInbox.send({
+      space: INBOX_SPACE,
+      host: "https://estuary.example.ts.net",
+      piece: " of:baedreiainboxpiece ",
+    });
+  });
+  const action_set_inbox_with_only_a_piece = action(() => {
+    profile.setInbox.send({ piece: "baedreiaotherpiece" });
+  });
   const action_clear_inbox = action(() => {
     profile.setInbox.send({});
   });
@@ -56,14 +66,26 @@ export default pattern(() => {
   );
   const assert_inbox_set_with_the_host_trimmed = assert(() =>
     profile.inbox?.space === INBOX_SPACE &&
-    profile.inbox?.host === "https://estuary.example.ts.net"
+    profile.inbox?.host === "https://estuary.example.ts.net" &&
+    profile.inbox?.piece === undefined
+  );
+  const assert_inbox_names_the_piece_without_its_prefix = assert(() =>
+    profile.inbox?.space === INBOX_SPACE &&
+    profile.inbox?.host === "https://estuary.example.ts.net" &&
+    profile.inbox?.piece === "baedreiainboxpiece"
+  );
+  const assert_inbox_kept_over_a_piece_alone = assert(() =>
+    profile.inbox?.space === INBOX_SPACE &&
+    profile.inbox?.host === "https://estuary.example.ts.net" &&
+    profile.inbox?.piece === "baedreiainboxpiece"
   );
   const assert_inbox_kept_over_a_half_pointer = assert(() =>
     profile.inbox?.space === INBOX_SPACE &&
     profile.inbox?.host === "https://estuary.example.ts.net"
   );
   const assert_inbox_cleared = assert(() =>
-    profile.inbox?.space === "" && profile.inbox?.host === ""
+    profile.inbox?.space === "" && profile.inbox?.host === "" &&
+    profile.inbox?.piece === undefined
   );
 
   // CT-1828: same empty-after-trim guard applies to setAvatar.
@@ -204,6 +226,13 @@ export default pattern(() => {
       { assertion: assert_inbox_kept_over_a_half_pointer },
       { action: action_set_inbox_with_a_loose_did },
       { assertion: assert_inbox_kept_over_a_half_pointer },
+      { action: action_set_inbox_with_a_piece },
+      { assertion: assert_inbox_names_the_piece_without_its_prefix },
+      { action: action_set_inbox_with_only_a_piece },
+      { assertion: assert_inbox_kept_over_a_piece_alone },
+      // A pointer written without a piece stores the two fields alone.
+      { action: action_set_inbox },
+      { assertion: assert_inbox_set_with_the_host_trimmed },
       { action: action_clear_inbox },
       { assertion: assert_inbox_cleared },
       { assertion: assert_initial_state },

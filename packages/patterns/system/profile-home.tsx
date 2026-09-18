@@ -148,21 +148,43 @@ export type VerifiedExternalIdentityCell = Cell<VerifiedExternalIdentity>;
 
 /**
  * Where things shared with this profile's owner are delivered: the owner's
- * share inbox — a dedicated space their daemon minted, holding one inbox piece
+ * share inbox — a dedicated space their daemon minted, holding an inbox piece
  * whose `receive` stream other daemons call (loom `shares/inbox.py`; the
  * design is loom's weaver-multiuser-sharing D8 and share-inbox proposal).
  * Public on purpose and no secret in it: the inbox space's ACL is the gate,
  * the pointer only says where to knock. Empty strings mean "no inbox yet".
+ *
+ * The pointer names the piece as well as the space, because an inbox space
+ * can hold more than one inbox piece (each mint adds one) and a sender that
+ * picks one by listing the space can pick one the owner's reader never
+ * reads. The piece rides beside the space as a plain id rather than
+ * replacing it: this type is embedded in the stored-profile schema of the
+ * home pattern, whose contract the pattern-update gate holds to additive
+ * changes only. The shape this stands in for is a link to the inbox piece
+ * (space and piece id together) plus the host, which the profile schema can
+ * take once a shape change of the home contract is admissible.
  */
 export type ProfileInboxPointer = {
   /** The inbox space's DID. */
   space: string;
+
   /** The memory host the space lives on (an http(s) origin). */
   host: string;
+
+  /**
+   * Id of the inbox piece in that space, in the bare spelling the CLI takes
+   * (`baedreia…`, no `of:` prefix). Absent on a pointer written without one,
+   * which names the space alone.
+   */
+  piece?: string;
 };
+
 export type SetProfileInboxEvent = {
   space?: string;
   host?: string;
+
+  /** Inbox piece id; a leading `of:` is dropped, and blank means none. */
+  piece?: string;
 };
 
 type VerifiedIdentityListWrite<Binding> = OwnerProtectedProfileWrite<
@@ -565,24 +587,37 @@ function inboxHostOrigin(value: string): string {
   return url.origin;
 }
 
+// Normalizes a piece id for the pointer: trimmed, without the `of:` prefix
+// a link spells it with, and `undefined` where nothing is left.
+const inboxPieceId = (raw: string): string | undefined => {
+  const trimmed = raw.trim();
+  const id = trimmed.startsWith("of:") ? trimmed.slice(3).trim() : trimmed;
+  return id === "" ? undefined : id;
+};
+
 // The single authorized writer for the share inbox pointer. A pointer is
 // both parts shaped or nothing: a did:key for the space, an http(s) origin
-// for the host; both empty clears it (the owner retired their inbox).
+// for the host; all parts empty clears it (the owner retired their inbox).
 // Anything else is dropped, never half-written — a sender that read a half
-// pointer would knock on nothing.
+// pointer would knock on nothing. The piece id is carried, never required:
+// a piece alone names no space to knock on, so it is dropped like any other
+// half pointer.
 const setInbox = handler<
   SetProfileInboxEvent,
   { inbox: Writable<ProfileInboxPointer> }
 >((event, state) => {
   const space = (event.space ?? "").trim();
   const rawHost = (event.host ?? "").trim();
-  if (space === "" && rawHost === "") {
+  const piece = inboxPieceId(event.piece ?? "");
+  if (space === "" && rawHost === "" && piece === undefined) {
     state.inbox.set({ space: "", host: "" });
     return;
   }
   const host = inboxHostOrigin(rawHost);
   if (!INBOX_SPACE_DID.test(space) || host === "") return;
-  state.inbox.set({ space, host });
+  state.inbox.set(
+    piece === undefined ? { space, host } : { space, host, piece },
+  );
 });
 
 // The single authorized writer for externally hosted profile links. Add and
