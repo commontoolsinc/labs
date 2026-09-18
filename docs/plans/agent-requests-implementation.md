@@ -8,7 +8,8 @@ on its own, and is testable without a model provider. Checkboxes are ticked
 as work lands; when the last stage of the first take (stage 6) lands, both
 documents are archived to `docs/history/plans/`.
 
-**Status:** not started. Written 2026-09-18 against `37b1acd3dd`.
+**Status:** stage 2 implemented; the other stages not started. Written
+2026-09-18 against `37b1acd3dd`.
 
 ## Ground rules for every stage
 
@@ -103,7 +104,7 @@ The writer is the harness routine of design §1.3. It runs on the trusted host
 over the fabric session's runtime and is called by the runner of stage 4 after
 a run reaches its structured result. It is not a model tool.
 
-- [ ] `src/result-writer.ts` — `writeAgentResult({ session, handleTable,
+- [x] `src/result-writer.ts` — `writeAgentResult({ session, handleTable,
       modelContext, structuredResult, resultSchema, observedHandles })`
       returning `{ link, joinLabel, mintedDocuments }`. Steps, in one
       transaction on `session.pieces.runtime`:
@@ -125,11 +126,11 @@ a run reaches its structured result. It is not a model tool.
          `@commonfabric/runner/cfc` or a sibling so the harness does not copy
          it.
       5. Commit; return the result link and the join the transaction derived.
-- [ ] Refusal handling: a commit the boundary refuses surfaces as a typed
+- [x] Refusal handling: a commit the boundary refuses surfaces as a typed
       writer failure carrying the refusal code and no label detail, the way
       `run_pattern` reports `cfc_release_withheld`; the runner maps it to
       `refused`.
-- [ ] Tests, `test/result-writer.test.ts`, on an in-memory runtime with
+- [x] Tests, `test/result-writer.test.ts`, on an in-memory runtime with
       fixture cells of two labels and one observed Loom row: one result
       document, three links, targets keep their labels, inline text carries
       the join of both cell labels, the minted row document carries the row's
@@ -137,11 +138,34 @@ a run reaches its structured result. It is not a model tool.
       any write; a handle at a non-`asCell` position still becomes a link; a
       value above a declared ceiling at an `asCell` position is sealed rather
       than written.
-- [ ] Documents: `docs/IMPLEMENTATION_PROFILE.md` (the writer as a trusted
+- [x] Documents: `docs/IMPLEMENTATION_PROFILE.md` (the writer as a trusted
       host path, AH-TOOL-7), `docs/CURRENT_STATE.md`.
 
 *Exit:* the stage-2 test file passes and CFC inspection (`cf inspect`) of the
 written space shows the labels the test asserts.
+
+*As landed.* The writer takes `maxConfidentiality` — the run's observation
+ceiling — in place of `modelContext`, and declares it on every node of the
+schema it writes through as the result document's store policy; under the
+strict rung a tainted write to a store declaring no policy is refused, and the
+ceiling is the policy design §1.4 says the result fits by construction. The
+runtime measures the derived join against it, so the join stays derived and
+nothing asserts a label. Two transactions are committed rather than one: the
+documents minted for non-cell referents go first, in a transaction that reads
+nothing, so each carries its declared label alone, and the result transaction
+then reads them beside the observed cells so their labels join the inline
+text. Validation uses the sanitizer's validation half only: its string-sealing
+pass withholds every free string a schema does not enumerate, which is right
+for a value leaving the fabric toward a model and wrong for text a model
+authored on its way into the fabric. A position's declared `maxConfidentiality`
+is applied by the writer to the referent placed there and stripped from the
+schema the write goes through, because the runtime applies that declaration to
+the whole transaction's join. The `LlmDerived` helper is exported as
+`withLlmDerivedStamp` from `@commonfabric/runner/cfc`. Stage 1 supplies no
+handle-table entry for a non-cell referent yet, so the writer takes those
+referents, with their content and reported label, as `kind: "document"` entries
+of `observedHandles`; `cf inspect` of the written space remains to be run
+against a real deployment.
 
 ## Stage 3 — The `agent` builtin
 
