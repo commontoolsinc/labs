@@ -428,8 +428,8 @@ export interface SampledLifts {
  * Decides what a measured sample's runs may be attributed to, and fails the
  * sample when they may not be attributed at all. `actions` are the graph
  * snapshots' implementation previews by `src`, taken before and after the
- * operation; `runSrcs` are the `src` keys of the runs that carried a read
- * sample, a run with no `src` keyed by the empty string.
+ * operation; `runSrcs` are the source locations of the runs that carried a
+ * read sample and a source location to carry.
  *
  * The checks the attribution rests on all run here, over the `src` values of
  * the snapshots and of the runs together: the board runs the program the

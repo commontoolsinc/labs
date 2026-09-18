@@ -230,8 +230,9 @@ describe("topics-browser-measurement", () => {
           operation: () => Promise.resolve(),
         }),
       ).rejects.toThrow(
-        "undemanded: the measured operation produced no runs with a read " +
-          "sample; declare `mayRunNothing` for an operation that may",
+        "undemanded: the measured operation completed no run carrying an " +
+          "authored source location; declare `mayRunNothing` for an " +
+          "operation that may",
       );
       expect(await samplesLeftInPage()).toEqual([]);
     });
@@ -285,6 +286,51 @@ describe("topics-browser-measurement", () => {
       } finally {
         await fresh.close();
       }
+    });
+
+    it("throws for a run whose source location cannot be parsed, even under the declaration", async () => {
+      // The declaration waives a run that carries no source location. It must
+      // not waive one that carries a location this helper cannot read: that is
+      // a measurement it cannot place, and zeroing it would be the
+      // misattribution the position checks exist to catch. Zero such runs were
+      // observed in the environments measured for the reopen workload, so the
+      // guard has no counterexample to keep it honest and this case is what
+      // keeps it.
+      //
+      // The run is made unreadable at its source: a marker is delivered to the
+      // page's telemetry carrying a `src` that `parseSrc()` rejects, alongside
+      // the read sample that makes it a counted run.
+
+      const operation = () =>
+        session.page.evaluate(() => {
+          const scope = globalThis as typeof globalThis & {
+            commonfabric?: { rt?: { emit?: unknown } };
+          };
+          const client = scope.commonfabric!.rt! as unknown as {
+            emit: (event: string, marker: unknown) => void;
+          };
+          client.emit("telemetry", {
+            type: "scheduler.run.complete",
+            src: "not a source location",
+            durationMs: 1,
+            reads: {
+              proxyAccesses: 1,
+              linkResolutions: 0,
+              distinctDocuments: 1,
+              registeredDependencies: 1,
+            },
+          });
+        });
+
+      await expect(
+        measureTopicsReads(session.page, {
+          label: "unparseable",
+          program,
+          operation,
+          mayRunNothing: true,
+        }),
+      ).rejects.toThrow("carried no source location to attribute them by");
+      expect(await samplesLeftInPage()).toEqual([]);
     });
 
     it("throws the operation's own error and leaves no sample in the page", async () => {

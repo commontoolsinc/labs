@@ -335,41 +335,55 @@ It charts a timed interval and writes two samples per size to stderr: the timed
 one, carrying that operation's graph size and timing, and a read-accounted one
 of the same operation, paired with it as the lunch-poll read-scaling benchmark
 pairs its diagnostic vote with its timed vote. What the read-accounted half
-records is a zero, and the zero is the finding: **a reopen completes no run that
-`measureTopicsReads()` can attribute to a lift**, so the sample declares
-`mayRunNothing` and carries a row per lift reading no runs. On
-eight-topic boards, seeded both with and without citations, the reopen completed
-no run carrying a read sample at all, where a first open of the same topic ran
-the pivot, that topic's backlinks and its comment count — about fifty scheduler
-runs in all. On the hundred-topic board a reopen's runs did carry a read sample
-but no source location, which the helper refuses because a position it cannot
-parse says nothing about the run. Neither refusal hides a named lift: a lift's
-run marker carries a source location, and these runs had none.
+records is a zero — a row per lift reading no runs — and the zero is the
+finding. It is recorded rather than omitted so that a reopen which begins doing
+lift work shows up as rows, instead of as an unexplained shift in the timing
+beside it.
 
-That refusal belongs to the operation and not to where the interval is drawn,
-which is worth stating because the plan asks the browser tier for body reads
-without qualification. Four boundaries were measured on an eight-topic board
-with citations, each of them a re-open within one live runtime client:
+The sample declares `mayRunNothing`, which waives one failure and only one: an
+operation completing no run that carried an authored source location. A run
+carrying a location the helper cannot parse still fails the measurement,
+declared or not, because that is a reading it cannot place rather than an
+absence of work.
 
-| boundary                                         | attributable runs                                   |
-| ------------------------------------------------ | --------------------------------------------------- |
-| open a topic already opened once, from the board | none; 1 scheduler run                               |
-| a third visit to the same topic                  | none; **0** scheduler runs                          |
-| reopen with another topic opened in between      | runs carried a read sample, but no source location  |
+Three measurements stand behind that shape, all against a local toolshed with
+client execution. The first asked whether the absence belongs to the operation
+or to where the interval is drawn. Four boundaries, each a re-open within one
+live runtime client, on an eight-topic board with citations:
+
+| boundary                                         | attributable runs                                       |
+| ------------------------------------------------ | ------------------------------------------------------- |
+| open a topic already opened once, from the board | none; 1 scheduler run                                   |
+| a third visit to the same topic                  | none; **0** scheduler runs                              |
+| reopen with another topic opened in between      | runs carried a read sample, but no source location      |
 | the whole round trip, topic → board → topic      | `lastActivityOf` once; the other three lifts not at all |
 
-Only the last yields a lift run, and it yields it for the wrong leg: measuring
-the return to the board on its own records that same single `lastActivityOf`
-run, with the same counters, while the reopen beside it records none. Widening
-the boundary that far would also charge this series for a board render, which
-the `<size>` series above already measures and which at a hundred topics costs
-an order of magnitude more than the reopen. So what this series records is a
-zero, and it records it rather than omitting it: the sample declares
-`mayRunNothing` and carries a row per lift reading no runs, which is why a
-reopen that begins doing lift work shows up here as rows instead of as an
-unexplained shift in the timing beside it. What does not apply to this workload
-is separating producer from consumer work, there being no lift work to
-separate; [the plan](../plans/topics-computation-cost.md) records that.
+Only the last yields a lift run, and for the wrong leg: measuring the return to
+the board on its own records that same single `lastActivityOf` run with the same
+counters, while the reopen beside it records none. Widening the boundary that
+far would charge this series for a board render, which the `<size>` series
+already measures and which at a hundred topics costs an order of magnitude more
+than the reopen.
+
+The second classified the runs themselves, because a reopen at first refused the
+read-accounted sample on most attempts — 14 refusals in 20 trials at a hundred
+topics, 19 in 20 at eight. Recording each run's raw source location across 32
+reopen trials and 16 first-open controls in the same environment: every reopen
+run that carried a read sample carried **no** source location, none carried one
+that failed to parse, and the first opens carried 416 parseable locations and
+attributed three lift runs on every one of the 16. A first open also carries
+runs without a location — 342 of them — alongside its parseable ones, which
+is why the attribution check passes there and failed on a reopen, where the
+runs without one were the whole population.
+
+The third is the outcome: with the two cases told apart, 20 trials of the
+hundred-topic reopen recorded 20 zeros and no refusals. Thirteen of them saw one
+run carrying no source location and seven saw none at all, which the sample
+reports as `runsWithoutSource` so that the two zeros do not print identically.
+
+What does not apply to this workload is separating producer from consumer work,
+there being no lift work to separate; [the
+plan](../plans/topics-computation-cost.md) records that.
 
 A reopen may run nothing in the worker at all, and the series declares
 `mayRunNothing` because that was observed rather than to quiet the check in
@@ -490,17 +504,23 @@ when its module has not started during the operation and no action's `src` names
 the module's file under any path. A `src` naming that file under another path,
 or the module itself under another root, fails the measurement instead.
 
-A measured operation fails when it completes no runs with a read sample, when an
-event commit fails, or when the page raises an error. The first of those is
-waived by declaring `mayRunNothing`, which permits a zero rather than asserting
-one: an operation that does complete runs is attributed as usual, and the sample
-records the declaration, so a measured zero is distinguishable from an operation
-nobody measured. It also fails when its runs cannot be attributed by position:
-when the runs with a read sample carry no source location, or when the board's
-pivot module is not running, since a measurement is taken on a page showing the
-board. Neither of those is waived — a run whose position cannot be read is a
-measurement that cannot be attributed rather than an absence of work, and
-`mayRunNothing` does not reach it. A timed operation fails on a
+A measured operation fails when it completes no run carrying an authored source
+location, when an event commit fails, or when the page raises an error. The
+first of those is waived by declaring `mayRunNothing`, which permits a zero
+rather than asserting one: an operation that does complete such runs is
+attributed as usual, and the sample records the declaration, so a measured zero
+is distinguishable from an operation nobody measured. A run whose marker carried
+no source location is counted apart, as `runsWithoutSource`, and reported beside
+the zero so that a zero taken next to runs the sample could not place reads
+differently from one taken next to no runs at all.
+
+It also fails when its runs cannot be attributed by position: when the runs that
+did carry a source location all carry one the helper cannot parse, or when the
+board's pivot module is not running, since a measurement is taken on a page
+showing the board. Neither of those is waived — a location that cannot be read
+is a measurement that cannot be placed rather than an absence of work, and
+`mayRunNothing` does not reach it. `topics-browser-measurement.test.ts` holds
+that case with the declaration in force. A timed operation fails on a
 page error, and when the worker's `scheduler/run` timing records no run, unless
 the caller declares with `mayRunNothing` that the operation may run nothing; the
 sample records that declaration. The count is of action runs the worker's
