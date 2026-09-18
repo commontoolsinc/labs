@@ -1,14 +1,16 @@
+/**
+ * Drives the `cf piece follow` action body and the lib function in-process
+ * with a stubbed connection, so the transition the piece controller makes —
+ * a `repoint` to the origin the caller named — and the outcomes the action
+ * reports are covered without a server.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { ValidationError } from "@cliffy/command";
 
 import { followPieceSourceAction } from "../commands/piece.ts";
 import { followPieceSource, type PieceConfig } from "../lib/piece.ts";
-
-// Drives the `cf piece follow` action body and the lib function in-process
-// with a stubbed connection, so the transition the piece controller makes —
-// a `repoint` to the origin the caller named — and the two outcomes it
-// reports are covered without a server.
 
 const BASE_OPTIONS = {
   apiUrl: "http://127.0.0.1:8000",
