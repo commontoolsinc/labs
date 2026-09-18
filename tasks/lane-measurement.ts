@@ -32,7 +32,7 @@ export { isLaneMeasurement, LANE_MEASUREMENT_PREFIX, LANE_MEASUREMENT_SURFACE };
 export const MEASURED_BATCH_SUFFIX = " with coverage";
 
 /** What each of a batch's three measurements is, as its name says it. */
-export type BatchMeasurementKind = "spent" | "planned" | "units";
+export type BatchMeasurementKind = "spent" | "ran" | "units";
 
 /**
  * The word a measurement's name carries to say which of the three it is.
@@ -41,16 +41,16 @@ export type BatchMeasurementKind = "spent" | "planned" | "units";
  */
 const BATCH_MEASUREMENT_LEAD: Record<BatchMeasurementKind, string> = {
   spent: "",
-  planned: "planned ",
+  ran: "ran ",
   units: "units ",
 };
 
 /**
  * What a lane's measurement of one batch is called.
  *
- * A lane writes three of these per batch: what it spent, what it was
- * packed to spend, and how many units it opened. The three together are
- * what the calibration is fitted from.
+ * A lane writes three of these per batch: what the batch spent, what its
+ * tests took between them, and how many units it opened. The three
+ * together are what the calibration is fitted from.
  */
 export function batchMeasurementName(
   suite: string,
@@ -78,7 +78,7 @@ export function batchMeasurement(
 ):
   | { suite: string; measured: boolean; kind: BatchMeasurementKind }
   | undefined {
-  for (const kind of ["planned", "units", "spent"] as const) {
+  for (const kind of ["ran", "units", "spent"] as const) {
     const prefix = `${LANE_MEASUREMENT_PREFIX}` +
       `${BATCH_MEASUREMENT_LEAD[kind]}batch `;
     if (!name.startsWith(prefix)) continue;

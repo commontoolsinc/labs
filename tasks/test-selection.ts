@@ -39,7 +39,7 @@ import {
   measuredSets,
 } from "./test-selection/coverage.ts";
 import type { Manifest } from "./test-selection/manifest.ts";
-import { plan } from "./test-selection/plan.ts";
+import { crowdingLine, plan, unholdableSuites } from "./test-selection/plan.ts";
 import { readWorkspaceMembers } from "./workspace-tests.ts";
 
 const USAGE = `usage: test-selection <mode>
@@ -367,7 +367,14 @@ export function planLines(
         `${result.overBudgetSeconds.toFixed(1)}s past its budget`,
     );
   }
+  // A suite whose fixed charge alone is past a lane comes first, and its
+  // identities are not listed under it. Every one of them is past the
+  // bound by that charge and by nothing about itself, so a list of them
+  // is one line per test saying what one line per suite already said.
+  const unholdable = unholdableSuites(result.crowding);
+  for (const suite of result.crowding) lines.push(crowdingLine(suite));
   for (const entry of result.unschedulable) {
+    if (unholdable.has(entry.suite)) continue;
     lines.push(
       `unschedulable: ${testIdentityKey(entry.test)} costs ` +
         `${entry.cost.toFixed(1)}s, past a lane's whole budget`,

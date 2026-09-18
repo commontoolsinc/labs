@@ -30,6 +30,7 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import {
   SEED_ENVELOPE_SCHEMA,
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
 } from "./cfc-seed-envelope.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
@@ -187,7 +188,7 @@ describe("CFC label document delivery", () => {
         id: `cid:${secondHash}` as URI,
         path: [],
       }, { value: SECOND_LABEL });
-      tx.writeOrThrow({ space, scope: "space", id, path: [] }, {
+      seedStoredEnvelope(tx, { space, scope: "space", id, path: [] }, {
         value: { secret: "resealed" },
         cfc: referencing(secondHash),
       });
@@ -260,7 +261,7 @@ describe("CFC label document delivery", () => {
     expect(replica.getDocument(`cid:${thirdHash}`)).toBeDefined();
     expect(replica.getDocument(`cid:${absentHash}`)).toBeUndefined();
     const tx = runtime.edit();
-    tx.writeOrThrow({
+    seedStoredEnvelope(tx, {
       space,
       scope: "space",
       id: "of:arrived" as URI,

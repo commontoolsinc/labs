@@ -152,6 +152,15 @@ function createMapInstance(
     setPatternCell(cell, parentCell.key("pattern"));
   };
 
+  // The Action the runner registers with the scheduler. `reconcile` below is
+  // wrapped before registration, so its own identity is not the scheduler's
+  // key: asynchronous work that must re-trigger the reconcile invalidates
+  // this one.
+  let registeredAction: Action | undefined;
+  const rearmReconcile = (): void => {
+    if (registeredAction) runtime.scheduler.invalidateAction(registeredAction);
+  };
+
   // Identity-based tracking: maps element address key → { resultCell, lastIndex }
   // for reuse across position changes. We pass list[i] directly each time, so
   // there's no need to store the element cell separately.
@@ -321,10 +330,11 @@ function createMapInstance(
       elementAwaitSync &&
       probeScoped(() => resultWithLog.get()) === undefined
     ) {
-      // The container's durable value is still streaming in; its arrival
-      // re-triggers this reconcile (the probe read above is journaled). A
-      // container that was never persisted has nothing to stream in, so the
-      // seed below ends the wait once the pull settles. The id names the
+      // The container's durable value is still streaming in; the pull
+      // below is what ends this wait, whatever the container turns out to
+      // hold: it re-triggers this reconcile once it settles, and seeds the
+      // empty array a fresh coordinator would have written when the
+      // container was never persisted. The id names the
       // seed's out-of-band recovery write; the helper stamps it with the
       // sanctioned bookkeeping kind (serving-loop.md §3d) so a SERVING
       // runtime's wave accepts the seal. Same shape in filter.ts/flatmap.ts.
@@ -333,6 +343,7 @@ function createMapInstance(
         runtime,
         container,
         () => active && result === container,
+        rearmReconcile,
         syncCellForIdentity(container, identity),
         logger,
         `map/resume-seed/${parentCell.sourceURI}`,
@@ -464,5 +475,10 @@ function createMapInstance(
 
   // Child-starting coordinator: its reconcile must run on resume to
   // re-attach the per-element children.
-  return { action: reconcile };
+  return {
+    action: reconcile,
+    onActionRegistered: (action) => {
+      registeredAction = action;
+    },
+  };
 }

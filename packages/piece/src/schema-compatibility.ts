@@ -881,8 +881,8 @@ function schemaSubsetIssue(
       source.anyOf || target.anyOf ||
       Array.isArray(source.type) || Array.isArray(target.type)
     ) {
-      const sources = schemaAlternatives(source, "source");
-      const targets = schemaAlternatives(target, "target");
+      const sources = schemaAlternatives(source, "source", context);
+      const targets = schemaAlternatives(target, "target", context);
       for (const sourceAlternative of sources) {
         const accepted = targets.some((targetAlternative) =>
           schemaConjunctionSubsetIssue(
@@ -1526,7 +1526,8 @@ function literalSubsetIssue(
   target: SchemaObject,
   path: string,
 ): string | undefined {
-  const sourceValues = allowedLiteralValues(source);
+  const sourceValues = allowedLiteralValues(source) ??
+    (source.type === "null" ? [null] : undefined);
   const targetValues = allowedLiteralValues(target);
   if (!targetValues) return undefined;
   if (!sourceValues) {
@@ -1544,16 +1545,30 @@ function literalSubsetIssue(
   return undefined;
 }
 
+/**
+ * Helper for literal and type proofs, which intersects `const`, `enum`, and
+ * the declared `type`. Values outside {@link valueSchemaType}'s vocabulary
+ * stay listed so their constraints still reach the ordinary object proof.
+ */
 function allowedLiteralValues(
   schema: SchemaObject,
 ): readonly unknown[] | undefined {
+  let values: readonly unknown[] | undefined = schema.enum;
   if (Object.hasOwn(schema, "const")) {
-    return schema.enum === undefined ||
+    values = schema.enum === undefined ||
         schema.enum.some((value) => fabricAwareEqual(value, schema.const))
       ? [schema.const]
       : [];
   }
-  return schema.enum;
+  if (values === undefined || schema.type === undefined) return values;
+  const declared = typeof schema.type === "string"
+    ? [schema.type]
+    : schema.type;
+  return values.filter((value) => {
+    const type = valueSchemaType(value);
+    return type === undefined ||
+      declared.some((admitted) => schemaTypeAdmits(admitted, type));
+  });
 }
 
 function typeSubsetIssue(
@@ -1726,52 +1741,104 @@ function schemaMayProduceType(
  * the parent node's default and extensions, including for a single-type node.
  * Branch and descendant schemas retain their own defaults and extensions.
  *
- * A source node with neither `anyOf` nor a `type` list, whose `enum` values
- * {@link schemaTypes} reads as more than one type, expands into one fragment
- * per type, each listing only that type's values. The fragments together
- * accept exactly what the node does, and the nullable literal union
- * `{enum: ["open", null]}` meets a `string` branch and a `null` branch one
- * type at a time. A node listing a value {@link valueSchemaType} cannot name,
- * such as a `FabricPrimitive`, stays whole. A target node stays whole too: a
- * source alternative has to fit inside a single target alternative, and one
- * listing values of several types fits only the whole node.
+ * Source enums expand by type through {@link ownEnumPartitions} and
+ * {@link sourceEnumAlternatives}, including beside a `type` list or inside
+ * `anyOf`. Branch partitions stay beside their base in the conjunction, so
+ * their node-level keywords are compared at the branch boundary. Target enums
+ * stay whole: a source alternative has to fit inside a single target
+ * alternative, and one listing values of several types can fit the whole enum.
  */
 function schemaAlternatives(
   schema: SchemaObject,
   side: "source" | "target",
+  context: CompatibilityContext,
 ): JSONSchema[][] {
-  const fragment = withoutNodeLevelKeywords(schema);
-  if (fragment.anyOf) {
-    const { anyOf, ...base } = fragment;
-    return anyOf.map((alternative) => [base, alternative]);
-  }
-  if (Array.isArray(fragment.type)) {
-    const { type: types, ...untyped } = fragment;
-    if (!types.includes("object")) {
-      return types.map((type) => [{ ...fragment, type }]);
+  const whole = withoutNodeLevelKeywords(schema);
+  const fragments = side === "source" ? ownEnumPartitions(whole) : [whole];
+  return fragments.flatMap((fragment): JSONSchema[][] => {
+    if (fragment.anyOf) {
+      const { anyOf, ...base } = fragment;
+      const branches = side === "source"
+        ? anyOf.flatMap((branch) => sourceEnumAlternatives(branch, context))
+        : anyOf;
+      return branches.map((alternative) => [base, alternative]);
     }
-    // The runtime checks `required` on a `FabricPrimitive` when the type list
-    // includes `object`, and would not check it under a branch typed by a
-    // `FabricPrimitive` name or by `unknown` alone. `object` admits every
-    // `FabricPrimitive` already, so those names add no branch of their own,
-    // and `unknown` becomes the untyped branch, which admits every value and
-    // is checked.
-    return types.filter((type) => !isFabricPrimitiveSchemaType(type))
-      .map((type) => [type === "unknown" ? untyped : { ...untyped, type }]);
+    if (Array.isArray(fragment.type)) {
+      const { type: types, ...untyped } = fragment;
+      if (!types.includes("object")) {
+        return types.map((type) => [{ ...fragment, type }]);
+      }
+      // The runtime checks `required` on a `FabricPrimitive` when the type list
+      // includes `object`, and would not check it under a branch typed by a
+      // `FabricPrimitive` name or by `unknown` alone. `object` admits every
+      // `FabricPrimitive` already, so those names add no branch of their own,
+      // and `unknown` becomes the untyped branch, which admits every value and
+      // is checked.
+      return types.filter((type) => !isFabricPrimitiveSchemaType(type))
+        .map((type) => [type === "unknown" ? untyped : { ...untyped, type }]);
+    }
+    return [[fragment]];
+  });
+}
+
+/**
+ * Helper for {@link schemaAlternatives}, which partitions source enums by
+ * their admitted literal types, retaining sibling constraints and branch-level
+ * defaults and extensions. Distributes partitions inside `anyOf` through its
+ * enclosing nodes. Enums containing an unclassified value stay whole, and
+ * references remain for the scoped proof to resolve. During evolution, a branch
+ * stays whole if any partition changes the effective default it supplies. Link
+ * proofs compare target defaults only, so source defaults do not limit splitting.
+ */
+function sourceEnumAlternatives(
+  schema: JSONSchema,
+  context: CompatibilityContext,
+): JSONSchema[] {
+  if (typeof schema === "boolean") return [schema];
+  let narrowed: JSONSchema[] | undefined;
+  if (schema.anyOf !== undefined) {
+    const branches = schema.anyOf.flatMap((branch) =>
+      sourceEnumAlternatives(branch, context)
+    );
+    if (branches.length > schema.anyOf.length) {
+      narrowed = branches.map((branch) => ({ ...schema, anyOf: [branch] }));
+    }
   }
-  // With no `type` list, `schemaTypes` names more than one type only when it
-  // can name every listed value, and a `const` lists a single value. So each
-  // `enum` value lands in exactly one fragment, and a value the declared
-  // `type` rejects lands in none.
-  const types = side === "source" ? schemaTypes(fragment) : undefined;
-  const values = fragment.enum;
-  if (types !== undefined && types.length > 1 && values !== undefined) {
-    return types.map((type) => [{
-      ...fragment,
-      enum: values.filter((value) => valueSchemaType(value) === type),
-    }]);
+  narrowed ??= ownEnumPartitions(schema);
+  if (
+    context.defaultComparison === "evolution" &&
+    narrowed.length > 1 &&
+    narrowed.some((fragment) =>
+      !schemaDefaultsResolveEqually(schema, fragment, {
+        sourceRoot: context.sourceRoot,
+        targetRoot: context.sourceRoot,
+      })
+    )
+  ) {
+    return [schema];
   }
-  return [[fragment]];
+  return narrowed;
+}
+
+/**
+ * Helper for source alternative expansion, which partitions this node's enum
+ * by admitted literal type while keeping its other keywords intact. An enum
+ * containing an unclassified value stays whole for the ordinary object proof.
+ */
+function ownEnumPartitions(schema: SchemaObject): SchemaObject[] {
+  const listed = schema.enum;
+  const values = allowedLiteralValues(schema);
+  if (listed !== undefined && values !== undefined) {
+    const types = values.map(valueSchemaType);
+    const distinct = [...new Set(types)];
+    if (!distinct.includes(undefined) && distinct.length > 1) {
+      return distinct.map((type) => ({
+        ...schema,
+        enum: listed.filter((value) => valueSchemaType(value) === type),
+      }));
+    }
+  }
+  return [schema];
 }
 
 /**
@@ -1861,12 +1928,6 @@ function schemaTypes(schema: SchemaObject): readonly string[] | undefined {
   for (const value of values) {
     const type = valueSchemaType(value);
     if (type === undefined) return declared;
-    if (
-      declared !== undefined &&
-      !declared.some((admitted) => schemaTypeAdmits(admitted, type))
-    ) {
-      continue;
-    }
     if (!types.includes(type)) types.push(type);
   }
   return types;
@@ -2016,10 +2077,14 @@ function schemasResolveEqually(
   return true;
 }
 
+/**
+ * Helper for evolution proofs, which compares the defaults two schemas supply
+ * in their own reference scopes.
+ */
 function schemaDefaultsResolveEqually(
   source: JSONSchema,
   target: JSONSchema,
-  context: CompatibilityContext,
+  context: Pick<CompatibilityContext, "sourceRoot" | "targetRoot">,
 ): boolean {
   const sourceHasDefault = schemaHasDefaultValue(source, context.sourceRoot);
   const targetHasDefault = schemaHasDefaultValue(target, context.targetRoot);

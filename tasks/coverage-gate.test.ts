@@ -1,5 +1,5 @@
 import { expect } from "@std/expect";
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, describe, it } from "@std/testing/bdd";
 import * as path from "@std/path";
 import {
   collectSetReports,
@@ -672,20 +672,49 @@ describe("coverage-gate", () => {
   });
 
   describe("asking git what the branch contains", () => {
-    /** A repository with two commits on one branch and one beside it. */
-    async function repository(): Promise<
-      { root: string; contained: string; newer: string; apart: string }
-    > {
-      const root = await Deno.makeTempDir({ prefix: "coverage-gate-git-" });
-      const git = async (...args: string[]) => {
+    const roots: string[] = [];
+
+    // Each fixture here builds a repository of its own, and the largest of
+    // them is a megabyte of git objects.
+    afterEach(async () => {
+      for (const root of roots.splice(0)) {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
+    /** A directory for a repository, removed once the case has run. */
+    async function temporaryRoot(prefix: string): Promise<string> {
+      const root = await Deno.makeTempDir({ prefix });
+      roots.push(root);
+      return root;
+    }
+
+    /**
+     * Runs git in `root` under `env`, returning what it wrote to its output
+     * stream. The variables given are added to the ones this process holds.
+     */
+    function gitIn(
+      root: string,
+      env: Record<string, string> = {},
+    ): (...args: string[]) => Promise<string> {
+      return async (...args: string[]) => {
         const result = await new Deno.Command("git", {
           args,
           cwd: root,
+          env,
           stdout: "piped",
           stderr: "piped",
         }).output();
         return new TextDecoder().decode(result.stdout).trim();
       };
+    }
+
+    /** A repository with two commits on one branch and one beside it. */
+    async function repository(): Promise<
+      { root: string; contained: string; newer: string; apart: string }
+    > {
+      const root = await temporaryRoot("coverage-gate-git-");
+      const git = gitIn(root);
       await git("init", "-q", "-b", "main");
       await git("config", "user.email", "tests@example.com");
       await git("config", "user.name", "Tests");
@@ -706,6 +735,96 @@ describe("coverage-gate", () => {
       return { root, contained, newer, apart };
     }
 
+    /**
+     * A repository whose history is longer than one read of `git rev-list`,
+     * with the commits at either end of it. `git fast-import` builds the whole
+     * of it in one pass.
+     */
+    async function longHistory(): Promise<
+      { root: string; tip: string; oldest: string }
+    > {
+      // A commit identifier and the newline after it take 41 bytes, and a
+      // pipe holds at most 64 KiB. Four times that leaves the history longer
+      // than the read the walk takes plus whatever git buffers behind it.
+      const commits = Math.ceil((4 * 64 * 1024) / 41);
+      const root = await temporaryRoot("coverage-gate-long-");
+      const git = gitIn(root);
+      await git("init", "-q", "-b", "main");
+      const stream: string[] = [];
+      for (let index = 0; index < commits; index++) {
+        const message = `commit ${index}`;
+        stream.push(
+          "commit refs/heads/main",
+          `committer Tests <tests@example.com> ${index} +0000`,
+          `data ${message.length}`,
+          message,
+        );
+      }
+      stream.push("done", "");
+      const child = new Deno.Command("git", {
+        args: ["fast-import", "--quiet", "--done"],
+        cwd: root,
+        stdin: "piped",
+        stdout: "null",
+        stderr: "piped",
+      }).spawn();
+      const complaints = new Response(child.stderr).text();
+      const writer = child.stdin.getWriter();
+      await writer.write(new TextEncoder().encode(stream.join("\n")));
+      await writer.close();
+      const built = await child.status;
+      if (!built.success) {
+        throw new Error(`git fast-import: ${await complaints}`);
+      }
+      const length = await git("rev-list", "--count", "HEAD");
+      if (length !== String(commits)) {
+        throw new Error(`history is ${length} commits, not ${commits}`);
+      }
+      return {
+        root,
+        tip: await git("rev-parse", "HEAD"),
+        oldest: await git("rev-list", "--max-parents=0", "HEAD"),
+      };
+    }
+
+    /**
+     * A repository holding a commit whose own descendant carries an older
+     * date, reachable through a merge, and both of those commits.
+     */
+    async function datedHistory(): Promise<
+      { root: string; ancestor: string; descendant: string }
+    > {
+      const root = await temporaryRoot("coverage-gate-dates-");
+      const git = gitIn(root);
+      const at = (when: number) => ({
+        GIT_AUTHOR_DATE: `@${when} +0000`,
+        GIT_COMMITTER_DATE: `@${when} +0000`,
+      });
+      const commit = async (name: string, when: number) => {
+        await Deno.writeTextFile(path.join(root, `${name}.txt`), name);
+        await git("add", "-A");
+        await gitIn(root, at(when))("commit", "-qm", name);
+        return await git("rev-parse", "HEAD");
+      };
+      await git("init", "-q", "-b", "main");
+      await git("config", "user.email", "tests@example.com");
+      await git("config", "user.name", "Tests");
+      const ancestor = await commit("one", 500);
+      await git("checkout", "-q", "-b", "beside");
+      const descendant = await commit("two", 300);
+      await git("checkout", "-q", "main");
+      await commit("three", 900);
+      await gitIn(root, at(1500))(
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "four",
+        "beside",
+      );
+      return { root, ancestor, descendant };
+    }
+
     it("names a commit the tree under test descends from", async () => {
       const { root, contained } = await repository();
       expect(await nearestOnBranch(root)([contained])).toBe(contained);
@@ -717,6 +836,15 @@ describe("coverage-gate", () => {
       const { root, contained, newer } = await repository();
       expect(await nearestOnBranch(root)([contained, newer])).toBe(newer);
       expect(await nearestOnBranch(root)([newer, contained])).toBe(newer);
+    });
+
+    it("takes the commit further down the branch when its date is older", async () => {
+      // A merge puts a commit and its own descendant in the list at once,
+      // and the descendant here is the older of the two by date.
+
+      const { root, ancestor, descendant } = await datedHistory();
+      expect(await nearestOnBranch(root)([ancestor, descendant]))
+        .toBe(descendant);
     });
 
     it("passes over a commit on a branch beside it", async () => {
@@ -736,6 +864,23 @@ describe("coverage-gate", () => {
     it("names nothing when asked about no commits at all", async () => {
       const { root } = await repository();
       expect(await nearestOnBranch(root)([])).toBeUndefined();
+    });
+
+    it("names a commit at the tip of a history longer than one read", async () => {
+      // The answer is the first line git writes, and the rest of a history
+      // this long is still to come when the walk stops reading. Closing the
+      // read is what ends git.
+
+      const { root, tip } = await longHistory();
+      expect(await nearestOnBranch(root)([tip])).toBe(tip);
+    });
+
+    it("names a commit at the root of a history longer than one read", async () => {
+      // The answer is the last identifier git writes, so the walk has to
+      // read the list out across every chunk it arrives in.
+
+      const { root, oldest } = await longHistory();
+      expect(await nearestOnBranch(root)([oldest])).toBe(oldest);
     });
   });
 

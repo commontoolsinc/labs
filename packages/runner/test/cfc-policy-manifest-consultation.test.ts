@@ -12,6 +12,7 @@ import {
 import { parseLink } from "../src/link-utils.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import {
@@ -75,7 +76,7 @@ const seedSecretSource = async (runtime: Runtime, name: string) => {
   );
   const sourceId = parseLink(sourceCell.getAsLink()).id!;
   writeSeedEnvelopeDoc(seed, signer.did());
-  seed.writeOrThrow({
+  seedStoredEnvelope(seed, {
     space: signer.did(),
     scope: "space",
     id: sourceId,

@@ -77,6 +77,10 @@ import { createCliPromptSlotBinding } from "../src/contracts/prompt-slot.ts";
 import type { HarnessInputCellSpec } from "../src/contracts/input-cells.ts";
 import type { HarnessConnectorGrantSpec } from "../src/contracts/well-known-grants.ts";
 import {
+  connectorGrantLabel,
+  connectorGrantName,
+} from "../src/well-known-grants.ts";
+import {
   DEFAULT_SUBAGENT_PROFILE,
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
 } from "../src/contracts/subagent.ts";
@@ -1033,8 +1037,8 @@ export const consoleHealthRows = (
     rows.push(...config.connectorGrants.map((grant): ConsoleHealthRow => ({
       id: `connector.granted.${grant.name}`,
       group: "connectors",
-      label: grant.source.connection,
-      value: `granted as ${grant.name}`,
+      label: connectorGrantName(grant.source),
+      value: `granted: ${connectorGrantLabel(grant)}`,
       source: "console connector configuration",
       detail: "CF_HARNESS_CONNECTOR_GRANTS",
       state: "ok",

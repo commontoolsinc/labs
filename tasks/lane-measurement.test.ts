@@ -15,9 +15,9 @@ describe("lane-measurement", () => {
         .toBe("ci-lane batch workspace-unit");
     });
 
-    it("names what the packer charged for a batch", () => {
-      expect(batchMeasurementName("workspace-unit", false, "planned"))
-        .toBe("ci-lane planned batch workspace-unit");
+    it("names what a batch's own tests took", () => {
+      expect(batchMeasurementName("workspace-unit", false, "ran"))
+        .toBe("ci-lane ran batch workspace-unit");
     });
 
     it("names a batch run with coverage apart from one run without", () => {
@@ -35,17 +35,17 @@ describe("lane-measurement", () => {
       });
     });
 
-    it("returns the suite a planned measurement names", () => {
-      expect(batchMeasurement("ci-lane planned batch workspace-unit")).toEqual({
+    it("returns the suite a tests-took measurement names", () => {
+      expect(batchMeasurement("ci-lane ran batch workspace-unit")).toEqual({
         suite: "workspace-unit",
         measured: false,
-        kind: "planned",
+        kind: "ran",
       });
     });
 
     it("returns every name `batchMeasurementName()` composes", () => {
       for (const measured of [false, true]) {
-        for (const kind of ["spent", "planned"] as const) {
+        for (const kind of ["spent", "ran", "units"] as const) {
           const name = batchMeasurementName("runner-unit", measured, kind);
           expect(batchMeasurement(name))
             .toEqual({ suite: "runner-unit", measured, kind });
@@ -58,7 +58,7 @@ describe("lane-measurement", () => {
         .toBeUndefined();
       expect(batchMeasurement(batchMeasurementName("", true)))
         .toBeUndefined();
-      expect(batchMeasurement(batchMeasurementName("", false, "planned")))
+      expect(batchMeasurement(batchMeasurementName("", false, "ran")))
         .toBeUndefined();
     });
 

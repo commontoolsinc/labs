@@ -18,7 +18,10 @@
 import { pooledMap } from "@std/async/pool";
 import { z } from "zod";
 
-import type { Manifest } from "@commonfabric/test-support/records";
+import {
+  type Manifest,
+  MANIFESTS_LOOKED_BACK,
+} from "@commonfabric/test-support/records";
 
 import { dashboardCacheFile } from "./history-files.ts";
 import { escapeHtml, friendlyError, memo, multiSparkline } from "./lib.ts";
@@ -118,29 +121,40 @@ export function makeTestSelectionSource(options: {
   let persisted = "";
 
   const newest = memo(MANIFEST_SHARE_MS, async () => {
-    const name = (await list()).at(-1);
-    if (name === undefined) {
+    const names = (await list()).slice(-MANIFESTS_LOOKED_BACK).reverse();
+    if (names.length === 0) {
       current = undefined;
-      return { name, manifest: undefined };
+      return { name: undefined, manifest: undefined };
     }
-    if (current?.name !== name) {
-      const known = refused.get(name);
-      if (known !== undefined) {
-        current = { name, error: known };
-      } else {
+    // The newest body this reader can read, over the same stretch of the
+    // store a lane looks back across. A body from further ahead is passed
+    // over; anything else unreadable ends the search, because a reader
+    // that half understands a body should not answer from it.
+    let newestAhead: { name: string; error: ManifestSchemaError } | undefined;
+    for (const name of names) {
+      if (current?.name === name && "manifest" in current) return current;
+      let known = refused.get(name);
+      if (known === undefined) {
         try {
           current = { name, manifest: await readManifest(name, options) };
+          return current;
         } catch (error) {
-          // The version a body declares cannot change, so it is kept and
-          // the object is not fetched again. Every other failure may come
-          // back differently on the next read.
+          // The shape a body declares cannot change, so it is kept and the
+          // object is not fetched again. Every other failure may come back
+          // differently on the next read.
           if (!(error instanceof ManifestSchemaError)) return { name, error };
           refused.set(name, error);
-          current = { name, error };
+          known = error;
         }
       }
+      newestAhead ??= { name, error: known };
     }
-    return current;
+    // Every body looked at is written further ahead than this reader.
+    // Reporting nothing would say the store holds no manifest, which is
+    // the one thing a reader this far behind its publisher must not say,
+    // so it reports the newest shape it passed over.
+    current = newestAhead;
+    return newestAhead ?? { name: undefined, manifest: undefined };
   });
 
   const latest: ManifestReader = async () => {

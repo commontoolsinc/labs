@@ -828,6 +828,13 @@ names the provider and operation, numbers the attempt against
 `outcome` is `transport_error` when no response arrived and `http_response`
 otherwise, with the status and selected headers.
 
+A final assistant reply must contain non-whitespace text. A reply with no text
+and no function tool calls fails the run with `provider-unavailable`, including
+when the provider returned HTTP 200. Tool-only replies continue through normal
+tool dispatch. The normalized assistant message stays in the transcript, and the
+run report retains the model attempts and token usage. This failure does not
+trigger a retry.
+
 A failed attempt carries the provider's own reason wherever the provider stated
 one. `providerError` holds the provider's `type`, `code`, and `message` as the
 provider sent them — from the body of a non-2xx response, from an in-stream

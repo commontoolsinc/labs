@@ -370,6 +370,18 @@ export type SpaceServerOptions = {
    * turned away. The check happens inside a drain pass, and so does
    * this. */
   onDrainInFlightSkip?: (eventId: string) => void;
+
+  /** DIAGNOSTIC (tests): forwarded to this tenure's outbox — see
+   * `SpaceOutbox`. */
+  onEffectRetired?: () => void;
+
+  /** DIAGNOSTIC (tests): the outcome of each space-root ensure attempt,
+   * reported as the counters beside it move. The counters can only be
+   * polled; a test that has to act once an attempt has landed waits on
+   * this instead. */
+  onRootEnsure?: (
+    outcome: "created" | "resolved" | "skipped-no-owner" | "failed",
+  ) => void;
 };
 
 const DEFAULT_FLUSH_DEADLINE_MS = 100;
@@ -1247,6 +1259,9 @@ export class SpaceServer implements TransactionSealDestination {
       engine,
       sessionId: this.#holder,
       localSeqRef: this.#options.localSeqRef,
+      ...(this.#options.onEffectRetired !== undefined
+        ? { onEffectRetired: this.#options.onEffectRetired }
+        : {}),
       ...(this.#options.policy?.maxOutstandingEffects !== undefined ||
           this.#options.policy?.egressRatePerSecond !== undefined
         ? {
@@ -5158,6 +5173,7 @@ export class SpaceServer implements TransactionSealDestination {
       const owner = server.resolveSpaceOwner(engine, space);
       if (owner === undefined) {
         stats.skippedNoOwner += 1;
+        this.#options.onRootEnsure?.("skipped-no-owner");
         this.#rootEnsureAwaitingOwner = true;
         // Once per tenure (F6): the first skip is the expected
         // fresh-space boot order (activation precedes the genesis ACL;
@@ -5232,12 +5248,16 @@ export class SpaceServer implements TransactionSealDestination {
       }
       stats.runs += 1;
       if (result.outcome === "created") stats.created += 1;
+      this.#options.onRootEnsure?.(
+        result.outcome === "created" ? "created" : "resolved",
+      );
       logger.info?.("space-root-ensure", () => [
         `space ${space}: root ensure ${result.outcome} ` +
         `(owner ${owner}${owner === space ? ", self-owned home" : ""})`,
       ]);
     } catch (error) {
       stats.failures += 1;
+      this.#options.onRootEnsure?.("failed");
       logger.warn("space-root-ensure-failed", () => [
         `space ${space}: root ensure failed; the tenure serves without ` +
         "it and the next activation retries (the client-era creation " +

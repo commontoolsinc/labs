@@ -8,6 +8,7 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -115,7 +116,7 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
       runtime.getCell(sourceSpace, name, undefined, seed).getAsLink(),
     ).id!;
     writeSeedEnvelopeDoc(seed, sourceSpace);
-    seed.writeOrThrow({
+    seedStoredEnvelope(seed, {
       space: sourceSpace,
       scope: "space",
       id: sourceId,
@@ -686,7 +687,7 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
           .getAsLink(),
       ).id!;
       writeSeedEnvelopeDoc(seed, spaceA);
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: spaceA,
         scope: "space",
         id: sourceId,
@@ -782,7 +783,7 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
         runtime.getCell(spaceB, name, undefined, seed).getAsLink(),
       ).id!;
       writeSeedEnvelopeDoc(seed, spaceB);
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: spaceB,
         scope: "space",
         id: sourceId,
