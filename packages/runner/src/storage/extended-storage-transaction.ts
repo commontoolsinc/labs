@@ -30,7 +30,6 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { CellScope } from "../builder/types.ts";
 import {
   type AttemptedWrite,
-  canonicalizeCfcMetadata,
   canonicalizeLogicalPath,
   CFC_ENFORCEMENT_MODES,
   CFC_ENFORCING_STRICTNESS,
