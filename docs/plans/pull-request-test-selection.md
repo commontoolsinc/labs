@@ -1651,7 +1651,7 @@ The exception the rule carries reaches a gate through the paths the gate
 declares a change reaches it by. A gate's unit is the name of a gate
 rather than a path, so the suite maps a change onto its units from a list
 each gate carries: `check-test-aliases` names
-`tasks/test-identity-aliases.jsonl`, `check-action-pins` names
+`tasks/test-identity-aliases/`, `check-action-pins` names
 `.github/`, and a change touching one of those makes that gate mandatory.
 The pull request that fixes a gate too flaky to judge by therefore runs
 it, which is what the exception is for.
@@ -1719,7 +1719,7 @@ catches, worth 0.75 on `proven`, becomes worth 0.05. It will still run,
 because an unknown identity is mandatory, but only once, and then it
 disappears into the tail.
 
-`tasks/test-identity-aliases.jsonl` already solves this and the mechanism
+`tasks/test-identity-aliases/` already solves this and the mechanism
 needs no changes. A line maps an old identity, or a whole scope for a
 package rename, to its replacement with the date of the rename. Readers
 resolve transitively, prefer a full-identity mapping over a whole-scope

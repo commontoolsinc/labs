@@ -56,12 +56,13 @@ files, reformatting, editing bodies, and resharding — shard and slice
 labels, and the section that dispatched a script step, are run context and
 never identity. A configuration is a variant only when its results need a
 separate history. Identity does not survive a change to the reported name; a
-rename splits history, and a line appended to
-`tasks/test-identity-aliases.jsonl` bridges a split worth bridging. That
-file is append-only, maps any identity at most once, must stay acyclic, and
-each line carries the rename's date; readers resolve aliases transitively
-and apply one only to records older than its date
-(`deno task check-test-aliases` enforces the file's shape). Alias lines name
+rename splits history, and a line appended under
+`tasks/test-identity-aliases/` bridges a split worth bridging. That
+directory holds one file per test file and reads as a single set of aliases.
+It is append-only file by file, maps any identity at most once, must stay
+acyclic, and each line carries the rename's date; readers resolve aliases
+transitively and apply one only to records older than its date
+(`deno task check-test-aliases` enforces the directory's shape). Alias lines name
 the three required identity parts and apply the rename to every variant.
 
 A task-level record may coexist with the per-item records of the same run

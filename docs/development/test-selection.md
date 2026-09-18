@@ -44,7 +44,7 @@ Each of those is printed on its own, because they are not alternatives: a
 withheld identity a change reaches runs anyway, so an answer that picked
 one of them would be leaving out something true.
 
-The identity resolves through `tasks/test-identity-aliases.jsonl` first,
+The identity resolves through `tasks/test-identity-aliases/` first,
 so asking about a renamed test under either name finds the joined history.
 
 ### `dials`
@@ -973,8 +973,8 @@ itself.
   extra runs are what make the observation possible, so this note is
   silent until they land.
 - **A rename that discarded history**, with the number of catches it
-  would bring back and the line to append to
-  `tasks/test-identity-aliases.jsonl`. Four things have to hold: the
+  would bring back and the line to append under
+  `tasks/test-identity-aliases/`. Four things have to hold: the
   departing test caught something; the unit it lived in produced records
   in this run, so its absence is a test that left rather than a suite
   that did not run; the arriving name is one the store has never seen;
@@ -1027,8 +1027,8 @@ of the identity being the reported name:
 - Prefer stable, content-derived wording over positional counters or
   interpolated identifiers, which mint a new identity every time they
   shift.
-- A rename splits history unless a line is appended to
-  `tasks/test-identity-aliases.jsonl`. Most renames cost nothing, because
+- A rename splits history unless a line is appended under
+  `tasks/test-identity-aliases/`. Most renames cost nothing, because
   most tests have never caught anything; a rename of a test that has is
   worth the line.
 

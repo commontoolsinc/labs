@@ -93,7 +93,7 @@ describe("the repository's gate suites", () => {
       [byId("repo-gates"), byId("repo-history-gates")]
         .flatMap((suite) => [...suite.unitsForChange!(new Set(changed))])
         .toSorted();
-    expect(reached("tasks/test-identity-aliases.jsonl")).toEqual([
+    expect(reached("tasks/test-identity-aliases/tags.test.ts.jsonl")).toEqual([
       "check-test-aliases",
     ]);
     expect(reached(".github/workflows/deno.yml")).toEqual([

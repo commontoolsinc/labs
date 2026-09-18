@@ -638,7 +638,7 @@ worst possible place: `catches` accumulates over unbounded history and is
 the whole of what makes a test worth running, so the best test in an area
 drops to the floor at the exact moment somebody is working there.
 
-`tasks/test-identity-aliases.jsonl` is what bridges the two halves, and
+`tasks/test-identity-aliases/` is what bridges the two halves, and
 every reader of the store resolves through it, the publisher included. A
 rename is never inferred: a wrong bridge silently credits one test with
 another's record, and since the whole score rests on catch attribution

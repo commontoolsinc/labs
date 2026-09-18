@@ -356,13 +356,13 @@ export const HISTORY_GATES: readonly Gate[] = [
     kind: "gate",
     run: ["task", "check-test-aliases"],
     args: ({ baseRef }) => [baseRef],
-    // The file, and the module holding the line format it parses and
-    // the graph rules it applies; the task itself is a `git show`
-    // wrapper around those.
+    // The alias files, and the module holding the line format the task
+    // parses and the graph rules it applies; the task itself is a
+    // `git show` wrapper around those.
     reachedBy: [
       "packages/test-support/",
       "tasks/check-test-aliases.ts",
-      "tasks/test-identity-aliases.jsonl",
+      "tasks/test-identity-aliases/",
     ],
   },
 ];

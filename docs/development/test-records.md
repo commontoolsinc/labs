@@ -44,11 +44,22 @@ records are world-visible, the same as the repository itself. A branch
 whose name should not be public should not report from a workstation.
 
 Renaming a test renames its identity and splits its history. When the
-continuity matters, append a line to `tasks/test-identity-aliases.jsonl`
-mapping the old identity (or a whole scope, for a package rename) to the
-new one with the date; `deno task check-test-aliases` holds that file to
-append-only, no-double-mapping, acyclic rules. The same rename applies to
-every variant.
+continuity matters, append a line mapping the old identity to the new one
+with the date. The line goes in `tasks/test-identity-aliases/`, in the file
+named after the test file that holds the test: a rename in
+`packages/runner/test/link-utils.test.ts` is a line in
+`link-utils.test.ts.jsonl`, and a test file with no alias file yet gets a
+new one. Only the last path segment names the file,
+so test files of one name share one, and a test file that moves keeps the
+one it has. A line mapping a whole scope, for a package rename, goes in
+`whole-scope.jsonl`. Every reader takes the directory as a single set of
+aliases, so which file holds a line changes nothing about what it means;
+the division keeps two changes that rename tests in different test files
+from appending to the same file, and so from conflicting when they merge.
+`deno task check-test-aliases` holds the directory to append-only,
+no-double-mapping, acyclic rules: each file only ever grows, none goes
+away, and no identity is mapped twice across all of them. The same rename
+applies to every variant.
 
 ## The environment surface
 

@@ -1,0 +1,2 @@
+{"date":"2026-09-03","from":{"k":"unit","s":"lib-shell","n":"RuntimeInternals > exposes page slug metadata"},"to":{"k":"unit","s":"lib-shell","n":"RuntimeInternals > exposes piece slug metadata"}}
+{"date":"2026-09-03","from":{"k":"unit","s":"lib-shell","n":"RuntimeInternals > guards removePage after dispose"},"to":{"k":"unit","s":"lib-shell","n":"RuntimeInternals > guards removePiece after dispose"}}

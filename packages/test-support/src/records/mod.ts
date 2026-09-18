@@ -37,14 +37,16 @@ export {
 } from "./paths.ts";
 export type { Environment } from "./paths.ts";
 export {
-  ALIAS_FILE,
+  ALIAS_DIRECTORY,
+  ALIAS_FILE_SUFFIX,
   aliasGraphProblems,
   aliasKeyOf,
   AliasResolver,
   loadAliasResolver,
   parseAliasLine,
+  readAliasFiles,
 } from "./aliases.ts";
-export type { AliasLine } from "./aliases.ts";
+export type { AliasFile, AliasLine } from "./aliases.ts";
 export {
   FRAGMENT_PREFIX,
   FRAGMENT_SUFFIX,
