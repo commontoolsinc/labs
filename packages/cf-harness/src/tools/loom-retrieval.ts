@@ -100,7 +100,10 @@ export interface LoomRetrievalToolSuccessOutput {
   /** Whether any row or string was cut to a bound. */
   truncated: boolean;
 
-  /** The payload's summary fields beside its rows, where the command has any. */
+  /**
+   * The payload's summary fields beside its rows, where the command has
+   * any.
+   */
   envelope?: Record<string, unknown>;
 
   /**

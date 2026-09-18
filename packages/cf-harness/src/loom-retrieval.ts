@@ -257,7 +257,10 @@ export const validateLoomRetrievalConfig = (
   }
 };
 
-/** Reads an explicit operator-owned configuration file; absence grants nothing. */
+/**
+ * Reads an explicit operator-owned configuration file; absence grants
+ * nothing.
+ */
 export const readLoomRetrievalConfig = async (
   path: string | undefined,
   readTextFile: (path: string) => Promise<string> = Deno.readTextFile,
