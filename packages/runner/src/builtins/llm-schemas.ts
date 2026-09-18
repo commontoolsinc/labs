@@ -1,4 +1,3 @@
-import type { JSONSchema } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model-schema";
 
 export { LLM_DERIVED_RESULT_STAMP_SCHEMA } from "../cfc/llm-derived-stamp.ts";
