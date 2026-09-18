@@ -30,9 +30,11 @@ import {
   atomsOutsideCeiling,
   type CfcConfClause,
   cfcLabelViewForCellFailClosedWithStatus,
+  type CfcObservationMaxConfidentiality,
   cfcOpaqueLinkForPath,
   type CfcRefusalDetail,
   type IFCLabel,
+  meetCfcObservationCeilings,
   resolveSchemaForValidation,
   uniqueCfcAtoms,
   validateAgainstSchema,
@@ -388,27 +390,44 @@ const governingSchema = (
     const branches = resolved[keyword];
     if (!Array.isArray(branches)) continue;
     const relaxedFull = relaxAsCellPositions(full);
-    for (const branch of branches) {
-      if (!isObjectOrArray(branch) && typeof branch !== "boolean") continue;
-      const relaxed = relaxAsCellPositions(branch as JSONSchema);
-      if (validateAgainstSchema(relaxed, value, relaxedFull) === undefined) {
-        return governingSchema(branch as JSONSchema, value, full);
-      }
+    const branch = branches.find((candidate) =>
+      validateAgainstSchema(
+        relaxAsCellPositions(candidate as JSONSchema),
+        value,
+        relaxedFull,
+      ) === undefined
+    );
+    if (branch !== undefined) {
+      return governingSchema(branch as JSONSchema, value, full);
     }
   }
   return resolved;
 };
 
-/** The subschema of `schema` governing the member `key` of an object value. */
+/** One schema from several: the lone one, or their `allOf`. */
+const combined = (schemas: readonly JSONSchema[]): JSONSchema =>
+  schemas.length === 0 ? true : schemas.length === 1 ? schemas[0] : {
+    allOf: [...schemas],
+  };
+
+/**
+ * The subschema of `schema` governing the member `key` of an object value:
+ * the node's own declaration for it joined with every `allOf` branch's, so a
+ * ceiling one branch declares is not lost behind a shape another declares.
+ */
 const childSchemaForKey = (
   schema: JSONSchema,
   key: string,
   full: JSONSchema,
 ): JSONSchema => {
   if (!isObjectOrArray(schema)) return schema;
-  if (isObjectOrArray(schema.properties)) {
-    const child = schema.properties[key];
-    if (child !== undefined) return child as JSONSchema;
+  const children: JSONSchema[] = [];
+  if (
+    isObjectOrArray(schema.properties) && schema.properties[key] !== undefined
+  ) {
+    children.push(schema.properties[key] as JSONSchema);
+  } else if (schema.additionalProperties !== undefined) {
+    children.push(schema.additionalProperties as JSONSchema);
   }
   if (Array.isArray(schema.allOf)) {
     for (const branch of schema.allOf) {
@@ -417,24 +436,28 @@ const childSchemaForKey = (
         key,
         full,
       );
-      if (child !== true) return child;
+      if (child !== true) children.push(child);
     }
   }
-  const additional = schema.additionalProperties;
-  return additional === undefined ? true : additional as JSONSchema;
+  return combined(children);
 };
 
-/** The subschema of `schema` governing the item at `index` of an array value. */
+/**
+ * The subschema of `schema` governing the item at `index` of an array value,
+ * joined across `allOf` branches the way {@link childSchemaForKey} joins.
+ */
 const childSchemaForIndex = (
   schema: JSONSchema,
   index: number,
   full: JSONSchema,
 ): JSONSchema => {
   if (!isObjectOrArray(schema)) return schema;
+  const children: JSONSchema[] = [];
   if (Array.isArray(schema.prefixItems) && index < schema.prefixItems.length) {
-    return schema.prefixItems[index] as JSONSchema;
+    children.push(schema.prefixItems[index] as JSONSchema);
+  } else if (schema.items !== undefined) {
+    children.push(schema.items as JSONSchema);
   }
-  if (schema.items !== undefined) return schema.items as JSONSchema;
   if (Array.isArray(schema.allOf)) {
     for (const branch of schema.allOf) {
       const child = childSchemaForIndex(
@@ -442,24 +465,38 @@ const childSchemaForIndex = (
         index,
         full,
       );
-      if (child !== true) return child;
+      if (child !== true) children.push(child);
     }
   }
-  return true;
+  return combined(children);
 };
 
 /**
  * The ceiling a position declares for what is placed there, or `undefined`
- * where it declares none. Read off the governing node's `ifc.maxConfidentiality`.
+ * where it declares none: the governing node's `ifc.maxConfidentiality` met
+ * with whatever each `allOf` branch declares, so a referent must fit every
+ * declaration that reaches the position.
  */
 const positionCeiling = (
   schema: JSONSchema,
+  full: JSONSchema,
 ): readonly CfcConfClause[] | undefined => {
-  if (!isObjectOrArray(schema) || !isObjectOrArray(schema.ifc)) {
-    return undefined;
+  const resolved = resolveSchemaForValidation(schema, full);
+  if (!isObjectOrArray(resolved)) return undefined;
+  let ceiling: CfcObservationMaxConfidentiality = undefined;
+  if (isObjectOrArray(resolved.ifc)) {
+    const own = resolved.ifc.maxConfidentiality;
+    if (Array.isArray(own)) ceiling = own as CfcConfClause[];
   }
-  const ceiling = schema.ifc.maxConfidentiality;
-  return Array.isArray(ceiling) ? ceiling as CfcConfClause[] : undefined;
+  if (Array.isArray(resolved.allOf)) {
+    for (const branch of resolved.allOf) {
+      ceiling = meetCfcObservationCeilings(
+        ceiling,
+        positionCeiling(branch as JSONSchema, full),
+      );
+    }
+  }
+  return ceiling;
 };
 
 /** The text a position holds as a reference, when it holds one whole. */
@@ -498,7 +535,7 @@ const resolveReferences = (
   if (text !== undefined) {
     const reference = resolve(text, path);
     if (reference !== undefined) {
-      out.push({ reference, ceiling: positionCeiling(node) });
+      out.push({ reference, ceiling: positionCeiling(node, full) });
       return;
     }
     // Not a reference as a whole; a token inside it is checked below.
@@ -526,6 +563,14 @@ const resolveReferences = (
   }
   if (isObjectNotArray(value)) {
     for (const [key, item] of Object.entries(value)) {
+      // A property name is text the model wrote, and the inbound swap
+      // restores tokens in names as it does in values, so a name is held to
+      // the same rule: an unheld handle anywhere in it fails the write. A
+      // held one stays as the text it is, since a name cannot hold a link.
+      if (referenceText(key) !== undefined) resolve(key, [...path, key]);
+      for (const match of key.matchAll(tokenPattern())) {
+        resolve(match[0], [...path, key]);
+      }
       resolveReferences(
         item,
         childSchemaForKey(node, key, full),
@@ -603,8 +648,15 @@ const fitsPositionCeiling = (
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-/** Maps a failed commit to the writer's typed failure. */
-const commitFailure = (
+/**
+ * Maps a failed commit to the writer's typed failure: a
+ * `CfcCommitRefusalError` is the boundary's decision and becomes
+ * `cfc_commit_refused` carrying its structured refusals; any other storage
+ * error becomes `commit_failed`. Either way the message names `what` was being
+ * written and nothing the error itself said, which is kept as
+ * `rawCauseMessage` for the artifact.
+ */
+export const agentResultCommitFailure = (
   error: { name?: string; message?: string; refusals?: unknown },
   what: string,
 ): AgentResultWriteError => {
@@ -625,6 +677,17 @@ const commitFailure = (
     `writing ${what} failed`,
     { rawCauseMessage: error.message },
   );
+};
+
+/** Commits `tx`, throwing the writer's failure for `what` when it does not land. */
+const commitOrThrow = async (
+  tx: { commit(): Promise<{ error?: { name?: string; message?: string } }> },
+  what: string,
+): Promise<void> => {
+  const outcome = await tx.commit();
+  if (outcome.error !== undefined) {
+    throw agentResultCommitFailure(outcome.error, what);
+  }
 };
 
 /** The label a synced cell carries at its root, as the runtime reports it. */
@@ -805,10 +868,7 @@ export const writeAgentResult = async (
         link: cell.getAsNormalizedFullLink(),
       });
     }
-    const outcome = await mintTx.commit();
-    if (outcome.error !== undefined) {
-      throw commitFailure(outcome.error, "the documents minted for the result");
-    }
+    await commitOrThrow(mintTx, "the documents minted for the result");
   }
 
   const tx = runtime.edit();
@@ -856,10 +916,7 @@ export const writeAgentResult = async (
     tx,
   );
   resultCell.set(value);
-  const outcome = await tx.commit();
-  if (outcome.error !== undefined) {
-    throw commitFailure(outcome.error, "the agent result");
-  }
+  await commitOrThrow(tx, "the agent result");
 
   const link = resultCell.getAsNormalizedFullLink();
   const written = runtime.getCellFromLink<unknown>(link);

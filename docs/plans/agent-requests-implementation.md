@@ -47,7 +47,7 @@ availability tables.
 - [ ] Confirm each of `people`, `calendar list`, `context`, `profile` against
       the pinned loom checkout (`~/looms/primary/src/bin/loom`): read-only,
       JSON output, argument list. Drop from the union any that is not; record
-      the dropped ones and why in `docs/LOOM_RETRIEVAL.md`.
+      the dropped ones and why in `packages/cf-harness/docs/LOOM_RETRIEVAL.md`.
 - [ ] `src/tools/loom-retrieval.ts` — one `HarnessToolDefinition` per tool
       (`loom_search`, `loom_page_discover`, `loom_page_inspect`,
       `loom_page_read`, `loom_people`, `loom_calendar_list`, `loom_context`,
@@ -86,9 +86,11 @@ availability tables.
       unlabeled hit refused; a hit above the ceiling sealed; the notice
       attached; availability gating in the descriptor tables; capability
       description lists the tools only when configured.
-- [ ] Documents: `docs/LOOM_RETRIEVAL.md` (new, the sibling of
-      `LOOM_AUTHORING.md`), `docs/IMPLEMENTATION_PROFILE.md` tool list,
-      `docs/CURRENT_STATE.md` supported surfaces, `README.md` where it lists
+- [ ] Documents: `packages/cf-harness/docs/LOOM_RETRIEVAL.md` (new, the
+      sibling of `packages/cf-harness/docs/LOOM_AUTHORING.md`),
+      `packages/cf-harness/docs/IMPLEMENTATION_PROFILE.md` tool list,
+      `packages/cf-harness/docs/CURRENT_STATE.md` supported surfaces,
+      `packages/cf-harness/README.md` where it lists
       Loom tools; `deno task check-skill-facts` if a skill cites a path.
 
 *Exit:* a batch run with `--loom-retrieval-config` and a scripted model answers
@@ -105,27 +107,34 @@ over the fabric session's runtime and is called by the runner of stage 4 after
 a run reaches its structured result. It is not a model tool.
 
 - [x] `src/result-writer.ts` — `writeAgentResult({ session, handleTable,
-      modelContext, structuredResult, resultSchema, observedHandles })`
-      returning `{ link, joinLabel, mintedDocuments }`. Steps, in one
-      transaction on `session.pieces.runtime`:
-      1. `validateAndSanitizeStructuredResultValue` against `resultSchema`
-         (existing, `src/structured-result.ts`).
-      2. Walk the value; at every position holding a handle token or the
-         canonical link string the inbound swap produces, resolve through
-         `resolveHandleRef` against the run's table — unheld fails the write
-         (AH-REF-2). A cell referent becomes its link. A non-cell referent
-         (a Loom row the run observed, a SQLite row) becomes a new document
-         written with the referent's disclosed label declared through the
-         document schema's `ifc.confidentiality`, and its link.
-      3. Read every observed cell (`observedHandles`) through the transaction
-         so `collectConsumedLabel` sees them.
-      4. `tx.setCfcImplementationIdentity({ kind: "builtin", builtinId: "agent" })`
-         and write the result document with an `LlmDerived` stamp schema
-         built the way `withLlmDerivedStamp` builds one for `generateObject`
-         (`packages/runner/src/builtins/llm.ts`); export that helper from
-         `@commonfabric/runner/cfc` or a sibling so the harness does not copy
-         it.
-      5. Commit; return the result link and the join the transaction derived.
+      structuredResult, resultSchema, observedHandles, maxConfidentiality,
+      cause?, opaqueHandleId? })` returning `{ link, joinLabel,
+      mintedDocuments, sealedPaths }`. `observedHandles` holds every cell
+      handle the run observed and, as `kind: "document"` entries carrying
+      content and reported label, every non-cell referent; `maxConfidentiality`
+      is the run's observation ceiling. Steps, on `session.pieces.runtime`:
+      1. `validateStructuredResultValue` against `resultSchema` with `asCell`
+         positions exempt (existing, `src/structured-result.ts`).
+      2. Walk the value; at every position holding a handle token, the
+         canonical link string the inbound swap produces, or a `{"@link"}`
+         object, resolve through `resolveHandleToken`/`resolveHandleRef`
+         against the run's table or the document referents — unheld fails the
+         write before any transaction opens (AH-REF-2), a token in prose or a
+         property name included; a cell outside the session's space is
+         refused. A cell referent becomes its link. Where the position
+         declares `ifc.maxConfidentiality` (met across `allOf`), a referent
+         above it is sealed.
+      3. First transaction: a document per non-cell referent, written through
+         a schema declaring the referent's label on every node; no reads.
+      4. Second transaction: read every observed cell and every minted
+         document so `collectConsumedLabel` sees them;
+         `tx.setCfcImplementationIdentity({ kind: "builtin", builtinId: "agent" })`;
+         write the result through the result schema with position ceilings
+         stripped, link positions relaxed, `maxConfidentiality` declared as
+         `ifc.confidentiality` on every node, and the `LlmDerived` stamp from
+         `withLlmDerivedStamp` (`@commonfabric/runner/cfc`) on every node.
+      5. Commit; return the result link and the label the runtime reports at
+         its root.
 - [x] Refusal handling: a commit the boundary refuses surfaces as a typed
       writer failure carrying the refusal code and no label detail, the way
       `run_pattern` reports `cfc_release_withheld`; the runner maps it to
@@ -138,8 +147,9 @@ a run reaches its structured result. It is not a model tool.
       any write; a handle at a non-`asCell` position still becomes a link; a
       value above a declared ceiling at an `asCell` position is sealed rather
       than written.
-- [x] Documents: `docs/IMPLEMENTATION_PROFILE.md` (the writer as a trusted
-      host path, AH-TOOL-7), `docs/CURRENT_STATE.md`.
+- [x] Documents: `packages/cf-harness/docs/IMPLEMENTATION_PROFILE.md` (the
+      writer as a trusted host path, AH-TOOL-7),
+      `packages/cf-harness/docs/CURRENT_STATE.md`.
 
 *Exit:* the stage-2 test file passes and CFC inspection (`cf inspect`) of the
 written space shows the labels the test asserts.

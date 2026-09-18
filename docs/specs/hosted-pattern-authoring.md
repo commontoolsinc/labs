@@ -18,7 +18,8 @@ Design, and likely to be superseded before it is built. The
 general way for a pattern or a person to hand work to a `cf-harness` run and
 track it through a per-user queue; revising a piece from a request is one such
 run under the harness's existing `pattern-author` profile, and the harness is
-now capable of the authoring this document specified a service for. Whoever
+now capable of the authoring that this document specified a service for.
+Whoever
 picks this up should start there and treat the entry points, the session state
 machine, and the publication gate below as requirements to carry into that
 design rather than as a second service to build.
