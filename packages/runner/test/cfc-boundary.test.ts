@@ -9,6 +9,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
@@ -54,24 +55,29 @@ import {
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 import { refuseAtCommitBoundary } from "./refused-commit.ts";
+import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "../src/storage/interface.ts";
+import type { FabricValue } from "@commonfabric/data-model";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
 
-// Seed stored CFC metadata via an ungated path-[] full-document write (the
-// shape hydration delivers it), reading the current doc first so the value
-// survives. A direct (unprivileged) ["cfc"] write is rejected as label forgery
-// (audit S18); the runtime's own ["cfc"] writes go through prepareCfc's
-// ECMAScript-private privileged scope, which tests can't (and shouldn't) reach.
+// Seed stored CFC metadata with a path-[] full-document write, reading the
+// current doc first so the value survives. Every write that reaches a
+// document's reserved siblings from outside the runtime's privileged
+// persistence scope is recorded as label forgery (audit S18), so the seed
+// goes through `seedStoredEnvelope`, which runs inside that scope.
 const seedPrivilegedCfc = (
   tx: unknown,
   address: unknown,
   metadata: unknown,
 ): void => {
-  const t = tx as {
-    readOrThrow(address: unknown): unknown;
-    writeOrThrow(address: unknown, value: unknown): void;
-  };
-  const docAddress = { ...(address as Record<string, unknown>), path: [] };
+  const t = tx as IExtendedStorageTransaction;
+  const docAddress = {
+    ...(address as Record<string, unknown>),
+    path: [],
+  } as unknown as IMemorySpaceAddress;
   let current: unknown;
   try {
     current = t.readOrThrow(docAddress);
@@ -79,7 +85,10 @@ const seedPrivilegedCfc = (
     current = undefined;
   }
   const base = current && typeof current === "object" ? current : {};
-  t.writeOrThrow(docAddress, { ...base, cfc: metadata });
+  seedStoredEnvelope(t, docAddress, {
+    ...base,
+    cfc: metadata,
+  } as FabricValue);
 };
 
 class SharedV2SessionFactory implements V2Storage.SessionFactory {
@@ -963,7 +972,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       const result = await tx.commit();
       expect(result.error?.message).toContain(
-        "unprivileged write to protected cfc path",
+        "unprivileged write to protected runtime surface",
       );
     } finally {
       await runtime.dispose();
@@ -1098,7 +1107,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       const result = await tx.commit();
       expect(result.error?.message).toContain(
-        "unprivileged write to protected cfc path",
+        "unprivileged write to protected runtime surface",
       );
     } finally {
       await runtime.dispose();
@@ -1581,7 +1590,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         ).getAsLink(),
       ).id!;
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: sourceId,
@@ -1657,7 +1666,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       const seed = runtime.edit();
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: seededId,
@@ -1891,7 +1900,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       const seed = runtime.edit();
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: seededId,
@@ -1953,7 +1962,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const seed = runtime.edit();
       seed.setCfcEnforcementMode("enforce-explicit");
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: seededId,
@@ -3022,7 +3031,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         } satisfies JSONSchema,
         true,
       );
-      targetSeed.writeOrThrow({
+      seedStoredEnvelope(targetSeed, {
         space: signer.did(),
         scope: "space",
         id: targetLink.id,
@@ -3122,7 +3131,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         } satisfies JSONSchema,
         true,
       );
-      targetSeed.writeOrThrow({
+      seedStoredEnvelope(targetSeed, {
         space: signer.did(),
         scope: "space",
         id: targetLink.id,
@@ -3363,7 +3372,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         } satisfies JSONSchema,
         true,
       );
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: targetLink.id,
@@ -3533,7 +3542,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         tx,
       );
       const link = cell.getAsNormalizedFullLink();
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         scope: "space",
         id: link.id,
@@ -4008,7 +4017,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     try {
       const seed = runtime.edit();
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: "of:cfc-derived-label-source",
@@ -4226,7 +4235,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       );
 
       const seed = runtime.edit();
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: documentId,
@@ -4624,7 +4633,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         ).getAsLink(),
       ).id!;
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: seededId,
@@ -4675,7 +4684,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         ).getAsLink(),
       ).id!;
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: sourceId,
@@ -4797,7 +4806,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         ).getAsLink(),
       ).id!;
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: sourceId,
@@ -4893,7 +4902,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         ).getAsLink(),
       ).id!;
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: sourceId,
@@ -4979,7 +4988,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         ).getAsLink(),
       ).id!;
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: trustedSourceId,
@@ -5011,7 +5020,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         ).getAsLink(),
       ).id!;
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: untrustedSourceId,
@@ -5102,7 +5111,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         ).getAsLink(),
       ).id!;
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: sourceId,
@@ -5182,7 +5191,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         ).getAsLink(),
       ).id!;
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: sourceId,
@@ -5360,7 +5369,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         ).getAsLink(),
       ).id!;
       writeSeedEnvelopeDoc(seed, signer.did());
-      seed.writeOrThrow({
+      seedStoredEnvelope(seed, {
         space: signer.did(),
         scope: "space",
         id: sourceId,

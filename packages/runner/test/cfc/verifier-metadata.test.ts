@@ -10,6 +10,7 @@ import { Runtime } from "../../src/runtime.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "../cfc-seed-envelope.ts";
 
@@ -68,7 +69,7 @@ describe("prepareBoundaryCommit()", () => {
       const schemaId = `cid:${guardedSchema.taggedHashString}` as const;
       const tx = runtime.edit();
       writeSeedEnvelopeDoc(tx, signer.did());
-      tx.writeOrThrow({
+      seedStoredEnvelope(tx, {
         space: signer.did(),
         scope: "space",
         id: schemaId,
@@ -295,7 +296,10 @@ describe("prepareBoundaryCommit()", () => {
           undefined,
           seed,
         );
-        seed.writeOrThrow({ ...source.getAsNormalizedFullLink(), path: [] }, {
+        seedStoredEnvelope(seed, {
+          ...source.getAsNormalizedFullLink(),
+          path: [],
+        }, {
           value: "opaque",
           cfc,
         });

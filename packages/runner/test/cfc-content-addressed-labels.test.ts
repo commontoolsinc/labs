@@ -40,6 +40,7 @@ import { TransactionWrapper } from "../src/storage/extended-storage-transaction.
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 
@@ -239,7 +240,7 @@ const writeReferencingEnvelope = (
 ): string => {
   const id = parseLink(runtime.getCell(space, name).getAsLink()).id!;
   writeSeedEnvelopeDoc(tx, space);
-  tx.writeOrThrow({ space, scope: "space", id, path: [] }, {
+  seedStoredEnvelope(tx, { space, scope: "space", id, path: [] }, {
     value: { secret: "sealed" },
     cfc: {
       version: 2,
@@ -857,7 +858,7 @@ describe("CFC content-addressed labels", () => {
         registerCfcLabelDocument(hash, content);
         const id = parseLink(runtime.getCell(space, "v1-ref").getAsLink()).id!;
         writeSeedEnvelopeDoc(tx, space);
-        tx.writeOrThrow({ space, scope: "space", id, path: [] }, {
+        seedStoredEnvelope(tx, { space, scope: "space", id, path: [] }, {
           value: { secret: "sealed" },
           cfc: {
             version: 1,
@@ -888,7 +889,7 @@ describe("CFC content-addressed labels", () => {
         const id = parseLink(runtime.getCell(space, "v2-shape").getAsLink())
           .id!;
         writeSeedEnvelopeDoc(tx, space);
-        tx.writeOrThrow({ space, scope: "space", id, path: [] }, {
+        seedStoredEnvelope(tx, { space, scope: "space", id, path: [] }, {
           value: { secret: "sealed" },
           cfc: {
             version: 2,
@@ -919,7 +920,7 @@ describe("CFC content-addressed labels", () => {
         const tx = runtime.edit();
         const id = parseLink(runtime.getCell(space, "foreign").getAsLink()).id!;
         writeSeedEnvelopeDoc(tx, space);
-        tx.writeOrThrow({ space, scope: "space", id, path: [] }, {
+        seedStoredEnvelope(tx, { space, scope: "space", id, path: [] }, {
           value: { secret: "sealed" },
           cfc: {
             version: 2,

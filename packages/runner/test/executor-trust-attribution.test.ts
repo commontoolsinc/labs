@@ -549,7 +549,9 @@ describe("executor-trust-attribution", () => {
         );
         const entry = entryByKind(engine, sidecarId, "s18-forge")!;
         expect(entry.error).toContain("CFC enforcement rejected commit");
-        expect(entry.error).toContain("unprivileged write to protected cfc");
+        expect(entry.error).toContain(
+          "unprivileged write to protected runtime surface",
+        );
         // The stored envelope is untouched: the honest subjects survive.
         expect(
           principalSubjects(

@@ -17,6 +17,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "../../runner/test/cfc-seed-envelope.ts";
 import type { VDomOp } from "../src/vdom-ops.ts";
@@ -89,7 +90,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
     const secretLink = secret.getAsNormalizedFullLink();
     writeSeedEnvelopeDoc(tx, signer.did());
-    tx.writeOrThrow({
+    seedStoredEnvelope(tx, {
       space: signer.did(),
       id: secretLink.id!,
       type: "application/json",
@@ -116,7 +117,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
     const structuredSecretLink = structuredSecret.getAsNormalizedFullLink();
     writeSeedEnvelopeDoc(tx, signer.did());
-    tx.writeOrThrow({
+    seedStoredEnvelope(tx, {
       space: signer.did(),
       id: structuredSecretLink.id!,
       type: "application/json",
@@ -143,7 +144,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
     const signedReleaseTextLink = signedReleaseText.getAsNormalizedFullLink();
     writeSeedEnvelopeDoc(tx, signer.did());
-    tx.writeOrThrow({
+    seedStoredEnvelope(tx, {
       space: signer.did(),
       id: signedReleaseTextLink.id!,
       type: "application/json",
@@ -179,7 +180,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
     const representedProfileLink = representedProfile.getAsNormalizedFullLink();
     writeSeedEnvelopeDoc(tx, signer.did());
-    tx.writeOrThrow({
+    seedStoredEnvelope(tx, {
       space: signer.did(),
       id: representedProfileLink.id!,
       type: "application/json",
@@ -209,7 +210,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     const authoredByProfileTextLink = authoredByProfileText
       .getAsNormalizedFullLink();
     writeSeedEnvelopeDoc(tx, signer.did());
-    tx.writeOrThrow({
+    seedStoredEnvelope(tx, {
       space: signer.did(),
       id: authoredByProfileTextLink.id!,
       type: "application/json",
@@ -2006,7 +2007,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         );
         const messageLink = message.getAsNormalizedFullLink();
         writeSeedEnvelopeDoc(tx, signer.did());
-        tx.writeOrThrow({
+        seedStoredEnvelope(tx, {
           space: signer.did(),
           id: messageLink.id!,
           type: "application/json",
@@ -2104,7 +2105,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         );
         const messageLink = message.getAsNormalizedFullLink();
         writeSeedEnvelopeDoc(tx, signer.did());
-        tx.writeOrThrow({
+        seedStoredEnvelope(tx, {
           space: signer.did(),
           id: messageLink.id!,
           type: "application/json",
@@ -2232,7 +2233,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         );
         const messagesLink = messages.getAsNormalizedFullLink();
         writeSeedEnvelopeDoc(tx, signer.did());
-        tx.writeOrThrow({
+        seedStoredEnvelope(tx, {
           space: signer.did(),
           id: messagesLink.id!,
           type: "application/json",
@@ -2714,7 +2715,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
     const influencedLink = influenced.getAsNormalizedFullLink();
     writeSeedEnvelopeDoc(caveatTx, signer.did());
-    caveatTx.writeOrThrow({
+    seedStoredEnvelope(caveatTx, {
       space: signer.did(),
       id: influencedLink.id!,
       type: "application/json",
@@ -2961,7 +2962,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           );
           const link = cell.getAsNormalizedFullLink();
           writeSeedEnvelopeDoc(seedTx, signer.did());
-          seedTx.writeOrThrow({
+          seedStoredEnvelope(seedTx, {
             space: signer.did(),
             id: link.id!,
             type: "application/json",
@@ -3047,7 +3048,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           );
           const link = cell.getAsNormalizedFullLink();
           writeSeedEnvelopeDoc(seedTx, signer.did());
-          seedTx.writeOrThrow({
+          seedStoredEnvelope(seedTx, {
             space: signer.did(),
             id: link.id!,
             type: "application/json",
@@ -3160,7 +3161,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           );
           const link = cell.getAsNormalizedFullLink();
           writeSeedEnvelopeDoc(seedTx, signer.did());
-          seedTx.writeOrThrow({
+          seedStoredEnvelope(seedTx, {
             space: signer.did(),
             id: link.id!,
             type: "application/json",
@@ -3315,7 +3316,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         );
         const markerLink = markerCellSeed.getAsNormalizedFullLink();
         writeSeedEnvelopeDoc(seedTx, signer.did());
-        seedTx.writeOrThrow({
+        seedStoredEnvelope(seedTx, {
           space: signer.did(),
           id: markerLink.id!,
           type: "application/json",
@@ -3451,7 +3452,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         );
         const teamLink = teamCell.getAsNormalizedFullLink();
         writeSeedEnvelopeDoc(seedTx, signer.did());
-        seedTx.writeOrThrow({
+        seedStoredEnvelope(seedTx, {
           space: signer.did(),
           id: teamLink.id!,
           type: "application/json",
@@ -3608,7 +3609,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         );
         const teamLink = teamCell.getAsNormalizedFullLink();
         writeSeedEnvelopeDoc(seedTx, signer.did());
-        seedTx.writeOrThrow({
+        seedStoredEnvelope(seedTx, {
           space: signer.did(),
           id: teamLink.id!,
           type: "application/json",

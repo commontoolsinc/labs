@@ -9,6 +9,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 
@@ -40,7 +41,7 @@ export async function prepareLadderFixture(entries: number) {
     });
   }
   writeSeedEnvelopeDoc(seed, space);
-  seed.writeOrThrow({ ...address, path: [] }, {
+  seedStoredEnvelope(seed, { ...address, path: [] }, {
     value,
     cfc: {
       version: 1,
