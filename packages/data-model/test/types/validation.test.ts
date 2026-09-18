@@ -21,7 +21,7 @@ import { expect } from "@std/expect";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
-import { codecClasses } from "@/fabric-primitives/index.ts";
+import { codecClasses } from "@/fabric-primitives/impl.ts";
 import type { FabricValue } from "@/interface.ts";
 import { shallowFabricFromConvertibleJsValue } from "@/convertible-js.ts";
 import {

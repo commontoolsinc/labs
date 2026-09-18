@@ -262,7 +262,7 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   (`packages/data-model/src/api.ts`, which `@commonfabric/api` re-exports) is
   derived from the class declarations there, and the runtime list
   `FABRIC_PRIMITIVE_SCHEMA_TYPES`
-  (`packages/data-model/src/fabric-primitives/index.ts`) from the classes.
+  (`packages/data-model/src/fabric-primitives/impl.ts`) from the classes.
 
 A generated schema places each named type in its root `$defs` and refers to
 it by `#/$defs/<name>`. The full TypeScript→schema mapping is specified in

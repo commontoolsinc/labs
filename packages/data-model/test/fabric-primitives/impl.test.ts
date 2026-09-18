@@ -1,6 +1,6 @@
 /**
- * What `fabric-primitives/index.ts` derives from its list of classes, and that
- * list's agreement with the vocabularies that range over the classes. Nothing
+ * What `fabric-primitives/impl.ts` derives from its set of classes, and that
+ * set's agreement with the vocabularies that range over the classes. Nothing
  * here names a class: each case ranges over `codecClasses()`, over one of
  * those vocabularies, or over the primitives the shared corpus holds, so a
  * class added to the package is covered without an edit here.
@@ -17,7 +17,7 @@ import {
   fabricPrimitiveClassesByName,
   fabricPrimitiveClassOfSchemaType,
   isFabricPrimitiveSchemaType,
-} from "@/fabric-primitives/index.ts";
+} from "@/fabric-primitives/impl.ts";
 import { FABRIC_PRIMITIVE_CODEC_TYPE_TAGS } from "@/fabric-primitives/interface.ts";
 import { FabricPrimitive } from "@/interface.ts";
 import { LAYER_CORPUS } from "../fabric-value-corpus.ts";
@@ -30,7 +30,7 @@ const PRIMITIVES = LAYER_CORPUS.filter(
     entry[1] instanceof FabricPrimitive,
 );
 
-describe("fabric-primitives/index", () => {
+describe("fabric-primitives/impl", () => {
   describe("codecClasses()", () => {
     it("lists classes which each report a distinct `.schemaType`", () => {
       const names = codecClasses().map((cls) => cls.prototype.schemaType);

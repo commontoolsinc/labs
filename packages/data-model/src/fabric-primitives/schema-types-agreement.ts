@@ -1,6 +1,6 @@
 /**
  * Compile-time agreement between the set of concrete primitive classes in
- * `index.ts` and what `api.ts` declares of them. Against
+ * `impl.ts` and what `api.ts` declares of them. Against
  * `FabricPrimitiveSchemaType`: a class for every name in the vocabulary, a
  * name in the vocabulary for every class, and no name reported by two classes.
  * Against the declarations by name: each class keyed by the name `api.ts`
@@ -27,7 +27,7 @@ import type {
   FabricPrimitiveClass,
   FabricPrimitiveClassesByName,
   isFabricPrimitiveSchemaType,
-} from "./index.ts";
+} from "./impl.ts";
 
 /** The members of `Classes` whose instances report `Name`. */
 type ClassesReporting<Classes, Name> = Extract<
