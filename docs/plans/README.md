@@ -10,6 +10,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Security and privacy roadmap](security-privacy-roadmap.md) gives an overview
+  of current trust boundaries and the path from runtime security to operator
+  exclusion, with remaining work and technical references in an appendix.
 - [Discovering Loom resources with wish](loom-resource-discovery.md) proposes
   publishing existing database and companion-cell references once per Loom
   environment, with a staged person-inbox migration and compiled integration
