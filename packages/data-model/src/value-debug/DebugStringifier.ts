@@ -671,19 +671,18 @@ export class DebugStringifier {
    * number and whose `excerpt` is a string, and `undefined` when it is not.
    */
   static #partialStringOf(value: FabricValue): PartialString | undefined {
-    const length = DebugStringifier.#lengthOf(value);
     // deno-coverage-ignore-start
     // The conversion shapes the form no other way; see the `partialString`
     // arm of `#renderTaggedForm()`.
-    if (length === undefined) {
+    if (!isPlainObject(value)) {
       return undefined;
     }
     // deno-coverage-ignore-stop
 
-    // `#lengthOf()` returns a length for a plain object alone, which the type
-    // of `value` does not show.
-    const { excerpt } = value as FabricPlainObject;
-    return (typeof excerpt === "string") ? { length, excerpt } : undefined;
+    const { length, excerpt } = value;
+    return ((typeof length === "number") && (typeof excerpt === "string"))
+      ? { length, excerpt }
+      : undefined;
   }
 
   /**
