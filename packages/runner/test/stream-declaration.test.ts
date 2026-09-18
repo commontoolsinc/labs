@@ -16,6 +16,11 @@ import {
   parseLink,
 } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
+import {
+  declaredHandleKind,
+  declaringManifestLink,
+  type ExternalReferenceResolver,
+} from "../src/stream-declaration.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("stream-declaration");
@@ -440,6 +445,50 @@ describe("stream declaration", () => {
         anyOf: [{ $ref: "#/$defs/Loop" }, event],
         $defs: { Loop: { anyOf: [{ $ref: "#/$defs/Loop" }] } },
       })).toBeUndefined();
+    });
+  });
+
+  describe("the reading a reader holding no runtime shares", () => {
+    const event = { asCell: ["stream"], type: "number" } as JSONSchema & object;
+    const external = { $ref: "cid:evt" } as JSONSchema;
+
+    it("declares nothing for an external reference given no resolver", () => {
+      expect(declaredHandleKind(external)).toBeUndefined();
+    });
+
+    it("reads a resolved reference against the document it resolved to", () => {
+      const resolveExternal: ExternalReferenceResolver = () => ({
+        schema: { $ref: "#/$defs/Event" } as JSONSchema,
+        root: { $defs: { Event: event } } as JSONSchema,
+      });
+      expect(declaredHandleKind(external, { resolveExternal })).toBe("stream");
+      // The root it was reached from names another definition by that name.
+      expect(declaredHandleKind(external, {
+        root: { $defs: { Event: { asCell: ["cell"] } } } as JSONSchema,
+        resolveExternal,
+      })).toBe("stream");
+    });
+
+    it("declares nothing where the resolver refuses the reference", () => {
+      expect(declaredHandleKind(external, { resolveExternal: () => undefined }))
+        .toBeUndefined();
+    });
+
+    it("returns the first manifest link naming the target that declares a stream", () => {
+      const manifest = [
+        { link: { id: "a", schema: event } },
+        "not an entry",
+        { link: { id: "b", schema: { type: "number" } } },
+        { link: { id: "b", schema: event } },
+      ];
+      const linkOf = (raw: unknown) =>
+        raw as { id: string; schema?: JSONSchema };
+      expect(declaringManifestLink(manifest, linkOf, (l) => l.id === "b"))
+        .toEqual({ id: "b", schema: event });
+      expect(declaringManifestLink(manifest, linkOf, (l) => l.id === "c"))
+        .toBeUndefined();
+      expect(declaringManifestLink("no manifest", linkOf, () => true))
+        .toBeUndefined();
     });
   });
 

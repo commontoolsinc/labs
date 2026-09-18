@@ -51,11 +51,17 @@
 //                  (`hasTable`, the scope_key shim). A schema-migration concern.
 // └────────────────────────────────────────────────────────────────────────────┘
 
+import type { JSONSchema } from "@commonfabric/api";
 import {
   classifySchemaMetaValue,
   SCHEMA_DOCUMENT_REF_PREFIX,
 } from "@commonfabric/data-model-schema/schema-refs";
-import { decodeJsonPointer } from "@commonfabric/utils/json-pointer";
+import {
+  declaredHandleKind,
+  declaringManifestLink,
+  definitionNamed,
+  type ExternalReferenceResolver,
+} from "@commonfabric/runner/stream-declaration";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 
@@ -258,16 +264,6 @@ export function spaceDocumentReader(
   };
 }
 
-/** The `asCell` kind a schema declares at its root, if it declares one. */
-function asCellKindOf(schema: unknown): string | undefined {
-  if (!isObjectNotArray(schema) || !Array.isArray(schema.asCell)) return;
-  const front: unknown = schema.asCell[0];
-  if (typeof front === "string") return front;
-  return isObjectNotArray(front) && typeof front.kind === "string"
-    ? front.kind
-    : undefined;
-}
-
 /**
  * A schema read out of a `schema` member — a document's meta, or a link's —
  * together with the document its local references resolve against: the
@@ -310,7 +306,7 @@ export function resolveSchemaMember(
   if (root === undefined) return undefined;
   const schema = form.defName === undefined
     ? root
-    : definitionOf(root, form.defName);
+    : definitionNamed(root as JSONSchema, form.defName);
   return schema === undefined
     ? undefined
     : { schema, root, via: "document", ref: form.ref };
@@ -324,83 +320,23 @@ export function storedSchemaOf(
   return resolveSchemaMember(doc.schema, readDocument);
 }
 
-/** The definition `root` carries under `name` in its `$defs`, if any. */
-function definitionOf(root: unknown, name: string): unknown {
-  if (!isObjectNotArray(root) || !isObjectNotArray(root.$defs)) return;
-  const defs = root.$defs;
-  if (!Object.hasOwn(defs, name)) return undefined;
-  const definition = defs[name];
-  return isObjectNotArray(definition) || typeof definition === "boolean"
-    ? definition
-    : undefined;
-}
-
 /**
- * The definition name a `#/$defs/<name>` reference names, or `undefined` for
- * any other reference.
+ * How the declaration reading follows an external reference here: into the
+ * schema document the space holds, through `readDocument`, under the grammar
+ * {@link resolveSchemaMember} applies. A reference the space cannot supply,
+ * and a member outside the grammar, resolve to nothing, and the position
+ * declares nothing.
  */
-function localDefinitionName(ref: string): string | undefined {
-  if (!ref.startsWith("#")) return undefined;
-  const path = decodeJsonPointer(ref);
-  return path.length === 3 && path[0] === "#" && path[1] === "$defs" &&
-      path[2] !== ""
-    ? path[2]
-    : undefined;
-}
-
-/**
- * The handle kind `schema` declares at its root: its own `asCell`, else what
- * a root `$ref` into `root`'s `$defs` declares, else what a composition whose
- * branches agree declares — `allOf` what any branch declares, and `anyOf` and
- * `oneOf` what every branch declares, since the value may be any of them.
- * `undefined` where nothing is declared, where the branches disagree, or
- * where a reference does not resolve.
- *
- * This is the runtime's reading, `ContextualFlowControl.declaredHandleKind`
- * in `packages/runner/src/cfc.ts`, taken over a schema whose external
- * reference {@link resolveSchemaMember} has already followed. It is written
- * here rather than imported because the inspector reads a space offline and
- * carries none of the runtime.
- *
- * `active` is the descent under way. It stops a reference from being followed
- * back into itself; a definition two sibling branches share is read once for
- * each, since the first branch has left it by the time the second arrives.
- */
-function declaredHandleKindOf(
-  schema: unknown,
-  root: unknown,
-  active: Set<object> = new Set(),
-): string | undefined {
-  if (!isObjectNotArray(schema) || active.has(schema)) return undefined;
-  active.add(schema);
-  try {
-    const direct = asCellKindOf(schema);
-    if (direct !== undefined) return direct;
-    if (typeof schema.$ref === "string") {
-      const name = localDefinitionName(schema.$ref);
-      return name === undefined
-        ? undefined
-        : declaredHandleKindOf(definitionOf(root, name), root, active);
-    }
-    const agreed = (branches: unknown, every: boolean): string | undefined => {
-      if (!Array.isArray(branches) || branches.length === 0) return undefined;
-      let kind: string | undefined;
-      for (const branch of branches) {
-        const declared = declaredHandleKindOf(branch, root, active);
-        if (declared === undefined) {
-          if (every) return undefined;
-          continue;
-        }
-        if (kind !== undefined && kind !== declared) return undefined;
-        kind = declared;
-      }
-      return kind;
+function externalReferenceResolver(
+  readDocument?: DocumentReader,
+): ExternalReferenceResolver {
+  return (schema) => {
+    const resolved = resolveSchemaMember(schema, readDocument);
+    return resolved === undefined ? undefined : {
+      schema: resolved.schema as JSONSchema,
+      root: resolved.root as JSONSchema,
     };
-    return agreed(schema.allOf, false) ?? agreed(schema.anyOf, true) ??
-      agreed(schema.oneOf, true);
-  } finally {
-    active.delete(schema);
-  }
+  };
 }
 
 /** Where a stream's declaration was read, and the schema found there. */
@@ -428,23 +364,21 @@ export function streamDeclarationOf(
 ): StreamDeclaration | undefined {
   const owner = linkId(doc.result);
   if (owner === undefined) return undefined;
-  const manifest = readDocument?.(owner)?.internal;
-  if (!Array.isArray(manifest)) return undefined;
-  for (const entry of manifest) {
-    if (!isObjectNotArray(entry)) continue;
-    const link = decodedLinkOf(entry.link);
-    if (link === null || link.id !== id || (link.path?.length ?? 0) > 0) {
-      continue;
-    }
-    const resolved = resolveSchemaMember(link.schema, readDocument);
-    if (
-      resolved !== undefined &&
-      declaredHandleKindOf(resolved.schema, resolved.root) === "stream"
-    ) {
-      return { ...resolved, owner };
-    }
-  }
-  return undefined;
+  const resolveExternal = externalReferenceResolver(readDocument);
+  const link = declaringManifestLink(
+    readDocument?.(owner)?.internal,
+    (raw) => {
+      const decoded = decodedLinkOf(raw);
+      return decoded === null
+        ? undefined
+        : { ...decoded, schema: decoded.schema as JSONSchema | undefined };
+    },
+    (link) => link.id === id && (link.path?.length ?? 0) === 0,
+    (schema) => declaredHandleKind(schema, { resolveExternal }) === "stream",
+  );
+  if (link === undefined) return undefined;
+  const resolved = resolveSchemaMember(link.schema, readDocument);
+  return resolved === undefined ? undefined : { ...resolved, owner };
 }
 
 /** A piece result value: carries render/name markers. */

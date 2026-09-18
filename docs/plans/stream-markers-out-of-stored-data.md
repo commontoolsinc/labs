@@ -316,14 +316,17 @@ than what the list first said, the item says what it does now and why.
 
 - [x] State inspector: a document classifies as `stream` by following its
       `result` back-link to the owner's `internal` manifest and reading the
-      stamped link there, through the reference and composition reading the
-      runtime's `declaredHandleKind` applies, written over stored documents
-      in `state-inspector/model.ts` since the inspector carries none of the
-      runtime; the value check stays until stage 3. `classifyDocument` takes
+      stamped link there, through the reading the runtime applies. That
+      reading is `@commonfabric/runner/stream-declaration`, a module carrying
+      none of the runtime, which the runtime and the inspector both go
+      through — each supplying how it resolves an external schema reference
+      (the registry; the space's documents, refusing a member outside the
+      schema-meta grammar) and how it parses a manifest link (`parseLink`
+      over cells; the stored sigil form). The value check stays until stage
+      3. `classifyDocument` takes
       the document's id, which the manifest entry is matched by, and a
       document reader, which the walk reads the owner and a manifest link's
-      `cid:` reference through. A declaration outside the schema-meta grammar
-      declares nothing. The detail view names the manifest it read.
+      `cid:` reference through. The detail view names the manifest it read.
 - [x] Shuttle listing: a key is a `callable` off the child's link-derived
       schema, the same signal the CLI read guard refuses on, through a new
       `listCallableKeys` read (`packages/cli/lib/piece.ts`) that runs beside the
@@ -410,10 +413,10 @@ than what the list first said, the item says what it does now and why.
       value read. It covers links a handler or lift wrote into data before
       stage 1, which no setup pass rewrites (`data-updating.ts:1283` stamps
       only a new write), and the llm-dialog dispatch at
-      `builtins/llm-dialog.ts:2067`. The runtime's walk is
-      `ownerStreamSchema` (`link-utils.ts`); the inspector, which carries none
-      of the runtime, keeps its own over stored documents
-      (`state-inspector/model.ts`), and the follow-up deletes both.
+      `builtins/llm-dialog.ts:2067`. The walk is `declaringManifestLink` in
+      `runner/src/stream-declaration.ts`, which `ownerStreamSchema`
+      (`link-utils.ts`) and the inspector's `streamDeclarationOf`
+      (`state-inspector/model.ts`) both call; the follow-up deletes it.
 - [ ] Decide compatibility for pieces last set up before stage 1, before the
       value branch goes. Owner resolution covers a bare address whose owner
       manifest is stamped; a piece set up before stage 1 has an unstamped

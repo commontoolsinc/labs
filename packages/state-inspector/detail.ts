@@ -285,13 +285,13 @@ function declaredSchemaFor(
     };
   }
   // 2. fallback: owner's result-schema property ($ref into $defs).
-  // NOTE: this is a deliberately NARROW resolver — a single top-level
-  // `#/$defs/<name>` lookup for display only. It does NOT decode JSON-pointer
-  // escapes (`~0`/`~1`), follow nested `$ref`s, or re-attach `$defs` to the
-  // resolved subschema, the way the canonical `ContextualFlowControl`
-  // (`@commonfabric/runner/cfc` `resolveSchemaRef`) does. Adopting the runner
-  // here would pull a heavy live-runtime dep into the offline tool; until that's
-  // worth it, a nested/escaped ref simply shows its raw `{ $ref }`.
+  // A deliberately NARROW lookup, for display only: a single top-level
+  // `#/$defs/<name>`, with no pointer-escape decoding, no nested `$ref`, and
+  // no `$defs` re-attached to what it finds, so a nested or escaped ref shows
+  // its raw `{ $ref }`. Nothing is classified through here: a stream is told
+  // from its owner's manifest by the reading in
+  // `@commonfabric/runner/stream-declaration`, which the runtime reads through
+  // as well and which carries none of the live runtime.
   const osch = ownerDoc?.schema;
   if (isObjectNotArray(osch) && isObjectNotArray(osch.properties)) {
     const prop = osch.properties[key];
