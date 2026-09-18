@@ -15,10 +15,11 @@ a record: archive it to `docs/history/plans/` following the procedure in
   passed as handles, an observation ceiling defaulting to the requester's own
   view, a structured result labeled with the run's join and carrying links
   back to its sources — with read-only Loom retrieval tools in `cf-harness`,
-  and a per-user queue of items stored as cells in the requesting space and
-  indexed from the home space, each ending in a receipt that reuses the
-  harness's usage and cost evidence. Carries the owner decisions and the
-  assumptions the first take rests on.
+  and a per-user queue of `AgentRun` records stored as cells in the requesting
+  space and indexed from the home space, each carrying the harness's usage and
+  cost evidence when it finishes. The harness writes the result itself, and a
+  per-user runner on the Loom host pulls work from the cloud home space.
+  Carries the rulings and the assumptions the first take rests on.
 - [Discovering Loom resources with wish](loom-resource-discovery.md) proposes
   publishing existing database and companion-cell references once per Loom
   environment, with a staged person-inbox migration and compiled integration
