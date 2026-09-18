@@ -75,6 +75,24 @@ describe("fabric-primitives/index", () => {
     it("returns a frozen record", () => {
       expect(Object.isFrozen(fabricPrimitiveClassesByName())).toBe(true);
     });
+
+    it("keys each class by the class's own `.name`", () => {
+      // The record's keys are written by hand, and this is the run-time check
+      // of them. It holds where tests run, which is unminified.
+
+      for (
+        const [name, cls] of Object.entries(fabricPrimitiveClassesByName())
+      ) {
+        expect(cls.name).toBe(name);
+      }
+    });
+
+    for (const [label, value] of PRIMITIVES) {
+      it(`holds the class of ${label} under that class's name`, () => {
+        const byName: Record<string, unknown> = fabricPrimitiveClassesByName();
+        expect(byName[value.constructor.name]).toBe(value.constructor);
+      });
+    }
   });
 
   describe("FABRIC_PRIMITIVE_SCHEMA_TYPES", () => {
