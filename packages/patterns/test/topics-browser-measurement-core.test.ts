@@ -491,11 +491,15 @@ describe("topics-browser-measurement-core", () => {
       },
     ];
 
-    it("throws for runs whose read samples carry no `src`, which would read every lift as not running", () => {
-      const running = liftRunningStates(lifts, ["", ""]);
+    it("throws for runs whose source locations cannot be parsed, which would read every lift as not running", () => {
+      // A run carrying no source location never reaches here: the sampler
+      // counts those apart and leaves them out of `srcs`. What does reach here
+      // is a location that cannot be read, which says nothing about the run.
+      const unreadable = ["not a source location", "cf:module/no-position"];
+      const running = liftRunningStates(lifts, unreadable);
 
       expect([...running.values()]).toEqual([false, false]);
-      expect(() => requireAttributableRuns(lifts, running, [""]))
+      expect(() => requireAttributableRuns(lifts, running, unreadable))
         .toThrow("carried no source location to attribute them by");
     });
 
@@ -512,7 +516,10 @@ describe("topics-browser-measurement-core", () => {
     });
 
     it("returns for attributable runs with the producer running and a consumer not running", () => {
-      const srcs = ["cf:module/board1/donuts/board.tsx:30:2", ""];
+      const srcs = [
+        "cf:module/board1/donuts/board.tsx:30:2",
+        "not a source location",
+      ];
       const running = liftRunningStates(lifts, srcs);
 
       expect(() => requireAttributableRuns(lifts, running, srcs)).not.toThrow();

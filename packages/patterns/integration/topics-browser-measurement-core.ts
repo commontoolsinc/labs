@@ -182,7 +182,7 @@ export function liftRunningStates(
   for (const src of srcs) {
     const parsed = parseSrc(src);
     if (parsed === undefined) {
-      if (src !== "") unparsed.push(src);
+      unparsed.push(src);
       continue;
     }
     sites.add(parsed.site);
@@ -385,11 +385,12 @@ export function confirmLiftImplementations(
 
 /**
  * Fails a sample whose runs cannot be attributed to lifts by position. `srcs`
- * are the `src` keys of the runs that carried a read sample, a run with no
- * `src` keyed by the empty string; `running` is {@link liftRunningStates}'s
- * result. Every sample is taken on a page showing the board, so a producer
- * lift's module that is not running means the positions read say nothing
- * about the runs, not that the producer ran nothing.
+ * are the source locations of the runs that carried a read sample and a source
+ * location to carry; a run whose marker had none is counted by the caller and
+ * left out of `srcs`. `running` is {@link liftRunningStates}'s result. Every
+ * sample is taken on a page showing the board, so a producer lift's module that
+ * is not running means the positions read say nothing about the runs, not that
+ * the producer ran nothing.
  *
  * @throws If `srcs` is not empty and none of them is in the form
  *   {@link parseSrc} accepts, or if a producer lift is not running.
@@ -428,8 +429,8 @@ export interface SampledLifts {
  * Decides what a measured sample's runs may be attributed to, and fails the
  * sample when they may not be attributed at all. `actions` are the graph
  * snapshots' implementation previews by `src`, taken before and after the
- * operation; `runSrcs` are the `src` keys of the runs that carried a read
- * sample, a run with no `src` keyed by the empty string.
+ * operation; `runSrcs` are the source locations of the runs that carried a
+ * read sample and a source location to carry.
  *
  * The checks the attribution rests on all run here, over the `src` values of
  * the snapshots and of the runs together: the board runs the program the

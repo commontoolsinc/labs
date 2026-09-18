@@ -264,9 +264,13 @@ comment-count, or last-activity lifts, so there is no work of theirs to measure
 headlessly. The tier's thread cases run under a workload of their own,
 `aggregates`, which demands every topic's present comment count and last
 activity and nothing else. Measure cold initialization, warm updates, and reopen
-or reconnect separately. Hold runtime, source package, data, demand, and feature
-flags constant between comparison arms; alternate repeated timing runs and
-report their distribution rather than a single favorable sample.
+or reconnect separately. T0 measured reopen in the browser tier and not
+reconnect: inducing a transport reconnect needs a storage relay the Benchmarks
+workflow does not run, so the browser tier's `reopen` series re-opens a topic
+within one live client and a browser reconnect is unmeasured. Hold runtime,
+source package, data, demand, and feature flags constant between comparison
+arms; alternate repeated timing runs and report their distribution rather than
+a single favorable sample.
 
 Test mention insertion/removal, same-count destination retargeting, duplicate
 and self-mentions, aliases/scoped references, topic reorder/removal, rename-only
@@ -281,8 +285,11 @@ executions, graph size in nodes and edges, elapsed time, and available storage
 or memory measurements. The browser tier records body reads, graph size, and
 timings; attempt reads come from the headless tier, because the runtime client's
 read-stats request enables body accounting only. Count producer and consumer
-work separately but decide on the complete settled operation. Network claims
-require bytes/subscription measurements in addition to read accounting.
+work separately but decide on the complete settled operation. T0 measured the
+browser tier's reopen workload to run none of the pivot, backlink,
+comment-count, or last-activity lifts, so that one has no producer or consumer
+work to separate. Network claims require bytes/subscription measurements in
+addition to read accounting.
 
 T0 must set numeric baseline-derived acceptance limits before tuning candidates.
 Read budgets are total and per-run, with explicit output/UI demand. Read and
