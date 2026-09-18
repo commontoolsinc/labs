@@ -381,14 +381,22 @@ therefore carries its own guard:
   unchanged passes: code that replaces a document wholesale reads the stored
   envelope and spreads it, the way `ACLManager` does. Creating a document, and
   replacing one that carries no reserved sibling, pass for the same reason.
-- A sibling is compared on what a reader would see rather than on the presence
-  of a key. For `cfc` that account is `cfcMetadataPresent`: an envelope
-  carrying `cfc: null`, or a record with no `version`, erases the map as surely
-  as one carrying no `cfc` at all, and a stored value the reader reports as
-  absent is not a map to erase. An envelope whose `version` this build cannot
-  read is not an erasure — the reader throws on it and every consumer fails
-  closed — but it is still not the stored map, so it records as a forgery.
-  Nothing interprets `source`, so definedness is the whole account there.
+- Whether a sibling is there at all is decided on what a reader would see
+  rather than on the presence of a key. For `cfc` that account is
+  `cfcMetadataPresent`: the reserved position is what qualifies a value, so an
+  envelope carrying `cfc: null` or a scalar erases the map as surely as one
+  carrying no `cfc`, and anything else there leaves a map behind, including a
+  version this build cannot read. Nothing interprets `source`, so definedness
+  is the whole account there.
+- Whether the sibling that is there is the stored one decides the rest, and
+  what counts as the same map is what `prepareBoundaryCommit()` counts: two
+  version-1 envelopes are compared on their canonical form, so a rebuild that
+  reorders entries or an OR-clause's alternatives says what the stored envelope
+  says and passes. Everything else is compared as the value it is, which for a
+  version-2 envelope is the same comparison, because it names each label by a
+  hash taken over the label's canonical form. So an envelope whose `version`
+  this build cannot read is recorded when it differs from the stored one, and
+  passes when it is the stored one carried forward.
 - Nothing outside the runtime is given a way past this. A fixture still needs
   stored label state in shapes the derivation pass does not produce — a forged
   atom, a version this build cannot read, a record carrying no label map — and

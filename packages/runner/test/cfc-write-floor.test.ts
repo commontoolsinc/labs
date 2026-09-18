@@ -69,8 +69,9 @@ const makeRuntime = (opts: {
       : {}),
   });
 
-// Seed a doc's stored CFC metadata directly via an ungated path-[] full-document
-// write (how the runtime persists it), so a later link to it carries the label.
+// Seed a doc's stored CFC metadata with a path-[] full-document write made
+// inside the runtime's privileged persistence scope, so a later link to it
+// carries the label. An ordinary write there is recorded as label forgery.
 const seedLabeledDoc = async (
   runtime: Runtime,
   id: string,

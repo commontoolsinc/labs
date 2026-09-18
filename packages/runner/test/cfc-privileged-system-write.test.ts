@@ -517,6 +517,63 @@ describe("CFC privileged system write (S18)", () => {
     }
   });
 
+  it("does not gate a rebuilt envelope that says what the stored one says", async () => {
+    // What counts as the same map is what the persistence pass counts: two
+    // version-1 envelopes are compared on their canonical form. An OR clause
+    // holding the same alternatives in another order is the same label, so a
+    // writer that rebuilds the envelope rather than spreading what it read
+    // still carries the stored map forward.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+    });
+    try {
+      const seed = runtime.edit();
+      const target = runtime.getCell(
+        signer.did(),
+        "s18-root-reorder",
+        undefined,
+        seed,
+      );
+      const address = {
+        space: signer.did(),
+        id: target.getAsNormalizedFullLink().id as URI,
+        type: "application/json" as const,
+        path: [] as string[],
+      };
+      writeSeedEnvelopeDoc(seed, signer.did());
+      const entry = (...anyOf: string[]) => ({
+        path: [] as string[],
+        label: { confidentiality: [{ anyOf }] },
+      });
+      seedStoredEnvelope(seed, address, {
+        value: { note: "one" },
+        cfc: {
+          version: 1,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: { version: 1, entries: [entry("alpha", "beta")] },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.writeOrThrow(address, {
+        value: { note: "two" },
+        cfc: {
+          version: 1,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: { version: 1, entries: [entry("beta", "alpha")] },
+        },
+      });
+      expect(tx.getCfcState().unprivilegedSystemWrites).toEqual([]);
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("does not gate a root envelope write that carries the stored label map forward", async () => {
     // Spreading the read envelope, the way ACLManager does, keeps `cfc` in
     // place. That write is not an erasure and stays ungated.

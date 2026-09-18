@@ -196,7 +196,13 @@ const isReadableStoredEntry = (
  * read, and the spec leaves a migrating writer free to keep a legacy field
  * beside the ones it defines (spec §4.6.4, operational guidance).
  */
-const isCfcMetadata = (value: unknown): value is StoredCfcMetadata => {
+/**
+ * Whether a value at the reserved metadata position is an envelope this build
+ * interprets, which is the precondition for comparing two of them on their
+ * canonical form. {@link cfcMetadataPresent} is the coarser question: whether
+ * a value leaves the document carrying a label map at all.
+ */
+export const isCfcMetadata = (value: unknown): value is StoredCfcMetadata => {
   if (!isObjectNotArray(value)) return false;
   const version = value.version;
   if (!isKnownCfcMetadataVersion(version)) return false;
