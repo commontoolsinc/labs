@@ -155,9 +155,12 @@ instead derives a fresh DID from the creating handler's frame cause (per-user
 home-space input links + the durable per-event id), so the space is unique per
 user AND per creation event, stable across the cross-space-commit retry. The
 display name is therefore independent of the space identity: it flows only to
-`initialName`, which the profile shows until a name is stored through
-`setName`, whose cell is initialized statically so it keeps its identity — and
-the name saved in it — across releases of the profile pattern. The home default pattern's `profile` link is
+`initialName`, which the profile shows until a name is stored in the profile's
+`name` cell. That cell is initialized statically so it keeps its identity — and
+the name saved in it — across releases of the profile pattern; a profile
+renamed under an earlier release, whose `name` cell was derived from
+`initialName`, loses that saved name once, at its first release under the
+static initializer, and keeps every name saved after. The home default pattern's `profile` link is
 the durable source of truth after creation, and runtime-only `.inSpace`
 annotations are rewritten to the resolved DID during post-run.
 

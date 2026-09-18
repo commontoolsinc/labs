@@ -110,6 +110,9 @@ describe("a profile's saved name across a release", () => {
       served = { contents: current, identity: currentIdentity };
       expect(await runtime.sourceReconciler.reconcile(profile)).toBe("updated");
       await runtime.runner.idlePointerMaintenance();
+      // The swap's outputs recompute on the scheduler; the assertions read
+      // after it has settled, not in a race with it.
+      await runtime.idle();
       await profile.pull();
       expect(getPatternIdentityRef(profile)?.identity).toBe(currentIdentity);
       const after = profile.key("name").asSchema<string>({ type: "string" });
