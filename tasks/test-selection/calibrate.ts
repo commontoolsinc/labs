@@ -311,12 +311,31 @@ function slopeOf(
  * have moved, and the intercept is charged once for holding the suite
  * where this is charged in proportion, so bounding it makes a suite
  * dearer to reach rather than cheaper.
+ *
+ * It is not believed either where the line it belongs to passes below
+ * the origin. A suite is charged a fixed cost of nothing or more, so
+ * such a line is not one the model can carry, and a slope steep enough
+ * to need it has taken what the batch spent on something else: within a
+ * suite more units usually means more seconds of tests, so what it has
+ * taken is what the units cost, and every batch then reads as having
+ * spent nothing on them.
  */
 function correctionOf(observations: readonly BatchObservation[]): number {
   if (observations.length < MIN_CORRECTION_SAMPLES) return 1;
   if (span(observations, (o) => o.ran) < MIN_CORRECTION_SPAN_SECONDS) return 1;
   const fitted = slopeOf(observations, (o) => o.ran, (o) => o.spent);
-  return fitted > 0 ? fitted : 1;
+  if (fitted <= 0) return 1;
+  const n = observations.length;
+  const meanRan = observations.reduce((most, o) => most + o.ran, 0) / n;
+  const meanSpent = observations.reduce((most, o) => most + o.spent, 0) / n;
+  // A suite whose batches spend exactly in proportion to their tests sits
+  // on the line this refuses either side of, and the fixed cost it is
+  // judged by is the difference of two figures that are equal there, so
+  // an exact comparison would settle it on what the arithmetic left
+  // behind. A suite this refuses is out by seconds: the one that prompted
+  // the guard fits a fixed cost of minus twenty-two.
+  const fixed = meanSpent - fitted * meanRan;
+  return fixed >= -1e-9 * meanSpent ? fitted : 1;
 }
 
 /**

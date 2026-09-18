@@ -182,12 +182,49 @@ units a lane packs, which nothing bounds. The intercept covers the
 difference comfortably on this data: `workspace-unit` keeps 24.2 seconds
 of intercept against batches whose smallest residual was 37.1 seconds.
 
+## A correction fitted alone can take the whole of what a unit costs
+
+The rate is read from what a batch spent beyond its own tests, and what
+its tests are charged is the correction. The correction is fitted from the
+tests alone, and within a suite more units usually means more seconds of
+tests, so a correction fitted too high takes some of what a unit costs
+with it. Where it takes all of it, every batch reads as having spent
+nothing on its units and the suite is published charging nothing a unit —
+which is the reading the whole change exists to replace.
+
+One suite in this run does exactly that. `package-integration-opposite`
+fits a correction of 1.786, whose line implies a fixed cost of minus 21.7
+seconds, and every one of its five batches then reads as having spent
+nothing beyond its tests:
+
+| units | tests | spent | spent less tests | rate at a correction of one |
+| --- | --- | --- | --- | --- |
+| 8 | 104.1 | 163.5 | 59.4 | 7.42 |
+| 9 | 71.4 | 104.7 | 33.2 | 3.69 |
+| 9 | 117.6 | 185.2 | 67.7 | 7.52 |
+| 10 | 114.5 | 175.1 | 60.5 | 6.05 |
+| 11 | 110.4 | 188.5 | 78.1 | 7.10 |
+
+A fixed cost below nothing is not a figure the model can carry, since a
+suite's intercept is charged at or above zero. So a correction whose line
+implies one is refused and the suite keeps a correction of one, which
+gives this suite a per-unit cost of 7.102 seconds, an intercept of 3.8,
+and a whole-suite reading of 856 seconds against the 817 the run spent —
+above it, where the fitted correction gave 925.
+
+It is the only suite of the nineteen the refusal changes. Two figures that
+are equal for a suite spending exactly in proportion to its tests are
+differenced to reach the fixed cost, so the comparison allows for what
+that arithmetic leaves behind; a suite the refusal catches is out by
+seconds rather than by parts in a billion.
+
 ## Three other ways of splitting the two, measured
 
 Each of these was raised in review and each was fitted over the same 130
 observations. The summed intercept across all 19 suites is 96.5 seconds
 for the reading that landed and 538.4 for the one it replaced, which is
-the figure to read the first two against.
+the figure to read the first two against. A fourth proposal, which keeps
+the slope and changes what gates it, is in the section after them.
 
 **Leave the per-unit charge out of the intercept**, so that the intercept
 is the largest residual outright and each term over-estimates on its own.
@@ -215,13 +252,17 @@ of exactly zero, with the old intercept, for `workspace-unit` (85.32),
 so a criterion that reads only in-sample resolves the split by putting
 everything in the term that is charged once.
 
+## Gating the slope differently rather than replacing it
+
 **Gate a fitted slope on the seconds it explains** rather than on a count
 of units, so that both regressors are held to `MIN_CORRECTION_SPAN_SECONDS`
-in one currency. The two conditions multiply: a slope clears the gate when
-its own value times the span in units reaches the threshold, so the
-narrower the span the larger the slope needed, and the noise slopes a
-narrow span produces are exactly the large ones. `typecheck` illustrates
-it: a span of four units and a rate reading of 19.047 from a batch of one.
+in one currency. This keeps the slope and changes only what decides
+whether it is believed, so it is not a way of splitting the two. It does
+not work: the two conditions multiply. A slope clears the gate when its
+own value times the span in units reaches the threshold, so the narrower
+the span the larger the slope needed, and the noise slopes a narrow span
+produces are exactly the large ones. `typecheck` illustrates it: a span of
+four units and a rate reading of 19.047 from a batch of one.
 
 ## What would settle the split rather than choose it
 

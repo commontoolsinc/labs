@@ -506,6 +506,45 @@ describe("calibrate", () => {
       expect(fitted.overhead).toBe(0);
     });
 
+    it("keeps a correction whose batches spend exactly in proportion to their tests", () => {
+      // The line the guard above refuses either side of. A suite sitting
+      // on it is one the model can carry, with nothing fixed and nothing
+      // per unit, so what decides it must not be the arithmetic.
+      const fitted = fitSuite(
+        Array.from({ length: MIN_CORRECTION_SAMPLES + 2 }, (_, i) => ({
+          suite: "s",
+          units: 20,
+          ran: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
+          spent: MIN_CORRECTION_SPAN_SECONDS * (2 + i) / 3,
+        })),
+      );
+      expect(fitted.correction).toBeCloseTo(1 / 3, 6);
+      expect(fitted.overhead).toBeCloseTo(0, 6);
+      expect(fitted.unitOverhead).toBeCloseTo(0, 6);
+    });
+
+    it("refuses a correction whose line needs a fixed cost below nothing", () => {
+      // The shape a suite arrives in where its batches cost more than
+      // their tests and cost more of it the more they hold: the slope on
+      // the tests alone comes out steep enough to explain every batch on
+      // its own, and what it has taken is what the units cost. Read that
+      // way the suite is charged nothing a unit, which is the reading
+      // this whole term exists to replace.
+      const seen = Array.from({ length: MIN_CORRECTION_SAMPLES + 2 }, (
+        _,
+        i,
+      ) => ({
+        suite: "s",
+        units: 10 * (1 + i) ** 2,
+        ran: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+        spent: MIN_CORRECTION_SPAN_SECONDS * (1 + i) + 7 * 10 * (1 + i) ** 2,
+      }));
+      const fitted = fitSuite(seen);
+      expect(fitted.correction).toBe(1);
+      expect(fitted.unitOverhead).toBeCloseTo(7, 6);
+      expect(fitted.overhead).toBeCloseTo(0, 6);
+    });
+
     it("refuses a slope saying a batch gets cheaper with more tests", () => {
       // Such a slope would let a lane pack the suite without limit
       // against a flat charge. A correction of zero is worse still: a
