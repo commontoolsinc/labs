@@ -528,6 +528,35 @@ describe("list-result-container-seed", () => {
       expect(logger.warnings).toEqual([]);
     });
 
+    it("waits afresh for a container the coordinator let go and took up again", async () => {
+      const wait = resumeContainerWait(
+        runtime,
+        logger,
+        "map/resume-seed/of:returned-container",
+      );
+      const container = newContainer("returned-container");
+      let held = false;
+      let rearms = 0;
+      // The coordinator has swapped this container away by the time the pull
+      // settles, so the wait ends having told it nothing: nothing is re-armed
+      // and nothing is written.
+      wait.begin(container, () => held, () => rearms++);
+      await storageManager.synced();
+      expect(rearms).toBe(0);
+      expect(valueOf(container)).toBeUndefined();
+      expect(wait.mayWait(container)).toBe(true);
+
+      // It takes the same container up again. The wait it takes now runs to a
+      // re-arm of its own, where joining the settled one would answer nobody.
+      held = true;
+      wait.begin(container, () => held, () => rearms++);
+      await storageManager.synced();
+      expect(rearms).toBe(1);
+      expect(valueOf(container)).toEqual([]);
+      expect(wait.mayWait(container)).toBe(false);
+      expect(logger.warnings).toEqual([]);
+    });
+
     it("waits again for a container that replaced the one it waited for", async () => {
       const wait = resumeContainerWait(
         runtime,

@@ -134,7 +134,10 @@ export interface ResumeContainerWait {
   /**
    * Wait for `container`: pull it, seed it when it is absent, and re-arm the
    * coordinator once both have settled. A call naming the container a wait is
-   * already outstanding for joins that wait rather than starting a second one.
+   * already outstanding for joins that wait rather than starting a second one;
+   * one naming a container whose wait has settled opens a wait of its own,
+   * which is what a coordinator that let a container go and took it up again
+   * takes.
    */
   begin(
     container: Cell<any[]>,
@@ -183,7 +186,7 @@ export function resumeContainerWait(
     begin: (container, stillHeld, rearm) => {
       if (outstanding === container) return;
       outstanding = container;
-      seedResultContainerWhenPullSettles(
+      const settled = seedResultContainerWhenPullSettles(
         runtime,
         container,
         stillHeld,
@@ -196,6 +199,14 @@ export function resumeContainerWait(
         seedActionId,
         identity,
       );
+      // The chain settles whether or not the coordinator was still holding the
+      // container to re-arm, and a coordinator that was not is one this wait
+      // told nothing. Releasing the container here is what lets it wait afresh
+      // if it takes that same container up again, rather than join a wait
+      // whose answer never reached it. The chain does not reject.
+      settled.then(() => {
+        if (outstanding === container) outstanding = undefined;
+      });
     },
   };
 }
