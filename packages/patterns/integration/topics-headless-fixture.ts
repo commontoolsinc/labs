@@ -23,6 +23,7 @@ import { Identity } from "@commonfabric/identity";
 import {
   type ActionReadStats,
   type Cell,
+  type ExperimentalOptions,
   type IExtendedStorageTransaction,
   isModule,
   type MemorySpace,
@@ -551,17 +552,74 @@ export interface PivotRow {
   mentionedBy: unknown[];
 }
 
+/** The flags every mode pins, and so the flags a mode is recognized by. */
+const MODE_FLAGS = ["lazyMaterialization", "serverExecution"] as const;
+
 /**
- * The experimental options a measurement's runtime pins, so that a measurement
- * keeps these semantics whatever the runtime's defaults become. Left unset,
- * `lazyMaterialization` takes the built-in default, and `serverExecution`
- * takes process-wide state that another runtime in the same process can
- * change.
+ * The experimental postures a measurement runs under, by the name that labels
+ * its samples. Each pins every flag in {@link MODE_FLAGS}, so that a
+ * measurement keeps those semantics whatever the runtime's defaults become:
+ * left unset, `lazyMaterialization` takes the built-in default, and
+ * `serverExecution` takes process-wide state that another runtime in the same
+ * process can change.
+ *
+ * Every posture here holds `serverExecution` off. A measurement's runtime has
+ * nothing to serve — it runs over an emulated storage manager in one process,
+ * with no memory server and no serving loop, where the ON posture needs a
+ * toolshed carrying an `ExecutorHost` over its memory server, as
+ * `docs/development/EXPERIMENTAL_OPTIONS.md` describes — so a measurement
+ * labeled as having server execution on would name a posture that nothing
+ * here engages.
  */
-export const TOPICS_FIXTURE_EXPERIMENTAL_OPTIONS = {
-  lazyMaterialization: true,
-  serverExecution: false,
-} as const;
+export const TOPICS_FIXTURE_MODES = {
+  /** Lazy materialization on, the posture a runtime takes by default. */
+  "lazy-materialization-on": {
+    lazyMaterialization: true,
+    serverExecution: false,
+  },
+
+  /** Lazy materialization off, where a lift's body reads its whole argument. */
+  "lazy-materialization-off": {
+    lazyMaterialization: false,
+    serverExecution: false,
+  },
+} as const satisfies Record<string, Record<typeof MODE_FLAGS[number], boolean>>;
+
+/** Names one of {@link TOPICS_FIXTURE_MODES}. */
+export type TopicsFixtureMode = keyof typeof TOPICS_FIXTURE_MODES;
+
+/** The mode a measurement runs under when it is given no other. */
+export const DEFAULT_TOPICS_FIXTURE_MODE: TopicsFixtureMode =
+  "lazy-materialization-on";
+
+/**
+ * Returns the mode whose flags `experimental` holds, as a runtime reports them
+ * back once it has resolved what it was given. Deriving a sample's label from
+ * the runtime's own report is what keeps the label reading the same field the
+ * runner acts on.
+ *
+ * It reads the flags {@link TOPICS_FIXTURE_MODES} names and no others, so two
+ * runtimes it calls the same mode may still differ in a flag no mode pins.
+ *
+ * @throws Error when no mode holds those flags.
+ */
+export function topicsFixtureModeOf(
+  experimental: ExperimentalOptions,
+): TopicsFixtureMode {
+  const names = Object.keys(TOPICS_FIXTURE_MODES) as TopicsFixtureMode[];
+  const found = names.find((name) =>
+    MODE_FLAGS.every((flag) =>
+      experimental[flag] === TOPICS_FIXTURE_MODES[name][flag]
+    )
+  );
+  if (found === undefined) {
+    const flags = MODE_FLAGS
+      .map((flag) => `${flag}=${experimental[flag]}`)
+      .join(", ");
+    throw new Error(`No measurement mode runs with ${flags}.`);
+  }
+  return found;
+}
 
 /**
  * Which of the reached lifts a measurement starts and holds demanded.
@@ -673,12 +731,15 @@ export interface TopicsOperation {
 /**
  * A settled measurement, holding a runtime over the fixture's storage open
  * until disposed. That is the runtime the measurement started, until
- * `reopen()` replaces it; `runtime`, `derivations`, `seeded`, and `outputs`
- * always describe the current one.
+ * `reopen()` replaces it; `runtime`, `mode`, `derivations`, `seeded`, and
+ * `outputs` always describe the current one.
  */
 export interface TopicsMeasurement extends AsyncDisposable {
   /** The runtime running the demanded lifts. */
   readonly runtime: Runtime;
+
+  /** The experimental posture `runtime` reports itself running under. */
+  readonly mode: TopicsFixtureMode;
 
   /** The derivations `runtime` reached. */
   readonly derivations: TopicsDerivations;
@@ -737,10 +798,22 @@ export interface TopicsMeasurement extends AsyncDisposable {
   reopen(): Promise<TopicsOperation>;
 }
 
+/** How {@link measureTopicsFixture} runs the lifts it measures. */
+export interface TopicsMeasurementOptions {
+  /**
+   * The experimental posture every runtime the measurement opens is given.
+   * Defaults to {@link DEFAULT_TOPICS_FIXTURE_MODE}.
+   */
+  readonly mode?: TopicsFixtureMode;
+
+  /** Extra work every runtime the measurement opens starts beside its lifts. */
+  readonly variant?: TopicsVariant;
+}
+
 /**
  * Runs the reached Topics lifts `demand` names over `fixture` in a fresh
  * runtime, holding their outputs demanded, and returns once the runtime has
- * settled. Given `variant`, every runtime the measurement opens starts the
+ * settled. Given a `variant`, every runtime the measurement opens starts the
  * variant's actions beside the lifts, in the same transaction.
  *
  * Reads are recorded from the transaction that starts the lifts, which is
@@ -750,12 +823,15 @@ export interface TopicsMeasurement extends AsyncDisposable {
  * start the lifts again over it.
  *
  * @throws RangeError when `demand` opens a topic outside the fixture.
+ * @throws Error when a runtime it opens resolves the flags of a mode other
+ * than the one it was given.
  */
 export async function measureTopicsFixture(
   fixture: TopicsFixture,
   passphrase: string,
   demand: TopicsDemand = { workload: "all-backlinks" },
-  variant?: TopicsVariant,
+  { mode = DEFAULT_TOPICS_FIXTURE_MODE, variant }: TopicsMeasurementOptions =
+    {},
 ): Promise<TopicsMeasurement> {
   const demanded = demandedLiftsOf(demand, fixture.topics.length);
   await using stack = new AsyncDisposableStack();
@@ -769,7 +845,7 @@ export async function measureTopicsFixture(
       storage,
       space,
       errors,
-      { topicCount: fixture.topics.length, demanded, seed, variant },
+      { topicCount: fixture.topics.length, demanded, mode, seed, variant },
     );
 
   // Unset only while `reopen()` is between disposing one session and opening
@@ -825,6 +901,9 @@ export async function measureTopicsFixture(
     get runtime() {
       return current().runtime;
     },
+    get mode() {
+      return current().mode;
+    },
     get derivations() {
       return current().derivations;
     },
@@ -850,6 +929,9 @@ interface TopicsSession extends AsyncDisposable {
   /** The runtime. */
   readonly runtime: Runtime;
 
+  /** The experimental posture `runtime` reports itself running under. */
+  readonly mode: TopicsFixtureMode;
+
   /** The derivations the runtime reached. */
   readonly derivations: TopicsDerivations;
 
@@ -864,20 +946,24 @@ interface TopicsSession extends AsyncDisposable {
 }
 
 /**
- * Helper for {@link measureTopicsFixture}, which opens a runtime over `storage`,
- * reaches the Topics lifts, writes `seed` into `space` or, absent one,
- * addresses the fixture already written there, and starts the lifts `demanded`
- * names, with `variant`'s actions when given, recording reads from that start
- * through settlement. Disposing the session disposes its runtime and leaves
- * `storage` open.
+ * Helper for {@link measureTopicsFixture}, which opens a runtime over `storage`
+ * under the posture `mode` names, reaches the Topics lifts, writes `seed` into
+ * `space` or, absent one, addresses the fixture already written there, and
+ * starts the lifts `demanded` names, with `variant`'s actions when given,
+ * recording reads from that start through settlement. Disposing the session
+ * disposes its runtime and leaves `storage` open.
+ *
+ * @throws Error when the runtime resolves the flags of another mode, which is
+ * what a flag the runtime refused or took from ambient state looks like.
  */
 async function openTopicsSession(
   storage: EmulatedStorageManager,
   space: MemorySpace,
   errors: string[],
-  { topicCount, demanded, seed, variant }: {
+  { topicCount, demanded, mode, seed, variant }: {
     readonly topicCount: number;
     readonly demanded: DemandedLifts;
+    readonly mode: TopicsFixtureMode;
     readonly seed?: TopicsFixture;
     readonly variant?: TopicsVariant;
   },
@@ -886,10 +972,22 @@ async function openTopicsSession(
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
-    experimental: TOPICS_FIXTURE_EXPERIMENTAL_OPTIONS,
+    experimental: TOPICS_FIXTURE_MODES[mode],
     errorHandlers: [(error) => errors.push(String(error))],
   });
   stack.defer(() => runtime.dispose({ closeStorage: false }));
+
+  // The label comes from the runtime's own report of its flags rather than
+  // from the name asked for, so a sample says what ran. Every mode sets both
+  // flags explicitly and the runtime keeps an explicit value, so today the two
+  // always agree and this guard cannot fire; it is here for a flag that later
+  // resolves against an ambient control point, where they could part.
+  const resolved = topicsFixtureModeOf(runtime.experimental);
+  if (resolved !== mode) {
+    throw new Error(
+      `A runtime given the \`${mode}\` mode runs \`${resolved}\`.`,
+    );
+  }
 
   const derivations = await reachTopicsDerivations(
     runtime,
@@ -932,6 +1030,7 @@ async function openTopicsSession(
   const cleanup = stack.move();
   return {
     runtime,
+    mode: resolved,
     derivations,
     seeded,
     outputs,

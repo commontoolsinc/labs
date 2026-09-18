@@ -225,7 +225,7 @@ and `Uint8Array` → `{ type: "object" }`; the seven `FabricPrimitive` classes
 `FabricKeyPair`, `FabricRegExp`, `FabricUnavailable`) → `{ type: "<Name>" }`
 (the `FabricPrimitive`
 schema
-vocabulary, `FABRIC_PRIMITIVE_SCHEMA_TYPES` in `packages/data-model/src/api.ts`);
+vocabulary, each name being the `.schemaType` its class's instances report);
 `URL` → `{ type: "string", format:
 "uri" }`; `ArrayBuffer`/`ArrayBufferLike`/`SharedArrayBuffer`/
 `ArrayBufferView`, the remaining ten typed arrays

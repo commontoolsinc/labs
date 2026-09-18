@@ -6,6 +6,7 @@ import {
 } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model-schema";
 import {
+  debugStr,
   type DebugValueOptions,
   toCompactDebugString,
 } from "@commonfabric/data-model";
@@ -2896,9 +2897,8 @@ export function wish(
         const targetMayUseHomeSpace = wishTargetMayUseHomeSpace(query, scope);
 
         if (query === undefined || query === null || query === "") {
-          const errorMsg = `Wish target "${
-            toCompactDebugString(targetValue)
-          }" has no query.`;
+          const errorMsg =
+            debugStr`Wish target $quote${targetValue} has no query.`;
           const outputScope = wishOutputScope(
             schema,
             inputScope,
@@ -3269,9 +3269,8 @@ export function wish(
         }
         return;
       } else {
-        const errorMsg = `Wish target is not recognized: ${
-          toCompactDebugString(targetValue)
-        }`;
+        const errorMsg =
+          debugStr`Wish target is not recognized: $quote${targetValue}`;
         const inputScope = tx.getNarrowestReadScope();
         measureWishPhase(
           "send-error",

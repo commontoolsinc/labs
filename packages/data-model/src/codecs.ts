@@ -30,8 +30,8 @@ import type {
 } from "./codec-realm/interface.ts";
 import { RealmCodecEngine } from "./codec-realm/RealmCodecEngine.ts";
 import { createBaseRealmRegistry } from "./codec-realm/createBaseRealmRegistry.ts";
-import { codecClasses as primitiveClasses } from "./fabric-primitives/index.ts";
-import { codecClasses as instanceClasses } from "./fabric-instances/index.ts";
+import { codecClasses as primitiveClasses } from "./fabric-primitives/impl.ts";
+import { codecClasses as instanceClasses } from "./fabric-instances/impl.ts";
 
 /**
  * Creates a registry pairing the JSON format with the fabric classes this
