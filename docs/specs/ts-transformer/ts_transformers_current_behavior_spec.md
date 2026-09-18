@@ -418,11 +418,8 @@ generic alias, and for an alias imported from another module. One shape
 differs: `T | Default<V>` where `V` is an object type assignable to `T`.
 Inline, the authored `Default` node shows that `T` already covers `V`, and the
 schema is `T` with the default. Through an alias the resolved union keeps `V`
-as a member of its own, and the schema is `anyOf: [T, V]`. Where `V` is an
-empty-object type that form also carries no default, and reports
-`schema-default:unresolved`: recovery from the resolved union takes the plain
-`V` arm for a brand arm without a marker (mapping spec, brand-payload
-fallback). `aliased-cell-value-schema.test.ts` pins these.
+as a member of its own, and the schema is `anyOf: [T, V]` with the default.
+`aliased-cell-value-schema.test.ts` pins these.
 
 The type-driven shrink also guards its descent on (type, requested-paths): a
 pair already on the path falls back to the named type reference — no

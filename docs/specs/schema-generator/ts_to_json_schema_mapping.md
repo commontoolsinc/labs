@@ -517,10 +517,13 @@ not take the alias path. (Contrast §11: CFC detection has no source check.)
    `DEFAULT_MARKER`-branded payload; when the alias is resolved away
    (`T | (T & DefaultMarker<V>)`), the payload is read back type-structurally
    (`type-utils.ts`). Union-distributed brands must **agree**;
-   disagreement bails to no-default with a warning. Only an actual
-   `DEFAULT_MARKER` property triggers this recovery; ordinary empty objects and
-   unrelated symbol brands do not. Non-`never` index signatures cannot provide a
-   literal default. Tested: brand-payload-defaults.test.ts and
+   disagreement bails to no-default with a warning. Only a member carrying an
+   actual `DEFAULT_MARKER` property is a brand arm. An ordinary empty object or
+   an unrelated symbol brand is a value member: it neither triggers this
+   recovery nor prevents it, and is formatted with the rest of the union. The
+   plain arm of `Default<{}>` or of `Default<Record<PropertyKey, never>>` is
+   such a member, so those recover `default: {}`. Non-`never` index signatures
+   cannot provide a literal default. Tested: brand-payload-defaults.test.ts and
    schema/default-diagnostics.test.ts.
 
 After the applicable extraction routes for `Default<>` or `DeepDefault<>`

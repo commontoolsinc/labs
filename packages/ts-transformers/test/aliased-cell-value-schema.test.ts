@@ -43,7 +43,7 @@ async function readCellSchema(
 }
 
 describe("aliased-cell-value-schema", () => {
-  it("emits the stored shape for a read of a union cell", async () => {
+  it("emits the stored shape and its default for a read of a union cell", async () => {
     const schema = await readCellSchema(
       "type UnionCell = Writable<Stored | Default<Empty>>;",
       "UnionCell",
@@ -51,6 +51,7 @@ describe("aliased-cell-value-schema", () => {
 
     expect(schema).toEqual({
       anyOf: [{ $ref: "#/$defs/Stored" }, { $ref: "#/$defs/Empty" }],
+      default: {},
       asCell: ["readonly"],
     });
   });
@@ -99,6 +100,7 @@ describe("aliased-cell-value-schema", () => {
       type: "array",
       items: {
         anyOf: [{ $ref: "#/$defs/Stored" }, { $ref: "#/$defs/Empty" }],
+        default: {},
       },
       asCell: ["readonly"],
     });
@@ -110,7 +112,7 @@ describe("aliased-cell-value-schema", () => {
       "MyCell<Stored>",
     );
 
-    expect(schema).toMatchObject({ asCell: ["readonly"] });
+    expect(schema).toMatchObject({ default: {}, asCell: ["readonly"] });
     expect((schema as { anyOf: unknown[] }).anyOf).toEqual(
       expect.arrayContaining([
         { $ref: "#/$defs/Stored" },
@@ -166,11 +168,12 @@ describe("aliased-cell-value-schema", () => {
       });
     });
 
-    it("emits the stored shape for a union cell", async () => {
+    it("emits the stored shape and its default for a union cell", async () => {
       const input = await importedCellSchema("UnionCell", asProperty);
 
       expect((input.properties as Record<string, unknown>).c).toEqual({
         anyOf: [{ $ref: "#/$defs/Stored" }, { $ref: "#/$defs/Empty" }],
+        default: {},
         asCell: ["readonly"],
       });
     });

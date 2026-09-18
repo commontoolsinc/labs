@@ -359,7 +359,7 @@ describe("Schema: Capability wrapper types", () => {
       });
     });
 
-    it("emits the resolved value for a union holding an expanded `Default` arm", async () => {
+    it("emits the resolved value and its default for a union holding an expanded `Default` arm", async () => {
       // One member the node path cannot read would otherwise turn the whole
       // union into accept-anything, and the value schema with it.
       const schema = await narrowedSchema(
@@ -387,6 +387,7 @@ describe("Schema: Capability wrapper types", () => {
 
       expect(schema).toMatchObject({
         anyOf: [{ $ref: "#/$defs/Stored" }, { $ref: "#/$defs/Empty" }],
+        default: {},
         asCell: ["readonly"],
       });
     });
