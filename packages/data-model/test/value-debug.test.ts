@@ -28,6 +28,7 @@ import {
   toCompactDebugString,
   toDebugKindString,
   toIndentedDebugString,
+  toLongQuotedDebugString,
   toShortQuotedDebugString,
 } from "@/value-debug.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
@@ -279,6 +280,28 @@ describe("value-debug", () => {
       };
       expect(toShortQuotedDebugString(value)).toBe(
         '`{boom:/unconvertible("nope")}`',
+      );
+    });
+  });
+
+  describe("toLongQuotedDebugString", () => {
+    it("returns the compact rendering as a backtick-quoted code span", () => {
+      expect(toLongQuotedDebugString({ a: [1, "x"] })).toBe('`{a:[1,"x"]}`');
+    });
+
+    it("returns a rendering the short form would cut, whole", () => {
+      const value = { text: "x".repeat(100) };
+      const whole = toCompactDebugString(value);
+      expect(whole.length).toBeGreaterThan(50);
+      expect(toLongQuotedDebugString(value)).toBe(`\`${whole}\``);
+    });
+
+    it("returns a rendering cut to five hundred characters, ellipsis included", () => {
+      const value = Array.from({ length: 100 }, () => "abcdef");
+      const whole = toCompactDebugString(value);
+      expect(whole.length).toBeGreaterThan(500);
+      expect(toLongQuotedDebugString(value)).toBe(
+        `\`${whole.slice(0, 497)}...\``,
       );
     });
   });

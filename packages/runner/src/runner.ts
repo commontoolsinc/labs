@@ -10,6 +10,7 @@ import {
   isWalkableObjectOrArray,
   refuseFabricInstance,
   toCompactDebugString,
+  toLongQuotedDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
@@ -11917,7 +11918,7 @@ function describeHandlerStreamFailure(
 
   if (eventTarget.link === undefined) {
     return `${prefix} is not a stream reference (got: ${
-      toCompactDebugString(eventTarget.value, { maxLength: 80 })
+      toLongQuotedDebugString(eventTarget.value)
     })`;
   }
 
@@ -11948,7 +11949,7 @@ function describeHandlerStreamFailure(
 
   return `${prefix} resolves to ${where}, whose value is not a stream ` +
     `marker — { "$stream": true } was overwritten (found: ${
-      toCompactDebugString(eventTarget.value, { maxLength: 80 })
+      toLongQuotedDebugString(eventTarget.value)
     })`;
 }
 

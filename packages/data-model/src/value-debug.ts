@@ -79,6 +79,9 @@ const DEFAULT_MAX_STRING_LINES = 5;
 /** Length `toShortQuotedDebugString()` cuts a rendering to. */
 const SHORT_MAX_LENGTH = 50;
 
+/** Length `toLongQuotedDebugString()` cuts a rendering to. */
+const LONG_MAX_LENGTH = 500;
+
 /** Matches one line break, of any of the three forms a string can hold. */
 const LINE_BREAK_REGEX = /\r\n|[\r\n]/g;
 
@@ -1294,10 +1297,28 @@ export function toCompactDebugString(
  * length which keeps a large value from swamping the message it lands in, as
  * a backtick-quoted code span. `toCompactDebugString()` returns a fixed string
  * for what it cannot render, so this holds up on the failure path it serves.
+ *
+ * The cut is at fifty characters, which is enough to say what kind of value
+ * arrived and not enough to say much about it; `toLongQuotedDebugString()`
+ * is the rendering for a message whose reader needs to recognize the value.
  */
 export function toShortQuotedDebugString(value: unknown): string {
   return toCompactDebugString(value, {
     maxLength: SHORT_MAX_LENGTH,
+    backtickQuote: true,
+  });
+}
+
+/**
+ * Like `toShortQuotedDebugString()`, except cut at five hundred characters.
+ * This is the rendering for a message whose reader needs to recognize the
+ * value -- which message arrived, which binding was wrong -- and it is still
+ * bounded, so that a value a caller does not control cannot flood the channel
+ * the message is reported on.
+ */
+export function toLongQuotedDebugString(value: unknown): string {
+  return toCompactDebugString(value, {
+    maxLength: LONG_MAX_LENGTH,
     backtickQuote: true,
   });
 }

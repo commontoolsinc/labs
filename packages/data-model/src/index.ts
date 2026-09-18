@@ -35,6 +35,7 @@ export {
   toCompactDebugString,
   toDebugKindString,
   toIndentedDebugString,
+  toLongQuotedDebugString,
   toShortQuotedDebugString,
   toStructuredDebugValue,
 } from "./value-debug.ts";

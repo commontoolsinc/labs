@@ -34,7 +34,7 @@
 // annotated from the outbox carriage captured at the original run's
 // seal; the durable outbound-append rows deliver and retire through
 // the outbox; `memo.*`/`outbox.*` counters are live.
-import { toCompactDebugString } from "@commonfabric/data-model";
+import { toLongQuotedDebugString } from "@commonfabric/data-model";
 import {
   type CellScope,
   type ConfirmedRead,
@@ -3832,9 +3832,7 @@ export class SpaceServer implements TransactionSealDestination {
             this.#options.stats.events.visibilityDeferrals += 1;
             logger.warn("event-view-lag", () => [
               `drain deferring ${entry.eventId}: replica view holds ` +
-              `${
-                toCompactDebugString(viewEntry, { maxLength: 200 })
-              } at index ${index}; ` +
+              `${toLongQuotedDebugString(viewEntry)} at index ${index}; ` +
               "later-arrived events wait behind it",
             ]);
             // The same barrier as above: the deferred entry's
