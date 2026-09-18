@@ -436,6 +436,25 @@ repeated and fits nowhere runs fewer times, down to once, since all of
 one identity's runs go in one lane and one observation beats none. Down
 to once and never to nothing.
 
+A plan says what a suite costs it, as well as what a test does. A lane
+pays a suite's overhead, what one of its units costs to open, and its
+capabilities' setup before it runs anything of that suite, and that
+charge is the same for every identity the suite has. Where it alone passes what a lane holding
+two things may take, nothing can share a lane with one of the suite's
+identities, so the suite takes a whole lane for each one it places; where
+it passes what a lane is killed at, no lane can hold the suite and every
+discretionary identity it has fits nowhere. Both are reported once for
+the suite, and the identities of a suite in the second case are left out
+of the report that names identities, since the suite's line says what
+every one of them would.
+
+Neither reading changes what the packer does. What they change is what a
+plan can be asked. A plan that reported only the identities says nothing
+at all in the first case, and in the second says the same thing once per
+identity — thousands of times where a report is unbounded, and where one
+is bounded, filling the whole of what it has room for with tests that
+each cost a thousandth of the figure beside them.
+
 Two rules force a test in.
 
 - **An identity with no records must run.** This is required of any

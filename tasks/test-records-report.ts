@@ -71,7 +71,7 @@ export function formatIdentity(key: string): string {
  * A lane's own measurements are not test surfaces: nothing enumerates
  * them and no lane can be asked to run one, so an aggregate over them
  * counts runs of nothing. Their figures are not durations either — one
- * says what a batch was packed to spend and another counts the units it
+ * sums what a batch's own tests took and another counts the units it
  * opened — so summing them alongside a test's duration reports a number
  * that means nothing.
  *

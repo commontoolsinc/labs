@@ -43,14 +43,14 @@ function measured(name: string, seconds: number): TestRecord {
 /** What a lane writes about one batch: the three figures, together. */
 function batch(
   suite: string,
-  planned: number,
+  ran: number,
   spent: number,
   units = 1,
   coverage = false,
 ): TestRecord[] {
   return [
     measured(batchMeasurementName(suite, coverage), spent),
-    measured(batchMeasurementName(suite, coverage, "planned"), planned),
+    measured(batchMeasurementName(suite, coverage, "ran"), ran),
     figure(batchMeasurementName(suite, coverage, "units"), units),
   ];
 }
@@ -62,11 +62,11 @@ function batch(
  * that both slopes are believed.
  */
 function separable(
-  spent: (planned: number, units: number) => number,
+  spent: (ran: number, units: number) => number,
 ): BatchObservation[] {
   const observations: BatchObservation[] = [];
   for (
-    const planned of [
+    const ran of [
       MIN_CORRECTION_SPAN_SECONDS,
       MIN_CORRECTION_SPAN_SECONDS * 3,
     ]
@@ -74,9 +74,9 @@ function separable(
     for (const units of [MIN_UNIT_SPAN_UNITS, MIN_UNIT_SPAN_UNITS * 3]) {
       observations.push({
         suite: "s",
-        planned,
+        ran,
         units,
-        spent: spent(planned, units),
+        spent: spent(ran, units),
       });
     }
   }
@@ -108,7 +108,7 @@ describe("calibrate", () => {
         { run: "a", records: batch("workspace-unit", 40, 92, 17) },
       ]);
       expect(seen.batches).toEqual([
-        { suite: "workspace-unit", planned: 40, spent: 92, units: 17 },
+        { suite: "workspace-unit", ran: 40, spent: 92, units: 17 },
       ]);
     });
 
@@ -140,15 +140,15 @@ describe("calibrate", () => {
         { run: "run-1-lane-2", records: batch("runner-unit", 20, 50, 9) },
       ]);
       expect(seen.batches.sort((a, b) => a.spent - b.spent)).toEqual([
-        { suite: "runner-unit", planned: 10, spent: 30, units: 4 },
-        { suite: "runner-unit", planned: 20, spent: 50, units: 9 },
+        { suite: "runner-unit", ran: 10, spent: 30, units: 4 },
+        { suite: "runner-unit", ran: 20, spent: 50, units: 9 },
       ]);
     });
 
     it("joins a batch run with coverage to its own figures", () => {
-      // Its planned figure is the same as the uninstrumented batch's, so
+      // Its tests took the same time as the uninstrumented batch's, so
       // a join that ignored the marker could read either batch's spent
-      // figure against either's planned one.
+      // figure against either's.
       const seen = observationsOf([{
         run: "a",
         records: [
@@ -157,8 +157,8 @@ describe("calibrate", () => {
         ],
       }]);
       expect(seen.batches.sort((a, b) => a.spent - b.spent)).toEqual([
-        { suite: "workspace-unit", planned: 40, spent: 92, units: 17 },
-        { suite: "workspace-unit", planned: 40, spent: 150, units: 17 },
+        { suite: "workspace-unit", ran: 40, spent: 92, units: 17 },
+        { suite: "workspace-unit", ran: 40, spent: 150, units: 17 },
       ]);
     });
 
@@ -226,7 +226,7 @@ describe("calibrate", () => {
         {
           day: "2026-09-12",
           suite: "runner-unit",
-          planned: 10,
+          ran: 10,
           spent: 30,
           units: 4,
         },
@@ -238,7 +238,7 @@ describe("calibrate", () => {
     it("puts the whole of one observation into the intercept", () => {
       // With one sample there is nothing to say about how the cost grows,
       // so the intercept carries what the lane was seen to spend.
-      expect(fitSuite([{ suite: "s", planned: 40, spent: 92, units: 6 }]))
+      expect(fitSuite([{ suite: "s", ran: 40, spent: 92, units: 6 }]))
         .toEqual({ overhead: 52, correction: 1, unitOverhead: 0 });
     });
 
@@ -247,7 +247,7 @@ describe("calibrate", () => {
       // runner and loads a module per unit pays for that whatever its
       // tests take, and nothing in a test's own duration holds it.
       const fitted = fitSuite(
-        separable((planned, units) => 10 + 2 * planned + 0.5 * units),
+        separable((ran, units) => 10 + 2 * ran + 0.5 * units),
       );
       expect(fitted.correction).toBeCloseTo(2, 6);
       expect(fitted.unitOverhead).toBeCloseTo(0.5, 6);
@@ -259,7 +259,7 @@ describe("calibrate", () => {
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
           units: 1,
-          planned: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+          ran: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
           spent: 10 + 2 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
         })),
       );
@@ -276,13 +276,13 @@ describe("calibrate", () => {
         {
           suite: "s",
           units: 1,
-          planned: MIN_CORRECTION_SPAN_SECONDS,
+          ran: MIN_CORRECTION_SPAN_SECONDS,
           spent: 80,
         },
         {
           suite: "s",
           units: MIN_UNIT_SPAN_UNITS * 4,
-          planned: MIN_CORRECTION_SPAN_SECONDS * 3,
+          ran: MIN_CORRECTION_SPAN_SECONDS * 3,
           spent: 100,
         },
       ]);
@@ -299,7 +299,7 @@ describe("calibrate", () => {
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
           units: 1,
-          planned: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+          ran: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
           spent: 20 + 50 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
         })),
       );
@@ -312,18 +312,18 @@ describe("calibrate", () => {
       // which for this quantity is half the lanes running past the
       // budget they were packed against.
       const seen: BatchObservation[] = [
-        ...separable((planned, units) => 10 + 2 * planned + 0.5 * units),
+        ...separable((ran, units) => 10 + 2 * ran + 0.5 * units),
         {
           suite: "s",
           units: MIN_UNIT_SPAN_UNITS,
-          planned: MIN_CORRECTION_SPAN_SECONDS,
+          ran: MIN_CORRECTION_SPAN_SECONDS,
           spent: 900,
         },
       ];
       const fitted = fitSuite(seen);
       for (const one of seen) {
         expect(
-          fitted.overhead + fitted.correction * one.planned +
+          fitted.overhead + fitted.correction * one.ran +
             fitted.unitOverhead * one.units,
         ).toBeGreaterThanOrEqual(one.spent - 1e-9);
       }
@@ -340,7 +340,7 @@ describe("calibrate", () => {
         Array.from({ length: MIN_CORRECTION_SAMPLES + 3 }, (_, i) => ({
           suite: "s",
           units: 1,
-          planned: 2 + 0.5 * i,
+          ran: 2 + 0.5 * i,
           spent: 41,
         })),
       );
@@ -357,7 +357,7 @@ describe("calibrate", () => {
         Array.from({ length: MIN_CORRECTION_SAMPLES + 1 }, (_, i) => ({
           suite: "s",
           units: 1,
-          planned: most + i,
+          ran: most + i,
           spent: 200 + i / 10,
         })),
       );
@@ -373,7 +373,7 @@ describe("calibrate", () => {
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
           units: MIN_UNIT_SPAN_UNITS * (1 + i),
-          planned: MIN_CORRECTION_SPAN_SECONDS,
+          ran: MIN_CORRECTION_SPAN_SECONDS,
           spent: MIN_CORRECTION_SPAN_SECONDS + 8 +
             3 * MIN_UNIT_SPAN_UNITS * (1 + i),
         })),
@@ -393,7 +393,7 @@ describe("calibrate", () => {
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
           units: MIN_UNIT_SPAN_UNITS * (1 + i),
-          planned: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+          ran: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
           spent: 10 + 2 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
         })),
       );
@@ -412,7 +412,7 @@ describe("calibrate", () => {
         Array.from({ length: MIN_CORRECTION_SAMPLES + 1 }, (_, i) => ({
           suite: "s",
           units: MIN_UNIT_SPAN_UNITS + i,
-          planned: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
+          ran: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
           spent: 100 + 40 * i,
         })),
       );
@@ -435,7 +435,7 @@ describe("calibrate", () => {
           Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
             suite: "s",
             units: MIN_UNIT_SPAN_UNITS * (1 + i) + bend * i * i,
-            planned: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+            ran: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
             spent: 10 + 2 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
           })),
         );
@@ -454,7 +454,7 @@ describe("calibrate", () => {
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
           units: 1,
-          planned: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
+          ran: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
           spent: MIN_CORRECTION_SPAN_SECONDS * (2 + i) / 3,
         })),
       );
@@ -471,7 +471,7 @@ describe("calibrate", () => {
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
           units: 1,
-          planned: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
+          ran: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
           spent: 500 - 0.5 * MIN_CORRECTION_SPAN_SECONDS * (2 + i),
         })),
       );
@@ -483,7 +483,7 @@ describe("calibrate", () => {
       // one's figure with it: what a unit costs beside a correction of
       // minus a half is not what it costs beside a correction of one.
       const fitted = fitSuite(
-        separable((planned, units) => units - 0.5 * planned),
+        separable((ran, units) => units - 0.5 * ran),
       );
       expect(fitted.correction).toBe(1);
       expect(fitted.unitOverhead).toBeGreaterThan(0);
@@ -491,7 +491,7 @@ describe("calibrate", () => {
 
     it("keeps the correction when the per-unit cost comes out negative", () => {
       const fitted = fitSuite(
-        separable((planned, units) => 2 * planned - units),
+        separable((ran, units) => 2 * ran - units),
       );
       expect(fitted.correction).toBeCloseTo(2, 6);
       expect(fitted.unitOverhead).toBe(0);
@@ -504,9 +504,7 @@ describe("calibrate", () => {
       for (const perSecond of [-3, -0.5, 0, 0.25, 4, 50]) {
         for (const perUnit of [-2, 0, 0.5, 9]) {
           const fitted = fitSuite(
-            separable((planned, units) =>
-              500 + perSecond * planned + perUnit * units
-            ),
+            separable((ran, units) => 500 + perSecond * ran + perUnit * units),
           );
           expect(fitted.correction).toBeGreaterThan(0);
           expect(fitted.unitOverhead).toBeGreaterThanOrEqual(0);
@@ -529,8 +527,8 @@ describe("calibrate", () => {
       const fitted = calibrate({
         setup: new Map([["fuse", [14.8, 2.1]], ["browser", [0]]]),
         batches: [
-          { suite: "workspace-unit", planned: 40, spent: 92, units: 3 },
-          { suite: "runner-unit", planned: 10, spent: 20, units: 2 },
+          { suite: "workspace-unit", ran: 40, spent: 92, units: 3 },
+          { suite: "runner-unit", ran: 10, spent: 20, units: 2 },
         ],
       });
       expect(Object.keys(fitted.setupCost).sort()).toEqual(["browser", "fuse"]);
@@ -550,7 +548,7 @@ describe("calibrate", () => {
         isLaneObservation({
           day: "d",
           suite: "s",
-          planned: 10,
+          ran: 10,
           spent: 30,
           units: 4,
         }),
@@ -567,7 +565,7 @@ describe("calibrate", () => {
         isLaneObservation({
           day: "d",
           suite: "s",
-          planned: 10,
+          ran: 10,
           spent: "30",
           units: 4,
         }),
@@ -576,7 +574,7 @@ describe("calibrate", () => {
         isLaneObservation({
           day: "d",
           suite: "s",
-          planned: Infinity,
+          ran: Infinity,
           spent: 3,
           units: 4,
         }),
@@ -586,10 +584,10 @@ describe("calibrate", () => {
     it("returns `false` for anything that is not one", () => {
       expect(isLaneObservation({ capability: "fuse", seconds: 1 })).toBe(false);
       expect(isLaneObservation({ day: "d", seconds: 1 })).toBe(false);
-      expect(isLaneObservation({ day: "d", suite: "s", planned: 10 }))
+      expect(isLaneObservation({ day: "d", suite: "s", ran: 10 }))
         .toBe(false);
       expect(
-        isLaneObservation({ day: "d", suite: "s", planned: 10, spent: 30 }),
+        isLaneObservation({ day: "d", suite: "s", ran: 10, spent: 30 }),
       ).toBe(false);
       expect(isLaneObservation("fuse took a while")).toBe(false);
       expect(isLaneObservation(null)).toBe(false);
@@ -603,7 +601,7 @@ describe("calibrate", () => {
         {
           day: "2026-09-12",
           suite: "runner-unit",
-          planned: 10,
+          ran: 10,
           spent: 30,
           units: 4,
         },
@@ -611,7 +609,7 @@ describe("calibrate", () => {
       ]);
       expect(seen.setup.get("fuse")).toEqual([14.8, 2.1]);
       expect(seen.batches).toEqual([
-        { suite: "runner-unit", planned: 10, spent: 30, units: 4 },
+        { suite: "runner-unit", ran: 10, spent: 30, units: 4 },
       ]);
     });
   });

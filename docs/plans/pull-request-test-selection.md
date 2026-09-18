@@ -2218,11 +2218,12 @@ however few units the batch holds. A suite whose whole set is expensive
 then prices out its own smallest batch.
 
 So the model is fitted instead. Every batch the lane runner executes
-records what it was planned to take, what it actually took, and how many
-units it opened. The publisher regresses those per suite over the last
-week — the intercept is `suiteOverhead`, the slope on the planned seconds
-multiplies into `correction`, and the slope on the unit count is
-`unitOverhead` — and publishes the result in the next manifest. They start
+records what its own tests took between them, what the batch actually
+took, and how many units it opened. The publisher regresses those per
+suite over the last week — the intercept is `suiteOverhead`, the slope on
+the tests' own seconds multiplies into `correction`, and the slope on the
+unit count is `unitOverhead` — and publishes the result in the next
+manifest. They start
 at zero, one and zero, and converge within a few days of lanes running.
 Three numbers per suite, all measured, none maintained by hand.
 
@@ -2232,8 +2233,8 @@ observations and half the lanes would otherwise run past the budget they
 were packed against. A slope is fitted at all only once a suite has enough
 batches, spread far enough apart in what that slope reads, for it to mean
 something: each is read far outside the range it was fitted over, since a
-suite charged six seconds in every batch anybody has seen may be charged
-thousands the first time a lane packs it whole, and one that has never
+suite whose every batch anybody has seen held six seconds of tests may be
+charged thousands the first time a lane packs it whole, and one that has never
 held more than five units may be asked to hold nine hundred. A suite whose
 batches all held the same seconds of tests per unit says nothing that
 separates the two slopes, and keeps the one it has always been fitted.
@@ -2245,12 +2246,25 @@ charged in proportion.
 The measurements travel through the machinery that already exists: the
 lane runner writes them as ordinary test records of kind `gate` and
 scope `ci`, named `ci-lane setup <capability>` and `ci-lane batch
-<suite>`. A batch is written three times, the others named `ci-lane
-planned batch <suite>` and `ci-lane units batch <suite>`, because neither
-what the packer expected its tests to take nor how many units it opened
-can be recovered from the records the batch produced: those say what the
-tests took rather than what the packer thought they would, and a unit
-whose tests all recorded nothing leaves no trace of having been opened.
+<suite>`. A batch is written three times, the others named `ci-lane ran
+batch <suite>` and `ci-lane units batch <suite>`, because neither what its
+tests took between them nor how many units it opened can be recovered
+from the records the batch produced: a reader of a report cannot tell
+which of its records came from which batch, and a unit whose tests all
+recorded nothing leaves no trace of having been opened.
+
+The tests' own time, rather than what the packer expected it to be. The
+two differ by however wrong the manifest's costs are, and a unit nothing
+has measured is charged a stand-in that can be out by a factor of ten.
+Fitting against the expectation puts that error in the intercept, which
+is charged once to every lane that holds the suite and kept for the whole
+window. An intercept past the planned budget already costs a whole lane
+for each identity of the suite that runs, since a lane holding two things
+stops at that budget; past the hard bound, which is what an identity's
+lone cost is weighed against, the suite places no discretionary identity
+at all. So an expectation that was briefly wrong takes the lanes away
+from everything else, and then holds a whole suite out of every pull
+request, for a week.
 The record format carries one number and calls it a duration, so the unit
 count travels in that field as a count, and the measurement's name is what
 says which of the three figures it is. A batch run
@@ -2840,8 +2854,9 @@ What the runner does, in order:
 7. Set up the union of the capabilities the batches need, recording each
    one's duration.
 8. Run each batch execution with fresh spool and JUnit output paths,
-   recording planned and actual durations and continuing past a failure so
-   that one failure does not hide later batches or repeats.
+   recording what the batch spent and what its own tests took, and
+   continuing past a failure so that one failure does not hide later
+   batches or repeats.
 9. Immediately after each execution, gather its direct records and
    described JUnit outputs into the lane spool through the shared gather
    function. Validate record surfaces and apply the suite's optional
