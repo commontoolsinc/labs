@@ -41,21 +41,32 @@ concurrency:
 # variables holding the numbers are how a workflow declares a value an anchor
 # can name; nothing reads them.
 #
-# A backstop, and not a schedule. A lane is packed against
+# A backstop, and not a schedule. What decides how much a lane carries is
 # `LANE_BOUND_SECONDS` or `FULL_LANE_BOUND_SECONDS` from
-# `tasks/test-selection/policy.ts`, both far below the figure here, and a lane
-# that runs past the bound it was packed against has been given more than it
-# could carry. What GitHub's kill costs in that case is everything that lane
-# did — every test it had already run, the records those runs produced, and the
-# measurements the cost model learns its own mistake from — so the backstop
-# sits far enough above the packed bound that an over-packed lane finishes late
-# rather than not at all.
+# `tasks/test-selection/policy.ts`, and a lane that runs past the bound it was
+# packed against has been given more than it could carry. What GitHub's kill
+# costs in that case is everything that lane did — every test it had already
+# run, the records those runs produced, and the measurements the cost model
+# learns its own mistake from. Killing it there throws that away and leaves the
+# next run packed just as badly, so the bound has to clear the packed one by
+# enough that a lane the packer got wrong still lands.
+#
+# An hour is what that comes to. A full run measured with no usable cost model
+# at all — the worst the packer can be wrong by — finished its healthy lanes in
+# nineteen to forty-nine minutes, so an hour covers a lane packed from nothing.
+# Above that a lane is not slow but stuck, and what a higher bound buys is more
+# hours of a runner holding a job that will never finish.
+#
+# What the step bound buys is the difference between failing and being
+# cancelled. A job stopped at its own bound is `cancelled`, which reads as
+# nobody's fault, and a wedged lane would look like a run somebody stopped. A
+# step stopped at its own bound fails, and says which step.
 env:
   # GitHub's Ubuntu image includes Chrome. Astral uses it directly instead of
   # downloading another browser when the first browser test starts.
   ASTRAL_BIN_PATH: /usr/bin/google-chrome
-  WORK_TIMEOUT_MINUTES: &work-timeout 30
-  JOB_TIMEOUT_MINUTES: &job-timeout 40
+  WORK_TIMEOUT_MINUTES: &work-timeout 50
+  JOB_TIMEOUT_MINUTES: &job-timeout 60
 
 # Every step name must begin with a phase-marker emoji (setup / work / shutdown).
 # scripts/ci-gantt.ts reads that emoji to split each job bar by phase. See the

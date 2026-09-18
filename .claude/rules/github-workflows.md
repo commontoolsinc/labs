@@ -45,10 +45,11 @@ of anchors there.
 That bound is a backstop and not a schedule, which is what keeps it at one pair
 for the whole file. The lanes are the job with a schedule of their own: each is
 packed against `LANE_BOUND_SECONDS` or `FULL_LANE_BOUND_SECONDS` from
-`tasks/test-selection/policy.ts`, both far below the anchor, so the anchor is
-reached only by a lane the packer gave more than it could carry — and it is
-high enough that such a lane finishes late rather than being killed with every
-test it had already run thrown away.
+`tasks/test-selection/policy.ts`, so anything that finishes finishes far below
+the anchor. The anchor has to clear those by several times over, because what
+it would otherwise stop is the lane carrying the measurements that correct
+them. What the step bound buys is which way a wedged job ends: cancelled reads
+as nobody's fault, where a failed step names itself.
 
 The deploy jobs are the exception and carry no bound, because a deploy's
 duration is set by a script in another repository. `tasks/ci-workflow.test.ts`

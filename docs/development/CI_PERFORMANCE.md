@@ -27,11 +27,13 @@ wrong. So a lane filled to its budget finishes seventy seconds short of its
 bound.
 
 Those two are the numbers to move when a lane runs long, and they are not the
-workflow's timeouts. `work-timeout` is a backstop sitting far above both, and
-what it is sized for is the lane the cost model got wrong. That lane is
-carrying the measurements the cost model learns its mistake from, so killing it
-at the bound it overran would cost the next run the same mistake as well as
-costing this one every test it had already run.
+workflow's timeouts. `work-timeout` is a backstop, sized for the lane the cost
+model got wrong rather than for the lane it got right. Such a lane carries the
+measurements the model learns that mistake from, so stopping it costs the next
+run the same mistake as well as costing this one every test it had already run.
+A full run packed with no usable cost model finished its healthy lanes in
+nineteen to forty-nine minutes, which is what an hour is chosen against: past
+that a lane is stuck rather than slow, and waiting longer buys nothing.
 
 Rebalancing is not something anybody does here any more. What a test costs is
 measured on every run and published in the manifest, and the packer distributes
@@ -266,8 +268,8 @@ anchors, which GitHub Actions has accepted since September 2025:
 
 ```yaml
 env:
-  WORK_TIMEOUT_MINUTES: &work-timeout 30
-  JOB_TIMEOUT_MINUTES: &job-timeout 40
+  WORK_TIMEOUT_MINUTES: &work-timeout 50
+  JOB_TIMEOUT_MINUTES: &job-timeout 60
 ```
 
 Every job then reads `timeout-minutes: *job-timeout` and every work step
@@ -276,12 +278,14 @@ environment variables are how a workflow declares a value an anchor can name;
 nothing reads them, and merge keys (`<<:`) remain unsupported, so an anchor
 cannot carry a block that a job then overrides.
 
+What the step bound buys is which way a wedged job ends: a job stopped at its
+own bound is `cancelled`, the same conclusion a run somebody stopped by hand
+carries, where a step stopped at its own bound fails and names itself.
+
 The lanes carry that same pair rather than one of their own. A lane is packed
-against a budget far below thirty minutes, so this bound is reached only by a
-lane that was given more than it could carry, and it is set high enough that
-such a lane finishes late instead of being killed with its work discarded. A
-job needing its own bound adds a pair of anchors alongside these rather than a
-number next to the step.
+against a budget of a few minutes, so nothing that finishes reaches this bound
+at all. A job needing its own bound adds a pair of anchors alongside these
+rather than a number next to the step.
 
 The deploy jobs carry no bound at all. A deploy hands the work to a script that
 lives outside this repository, and a bound here would cancel a deploy this

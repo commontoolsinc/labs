@@ -15,6 +15,19 @@ function range(count: number): number[] {
   return Array.from({ length: count }, (_, index) => index + 1);
 }
 
+/** What separates a work step's bound from the bound on its job. */
+const JOB_HEADROOM_MINUTES = 10;
+
+/**
+ * How far the backstop has to clear the largest bound a lane is packed
+ * against. A lane that reaches the backstop is one the packer got wrong, and
+ * it is carrying the measurements that correct the packer, so there has to be
+ * room above the packed bound for such a lane to land. The figure itself is a
+ * judgment about how wrong the packer can be; this is the shape that judgment
+ * has to keep.
+ */
+const BACKSTOP_CLEARANCE = 4;
+
 function jobBlock(workflow: string, jobId: string): string {
   const jobsStart = workflow.indexOf("jobs:\n");
   assert(jobsStart >= 0, "workflow jobs section not found");
@@ -367,7 +380,7 @@ Deno.test("every work step is bounded before its job is", async () => {
   // so each is a name here rather than a number, and the minutes behind the
   // names are written once.
 
-  const headroom = 10;
+  const headroom = JOB_HEADROOM_MINUTES;
   const contents = await workflow("deno.yml");
   const anchors = anchoredMinutes(contents);
   // The deploy jobs hand the work to a script that lives elsewhere — one on the
@@ -525,18 +538,25 @@ Deno.test("the workflow spells the dials the packer reads", async () => {
   // corrects the cost model is the measurements that same lane is
   // carrying: killing it there would throw them away along with every
   // test it had already run, and the next run would be packed just as
-  // badly. So the backstop is held clear of the packed bound by the whole
-  // of that bound again, which leaves an over-packed lane finishing late
-  // rather than not at all.
+  // badly. So the backstop clears the largest packed bound several times
+  // over, which leaves such a lane finishing late rather than not at all,
+  // and the job bound stays the headroom above the step's.
   const anchors = anchoredMinutes(contents);
-  const minutes = anchors.get("work-timeout");
-  assert(minutes !== undefined, "no work-timeout anchor");
+  const work = anchors.get("work-timeout");
+  const job = anchors.get("job-timeout");
+  assert(work !== undefined, "no work-timeout anchor");
+  assert(job !== undefined, "no job-timeout anchor");
   const packed = Math.max(LANE_BOUND_SECONDS, FULL_LANE_BOUND_SECONDS);
   assert(
-    minutes * 60 >= 2 * packed,
-    `the work backstop is ${minutes * 60} seconds against a packed bound ` +
-      `of ${packed}, leaving an over-packed lane less than that bound ` +
-      `again before GitHub kills it`,
+    work * 60 >= BACKSTOP_CLEARANCE * packed,
+    `the work backstop is ${work * 60} seconds against a packed bound of ` +
+      `${packed}, which leaves an over-packed lane under ` +
+      `${BACKSTOP_CLEARANCE} times that bound before GitHub kills it`,
+  );
+  assertEquals(
+    job - work,
+    JOB_HEADROOM_MINUTES,
+    "the job backstop is not the headroom above the work backstop",
   );
 });
 

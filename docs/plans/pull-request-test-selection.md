@@ -2810,15 +2810,14 @@ what the token can do to reading this repository, which is what
 `check-action-pins` asks the service for.
 
 The lane needs no timeout anchor of its own. It takes the pair the block
-at the top of the file already holds — `WORK_TIMEOUT_MINUTES` at thirty
-and `JOB_TIMEOUT_MINUTES` at forty — which is a backstop and not the
+at the top of the file already holds, which is a backstop and not the
 schedule. The schedule is `LANE_BUDGET_SECONDS`, and a lane that reaches
 the bound above is one the packer got wrong; stopping it there would
 throw away the tests it had run along with the measurements that would
-have corrected the packer, so the backstop sits far enough above the
-packed bound to let such a lane land. `tasks/ci-workflow.test.ts` holds
-it there, and holds every job's bound at least ten minutes above its work
-step's.
+have corrected the packer. So the pair clears the packed bound several
+times over, which is an hour of work inside a job ten minutes longer.
+`tasks/ci-workflow.test.ts` holds it there, and holds every job's bound
+at least ten minutes above its work step's.
 
 The ship step carries neither a `variant` nor a `--junit` specification,
 which is the last piece of per-suite knowledge to leave the workflow. A
@@ -4125,10 +4124,10 @@ spent its time on the batch most worth knowing about and dropped the
 cheap ones.
 
 The backstop above is what makes this a tail case rather than the norm.
-A lane over-packed against a 230-second budget still has thirty minutes
-before GitHub stops it, so the ordering decides what a lane measures
-first and only decides what it measures at all when the packing was
-wrong by more than sevenfold.
+A lane over-packed against a 230-second budget has an hour before
+anything stops it, so the ordering decides what a lane measures first
+and decides what it measures at all only where the batch itself is
+wedged.
 
 Ordering by the suite identifier put the three largest suites last by the
 alphabet, and four runs of the lanes left `workspace-unit`, `runner-unit`

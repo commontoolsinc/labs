@@ -651,13 +651,13 @@ holds the mechanics and a reproduction, under "A line two adjacent callbacks
 share".
 
 The gate merges the coverage artifacts a run uploads by adding each line's
-counts together, so a line one shard reaches is covered however many shards
+counts together, so a line one lane reaches is covered however many lanes
 missed it. A shared line is not settled that way. It needs one artifact in
 which both callbacks ran, and which test files an artifact holds is decided by
-how the suite was split across shards. Nothing asserts that split, and it is
-repacked whenever a test file is added or removed: the runner suite's shards
-come from `tasks/select-runner-test-files.ts`, which packs the weighted list of
-test files into bins, so one new file moves whatever lands after it.
+how the corpus was packed across lanes. Nothing asserts that packing, and it is
+redone on every run: the packer fills each lane from what the manifest says
+every test costs and what it is worth, so one test getting slower moves
+whatever lands after it.
 
 Any two adjacent callback arguments sit in this position. The pair that
 produced it here is a request's two endings — the work to start once the
