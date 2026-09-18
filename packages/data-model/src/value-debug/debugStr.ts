@@ -151,15 +151,20 @@ export function debugStr(
   let afterBlock = false;
 
   pieces.forEach((piece, index) => {
+    const hasValue = index < values.length;
+
     // A block's closing fence is followed by a line break, unless the text
-    // supplies one or there is no more text.
-    if (afterBlock && (piece.text !== "") && !piece.text.startsWith("\n")) {
+    // supplies one or nothing at all comes after the block.
+    if (
+      afterBlock && !piece.text.startsWith("\n") &&
+      ((piece.text !== "") || hasValue)
+    ) {
       result += "\n";
     }
     result += piece.text;
     afterBlock = false;
 
-    if (index < values.length) {
+    if (hasValue) {
       // A block's opening fence starts a line.
       if (piece.isBlock && (result !== "") && !result.endsWith("\n")) {
         result += "\n";

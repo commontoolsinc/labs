@@ -137,6 +137,16 @@ describe("debugStr()", () => {
       expect(debugStr`$quote,indent${[]}`).toBe("```\n[]\n```");
     });
 
+    it("returns a line break between a block and a substitution right after it", () => {
+      expect(debugStr`a $quote,indent${[]}${"next"} b`)
+        .toBe("a \n```\n[]\n```\nnext b");
+    });
+
+    it("returns one line break between two blocks in a row", () => {
+      expect(debugStr`$quote,indent${[]}$quote,indent${[1]}`)
+        .toBe("```\n[]\n```\n```\n[\n  1\n]\n```");
+    });
+
     it("returns a cut rendering with its line count inside the fence", () => {
       const lines = toIndentedDebugString(TALL).split("\n");
       const expected = [
