@@ -93,14 +93,11 @@ compares across jobs. Adding a bench file to the list does not place it, so
 neither the calibration's position nor any other file's can be arranged from
 here.
 
-Benchmark results are not gated, and neither is CI wall time. The counts gated
-on every pull request include the coverage-debt ratchet
-(`tasks/coverage-check.ts`, in the Coverage Check job), the read limits of the
-headless lunch-poll render fixtures
-([below](#headless-render-read-limits), in Pattern Unit Tests), and the Topics
-read and graph limits ([below](#the-read-budget), in Pattern Integration
-Tests). None of them ingests benchmark results, so a bench regression shows up
-as trend drift on the dashboard rather than as a failing check.
+Benchmark numbers are not gated, and neither is CI wall time. The only
+coverage gate on a pull request is the measured-set one
+(`tasks/coverage-gate.ts`), which never ingests benchmark results, so a bench
+regression shows up as trend drift on the dashboard rather than as a failing
+check.
 
 Most packages with benches define a `bench` task for running them locally
 (see `packages/runner/deno.jsonc`); otherwise invoke `deno bench` on a

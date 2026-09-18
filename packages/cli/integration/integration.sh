@@ -1386,7 +1386,7 @@ run_piece_data_files() {
 # `all` runs every step, and every step also runs under one of the sections CI
 # dispatches: piece-values, piece-call, and piece-links. Both hold in
 # packages/cli/test/integration-sections.test.ts, which reads this table and
-# the cli-integration-test matrix in .github/workflows/deno.yml.
+# the units the `cli-core` suite enumerates.
 #
 # Two kinds of arm live here. A **step arm** runs exactly one step, and
 # every step has one, so any step can be run and scheduled on its own. A

@@ -420,9 +420,41 @@ export function batchesOf(
       (a.unit < b.unit ? -1 : a.unit > b.unit ? 1 : 0)
     );
   }
-  return [...batches.values()].sort((a, b) =>
-    a.suite.id < b.suite.id ? -1 : a.suite.id > b.suite.id ? 1 : 0
+  // What a lane costs beyond its tests is fitted from what its batches
+  // were seen to take, and a lane that runs out of time is killed with
+  // its later batches unrun and unmeasured. So the order a lane takes
+  // its batches in decides which suites the cost model can ever learn,
+  // and a suite the model cannot price is one that makes lanes run out
+  // of time. Two keys answer that, in this order.
+  //
+  // A suite nothing has measured goes ahead of one something has,
+  // because it is the one worth measuring. And within each group the
+  // largest share of the lane goes first, because a lane that runs out
+  // of time should have spent it on the batch most worth knowing about
+  // and dropped the cheap ones. Ordering by the identifier instead put
+  // the three largest suites last by the alphabet, and every lane died
+  // before reaching them.
+  //
+  // Both keys are a function of the plan, so the order is the same on
+  // the default branch as on a change, which is what the identifier was
+  // there for.
+  const fitted = manifest?.calibration.suites ?? {};
+  const charged = new Map(
+    [...batches.keys()].map((
+      suiteId,
+    ) => [suiteId, chosenFor(suiteId, selections).seconds]),
   );
+  const key = (batch: Batch) => ({
+    unmeasured: fitted[batch.suite.id] === undefined ? 0 : 1,
+    seconds: charged.get(batch.suite.id) ?? 0,
+  });
+  return [...batches.values()].sort((a, b) => {
+    const left = key(a);
+    const right = key(b);
+    return left.unmeasured - right.unmeasured ||
+      right.seconds - left.seconds ||
+      (a.suite.id < b.suite.id ? -1 : a.suite.id > b.suite.id ? 1 : 0);
+  });
 }
 
 /** What running one invocation came to. */
@@ -1259,6 +1291,15 @@ export async function fullLanes(
   });
 }
 
+/**
+ * The directory the continuous-integration job keeps its own temporary
+ * files in, where the lane is running inside one.
+ */
+function runnerTemp(): string | undefined {
+  const at = Deno.env.get("RUNNER_TEMP");
+  return at === undefined || at.length === 0 ? undefined : at;
+}
+
 /** Runs one lane, and says whether everything in it passed. */
 export async function runLane(
   options: LaneOptions,
@@ -1310,7 +1351,14 @@ export async function runLane(
   describeWithheld(laid.withheld, seen.mandatory);
   if (options.dryRun) return true;
 
-  const workDir = await Deno.makeTempDir({ prefix: "ci-lane-" });
+  const workDir = await Deno.makeTempDir({
+    prefix: "ci-lane-",
+    // Under the job's own temporary directory where there is one, so that
+    // a workflow step can upload what a failing lane left behind. A
+    // server's log is written here, and a lane that failed is exactly
+    // when somebody wants to read one.
+    ...(runnerTemp() === undefined ? {} : { dir: runnerTemp() }),
+  });
   const spool = (deps.spool ?? recordsDir)();
   // The directory belongs to the lane from the moment it exists, and a
   // capability that refuses to open is one of the ways the lane ends.
@@ -1410,9 +1458,11 @@ export async function runLane(
     // and the logs are large.
     if (!ok) await describeCapabilityLogs(opened.logs);
     await opened.close();
-    // The lane owns this directory and nothing outside the lane reads
-    // it, so it goes whether the batches passed, failed, or never ran.
-    await Deno.remove(workDir, { recursive: true }).catch(() => {});
+    // A lane that passed leaves nothing behind. A lane that failed keeps
+    // what its capabilities wrote, because a server's log is what says
+    // why a suite could not reach it, and the directory is under the
+    // job's own temporary directory so the workflow can upload it.
+    if (ok) await Deno.remove(workDir, { recursive: true }).catch(() => {});
   }
   describeConflicts(conflicts);
   // After the capabilities are closed, because a conversion is the lane's
