@@ -134,6 +134,19 @@ interface ServedFrom {
    * Whether the shell was sought from the toolshed's own origin. When it was
    * not, the two are separate deployments and `/api/meta` describes a shell
    * the browser is not loading, so its define is no evidence about this run.
+   *
+   * A match takes one origin to be one deployment, which is the bound on what
+   * this establishes: a shell proxied from another host under the toolshed's
+   * origin, or served from a different path of it, reads as the toolshed's
+   * own, and `/api/meta` would then be trusted for a shell it does not
+   * describe. Anything finer would be guessing at a deployment's topology
+   * from two URLs.
+   *
+   * This gates only the path that reads the toolshed's report alone, so the
+   * mislabeling needs all three at once: the served shell states no define,
+   * the toolshed states one, and the two are different artifacts under a
+   * shared origin. A served shell that states a define is read from the
+   * artifact itself, and one that contradicts the toolshed refuses.
    */
   readonly servedByToolshed: boolean;
 }
