@@ -375,6 +375,10 @@ describe("collection index lookup", () => {
     }
   });
   it("reads a mode a schema pins with `const` rather than with `enum`", () => {
+    // `const` is the other JSON Schema spelling for one admissible value. The
+    // descriptor here is unwritten, so the schema is the only thing naming the
+    // marker and the mode.
+
     const tx = runtime.edit();
     const index = runtime.getCell<CollectionIndexData<string, number[]>>(
       space,
@@ -391,9 +395,13 @@ describe("collection index lookup", () => {
       },
       tx,
     );
-    expect(index.lookup("a")).toEqual([]);
-    expect(index.keys()).toEqual([]);
-    expect(index.keyEntries()).toEqual([]);
+    const proxy = index.getAsReactiveProxy() as unknown as GroupIndex<
+      string,
+      number
+    >;
+    expect(proxy.lookup("a")).toEqual([]);
+    expect(proxy.keys()).toEqual([]);
+    expect(proxy.keyEntries()).toEqual([]);
     tx.abort();
   });
   it("ignores unrelated buckets and key enumeration while following its selected bucket", async () => {
