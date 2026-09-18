@@ -314,7 +314,10 @@ would admit a reference to the requester's own data. Reaching the ruling means
 carrying the request's ceiling on the sink-request policy input, a registry
 arm that declares the row per request, and every reader of
 `SinkMaxConfidentiality` — the gate, `effectiveObservationCeiling`, the
-posture report, the audit — taking that arm; D5 records the choice.
+posture report, the audit — taking that arm. The first take ships the static
+row with the builtin-side check; the per-request ceiling, and any further
+`maxConfidentiality` work, is later work listed under "Later, not sequenced"
+(D5).
 
 **Gate 2 — each observation, in the run.** Every value that would enter model
 context is measured against the run's observation ceiling before it does:
@@ -716,7 +719,11 @@ it) and the fabric session's read ceiling is published as observe-grade for
 space-scoped reads — a reduced-assurance deviation with an owner and a
 retirement condition, as AH-CFC-15 requires.
 
-**Later, not sequenced:** ranking; the durable ledger and per-user budgets;
+**Later, not sequenced:** the per-request `agent` sink ceiling — the gate
+reading the request's observation ceiling in place of the static row, so that
+a reference to the requester's own labeled data fits under max enforcement
+(§1.4, D5) — and any further `maxConfidentiality` work; ranking; the durable
+ledger and per-user budgets;
 Page and calendar mutation tools; a shared runner with delegated identity;
 folding hosted pattern authoring into an agent request with the
 `pattern-author` profile.
@@ -731,7 +738,7 @@ Ruled 2026-09-18 unless marked.
 | D2 | Result labeling | the harness writes the result: every referenced handle becomes a link, non-cell referents become labeled documents, inline text carries the derived join (§1.3) |
 | D3 | How the join is established | derived by the writing transaction reading the observed cells, not asserted by the runner; no trusted label input |
 | D4 | Default observation ceiling | the requester's own view |
-| D5 | `agent` sink ceiling under max enforcement | ruled the request's observation ceiling; built as a static empty ceiling (`agent: { ceiling: [] }`), because the governance registry admits one clause list per sink and the gate reads nothing off the request. The builtin measures its request against the pattern's `maxConfidentiality` before staging. Under the static row a reference to a labeled cell is refused with the task text, since a link position carries its target's label as the pointer's own; the ruled ceiling needs the sink-request policy input to carry the request's ceiling, a registry arm declaring the row per request, and every reader of `SinkMaxConfidentiality` taking that arm (§1.4, gate 1) |
+| D5 | `agent` sink ceiling under max enforcement | the first take ships a static empty ceiling with the builtin-side check; the request's observation ceiling as a per-request sink ceiling is later work (ruled 2026-09-18). Built as a static empty ceiling (`agent: { ceiling: [] }`), because the governance registry admits one clause list per sink and the gate reads nothing off the request. The builtin measures its request against the pattern's `maxConfidentiality` before staging. Under the static row a reference to a labeled cell is refused with the task text, since a link position carries its target's label as the pointer's own; the ruled ceiling needs the sink-request policy input to carry the request's ceiling, a registry arm declaring the row per request, and every reader of `SinkMaxConfidentiality` taking that arm (§1.4, gate 1) |
 | D6 | Run identity | the requester's, held by their runner |
 | D7 | Runner placement | a separate process per user on the Loom host, pulling from the cloud home space (§1.7) |
 | D8 | Record location | requesting space, indexed from home with `{link, host}` entries |

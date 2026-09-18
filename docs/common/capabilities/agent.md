@@ -89,8 +89,13 @@ const view = recommendation.pending
 The request is staged under the `agent` sink and measured at the commit
 boundary like any other sink request. What the transaction consumed is the
 task text and the pointer label of each input reference — a link position
-carries its target's label — so under a deployment ceiling of `[]` on the
-`agent` sink, a task built from labeled data and a reference to a labeled
-cell are both refused, and a request over public references fits. A refused
+carries its target's label.
+
+**Present limit.** Under the max-enforcement posture the `agent` sink's
+ceiling is `[]`, so a request passing a labeled cell by reference is refused,
+as is a task built from labeled data; only a request over unlabeled
+references and a plain task fits. Declaring `maxConfidentiality` does not
+change that, since it can only tighten. A deployment that declares no ceiling
+for the `agent` sink applies no gate to the request. A refused
 request settles with `pending: false` and an `error` naming the sink; the
 reason's detail is not handed to the pattern.

@@ -383,8 +383,11 @@ read through `gh api --paginate repos/commonfabric/labs/pulls/<n>/comments`.
 
 ## What is deliberately not in this plan
 
-Ranking (`priority` stays reserved). A durable per-user ledger and quota
-enforcement. Page and calendar mutation tools. A shared runner with delegated
-identity. Folding hosted pattern authoring into an agent request. Each is
-named in the design document under "Later, not sequenced" and gets its own
-plan when it is picked up.
+The per-request `agent` sink ceiling and any further `maxConfidentiality`
+work: the first take ships the static empty row under max enforcement with
+the builtin-side check, under which a request passing a labeled cell by
+reference is refused (design D5). Ranking (`priority` stays reserved). A
+durable per-user ledger and quota enforcement. Page and calendar mutation
+tools. A shared runner with delegated identity. Folding hosted pattern
+authoring into an agent request. Each is named in the design document under
+"Later, not sequenced" and gets its own plan when it is picked up.
