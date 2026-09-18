@@ -1,8 +1,9 @@
 # Agent requests from a pattern, and the queue that runs them
 
-**Status:** design, ruled on 2026-09-18; nothing is built. Written against
-`c89aef10a3`. Section 8 records the decisions and section 9 the assumptions
-the first take rests on.
+**Status:** design, ruled on 2026-09-18;
+[the implementation plan](agent-requests-implementation.md) tracks what is
+built. Written against `c89aef10a3`. Section 8 records the decisions and
+section 9 the assumptions the first take rests on.
 
 ## What this is
 
@@ -294,13 +295,26 @@ knob.
 
 **Gate 1 — the request, at the commit boundary.** `agent` is a row in
 `KNOWN_SINKS` with its own sink class (`agent`, not the hardcoded `network`
-that every sink mints today; giving the llm sinks a class of their own is
-stage 2 of [llm-sink admission](cfc-llm-sink-admission.md) and this is the
-first sink to need it). Its ceiling under the max-enforcement posture is *the
-request's observation ceiling* — this section's knob — so that a task text may
-carry what the model is going to be allowed to see and nothing more. Because
-inputs are references, a request that passes cells and a plain task fits
-trivially; the gate bites on a task text built from labeled data.
+the other sinks mint; giving the llm sinks a class of their own is stage 2 of
+[llm-sink admission](cfc-llm-sink-admission.md), and the class table this sink
+introduced is where that happens). Its ceiling under the max-enforcement
+posture is ruled to be *the request's observation ceiling* — this section's
+knob — so that a task text may carry what the model is going to be allowed to
+see and nothing more. The governance registry admits one static clause list
+per sink and the gate reads nothing off the request, so what is built is a
+static empty ceiling: the builtin measures its request against the pattern's
+`maxConfidentiality` before staging, and the deployment's row bounds what the
+staging transaction consumed. Two things follow. A request whose reads carry
+no label fits, and a task text built from labeled data is refused. And a
+reference is not free of label: a link position carries its target's label as
+the pointer's own (`origin:"link"` entries, consumed by the `followRef` read
+that resolves which reference sits at the slot), so a request passing a
+labeled cell is refused with it under the static row, where the ruled ceiling
+would admit a reference to the requester's own data. Reaching the ruling means
+carrying the request's ceiling on the sink-request policy input, a registry
+arm that declares the row per request, and every reader of
+`SinkMaxConfidentiality` — the gate, `effectiveObservationCeiling`, the
+posture report, the audit — taking that arm; D5 records the choice.
 
 **Gate 2 — each observation, in the run.** Every value that would enter model
 context is measured against the run's observation ceiling before it does:
@@ -512,6 +526,9 @@ record and the builtin cell in different spaces.
 // Shown for illustration only.
 AgentRun (PerUser, in the requesting space)
   request        link to the agent node's cell (holds requestHash)
+  requestHash
+  task, inputs, resultSchema, maxConfidentiality?, tools?
+                 the request as staged; inputs are links
   space, piece   where it came from — links, not names
   submittedAt
   state          queued | claimed | running | completed | failed | refused | cancelled
@@ -534,9 +551,12 @@ AgentRun (PerUser, in the requesting space)
 The request fields are written by the server when the request commits; the
 runner writes everything from `claim` on. The two writer sets never overlap,
 which is what lets a derived creation and later authored progress writes share
-one record without a second deriver; phase 3 confirms this against the
-single-deriver rule and falls back to a runner-owned sibling document if the
-rule turns out to forbid the split.
+one record without a second deriver. The single-deriver rule admits the split:
+it binds derived committers and is not an ACL on the record, an authored write
+to the record is admitted under the record's ACL and CAS, and the one hazard —
+a derivation later blind-writing the record over the runner's fields — does
+not arise, because the effect writes the record once and the builtin only
+reads it from then on (assumption 9).
 
 The state machine is hosted authoring's with the two authoring-specific states
 removed and one added:
@@ -706,7 +726,7 @@ Ruled 2026-09-18 unless marked.
 | D2 | Result labeling | the harness writes the result: every referenced handle becomes a link, non-cell referents become labeled documents, inline text carries the derived join (§1.3) |
 | D3 | How the join is established | derived by the writing transaction reading the observed cells, not asserted by the runner; no trusted label input |
 | D4 | Default observation ceiling | the requester's own view |
-| D5 | `agent` sink ceiling under max enforcement | the request's observation ceiling |
+| D5 | `agent` sink ceiling under max enforcement | ruled the request's observation ceiling; built as a static empty ceiling (`agent: { ceiling: [] }`), because the governance registry admits one clause list per sink and the gate reads nothing off the request. The builtin measures its request against the pattern's `maxConfidentiality` before staging. Under the static row a reference to a labeled cell is refused with the task text, since a link position carries its target's label as the pointer's own; the ruled ceiling needs the sink-request policy input to carry the request's ceiling, a registry arm declaring the row per request, and every reader of `SinkMaxConfidentiality` taking that arm (§1.4, gate 1) |
 | D6 | Run identity | the requester's, held by their runner |
 | D7 | Runner placement | a separate process per user on the Loom host, pulling from the cloud home space (§1.7) |
 | D8 | Record location | requesting space, indexed from home with `{link, host}` entries |
@@ -749,9 +769,14 @@ Listed so they can be overturned before phase 1.
    authority story and is out of scope.
 8. **`PerUser<>` is honored by acting as the user**, not by a new mechanism.
 9. **A split-writer record is admissible.** Server-derived request fields and
-   runner-authored progress fields on one document (§2.3). If the
-   single-deriver rule forbids it, the progress fields move to a sibling
-   document the runner owns and the record links to it; nothing else changes.
+   runner-authored progress fields on one document (§2.3). Settled by reading
+   the spec: the single-deriver invariant binds derived committers and is not
+   an ACL on a derived document — an authored write into one is admitted
+   under the target's ACL and CAS (`scenario-traces.md` T12.Q4,
+   `serving-loop.md` §3d) — and what it leaves open is a blind-writing
+   derivation later clobbering the authored fields, which cannot happen to
+   a record the effect writes once and the builtin thereafter only reads.
+   The sibling-document fallback is not needed.
 10. **Minting a document for a Loom hit is an authored write the runtime
     admits with a declared label.** The label comes from loom's `ifc` on the
     row; a row without one is refused before it reaches the model, so none
