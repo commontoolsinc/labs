@@ -351,12 +351,12 @@ which is worth stating because the plan asks the browser tier for body reads
 without qualification. Four boundaries were measured on an eight-topic board
 with citations, each of them a re-open within one live runtime client:
 
-| boundary | attributable runs |
-|---|---|
-| open a topic already opened once, from the board | none; 1 scheduler run |
-| a third visit to the same topic | none; **0** scheduler runs |
-| reopen with another topic opened in between | runs carried a read sample, but no source location |
-| the whole round trip, topic → board → topic | `lastActivityOf` once; the other three lifts not at all |
+| boundary                                         | attributable runs                                   |
+| ------------------------------------------------ | --------------------------------------------------- |
+| open a topic already opened once, from the board | none; 1 scheduler run                               |
+| a third visit to the same topic                  | none; **0** scheduler runs                          |
+| reopen with another topic opened in between      | runs carried a read sample, but no source location  |
+| the whole round trip, topic → board → topic      | `lastActivityOf` once; the other three lifts not at all |
 
 Only the last yields a lift run, and it yields it for the wrong leg: measuring
 the return to the board on its own records that same single `lastActivityOf`

@@ -188,7 +188,7 @@ for (const topicCount of SIZES) {
 const reopenTopic = (topicCount: number): number => topicCount - 1;
 
 /**
- * Show the piece `pieceId` through the shell's own navigation, so one runtime
+ * Shows the piece `pieceId` through the shell's own navigation, so one runtime
  * serves the whole sequence, and wait for the selected view to be it.
  */
 async function showPiece(
@@ -206,7 +206,8 @@ async function showPiece(
 }
 
 /**
- * Show the topic at `index` of `fixture` and wait for its page to have formed:
+ * Shows the topic at `index` of `fixture` and waits for its page to have
+ * formed:
  * its empty thread, then its title, then the count its comment-count lift
  * produces. These boards carry no citations, so the topic has neither a
  * `Referenced by` card nor a `References` one to wait for.
@@ -223,8 +224,9 @@ async function showTopicPage(
 }
 
 /**
- * Bring `session` to a board whose newest topic it has already opened once and
- * left again, and return the operation that opens that topic a second time.
+ * Brings `session` to a board whose newest topic it has already opened once
+ * and left again, and returns the operation that opens that topic a second
+ * time.
  *
  * That second open is what `reopen` measures. What it is not is worth saying,
  * because the plan's phrase is "reopen or reconnect": the page, its shell, its
@@ -266,8 +268,11 @@ function topicsProgram(): Promise<TopicsProgram> {
 const reported = new Set<number>();
 
 /**
- * Record a size's reopen with read accounting on, in a browser of its own so
- * the session about to be timed reaches its starting point untouched.
+ * Records a size's reopen with read accounting on, in a browser of its own.
+ *
+ * It needs one: this runs after the timed interval, and the session that was
+ * timed has already performed the reopen, so asking it to reopen again would
+ * measure a third visit rather than the operation the interval timed.
  *
  * A reopen is expected to complete no run carrying a read sample, so the
  * measurement is declared with `mayRunNothing` and what it records is a zero:

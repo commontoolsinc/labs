@@ -405,13 +405,13 @@ async function compileTopicsProgram(
  *   cannot be attributed to the lifts of `program`, as `confirmSampledLifts()`
  *   decides, each of whose messages names its cause; if the runtime client is
  *   replaced, after read accounting and telemetry are turned off on the client
- *   they were enabled on; or if the operation completes no run with a read
- *   sample and the caller did not declare `mayRunNothing`, fails an event
- *   commit, or raises a page error. When the operation
- *   throws and
- *   disabling accounting or releasing the sample also fails, an
- *   `AggregateError` holds the operation's error first. The sample's hold on
- *   the page is released on every exit.
+ *   they were enabled on; or if the operation fails an event commit or raises
+ *   a page error. It also throws when the operation completes no run carrying
+ *   a read sample, unless the caller declared `mayRunNothing`; that
+ *   declaration reaches this one failure and none of the others. When the
+ *   operation throws and disabling accounting or releasing the sample also
+ *   fails, an `AggregateError` holds the operation's error first. The sample's
+ *   hold on the page is released on every exit.
  */
 export async function measureTopicsReads(
   page: Page,

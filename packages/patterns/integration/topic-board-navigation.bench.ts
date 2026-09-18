@@ -182,10 +182,12 @@ note(
   }ms; ${ITERATIONS} iterations per segment after ${WARMUP} warm-up`,
 );
 
-const commentSeedingStartedAt = performance.now();
-
 /**
  * The board the comment segment writes to, in a space of its own.
+ *
+ * Seeded on first use rather than at module scope, so a run filtered to the
+ * segments that do not need it pays nothing for it. The scale benchmark seeds
+ * its boards the same way and for the same reason.
  *
  * Sending a comment is a durable write: it moves the topic's comment count and
  * its last activity, and the board orders its cards by last activity, so a
@@ -196,25 +198,44 @@ const commentSeedingStartedAt = performance.now();
  * merge the two boards: nothing orders the cases within a file, so the failure
  * would depend on the order Deno happened to run them in.
  */
-const commentFixture: TopicBoardFixture = await seedTopicBoardOutOfProcess({
-  apiUrl: new URL(env.API_URL),
-  spaceName: `${env.SPACE_NAME}-comment`,
-  passphrase: PASSPHRASE,
-  topicCount: TOPIC_COUNT,
-  demand: DEMAND,
-});
-note(
-  `seeded comment board ${commentFixture.boardId} in ${
-    Math.round(performance.now() - commentSeedingStartedAt)
-  }ms`,
-);
+let commentSeeding: Promise<TopicBoardFixture> | undefined;
+
+/** Returns the comment board, seeding it on first use. */
+function commentBoard(): Promise<TopicBoardFixture> {
+  commentSeeding ??= (async () => {
+    const startedAt = performance.now();
+    const seeded = await seedTopicBoardOutOfProcess({
+      apiUrl: new URL(env.API_URL),
+      spaceName: `${env.SPACE_NAME}-comment`,
+      passphrase: PASSPHRASE,
+      topicCount: TOPIC_COUNT,
+      demand: DEMAND,
+    });
+    await report(
+      `seeded comment board ${seeded.boardId} in ${
+        Math.round(performance.now() - startedAt)
+      }ms`,
+    );
+    return seeded;
+  })();
+  return commentSeeding;
+}
+
+/** Returns the board the six navigation segments share. */
+const mainBoard = (): Promise<TopicBoardFixture> => Promise.resolve(fixture);
 
 /**
  * The Topics program compiled from the sources both boards were seeded from,
- * which a read-accounted sample attributes its runs against. One compile serves
- * every sample.
+ * which a read-accounted sample attributes its runs against. Compiled on first
+ * use, and one compile serves every sample.
  */
-const program: TopicsProgram = await prepareTopicsProgram();
+let compiling: Promise<TopicsProgram> | undefined;
+
+/** Returns the compiled Topics program, compiling it on first use. */
+function topicsProgram(): Promise<TopicsProgram> {
+  compiling ??= prepareTopicsProgram();
+  return compiling;
+}
 
 /** Index of the topic `pieceId` addresses, by the fid the fixture recorded. */
 function topicIndexOf(pieceId: string): number {
@@ -251,7 +272,7 @@ function expectedOnTopicPage(openedPieceId: string): readonly string[] {
 const encoder = new TextEncoder();
 
 /**
- * Write `message` to stderr from inside a bench body, where the JSON reporter
+ * Writes `message` to stderr from inside a bench body, where the JSON reporter
  * captures console output and `note()` above therefore cannot be used.
  */
 function report(message: string): Promise<number> {
@@ -261,7 +282,8 @@ function report(message: string): Promise<number> {
 }
 
 /**
- * Indices of the topics that cite `index` on a board of {@link TOPIC_COUNT}
+ * Returns the indices of the topics that cite `index` on a board of
+ * {@link TOPIC_COUNT}
  * topics, newest first, which are the rows the topic's backlink derivation
  * produces and the labels its `Referenced by` card shows.
  */
@@ -330,7 +352,7 @@ if (crossrefTargets(BACKLINK_TOPIC, { topicCount: TOPIC_COUNT }).length > 0) {
  */
 let commented = 0;
 
-/** The next uncommented topic of the comment board. */
+/** Returns the next uncommented topic of the comment board. */
 function nextCommentTopic(): number {
   if (commented >= TOPIC_COUNT) {
     throw new Error(
@@ -377,7 +399,7 @@ const profileSurface = async (
 };
 
 /**
- * Give the page's viewer a Profile, which is what enables the comment
+ * Gives the page's viewer a Profile, which is what enables the comment
  * composer's send button: it is disabled until `#profile` resolves to a named
  * profile, and the wish renders its own create surface when there is none. The
  * field beside it is not gated, so a draft can be typed either way and it is
@@ -403,7 +425,7 @@ async function ensureProfile(page: Page): Promise<void> {
 }
 
 /**
- * Show the topic at `index` of `board` through the shell's own navigation, so
+ * Shows the topic at `index` of `board` through the shell's own navigation, so
  * one runtime serves the whole sequence, and wait for the view to be that
  * topic. Reaching a topic by clicking needs it to be on a card or a link the
  * page already shows, which the topics these segments measure are not.
@@ -424,7 +446,7 @@ async function showTopic(
 }
 
 /**
- * Open a topic of the comment board and type a comment into its composer,
+ * Opens a topic of the comment board and types a comment into its composer,
  * returning the operation that sends it. Everything the send needs is in place
  * before the operation runs: the page shows the topic, the viewer has a
  * Profile, and the draft holds the text. Typing writes the draft cell of its
@@ -437,7 +459,7 @@ async function reachComment(
   await navigation.signIn();
   await navigation.showBoard();
   const index = nextCommentTopic();
-  await showTopic(navigation, commentFixture, index);
+  await showTopic(navigation, await commentBoard(), index);
   await ensureProfile(navigation.page);
   // Unique to the topic, and no seeded title or body holds it: the fixture's
   // prose is drawn from a fixed vocabulary that does not include these words.
@@ -455,8 +477,8 @@ async function reachComment(
 }
 
 /**
- * Bring `navigation` to the board and return the operation that opens the most
- * cited topic and waits for every backlink row its derivation produces. The
+ * Brings `navigation` to the board and returns the operation that opens the
+ * most cited topic and waits for every backlink row its derivation produces. The
  * heading renders only once there is a row to list, so waiting for it waits on
  * the derivation's output rather than on the page's furniture.
  */
@@ -479,7 +501,7 @@ async function reachBacklink(
 const sampled = new Set<string>();
 
 /**
- * Take `name`'s one read-accounted sample and write it to stderr, the first
+ * Takes `name`'s one read-accounted sample and writes it to stderr, the first
  * time it is asked for.
  *
  * The sample runs in a browser of its own, so the session about to be timed
@@ -490,17 +512,20 @@ const sampled = new Set<string>();
  */
 async function recordReadsOnce(
   name: string,
-  board: TopicBoardFixture,
+  board: () => Promise<TopicBoardFixture>,
   reach: (navigation: BoardSession) => Promise<() => Promise<unknown>>,
 ): Promise<void> {
   if (sampled.has(name)) return;
   sampled.add(name);
-  const navigation = await BoardSession.open({ fixture: board, identity });
+  const navigation = await BoardSession.open({
+    fixture: await board(),
+    identity,
+  });
   try {
     const operation = await reach(navigation);
     const sample = await measureTopicsReads(navigation.page, {
       label: name,
-      program,
+      program: await topicsProgram(),
       operation,
     });
     await report(formatTopicsSample(sample).join("\n"));
@@ -510,14 +535,14 @@ async function recordReadsOnce(
 }
 
 /**
- * Open a browser on `board`, bring it to a segment's starting point with
- * `reach`, and hand `measure` the bench context to bracket. A failure writes
+ * Opens a browser on `board`, brings it to a segment's starting point with
+ * `reach`, and hands `measure` the bench context to bracket. A failure writes
  * its phase, elapsed time, error and main-thread diagnostics to stderr, without
  * requesting another reply from a possibly stalled worker.
  */
 function benchSegment<Reached>(
   name: string,
-  board: TopicBoardFixture,
+  board: () => Promise<TopicBoardFixture>,
   reach: (navigation: BoardSession) => Promise<Reached>,
   measure: (
     navigation: BoardSession,
@@ -531,7 +556,10 @@ function benchSegment<Reached>(
     n: ITERATIONS,
     warmup: WARMUP,
   }, async (b) => {
-    const navigation = await BoardSession.open({ fixture: board, identity });
+    const navigation = await BoardSession.open({
+      fixture: await board(),
+      identity,
+    });
     let startedAt = performance.now();
     let phase = "setup";
     try {
@@ -576,7 +604,7 @@ function segment<Reached>(
     reached: Reached,
   ) => Promise<void>,
 ): void {
-  benchSegment(name, fixture, reach, async (navigation, reached, b) => {
+  benchSegment(name, mainBoard, reach, async (navigation, reached, b) => {
     b.start();
     await measure(navigation, reached);
     b.end();
@@ -584,7 +612,7 @@ function segment<Reached>(
 }
 
 /**
- * Register a segment whose measured operation is timed by the Topics
+ * Registers a segment whose measured operation is timed by the Topics
  * measurement helper: it turns telemetry and read accounting off, brackets the
  * bench context around the operation and the wait for its settled boundary, and
  * leaves its own requests outside that bracket. `reach` returns the operation
@@ -592,7 +620,7 @@ function segment<Reached>(
  */
 function measuredSegment(
   name: string,
-  board: TopicBoardFixture,
+  board: () => Promise<TopicBoardFixture>,
   reach: (navigation: BoardSession) => Promise<() => Promise<unknown>>,
 ): void {
   benchSegment(
@@ -669,6 +697,6 @@ segment(
   },
 );
 
-measuredSegment("comment", commentFixture, reachComment);
+measuredSegment("comment", commentBoard, reachComment);
 
-measuredSegment("backlink", fixture, reachBacklink);
+measuredSegment("backlink", mainBoard, reachBacklink);

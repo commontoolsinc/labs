@@ -288,8 +288,8 @@ read-stats request enables body accounting only. Count producer and consumer
 work separately but decide on the complete settled operation. T0 measured the
 browser tier's reopen workload to run none of the pivot, backlink,
 comment-count, or last-activity lifts, so that one has no producer or consumer
-work to separate; its series records the zero rather than omitting it. Network claims
-require bytes/subscription measurements in addition to read accounting.
+work to separate. Network claims require bytes/subscription measurements in
+addition to read accounting.
 
 T0 must set numeric baseline-derived acceptance limits before tuning candidates.
 Read budgets are total and per-run, with explicit output/UI demand. Read and
