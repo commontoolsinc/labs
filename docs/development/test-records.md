@@ -58,8 +58,11 @@ the division keeps two changes that rename tests in different test files
 from appending to the same file, and so from conflicting when they merge.
 `deno task check-test-aliases` holds the directory to append-only,
 no-double-mapping, acyclic rules: each file only ever grows, none goes
-away, and no identity is mapped twice across all of them. The same rename
-applies to every variant.
+away, and no identity is mapped twice across all of them. It also fails a
+line that does not parse, naming the file and line, and anything no reader
+would load: an entry of the directory other than a `.jsonl` file directly
+inside it, or a `test-identity-aliases.jsonl` beside the directory, whose
+lines belong in the files inside. The same rename applies to every variant.
 
 ## The environment surface
 

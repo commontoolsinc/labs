@@ -1720,13 +1720,14 @@ because an unknown identity is mandatory, but only once, and then it
 disappears into the tail.
 
 `tasks/test-identity-aliases/` already solves this and the mechanism
-needs no changes. A line maps an old identity, or a whole scope for a
+needs no changes. The directory holds one file of lines per test-file
+name and reads as a single set. A line maps an old identity, or a whole scope for a
 package rename, to its replacement with the date of the rename. Readers
 resolve transitively, prefer a full-identity mapping over a whole-scope
 one, and apply an alias only to records from days strictly before its
 date, so the two halves of a test's history join under today's name.
-`deno task check-test-aliases` holds the file to append-only, at most one
-mapping per identity, and acyclic. The scope form matters more here than
+`deno task check-test-aliases` holds each file to append-only, and the
+directory as a whole to at most one mapping per identity and to acyclic. The scope form matters more here than
 it looks: the topology maps records by kind, scope, and optional variant,
 so a package rename without one orphans every configuration of the suite
 at once.
@@ -1736,8 +1737,8 @@ every variant. Resolution preserves the record's variant, so one rename
 bridges the default and every non-default history without joining those
 histories to each other.
 
-The mechanism is there and so, by now, is the practice: the file holds
-219 lines across nine dates, so renames are being bridged as they happen
+The mechanism is there and so, by now, is the practice: as of this
+writing the directory holds 2168 lines across 24 dates, so renames are being bridged as they happen
 rather than swept up once. What the reporter's suggestion adds is the
 case nobody notices — a rename whose author had no reason to think the
 history mattered.
