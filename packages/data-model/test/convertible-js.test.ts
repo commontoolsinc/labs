@@ -48,7 +48,7 @@ import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
-import { codecClasses } from "@/fabric-primitives/index.ts";
+import { codecClasses } from "@/fabric-primitives/impl.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricUnavailable } from "@/fabric-primitives/FabricUnavailable.ts";
 import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";

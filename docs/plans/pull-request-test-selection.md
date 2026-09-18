@@ -2220,25 +2220,41 @@ then prices out its own smallest batch.
 
 So the model is fitted instead. Every batch the lane runner executes
 records what its own tests took between them, what the batch actually
-took, and how many units it opened. The publisher regresses those per
-suite over the last week — the intercept is `suiteOverhead`, the slope on
-the tests' own seconds multiplies into `correction`, and the slope on the
-unit count is `unitOverhead` — and publishes the result in the next
-manifest. They start
-at zero, one and zero, and converge within a few days of lanes running.
-Three numbers per suite, all measured, none maintained by hand.
+took, and how many units it opened. The publisher fits those per suite
+over the last week — `correction` is the least-squares slope of what a
+batch spent on what its tests took, `unitOverhead` is the rate a batch
+paid per unit for what it spent beyond its tests, and `suiteOverhead` is
+what those two leave — and publishes the result in the next manifest.
+They start at zero, one and zero, and converge within a few days of lanes
+running. Three numbers per suite, all measured, none maintained by hand.
 
 The intercept is then raised until no batch anybody has seen is
 under-predicted, because a least-squares line sits in the middle of its
 observations and half the lanes would otherwise run past the budget they
-were packed against. A slope is fitted at all only once a suite has enough
-batches, spread far enough apart in what that slope reads, for it to mean
-something: each is read far outside the range it was fitted over, since a
-suite whose every batch anybody has seen held six seconds of tests may be
-charged thousands the first time a lane packs it whole, and one that has never
-held more than five units may be asked to hold nine hundred. A suite whose
-batches all held the same seconds of tests per unit says nothing that
-separates the two slopes, and keeps the one it has always been fitted.
+were packed against. The correction is fitted at all only once a suite has
+enough batches, far enough apart in the seconds their tests took, for a
+slope to mean something: it is read far outside the range it was fitted
+over, since a suite whose every batch anybody has seen held six seconds of
+tests may be charged thousands the first time a lane packs it whole.
+
+`unitOverhead` is a rate rather than a slope because whether a slope can
+be fitted is a property of the run rather than of the suite. The packer
+puts an identity in the cheapest lane that can hold it and breaks a tie by
+which lane is emptier, so a suite gathers in the lanes already holding it
+and is shared out among them; where every lane fills to one budget the
+counts come out close. Across a full run of twenty-two lanes the widest
+gap between two batches' sizes is around twenty units against batches of
+eighty, and a least-squares slope over a gap that narrow is negative for
+five of the eight suites with enough batches to fit one and inside its own
+standard error for two more. Across five lanes packing a selection the
+same suite has held five units in one batch and six hundred in another,
+where the slope is worth fitting. A threshold on that gap therefore
+settles what a suite is charged from how its run happened to divide, and
+falls back to charging nothing a unit. What a batch says on its own is the
+rate it paid, which is what it spent beyond its tests over the units that
+spending opened. Whatever the batch paid for itself is in that rate, which
+is what carries a reading above what a unit costs, and the middle reading
+is the one taken.
 Nothing bounds either from above. A slope fitted too high only
 over-charges, and what a bound took off it would land on the intercept,
 which a lane pays to run one test of the suite where the slopes are
