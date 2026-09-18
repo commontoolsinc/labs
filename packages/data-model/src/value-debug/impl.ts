@@ -334,7 +334,9 @@ export function toIndentedDebugString(
  * properties; when there is no string line count given, a string is carried
  * whole to five lines; and when there is no string length given, a string is
  * carried whole to two hundred characters, or as long as the conversion allows
- * when a line count is given.
+ * when a line count is given. The `maxBufferLength` of `options` is validated
+ * like the other limits and has no effect on the result: a `FabricPrimitive`
+ * is carried whole, and that limit applies only when one is rendered.
  *
  * If the conversion could not be completed (stack overflow, object
  * `toJSON()` conversion error, etc.), this function returns the literal value

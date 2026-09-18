@@ -32,6 +32,18 @@
     return new ListState();
   })(),
 
+  "holes and an array past the limit": (() => {
+    class HoleyListed extends FabricPrimitive {
+      static get [REALM_CODEC]() {
+        return {
+          tagForValue: () => "HoleyListed@1",
+          encode: () => [, , 3, 4, 5],
+        };
+      }
+    }
+    return new HoleyListed();
+  })(),
+
   "nesting past the limit": (() => {
     class Deep extends FabricPrimitive {
       static get [REALM_CODEC]() {
@@ -92,6 +104,20 @@ array state past the limit:
 /ListState([
   1,
   2,
+  3,
+  4,
+  5
+])
+
+holes and an array past the limit:
+/HoleyListed([void*2,3,...length:5])
+/HoleyListed([
+  void * 2,
+  3,
+  ... length: 5
+])
+/HoleyListed([
+  void * 2,
   3,
   4,
   5

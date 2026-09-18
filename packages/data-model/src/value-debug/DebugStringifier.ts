@@ -101,32 +101,13 @@ export class DebugStringifier {
    * is indented by `indent`.
    */
   #renderArray(value: readonly FabricValue[], indent: string): string {
-    const inner = this.#innerIndent(indent);
-    const parts: string[] = [];
-
-    // Iterated by index rather than by element, so that a hole is noticed. A
-    // hole renders as `void`, and a run of holes as a single `void` times the
-    // length of the run. The length form the conversion leaves at the end of
-    // a truncated array is an element like any other, so a run of holes ends
-    // at it.
-    for (let i = 0; i < value.length; i++) {
-      if (i in value) {
-        parts.push(this.#renderSubvalue(value[i], inner));
-        continue;
-      }
-
-      let holeCount = 1;
-      while (((i + 1) < value.length) && !((i + 1) in value)) {
-        holeCount++;
-        i++;
-      }
-      parts.push(
-        (holeCount === 1)
-          ? "void"
-          : `void${this.#spacer}*${this.#spacer}${holeCount}`,
-      );
-    }
-
+    // The length form the conversion leaves at the end of a truncated array is
+    // an element like any other, so a run of holes ends at it.
+    const parts = this.#renderElements(
+      value,
+      indent,
+      (v, i) => this.#renderSubvalue(v, i),
+    );
     return this.#renderContainer("[", "]", parts, indent);
   }
 
@@ -148,6 +129,40 @@ export class DebugStringifier {
 
     const inner = this.#innerIndent(indent);
     return `${open}\n${inner}${parts.join(`,\n${inner}`)}\n${indent}${close}`;
+  }
+
+  /**
+   * Renders the elements of an array, one part per element or run of holes,
+   * for a container whose closing bracket is indented by `indent`, each
+   * element rendered by `render`. A hole renders as `void`, and a run of holes
+   * as a single `void` times the length of the run.
+   */
+  #renderElements<T>(
+    value: readonly T[],
+    indent: string,
+    render: (value: T, indent: string) => string,
+  ): string[] {
+    const inner = this.#innerIndent(indent);
+    const parts: string[] = [];
+    const pushHoles = (count: number): void => {
+      if (count === 1) {
+        parts.push("void");
+      } else if (count > 1) {
+        parts.push(`void${this.#spacer}*${this.#spacer}${count}`);
+      }
+    };
+
+    // `forEach()` skips a hole, so a gap between one index it passes and the
+    // next is a run of holes.
+    let nextIndex = 0;
+    value.forEach((element, index) => {
+      pushHoles(index - nextIndex);
+      parts.push(render(element, inner));
+      nextIndex = index + 1;
+    });
+    pushHoles(value.length - nextIndex);
+
+    return parts;
   }
 
   /**
@@ -234,10 +249,11 @@ export class DebugStringifier {
     } else if (depth >= this.#limits.maxDepth) {
       return "...";
     } else if (isArray) {
-      const inner = this.#innerIndent(indent);
       const maxLength = this.#limits.maxArrayLength;
-      const parts = value.slice(0, maxLength).map((element) =>
-        this.#renderRealmState(element, inner, depth + 1)
+      const parts = this.#renderElements(
+        value.slice(0, maxLength),
+        indent,
+        (v, i) => this.#renderRealmState(v, i, depth + 1),
       );
       if (value.length > maxLength) {
         parts.push(this.#renderElision("length", value.length));
