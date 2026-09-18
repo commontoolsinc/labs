@@ -462,10 +462,16 @@ export {
   CFC_CANONICAL_ALIAS_NAMES,
   FABRIC_INSTANCE_PLUS_BRAND,
   FABRIC_PRIMITIVE_BRAND,
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  isFabricPrimitiveSchemaType,
   MERGEABLE_OP_METHODS,
 } from "@commonfabric/api";
+
+// The schema `type` vocabulary of the primitive classes, which
+// `@commonfabric/api` declares and the data model implements. The real surface
+// binds these two from there as well.
+export {
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  isFabricPrimitiveSchemaType,
+} from "@commonfabric/data-model/fabric-primitives";
 
 export function findEventHandlers(
   node: unknown,
