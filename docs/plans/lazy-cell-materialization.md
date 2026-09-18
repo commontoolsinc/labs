@@ -150,21 +150,17 @@ a computed that has not produced yet is the ordinary case rather than a fault.
 The read that failed is registered either way, so the reader comes back when the
 data arrives.
 
-State the delta plainly, because it is the one behavior change a pattern author
-can observe: **a mismatch in a subtree the reader never touches no longer stops
-the reader.** Today a broken field five levels down collapses the whole argument
-and the lift does not run. Under this contract the lift runs, because nothing
-ever asked. This is the deliberate cost of not materializing what nobody wants.
-It is bounded in the direction that matters — a reader that touches broken data
-still refuses — and it removes a class of whole-argument collapses caused by
-data the reader had no interest in.
+For ordinary containers, a mismatch in an untouched child does not stop the
+reader. Validation follows demand, with whole-subtree decisions made at the
+boundaries below. A reader that touches broken data still refuses unless the
+schema permits an omitted property or a fallback.
 
-**`anyOf` resolves at the point of access.** When the narrowed schema at a path
-is a union, the view reads the value at that path non-recursively and filters
-branches with `canBranchMatch`. One surviving branch narrows to it; several
-merge their property schemas the way `mergeAnyOfBranchSchemas` already does;
-none is a refusal. The prefilter is shallow by construction, so this stays a
-container-shaped read, not a descent.
+**Combinators resolve at the point of access.** `anyOf`, `oneOf`, and `allOf`
+use eager traversal for the selected subtree, preserving whole-branch validation
+and merging only successful results. Shallow candidate matching does not decide
+branch validity. Property defaults and nullable array-item fallbacks also need
+the selected subtree evaluated before choosing a replacement; see
+[the feature contract](../features/lazy-cell-materialization.md).
 
 ### Snapshot semantics
 
@@ -369,8 +365,8 @@ the materialization differs.
       `Array.prototype` methods over element views built on demand. The
       reshaping methods refuse — a view is a read.
 - [x] `toCell` on every view.
-- [x] `anyOf` / `oneOf` narrowed at the point of access via `canBranchMatch`,
-      merged by `mergeAnyOfBranchSchemas` when several branches survive.
+- [x] `anyOf`, `oneOf`, and `allOf` evaluated through eager traversal at the
+      point of access, preserving whole-branch validation and result merging.
 - [x] `SchemaMismatchError`, carrying link and reason.
 - [x] Root guard: type, `required` presence. A mismatch at the root is
       `undefined`, matching an eager read; below it, a refusal.

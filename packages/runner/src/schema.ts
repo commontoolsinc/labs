@@ -67,6 +67,7 @@ import {
 import {
   defaultForAbsentValue,
   materializeSchemaView,
+  SchemaMismatchError,
   UnresolvedInputError,
 } from "./schema-view.ts";
 import { canFollowScopedLink, isCellScope } from "./scope.ts";
@@ -981,6 +982,9 @@ function readValueAtResolvedLink(
 }
 
 export interface ValidateAndTransformOptions {
+  /** Whether to evaluate the selected subtree before a view decides a fallback. */
+  materializeEagerly?: boolean;
+
   /** When true, also read into each Cell created for asCell fields to capture dependencies */
   traverseCells?: boolean;
 
@@ -1248,8 +1252,8 @@ export function validateAndTransform(
     path: doc.address.path,
     schema: valueSelectedSchema ?? resolvedValueLink.schema ?? link.schema!,
   };
-  // A marked transaction takes the lazy route from here. Everything above has
-  // run either way — link resolution, the `asCell` dispatch, schema
+  // A marked transaction selects its materialization strategy here. Everything
+  // above has run either way — link resolution, the `asCell` dispatch, schema
   // combination — so a view and an eager read start from the same link and the
   // same schema; only the materialization differs.
   //
@@ -1298,15 +1302,28 @@ export function validateAndTransform(
       tx.noteSchemaRefusal(refusal);
       throw refusal;
     }
-    return materializeSchemaView(
-      runtime,
-      tx,
-      { ...resolvedValueLink, schema: viewSchema },
-      value,
-      cfcLabelView,
-      options?.synced ?? false,
-      options?.mismatchThrows !== true,
-    );
+    // Combinators decide which entire branches validate before merging their
+    // results. Evaluating that boundary uses the traverser; a shallow schema
+    // union would admit values assembled from different, failing branches.
+    const compound = isObjectOrArray(selector.schema) &&
+      (selector.schema.anyOf !== undefined ||
+        selector.schema.oneOf !== undefined ||
+        selector.schema.allOf !== undefined);
+    if (
+      (value === undefined &&
+        defaultForAbsentValue(viewSchema) !== undefined) ||
+      (!compound && options?.materializeEagerly !== true)
+    ) {
+      return materializeSchemaView(
+        runtime,
+        tx,
+        { ...resolvedValueLink, schema: viewSchema },
+        value,
+        cfcLabelView,
+        options?.synced ?? false,
+        options?.mismatchThrows !== true,
+      );
+    }
   }
 
   // TODO(@ubik2): these constructor parameters are complex enough that we should
@@ -1341,7 +1358,16 @@ export function validateAndTransform(
     ),
     objectCreator,
   );
-  const { ok: val, error: _err } = traverser.traverse(doc, link);
+  const { ok: val, error } = traverser.traverse(doc, link);
+  if (error !== undefined && options?.mismatchThrows === true) {
+    tx.readValueOrThrow(resolvedValueLink);
+    const refusal = new SchemaMismatchError(
+      resolvedValueLink,
+      "selected subtree does not match the schema",
+    );
+    tx.noteSchemaRefusal(refusal);
+    throw refusal;
+  }
   // TODO(@ubik2): Now that undefined is a valid return value from traverse,
   // we need some other way to indicate success to our caller. For now, I'm
   // still just returning undefined in the error case.
