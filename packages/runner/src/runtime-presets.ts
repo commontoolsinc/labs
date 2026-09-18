@@ -141,7 +141,7 @@
  * `enforce` asks for it the same way.
  */
 
-import { toCompactDebugString } from "@commonfabric/data-model";
+import { toShortQuotedDebugString } from "@commonfabric/data-model";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 
 import {
@@ -440,9 +440,7 @@ export function parseServerExperimentalOptions(
     if (typeof value !== "boolean") {
       console.warn(
         `[runtime-presets] Ignoring server-published ${key}=` +
-          `${
-            toCompactDebugString(value, { backtickQuote: true })
-          } — expected a boolean.`,
+          `${toShortQuotedDebugString(value)} — expected a boolean.`,
       );
       continue;
     }
