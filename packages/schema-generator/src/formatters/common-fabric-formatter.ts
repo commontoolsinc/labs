@@ -439,7 +439,8 @@ export class CommonFabricFormatter implements TypeFormatter {
     let innerType: ts.Type;
     try {
       innerType = context.typeRegistry?.get(innerTypeNode) ??
-        registeredWrapperInfo?.typeRef.typeArguments?.[0] ??
+        (registeredWrapperInfo &&
+          this.#firstTypeArgument(registeredWrapperInfo.typeRef, context)) ??
         context.typeChecker.getTypeFromTypeNode(innerTypeNode);
     } catch {
       innerType = context.typeChecker.getAnyType();
@@ -457,7 +458,10 @@ export class CommonFabricFormatter implements TypeFormatter {
       this.#isUnusableInnerType(innerType) && fallbackInnerTypeRef &&
       ts.isTypeReferenceNode(innerTypeNode)
     ) {
-      const fallbackInner = fallbackInnerTypeRef.typeArguments?.[0];
+      const fallbackInner = this.#firstTypeArgument(
+        fallbackInnerTypeRef,
+        context,
+      );
       if (fallbackInner && !this.#isUnusableInnerType(fallbackInner)) {
         innerType = fallbackInner;
       }
@@ -493,7 +497,8 @@ export class CommonFabricFormatter implements TypeFormatter {
     // it supplies the value schema instead, at the cost of any narrowing the
     // node carried: the schema is then that of the whole stored value.
     if (uninterpreted.length > 0) {
-      const resolvedInner = fallbackInnerTypeRef?.typeArguments?.[0];
+      const resolvedInner = fallbackInnerTypeRef &&
+        this.#firstTypeArgument(fallbackInnerTypeRef, context);
       if (resolvedInner && !this.#isUnusableInnerType(resolvedInner)) {
         innerType = resolvedInner;
         innerSchema = this.#schemaGenerator.formatChildType(
@@ -532,6 +537,20 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     return this.#applyWrapperSemantics(innerSchema, wrapperKind);
+  }
+
+  /**
+   * Helper for `#formatWrapperTypeFromNode()`, which reads a wrapper's payload
+   * type. A reference whose arguments are still deferred carries none on the
+   * object and yields them through the checker.
+   */
+  #firstTypeArgument(
+    typeRef: ts.TypeReference,
+    context: GenerationContext,
+  ): ts.Type | undefined {
+    const typeArgs = typeRef.typeArguments ??
+      context.typeChecker.getTypeArguments(typeRef);
+    return typeArgs[0];
   }
 
   #formatScopeWrapperTypeFromNode(
