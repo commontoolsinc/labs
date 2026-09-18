@@ -59,12 +59,15 @@
  * (`nowTick`): the runtime's shared per-space clock, coarsened to five
  * minutes, written immediately on subscribe (and refreshed on reload), then
  * advanced on aligned boundaries — so an open tab rolls to the new day at
- * midnight on its own. It reads null until the wish resolves (shown as an
- * empty vote view and a placeholder date) and stays null on pre-#4740
- * runtimes, where the vote and visit handlers no-op rather than read an
- * ambient clock the runtime may not provide. The day boundary is the
- * runtime's local timezone (the viewer's, in the browser); two viewers in
- * different timezones can see different vote sets around midnight.
+ * midnight on its own. An instant in the `clock` input takes the wish's place
+ * wherever the clock is read, which is how a test puts the poll at a moment it
+ * chooses; production supplies none. The clock reads null until the wish
+ * resolves (shown as an empty vote view and a placeholder date) and stays null
+ * on pre-#4740 runtimes, where the vote and visit handlers no-op rather than
+ * read an ambient clock the runtime may not provide. Null is the only reading
+ * that means unresolved: every instant is a day, epoch included. The day
+ * boundary is the runtime's local timezone (the viewer's, in the browser); two
+ * viewers in different timezones can see different vote sets around midnight.
  */
 
 import {
@@ -812,7 +815,7 @@ const castVote = handler<CastVoteEvent, {
   // wish resolves (and always on pre-#4740 runtimes, which also show no
   // votes): voting no-ops rather than reading an ambient clock.
   const now = nowTick;
-  if (!now) return;
+  if (typeof now !== "number") return;
   // My vote for this option has a deterministic address, so this reads and
   // edits just that one vote — never the whole list. Clicking the current
   // color toggles the vote off; any other color sets it.
@@ -941,7 +944,7 @@ const logVisit = handler<LogVisitEvent, {
     // the wish is still unresolved (null `nowTick`) the board shows no votes,
     // so the snapshot stays empty for that window too.
     const nowRef = nowTick;
-    const nowDay = nowRef ? dayKeyOf(nowRef) : null;
+    const nowDay = typeof nowRef === "number" ? dayKeyOf(nowRef) : null;
     const titleById = new Map(options.get().map((o) => [o.id, o.title]));
     const voteSnapshot: VoteSnapshot[] = [];
     for (const v of votes.get()) {
@@ -1430,7 +1433,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // The filter is keyed on the day, so a tick that advances within one day
     // leaves the key equal and the vote set is not recomputed. Keying it on the
     // tick itself would rescan every vote every five minutes.
-    const todayKey = computed(() => (nowTick ? dayKeyOf(nowTick) : ""));
+    const todayKey = computed(() =>
+      typeof nowTick === "number" ? dayKeyOf(nowTick) : ""
+    );
     // The scan reads the day key rather than the tick, so it runs when the
     // day changes rather than on every tick within a day.
     const todaysVotes = computed(() => {
@@ -1537,7 +1542,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     const u = userCount ?? 0;
                     const o = optionCount ?? 0;
                     const v = todayVoteCount ?? 0;
-                    const todayLabel = nowTick ? dayLabelOf(nowTick) : "…";
+                    const todayLabel = typeof nowTick === "number"
+                      ? dayLabelOf(nowTick)
+                      : "…";
                     const admin = hostName;
                     const joined = isJoined;
                     const amAdmin = isAdmin;

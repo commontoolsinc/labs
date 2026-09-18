@@ -72,6 +72,9 @@ interface Output {
   /** Number of votes the poll counts as cast on its clock's day. */
   todayVoteCount: number;
 
+  /** The day the poll's clock reads, or "" while the clock is unresolved. */
+  todayDate: string;
+
   /** Whether the synthetic viewer belongs to the roster. */
   isJoined: boolean;
 
@@ -184,6 +187,7 @@ export default pattern<{
     optionCount: poll.optionCount,
     userCount: poll.userCount,
     todayVoteCount: poll.todayVoteCount,
+    todayDate: poll.todayDate,
     isJoined: poll.isJoined,
     votes: poll.votes,
   };

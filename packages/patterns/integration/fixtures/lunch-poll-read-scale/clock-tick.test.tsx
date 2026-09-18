@@ -41,6 +41,11 @@ export default pattern(() => {
       { action: action(() => poll.setClock.send({ at: START + TICK })) },
       { render: poll[UI], readBudget: { total: 100, perRun: 50 } },
       { assertion: assert(() => poll.todayVoteCount === 74) },
+      // The epoch is an instant like any other, so a clock reading zero is a
+      // day rather than a clock that has not resolved. Which local day it is
+      // depends on the zone, so the assertion is that the poll names one.
+      { action: action(() => poll.setClock.send({ at: 0 })) },
+      { assertion: assert(() => poll.todayDate !== "") },
     ],
   };
 });
