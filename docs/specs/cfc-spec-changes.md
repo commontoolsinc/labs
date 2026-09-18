@@ -669,8 +669,12 @@ in the labs repo): implementation identity is the pair **(content hash of the
 verified code artifact, symbol/binding path within it)**. Same artifact hash
 + same symbol = same identity wherever the artifact is loaded; any code
 change changes the hash and with it every identity within the artifact.
-Rebinding does not inherit authority by default. The narrow temporary exception
-is an explicit `piece setsrc` update: the new entry succeeds the old entry
+Rebinding does not inherit authority by default. Two updates are the exception,
+and derive the same delegation: an explicit `piece setsrc` update, and an
+unattended update to a `system:` origin — a release the deployment gated
+through its golden replays (owner decision 2026-09-17; an update to any other
+origin inherits nothing, since nobody promised anything about what it ships).
+In either, the new entry succeeds the old entry
 outright, since the update is what names the pair, and every other module in
 the old and new recursive closures matches by canonical filename — directly,
 or under the root substitution the two entry names define when they share a

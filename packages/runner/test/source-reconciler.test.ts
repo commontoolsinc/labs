@@ -347,6 +347,11 @@ describe("piece source reconciliation", () => {
 
       expect(await reconcile(piece)).toBe("updated");
       await runtime.idle();
+      // A `system:` update grants the candidate the running pattern's writer
+      // authority, and the watcher reads that grant before it follows the
+      // pointer; `idle()` does not cover that read, the pointer maintenance
+      // settle does.
+      await runtime.runner.idlePointerMaintenance();
       // Staging belongs to the transaction that moves the pointer whether or
       // not the piece is running, so the completion marker names the candidate
       // and the watcher re-instantiates over a document already set up for it.
