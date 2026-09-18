@@ -1051,8 +1051,9 @@ The options select what runs:
 ### The modes
 
 A mode is an experimental posture the run's runtimes are given, and every
-record the run writes is labeled with it, so a result file says which semantics
-produced it without a reader consulting where the file sits.
+record the run writes — `environment`, `sample`, `limit` and `complete` — is
+labeled with it, so a result file says which semantics produced it without a
+reader consulting where the file sits.
 `TOPICS_FIXTURE_MODES` in the fixture holds them:
 
 - `lazy-materialization-on` pins `lazyMaterialization` on, which is the posture
@@ -1216,9 +1217,9 @@ everything a case's process prints.
   out-of-memory message. No size of the series from `size` up runs again, and
   `skipped` lists the larger ones; an earlier round may already have sampled
   them.
-- The last line has the `kind` `complete`, with the number of `samples` the run
-  wrote and the `limitedSeries` that recorded a limit. A case that fails in any
-  other way ends the run with an error and no `complete` line.
+- The last line has the `kind` `complete`, with the run's `mode`, the number of
+  `samples` the run wrote, and the `limitedSeries` that recorded a limit. A case
+  that fails in any other way ends the run with an error and no `complete` line.
 
 A measured phase records:
 

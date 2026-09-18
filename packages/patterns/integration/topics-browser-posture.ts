@@ -1,7 +1,9 @@
 /**
  * The server-execution posture a browser-tier Topics measurement ran under, so
- * that every sample says which mode produced it, as
- * `docs/plans/topics-computation-cost.md` asks of a run labeled by mode.
+ * that every sample says either which mode produced it or that the deployment
+ * declared none, as `docs/plans/topics-computation-cost.md` asks of a run
+ * labeled by mode. A sample never leaves the question open, and never answers
+ * it with a guess.
  *
  * The posture is read from the deployment under measurement rather than from
  * the environment the benchmark process was started with: a benchmark that

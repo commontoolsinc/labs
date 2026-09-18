@@ -253,27 +253,27 @@ last-activity lift once. The measurement is one small sample, taken with
 [lazy materialization](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization)
 on and with client execution.
 
-Each mode is measured in the tier that can run it, and every run is labeled by
-mode. The headless tier measures lazy materialization on and off, under a
-`--mode` the probe stamps onto each sample from the flags the runtime reports
-back. It cannot measure
+Which tier measures a mode is settled by which tier can run it, and every run
+is labeled by mode. The headless tier measures lazy materialization on and off,
+under a `--mode` the probe stamps onto each sample from the flags the runtime
+reports back. It cannot measure
 [server execution](../development/EXPERIMENTAL_OPTIONS.md#serverexecution): the
 ON posture's serving loop is an `ExecutorHost` built over a co-hosted memory
 server, and the headless fixture runs over an emulated storage manager in one
 process with no memory server, so the flag has nothing there to engage. Server
-execution is measured in the browser tier, which runs against a toolshed. A
-toolshed given the ON flag was measured to construct the loop and to serve a
-deployed Topics board's work, recorded in
+execution can be measured only in the browser tier, which is the tier that runs
+against a toolshed. A toolshed given the ON flag was measured to construct the
+loop and to serve a deployed Topics board's work, recorded in
 [the engagement probe](../history/development/performance/2026-09-18-topics-lazy-materialization.md),
 which is the engagement the headless tier has no way to produce. That probe
-drove a source-run toolshed with the `cf` CLI rather than the browser
-benchmark environment of a built binary, a baked shell and Chrome, so whether
-that environment runs a coherent arm is open. The cost of server execution is
-not yet measured in either tier. A browser arm holds its
-two halves to one posture — the toolshed serves at it, and the shell it serves
-is built at it — and a run whose halves disagree is refused rather than
-labeled. Server execution on and off must both be measured before the baseline
-report. The scheduled Benchmarks workflow runs client execution only.
+drove a source-run toolshed with the `cf` CLI rather than the browser benchmark
+environment of a built binary, a baked shell and Chrome, so whether that
+environment runs a coherent arm is open. The cost of server execution is not
+yet measured in either tier. A browser arm holds its two halves to one
+posture: the toolshed serves at it, and the shell it serves is built at it.
+A run whose halves disagree is refused rather than labeled. Server execution
+on and off must both be measured before the baseline report. The scheduled
+Benchmarks workflow runs client execution only.
 
 Of the three demand workloads above, the headless tier measures the
 board-with-one-topic workload with the demand the browser measured, and the

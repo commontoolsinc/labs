@@ -64,7 +64,11 @@ const REPOSITORY_ROOT = fromFileUrl(new URL("..", import.meta.url));
 
 /** What the command line selects for a run. */
 interface RunOptions {
-  /** The experimental posture every case's runtime is given. */
+  /**
+   * The experimental posture the runtimes of every measured case are given,
+   * and the mode every record of the run is labeled with. A `board` case
+   * opens no runtime, and its sample carries this mode as the run's.
+   */
   readonly mode: TopicsFixtureMode;
 
   /** How many rounds of every selected case to run. */
@@ -193,7 +197,12 @@ async function runProbe(options: RunOptions): Promise<void> {
       });
     }
   }
-  emit({ kind: "complete", samples, limitedSeries: [...limits.keys()] });
+  emit({
+    kind: "complete",
+    mode: options.mode,
+    samples,
+    limitedSeries: [...limits.keys()],
+  });
 }
 
 /**
