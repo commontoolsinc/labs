@@ -1,7 +1,7 @@
 # Agent requests from a pattern, and the queue that runs them
 
-**Status:** design, ruled on 2026-09-18; nothing is built. Written against
-`c89aef10a3`. Section 8 records the decisions and section 9 the assumptions
+**Status:** design, ruled on 2026-09-18. Phase 1, the Loom retrieval tools, is
+built; phases 2 through 7 are not. Written against `c89aef10a3`. Section 8 records the decisions and section 9 the assumptions
 the first take rests on.
 
 ## What this is
@@ -422,8 +422,12 @@ either, so every real row is withheld until loom stamps its rows (assumption
 11). The tools are complete on the harness side and exercised against fixture
 output that carries labels.
 
-**Loom's search JSON carries `schemaVersion: 1`**, stamped by `render_json`
-for this consumer, and the tool refuses a payload carrying any other value.
+**The tool pins `schemaVersion: 1` on loom's search JSON** and refuses a
+payload that carries any other value or none. The stamp is loom's to add, in
+`render_json` (`lib/connectors/search.py`); a loom checkout without it has
+every `loom_search` call refused as `schema_version_mismatch`, which is the
+intended reading of an unversioned payload by its first external consumer
+(assumption 11).
 
 ### 1.7 Where a run executes, across two toolsheds
 
@@ -650,15 +654,18 @@ harness has a scripted model client (`test/research.test.ts`,
 `ScriptedModelClient`), and the runner's admission and settlement are
 exercised with a fake executor the way hosted authoring's stage 1 prescribes.
 
-**Phase 1 — Loom retrieval tools in the harness.** The tools of section 1.6
-over a `HarnessLoomRetrievalConfig` beside the authoring one; confirmation of
-each command's arguments and JSON shape; ceiling and facet forwarding; label
-measurement on returned rows; the untrusted-content notice; `schemaVersion`
-on loom's search JSON. Capability description lists the tools. *Acceptance:* a
-batch run over a fixture loom answers a search and a people lookup from a
-scripted model, an unlabeled row is refused, and the run report shows the
-tools' calls. Documents: `LOOM_AUTHORING.md` gains a sibling or a section,
-`IMPLEMENTATION_PROFILE.md` lists the tools.
+**Phase 1 — Loom retrieval tools in the harness. Built.** The tools of
+section 1.6 over a `HarnessLoomRetrievalConfig` beside the authoring one, each
+command's arguments and JSON shape confirmed against the pinned loom checkout;
+the run's ceiling met with the loom read-ceiling record on the host; label
+measurement on returned rows; the untrusted-content notice; a pinned
+`schemaVersion` on loom's search JSON. Capability description lists the tools.
+A scripted model over fixture output gets a search and a people lookup
+returned, an unlabeled row is refused, and the transcript shows the tools'
+calls. `packages/cf-harness/docs/LOOM_RETRIEVAL.md` is the reference, and
+`IMPLEMENTATION_PROFILE.md` lists the tools. What the phase rests on from the
+loom side — `ifc` on returned rows and the `schemaVersion` stamp — is
+assumption 11.
 
 **Phase 2 — The result writer in the harness.** The host-side routine of
 section 1.3: validate, resolve handles to links, mint labeled documents for
@@ -773,11 +780,12 @@ Listed so they can be overturned before phase 1.
     admits with a declared label.** The label comes from loom's `ifc` on the
     row; a row without one is refused before it reaches the model, so none
     reaches the writer.
-11. **Loom will stamp `ifc` on the rows its retrieval commands return.**
-    Today `loom search --json` emits no `ifc` on `hits[]`, and the page,
-    people, calendar, context, and profile payloads carry none, so the
-    harness withholds every real row as `cfc_label_read_failed` (section
-    1.6). The first take's demonstration (phase 6) rests on loom emitting the
+11. **Loom will stamp `ifc` on the rows its retrieval commands return, and
+    `schemaVersion: 1` on its search JSON.** Today `loom search --json`
+    carries neither: a search is refused as `schema_version_mismatch`, and
+    with the stamp in place its `hits[]` carry no `ifc`, as the page, people,
+    calendar, context, and profile payloads carry none, so the harness
+    withholds every real row as `cfc_label_read_failed` (section 1.6). The first take's demonstration (phase 6) rests on loom emitting the
     label its stores already hold for each row; until then the tools answer
     only fixture output. If loom does not, the alternative is a
     host-configured label for loom-native payloads, which is a new trust

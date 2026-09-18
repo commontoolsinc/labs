@@ -557,7 +557,7 @@ export const runLoomRetrievalCommand = async (
     return {
       status: "error",
       code: "invalid_input",
-      message: error instanceof Error ? error.message : "Invalid input.",
+      message: (error as Error).message,
     };
   }
   const env = createClearedHostProcessEnv();

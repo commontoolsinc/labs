@@ -277,6 +277,14 @@ describe("loom-retrieval tools", () => {
       expect(output.status).toBe("error");
       expect(output.status === "error" && output.code).toBe("not_configured");
       expect(calls).toHaveLength(0);
+      // A failed retrieval showed the model nothing, so it observes nothing.
+      expect(
+        loomRetrievalModelContextObservation(
+          output,
+          { toolId: "loom_search", outputId: output.outputId },
+          "call-1",
+        ),
+      ).toBeUndefined();
     });
 
     it("returns an error without starting a process once the turn is cancelled", async () => {
@@ -485,6 +493,7 @@ describe("loom-retrieval tools", () => {
           hit("m-5", {
             confidentiality: [{ anyOf: [OWNER, { type: WORK, name: "w" }] }],
           }),
+          hit("m-6", { confidentiality: [OWNER], integrity: "not-a-list" }),
         ]),
       });
       const output = ok(
@@ -496,13 +505,13 @@ describe("loom-retrieval tools", () => {
         "withheld",
         "withheld",
         "admitted",
+        "withheld",
       ]);
       expect(
-        output.entries.slice(0, 4).every((entry) =>
-          entry.status === "withheld" &&
-          entry.reasonCode === "cfc_label_read_failed"
-        ),
-      ).toBe(true);
+        output.entries.filter((entry) => entry.status === "withheld").map((
+          entry,
+        ) => entry.status === "withheld" && entry.reasonCode),
+      ).toEqual(Array(5).fill("cfc_label_read_failed"));
     });
 
     it("marks the observation truncated when the result bounded anything", async () => {

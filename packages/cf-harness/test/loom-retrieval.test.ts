@@ -75,6 +75,11 @@ describe("loom-retrieval", () => {
           { ...broker, readCeilingFile: "relative/ceiling.json" },
           { ...broker, transport: { kind: "broker", queuePath: "queue" } },
           { ...broker, transport: { kind: "unknown" } },
+          { ...direct, transport: { ...direct.transport, runId: " run-1" } },
+          {
+            ...direct,
+            transport: { ...direct.transport, instanceDir: "relative" },
+          },
           { ...broker, facets: ["Work Stuff"] },
           { ...broker, facets: [] },
         ]
@@ -257,6 +262,9 @@ describe("loom-retrieval", () => {
           ["calendar.list", { from: "yesterday" }],
           ["calendar.list", { from: "2026-09-01", all: true }],
           ["context", { read: "hosted" }],
+          ["context", {}],
+          ["profile", "fresh"],
+          ["profile", null],
           ["context", { read: "where", since: "now-30m" }],
           ["profile", { fresh: "yes" }],
         ] as const
