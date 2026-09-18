@@ -136,7 +136,8 @@ function reservedOutputTypeChecks() {
     count: 3,
   }));
 
-  // A single group handed over bare, rather than under its name.
+  // A string is not a group map: guards against [VIEWS] being loosened to
+  // accept anything, which a number-only rejection would not catch.
   const badViewsString = pattern(() => ({
     // @ts-expect-error [VIEWS] must hold named groups, not a string
     [VIEWS]: "inboxView",
