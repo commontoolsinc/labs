@@ -139,6 +139,15 @@ describe("topicsBrowserPostureOf()", () => {
     );
   });
 
+  it("reads the shell's posture from the bundle even when another host serves it", () => {
+    const posture = declared(topicsBrowserPostureOf(
+      { experimental: { serverExecution: true } },
+      bundleWith("true", false),
+    ));
+    expect(posture.mode).toBe("server-execution-on");
+    expect(posture.clientFrom).toBe("bundle");
+  });
+
   it("returns an undeclared posture when only the toolshed names a define and another host serves the shell", () => {
     const posture = undeclared(topicsBrowserPostureOf(
       {

@@ -491,11 +491,22 @@ The shell's define has two possible statements and they are not
 interchangeable. The bundle served to the browser is the artifact the run
 loads; `shellServerExecutionDefine` on `/api/meta` describes the shell its own
 toolshed serves, which is the same artifact only when `FRONTEND_URL` and
-`API_URL` name one deployment. So both are read on every run, both are
-compared when both state a define, and a disagreement between them refuses.
-The toolshed's report settles the question alone only for a shell that
-toolshed serves; where another host serves it, that report describes a shell
-the browser never loads and the posture reads as undeclared.
+`API_URL` name one origin. Both are read on every run, and what settles the
+shell's posture is:
+
+- both stating a define and agreeing — the posture, read from both;
+- both stating one and disagreeing — refused, since they describe different
+  artifacts and neither says what this run loaded;
+- the bundle alone — the posture, whichever host served the shell, because the
+  script the browser loads answers for itself;
+- `/api/meta` alone, with the toolshed serving the shell — the posture;
+- `/api/meta` alone, with another host serving the shell — undeclared, that
+  define describing a shell this run never loads;
+- neither — undeclared.
+
+A bundle states nothing whether it could not be read or was read and carries
+no define; that changes none of the above, and shows only in the reason an
+undeclared posture records.
 
 Reading a deployment has three outcomes. Where both halves state a posture and
 agree, that is the mode. Where both state one and disagree, reading refuses,

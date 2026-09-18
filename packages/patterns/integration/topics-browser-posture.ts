@@ -142,11 +142,13 @@ interface ServedFrom {
    * describe. Anything finer would be guessing at a deployment's topology
    * from two URLs.
    *
-   * This gates only the path that reads the toolshed's report alone, so the
-   * mislabeling needs all three at once: the served shell states no define,
-   * the toolshed states one, and the two are different artifacts under a
-   * shared origin. A served shell that states a define is read from the
-   * artifact itself, and one that contradicts the toolshed refuses.
+   * One path consults this: the one where `/api/meta` states a define and the
+   * served bundle states none, whether because it could not be read or
+   * because it carries none. A wrong match there trusts the toolshed's report
+   * for a shell it does not describe. Every other path ignores this flag — a
+   * bundle stating a define answers for itself whoever served it, a bundle
+   * disagreeing with the toolshed refuses, and where neither states one the
+   * posture is undeclared either way.
    */
   readonly servedByToolshed: boolean;
 }
@@ -221,15 +223,29 @@ export function topicsBrowserPostureOf(
 }
 
 /**
- * Helper for {@link topicsBrowserPostureOf}, which returns the posture the
- * served shell runs and the statements it was read from, or `undefined` where
- * nothing states it.
+ * Helper for {@link topicsBrowserPostureOf}, which returns what states the
+ * posture the served shell runs, or why nothing does.
  *
- * The bundle is the script the browser loads, so it states the posture of the
- * run itself. `/api/meta` states the posture of the shell its own toolshed
- * serves, which is the same artifact only when the shell came from that
- * toolshed; where the two are separate deployments, meta alone says nothing
- * about this run.
+ * Two statements are available and neither substitutes for the other. The
+ * bundle is the script the browser loads, so it states this run's posture.
+ * `/api/meta` states the posture of the shell its own toolshed serves, which
+ * is this run's shell only when that toolshed served it.
+ *
+ * Each combination of the two yields:
+ *
+ * - both state a define and they differ: throws.
+ * - both state a define and they agree: stated, from `meta and bundle`.
+ * - only the bundle states one: stated, from `bundle`, whichever host served
+ *   the shell — the artifact the browser loads answers for itself.
+ * - only `/api/meta` states one, and the toolshed served the shell: stated,
+ *   from `meta`.
+ * - only `/api/meta` states one, and another host served the shell: unstated,
+ *   that define describing a shell this run did not load.
+ * - neither states one: unstated.
+ *
+ * The bundle states nothing in two ways — it could not be read, or it was
+ * read and carries no define — which change no outcome above and are told
+ * apart only in the `reason` an unstated result carries.
  *
  * @throws Error when a statement it reads is neither `true` nor `false`, and
  * when the two statements disagree.
