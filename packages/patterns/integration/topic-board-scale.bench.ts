@@ -41,6 +41,10 @@ import {
   timeTopicsOperation,
   type TopicsProgram,
 } from "./topics-browser-measurement.ts";
+import {
+  readTopicsBrowserPosture,
+  type TopicsBrowserPosture,
+} from "./topics-browser-posture.ts";
 import { waitForPieceView } from "./topics-navigation-helpers.ts";
 
 const DEMAND = parseTopicBoardDemand(Deno.env.get("CF_TOPIC_BOARD_DEMAND"));
@@ -263,6 +267,20 @@ function topicsProgram(): Promise<TopicsProgram> {
 }
 
 /**
+ * The server-execution posture the deployment under measurement runs, which
+ * labels every sample. Read from the deployment on first use, so a run whose
+ * sizes are all skipped asks it nothing, and read once so that every sample of
+ * a run carries the same statement of what produced it.
+ */
+let reading: Promise<TopicsBrowserPosture> | undefined;
+
+/** Returns the deployment's posture, reading it on first use. */
+function benchPosture(): Promise<TopicsBrowserPosture> {
+  reading ??= readTopicsBrowserPosture(env.API_URL, env.FRONTEND_URL);
+  return reading;
+}
+
+/**
  * Invocations of each size's reopen case so far, so that the samples written to
  * stderr come from an iteration the benchmark keeps rather than the one it
  * discards.
@@ -314,6 +332,7 @@ async function recordReopenReads(
     const operation = await reachReopen(session, fixture);
     const sample = await measureTopicsReads(session.page, {
       label: `reopen ${topicCount}, reads`,
+      posture: await benchPosture(),
       program: await topicsProgram(),
       operation,
       mayRunNothing: true,
@@ -346,6 +365,7 @@ for (const topicCount of SIZES) {
       // sample records the declaration alongside its run count.
       const sample = await timeTopicsOperation(session.page, {
         label: `reopen ${topicCount}`,
+        posture: await benchPosture(),
         operation,
         interval: b,
         mayRunNothing: true,

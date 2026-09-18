@@ -473,6 +473,29 @@ completes no run for the call to attribute and the zero is what it has to
 record; it writes its timed sample as well, for the graph and timing the
 read-accounted half's elapsed time cannot speak for.
 
+### The posture a sample is labeled with
+
+Every sample carries the server-execution posture the deployment under
+measurement ran, printed in square brackets after the sample's label, so a
+diagnostics line says which mode produced it without a reader knowing how the
+run was started. `topics-browser-posture.ts` reads it from the deployment
+rather than from the benchmark process's own `EXPERIMENTAL_SERVER_EXECUTION`,
+which would label whatever it was told: the toolshed reports the posture it
+serves at on `/api/meta`, and the shell it serves states its own through the
+build define — from `shellServerExecutionDefine`, from the define baked into
+the served bundle, or, where neither names one, from the first-party default
+the shell itself falls back to. The worker refuses to initialize when its
+resolved posture disagrees with the shell's declaration, so a page that loaded
+at all ran the posture its shell declared.
+
+A run whose two halves disagree is refused rather than labeled, because a
+client and a server on opposite postures exercise neither. A source-run
+toolshed given the ON flag is one such case: it serves no built shell, so the
+shell a browser would load follows the first-party default, and the pair is a
+mixed posture.
+
+### What a sample records
+
 `measureTopicsReads()` turns telemetry and body read accounting on in the
 shell's runtime client, runs the operation, waits until the view has settled and
 the runtime is idle, and turns both off again. From the `scheduler.run.complete`

@@ -251,10 +251,25 @@ last-activity lifts. Opening a topic ran the pivot, that topic's backlinks, and
 its comment count. Returning to the board afterward ran that topic's
 last-activity lift once. The measurement is one small sample, taken with
 [lazy materialization](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization)
-on. [Server execution](../development/EXPERIMENTAL_OPTIONS.md#serverexecution)
-and lazy materialization off are not yet measured. T0 measures both before the
-baseline report, in runs labeled by mode; the scheduled Benchmarks workflow runs
-client execution only. Of those three, the headless tier measures the
+on and with client execution.
+
+Each mode is measured in the tier that can run it, and every run is labeled by
+mode. The headless tier measures lazy materialization on and off, under a
+`--mode` the probe stamps onto each sample from the flags the runtime reports
+back. It cannot measure
+[server execution](../development/EXPERIMENTAL_OPTIONS.md#serverexecution): the
+ON posture's serving loop is an `ExecutorHost` built over a co-hosted memory
+server, and the headless fixture runs over an emulated storage manager in one
+process with no memory server, so the flag has nothing there to engage. Server
+execution is measured in the browser tier, which runs against a toolshed: a
+toolshed given the ON flag was measured to construct the loop and to serve a
+deployed Topics board's work, which is the engagement the headless tier has no
+way to produce. That posture's cost is not yet measured. A browser arm holds
+its two halves to one posture — the toolshed serves at it, and the shell it
+serves is built at it — and a run whose halves disagree is refused rather than
+labeled. Both postures must be measured before the baseline report. The
+scheduled Benchmarks workflow runs client execution only. Of those three, the
+headless tier measures the
 board-with-one-topic workload with the demand the browser measured, and the
 all-backlinks workload as a scaling probe rather than normal UI behavior: it
 demands the pivot and every topic's backlinks at once, which no browser workload
