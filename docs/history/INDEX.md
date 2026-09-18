@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Default-on handler dispatch timings](development/performance/2026-09-18-default-on-handler/) ([report](development/performance/2026-09-18-default-on-handler/README.md)) — Eighteen pinned handler cases with accounting disabled, raw phase records, and explicit timing-comparison limits.
+
 - [2026-09-16 CFC evidence review](development/performance/2026-09-16-cfc-evidence-review.md) — Phase warmup verification and deterministic browser comparison including capture identity and size.
 - [2026-09-16 CFC callback argument narrowing withdrawal](development/performance/2026-09-16-cfc-argument-narrowing-withdrawal.md) — Server-execution Lunch Poll regression, controlled isolation, and the final PR performance-claim boundary.
 - [2026-09-16 CFC browser evidence reproduction](development/performance/2026-09-16-cfc-browser-evidence-reproduction.md) — Exact comparator revisions, reproduced historical hashes, and portable mappings for external capture artifacts.
