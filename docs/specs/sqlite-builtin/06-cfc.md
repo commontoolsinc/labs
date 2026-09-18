@@ -483,6 +483,18 @@ runtime's option governs the queries it executes itself. The runtime's
 ceiling joins the request hash, so a settled result is a hit only for a
 runtime reading under the same ceiling.
 
+The option is therefore an OFF-arm dial for a client. A client runtime under
+server execution (`experimental.serverExecution` on, without the serving
+posture) executes no query of its own — the space server's runtime serves
+them, and this ceiling does not reach it — so the constructor **refuses**
+`cfcReadMaxConfidentiality` on such a runtime rather than admitting a
+session whose reads nothing bounds. A host that offers the ceiling as a dial
+(cf-harness's `--max-confidentiality`) resolves the deployment's posture
+first and refuses the combination in its own terms, before any run starts.
+A run's ceiling does not travel with its demand to the runtime that serves
+it; until it does, a bounded client session exists only on the OFF arm
+(`docs/specs/server-side-execution/verification-coverage.md`, OW64).
+
 **Read-time clearance (Phase 3.b).** Filtering by *who is asking*, rather than
 by a declared contract: `db.query(sql, { readClearance: true })` keeps only the
 rows the **acting reader** may read and drops the rest. The acting reader is

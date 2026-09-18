@@ -86,7 +86,10 @@
  * | cfcSinkMaxConfidentiality  | core-default (none declared) — same              |
  * | cfcReadMaxConfidentiality  | core-default (none — the owner view); delta on   |
  * |                            | remoteClient / browserWorker (a per-run or       |
- * |                            | per-device read ceiling is the host's to set)    |
+ * |                            | per-device read ceiling is the host's to set).   |
+ * |                            | An OFF-arm dial: the constructor refuses it on a |
+ * |                            | flag-ON client, whose queries the space server's |
+ * |                            | runtime serves beyond the ceiling's reach        |
  * | cfcReadOnExceed            | core-default (`fail`); delta on the same two,    |
  * |                            | beside the ceiling it qualifies                  |
  * | patternEnvironment         | pinned from apiUrl in productionServer /         |
@@ -880,7 +883,12 @@ export interface RemoteClientPresetParams extends CoreParams {
   /**
    * The runtime-wide read ceiling for this one session's `db.query` reads
    * (`RuntimeOptions.cfcReadMaxConfidentiality`): a harness running one
-   * pattern under one clearance sets it here.
+   * pattern under one clearance sets it here. It bounds only the runtime
+   * it is set on, so the constructor refuses it when `experimental` resolves
+   * to server execution: that client's queries are served by the space
+   * server's runtime, which the ceiling does not reach. A host that sets it
+   * resolves the posture first (`experimentalOptionsForDeployedClient`) and
+   * refuses the combination in its own terms.
    */
   cfcReadMaxConfidentiality?: readonly CfcConfClause[];
 

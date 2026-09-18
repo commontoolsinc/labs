@@ -7,6 +7,7 @@ import {
   createHarnessFabricSessionFactory,
   type HarnessFabricSession,
   harnessFabricSessionControllerOptions,
+  resolveHarnessFabricSessionPosture,
 } from "../src/fabric-session.ts";
 
 const identity = await Identity.fromPassphrase("fabric-session factory");
@@ -62,6 +63,14 @@ describe("fabric-session", () => {
       expect(options.cfcReadOnExceed).toBe("skip");
     });
 
+    it("carries the experimental posture the config resolved", () => {
+      const options = harnessFabricSessionControllerOptions({
+        ...base,
+        experimental: { serverExecution: false },
+      });
+      expect(options.experimental).toEqual({ serverExecution: false });
+    });
+
     it("carries every dial the config sets, posture included", () => {
       const options = harnessFabricSessionControllerOptions({
         ...base,
@@ -72,6 +81,67 @@ describe("fabric-session", () => {
       expect(options.cfcEnforcementMode).toBe("enforce-strict");
       expect(options.cfcFlowLabels).toBe("persist");
       expect(options.cfcPosture).toBe("max-enforcement");
+    });
+  });
+
+  describe("resolveHarnessFabricSessionPosture()", () => {
+    const base = {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    };
+    const ceiling = { cfcReadMaxConfidentiality: ["did:key:zOwner"] };
+
+    /** A deployment whose `/api/meta` declares the given posture. */
+    const deploymentDeclaring = (serverExecution: boolean) => ({
+      env: () => undefined,
+      fetch: (input: RequestInfo | URL) => {
+        expect(String(input)).toBe("https://toolshed.example/api/meta");
+        return Promise.resolve(
+          Response.json({ experimental: { serverExecution } }),
+        );
+      },
+    });
+
+    it("returns the config carrying the posture the deployment declares", async () => {
+      const resolved = await resolveHarnessFabricSessionPosture(
+        { ...base, ...ceiling },
+        deploymentDeclaring(false),
+      );
+      const { experimental, ...rest } = resolved;
+      expect(rest).toEqual({ ...base, ...ceiling });
+      expect(experimental?.serverExecution).toBe(false);
+    });
+
+    it("throws naming `--max-confidentiality` and server execution for a ceiling under the ON arm", async () => {
+      await expect(
+        resolveHarnessFabricSessionPosture(
+          { ...base, ...ceiling },
+          deploymentDeclaring(true),
+        ),
+      ).rejects.toThrow(
+        /--max-confidentiality .*https:\/\/toolshed\.example\/ runs under server execution/,
+      );
+    });
+
+    it("returns the config carrying the ON arm when it sets no ceiling", async () => {
+      const resolved = await resolveHarnessFabricSessionPosture(
+        base,
+        deploymentDeclaring(true),
+      );
+      expect(resolved.experimental?.serverExecution).toBe(true);
+    });
+
+    it("lets this process's explicit flag select the arm over the deployment's", async () => {
+      const resolved = await resolveHarnessFabricSessionPosture(
+        { ...base, ...ceiling },
+        {
+          ...deploymentDeclaring(true),
+          env: (key) =>
+            key === "EXPERIMENTAL_SERVER_EXECUTION" ? "false" : undefined,
+        },
+      );
+      expect(resolved.experimental?.serverExecution).toBe(false);
     });
   });
 

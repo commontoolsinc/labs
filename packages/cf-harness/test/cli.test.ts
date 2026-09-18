@@ -30,6 +30,7 @@ import {
   parseCfHarnessCliArgs,
   resolveCfHarnessCliSystemPrompt,
   runCfHarnessCli,
+  type RunCfHarnessCliDependencies,
 } from "../src/cli.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { HarnessControlError } from "../src/control-errors.ts";
@@ -7611,6 +7612,98 @@ Deno.test("parseCfHarnessCliArgs carries --max-confidentiality into the fabric s
       { type: "Facet", owner: "did:key:zOwner", id: "work" },
     ],
   });
+});
+
+/**
+ * A run bounded by `--max-confidentiality` against a deployment whose
+ * `/api/meta` declares `serverExecution`. The prompt loop is stubbed so the
+ * run's outcome is decided by startup alone; `fetched` records what the CLI
+ * asked the deployment.
+ */
+const runBoundedAgainstDeployment = async (
+  serverExecution: boolean,
+  deps: Pick<RunCfHarnessCliDependencies, "fabricSessionFactory"> = {},
+) => {
+  const { io, stderr } = createIoBuffers();
+  const fetched: string[] = [];
+  let engine: CfHarnessEngine | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--model-provider",
+      "openai-compatible-gateway",
+      "--gateway-auth-mode",
+      "none",
+      "--cfc-enforcement-mode",
+      "disabled",
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--max-confidentiality",
+      '["did:key:zOwner"]',
+    ],
+    {
+      io,
+      env: {},
+      fetchFn: (input) => {
+        fetched.push(String(input));
+        return Promise.resolve(
+          Response.json({ experimental: { serverExecution } }),
+        );
+      },
+      createPromptLoop: (options) => {
+        engine = options.engine;
+        return {
+          runPrompt: () => Promise.resolve(completedCliResult("run-bounded")),
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
+        };
+      },
+      ...deps,
+    },
+  );
+  return { exitCode, stderr, fetched, engine };
+};
+
+Deno.test("runCfHarnessCli refuses --max-confidentiality before the first model turn when the deployment runs under server execution", async () => {
+  const { exitCode, stderr, fetched, engine } =
+    await runBoundedAgainstDeployment(true);
+  assertEquals(exitCode, 1);
+  assertEquals(fetched, ["https://toolshed.example/api/meta"]);
+  assertEquals(engine, undefined);
+  assertEquals(stderr.length, 1);
+  assertStringIncludes(stderr[0], "--max-confidentiality");
+  assertStringIncludes(
+    stderr[0],
+    "https://toolshed.example/ runs under server execution",
+  );
+});
+
+Deno.test("runCfHarnessCli builds a bounded session under the OFF arm the deployment declares", async () => {
+  const { exitCode, fetched, engine } = await runBoundedAgainstDeployment(
+    false,
+  );
+  assertEquals(exitCode, 0);
+  assertEquals(fetched, ["https://toolshed.example/api/meta"]);
+  assertEquals(
+    engine?.config.fabricSession?.experimental?.serverExecution,
+    false,
+  );
+});
+
+Deno.test("runCfHarnessCli does not ask the deployment for its posture when the session is injected", async () => {
+  const { exitCode, fetched } = await runBoundedAgainstDeployment(true, {
+    fabricSessionFactory: () =>
+      Promise.reject(new Error("the session is never built here")),
+  });
+  assertEquals(exitCode, 0);
+  assertEquals(fetched, []);
 });
 
 Deno.test("parseCfHarnessCliArgs refuses a --max-confidentiality that is not a ceiling", async () => {

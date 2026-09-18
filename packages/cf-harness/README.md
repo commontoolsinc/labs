@@ -1772,6 +1772,18 @@ and the operator summary prints the ceiling beside the other session dials. A
 delegated child runs on its parent's session and records the parent's ceiling as
 its own.
 
+The ceiling bounds only the runtime it is set on, and under server execution
+(`EXPERIMENTAL_SERVER_EXECUTION`; the deployment publishes its posture at
+`/api/meta`) a client runtime's queries are served by the space server's
+runtime, which the ceiling does not reach. So a bounded run resolves the
+deployment's posture at startup and is refused, naming the flag and the
+deployment, before its first model turn when that posture is server execution —
+rather than failing inside the first `run_pattern` call, where the runtime
+constructor refuses the same combination. The session is then built under the
+posture the refusal was decided on. An explicit `EXPERIMENTAL_SERVER_EXECUTION`
+in the harness's own environment selects the arm over the deployment's, as it
+does for every client. An unbounded run asks nothing at startup.
+
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
 over-cap source is a structured tool error), an optional `inputs` object, and an
 optional `resultSchema`. An `inputs` string value that is a whole-string

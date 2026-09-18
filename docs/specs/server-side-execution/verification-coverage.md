@@ -32,6 +32,7 @@ The status corrections in this register are bounded to the rows below:
 | OW56 finding 2 | Closed: source following has one owner, the opener. ON upload and instantiate run on the serving runtime; source updates, other client creation paths, and compiled-byte trust remain separate OW56 work. |
 | OW58 | Closed: resolved-error notice commits release the drain guard. |
 | OW60 | Open: unresolved flag-ON client echoes are still skipped. |
+| OW64 | Open: a client's runtime read ceiling does not travel with its demand, so a bounded client session exists only on the OFF arm; the ON-arm refusal is pinned at the constructor, the pieces controller, and cf-harness. |
 
 The [coverage status audit](../../history/plans/server-execution-v2/optimize/coverage-status-audit-2026-09-09.md)
 records the investigation's inspected head, provenance, probes, and limits.
@@ -10144,6 +10145,45 @@ supply; OW29/OW32/OW34 closed):
     one. Unpinned and unmeasured; structural from the code only
     (`wake-shaping.ts`'s per-group `pending` + window tick, and the
     drain's per-entry `queueEvent`).
+  - **OW64 — the runtime read ceiling does not travel with a demand
+    (minted 2026-09-18 from the ON-default rehearsal's one failing
+    unit test, `pieces-controller-connection.test.ts`).**
+    `RuntimeOptions.cfcReadMaxConfidentiality`
+    (`docs/specs/sqlite-builtin/06-cfc.md`, "Runtime read ceiling")
+    bounds only the runtime it is set on. Under the ON arm a client
+    runtime executes no `db.query` of its own — the serving runtime
+    performs it, under ITS option — so a ceiling accepted on a
+    flag-ON client would read as a bounded session whose reads
+    nothing bounds. The constructor refuses that combination
+    (`packages/runner/src/runtime.ts`; pinned in
+    `packages/runner/test/sqlite-runtime-read-ceiling.test.ts`),
+    which made the pieces controller's forwarding test fail at an ON
+    default: the test depended on the ambient default for its arm.
+    DISPOSITION: the refusal stands and every consumer states the
+    arm. `PiecesController.initialize` takes the posture its runtime
+    runs under, so a host resolves it once and the runtime runs what
+    the host checked; the controller's tests pin forwarding on the
+    explicit OFF arm and the refusal on the explicit ON arm
+    (`packages/piece/test/pieces-controller-connection.test.ts`).
+    cf-harness — the production consumer, whose
+    `--max-confidentiality` reaches the controller through
+    `runtimePresets.remoteClient` and, unset, the first-party default
+    — resolves the deployment's posture at startup for a bounded
+    session and refuses before the first model turn, naming the flag
+    and the deployment
+    (`packages/cf-harness/src/fabric-session.ts`,
+    `resolveHarnessFabricSessionPosture`; pinned in
+    `packages/cf-harness/test/fabric-session.test.ts` and
+    `packages/cf-harness/test/cli.test.ts`). The preset table's
+    `cfcReadMaxConfidentiality` row says it is an OFF-arm dial.
+    STILL OWED: carrying a run's ceiling with its demand to the
+    runtime that serves it — into the served run context, the request
+    hash beside `runtimeReadCeiling`, and the effect key, with the
+    harness's bounded-as-configured attestation re-keyed on the served
+    runtime — which is a protocol.md / serving-loop.md ruling before it
+    is code. Until then a bounded client session exists only on the
+    OFF arm, and the post-soak flag removal (Phase 7) must rule on
+    this row before deleting that arm.
 
 ## 4. Standing rule
 

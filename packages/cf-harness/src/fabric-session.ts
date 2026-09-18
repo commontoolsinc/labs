@@ -9,6 +9,11 @@
 import { Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
+  type EnvReader,
+  type ExperimentalOptions,
+  experimentalOptionsForDeployedClient,
+} from "@commonfabric/runner";
+import {
   fabricSessionPresetCfcDials,
   type HarnessFabricSessionConfig,
   type HarnessFabricSessionPresetCfcDials,
@@ -65,6 +70,7 @@ export const harnessFabricSessionControllerOptions = (
     "cfcReadMaxConfidentiality"
   ];
   cfcReadOnExceed?: HarnessFabricSessionConfig["cfcReadOnExceed"];
+  experimental?: ExperimentalOptions;
 } => ({
   apiUrl: new URL(config.apiUrl),
   space: config.space,
@@ -75,7 +81,59 @@ export const harnessFabricSessionControllerOptions = (
   ...(config.cfcReadOnExceed !== undefined
     ? { cfcReadOnExceed: config.cfcReadOnExceed }
     : {}),
+  ...(config.experimental !== undefined
+    ? { experimental: config.experimental }
+    : {}),
 });
+
+/** How `resolveHarnessFabricSessionPosture` reaches the deployment. */
+export interface HarnessFabricSessionPostureDeps {
+  /** Reads this process's environment; `Deno.env.get` by default. */
+  env?: EnvReader;
+
+  /** Fetches the deployment's posture; the global `fetch` by default. */
+  fetch?: typeof globalThis.fetch;
+}
+
+/**
+ * The config with the experimental posture its session's runtime will run
+ * under: the deployment's own, with this process's explicit `EXPERIMENTAL_*`
+ * winning per flag, resolved before the run starts. The controller resolves
+ * the same posture at session build when the config carries none.
+ *
+ * A config carrying a read ceiling is refused under server execution. The
+ * ceiling bounds only the runtime it is set on, and a client under server
+ * execution has its queries served by the space server's runtime, which the
+ * ceiling does not reach; the runtime constructor refuses the same
+ * combination, and resolving the posture here moves that refusal ahead of
+ * the run's first model turn, named after the flag the operator wrote.
+ *
+ * @throws Error when the config sets `cfcReadMaxConfidentiality` and the
+ * resolved posture is server execution.
+ */
+export const resolveHarnessFabricSessionPosture = async (
+  config: HarnessFabricSessionConfig,
+  deps: HarnessFabricSessionPostureDeps = {},
+): Promise<HarnessFabricSessionConfig> => {
+  const experimental = await experimentalOptionsForDeployedClient({
+    apiUrl: new URL(config.apiUrl),
+    env: deps.env ?? ((key) => Deno.env.get(key)),
+    ...(deps.fetch !== undefined ? { fetch: deps.fetch } : {}),
+  });
+  if (
+    config.cfcReadMaxConfidentiality !== undefined &&
+    experimental.serverExecution === true
+  ) {
+    throw new Error(
+      "--max-confidentiality (or the run manifest's cfc.maxConfidentiality) " +
+        "bounds only the runtime it is set on, and the fabric session's " +
+        `deployment at ${config.apiUrl} runs under server execution, where ` +
+        "the session's queries are served by the space server's runtime; " +
+        "run the bounded session against a deployment on the OFF arm",
+    );
+  }
+  return { ...config, experimental };
+};
 
 /**
  * The two steps of building a session that a test replaces: loading the
