@@ -458,10 +458,23 @@ with its own toolkit instead of rendering VDOM — a native application, say, or
 one built on a different renderer. It is a sibling concept to the variants
 above rather than a member of them: not a size, and not a shell slot.
 
-One key rather than one key per view is what keeps discovery cheap. A host
-reads `[VIEWS]` through a schema whose members are opaque and learns what is on
-offer in one round, before anything under it is derived; probing well-known
-names one at a time would make the common case slow.
+One key rather than one key per view is what keeps discovery cheap: a host
+learns what is on offer in one round, where probing well-known names one at a
+time would make the common case slow. Two different schemas carry that, and
+telling them apart is the thing to get right.
+
+- **The pattern's own result schema** names every group and everything in it.
+  A pattern declares `[VIEWS]` as the groups it offers — `{ inboxView:
+  InboxView }` — and the emitted schema carries each group by name, each
+  member's type, and each `Stream<T>`'s payload schema, which is where a host
+  reads the event contract from. Declaring the field `unknown` instead is a
+  compile error at the root of a result, for the same reason it is one under
+  `[UI]`: see [`unknown`](../concepts/types-and-schemas/unknown.md).
+- **A consumer's demand schema** is what that host reads with, and it is free
+  to ask for less. Below the root, a consumer may describe a group as
+  `unknown` and receive an opaque reference in place of the derived value —
+  which is how a host learns *which* groups are on offer without the runtime
+  computing any of them, and then reads for real only the one it will draw.
 
 ```tsx
 import {
