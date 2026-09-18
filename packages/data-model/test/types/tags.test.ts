@@ -43,7 +43,7 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { codecClasses } from "@/fabric-primitives/index.ts";
+import { codecClasses } from "@/fabric-primitives/impl.ts";
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,

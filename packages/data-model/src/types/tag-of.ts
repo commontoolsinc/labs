@@ -25,7 +25,7 @@ import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
 } from "@/fabric-primitives/interface.ts";
-import { toShortQuotedDebugString } from "@/value-debug";
+import { debugStr } from "@/value-debug";
 
 import { type PlusTypePredicate } from "./interface.ts";
 import {
@@ -49,8 +49,7 @@ export function tagOfFabricPrimitive(
     return result;
   }
 
-  const desc = toShortQuotedDebugString(value);
-  throw new Error(`Not a valid \`FabricPrimitive\`: ${desc}`);
+  throw new Error(debugStr`Not a valid \`FabricPrimitive\`: $quote${value}`);
 }
 
 /**
@@ -151,8 +150,9 @@ export function tagOfFabricValue<PlusType = never>(
     return result;
   }
 
-  const desc = toShortQuotedDebugString(value);
-  throw new Error(`Not possibly a valid \`FabricValue\`: ${desc}`);
+  throw new Error(
+    debugStr`Not possibly a valid \`FabricValue\`: $quote${value}`,
+  );
 }
 
 /**

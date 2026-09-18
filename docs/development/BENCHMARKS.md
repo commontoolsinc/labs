@@ -473,6 +473,64 @@ completes no run for the call to attribute and the zero is what it has to
 record; it writes its timed sample as well, for the graph and timing the
 read-accounted half's elapsed time cannot speak for.
 
+### The posture a sample is labeled with
+
+Every sample carries the server-execution posture the deployment under
+measurement ran, printed in square brackets after the sample's label as
+`[<mode> via <source>]`, so a diagnostics line says which mode produced it and
+which statement of the posture that came from, without a reader knowing how the
+run was started. `topics-browser-posture.ts` reads it from the deployment
+rather than from the benchmark process's own `EXPERIMENTAL_SERVER_EXECUTION`,
+which would label whatever it was told: the toolshed reports the posture it
+serves at on `/api/meta`, and the shell it serves states its own through the
+build define. The worker refuses to initialize when its resolved posture
+disagrees with the shell's declaration, so a page that loaded at all ran the
+posture its shell declared.
+
+The shell's define has two possible statements and they are not
+interchangeable. The bundle served to the browser is the artifact the run
+loads; `shellServerExecutionDefine` on `/api/meta` describes the shell its own
+toolshed serves, which is the same artifact only when `FRONTEND_URL` and
+`API_URL` name one origin. Both are read on every run, and what settles the
+shell's posture is:
+
+- both stating a define and agreeing — the posture, read from both;
+- both stating one and disagreeing — refused, since they describe different
+  artifacts and neither says what this run loaded;
+- the bundle alone — the posture, whichever host served the shell, because the
+  script the browser loads answers for itself;
+- `/api/meta` alone, with the toolshed serving the shell — the posture;
+- `/api/meta` alone, with another host serving the shell — undeclared, that
+  define describing a shell this run never loads;
+- neither — undeclared.
+
+A bundle states nothing whether it could not be read or was read and carries
+no define; that changes none of the above, and shows only in the reason an
+undeclared posture records.
+
+Reading a deployment has three outcomes. Where both halves state a posture and
+agree, that is the mode. Where both state one and disagree, reading refuses,
+because a client and a server on opposite postures exercise neither. Where the
+deployment states the shell's half nowhere — a bundle with no define, or no
+bundle that can be read — the posture is `undeclared`: a recorded fact about
+the deployment, never the first-party default, which is a constant compiled
+into the benchmark process rather than something the deployment said. So no
+path labels a run from an assumption.
+
+Whether `undeclared` is usable belongs to the caller, because strictness is a
+property of what a measurement is for. A benchmark comparing two postures needs
+a declared one and reads through `readDeclaredTopicsBrowserPosture()`, which
+refuses the rest; the Benchmarks workflow builds its toolshed binary with
+`EXPERIMENTAL_SERVER_EXECUTION` set, so the shell it serves carries a define
+and the read succeeds. A test exercising these helpers does not care what
+posture it ran under, reads through `readTopicsBrowserPosture()`, and carries
+whatever it finds into its samples; the pattern-integration lane serves a shell
+built with no posture defines, which is an ordinary configuration rather than a
+fault. A sample taken under an undeclared posture prints `[posture undeclared]`
+rather than a mode, so it cannot later be read as a measurement of either.
+
+### What a sample records
+
 `measureTopicsReads()` turns telemetry and body read accounting on in the
 shell's runtime client, runs the operation, waits until the view has settled and
 the runtime is idle, and turns both off again. From the `scheduler.run.complete`
@@ -1001,9 +1059,43 @@ The options select what runs:
   back.
 - `--max-old-space-size=<megabytes>` sets the heap each case's process runs
   under.
+- `--mode=<name>` runs every case under that measurement mode, which defaults
+  to `lazy-materialization-on`. [The modes](#the-modes) below list them.
 - `--derive-limits` runs the read-budget cases instead and prints their limits,
   as [the read budget](#the-read-budget) describes. It takes no other option
-  but `--max-old-space-size`.
+  but `--max-old-space-size`, so the limits are derived under the default mode
+  and refuse `--mode`: the limits go into one table that carries no mode, and
+  three of the five counts a limit gates are proxy accesses, which a run with
+  lazy materialization off has been measured to leave at 0 in every phase.
+
+### The modes
+
+A mode is an experimental posture the run's runtimes are given, and every
+record the run writes — `environment`, `sample`, `limit` and `complete` — is
+labeled with it, so a result file says which semantics produced it without a
+reader consulting where the file sits.
+`TOPICS_FIXTURE_MODES` in the fixture holds them:
+
+- `lazy-materialization-on` pins `lazyMaterialization` on, which is the posture
+  a runtime takes by default.
+- `lazy-materialization-off` pins it off, so that a lift's body reads the whole
+  of what its schema selects rather than the paths it touches.
+
+Both pin `serverExecution` off. A measurement's runtime runs over an emulated
+storage manager in one process, with no memory server and no serving loop,
+where the ON posture needs a toolshed carrying an `ExecutorHost` over its
+memory server; see
+[`serverExecution`](EXPERIMENTAL_OPTIONS.md#serverexecution). Server execution
+is measured in the browser tier, which has a toolshed to serve.
+
+A measured case's label comes from the flags its runtime reports back once it
+has resolved what it was given, not from the option asked for, so the label
+reads the same field the runner acts on. Every mode sets both flags explicitly
+and a runtime keeps an explicit value, so the two cannot part today; the probe
+checks them against each other anyway, against a flag that later resolves
+against an ambient control point. A `board` case starts no runtime at all, so
+its sample carries the mode the run was given rather than one a runtime
+reported.
 
 ### The heap the 512-topic cases need
 
@@ -1126,27 +1218,28 @@ everything a case's process prints.
 
 - The first line has the `kind` `environment`: the git revision and whether the
   tree is dirty, the Deno, V8, and TypeScript versions, the platform, the
-  processor count, the experimental options the fixture pins, the arguments, the
-  V8 flags each case's process starts with, the `repeat` count, and the selected
-  case IDs.
-- A `sample` line is one case in one `round`: the case, its `family` (`pivot` or
-  `thread`), its series, the `size` its series scales, its `workload`, the
-  fixture's options with its mention count, the `focusTopic` and its
-  `focusMentioners` count, and `demandedActions`, how many actions of each lift
-  the workload starts. A measured sample adds `measured: true`, the heap limit
-  its process ran under, and a record per phase; a `board` sample adds
+  processor count, the `mode` the run was given and the experimental options
+  that mode pins, the arguments, the V8 flags each case's process starts with,
+  the `repeat` count, and the selected case IDs.
+- A `sample` line is one case in one `round`: its `mode`, the case, its `family`
+  (`pivot` or `thread`), its series, the `size` its series scales, its
+  `workload`, the fixture's options with its mention count, the `focusTopic` and
+  its `focusMentioners` count, and `demandedActions`, how many actions of each
+  lift the workload starts. A measured sample adds `measured: true`, the heap
+  limit its process ran under, and a record per phase; a `board` sample adds
   `measured: false` and the `reason` instead.
 - A `limit` line records a case whose process exhausted its heap, which the
   probe recognizes by V8's out-of-memory message on the process's stderr. It
-  names the case, its series (the ID with the scaled count written as `*`), the
-  `size` that failed, `largestBuilt` (the largest smaller size of the series
-  with a sample, or `null`), the heap limit the process ran under, how long it
-  ran, the signal or exit code that ended it, and the out-of-memory message. No
-  size of the series from `size` up runs again, and `skipped` lists the larger
-  ones; an earlier round may already have sampled them.
-- The last line has the `kind` `complete`, with the number of `samples` the run
-  wrote and the `limitedSeries` that recorded a limit. A case that fails in any
-  other way ends the run with an error and no `complete` line.
+  names the run's `mode`, the case, its series (the ID with the scaled count
+  written as `*`), the `size` that failed, `largestBuilt` (the largest smaller
+  size of the series with a sample, or `null`), the heap limit the process ran
+  under, how long it ran, the signal or exit code that ended it, and the
+  out-of-memory message. No size of the series from `size` up runs again, and
+  `skipped` lists the larger ones; an earlier round may already have sampled
+  them.
+- The last line has the `kind` `complete`, with the run's `mode`, the number of
+  `samples` the run wrote, and the `limitedSeries` that recorded a limit. A case
+  that fails in any other way ends the run with an error and no `complete` line.
 
 A measured phase records:
 
