@@ -1005,7 +1005,10 @@ The options select what runs:
   to `lazy-materialization-on`. [The modes](#the-modes) below list them.
 - `--derive-limits` runs the read-budget cases instead and prints their limits,
   as [the read budget](#the-read-budget) describes. It takes no other option
-  but `--max-old-space-size`, so the limits are derived under the default mode.
+  but `--max-old-space-size`, so the limits are derived under the default mode
+  and refuse `--mode`: the limits go into one table that carries no mode, and
+  three of the five counts a limit gates are proxy accesses, which a run with
+  lazy materialization off has been measured to leave at 0 in every phase.
 
 ### The modes
 

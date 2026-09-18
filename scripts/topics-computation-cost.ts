@@ -383,6 +383,14 @@ async function measureCase(
 /** How many rounds `--derive-limits` runs every read-budget case. */
 const DERIVATION_ROUNDS = 5;
 
+/** Why the read-budget limits are derived under the default mode alone. */
+const LIMITS_TAKE_THE_DEFAULT_MODE =
+  "A mode is not theirs to take: the limits go into one table that carries " +
+  "no mode, and the counts they gate differ between modes — three of the " +
+  "five are proxy accesses, which lazy materialization off has been measured " +
+  "to leave at 0 — so a table derived under one mode would gate every other " +
+  "mode by counts that mode does not produce.";
+
 /**
  * Runs every case the read-budget groups name in {@link DERIVATION_ROUNDS}
  * rounds, each case in a process of its own started with `v8Flags`, writes the
@@ -628,7 +636,8 @@ async function main(): Promise<void> {
       throw new Error(
         "`--derive-limits` takes no other option but " +
           "`--max-old-space-size`, and was given " +
-          `${conflicting.map((name) => `\`--${name}\``).join(", ")}.`,
+          `${conflicting.map((name) => `\`--${name}\``).join(", ")}.` +
+          (args.mode === undefined ? "" : ` ${LIMITS_TAKE_THE_DEFAULT_MODE}`),
       );
     }
     await deriveLimits(childV8Flags(maxOldSpaceSize));
