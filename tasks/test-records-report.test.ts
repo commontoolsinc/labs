@@ -57,6 +57,30 @@ function contextOn(startedAt: string): RunContext {
   };
 }
 
+/**
+ * Runs `body` with `console.log`, `console.warn` and `console.error`
+ * captured, returning what each received alongside the body's result.
+ */
+async function captureConsole<T>(
+  body: () => Promise<T>,
+): Promise<{ result: T; out: string; err: string }> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  console.log = (...args) => out.push(args.map(String).join(" "));
+  console.warn = (...args) => err.push(args.map(String).join(" "));
+  console.error = (...args) => err.push(args.map(String).join(" "));
+  try {
+    return { result: await body(), out: out.join("\n"), err: err.join("\n") };
+  } finally {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
+}
+
 describe("test-records-report", () => {
   describe("aggregate()", () => {
     it("returns runs, failures, and the worst duration per identity", () => {
@@ -243,9 +267,13 @@ describe("test-records-report", () => {
   describe("runReport()", () => {
     const NOW = Date.parse("2026-08-18T12:00:00Z");
 
-    // One day's listing with two objects: a same-repository report and a
-    // fork-authored one carrying an over-sixty-seconds record.
-    function reportFetch(bodies: Record<string, string>): typeof fetch {
+    // The day's listing over the named objects, each served with the body
+    // given for it. A name mapped to `undefined` is listed and then fails
+    // to read, which is the transient network failure a whole-day read
+    // meets among its tens of thousands of requests.
+    function reportFetch(
+      bodies: Record<string, string | undefined>,
+    ): typeof fetch {
       return ((input: URL | RequestInfo) => {
         const url = String(input);
         if (url.includes("/storage/v1/")) {
@@ -260,8 +288,11 @@ describe("test-records-report", () => {
         const name = Object.keys(bodies).find((candidate) =>
           url.endsWith(candidate)
         );
+        const body = name === undefined ? undefined : bodies[name];
         return Promise.resolve(
-          new Response(bodies[name ?? ""] ?? "", { status: 200 }),
+          body === undefined
+            ? new Response("", { status: 503 })
+            : new Response(body, { status: 200 }),
         );
       }) as typeof fetch;
     }
@@ -289,50 +320,193 @@ describe("test-records-report", () => {
       // See `docs/specs/test-records.md`, "Trust boundaries for consumers",
       // for what the store's member gate leaves the fork flag meaning.
 
-      const gateFailed = await runReport({
-        days: 1,
-        gate: true,
-        bucket: "b",
-        prefix: "p",
-        now: NOW,
-        fetchImpl: reportFetch({
-          "same-repository.ndjson": ciBody(false, [record("fast", "pass", 5)]),
-          "forked.ndjson": ciBody(true, [record("slow", "pass", 90_000)]),
-        }),
-      });
-      expect(gateFailed).toBe(true);
+      const { result: status } = await captureConsole(() =>
+        runReport({
+          days: 1,
+          gate: true,
+          bucket: "b",
+          prefix: "p",
+          now: NOW,
+          fetchImpl: reportFetch({
+            "same-repository.ndjson": ciBody(false, [
+              record("fast", "pass", 5),
+            ]),
+            "forked.ndjson": ciBody(true, [record("slow", "pass", 90_000)]),
+          }),
+        })
+      );
+      expect(status).toBe(1);
     });
 
     it("fails the gate for an over-sixty-seconds record", async () => {
-      const gateFailed = await runReport({
-        days: 1,
-        gate: true,
-        bucket: "b",
-        prefix: "p",
-        now: NOW,
-        fetchImpl: reportFetch({
-          "same-repository.ndjson": ciBody(false, [
-            record("slow", "pass", 61_000),
-          ]),
-        }),
-      });
-      expect(gateFailed).toBe(true);
+      const { result: status } = await captureConsole(() =>
+        runReport({
+          days: 1,
+          gate: true,
+          bucket: "b",
+          prefix: "p",
+          now: NOW,
+          fetchImpl: reportFetch({
+            "same-repository.ndjson": ciBody(false, [
+              record("slow", "pass", 61_000),
+            ]),
+          }),
+        })
+      );
+      expect(status).toBe(1);
     });
 
     it("reports without failing when the gate is off", async () => {
-      const gateFailed = await runReport({
-        days: 1,
-        gate: false,
-        bucket: "b",
-        prefix: "p",
-        now: NOW,
-        fetchImpl: reportFetch({
-          "same-repository.ndjson": ciBody(false, [
-            record("slow", "pass", 61_000),
-          ]),
-        }),
-      });
-      expect(gateFailed).toBe(false);
+      const { result: status } = await captureConsole(() =>
+        runReport({
+          days: 1,
+          gate: false,
+          bucket: "b",
+          prefix: "p",
+          now: NOW,
+          fetchImpl: reportFetch({
+            "same-repository.ndjson": ciBody(false, [
+              record("slow", "pass", 61_000),
+            ]),
+          }),
+        })
+      );
+      expect(status).toBe(0);
+    });
+
+    it("lists the collisions and the high-churn families it found", async () => {
+      const { out } = await captureConsole(() =>
+        runReport({
+          days: 1,
+          gate: false,
+          bucket: "b",
+          prefix: "p",
+          now: NOW,
+          fetchImpl: reportFetch({
+            "first.ndjson": ciBody(false, [
+              record("same", "pass", 1),
+              record("same", "pass", 2),
+              record("case #1", "pass", 1),
+              record("case #2", "pass", 1),
+              record("case #3", "pass", 1),
+              record("stable", "pass", 1),
+            ]),
+            "second.ndjson": ciBody(true, [record("stable", "pass", 1)]),
+          }),
+        })
+      );
+      expect(out).toContain("Collisions (1):");
+      expect(out).toContain("2x [unit] bakery: same in first.ndjson");
+      expect(out).toContain("High-churn identity families (1):");
+      expect(out).toContain('3 one-run members: ["unit","bakery","case ##"]');
+    });
+
+    it("reports over the objects it read when one of them cannot be read", async () => {
+      const { result: status, out, err } = await captureConsole(() =>
+        runReport({
+          days: 1,
+          gate: false,
+          bucket: "b",
+          prefix: "p",
+          now: NOW,
+          fetchImpl: reportFetch({
+            "first.ndjson": ciBody(false, [record("slow", "pass", 61_000)]),
+            "second.ndjson": undefined,
+          }),
+        })
+      );
+      expect(status).toBe(0);
+      expect(err).toContain("leaving `second.ndjson` out");
+      expect(out).toContain("2 object(s) under p in the last 1 day(s).");
+      expect(out).toContain("1 object(s) read, 1 could not be read.");
+      expect(out).toContain("Every figure below is over the objects that");
+      expect(out).toContain("Over sixty seconds (1):");
+      expect(out).toContain("[unit] bakery: slow");
+    });
+
+    it("names fifty of the objects it could not read and no more", async () => {
+      const bodies: Record<string, string | undefined> = {
+        "readable.ndjson": ciBody(false, [record("fast", "pass", 5)]),
+      };
+      for (let at = 0; at < 60; at++) {
+        bodies[`broken-${String(at).padStart(2, "0")}.ndjson`] = undefined;
+      }
+      const { out, err } = await captureConsole(() =>
+        runReport({
+          days: 1,
+          gate: false,
+          bucket: "b",
+          prefix: "p",
+          now: NOW,
+          fetchImpl: reportFetch(bodies),
+        })
+      );
+      const named = err.split("\n").filter((line) =>
+        line.startsWith("leaving")
+      );
+      expect(named.length).toBe(50);
+      expect(err).toContain(
+        "objects left out past the first 50 are not named.",
+      );
+      expect(out).toContain("1 object(s) read, 60 could not be read.");
+    });
+
+    it("exits 3 for a window it could not read in full", async () => {
+      const { result: status, err } = await captureConsole(() =>
+        runReport({
+          days: 1,
+          gate: true,
+          bucket: "b",
+          prefix: "p",
+          now: NOW,
+          fetchImpl: reportFetch({
+            "first.ndjson": ciBody(false, [record("fast", "pass", 5)]),
+            "second.ndjson": undefined,
+          }),
+        })
+      );
+      expect(status).toBe(3);
+      expect(err).toContain("the ratchet could not check it");
+      expect(err).not.toContain("exceed the sixty-second rule");
+    });
+
+    it("exits 1 for a test over the rule even in a window read in part", async () => {
+      const { result: status, err } = await captureConsole(() =>
+        runReport({
+          days: 1,
+          gate: true,
+          bucket: "b",
+          prefix: "p",
+          now: NOW,
+          fetchImpl: reportFetch({
+            "first.ndjson": ciBody(false, [record("slow", "pass", 61_000)]),
+            "second.ndjson": undefined,
+          }),
+        })
+      );
+      expect(status).toBe(1);
+      expect(err).toContain("exceed the sixty-second rule");
+      expect(err).toContain("the ratchet could not check it");
+    });
+
+    it("exits 3 for a day it could not list", async () => {
+      const { result: status, out, err } = await captureConsole(() =>
+        runReport({
+          days: 1,
+          gate: true,
+          bucket: "b",
+          prefix: "p",
+          now: NOW,
+          fetchImpl: (() =>
+            Promise.resolve(
+              new Response("", { status: 503 }),
+            )) as typeof fetch,
+        })
+      );
+      expect(status).toBe(3);
+      expect(err).toContain("listing `2026/08/18` failed");
+      expect(out).toContain("1 day(s) could not be listed");
+      expect(err).toContain("the ratchet could not check it");
     });
   });
 

@@ -518,10 +518,15 @@ take milliseconds. Anything that cannot is a container to split into the
 tests it actually contains. `tasks/test-records-report.ts` lists the
 identities over the rule from their passing executions, and its `--gate`
 flag is the ratchet, advisory until the list is short enough to enforce.
-The list is over tests: a lane's measurement of one of its batches is not
-one, however long that batch ran. A test that wedges rather than
-finishing slowly records no duration; wedges surface through job
-failures, and the incremental producers bound what a wedged job loses to
-its unflushed lines. An identity with no passing execution in the window
-has no duration either, and is absent from the list for the same reason.
-A test that fails every time it runs surfaces through the job it fails.
+A window the report could not read in full is neither a pass nor a
+failure of the rule, and the ratchet says so with a status of its own:
+the objects a report left out are the ones nothing has been established
+about, and a ratchet that passed on a window read in part would report
+it clean on the strength of what arrived. The list is over tests: a
+lane's measurement of one of its batches is not one, however long that
+batch ran. A test that wedges rather than finishing slowly records no
+duration; wedges surface through job failures, and the incremental
+producers bound what a wedged job loses to its unflushed lines. An
+identity with no passing execution in the window has no duration either,
+and is absent from the list for the same reason. A test that fails every
+time it runs surfaces through the job it fails.
