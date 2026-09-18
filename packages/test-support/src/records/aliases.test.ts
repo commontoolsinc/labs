@@ -8,7 +8,7 @@ import {
   AliasResolver,
   loadAliasResolver,
   parseAliasLine,
-  readAliasFiles,
+  readAliasDirectory,
 } from "./aliases.ts";
 
 const FULL: AliasLine = {
@@ -214,7 +214,7 @@ describe("aliases", () => {
     });
   });
 
-  describe("readAliasFiles()", () => {
+  describe("readAliasDirectory()", () => {
     let directory: string;
 
     beforeEach(async () => {
@@ -225,19 +225,31 @@ describe("aliases", () => {
       await Deno.remove(directory, { recursive: true }).catch(() => {});
     });
 
-    it("returns the `.jsonl` files in order of name", async () => {
+    it("returns the `.jsonl` files and the other entries, each in order of name", async () => {
       await Deno.writeTextFile(join(directory, "b.test.ts.jsonl"), "second\n");
       await Deno.writeTextFile(join(directory, "a.test.ts.jsonl"), "first\n");
       await Deno.writeTextFile(join(directory, "README.md"), "prose\n");
       await Deno.mkdir(join(directory, "nested.jsonl"));
-      expect(await readAliasFiles(directory)).toEqual([
-        { name: "a.test.ts.jsonl", text: "first\n" },
-        { name: "b.test.ts.jsonl", text: "second\n" },
-      ]);
+      expect(await readAliasDirectory(directory)).toEqual({
+        files: [
+          { name: "a.test.ts.jsonl", text: "first\n" },
+          { name: "b.test.ts.jsonl", text: "second\n" },
+        ],
+        unread: ["README.md", "nested.jsonl"],
+      });
     });
 
-    it("returns no files for a missing directory", async () => {
-      expect(await readAliasFiles(join(directory, "absent"))).toEqual([]);
+    it("returns nothing for a missing directory", async () => {
+      expect(await readAliasDirectory(join(directory, "absent"))).toEqual({
+        files: [],
+        unread: [],
+      });
+    });
+
+    it("throws given a path that is not a directory", async () => {
+      const file = join(directory, "a.test.ts.jsonl");
+      await Deno.writeTextFile(file, "first\n");
+      await expect(readAliasDirectory(file)).rejects.toThrow();
     });
   });
 

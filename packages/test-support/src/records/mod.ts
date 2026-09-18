@@ -44,9 +44,9 @@ export {
   AliasResolver,
   loadAliasResolver,
   parseAliasLine,
-  readAliasFiles,
+  readAliasDirectory,
 } from "./aliases.ts";
-export type { AliasFile, AliasLine } from "./aliases.ts";
+export type { AliasDirectory, AliasFile, AliasLine } from "./aliases.ts";
 export {
   FRAGMENT_PREFIX,
   FRAGMENT_SUFFIX,

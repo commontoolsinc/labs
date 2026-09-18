@@ -3,6 +3,11 @@ import { expect } from "@std/expect";
 import { dirname, fromFileUrl, join } from "@std/path";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 
+import {
+  aliasDirectoryProblems,
+  type AliasDirectoryState,
+} from "./check-test-aliases.ts";
+
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 const ALIAS_LINE = JSON.stringify({
   date: "2026-08-17",
@@ -226,6 +231,119 @@ describe("check-test-aliases", () => {
     } finally {
       await Deno.remove(repo.dir, { recursive: true }).catch(() => {});
     }
+  });
+
+  describe("aliasDirectoryProblems()", () => {
+    /** A state with one committed file, unchanged, overridden per test. */
+    function state(
+      overrides: Partial<AliasDirectoryState> = {},
+    ): AliasDirectoryState {
+      return {
+        current: {
+          files: [{ name: "glaze.test.ts.jsonl", text: ALIAS_LINE + "\n" }],
+          unread: [],
+        },
+        committed: new Map([["glaze.test.ts.jsonl", ALIAS_LINE + "\n"]]),
+        mergeBase: "0123456789abcdef",
+        strayFile: false,
+        ...overrides,
+      };
+    }
+
+    it("returns no problems and every alias for an unchanged directory", () => {
+      const { problems, aliases } = aliasDirectoryProblems(state());
+      expect(problems).toEqual([]);
+      expect(aliases).toEqual([JSON.parse(ALIAS_LINE)]);
+    });
+
+    it("returns no problems for an appended line and for a new file", () => {
+      const { problems, aliases } = aliasDirectoryProblems(state({
+        current: {
+          files: [
+            { name: "crumb.test.ts.jsonl", text: OTHER_LINE + "\n" },
+            {
+              name: "glaze.test.ts.jsonl",
+              text: ALIAS_LINE + "\n" + ALIAS_LINE.replace("old", "oldest") +
+                "\n",
+            },
+          ],
+          unread: [],
+        },
+      }));
+      expect(problems).toEqual([]);
+      expect(aliases).toHaveLength(3);
+    });
+
+    it("returns a problem naming a committed file that was edited", () => {
+      const { problems } = aliasDirectoryProblems(state({
+        current: {
+          files: [{ name: "glaze.test.ts.jsonl", text: OTHER_LINE + "\n" }],
+          unread: [],
+        },
+      }));
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain(
+        "tasks/test-identity-aliases/glaze.test.ts.jsonl rewrites history: " +
+          "the content at 0123456789ab is",
+      );
+    });
+
+    it("returns a problem naming a committed file that went missing", () => {
+      const { problems } = aliasDirectoryProblems(state({
+        current: {
+          files: [{ name: "icing.test.ts.jsonl", text: ALIAS_LINE + "\n" }],
+          unread: [],
+        },
+      }));
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain("glaze.test.ts.jsonl rewrites history");
+    });
+
+    it("returns a problem naming the file and line that does not parse", () => {
+      const { problems, aliases } = aliasDirectoryProblems(state({
+        current: {
+          files: [{
+            name: "glaze.test.ts.jsonl",
+            text: ALIAS_LINE + "\n\nnot json\n",
+          }],
+          unread: [],
+        },
+      }));
+      expect(problems).toEqual(["glaze.test.ts.jsonl line 3 is not JSON"]);
+      expect(aliases).toHaveLength(1);
+    });
+
+    it("returns a problem for an identity mapped in two files", () => {
+      const { problems } = aliasDirectoryProblems(state({
+        current: {
+          files: [
+            {
+              name: "crumb.test.ts.jsonl",
+              text: ALIAS_LINE.replace("new", "newer") + "\n",
+            },
+            { name: "glaze.test.ts.jsonl", text: ALIAS_LINE + "\n" },
+          ],
+          unread: [],
+        },
+      }));
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain("two mappings from");
+    });
+
+    it("returns a problem naming each entry that no reader loads", () => {
+      const { problems } = aliasDirectoryProblems(state({
+        current: { ...state().current, unread: ["README.md", "nested"] },
+        strayFile: true,
+      }));
+      expect(problems).toHaveLength(3);
+      expect(problems[0]).toContain(
+        "tasks/test-identity-aliases/README.md is not a `.jsonl` file",
+      );
+      expect(problems[1]).toContain("tasks/test-identity-aliases/nested is");
+      expect(problems[2]).toContain(
+        "tasks/test-identity-aliases.jsonl is outside",
+      );
+    });
   });
 
   it("treats a missing merge base as a setup error", async () => {

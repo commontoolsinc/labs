@@ -26,14 +26,91 @@
  * Usage: check-test-aliases.ts [base-ref]   (default: origin/main)
  */
 
+import { basename, dirname } from "@std/path";
 import {
   ALIAS_DIRECTORY,
   ALIAS_FILE_SUFFIX,
+  type AliasDirectory,
   aliasGraphProblems,
   type AliasLine,
   parseAliasLine,
-  readAliasFiles,
+  readAliasDirectory,
 } from "@commonfabric/test-support/records";
+
+/** What the gate compares: the alias directory now, and at the merge base. */
+export type AliasDirectoryState = {
+  /** The directory as the working copy holds it. */
+  current: AliasDirectory;
+
+  /** Text of each alias file at the merge base, by file name. */
+  committed: ReadonlyMap<string, string>;
+
+  /** The merge base, as messages name it. */
+  mergeBase: string;
+
+  /**
+   * Whether a `.jsonl` file of the directory's own name sits beside the
+   * directory.
+   */
+  strayFile: boolean;
+};
+
+/**
+ * Holds an alias directory to history's rules. Returns every problem found,
+ * along with the aliases that parsed.
+ */
+export function aliasDirectoryProblems(
+  state: AliasDirectoryState,
+): { problems: string[]; aliases: AliasLine[] } {
+  const { current, committed, mergeBase, strayFile } = state;
+  const problems: string[] = [];
+
+  for (const name of current.unread) {
+    problems.push(
+      `${ALIAS_DIRECTORY}/${name} is not a \`${ALIAS_FILE_SUFFIX}\` file ` +
+        "directly inside the directory, so no reader loads it",
+    );
+  }
+  if (strayFile) {
+    problems.push(
+      `${ALIAS_DIRECTORY}${ALIAS_FILE_SUFFIX} is outside ` +
+        `${ALIAS_DIRECTORY}/, so no reader loads it; its lines belong in ` +
+        "the files there",
+    );
+  }
+
+  const currentText = new Map(
+    current.files.map(({ name, text }) => [name, text]),
+  );
+  for (const [name, text] of committed) {
+    if (currentText.get(name)?.startsWith(text) !== true) {
+      problems.push(
+        `${ALIAS_DIRECTORY}/${name} rewrites history: the content at ` +
+          `${mergeBase.slice(0, 12)} is no longer a prefix of the working ` +
+          "copy. An alias file is append-only — a wrong line is superseded " +
+          "by a newer line, never edited.",
+      );
+    }
+  }
+
+  const aliases: AliasLine[] = [];
+  for (const { name, text } of current.files) {
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      if (line.length === 0) continue;
+      const parsed = parseAliasLine(line);
+      if (typeof parsed === "string") {
+        problems.push(`${name} line ${i + 1} ${parsed}`);
+        continue;
+      }
+      aliases.push(parsed);
+    }
+  }
+  problems.push(...aliasGraphProblems(aliases));
+
+  return { problems, aliases };
+}
 
 async function git(...args: string[]): Promise<string> {
   const { code, stdout, stderr } = await new Deno.Command("git", {
@@ -47,34 +124,6 @@ async function git(...args: string[]): Promise<string> {
     );
   }
   return new TextDecoder().decode(stdout);
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await Deno.lstat(path);
-    return true;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return false;
-    throw error;
-  }
-}
-
-/**
- * Names of the entries of an alias directory that `readAliasFiles()` passes
- * over. A missing directory has none.
- */
-async function unreadEntries(directory: string): Promise<string[]> {
-  const names: string[] = [];
-  try {
-    for await (const entry of Deno.readDir(directory)) {
-      if (!entry.isFile || !entry.name.endsWith(ALIAS_FILE_SUFFIX)) {
-        names.push(entry.name);
-      }
-    }
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
-  }
-  return names.sort();
 }
 
 async function main(): Promise<void> {
@@ -92,74 +141,35 @@ async function main(): Promise<void> {
 
   // `ls-tree` prints nothing for a path absent at that ref, so a directory
   // created after the merge base reads as empty history, and any git
-  // failure stops the gate rather than approving a rewrite.
-  let committedPaths: string[];
-  try {
-    committedPaths = (await git(
-      "ls-tree",
-      "-r",
-      "-z",
-      "--name-only",
-      mergeBase,
-      "--",
-      `${ALIAS_DIRECTORY}/`,
-    )).split("\0").filter((path) => path.length > 0);
-  } catch (error) {
-    console.error(
-      `Cannot list ${ALIAS_DIRECTORY} at the merge base: ${error}`,
-    );
-    Deno.exit(2);
-  }
+  // failure throws, which stops the gate rather than approving a rewrite.
+  const committedPaths = (await git(
+    "ls-tree",
+    "-r",
+    "-z",
+    "--name-only",
+    mergeBase,
+    "--",
+    `${ALIAS_DIRECTORY}/`,
+  )).split("\0").filter((path) => path.length > 0);
 
-  const problems: string[] = [];
-
-  for (const name of await unreadEntries(ALIAS_DIRECTORY)) {
-    problems.push(
-      `${ALIAS_DIRECTORY}/${name} is not a \`${ALIAS_FILE_SUFFIX}\` file ` +
-        "directly inside the directory, so no reader loads it",
-    );
-  }
-  const stray = `${ALIAS_DIRECTORY}${ALIAS_FILE_SUFFIX}`;
-  if (await exists(stray)) {
-    problems.push(
-      `${stray} is outside ${ALIAS_DIRECTORY}/, so no reader loads it; its ` +
-        "lines belong in the files there",
-    );
-  }
-
-  const files = await readAliasFiles(ALIAS_DIRECTORY);
-  const currentText = new Map(
-    files.map(({ name, text }) => [`${ALIAS_DIRECTORY}/${name}`, text]),
-  );
+  const prefix = `${ALIAS_DIRECTORY}/`;
+  const committed = new Map<string, string>();
   for (const path of committedPaths) {
-    const committed = await git("show", `${mergeBase}:${path}`);
-    const current = currentText.get(path);
-    if (current === undefined || !current.startsWith(committed)) {
-      problems.push(
-        `${path} rewrites history: the content at ${
-          mergeBase.slice(0, 12)
-        } is no longer a prefix of the working copy. An alias file is ` +
-          "append-only — a wrong line is superseded by a newer line, never " +
-          "edited.",
-      );
-    }
+    committed.set(
+      path.slice(prefix.length),
+      await git("show", `${mergeBase}:${path}`),
+    );
   }
-
-  const aliases: AliasLine[] = [];
-  for (const { name, text } of files) {
-    const lines = text.split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]!;
-      if (line.length === 0) continue;
-      const parsed = parseAliasLine(line);
-      if (typeof parsed === "string") {
-        problems.push(`${name} line ${i + 1} ${parsed}`);
-        continue;
-      }
-      aliases.push(parsed);
-    }
-  }
-  problems.push(...aliasGraphProblems(aliases));
+  const current = await readAliasDirectory(ALIAS_DIRECTORY);
+  const beside = await Array.fromAsync(Deno.readDir(dirname(ALIAS_DIRECTORY)));
+  const { problems, aliases } = aliasDirectoryProblems({
+    current,
+    committed,
+    mergeBase,
+    strayFile: beside.some(({ name }) =>
+      name === `${basename(ALIAS_DIRECTORY)}${ALIAS_FILE_SUFFIX}`
+    ),
+  });
 
   if (problems.length > 0) {
     console.error(`${ALIAS_DIRECTORY} has ${problems.length} problem(s):`);
@@ -167,8 +177,8 @@ async function main(): Promise<void> {
     Deno.exit(1);
   }
   console.log(
-    `${ALIAS_DIRECTORY}: ${aliases.length} alias(es) in ${files.length} ` +
-      "file(s), append-only and acyclic.",
+    `${ALIAS_DIRECTORY}: ${aliases.length} alias(es) in ` +
+      `${current.files.length} file(s), append-only and acyclic.`,
   );
 }
 

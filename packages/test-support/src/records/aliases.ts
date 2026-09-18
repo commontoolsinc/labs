@@ -99,27 +99,44 @@ export type AliasFile = {
   text: string;
 };
 
+/** What an alias directory holds. */
+export type AliasDirectory = {
+  /** The alias files directly inside the directory, in order of name. */
+  files: AliasFile[];
+
+  /**
+   * Names of the directory's other entries, in order. No reader loads
+   * these.
+   */
+  unread: string[];
+};
+
 /**
- * Reads every alias file directly inside `directory`, in order of file name.
- * A missing directory holds no files.
+ * Reads an alias directory: every `.jsonl` file directly inside it, and the
+ * names of whatever else is there. A missing directory holds nothing.
  */
-export async function readAliasFiles(directory: string): Promise<AliasFile[]> {
+export async function readAliasDirectory(
+  directory: string,
+): Promise<AliasDirectory> {
   const names: string[] = [];
+  const unread: string[] = [];
   try {
     for await (const entry of Deno.readDir(directory)) {
-      if (entry.isFile && entry.name.endsWith(ALIAS_FILE_SUFFIX)) {
-        names.push(entry.name);
-      }
+      const isAliasFile = entry.isFile &&
+        entry.name.endsWith(ALIAS_FILE_SUFFIX);
+      (isAliasFile ? names : unread).push(entry.name);
     }
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return [];
+    if (error instanceof Deno.errors.NotFound) return { files: [], unread: [] };
     throw error;
   }
   names.sort();
-  return await Promise.all(names.map(async (name) => ({
+  unread.sort();
+  const files = await Promise.all(names.map(async (name) => ({
     name,
     text: await Deno.readTextFile(join(directory, name)),
   })));
+  return { files, unread };
 }
 
 /**
@@ -237,7 +254,9 @@ export async function loadAliasResolver(path?: string): Promise<AliasResolver> {
       return root === undefined ? undefined : join(root, ALIAS_DIRECTORY);
     })();
   const aliases: AliasLine[] = [];
-  const files = directory === undefined ? [] : await readAliasFiles(directory);
+  const files = directory === undefined
+    ? []
+    : (await readAliasDirectory(directory)).files;
   for (const { text } of files) {
     for (const line of text.split("\n")) {
       if (line.length === 0) continue;
