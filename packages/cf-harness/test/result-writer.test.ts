@@ -571,9 +571,21 @@ describe("writeAgentResult()", () => {
             },
           ],
         },
+        // A ceiling inside an alternative beneath an `allOf` branch.
+        nested: {
+          allOf: [
+            { type: "object", asCell: ["cell"] },
+            {
+              anyOf: [
+                { type: "number" },
+                { ifc: { maxConfidentiality: [] } },
+              ],
+            },
+          ],
+        },
         viaLink: { type: "object", asCell: ["cell"] },
       },
-      required: ["extras", "pair", "either", "both", "viaLink"],
+      required: ["extras", "pair", "either", "both", "nested", "viaLink"],
       additionalProperties: false,
     };
     const written = await writeAgentResult({
@@ -585,6 +597,7 @@ describe("writeAgentResult()", () => {
         pair: [tokenB, "plain"],
         either: tokenA,
         both: { book: tokenB },
+        nested: tokenA,
         viaLink: { "@link": tokenA },
       },
       observedHandles: cellHandles(),
@@ -592,7 +605,11 @@ describe("writeAgentResult()", () => {
       cause: "result-positions",
     });
 
-    expect(written.sealedPaths).toEqual([["either"], ["both", "book"]]);
+    expect(written.sealedPaths).toEqual([
+      ["either"],
+      ["both", "book"],
+      ["nested"],
+    ]);
     const result = runtime.getCellFromLink(written.link);
     await result.sync();
     expect(parseLink(result.key("extras").key("one").getRaw())?.id).toBe(

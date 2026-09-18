@@ -293,18 +293,20 @@ The current package provides:
   root) over the same fabric session, for a caller that runs the harness on
   behalf of a pattern's agent request: it validates a run's structured result
   against its schema, writes it as one document in the session's space, and
-  returns a link to it. Every handle the result names becomes a link wherever it
-  sits — a cell handle to its cell, a non-cell referent the run observed (a Loom
-  row, a SQLite row) to a document minted under the label the tool reported —
-  and a handle the run does not hold fails the write before any document is
-  written. Inline model-authored text carries the join the writing transaction
-  derives from reading every observed cell; the write is attributed to the
-  `agent` builtin, so the result carries `LlmDerived`; the run's observation
-  ceiling is declared as the result's store policy, so a join that does not fit
-  is refused by the runner's commit boundary and surfaces as a typed
-  `cfc_commit_refused` failure whose message names no label. A handle at a
-  position whose schema declares a `maxConfidentiality` the referent's label
-  exceeds is sealed rather than linked;
+  returns a link to it. Every handle the result names at a value position
+  becomes a link, `asCell` position or not; a property name is held to the same
+  ownership rule and stays text, since a name cannot hold a link — a cell handle
+  to its cell, a non-cell referent the run observed (a Loom row, a SQLite row)
+  to a document minted under the label the tool reported — and a handle the run
+  does not hold fails the write before any document is written. Inline
+  model-authored text carries the join the writing transaction derives from
+  reading every observed cell; the write is attributed to the `agent` builtin,
+  so the result carries `LlmDerived`; the run's observation ceiling is declared
+  as the result's store policy, so a join that does not fit is refused by the
+  runner's commit boundary and surfaces as a typed `cfc_commit_refused` failure
+  whose message names no label. A handle at a position whose schema declares a
+  `maxConfidentiality` the referent's label exceeds is sealed rather than
+  linked;
 - opt-in fabric-session tools — `run_pattern` and `assign_slug`
   (`--fabric-api-url`, `--fabric-identity`, and `--fabric-space` configured
   together, or their `CF_HARNESS_FABRIC_*` environment fallbacks).

@@ -261,7 +261,8 @@ referent's label as the tool reported it, and a link to that document. A
 handle the run does not hold, anywhere in the result — a whole position, a
 token inside prose, a property name — does not resolve, and the result fails
 before anything is written rather than carrying an address the model composed
-(AH-REF-2). A handle whose cell lies outside the session's space is refused
+(AH-REF-2). A held handle in a property name stays the text it is, since a
+name cannot hold a link. A handle whose cell lies outside the session's space is refused
 too: the session's authority ends at its space. A recommendation list is then
 five links to five book cells and a short model-authored rationale per link.
 

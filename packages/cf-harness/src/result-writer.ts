@@ -5,7 +5,9 @@
  * The harness is what knows what the model observed and what each handle in
  * the answer stands for, so the harness writes the result itself, from its
  * host-side fabric session, and nothing downstream re-labels or re-validates
- * it. Every handle the result names becomes a link, wherever it sits: a
+ * it. Every handle the result names at a value position becomes a link,
+ * `asCell` position or not; a property name is held to the same ownership
+ * rule and stays the text it is, since a name cannot hold a link. A
  * handle to a cell becomes a link to that cell, so a consumer's read resolves
  * the cell's own label; a handle to a referent that is not a cell — a Loom
  * row, a SQLite row — becomes a document holding that content under the
@@ -473,26 +475,29 @@ const childSchemaForIndex = (
 
 /**
  * The ceiling a position declares for what is placed there, or `undefined`
- * where it declares none: the governing node's `ifc.maxConfidentiality` met
- * with whatever each `allOf` branch declares, so a referent must fit every
- * declaration that reaches the position.
+ * where it declares none: the `ifc.maxConfidentiality` of the node governing
+ * `value` met with whatever each `allOf` branch declares, so a referent must
+ * fit every declaration that reaches the position. Each branch is narrowed to
+ * the alternative `value` satisfies before it is read, so a ceiling declared
+ * inside an `anyOf` or `oneOf` beneath an `allOf` is measured too.
  */
 const positionCeiling = (
   schema: JSONSchema,
+  value: unknown,
   full: JSONSchema,
 ): readonly CfcConfClause[] | undefined => {
-  const resolved = resolveSchemaForValidation(schema, full);
-  if (!isObjectOrArray(resolved)) return undefined;
+  const node = governingSchema(schema, value, full);
+  if (!isObjectOrArray(node)) return undefined;
   let ceiling: CfcObservationMaxConfidentiality = undefined;
-  if (isObjectOrArray(resolved.ifc)) {
-    const own = resolved.ifc.maxConfidentiality;
+  if (isObjectOrArray(node.ifc)) {
+    const own = node.ifc.maxConfidentiality;
     if (Array.isArray(own)) ceiling = own as CfcConfClause[];
   }
-  if (Array.isArray(resolved.allOf)) {
-    for (const branch of resolved.allOf) {
+  if (Array.isArray(node.allOf)) {
+    for (const branch of node.allOf) {
       ceiling = meetCfcObservationCeilings(
         ceiling,
-        positionCeiling(branch as JSONSchema, full),
+        positionCeiling(branch as JSONSchema, value, full),
       );
     }
   }
@@ -535,7 +540,7 @@ const resolveReferences = (
   if (text !== undefined) {
     const reference = resolve(text, path);
     if (reference !== undefined) {
-      out.push({ reference, ceiling: positionCeiling(node, full) });
+      out.push({ reference, ceiling: positionCeiling(node, value, full) });
       return;
     }
     // Not a reference as a whole; a token inside it is checked below.
