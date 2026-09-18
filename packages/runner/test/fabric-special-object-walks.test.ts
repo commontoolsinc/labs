@@ -42,10 +42,12 @@ import {
   FabricSet,
 } from "@commonfabric/data-model/fabric-instances";
 import {
+  codecClasses as primitiveCodecClasses,
   FabricBytes,
   FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
+  FabricKeyPair,
   FabricRegExp,
   FabricUnavailable,
 } from "@commonfabric/data-model/fabric-primitives";
@@ -129,6 +131,20 @@ const SPECIAL_OBJECTS: readonly SpecialObjectKind[] = [
     isInstance: false,
   },
   {
+    name: "FabricKeyPair",
+    cls: FabricKeyPair,
+    // A pair holding material, which is the arm a codec can freeze and hash.
+    // The algorithm name is arbitrary; a real one would mislead a `grep`.
+    make: () =>
+      new FabricKeyPair(
+        "ExampleAlgorithm",
+        new Uint8Array([1, 2]),
+        new Uint8Array([3, 4]),
+      ),
+    storable: true,
+    isInstance: false,
+  },
+  {
     name: "FabricUnavailable",
     cls: FabricUnavailable,
     make: () => new FabricUnavailable("error", "general", "boom"),
@@ -196,6 +212,19 @@ function forEachSpecialObject(
 }
 
 describe("fabric special objects through the runner's walks", () => {
+  describe("the roster of kinds", () => {
+    it("holds exactly the `FabricPrimitive` classes the data model lists", () => {
+      // A primitive left out of the roster is one no case here carries through
+      // a walk, and nothing else would say so.
+
+      const rostered = FABRIC_PRIMITIVES.map((kind) => kind.cls);
+      expect(new Set<unknown>(rostered)).toEqual(
+        new Set<unknown>(primitiveCodecClasses()),
+      );
+      expect(rostered.length).toBe(primitiveCodecClasses().length);
+    });
+  });
+
   describe("mergeDefaults()", () => {
     forEachSpecialObject(
       STORABLE_PRIMITIVES,
