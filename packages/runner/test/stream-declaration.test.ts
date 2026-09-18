@@ -350,10 +350,27 @@ describe("stream declaration", () => {
       $defs: { Event: { asCell: ["stream"], type: "number" } },
     } as JSONSchema;
 
+    // Two branches naming one definition: the second visit to `Event` is a
+    // sibling's, not a cycle.
+    const shared = {
+      type: "object",
+      required: ["events"],
+      properties: {
+        events: {
+          anyOf: [
+            { $ref: "#/$defs/Event", description: "one" },
+            { $ref: "#/$defs/Event", description: "two" },
+          ],
+        },
+      },
+      $defs: { Event: { asCell: ["stream"], type: "number" } },
+    } as JSONSchema;
+
     for (
       const [spelling, schema] of [
         ["inline", inline],
         ["through a local `$ref`", referenced],
+        ["through two local `$ref`s to one definition", shared],
       ] as const
     ) {
       for (const mode of ["eager", "lazy"] as const) {
@@ -372,6 +389,32 @@ describe("stream declaration", () => {
         });
       }
     }
+  });
+
+  describe("a declaration read through references", () => {
+    const event = { asCell: ["stream"], type: "number" } as JSONSchema & object;
+
+    it("reads a definition once for each branch that names it", () => {
+      expect(ContextualFlowControl.declaresStream({
+        anyOf: [
+          { $ref: "#/$defs/Event", description: "one" },
+          { $ref: "#/$defs/Event", description: "two" },
+        ],
+        $defs: { Event: event },
+      })).toBe(true);
+    });
+
+    it("stops at a reference that leads back to itself", () => {
+      expect(ContextualFlowControl.declaredHandleKind({
+        $ref: "#/$defs/Loop",
+        $defs: { Loop: { $ref: "#/$defs/Loop" } },
+      })).toBeUndefined();
+      // A branch that loops declares nothing, and `anyOf` needs every branch.
+      expect(ContextualFlowControl.declaredHandleKind({
+        anyOf: [{ $ref: "#/$defs/Loop" }, event],
+        $defs: { Loop: { anyOf: [{ $ref: "#/$defs/Loop" }] } },
+      })).toBeUndefined();
+    });
   });
 
   describe("an address that names a stream's document alone", () => {

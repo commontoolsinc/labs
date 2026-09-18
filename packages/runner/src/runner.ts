@@ -5069,8 +5069,12 @@ export class Runner {
     // this pattern's derived internal cells. A marker naming another version
     // and no marker at all both qualify: a doc set up before the marker
     // existed carries none, and drifts the same way. Only a marker naming
-    // this version says its setup ran. The repair moves no durable identity
-    // pointer; it replays the pattern the pointer already names
+    // this version says its setup ran. A keyless piece keeps that marker
+    // session-side (`#sessionPatternPointers`, the never-durable contract),
+    // so it reads as matching and is not repaired here; the precondition
+    // below re-reads a durable identity it never had. The repair moves no
+    // durable identity pointer; it replays the pattern the pointer already
+    // names
     // (samePattern=true: materializes the missing internal cells but leaves
     // the existing argument — the piece's data — untouched; no roll-forward,
     // no user-data rewrite). It stages into the instantiation's own
@@ -5089,7 +5093,11 @@ export class Runner {
       if (
         useTx === undefined &&
         ref !== undefined &&
-        storedSetupMarker(resultCell, ref) !== "matches" &&
+        storedSetupMarker(
+            resultCell,
+            ref,
+            this.#sessionPatternPointer(resultCell),
+          ) !== "matches" &&
         !this.#storedManifestCovers(resultCell, pattern) &&
         // The root/default pattern is the PieceController's to repair (it has
         // the richer roll-forward + clear-error path); defer to it there.

@@ -88,6 +88,7 @@ import {
 } from "./link-types.ts";
 import {
   addressKey,
+  declareStreamSchema,
   NormalizedFullLink,
   parseLink,
   schemaForSpaceCrossing,
@@ -5171,8 +5172,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
           // way an inline value at an asCell boundary is above, so a key the
           // data lacks there is not a missing property. Nothing is traversed:
           // the event schema describes what the stream accepts, not a value.
+          // The handle's link declares the stream at its root, where the
+          // creator reads it, however the property spelled the declaration.
           filteredObj[propKey] = this.objectCreator.createObject(
-            getNormalizedLink(propAddress, propSchema),
+            getNormalizedLink(propAddress, declareStreamSchema(propSchema)),
             undefined,
           );
           continue;

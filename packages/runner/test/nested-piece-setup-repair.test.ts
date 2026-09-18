@@ -229,4 +229,55 @@ describe("nested-piece-setup-repair", () => {
       await rt.dispose();
     }
   });
+
+  it("leaves a keyless piece alone: its session pointer is its setup marker", async () => {
+    // A keyless pattern's identity never reaches durable state, so its doc
+    // carries neither `patternSetupIdentity` nor a durable `patternIdentity`.
+    // Its setup evidence is the session pointer, and the repair trigger reads
+    // the marker through it. Read without it, a keyless piece whose manifest
+    // does not cover its pattern would be staged for repair and then refused
+    // by the precondition, which re-reads a durable identity it never had.
+    const rt = newRuntime();
+    try {
+      const keyless = {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { count: { type: "number" } },
+        },
+        result: { count: { $alias: { partialCause: "count", path: [] } } },
+        derivedInternalCells: [{
+          partialCause: "count",
+          schema: { type: "number", default: 3 },
+        }],
+        nodes: [],
+      };
+      const tx = rt.edit();
+      const cell = rt.getCell<Record<string, unknown>>(
+        space,
+        "keyless-not-repaired",
+        undefined,
+        tx,
+      );
+      const running = rt.run(tx, keyless as never, {}, cell);
+      await tx.commit();
+      await running.pull();
+      rt.runner.stop(cell);
+      // The stored state drifted: the manifest no longer names the pattern's
+      // derived cell, which is what turns the repair on for a keyed piece.
+      const tx2 = rt.edit();
+      cell.withTx(tx2).setMetaRaw(
+        "internal",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
+      await tx2.commit();
+
+      expect(await rt.start(cell)).toBe(true);
+      await cell.pull();
+      expect((cell.getAsQueryResult() as { count: number }).count).toBe(3);
+    } finally {
+      await rt.dispose();
+    }
+  });
 });

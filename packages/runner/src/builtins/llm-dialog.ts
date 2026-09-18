@@ -2074,12 +2074,14 @@ function resolveToolCall(
     // They are tried in that order because the handle chosen is also what the
     // integrity gate reads its floors from (`integrityGateTarget`): a stored
     // link and a manifest link carry the handler's event schema, floors
-    // included, where a result schema may say no more than "a stream".
+    // included, where a result schema may say no more than "a stream". The
+    // handle returned carries that schema on its own link.
     const streamHandle = (): Cell<unknown> | undefined => {
-      if (isStream(cellRef.resolveAsCell())) return cellRef;
+      const resolved = cellRef.resolveAsCell();
+      if (isStream(resolved)) return resolved;
       const typedRef = getResultCellWithSourceSchema(cellRef);
       if (isStream(typedRef.resolveAsCell())) return typedRef;
-      const ownerSchema = ownerStreamSchema(cellRef.resolveAsCell());
+      const ownerSchema = ownerStreamSchema(resolved);
       return ownerSchema === undefined
         ? undefined
         : cellRef.asSchema(ownerSchema);

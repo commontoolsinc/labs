@@ -418,8 +418,11 @@ export function createSigilLinkFromParsedLink(
  * `asCell` entry the event schema already carries describes the event and
  * stays behind the stamp, which is the order the runtime reads a list of
  * kinds in. A schema whose front entry is already `stream` is returned as it
- * is. This is the declaration every link to a stream carries, since the
- * document behind a stream holds nothing that says what the position is.
+ * is; one that declares the stream only through a reference or a union is
+ * stamped like any other, since the readers that mint a handle from a link's
+ * schema look at its root alone. This is the declaration every link to a
+ * stream carries, since the document behind a stream holds nothing that says
+ * what the position is.
  *
  * The result is interned and remembered per input schema, so a stream
  * serialized again and again hands link serialization the same frozen
@@ -434,7 +437,13 @@ export function declareStreamSchema(
   if (schema === false) {
     return EVENTLESS_STREAM_SCHEMA;
   }
-  if (ContextualFlowControl.declaresStream(schema)) return schema;
+  if (
+    ContextualFlowControl.getAsCellKind(
+      ContextualFlowControl.getAsCellValues(
+        resolveExternalRootRefForStructure(schema),
+      ).at(0),
+    ) === "stream"
+  ) return schema;
   const remembered = declaredStreamSchemas.get(schema);
   if (remembered !== undefined) return remembered;
   const entries = Array.isArray(schema.asCell) ? schema.asCell : [];
