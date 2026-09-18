@@ -42,15 +42,10 @@ import {
   FabricSet,
 } from "@commonfabric/data-model/fabric-instances";
 import {
-  codecClasses as primitiveCodecClasses,
   FabricBytes,
-  FabricEpochDay,
-  FabricEpochNsec,
-  FabricHash,
-  FabricKeyPair,
-  FabricRegExp,
-  FabricUnavailable,
+  fabricPrimitiveClassesByName,
 } from "@commonfabric/data-model/fabric-primitives";
+import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@commonfabric/data-model/fabric-primitives/examples-for-testing-only";
 import {
   fabricAwareEqual,
   type FabricSpecialObject,
@@ -94,63 +89,25 @@ interface SpecialObjectKind {
   readonly isInstance: boolean;
 }
 
+/**
+ * One kind per concrete `FabricPrimitive` class, taken from the data model's
+ * own examples, so that a class added there is driven through every walk here
+ * with no edit to this file.
+ */
+const PRIMITIVE_KINDS: readonly SpecialObjectKind[] = Object.entries(
+  FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY,
+).map(([name, [example]]): SpecialObjectKind => ({
+  name,
+  cls: fabricPrimitiveClassesByName()[
+    name as keyof typeof FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY
+  ],
+  make: () => example,
+  storable: true,
+  isInstance: false,
+}));
+
 const SPECIAL_OBJECTS: readonly SpecialObjectKind[] = [
-  {
-    name: "FabricBytes",
-    cls: FabricBytes,
-    make: () => new FabricBytes(new Uint8Array([1, 2, 3])),
-    storable: true,
-    isInstance: false,
-  },
-  {
-    name: "FabricEpochNsec",
-    cls: FabricEpochNsec,
-    make: () => new FabricEpochNsec(1_700n),
-    storable: true,
-    isInstance: false,
-  },
-  {
-    name: "FabricEpochDay",
-    cls: FabricEpochDay,
-    make: () => new FabricEpochDay(20_000n),
-    storable: true,
-    isInstance: false,
-  },
-  {
-    name: "FabricRegExp",
-    cls: FabricRegExp,
-    make: () => new FabricRegExp("es2025", "a+", "g"),
-    storable: true,
-    isInstance: false,
-  },
-  {
-    name: "FabricHash",
-    cls: FabricHash,
-    make: () => new FabricHash(new Uint8Array([9, 9]), "fid1"),
-    storable: true,
-    isInstance: false,
-  },
-  {
-    name: "FabricKeyPair",
-    cls: FabricKeyPair,
-    // A pair holding material, which is the arm a codec can freeze and hash.
-    // The algorithm name is arbitrary; a real one would mislead a `grep`.
-    make: () =>
-      new FabricKeyPair(
-        "ExampleAlgorithm",
-        new Uint8Array([1, 2]),
-        new Uint8Array([3, 4]),
-      ),
-    storable: true,
-    isInstance: false,
-  },
-  {
-    name: "FabricUnavailable",
-    cls: FabricUnavailable,
-    make: () => new FabricUnavailable("error", "general", "boom"),
-    storable: true,
-    isInstance: false,
-  },
+  ...PRIMITIVE_KINDS,
   {
     name: "FabricError",
     cls: FabricError,
@@ -212,19 +169,6 @@ function forEachSpecialObject(
 }
 
 describe("fabric special objects through the runner's walks", () => {
-  describe("the roster of kinds", () => {
-    it("holds exactly the `FabricPrimitive` classes the data model lists", () => {
-      // A primitive left out of the roster is one no case here carries through
-      // a walk, and nothing else would say so.
-
-      const rostered = FABRIC_PRIMITIVES.map((kind) => kind.cls);
-      expect(new Set<unknown>(rostered)).toEqual(
-        new Set<unknown>(primitiveCodecClasses()),
-      );
-      expect(rostered.length).toBe(primitiveCodecClasses().length);
-    });
-  });
-
   describe("mergeDefaults()", () => {
     forEachSpecialObject(
       STORABLE_PRIMITIVES,

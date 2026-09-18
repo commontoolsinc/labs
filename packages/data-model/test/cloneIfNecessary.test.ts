@@ -28,15 +28,11 @@ import {
 } from "@/index.ts";
 import type { FabricValue } from "@/index.ts";
 import { isDeepFrozen, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
-import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
+import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@/fabric-primitives/examples-for-testing-only.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
-import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
-import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { FabricUnavailable } from "@/fabric-primitives/FabricUnavailable.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import {
@@ -593,37 +589,15 @@ describe("cloneIfNecessary()", () => {
       factory: () => new FabricSet(new Set<FabricValue>([1])),
       deepCloneImplemented: false,
     },
-    // `FabricPrimitive` subclasses (intrinsically immutable).
-    {
-      name: "FabricBytes",
-      factory: () => new FabricBytes(new Uint8Array([1, 2, 3])),
+    // `FabricPrimitive` subclasses (intrinsically immutable), one case per
+    // class, from the examples the classes' own package keeps complete.
+    ...Object.entries(FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY).map((
+      [name, [example]],
+    ): SubclassCase => ({
+      name,
+      factory: () => example,
       deepCloneImplemented: false,
-    },
-    {
-      name: "FabricRegExp",
-      factory: () => new FabricRegExp(/abc/g),
-      deepCloneImplemented: false,
-    },
-    {
-      name: "FabricEpochNsec",
-      factory: () => new FabricEpochNsec(1234567890n),
-      deepCloneImplemented: false,
-    },
-    {
-      name: "FabricEpochDay",
-      factory: () => new FabricEpochDay(42n),
-      deepCloneImplemented: false,
-    },
-    {
-      name: "FabricHash",
-      factory: () => new FabricHash(new Uint8Array([1, 2, 3, 4]), "fid1"),
-      deepCloneImplemented: false,
-    },
-    {
-      name: "FabricUnavailable",
-      factory: () => new FabricUnavailable("error", "general", "boom"),
-      deepCloneImplemented: false,
-    },
+    })),
   ];
 
   /**
