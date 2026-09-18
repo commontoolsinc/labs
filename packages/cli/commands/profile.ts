@@ -174,9 +174,8 @@ list. Prints the new profile's address.`,
     "show",
     connected(
       cliText(
-        `Print the profile '#profile' resolves to, as JSON: its address, and
-its display name once the profile has run somewhere (a profile created and
-never opened carries only the name it was created with).`,
+        `Print the profile '#profile' resolves to, as JSON: its address and
+its display name.`,
       ),
     )
       .example(

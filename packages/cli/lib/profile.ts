@@ -16,6 +16,7 @@
  * carried on the event and never on a draft cell.
  */
 
+import type { CellScope } from "@commonfabric/api";
 import {
   type Cell,
   getMetaLink,
@@ -155,6 +156,50 @@ function sendCreate(
 }
 
 /**
+ * Helper for {@link createProfile}, which runs the created profile once so
+ * that its computed outputs — `name` among them, which the profile derives
+ * from the `initialName` the event carried — are stored where a runtime
+ * that never runs the piece reads them.
+ *
+ * The create handler sets the piece up and nothing runs it until a shell
+ * opens it. `cf profile show` and the `#profile` wish loom resolves a viewer
+ * through read the stored `name` and run nothing, so without this step they
+ * find a profile with no name.
+ *
+ * The run goes through a connection of its own, scoped to the profile's
+ * space, rather than through the home connection that sent the create: in
+ * the runtime that ran the handler the piece's nodes do not run on demand —
+ * a start there wires the scheduler and a pull materializes nothing — while
+ * a fresh runtime resuming the piece from storage runs them. The shape of
+ * the step is `cf cell get --step`'s (`getCellValue()`, lib/piece.ts): the
+ * piece started through `getPieceCell()`, pulled, synced, settled, synced.
+ * The stop and dispose close the connection down the way a one-shot command
+ * closes it.
+ *
+ * Under server execution (`experimental.serverExecution`) the server runs
+ * the piece as soon as it exists, and this client-side run adds nothing to
+ * what the server stored.
+ */
+async function materializeProfile(
+  config: SpaceConfig,
+  created: Pick<CreatedProfile, "space" | "id">,
+  scope: CellScope,
+  load: typeof loadPieces,
+): Promise<void> {
+  const pieces = await load({ ...config, space: created.space });
+  try {
+    const piece = await pieces.getPieceCell(created.id, true, undefined, scope);
+    await piece.pull();
+    await pieces.synced();
+    await pieces.runtime.idle();
+    await pieces.synced();
+    await pieces.stopPiece(piece);
+  } finally {
+    await pieces.dispose();
+  }
+}
+
+/**
  * Creates a profile named `config.name` in the home space of
  * `config.identity`, and returns where it landed.
  *
@@ -216,14 +261,17 @@ export async function createProfile(
   }
   const [space, link] = created;
   const normalized = link.getAsNormalizedFullLink();
+  const scope = normalized.scope ?? "space";
+  await materializeProfile(
+    config,
+    { space, id: normalized.id },
+    scope,
+    deps.loadPieces ?? loadPieces,
+  );
   return {
     name,
     space,
     id: normalized.id,
-    address: canonicalAddress({
-      space,
-      id: normalized.id,
-      scope: normalized.scope ?? "space",
-    }),
+    address: canonicalAddress({ space, id: normalized.id, scope }),
   };
 }

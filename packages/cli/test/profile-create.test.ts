@@ -11,9 +11,20 @@ import { expect } from "@std/expect";
 import { fromFileUrl } from "@std/path";
 
 import { Identity } from "@commonfabric/identity";
-import { type Cell, Runtime, type RuntimeProgram } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  type Cell,
+  type MemorySpace,
+  Runtime,
+  type RuntimeProgram,
+} from "@commonfabric/runner";
+import {
+  EmulatedStorageManager,
+  newLoopbackServer,
+} from "@commonfabric/runner/storage/cache.deno";
 
+import { PiecesController } from "@commonfabric/piece/ops";
+
+import type { SpaceConfig } from "../lib/piece.ts";
 import {
   createdByThisCall,
   createProfile,
@@ -59,7 +70,10 @@ const CONFIG: ProfileCreateConfig = {
 };
 
 describe("createProfile()", () => {
-  let manager: ReturnType<typeof StorageManager.emulate>;
+  // One server behind every manager, so a second runtime connected to it
+  // reads what the first committed the way a later process reads it.
+  let server: ReturnType<typeof newLoopbackServer>;
+  let manager: EmulatedStorageManager;
   let runtime: Runtime;
   // deno-lint-ignore no-explicit-any
   let host: any;
@@ -67,7 +81,8 @@ describe("createProfile()", () => {
   let loadPieces: any;
 
   beforeEach(async () => {
-    manager = StorageManager.emulate({ as: signer });
+    server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
+    manager = EmulatedStorageManager.connectTo(server, { as: signer });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: manager,
@@ -89,19 +104,40 @@ describe("createProfile()", () => {
     const setup = await tx.commit();
     expect(setup.error).toBeUndefined();
     await host.pull();
-    // The connection the command would open, answering with this host as
-    // the home root.
-    loadPieces = () =>
-      Promise.resolve({
-        runtime,
-        synced: () => Promise.resolve(),
-        ensureDefaultPattern: () => Promise.resolve({ getCell: () => host }),
+    // The connections the command would open: to the home space, answering
+    // with this host as the home root; and to the created profile's space,
+    // a runtime of its own over the same server, as a second connection
+    // from one process is.
+    loadPieces = (config: SpaceConfig) => {
+      if (config.space === space) {
+        return Promise.resolve({
+          runtime,
+          synced: () => Promise.resolve(),
+          ensureDefaultPattern: () => Promise.resolve({ getCell: () => host }),
+        });
+      }
+      const storage = EmulatedStorageManager.connectTo(server, { as: signer });
+      const profileRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
       });
+      const pieces = new PiecesController(
+        { as: signer, space: config.space as MemorySpace },
+        profileRuntime,
+        { deferSpaceCellSync: true },
+      );
+      pieces.dispose = async () => {
+        await profileRuntime.dispose({ closeStorage: false });
+        await storage.close();
+      };
+      return Promise.resolve(pieces);
+    };
   });
 
   afterEach(async () => {
     await runtime.dispose({ closeStorage: false });
     await manager.close();
+    await server.close();
   });
 
   it("creates the profile in a space of its own and returns its address", async () => {
@@ -110,6 +146,32 @@ describe("createProfile()", () => {
     expect(created.space).not.toBe(space);
     expect(created.address).toContain(created.space);
     expect(created.address).toContain(created.id);
+  });
+
+  it("stores the profile's `name`, which a fresh runtime reads back", async () => {
+    // The name is a computed output of the profile piece, and a reader with
+    // no shell — `cf profile show`, a `#profile` wish — runs nothing to
+    // produce it; the create has to have run the piece once.
+    const created = await createProfile(CONFIG, { loadPieces });
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const reader = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: readerStorage,
+    });
+    try {
+      const name = reader.getCellFromEntityId<string>(
+        created.space as MemorySpace,
+        created.id,
+        ["name"],
+      );
+      await name.pull();
+      expect(name.get()).toBe("Ada Lovelace");
+    } finally {
+      await reader.dispose({ closeStorage: false });
+      await readerStorage.close();
+    }
   });
 
   it("returns the profile the call made, not one already there", async () => {
@@ -161,9 +223,9 @@ describe("createProfile()", () => {
 
   it("trims the name and refuses a blank one before connecting", async () => {
     let connected = 0;
-    const counting = () => {
+    const counting = (config: SpaceConfig) => {
       connected++;
-      return loadPieces();
+      return loadPieces(config);
     };
     await expect(createProfile({ ...CONFIG, name: "  " }, {
       loadPieces: counting,
