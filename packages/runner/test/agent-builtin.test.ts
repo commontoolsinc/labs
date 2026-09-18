@@ -48,6 +48,7 @@ type AgentResult = {
   error?: string;
   requestHash?: string;
   run?: { state?: string; submittedAt?: string; tools?: string[] };
+  host?: string;
 };
 
 describe("agent builtin", () => {
@@ -152,6 +153,8 @@ describe("agent builtin", () => {
       "Solaris",
     ]);
     expect(result.withTx().key("pending").get()).toBe(true);
+    // The host serving the record's space rides beside the `run` link.
+    expect(result.withTx().key("host").get()).toBe("https://fabric.example");
     // Nothing a runner writes is present yet.
     expect(raw.claim).toBeUndefined();
     expect(raw.result).toBeUndefined();

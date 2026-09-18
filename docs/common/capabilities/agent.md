@@ -52,10 +52,12 @@ const view = recommendation.pending
   tools it has; nothing here is copied into the request.
 - `resultSchema` is the schema the run's structured result is validated
   against before it is written.
-- `maxConfidentiality` (optional) bounds what the run may observe. Absent,
-  the run observes what the requesting user may see. Declared, it can only
-  tighten, and a request whose own reads already exceed it is refused before
-  it is staged.
+- `maxConfidentiality` (optional) bounds what the run may observe. Declared,
+  it can only tighten what the deployment allows, and a request whose own
+  reads already exceed it is refused before it is staged. Absent, the run's
+  ceiling is the deployment's; a deployment whose `agent` sink ceiling is
+  `[]` refuses every labeled read in the request, references included, whether
+  or not this is declared (see below).
 - `tools` (optional) names the tools the run may use, from the list the
   deployment publishes (`AGENT_TOOL_NAMES` in
   `packages/runner/src/builtins/agent-schemas.ts`). A name the user's
@@ -75,7 +77,8 @@ const view = recommendation.pending
   the graph.
 - `run` is a link to the run's `AgentRun` record: its `state`, `stateSince`,
   and, once finished, `outcome`, `usage`, `modelTurns`, and `toolCalls`, for
-  a pattern that wants to show progress or cost.
+  a pattern that wants to show progress or cost. `host` is the origin of the
+  toolshed serving the record's space, for a reader on another host.
 - `requestHash` identifies the request. The same request in the same user
   instance yields the same record, so a re-run of the node over unchanged
   inputs is a memo hit and creates nothing; a pattern that wants a fresh run

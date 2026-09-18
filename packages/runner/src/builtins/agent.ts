@@ -68,6 +68,7 @@ type ResultFields = {
   error: Cell<string | undefined>;
   requestHash: Cell<string | undefined>;
   run: Cell<unknown>;
+  host: Cell<string | undefined>;
 };
 
 /** What the builtin keeps between runs of its action. */
@@ -75,6 +76,13 @@ type AgentNodeState = {
   resultCell?: Cell<any>;
   cellScope?: NormalizedFullLink["scope"];
   previousCallHash?: string;
+
+  /**
+   * The hash of the request the node most recently staged. A settlement
+   * arriving for an older request finds a different value here and leaves
+   * the result cell to the newer one.
+   */
+  currentHash?: string;
 };
 
 /**
@@ -182,6 +190,7 @@ function resultFields(
     error: resultCell.key("error").withTx(tx),
     requestHash: resultCell.key("requestHash").withTx(tx),
     run: resultCell.key("run").withTx(tx),
+    host: resultCell.key("host").withTx(tx),
   };
 }
 
@@ -197,6 +206,7 @@ function settleWithoutRun(
   fields.pending.set(false);
   fields.result.set(undefined);
   fields.run.set(undefined);
+  fields.host.set(undefined);
   fields.error.set(error);
   fields.requestHash.set(requestHash);
 }
@@ -214,11 +224,13 @@ function deriveFromRecord(
   record: Cell<AgentRunRecord>,
   value: Pick<AgentRunRecord, "state" | "result" | "outcome" | "errorCode">,
   requestHash: string,
+  host: string,
 ): void {
   const terminal = AGENT_RUN_TERMINAL_STATES.has(value.state);
   fields.pending.set(!terminal);
   fields.requestHash.set(requestHash);
   fields.run.setRawUntyped(record.getAsLink({ base: resultCell }), true);
+  fields.host.set(host);
   if (value.state === "completed" && value.result !== undefined) {
     fields.result.setRawUntyped(
       record.key("result").getAsLink({ base: resultCell }),
@@ -311,6 +323,7 @@ export function agent(
       fields.result.set(undefined);
       fields.error.set(undefined);
       fields.run.set(undefined);
+      fields.host.set(undefined);
       fields.requestHash.set(undefined);
       return;
     }
@@ -342,6 +355,8 @@ export function agent(
     const effectId = `${AGENT_SINK}:${hash}`;
     const effectKey = effectTargetKey(effectId, resultCell, identity);
 
+    const host = runtime.hostForSpace(parentCell.space).origin;
+
     // The record's existence is the memo: reading it here is also what
     // re-runs this action when a runner moves it.
     const record = agentRunRecordCell(runtime, tx, parentCell, cause, hash);
@@ -350,7 +365,7 @@ export function agent(
       | undefined;
     if (recordValue !== undefined && recordValue.state !== undefined) {
       runtime.effectMemoObserver?.({ kind: "hit", id: effectId });
-      deriveFromRecord(fields, resultCell, record, recordValue, hash);
+      deriveFromRecord(fields, resultCell, record, recordValue, hash, host);
       return;
     }
 
@@ -361,9 +376,22 @@ export function agent(
     }
     if (hash === state.previousCallHash) return;
 
+    // The record is found through the requester's home-space index, so a run
+    // with no requesting identity to resolve that space for has nowhere to
+    // queue: it is refused here rather than left as a record nothing finds.
     const homeSpace = runtime.homeSpacePrincipalFor(tx);
+    if (homeSpace === undefined) {
+      state.previousCallHash = undefined;
+      settleWithoutRun(
+        fields,
+        "INVALID_INPUT: the agent request has no requesting identity whose " +
+          "home space could index its run",
+        hash,
+      );
+      return;
+    }
 
-    if (tools !== undefined && tools.length > 0 && homeSpace !== undefined) {
+    if (tools !== undefined && tools.length > 0) {
       const runner = agentQueueIndexCell(runtime, homeSpace, tx)
         .key("agentRunner").withTx(tx).get();
       if (runner !== undefined) {
@@ -407,6 +435,7 @@ export function agent(
 
     const previousCallHash = state.previousCallHash;
     state.previousCallHash = hash;
+    state.currentHash = hash;
     tx.addCommitCallback((_committedTx, commitResult) => {
       if (commitResult.error && state.previousCallHash === hash) {
         state.previousCallHash = previousCallHash;
@@ -418,8 +447,7 @@ export function agent(
     fields.error.set(undefined);
     fields.requestHash.set(hash);
     fields.run.setRawUntyped(record.getAsLink({ base: resultCell }), true);
-
-    const host = runtime.hostForSpace(parentCell.space).origin;
+    fields.host.set(host);
 
     /**
      * Creates the record, re-reading the request under the effect's own
@@ -498,14 +526,6 @@ export function agent(
         );
         return;
       }
-      if (homeSpace === undefined) {
-        console.error(
-          "[agent] No home space to index the run record in; the record " +
-            "exists but no runner will find it through the index.",
-          { requestHash: hash },
-        );
-        return;
-      }
       const indexed = await runtime.editWithRetry((tx) => {
         if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
         const record = agentRunRecordCell(
@@ -525,24 +545,56 @@ export function agent(
         entries.push({ run: record, host });
       });
       if (indexed.error) {
+        // A record no index names is a request nothing will ever claim, so
+        // the effect, which still owns the record until it is indexed, ends
+        // it: the record reads `refused` and the result cell derives that.
         console.error(
-          "[agent] Indexing the run record in the home space was rejected.",
+          "[agent] Indexing the run record in the home space was rejected; " +
+            "the record settles as refused.",
           { requestHash: hash, rejection: indexed.error.message },
         );
+        const refused = await runtime.editWithRetry((tx) => {
+          markEffectCompletion(tx, effectKey);
+          if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
+          const record = agentRunRecordCell(
+            runtime,
+            tx,
+            parentCell,
+            cause,
+            hash,
+          );
+          recordRuntimeOwnedStore(tx, parentCell, record);
+          const recordTx = record.withTx(tx);
+          recordTx.key("state").set("refused");
+          recordTx.key("stateSince").set(new Date().toISOString());
+          recordTx.key("outcome").set("refused");
+          recordTx.key("errorCode").set("REFUSED");
+        });
+        if (refused.error) {
+          console.error(
+            "[agent] Settling the unindexed run record was rejected.",
+            { requestHash: hash, rejection: refused.error.message },
+          );
+        }
       }
     };
 
     /**
-     * Settles the request the staging transaction was abandoned with: the
-     * request never went out, so the result cell says so rather than
-     * staying pending forever. The message names the sink and stops there;
-     * the refusal's detail faces the operator.
+     * Settles a request that never went out — its staging transaction was
+     * abandoned, or its release check refused it after commit — so the
+     * result cell says so rather than staying pending forever. The message
+     * names the sink and stops there; the refusal's detail faces the
+     * operator. A request the node has since replaced leaves the cell to the
+     * newer one.
      */
     const settleAbandoned = async (error: Error): Promise<void> => {
       await runtime.idle();
       const { error: writeError } = await runtime.editWithRetry((tx) => {
         markEffectCompletion(tx, effectKey);
         if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
+        // Read at write time: a newer request can stage while this one
+        // waits for the scheduler, and from then on the cell is its.
+        if (state.currentHash !== hash) return;
         sendResult(tx, resultCell);
         settleWithoutRun(resultFields(resultCell, tx), error.message, hash);
       });
@@ -577,6 +629,16 @@ export function agent(
         idempotencyKey: effectKey,
         onRejected: (error) => {
           runtime.trackAsyncWork(settleAbandoned(error), parentCell);
+        },
+        // The release check refusing after commit is the other way a staged
+        // request never goes out; without this the result stays pending.
+        onReleaseRejected: () => {
+          runtime.trackAsyncWork(
+            settleAbandoned(
+              new Error(`${AGENT_SINK} request was not released after commit`),
+            ),
+            parentCell,
+          );
         },
       },
     );

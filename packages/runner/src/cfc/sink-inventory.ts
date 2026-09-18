@@ -24,11 +24,12 @@ export type InitialSinkName =
  * deployment without someone deciding whether it carries a confidentiality
  * ceiling or releases ungated, and saying why.
  *
- * `agent` is the one sink whose request does not leave for a host on the
- * network: it becomes an `AgentRun` record a runner acting as the requester
- * claims, and its request holds the task text and links to the cells the
- * run may read. {@link SINK_CLASSES} records that difference as the class
- * the egress gate mints for it.
+ * `agent` is the sink whose request is handed to an agent runner through an
+ * `AgentRun` record, on whichever host serves the requesting space: the
+ * request holds the task text and links to the cells the run may read, and
+ * the runner observes those cells under the run's own ceiling rather than
+ * receiving their values. {@link SINK_CLASSES} records that difference in
+ * what a release exposes as the class the egress gate mints for it.
  */
 export const KNOWN_SINKS = [
   "fetchBinary",

@@ -129,7 +129,10 @@ export const AgentParamsSchema = internSchema(
 /**
  * Runtime schema for {@link BuiltInAgentState} (packages/api/index.ts).
  * `result` and `run` hold links: to the result document the run's harness
- * wrote, and to the run's record. The cell never holds a copy of either.
+ * wrote, and to the run's record; `host` is the origin of the toolshed
+ * serving the record's space, carried beside `run` because a link resolves
+ * a space and not the host that serves it. The cell never holds a copy of
+ * the result or the record.
  */
 export const AgentResultSchema = internSchema(
   {
@@ -140,6 +143,7 @@ export const AgentResultSchema = internSchema(
       error: { type: "string" },
       requestHash: { type: "string" },
       run: {},
+      host: { type: "string" },
     },
     required: ["pending"],
   } as const satisfies JSONSchema,
@@ -206,8 +210,11 @@ export const AgentRunRecordSchema = internSchema(
     required: [
       "requestHash",
       "request",
+      "piece",
+      "space",
       "task",
       "inputs",
+      "resultSchema",
       "submittedAt",
       "state",
       "stateSince",

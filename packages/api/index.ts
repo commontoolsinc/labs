@@ -2309,9 +2309,10 @@ export interface BuiltInAgentParams {
 
   /**
    * The cells the run may read, by the names the model sees them under. Each
-   * reaches the request as a link, never as its value.
+   * reaches the request as a link, never as its value, so an entry has to be
+   * a cell.
    */
-  inputs: Record<string, any>;
+  inputs: Record<string, AnyCell<any> | AnyBrandedCell<any> | OpaqueCell<any>>;
 
   /** The schema the run's structured result is validated against. */
   resultSchema: JSONSchema;
@@ -2333,7 +2334,9 @@ export interface BuiltInAgentParams {
 /**
  * What an `agent()` node holds. `result` is a link to the document the run's
  * harness wrote; `run` is a link to the run's record, which a pattern reads
- * for progress, outcome, and usage.
+ * for progress, outcome, and usage; `host` is the origin of the toolshed
+ * serving the record's space, carried beside `run` because a link resolves a
+ * space and not the host that serves it.
  */
 export interface BuiltInAgentState<T> {
   pending: boolean;
@@ -2341,6 +2344,7 @@ export interface BuiltInAgentState<T> {
   error?: string;
   requestHash?: string;
   run?: Record<string, any>;
+  host?: string;
 }
 
 export interface BuiltInCompileAndRunParams<T> {

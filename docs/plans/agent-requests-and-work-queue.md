@@ -508,8 +508,13 @@ and the scheduled-work plan already proposes a per-space ledger there; that is
 later work and it reads the same records.
 
 **Ruled: records in the requesting space, indexed from the home space.** The
-record is created in the same transaction as the request, in the requester's
-`PerUser` instance, next to the builtin cell that derives from it. The
+record is created by the request's post-commit effect, once the transaction
+staging the request is durable, in the requester's `PerUser` instance, next to
+the builtin cell that derives from it; the index entry follows in a second
+transaction, since the home space is not the requesting space. A request with
+no requesting identity to resolve a home space for is refused before it is
+staged, so no record exists that no index names; a record whose index write is
+refused is ended by the effect as `refused`, and the builtin derives that. The
 requester's home space carries one index piece (`#agent_queue`, an underscore
 because the hashtag extractor ends at a hyphen) holding `{link, host}` entries
 to records across spaces and toolsheds, written through the sanctioned
