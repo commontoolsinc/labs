@@ -294,13 +294,14 @@ than what the list first said, the item says what it does now and why.
       case that added the proxy fallback and that `sidebar.tsx:84` still works
       around. Under this design it works only because the stored alias link
       carries the stamp.
-- [ ] `when` and `unless` carry the stamp on the link they write when the
-      selected branch declares a stream, as `ifElse` now does
-      (`builtins/if-else.ts` asks for `includeSchema` off
-      `declaresStream(resolvedRef.schema)`), and one test per builtin asserts
-      the emitted link's schema. Without it a stream chosen through either
-      resolves to a link with no stamp and no value, and its `send()` becomes
-      a value write once stage 3 lands.
+- [x] `when` and `unless` carry the stamp on the link they write when the
+      selected branch declares a stream, as `ifElse` does (each asks for
+      `includeSchema` off `declaresStream(resolvedRef.schema)`). One test per
+      builtin, over a sub-pattern's stream and the pattern's own
+      (`stream-declaration.test.ts`), pins it by what the stamp is for: with
+      nothing stored at the position, the selected field reads as a stream
+      and a `send()` through it dispatches, which holds only if the link
+      carries the declaration.
 - [x] Not foreseen: every read path treats a declared stream position as a
       handle whether or not the data names it — the eager traversal, the
       schema view, the defaults path — with `required` checks exempting such
