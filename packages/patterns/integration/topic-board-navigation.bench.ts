@@ -478,9 +478,9 @@ async function reachComment(
 
 /**
  * Brings `navigation` to the board and returns the operation that opens the
- * most cited topic and waits for every backlink row its derivation produces. The
- * heading renders only once there is a row to list, so waiting for it waits on
- * the derivation's output rather than on the page's furniture.
+ * most cited topic and waits for every backlink row its derivation produces.
+ * The heading renders only once there is a row to list, so waiting for it waits
+ * on the derivation's output rather than on the page's furniture.
  */
 async function reachBacklink(
   navigation: BoardSession,

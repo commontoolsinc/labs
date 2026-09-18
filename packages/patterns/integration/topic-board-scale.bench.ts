@@ -99,9 +99,9 @@ const PASSPHRASE = "topic board scale benchmark";
 
 /**
  * The topic page's empty-thread text. No board card carries it, so seeing it is
- * what says the board view has been replaced by the topic's — the shell selects
- * a piece before its page has rendered, and a title or a comment count would
- * otherwise be matched against the board's own card for that topic.
+ * what says the board view has been replaced by the topic's — the shell
+ * selects a piece before its page has rendered, and a title or a comment count
+ * would otherwise be matched against the board's own card for that topic.
  */
 const EMPTY_THREAD = "No comments yet.";
 

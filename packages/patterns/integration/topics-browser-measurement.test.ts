@@ -260,8 +260,8 @@ describe("topics-browser-measurement", () => {
     it("attributes the runs of an operation that does run, under the same declaration", async () => {
       // A browser of its own, in which no other case has opened a topic: an
       // operation already run in a page can run nothing, which is the very
-      // thing the declaration permits, and this case is about the other half —
-      // that declaring it does not suppress runs the operation does complete.
+      // thing the declaration permits, and this case is about the other
+      // half — that declaring it does not suppress runs it does complete.
 
       const fresh = await openFreshSession();
       try {
