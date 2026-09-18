@@ -390,7 +390,7 @@ describe("loom-retrieval", () => {
       }
     });
 
-    it("reads a profile whose fallback tier answered as an ordinary payload", async () => {
+    it("reads a profile exiting 1 as a payload only when it says a fallback tier supplied it", async () => {
       const payload = { name: "Me", hasProfile: false, source: "basename" };
       const output = await runLoomRetrievalCommand(
         broker,
@@ -399,6 +399,23 @@ describe("loom-retrieval", () => {
         runnerReplying({ exitCode: 1, stdout: JSON.stringify(payload) }),
       );
       expect(output).toEqual({ status: "ok", payload });
+      for (
+        const reply of [
+          { exitCode: 1, stdout: JSON.stringify({ name: "Me" }) },
+          { exitCode: 1, stdout: JSON.stringify({ hasProfile: true }) },
+          { exitCode: 2, stdout: JSON.stringify(payload) },
+        ]
+      ) {
+        const failed = await runLoomRetrievalCommand(
+          broker,
+          "profile",
+          {},
+          runnerReplying(reply),
+        );
+        expect(failed.status === "error" && failed.code).toBe(
+          "command_failed",
+        );
+      }
     });
 
     it("returns `host_refused` with the host's code for a page payload the host refused", async () => {

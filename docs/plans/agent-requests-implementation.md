@@ -46,7 +46,7 @@ availability tables.
 - [x] Confirm each of `people`, `calendar list`, `context`, `profile` against
       the pinned loom checkout (`~/looms/primary/src/bin/loom`): read-only,
       JSON output, argument list. Drop from the union any that is not; record
-      the dropped ones and why in `docs/LOOM_RETRIEVAL.md`.
+      the dropped ones and why in `packages/cf-harness/docs/LOOM_RETRIEVAL.md`.
 - [x] `src/tools/loom-retrieval.ts` — one `HarnessToolDefinition` per tool
       (`loom_search`, `loom_page_discover`, `loom_page_inspect`,
       `loom_page_read`, `loom_people`, `loom_calendar_list`, `loom_context`,
@@ -87,9 +87,10 @@ availability tables.
       unlabeled hit refused; a hit above the ceiling sealed; the notice
       attached; availability gating in the descriptor tables; capability
       description lists the tools only when configured.
-- [x] Documents: `docs/LOOM_RETRIEVAL.md` (new, the sibling of
-      `LOOM_AUTHORING.md`), `docs/IMPLEMENTATION_PROFILE.md` tool list,
-      `docs/CURRENT_STATE.md` supported surfaces, `README.md` where it lists
+- [x] Documents, all under `packages/cf-harness/`: `docs/LOOM_RETRIEVAL.md`
+      (new, the sibling of `LOOM_AUTHORING.md`), `docs/IMPLEMENTATION_PROFILE.md`
+      tool list, `docs/CURRENT_STATE.md` supported surfaces, `README.md` where
+      it lists
       Loom tools; `deno task check-skill-facts` if a skill cites a path.
 
 *Exit:* a batch run with `--loom-retrieval-config` and a scripted model answers
@@ -139,8 +140,8 @@ a run reaches its structured result. It is not a model tool.
       any write; a handle at a non-`asCell` position still becomes a link; a
       value above a declared ceiling at an `asCell` position is sealed rather
       than written.
-- [ ] Documents: `docs/IMPLEMENTATION_PROFILE.md` (the writer as a trusted
-      host path, AH-TOOL-7), `docs/CURRENT_STATE.md`.
+- [ ] Documents, under `packages/cf-harness/`: `docs/IMPLEMENTATION_PROFILE.md`
+      (the writer as a trusted host path, AH-TOOL-7), `docs/CURRENT_STATE.md`.
 
 *Exit:* the stage-2 test file passes and CFC inspection (`cf inspect`) of the
 written space shows the labels the test asserts.
@@ -272,7 +273,8 @@ and a result link, and observes `pending: false` and `result` on the node.
       taxonomy the retention plan owes; the design document's §2.3 names it.
 - [ ] Tests: `packages/cli/test/agent-runner.test.ts` with a fake executor
       (an injected `createPromptLoop` returning a scripted loop, the seam
-      `src/cli.ts` already exposes as `deps.createPromptLoop`) over two
+      `packages/cf-harness/src/cli.ts` already exposes as
+      `deps.createPromptLoop`) over two
       in-process test toolsheds (the multi-runtime harness, one memory server
       per toolshed): every state transition; the memo hit creates no record;
       two runners racing claim once; a killed runner's record re-queues once
@@ -353,12 +355,13 @@ may start earlier.
       so a labeled cell outside the ceiling reads as withheld
       (`packages/runner/src/cfc/read-ceiling.ts` and the transaction read
       path); retire the session-scope requirement `run_pattern`'s description
-      states; update `IMPLEMENTATION_PROFILE.md` deviation 9 and
-      `README.md` §ceiling.
+      states; update `packages/cf-harness/docs/IMPLEMENTATION_PROFILE.md`
+      deviation 9 and `packages/cf-harness/README.md` §ceiling.
 - [ ] Deviation 8 / CT-2217: `delegate_task` carries the parent's observation
       ceiling into the child profile and rejects an inherited handle whose
       resolved value exceeds it (AH-CFC-12a); retire the AUD-23 known-defect
-      row in `audit/checks/known-defects.ts` and `conformance-manifest.ts`.
+      row in `packages/cf-harness/audit/checks/known-defects.ts` and
+      `packages/cf-harness/audit/conformance-manifest.ts`.
 - [ ] Group ceilings: a runner test with `maxConfidentiality:
       [{anyOf:[User(A),User(B)]}]` over cells labeled `User(A)`, `User(B)`,
       and `[User(A),User(B)]`, asserting which enter model context.

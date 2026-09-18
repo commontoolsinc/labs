@@ -3,6 +3,11 @@ import { describe, it } from "@std/testing/bdd";
 import { CFC_LABEL_READ_FAILED_ATOM } from "@commonfabric/runner/cfc";
 
 import { createCfHarnessCliCapabilities } from "../../src/cli.ts";
+import { CfHarnessEngine } from "../../src/engine.ts";
+import { CfHarnessPromptLoop } from "../../src/prompt-loop.ts";
+import type { SandboxRuntime } from "../../src/sandbox/types.ts";
+import { directPromptSlotBindingFor } from "../support/prompt-slot-binding.ts";
+import { responsesBodyFromChatFixture } from "../support/responses-fixture.ts";
 import {
   LOOM_RETRIEVAL_TOOL_IDS,
   parentToolIdsForBacking,
@@ -24,7 +29,12 @@ import {
   LOOM_RETRIEVAL_TOOLS,
   LOOM_RETRIEVAL_UNTRUSTED_NOTICE,
   loomCalendarListTool,
+  loomContextTool,
+  loomPageDiscoverTool,
+  loomPageInspectTool,
+  loomPageReadTool,
   loomPeopleTool,
+  loomProfileTool,
   loomRetrievalModelContextObservation,
   type LoomRetrievalToolOutput,
   loomSearchTool,
@@ -119,6 +129,52 @@ const ok = (output: LoomRetrievalToolOutput) => {
   expect(output.status).toBe("ok");
   if (output.status !== "ok") throw new Error("unreachable");
   return output;
+};
+
+/** Sandbox fixture which never starts a process. */
+const sandbox: SandboxRuntime = {
+  describe: () => ({
+    kind: "docker-runsc-cfc",
+    defaultWorkingDirectory: "/workspace",
+    cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+  }),
+  defaultWorkingDirectory: () => "/workspace",
+  resolvePath: (path) => path,
+  isPathWithinWorkspace: () => true,
+  isPathWithinAllowedRoots: () => true,
+  run: () => Promise.resolve({ stdout: "", stderr: "", exitCode: 0 }),
+  runShell: () => Promise.resolve({ stdout: "", stderr: "", exitCode: 0 }),
+};
+
+/** Helper for engine tests, which replies to every host command with `stdout`. */
+const engineWith = (
+  stdout: string,
+  options: { ceiling?: readonly unknown[] } = {},
+) => {
+  const calls: ProcessRunRequest[] = [];
+  const engine = new CfHarnessEngine({
+    model: "gpt-5.4",
+    sandboxRuntime: sandbox,
+    loomRetrieval: config,
+    ...(options.ceiling !== undefined
+      ? {
+        fabricSession: {
+          apiUrl: "https://toolshed.example/",
+          identityKeyPath: "/keys/agent.pkcs8",
+          space: "my-space",
+          cfcReadMaxConfidentiality: options
+            .ceiling as HarnessToolContext["cfcReadMaxConfidentiality"],
+        },
+      }
+      : {}),
+    processRunner: {
+      run(request) {
+        calls.push(request);
+        return Promise.resolve({ stdout, stderr: "", exitCode: 0 });
+      },
+    },
+  });
+  return { engine, calls };
 };
 
 describe("loom-retrieval tools", () => {
@@ -419,6 +475,99 @@ describe("loom-retrieval tools", () => {
       expect(output.status === "error" && output.code).toBe("command_failed");
     });
 
+    it("refuses a label whose clause is not an atom or an `anyOf` over atoms, even with no ceiling", async () => {
+      const { context } = contextWith({
+        stdout: searchPayload([
+          hit("m-1", { confidentiality: [{ anyOf: "not-a-list" }] }),
+          hit("m-2", { confidentiality: [{ anyOf: [] }] }),
+          hit("m-3", { confidentiality: [{ name: "no type" }] }),
+          hit("m-4", { confidentiality: [{ anyOf: [{ name: "no type" }] }] }),
+          hit("m-5", {
+            confidentiality: [{ anyOf: [OWNER, { type: WORK, name: "w" }] }],
+          }),
+        ]),
+      });
+      const output = ok(
+        await loomSearchTool.invoke(context, { query: "donuts" }),
+      );
+      expect(output.entries.map((entry) => entry.status)).toEqual([
+        "withheld",
+        "withheld",
+        "withheld",
+        "withheld",
+        "admitted",
+      ]);
+      expect(
+        output.entries.slice(0, 4).every((entry) =>
+          entry.status === "withheld" &&
+          entry.reasonCode === "cfc_label_read_failed"
+        ),
+      ).toBe(true);
+    });
+
+    it("marks the observation truncated when the result bounded anything", async () => {
+      const { context } = contextWith({
+        stdout: searchPayload([
+          hit(
+            "m-long",
+            { confidentiality: [OWNER] },
+            "x".repeat(LOOM_RETRIEVAL_MAX_STRING_CHARS + 1),
+          ),
+        ]),
+      });
+      const output = ok(
+        await loomSearchTool.invoke(context, { query: "donuts" }),
+      );
+      expect(output.truncated).toBe(true);
+      expect(
+        loomRetrievalModelContextObservation(
+          output,
+          { toolId: "loom_search", outputId: output.outputId },
+          "call-1",
+        )?.truncated,
+      ).toBe(true);
+    });
+
+    it("returns `malformed_payload` for a search payload without a `hits` list", async () => {
+      const { context } = contextWith({
+        stdout: JSON.stringify({
+          schemaVersion: LOOM_SEARCH_SCHEMA_VERSION,
+          hits: "none",
+        }),
+      });
+      const output = await loomSearchTool.invoke(context, { query: "donuts" });
+      expect(output.status === "error" && output.code).toBe(
+        "malformed_payload",
+      );
+    });
+
+    it("leaves out a row that alone would pass the output bound, envelope included", async () => {
+      // Twenty fields at the string bound each: bounded per string, and
+      // still far past what one result may carry.
+      const wide = Object.fromEntries(
+        Array.from({ length: 20 }, (_, index) => [
+          `field${index}`,
+          "z".repeat(LOOM_RETRIEVAL_MAX_STRING_CHARS),
+        ]),
+      );
+      const { context } = contextWith({
+        ceiling,
+        stdout: searchPayload([
+          { ...hit("m-wide", { confidentiality: [OWNER] }), ...wide },
+          hit("m-small", { confidentiality: [OWNER] }),
+        ]),
+      });
+      const output = ok(
+        await loomSearchTool.invoke(context, { query: "donuts" }),
+      );
+      expect(output.entries).toEqual([]);
+      expect(output.omitted).toBe(2);
+      expect(output.truncated).toBe(true);
+      expect(JSON.stringify(output).length).toBeLessThanOrEqual(
+        LOOM_RETRIEVAL_MAX_OUTPUT_CHARS,
+      );
+    });
+
     it("bounds long strings and the total output, reporting what it left out", async () => {
       const long = "x".repeat(LOOM_RETRIEVAL_MAX_STRING_CHARS + 100);
       const many = Array.from(
@@ -449,8 +598,214 @@ describe("loom-retrieval tools", () => {
       expect(output.omitted).toBeGreaterThan(0);
       expect(output.entries.length + output.omitted).toBe(201);
       expect(JSON.stringify(output).length).toBeLessThanOrEqual(
-        LOOM_RETRIEVAL_MAX_OUTPUT_CHARS + 2000,
+        LOOM_RETRIEVAL_MAX_OUTPUT_CHARS,
       );
+    });
+  });
+
+  describe("single-row tools", () => {
+    it("treats each payload object as the one row and passes the target on argv", async () => {
+      const row = {
+        pageId: "P-12",
+        title: "Plan",
+        ifc: { confidentiality: [OWNER] },
+      };
+      const cases: [
+        typeof loomPageInspectTool,
+        Record<string, unknown>,
+        string[],
+      ][] = [
+        [loomPageInspectTool, { target: "P-12" }, [
+          "page",
+          "inspect",
+          "P-12",
+          "--json",
+          "--concise",
+        ]],
+        [loomPageReadTool, { target: "P-12" }, [
+          "page",
+          "read",
+          "P-12",
+          "--json",
+        ]],
+        [loomContextTool as unknown as typeof loomPageInspectTool, {
+          read: "where",
+        }, ["context", "where", "--json"]],
+        [loomProfileTool as unknown as typeof loomPageInspectTool, {}, [
+          "profile",
+          "--json",
+        ]],
+      ];
+      for (const [tool, input, argv] of cases) {
+        const { context, calls } = contextWith({
+          ceiling,
+          stdout: JSON.stringify(row),
+        });
+        const output = ok(
+          await tool.invoke(context, input as { target: string }),
+        );
+        expect(calls[0].args).toEqual(argv);
+        expect(output.entries).toEqual([{
+          status: "admitted",
+          label: { confidentiality: [[OWNER]], integrity: [] },
+          value: { pageId: "P-12", title: "Plan" },
+        }]);
+        expect(output.envelope).toBeUndefined();
+      }
+    });
+  });
+
+  describe("loomPageDiscoverTool", () => {
+    it("measures the `pages` rows and keeps the inventory's counts as the envelope", async () => {
+      const { context, calls } = contextWith({
+        ceiling,
+        stdout: JSON.stringify({
+          ok: true,
+          concise: true,
+          pages: [
+            { pageId: "P-1", title: "One", ifc: { confidentiality: [OWNER] } },
+            { pageId: "P-2", title: "Two", ifc: { confidentiality: [HEALTH] } },
+          ],
+          totalPages: 2,
+          summary: { pages: 2 },
+          omittedViews: ["projects"],
+        }),
+      });
+      const output = ok(
+        await loomPageDiscoverTool.invoke(context, { kind: "project" }),
+      );
+      expect(calls[0].args).toEqual([
+        "page",
+        "discover",
+        "--json",
+        "--concise",
+        "--kind",
+        "project",
+      ]);
+      expect(output.entries.map((entry) => entry.status)).toEqual([
+        "admitted",
+        "withheld",
+      ]);
+      expect(output.envelope).toEqual({
+        totalPages: 2,
+        omittedViews: ["projects"],
+      });
+    });
+  });
+
+  describe("engine wiring", () => {
+    it("measures rows against the fabric session's read ceiling", async () => {
+      const payload = searchPayload([
+        hit("m-1", { confidentiality: [OWNER] }),
+        hit("m-2", { confidentiality: [HEALTH] }),
+      ]);
+      const bounded = engineWith(payload, { ceiling: [OWNER] });
+      const { output } = await bounded.engine.invokeBuiltinTool(
+        "loom_search",
+        { query: "donuts" },
+      );
+      expect(ok(output).entries.map((entry) => entry.status)).toEqual([
+        "admitted",
+        "withheld",
+      ]);
+      expect(bounded.calls[0].env?.LOOM_SEARCH_BROKER_QUEUE).toBe(
+        "/trusted/queue",
+      );
+      const unbounded = engineWith(payload);
+      const unboundedOutput = await unbounded.engine.invokeBuiltinTool(
+        "loom_search",
+        { query: "donuts" },
+      );
+      expect(ok(unboundedOutput.output).entries.map((entry) => entry.status))
+        .toEqual(["admitted", "admitted"]);
+    });
+  });
+
+  describe("prompt loop", () => {
+    it("shows the model the measured rows without the label join, and records the join as an observation", async () => {
+      const { engine, calls } = engineWith(searchPayload([
+        hit("m-1", { confidentiality: [OWNER] }),
+        hit(
+          "m-2",
+          { confidentiality: [WORK] },
+          "y".repeat(LOOM_RETRIEVAL_MAX_STRING_CHARS + 1),
+        ),
+      ]));
+      const payloads = [
+        {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "search-one",
+                type: "function",
+                function: {
+                  name: "loom_search",
+                  arguments: JSON.stringify({ query: "donuts" }),
+                },
+              }],
+            },
+          }],
+        },
+        {
+          choices: [{
+            index: 0,
+            message: { role: "assistant", content: "Done" },
+          }],
+        },
+      ];
+      let index = 0;
+      const requests: string[] = [];
+      const loop = new CfHarnessPromptLoop({
+        engine,
+        apiKey: "synthetic-test-key",
+        model: "gpt-5.4",
+        allowedToolIds: ["loom_search"],
+        fetchFn: (_url, init) => {
+          requests.push(String(init?.body ?? ""));
+          return Promise.resolve(
+            new Response(
+              JSON.stringify(
+                responsesBodyFromChatFixture(payloads[index++], init?.body),
+              ),
+              { status: 200 },
+            ),
+          );
+        },
+      });
+      // Every tool needs direct-command authority under the default
+      // `enforce-strict` mode, reads included.
+      const result = await loop.runPrompt({
+        prompt: "Find donuts",
+        promptSlotBinding: directPromptSlotBindingFor("loom-retrieval"),
+      });
+      expect(calls).toHaveLength(1);
+      const toolMessage = result.transcript.find((message) =>
+        message.role === "tool"
+      );
+      expect(toolMessage).toBeDefined();
+      const shown = JSON.parse(
+        (toolMessage as { content: string }).content,
+      ) as Record<string, unknown>;
+      expect(shown.notice).toBe(LOOM_RETRIEVAL_UNTRUSTED_NOTICE);
+      expect(shown.cfc).toBeUndefined();
+      expect(shown.truncated).toBe(true);
+      expect(requests[1]).toContain("snippet for m-1");
+      const context = engine.getRunState().cfcModelContext;
+      expect(
+        context?.observations.map((observation) => ({
+          toolId: observation.toolId,
+          channels: observation.channels,
+          truncated: observation.truncated,
+        })),
+      ).toEqual([{
+        toolId: "loom_search",
+        channels: ["output"],
+        truncated: true,
+      }]);
+      expect(context?.label).toEqual({ confidentiality: [OWNER, WORK] });
     });
   });
 

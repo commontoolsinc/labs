@@ -57,8 +57,8 @@ field holding a `confidentiality` clause list. Three outcomes:
   atom types and its `ifc` field removed from the value;
 - a row whose label does not fit is replaced by
   `{ "status": "withheld", "reasonCode": "cfc_ceiling_exceeded" }`;
-- a row with no `ifc`, or one whose `confidentiality` is not a clause list, is
-  replaced by
+- a row with no `ifc`, or one whose `confidentiality` is not a list of clauses —
+  each an atom, or an `anyOf` over a nonempty list of atoms — is replaced by
   `{ "status": "withheld", "reasonCode":
   "cfc_label_read_failed" }`. It is
   never read as public, and it is refused even when the run declares no ceiling.
@@ -161,6 +161,9 @@ quote host paths and identifiers:
 ## Bounds
 
 Each string of an admitted row is cut at 4,000 characters and the entry marked
-`truncated`. Entries stop being admitted once the serialized result passes
+`truncated`. An entry is added only while the whole serialized result — its
+fixed fields, the envelope, the entries so far, and this one — stays within
 48,000 characters; the rows left out are counted in `omitted`, and the result's
-`truncated` flag is set. The envelope's strings are bounded the same way.
+`truncated` flag is set. The envelope's strings are bounded the same way. The
+model-context observation the result contributes carries `truncated` whenever
+the result does.

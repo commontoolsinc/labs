@@ -51,6 +51,14 @@ export const LOOM_RETRIEVAL_MAX_STRING_CHARS = 4_000;
 /** The serialized size at which a result stops admitting further rows. */
 export const LOOM_RETRIEVAL_MAX_OUTPUT_CHARS = 48_000;
 
+/**
+ * Serialized size reserved for the label join the result carries beside its
+ * entries. Each admitted row adds its clauses to the join, and each clause
+ * appears in the row's own entry as an atom type, so the join grows no
+ * faster than the entries do; this covers the wrapping around it.
+ */
+const LOOM_RETRIEVAL_LABEL_JOIN_ALLOWANCE = 2_000;
+
 /** Why a row was replaced by an opaque entry. */
 export type LoomRetrievalWithheldReason =
   | "cfc_ceiling_exceeded"
@@ -144,9 +152,21 @@ const pick = (
     ) => [key, source[key]]),
   );
 
-/** Whether a value has the shape of one confidentiality clause. */
+/** Whether a value has the shape of one atom: a string, or a typed record. */
+const isAtomShape = (value: unknown): boolean =>
+  typeof value === "string" ||
+  (isRecord(value) && typeof value.type === "string");
+
+/**
+ * Whether a value has the shape of one confidentiality clause: an atom, or
+ * an `anyOf` over a nonempty list of atoms. Anything else — an `anyOf` that
+ * is not a list, a record with no `type` — is not a clause, so a label
+ * carrying one is unreadable rather than measured.
+ */
 const isClauseShape = (value: unknown): boolean =>
-  typeof value === "string" || isRecord(value);
+  isAtomShape(value) ||
+  (isRecord(value) && Array.isArray(value.anyOf) && value.anyOf.length > 0 &&
+    value.anyOf.every(isAtomShape));
 
 /**
  * The `ifc` label a row carries, or `undefined` when none can be read. A
@@ -246,13 +266,15 @@ const rowsOf = (
 
 /**
  * Measures each row against `ceiling` and bounds what is admitted. Rows are
- * measured in order and the output stops admitting entries once its
- * serialized size passes the output bound, so the count of what it left out
- * is reported rather than the rows themselves.
+ * measured in order, and an entry is added only while the serialized result
+ * — the `reserved` size of everything beside the entries, the entries so
+ * far, and this entry — stays within the output bound; the rows left out are
+ * counted rather than carried.
  */
 const measureRows = (
   rows: unknown[],
   ceiling: readonly CfcConfClause[] | undefined,
+  reserved: number,
 ): {
   entries: LoomRetrievalEntry[];
   omitted: number;
@@ -261,10 +283,9 @@ const measureRows = (
 } => {
   const entries: LoomRetrievalEntry[] = [];
   const labels: IFCLabel[] = [];
-  let size = 0;
+  let size = reserved;
   let truncated = false;
   for (const row of rows) {
-    if (size > LOOM_RETRIEVAL_MAX_OUTPUT_CHARS) break;
     const label = isRecord(row) ? readRowLabel(row) : undefined;
     let entry: LoomRetrievalEntry;
     if (label === undefined) {
@@ -274,17 +295,21 @@ const measureRows = (
     } else {
       const { ifc: _ifc, ...value } = row as Record<string, unknown>;
       const bounded = boundStrings(value);
-      truncated ||= bounded.cut;
       entry = {
         status: "admitted",
         label: cfcLabelAtomTypes(label),
         value: bounded.value,
         ...(bounded.cut ? { truncated: true as const } : {}),
       };
+    }
+    const entrySize = JSON.stringify(entry).length;
+    if (size + entrySize > LOOM_RETRIEVAL_MAX_OUTPUT_CHARS) break;
+    size += entrySize;
+    entries.push(entry);
+    truncated ||= entry.status === "admitted" && entry.truncated === true;
+    if (entry.status === "admitted" && label !== undefined) {
       labels.push({ confidentiality: label.confidentiality });
     }
-    entries.push(entry);
-    size += JSON.stringify(entry).length;
   }
   const omitted = rows.length - entries.length;
   return { entries, omitted, truncated: truncated || omitted > 0, labels };
@@ -363,16 +388,32 @@ const invoke = async <C extends LoomRetrievalCommand>(
       "The host payload does not have the shape this command returns.",
     );
   }
-  const measured = measureRows(split.rows, ceiling);
-  const observedLabel = mergeConfidentialityOnlyLabels(measured.labels);
   const envelope = split.envelope === undefined
     ? undefined
     : boundStrings(split.envelope).value as Record<string, unknown>;
-  return {
+  // Everything the result carries beside its entries is sized first, so the
+  // bound holds over the whole serialized result. The label join is the one
+  // field not known yet; a clause per admitted row bounds it, and the
+  // allowance below covers a row's worth of clauses beyond that.
+  const skeleton: Omit<LoomRetrievalToolSuccessOutput, "entries" | "cfc"> = {
     outputId,
     status: "ok",
     kind: command,
     notice: LOOM_RETRIEVAL_UNTRUSTED_NOTICE,
+    admitted: split.rows.length,
+    withheld: split.rows.length,
+    omitted: split.rows.length,
+    truncated: true,
+    ...(envelope !== undefined ? { envelope } : {}),
+  };
+  const measured = measureRows(
+    split.rows,
+    ceiling,
+    JSON.stringify(skeleton).length + LOOM_RETRIEVAL_LABEL_JOIN_ALLOWANCE,
+  );
+  const observedLabel = mergeConfidentialityOnlyLabels(measured.labels);
+  return {
+    ...skeleton,
     entries: measured.entries,
     admitted: measured.entries.filter((entry) => entry.status === "admitted")
       .length,
@@ -399,9 +440,10 @@ export const isLoomRetrievalToolSuccessOutput = (
 
 /**
  * The model-context observation a retrieval result contributes: the join of
- * its admitted rows' labels over the output channel, or nothing when no
- * row was admitted. Withheld rows contribute nothing, since nothing of them
- * reached the model.
+ * its admitted rows' labels over the output channel, marked truncated when
+ * the result bounded a string or left rows out, or nothing when no row was
+ * admitted. Withheld rows contribute nothing, since nothing of them reached
+ * the model.
  */
 export const loomRetrievalModelContextObservation = (
   output: unknown,
@@ -416,6 +458,7 @@ export const loomRetrievalModelContextObservation = (
     outputId: resultRef.outputId,
     channels: ["output"],
     label,
+    ...(output.truncated ? { truncated: true } : {}),
   };
 };
 

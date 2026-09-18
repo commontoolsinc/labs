@@ -311,7 +311,7 @@ measured the same way (section 1.6), and a refusal returns a typed opaque
 observation, never silence (AH-CFC-6). The fabric session's read ceiling is
 the same clause set; its present limit — it gates session-scoped query results
 only, deviation 9 in the implementation profile — is a known gap the design
-inherits and phase 6 retires.
+inherits and phase 7 retires.
 
 **Gate 3 — the result, at the write.** Section 1.3's write is an ordinary
 transaction under the run's session, so every runtime gate applies to it. It
@@ -379,35 +379,51 @@ are about collections:
 | `loom_page_discover` | `loom page discover --concise [--kind] [--limit]` | the canonical Page inventory |
 | `loom_page_inspect` | `loom page inspect <target> --concise` | a Page's context, `sourceVersion`, relations, and capability descriptors |
 | `loom_page_read` | `loom page read <target>` | the Page or Document source with its exact `sourceVersion` |
-| `loom_people` | `loom people <query> --json [--shape summary\|card]` | canonical person resolution: identifiers, pages, recent interaction summary |
-| `loom_calendar_list` | `loom calendar list --json [--since/--until]` | loom-native events from the calendar store |
-| `loom_context` | `loom context where\|activity\|hosted --json` | where the user is, current activity, hosted surfaces |
-| `loom_profile` | `loom profile --json` | the user's short resolver-backed identity |
+| `loom_people` | `loom people <query> --json [--shape summary\|card]`, lookups only — an email, phone, `handle:`, `person:`, `group:`, or `People/<Name>/about.md` path; the maintenance and group-write verbs the same positional carries are refused | canonical person resolution: identifiers, pages, recent interaction summary |
+| `loom_calendar_list` | `loom calendar list --json [--from/--to \| --all]` (`YYYY-MM-DD` dates) | loom-native events from the calendar store |
+| `loom_context` | `loom context where\|activity --json [--at] [--since/--until]`; `hosted` records channel coordinates and is refused | where the user is, current activity |
+| `loom_profile` | `loom profile --json [--fresh]` | the user's short resolver-backed identity |
 
-The first four are confirmed against the pinned loom checkout; the last four
-are named from loom's command inventory and phase 1 confirms each command's
-exact arguments and JSON shape before it ships, dropping any that turns out
-not to be read-only or not to answer in JSON. Page mutation (`create`,
-`replace`, `section …`, `relocate`, `trash`), calendar writes, and `wish` are
-out of the first take. `--concise` is passed by the host, not offered to the
-model: a full `inspect` exceeds the harness's tool-result bound and returns
-fragments that do not parse, which loom's own skill notes.
+All eight are confirmed against the pinned loom checkout: read-only, JSON on
+`--json`, with the argument surface the table shows and nothing else — no
+routing flag (`--rpc-queue`, `--instance`, `--engine`, `--person-ref`) reaches
+the model, and a value that would parse as a flag or as another verb is
+refused before a process starts. Page mutation (`create`, `replace`,
+`section …`, `relocate`, `trash`), calendar writes, and `wish` are out of the
+first take. `--concise` is passed by the host, not offered to the model: a
+full `inspect` exceeds the harness's tool-result bound and returns fragments
+that do not parse, which loom's own skill notes.
+[`packages/cf-harness/docs/LOOM_RETRIEVAL.md`](../../packages/cf-harness/docs/LOOM_RETRIEVAL.md)
+is the implementation reference.
 
-**Labels on Loom observations.** Loom connector rows carry `ifc` labels and
-loom's `/agent-search` honors a facet scope and a read ceiling injected by its
-broker. The tool passes the run's observation ceiling through the same
-channels the wish dispatcher uses (`--read-ceiling-file`, the facet header the
-broker writes), so loom's own filtering runs first, and the host measures the
-returned rows' labels against the ceiling again before they enter model
-context (gate 2) so that a loom version that returns an unlabeled row is
-refused rather than admitted. A `hits[]` entry whose label cannot be read is
-reported as a label, not as public — the disclosure rule in
-`cfc-label-disclosure.ts`. The same reported label is what the result writer
-stamps on a document it mints for a hit the answer references (section 1.3).
+**Labels on Loom observations.** Loom connector rows carry `ifc` labels in
+their stores, and loom's `/agent-search` honors the facet scope its broker was
+launched with (`fabric_local_agent_rpc.py serve --facets`), so loom's own
+filtering runs first. None of the retrieval commands takes a ceiling on argv,
+so the harness carries the ceiling on its own side: the retrieval
+configuration names the loom read-ceiling record a facet-scoped dispatch
+writes (`readCeilingFile`, the `run-ceiling` output with `loomReadCeiling`,
+`facets`, `facetSource`), the harness reads it on the host, checks its facets
+against the configured ones, and meets its clause list with the run's own
+ceiling. Every returned row's `ifc` label is then measured against that met
+ceiling before the row enters model context (gate 2), with the same predicate
+`run_pattern` uses over a disclosed label. A row above the ceiling is replaced
+by a typed opaque entry; a row whose label cannot be read — no `ifc`, or a
+clause that is not an atom or an `anyOf` over atoms — is refused as
+`cfc_label_read_failed`, never read as public, and refused even when the run
+declares no ceiling (the disclosure rule in `cfc-label-disclosure.ts`). The
+admitted rows' labels join into one model-context observation, and that same
+label is what the result writer stamps on a document it mints for a hit the
+answer references (section 1.3).
 
-**Loom's search JSON is deliberately unversioned** until a first external
-consumer appears; this is that consumer, and phase 1 adds `schemaVersion: 1`
-to the loom side and pins it in the tool.
+Against the pinned loom checkout, `loom search --json` emits no `ifc` on its
+hits, and the page, people, calendar, context, and profile payloads carry none
+either, so every real row is withheld until loom stamps its rows (assumption
+11). The tools are complete on the harness side and exercised against fixture
+output that carries labels.
+
+**Loom's search JSON carries `schemaVersion: 1`**, stamped by `render_json`
+for this consumer, and the tool refuses a payload carrying any other value.
 
 ### 1.7 Where a run executes, across two toolsheds
 
@@ -600,8 +616,9 @@ next runner to see it re-queues it once, recording the retry on the record
 (AH-LIFE-5: bounded, visible, and only where replay is safe — a run that had
 not yet started a side effect). A second expiry fails the record. The lease is
 renewed on every durable write the run makes, so it measures silence rather
-than time since start — the trap `fetch-request-deadlines.md` records for a
-claim that stamps `lastActivity` once.
+than time since start — the trap
+[`docs/features/fetch-request-deadlines.md`](../features/fetch-request-deadlines.md)
+records for a claim that stamps `lastActivity` once.
 
 **Ranking, later.** `priority` is reserved and absent; claim order is
 `submittedAt`. Round-robin across users is the runner's business when one
@@ -756,6 +773,15 @@ Listed so they can be overturned before phase 1.
     admits with a declared label.** The label comes from loom's `ifc` on the
     row; a row without one is refused before it reaches the model, so none
     reaches the writer.
+11. **Loom will stamp `ifc` on the rows its retrieval commands return.**
+    Today `loom search --json` emits no `ifc` on `hits[]`, and the page,
+    people, calendar, context, and profile payloads carry none, so the
+    harness withholds every real row as `cfc_label_read_failed` (section
+    1.6). The first take's demonstration (phase 6) rests on loom emitting the
+    label its stores already hold for each row; until then the tools answer
+    only fixture output. If loom does not, the alternative is a
+    host-configured label for loom-native payloads, which is a new trust
+    decision and gets its own ruling.
 
 ## Alternatives considered and set aside
 

@@ -611,10 +611,12 @@ export const runLoomRetrievalCommand = async (
       ...(typeof payload.code === "string" ? { hostCode: payload.code } : {}),
     };
   }
-  // `loom profile` exits 1 when a fallback tier answered, with the payload
-  // saying so in `hasProfile`; every other command's nonzero exit is a
-  // failure whatever it printed.
-  if (response.exitCode !== 0 && command !== "profile") {
+  // `loom profile` exits 1 when a fallback tier supplied the profile, and
+  // the payload says so in `hasProfile`; a nonzero exit without that word is
+  // a failure whatever was printed, as it is for every other command.
+  const profileFallback = command === "profile" && response.exitCode === 1 &&
+    isRecord(payload) && payload.hasProfile === false;
+  if (response.exitCode !== 0 && !profileFallback) {
     return failed("The host command did not succeed.");
   }
   if (

@@ -5142,6 +5142,11 @@ export class CfHarnessPromptLoop {
             resultRef,
             presentFieldPointers(output, ["cfc"]),
           ),
+          createHarnessTranscriptOmissionRuleRecord(
+            "model-context-truncation",
+            resultRef,
+            output.truncated === true ? ["/entries"] : [],
+          ),
         ),
       };
     }
