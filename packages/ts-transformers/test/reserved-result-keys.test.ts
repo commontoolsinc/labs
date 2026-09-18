@@ -148,6 +148,32 @@ describe("reserved-result-keys", () => {
       expect(diagnostics[0]!.message).toContain("`$UI`");
     });
 
+    it("reports a declared result that leaves its offered views opaque", async () => {
+      const diagnostics = await reservedKeyDiagnostics([
+        "/// <cts-enable />",
+        'import { pattern, VIEWS } from "commonfabric";',
+        "type Out = { [VIEWS]: unknown; label: string };",
+        "export default pattern<{ label: string }, Out>(",
+        "  (s) => ({ [VIEWS]: { inbox: { label: s.label } }, label: s.label }),",
+        ");",
+      ]);
+      expect(diagnostics.length).toBe(1);
+      expect(diagnostics[0]!.severity).toBe("error");
+      expect(diagnostics[0]!.message).toContain("`$VIEWS`");
+    });
+
+    it("accepts a result that names the groups its views field holds", async () => {
+      const diagnostics = await reservedKeyDiagnostics([
+        "/// <cts-enable />",
+        'import { pattern, VIEWS } from "commonfabric";',
+        "type Out = { [VIEWS]: { inbox: { label: string } }; label: string };",
+        "export default pattern<{ label: string }, Out>(",
+        "  (s) => ({ [VIEWS]: { inbox: { label: s.label } }, label: s.label }),",
+        ");",
+      ]);
+      expect(diagnostics).toEqual([]);
+    });
+
     it("accepts a result that names the type its reserved key holds", async () => {
       const diagnostics = await reservedKeyDiagnostics([
         "/// <cts-enable />",

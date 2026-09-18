@@ -9,6 +9,7 @@ import type {
   PatternFunction,
   TILE_UI as TILE_UI_TYPE,
   UI as UI_TYPE,
+  VIEWS as VIEWS_TYPE,
   VNode,
 } from "@commonfabric/api";
 
@@ -27,6 +28,21 @@ declare const NAME: typeof NAME_TYPE;
 declare const TILE_UI: typeof TILE_UI_TYPE;
 declare const CHIP_UI: typeof CHIP_UI_TYPE;
 declare const FS: typeof FS_TYPE;
+declare const VIEWS: typeof VIEWS_TYPE;
+
+/**
+ * A group of facts a host may draw natively, and the field offering it. The
+ * two are declared as interfaces on purpose: an interface has no implicit
+ * index signature, so a `[VIEWS]` typed `Record<string, unknown>` would reject
+ * the very shape a group is written in.
+ */
+interface InboxView {
+  threads: string[];
+}
+interface OfferedViews {
+  inboxView: InboxView;
+}
+declare const offeredViews: OfferedViews;
 
 declare const reactiveUi: FactoryInput<VNode>;
 declare const reactiveName: FactoryInput<string>;
@@ -97,6 +113,36 @@ function reservedOutputTypeChecks() {
     count: 3,
   }));
 
+  // [VIEWS] holds the named groups this pattern offers. The framework types
+  // the field, not its members: what a group holds is the pattern's to declare
+  // and a host's to demand through a schema.
+  const views = pattern(() => ({
+    [UI]: plainVNode,
+    [VIEWS]: { inboxView: { threads: ["a"] } },
+    count: 3,
+  }));
+
+  // An interface-typed value is accepted, which a `Record<string, unknown>`
+  // field would reject for want of an index signature.
+  const viewsFromInterface = pattern(() => ({
+    [UI]: plainVNode,
+    [VIEWS]: offeredViews,
+    count: 3,
+  }));
+
+  const badViews = pattern(() => ({
+    // @ts-expect-error [VIEWS] must hold named groups, not a number
+    [VIEWS]: 5,
+    count: 3,
+  }));
+
+  // A single group handed over bare, rather than under its name.
+  const badViewsString = pattern(() => ({
+    // @ts-expect-error [VIEWS] must hold named groups, not a string
+    [VIEWS]: "inboxView",
+    count: 3,
+  }));
+
   return {
     valid,
     reactive,
@@ -108,6 +154,10 @@ function reservedOutputTypeChecks() {
     badTileUi,
     badChipUi,
     badFs,
+    views,
+    viewsFromInterface,
+    badViews,
+    badViewsString,
   };
 }
 
