@@ -78,6 +78,8 @@
  * topology before it runs anything.
  */
 
+import { utf8Compare } from "@commonfabric/utils/utf8";
+
 import { VINTAGE_SPACES_SUFFIX } from "../packages/piece/test/vintage-layout.ts";
 
 /** Root of the committed fixture tree. See the note above on why it is here. */
@@ -199,7 +201,14 @@ export function parseVintagePath(
   return { testKey, tier, stamp, identity, path };
 }
 
-/** Every fixture under `root`, sorted by path so runs are reproducible. */
+/**
+ * Every fixture under `root`, sorted by path so runs are reproducible.
+ *
+ * Sorted by code point rather than by `localeCompare`, whose ordering follows
+ * the host's default locale: the replay walks this list in order and credits
+ * the first fixture that records a pattern, so two hosts ordering it
+ * differently would attribute an uncovered pattern to different fixtures.
+ */
 export async function collectVintages(
   root: string = VINTAGES_DIR,
 ): Promise<VintageRef[]> {
@@ -227,7 +236,7 @@ export async function collectVintages(
     }
   };
   await walk(root);
-  found.sort((left, right) => left.path.localeCompare(right.path));
+  found.sort((left, right) => utf8Compare(left.path, right.path));
   return found;
 }
 

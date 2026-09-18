@@ -6,6 +6,11 @@ import { TRIPWIRES } from "../check-tripwires.ts";
 import { namedBenchmarkFiles } from "../check-bench-workflow.ts";
 import { matchesPatternFilter } from "../pattern-files.ts";
 import {
+  parseVintagePath,
+  vintageRecordName,
+  VINTAGES_DIR,
+} from "../pattern-vintage-layout.ts";
+import {
   type Gate,
   HISTORY_GATES,
   loadGateSuites,
@@ -34,27 +39,21 @@ const context = { root: "/repo", outputDir: "/out", spoolDir: "/spool" };
 /**
  * Every record name the vintage gate writes for the tree's own fixtures.
  *
- * A fixture is `<test key>/<tier>/<stamp>-<identity>.sqlite` under the
- * committed vintage tree, and the gate records it as `pattern-vintage
- * <test key> <tier> <stamp>`. Read from git so that what the topology
- * claims is compared against the tree rather than against the walk the
- * gate itself does.
+ * The fixture set is read from git rather than from the walk the gate
+ * replays with, so what the topology claims is compared against the tree
+ * rather than against a second copy of that walk. What each fixture is
+ * called comes from the layout module, which is where the gate takes it
+ * from as well, so the two cannot disagree about the name; the record
+ * name's own spelling is held by `tasks/pattern-vintage-run.test.ts`.
  */
 function vintageRecordNames(): string[] {
-  const tree = "packages/piece/test/vintages";
   const listed = new Deno.Command("git", {
-    args: ["-C", root, "ls-files", "-z", tree],
+    args: ["-C", root, "ls-files", "-z", VINTAGES_DIR],
   }).outputSync();
-  const fixture = new RegExp(
-    `^${tree}/(.+)/([^/]+)/` +
-      "(\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}\\.\\d{3}Z)-[^/]+\\.sqlite$",
-  );
   const names = new Set<string>();
   for (const file of new TextDecoder().decode(listed.stdout).split("\0")) {
-    const parts = fixture.exec(file);
-    if (parts !== null) {
-      names.add(`pattern-vintage ${parts[1]} ${parts[2]} ${parts[3]}`);
-    }
+    const fixture = parseVintagePath(file);
+    if (fixture !== undefined) names.add(vintageRecordName(fixture));
   }
   return [...names].sort();
 }
