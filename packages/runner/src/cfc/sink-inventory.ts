@@ -9,7 +9,8 @@ export type InitialSinkName =
   | "llm"
   | "llmDialog"
   | "generateText"
-  | "generateObject";
+  | "generateObject"
+  | "agent";
 
 /**
  * Every sink a deployment has to decide about, by hand.
@@ -34,10 +35,53 @@ export const KNOWN_SINKS = [
   "llmDialog",
   "generateText",
   "generateObject",
+  "agent",
 ] as const satisfies readonly InitialSinkName[];
 
 /** A sink the registry classifies. */
 export type KnownSinkName = (typeof KNOWN_SINKS)[number];
+
+/**
+ * The boundary class of a sink, minted as the `sinkClass` boundary-context
+ * atom at the egress gate so an exchange rule can scope itself to one class
+ * of release site (spec §8.10.5.2). `network` is a request leaving the
+ * runtime for a host on the network — a fetch, a stream, a model call.
+ * `agent` is a request handed to an agent runner acting as the requester,
+ * whose model observes the fabric through handles rather than receiving the
+ * request's values.
+ */
+export type SinkClass = "network" | "agent";
+
+/**
+ * Every known sink's class. Total over {@link KNOWN_SINKS}, the same way the
+ * governance registry is: a sink added to the inventory without a class here
+ * is a compile error.
+ */
+export const SINK_CLASSES: Readonly<Record<KnownSinkName, SinkClass>> = Object
+  .freeze({
+    fetchBinary: "network",
+    fetchText: "network",
+    fetchJson: "network",
+    fetchJsonUnchecked: "network",
+    fetchProgram: "network",
+    streamData: "network",
+    llm: "network",
+    llmDialog: "network",
+    generateText: "network",
+    generateObject: "network",
+    agent: "agent",
+  });
+
+/**
+ * The class the egress gate mints for `sink`. A sink outside the inventory
+ * is classed `network`: the gate reads sink names off recorded policy inputs,
+ * and a name nobody registered is a request leaving the runtime for
+ * somewhere no rule has been scoped to.
+ */
+export const sinkClassOf = (sink: string): SinkClass =>
+  Object.hasOwn(SINK_CLASSES, sink)
+    ? SINK_CLASSES[sink as KnownSinkName]
+    : "network";
 
 type UnregisteredSink = Exclude<InitialSinkName, KnownSinkName>;
 // If the next line errors, a sink name exists that the registry has not
