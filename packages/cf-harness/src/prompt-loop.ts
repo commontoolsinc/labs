@@ -239,6 +239,10 @@ export interface CreateHarnessPromptLoopOptions
   apiKeySource?: string;
   fetchFn?: HarnessFetch;
   maxModelTurns?: number;
+
+  /** Reserves the last root model turn for a partial answer without tools. */
+  finalizeOnTurnLimit?: boolean;
+
   allowedToolIds?: readonly BuiltinToolId[];
   allowedSubagentProfiles?: readonly HarnessSubagentProfile[];
   nativeModelToolIds?: readonly HarnessNativeModelToolId[];
@@ -287,6 +291,16 @@ export interface RunHarnessTranscriptOptions {
   model?: string;
   promptSlotBinding?: PromptSlotBinding;
   signal?: AbortSignal;
+
+  /**
+   * Completed tool batch or opening handoff with matching research and model
+   * influence. The views borrow loop state; retained checkpoints must copy it.
+   */
+  onCheckpoint?: (checkpoint: {
+    transcript: readonly HarnessTranscriptMessage[];
+    runState: ReturnType<CfHarnessEngine["getRunState"]>;
+  }) => void | Promise<void>;
+
   onTranscriptEvent?: (
     event: HarnessTranscriptEvent,
   ) => void | Promise<void>;
@@ -2826,6 +2840,7 @@ export class CfHarnessPromptLoop {
   readonly modelClient: HarnessModelClient;
   readonly #gatewayClient?: OpenAICompatibleGatewayClient;
   readonly #maxModelTurns: number;
+  readonly #finalizeOnTurnLimit: boolean;
   readonly #allowedToolIds: ReadonlySet<BuiltinToolId>;
   readonly #nativeModelToolIds: readonly HarnessNativeModelToolId[];
   readonly #parentToolAllowanceMode: HarnessParentToolAllowance;
@@ -2907,6 +2922,7 @@ export class CfHarnessPromptLoop {
       }
     }
     this.#maxModelTurns = options.maxModelTurns ?? DEFAULT_MAX_MODEL_TURNS;
+    this.#finalizeOnTurnLimit = options.finalizeOnTurnLimit ?? false;
     this.#parentToolAllowanceMode = options.allowedToolIds === undefined
       ? "all-builtins"
       : "restricted";
@@ -3644,18 +3660,46 @@ export class CfHarnessPromptLoop {
           }
         }
       }
+      if (openingResearch !== undefined) {
+        options.signal?.throwIfAborted();
+        await options.onCheckpoint?.({
+          transcript,
+          runState: this.engine.getRunState(),
+        });
+      }
       while (modelTurns < maxModelTurns) {
         options.signal?.throwIfAborted();
         modelTurns += 1;
+        const finalizing = this.#finalizeOnTurnLimit &&
+          modelTurns === maxModelTurns;
+        if (
+          finalizing ||
+          (this.#finalizeOnTurnLimit && modelTurns === maxModelTurns - 2)
+        ) {
+          const budgetMessage: HarnessTranscriptMessage = {
+            role: "user",
+            content: finalizing
+              ? "Host turn budget: provide your final response now. Tools are unavailable. Summarize verified findings with source citations, explicitly identify unread material and uncertainty, and do not claim exhaustive coverage."
+              : "Host turn budget: two root turns remain after this call, with the last reserved for your final response. Prioritize essential source reads and prepare verified findings and remaining gaps.",
+          };
+          transcript.push(budgetMessage);
+          await this.engine.persistTranscript(transcript);
+          await options.onTranscriptEvent?.({
+            message: budgetMessage,
+            transcript,
+          });
+        }
         let response;
         try {
           response = await this.modelClient.complete({
             model,
             transcript,
-            tools: BUILTIN_TOOLS.filter((tool) =>
-              this.#allowedToolIds.has(tool.descriptor.toolId)
-            ).map((tool) => tool.descriptor),
-            nativeModelToolIds: this.#nativeModelToolIds,
+            tools: finalizing
+              ? []
+              : BUILTIN_TOOLS.filter((tool) =>
+                this.#allowedToolIds.has(tool.descriptor.toolId)
+              ).map((tool) => tool.descriptor),
+            nativeModelToolIds: finalizing ? [] : this.#nativeModelToolIds,
             runId: this.engine.getRunState().runId,
             ...(this.#cacheAffinityKey !== undefined
               ? { cacheAffinityKey: this.#cacheAffinityKey }
@@ -3710,6 +3754,12 @@ export class CfHarnessPromptLoop {
         });
         options.signal?.throwIfAborted();
         const toolCalls = assistantMessage.toolCalls ?? [];
+        if (finalizing && toolCalls.length > 0) {
+          throw new HarnessControlError(
+            "provider-unavailable",
+            "The model requested tools during its final response",
+          );
+        }
         if (toolCalls.length === 0) {
           if (assistantMessage.content.trim().length === 0) {
             throw new HarnessControlError(
@@ -3718,6 +3768,13 @@ export class CfHarnessPromptLoop {
             );
           }
           finalAssistantText = assistantMessage.content;
+          if (finalizing) {
+            taskOutcome = {
+              outcome: "gave-up",
+              reason:
+                "Root model turn budget reached; response contains partial findings.",
+            };
+          }
           break;
         }
         const followupMessages: HarnessTranscriptMessage[] = [];
@@ -3798,6 +3855,10 @@ export class CfHarnessPromptLoop {
           );
         }
         options.signal?.throwIfAborted();
+        await options.onCheckpoint?.({
+          transcript,
+          runState: this.engine.getRunState(),
+        });
         if (finalAssistantText !== undefined) break;
       }
     } catch (error) {
@@ -3826,7 +3887,11 @@ export class CfHarnessPromptLoop {
       await persistRunReport();
       throw turnLimitError;
     }
-    await this.engine.completeRun("assistant_completed");
+    await this.engine.completeRun(
+      this.#finalizeOnTurnLimit && modelTurns === maxModelTurns
+        ? "budget_finalized"
+        : "assistant_completed",
+    );
     await persistRunReport(finalAssistantText, taskOutcome);
     return {
       model,
