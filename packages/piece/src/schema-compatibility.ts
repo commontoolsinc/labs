@@ -12,11 +12,7 @@ import {
   validateSchemaDefinition,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
-import {
-  FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  type FabricPrimitiveSchemaType,
-  isFabricPrimitiveSchemaType,
-} from "@commonfabric/api";
+import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "@commonfabric/runner/fabric-special-object-brand";
 import {
   isObjectNotArray,
@@ -36,7 +32,11 @@ import {
   fabricAwareEqual,
   isKeyableObjectOrArray,
 } from "@commonfabric/data-model";
-import { fabricPrimitiveClassOfSchemaType } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  fabricPrimitiveClassOfSchemaType,
+  isFabricPrimitiveSchemaType,
+} from "@commonfabric/data-model/fabric-primitives";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
