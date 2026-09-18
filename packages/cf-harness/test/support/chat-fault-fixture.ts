@@ -71,6 +71,12 @@ export const faultingToolLoop = (
       transcript.push(message);
       await runOptions.onTranscriptEvent?.({ message, transcript });
     }
+    if (resultsBeforeFault === TOOL_CALL_IDS.length) {
+      await runOptions.onCheckpoint?.({
+        transcript,
+        runState: {} as HarnessPromptLoopResult["runState"],
+      });
+    }
     options.onFault?.();
     if (fault === "interrupt") {
       return await new Promise<HarnessPromptLoopResult>(() => {});

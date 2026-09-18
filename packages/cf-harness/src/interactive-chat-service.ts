@@ -1,3 +1,7 @@
+import {
+  createHarnessTranscriptOmissions,
+  restoreHarnessTranscriptOmissions,
+} from "./contracts/transcript-omissions.ts";
 import { selectResearchContext } from "./research/context.ts";
 import { loomAuthoringForTurn } from "./loom-authoring.ts";
 import {
@@ -1505,6 +1509,10 @@ export class HarnessInteractiveChatService {
         ? [{ role: "system", content: this.#systemPrompt }]
         : [];
     let observedTranscriptLength = 0;
+    let completedCheckpoint: {
+      transcript: HarnessTranscriptMessage[];
+      researchContext: HarnessChatResearchContext;
+    } | undefined;
     // The `delegate_task` children this turn has announced, keyed by the
     // parent tool call that started each one. Membership is what closes the
     // bracket: a `subagent_completed` is emitted only for a child whose
@@ -1572,6 +1580,30 @@ export class HarnessInteractiveChatService {
         model: session.model,
         promptSlotBinding: policy.promptSlot,
         signal,
+        onCheckpoint: (checkpoint) => {
+          if (
+            !this.#basePromptLoopOptions.finalizeOnTurnLimit ||
+            record.canceledTurnIds.has(turnId) ||
+            !isResumableHarnessTranscript(checkpoint.transcript)
+          ) return;
+          const transcript = structuredClone([...checkpoint.transcript]);
+          restoreHarnessTranscriptOmissions(
+            transcript,
+            createHarnessTranscriptOmissions(checkpoint.transcript),
+          );
+          completedCheckpoint = {
+            transcript,
+            researchContext: structuredClone({
+              researchGoal,
+              runs: selectResearchContext(
+                checkpoint.runState.researchRuns ?? [],
+              ),
+              ...(checkpoint.runState.cfcModelContext === undefined ? {} : {
+                cfcModelContext: checkpoint.runState.cfcModelContext,
+              }),
+            }),
+          };
+        },
         onTranscriptEvent: async (event) => {
           if (record.canceledTurnIds.has(turnId)) {
             return;
@@ -1598,11 +1630,6 @@ export class HarnessInteractiveChatService {
             return;
           }
           observedTranscriptLength = event.transcript.length;
-          // The event carries the turn's live transcript, whose tool calls may
-          // not have their results yet. It is reported and deliberately not
-          // promoted into `record.transcript`: an interrupted turn must not
-          // durably commit history a provider would reject. The full working
-          // transcript is on disk in the run's artifacts either way.
           await this.#emitTranscriptEvent(
             session.sessionId,
             turnId,
@@ -1654,14 +1681,13 @@ export class HarnessInteractiveChatService {
       if (isTerminalTurnStatus(record.turns.get(turnId)?.turn.status)) {
         return;
       }
-      // `record.transcript` still holds the transcript from before this turn.
-      // Persisting it here is the rollback: the turn's partial history stays in
-      // the event log and the run artifacts, and never becomes model history.
+      // Promote completed evidence atomically with the failure. Unpaired
+      // activity remains solely in the audit trail and run artifacts.
       await this.#emit(session.sessionId, turnId, {
         kind: "turn_failed",
         turnId,
         error: chatTurnError(error),
-      });
+      }, completedCheckpoint);
     }
   }
 
