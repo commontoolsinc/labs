@@ -47,6 +47,12 @@
  * Every figure here errs high. A cost model that under-estimates puts a
  * lane past the bound it is killed at, where one that over-estimates
  * leaves a lane finishing early.
+ *
+ * One reading cannot manage it at both ends. A suite's fixed cost and
+ * what one of its units costs are measured from batches of much the same
+ * size, which cannot tell the two apart, so whichever way the split falls
+ * the model is under a batch of some size. `fitSuite` says which end it
+ * chooses and what bounds the error there.
  */
 
 import type { TestRecord } from "@commonfabric/test-support/records";
@@ -61,7 +67,6 @@ import {
   LANE_PROLOGUE_SECONDS,
   MIN_CORRECTION_SAMPLES,
   MIN_CORRECTION_SPAN_SECONDS,
-  MIN_UNIT_SPAN_UNITS,
 } from "./policy.ts";
 
 /** One thing a lane measured about itself, and the day it measured it. */
@@ -250,18 +255,6 @@ export function laneObservationsOf(
   ];
 }
 
-/** The two slopes a suite's cost is fitted with. */
-interface Slopes {
-  /** What one second of the batch's own test time costs. */
-  correction: number;
-
-  /** What one more unit costs a batch that already runs others. */
-  unitOverhead: number;
-}
-
-/** What a suite carries where neither slope has been fitted. */
-const UNFITTED: Slopes = { correction: 1, unitOverhead: 0 };
-
 /** The widest gap between two observations' readings of `of`. */
 function span(
   observations: readonly BatchObservation[],
@@ -294,160 +287,143 @@ function slopeOf(
 }
 
 /**
- * How far apart the observations are in their readings of `of` once
- * whatever `other` explains of that is taken out. The caller has
- * established that the observations disagree about `other`, so the slope
- * this takes out is one it can fit.
+ * What one second of a batch's own test time costs it.
  *
- * This is what says whether each reading carries evidence of its own. A
- * suite whose batches all held the same seconds of tests per unit has one
- * reading written two ways, and what a batch cost could be split between
- * the two however you liked; the split would be a choice rather than a
- * measurement, and read out at a batch holding a different mix it would
- * be wrong in either direction.
- */
-function independentSpan(
-  observations: readonly BatchObservation[],
-  of: (observation: BatchObservation) => number,
-  other: (observation: BatchObservation) => number,
-): number {
-  const tracking = slopeOf(observations, other, of);
-  return span(observations, (o) => of(o) - tracking * other(o));
-}
-
-/**
- * Both slopes at once. The caller has established that each reading says
- * something the other does not, so the two are separable and the divisor
- * is positive.
- */
-function bothSlopes(observations: readonly BatchObservation[]): Slopes {
-  const n = observations.length;
-  const meanP = observations.reduce((t, o) => t + o.ran, 0) / n;
-  const meanU = observations.reduce((t, o) => t + o.units, 0) / n;
-  const meanY = observations.reduce((t, o) => t + o.spent, 0) / n;
-  let pp = 0, uu = 0, pu = 0, py = 0, uy = 0;
-  for (const o of observations) {
-    const dp = o.ran - meanP;
-    const du = o.units - meanU;
-    const dy = o.spent - meanY;
-    pp += dp * dp;
-    uu += du * du;
-    pu += dp * du;
-    py += dp * dy;
-    uy += du * dy;
-  }
-  const separable = pp * uu - pu * pu;
-  return {
-    correction: (uu * py - pu * uy) / separable,
-    unitOverhead: (pp * uy - pu * py) / separable,
-  };
-}
-
-/** The correction alone, with a unit costing the nothing it starts at. */
-function correctionAlone(observations: readonly BatchObservation[]): Slopes {
-  const correction = slopeOf(observations, (o) => o.ran, (o) => o.spent);
-  return correction > 0 ? { ...UNFITTED, correction } : UNFITTED;
-}
-
-/**
- * The per-unit cost alone, fitted against what the batch spent beyond
- * its tests, since the tests are charged at the reading this leaves the
- * correction at.
- */
-function unitsAlone(observations: readonly BatchObservation[]): Slopes {
-  const unitOverhead = slopeOf(
-    observations,
-    (o) => o.units,
-    (o) => o.spent - o.ran,
-  );
-  return unitOverhead > 0 ? { ...UNFITTED, unitOverhead } : UNFITTED;
-}
-
-/**
- * What a batch costs in proportion to what it holds: a slope on the
- * seconds its own tests took, and a slope on the units it
- * opened.
+ * The slope is read far outside the range it was fitted over: a suite
+ * whose every batch anybody has seen held six seconds of tests may be
+ * charged thousands the first time a lane packs it whole. Inside a narrow
+ * range the fixed cost dominates and the slope is noise, so it is fitted
+ * only where the suite's batches have disagreed enough about that reading
+ * for a slope to mean anything, and otherwise stays at one. That is the
+ * reading which needs no evidence: a second of test time costs a second.
  *
- * A slope is read far outside the range it was fitted over: a suite whose
- * every batch anybody has seen held six seconds of tests may be charged
- * thousands the first time a lane packs it whole, and one that has never
- * held more than five units may be asked to hold nine hundred. So each is
- * fitted only where the suite's batches have disagreed enough about that
- * reading for a slope to mean anything, and otherwise stays at the
- * reading that needs no evidence.
- *
- * Neither is believed where it comes out at or below zero. A correction
+ * It is not believed where it comes out at or below zero. A correction
  * below one is ordinary — a batch runs its files in parallel, so the wall
  * time of one is routinely a fraction of the sum of its tests' own
  * durations, and the pattern unit suite takes about a third — but at or
- * below zero either slope says a batch grows no dearer, or grows cheaper,
- * the more of the suite it holds, which would let a lane pack the suite
- * without limit against a flat charge. A manifest carrying a correction
- * of zero is refused whole, so publishing one would leave every lane with
- * no manifest at all.
+ * below zero it says a batch grows no dearer, or grows cheaper, the more
+ * of the suite it holds, which would let a lane pack the suite without
+ * limit against a flat charge. A manifest carrying a correction of zero
+ * is refused whole, so publishing one would leave every lane with no
+ * manifest at all.
  *
- * Nothing bounds either above. The intercept absorbs whatever a bound
- * would have moved, and the intercept is charged once for holding the
- * suite where these are charged in proportion, so bounding a slope makes
- * a suite dearer to reach rather than cheaper.
+ * Nothing bounds it above. The intercept absorbs whatever a bound would
+ * have moved, and the intercept is charged once for holding the suite
+ * where this is charged in proportion, so bounding it makes a suite
+ * dearer to reach rather than cheaper.
+ *
+ * It is not believed either where the line it belongs to passes below
+ * the origin. A suite is charged a fixed cost of nothing or more, so
+ * such a line is not one the model can carry, and a slope steep enough
+ * to need it has taken what the batch spent on something else: within a
+ * suite more units usually means more seconds of tests, so what it has
+ * taken is what the units cost, and every batch then reads as having
+ * spent nothing on them.
  */
-function slopes(observations: readonly BatchObservation[]): Slopes {
-  if (observations.length < MIN_CORRECTION_SAMPLES) return UNFITTED;
-  const ran = (o: BatchObservation) => o.ran;
-  const units = (o: BatchObservation) => o.units;
-  const ranWide = span(observations, ran) >= MIN_CORRECTION_SPAN_SECONDS;
-  // The width the unit count has to clear is in the part of it the
-  // tests' own seconds do not account for. The two are asked different
-  // questions because their readings without evidence differ: a
-  // correction of one says a second of test time costs a second, which
-  // is a claim about the machine, where a per-unit cost of zero says
-  // opening a unit is free, which is a claim about nothing. So the
-  // correction is fitted from the suite's batches as it always has been,
-  // and the unit count is believed only where it says something the
-  // correction does not. Asking the correction for evidence independent
-  // of the units as well would refuse the pair wherever the two move
-  // together, which for a unit suite is the ordinary case — more units
-  // usually means more tests — and leave the suite charged as though
-  // opening a unit were free.
-  const unitsWide = span(observations, units) >= MIN_UNIT_SPAN_UNITS &&
-    (!ranWide ||
-      independentSpan(observations, units, ran) >= MIN_UNIT_SPAN_UNITS);
-  if (!ranWide) return unitsWide ? unitsAlone(observations) : UNFITTED;
-  if (!unitsWide) return correctionAlone(observations);
-  const both = bothSlopes(observations);
-  if (both.correction > 0 && both.unitOverhead > 0) return both;
-  if (both.correction <= 0 && both.unitOverhead <= 0) return UNFITTED;
-  // What one slope comes to beside the other is not what it comes to
-  // without it, so the one that is believed is fitted again on its own
-  // rather than kept at the figure the pair gave it.
-  return both.correction > 0
-    ? correctionAlone(observations)
-    : unitsAlone(observations);
+function correctionOf(observations: readonly BatchObservation[]): number {
+  if (observations.length < MIN_CORRECTION_SAMPLES) return 1;
+  if (span(observations, (o) => o.ran) < MIN_CORRECTION_SPAN_SECONDS) return 1;
+  const fitted = slopeOf(observations, (o) => o.ran, (o) => o.spent);
+  if (fitted <= 0) return 1;
+  const n = observations.length;
+  const meanRan = observations.reduce((most, o) => most + o.ran, 0) / n;
+  const meanSpent = observations.reduce((most, o) => most + o.spent, 0) / n;
+  // A suite whose batches spend exactly in proportion to their tests sits
+  // on the line this refuses either side of, and the fixed cost it is
+  // judged by is the difference of two figures that are equal there, so
+  // an exact comparison would settle it on what the arithmetic left
+  // behind. A suite this refuses is out by seconds: the one that prompted
+  // the guard fits a fixed cost of minus twenty-two.
+  const fixed = meanSpent - fitted * meanRan;
+  return fixed >= -1e-9 * meanSpent ? fitted : 1;
+}
+
+/**
+ * What one unit costs a batch: a rate read off each batch, rather than a
+ * slope fitted across batches of different sizes.
+ *
+ * A slope needs the suite's batches to have disagreed about how many units
+ * they held, and whether they do is a property of the run rather than of
+ * the suite. The packer puts an identity in the cheapest lane that can
+ * still hold it and breaks a tie by which lane is emptier, so a suite
+ * gathers in the lanes already holding it and is shared out among them;
+ * where every lane fills to one budget the counts come out close. Across
+ * a full run of twenty-two lanes the widest gap between two batches of
+ * one suite is around twenty units against batches of eighty. A
+ * least-squares slope over a gap that narrow comes out negative for five
+ * of the eight suites with enough batches to fit one, and inside its own
+ * standard error for two more; the eighth is the suite whose per-unit
+ * cost has been measured directly, and the slope reads it at twice that
+ * figure. Across five lanes packing a selection the same suite has held
+ * five units in one batch and six hundred in another, which is a gap
+ * worth fitting over. So a threshold on that gap settles what a suite is
+ * charged from the shape of the run it was measured in, and where it is
+ * not met the suite is charged nothing a unit, which is the direction a
+ * lane is killed in.
+ *
+ * What a batch does say on its own is a rate: what it spent beyond its
+ * own tests, over the units that spending opened. Whatever the batch paid
+ * for itself is in that rate, which is what carries a reading above what
+ * a unit costs rather than below it. The middle reading is the one taken.
+ * The largest charges every unit a small batch's whole fixed cost. The
+ * smallest lands under the figure the same suites have been measured at
+ * directly, because a batch's wall time moves by several seconds for
+ * reasons that have nothing to do with what the batch held, and because
+ * a correction fitted from the tests alone takes some of what a unit
+ * costs with it.
+ *
+ * A batch whose spending is under what its own tests are charged has
+ * nothing left to attribute to its units, which is where a suite running
+ * its files in parallel lands. That is not evidence a unit gives time
+ * back, so it reads as costing nothing.
+ */
+function unitCostOf(
+  observations: readonly BatchObservation[],
+  correction: number,
+): number {
+  const rates = observations
+    .filter((observation) => observation.units > 0)
+    .map((observation) =>
+      Math.max(0, observation.spent - correction * observation.ran) /
+      observation.units
+    )
+    .sort((a, b) => a - b);
+  if (rates.length === 0) return 0;
+  // The higher of the two middle readings where the count is even, which
+  // is the direction every figure here errs in.
+  return rates[Math.floor(rates.length / 2)]!;
 }
 
 /**
  * What the share of a batch that is not its tests comes to, as an
- * intercept and two slopes.
+ * intercept and two figures charged in proportion to what the batch
+ * holds.
  *
  * The intercept is raised until no observation is under-predicted,
- * whatever the slopes came to. A least-squares plane sits in the middle
+ * whatever the other two came to. A least-squares line sits in the middle
  * of its observations by construction, which for this quantity means half
  * the lanes running past the budget they were packed against.
+ *
+ * The per-unit cost is read at a rate carrying a share of the suite's own
+ * fixed cost, and the intercept is what that rate leaves. So a batch far
+ * smaller than any this has seen is charged less than the whole of that
+ * fixed cost, and what that can be wrong by is bounded by the fixed cost
+ * itself. Charging nothing per unit is wrong by the per-unit cost times
+ * however many units a lane packs, and nothing bounds that: neither term
+ * left would grow with the units, so a lane packing a thousand of a
+ * suite's cheapest units would be charged what a lane packing three is.
  */
 export function fitSuite(
   observations: readonly BatchObservation[],
 ): { overhead: number; correction: number; unitOverhead: number } {
-  if (observations.length === 0) return { overhead: 0, ...UNFITTED };
-  const fitted = slopes(observations);
+  const correction = correctionOf(observations);
+  const unitOverhead = unitCostOf(observations, correction);
   const overhead = observations.reduce(
     (most, o) =>
-      Math.max(
-        most,
-        o.spent - fitted.correction * o.ran - fitted.unitOverhead * o.units,
-      ),
+      Math.max(most, o.spent - correction * o.ran - unitOverhead * o.units),
     0,
   );
-  return { overhead, ...fitted };
+  return { overhead, correction, unitOverhead };
 }
 
 /** What a lane pays beyond its tests, fitted from what lanes have spent. */
