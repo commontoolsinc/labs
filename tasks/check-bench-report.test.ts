@@ -72,6 +72,41 @@ async function check(
 }
 
 describe("check-bench-report", () => {
+  describe("as a program", () => {
+    // The Benchmarks workflow reads this check's exit code and nothing else,
+    // which only running it as a program states. It is started through
+    // `Deno.execPath()` rather than through `deno` on the PATH, since a
+    // coverage profile one Deno version writes cannot be reported by another,
+    // and with `--frozen` so that the spawn resolves the checked-in dependency
+    // graph rather than a new one.
+
+    it("exits 1 and names the problem for a report the tiles cannot read", async () => {
+      const directory = await Deno.makeTempDir({
+        prefix: "check-bench-report-program-",
+      });
+      const path = join(directory, "results.json");
+      await Deno.writeTextFile(
+        path,
+        report([`${CALIBRATION} > integer arithmetic`]),
+      );
+      const { code, stderr } = await new Deno.Command(Deno.execPath(), {
+        args: [
+          "run",
+          "--frozen",
+          "--allow-read",
+          "tasks/check-bench-report.ts",
+          path,
+        ],
+        cwd: new URL("../", import.meta.url),
+        stdout: "null",
+      }).output();
+      await Deno.remove(directory, { recursive: true });
+      expect(code).toBe(1);
+      expect(new TextDecoder().decode(stderr))
+        .toContain("no product benchmark measurements");
+    });
+  });
+
   describe("main()", () => {
     it("returns 0 and names the file for a report the tiles can read", async () => {
       const { code, out, err } = await check(

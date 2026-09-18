@@ -205,6 +205,29 @@ describe("check-bench-workflow", () => {
     });
   });
 
+  describe("as a program", () => {
+    // The gate's contract with CI is its exit code, which only running it as a
+    // program states. It is started through `Deno.execPath()` rather than
+    // through `deno` on the PATH, since a coverage profile one Deno version
+    // writes cannot be reported by another, and with `--frozen` so that the
+    // spawn resolves the checked-in dependency graph rather than a new one.
+
+    it("exits 0 over this repository", async () => {
+      const { code, stdout } = await new Deno.Command(Deno.execPath(), {
+        args: [
+          "run",
+          "--frozen",
+          "--allow-read",
+          "tasks/check-bench-workflow.ts",
+        ],
+        cwd: new URL("../", import.meta.url),
+        stderr: "null",
+      }).output();
+      expect(code).toBe(0);
+      expect(new TextDecoder().decode(stdout)).toContain("names (3 files)");
+    });
+  });
+
   describe("main()", () => {
     it("returns 0 and counts the files for this repository", () => {
       let code = -1;
