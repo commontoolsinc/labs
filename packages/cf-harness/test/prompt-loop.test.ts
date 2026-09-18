@@ -2148,6 +2148,10 @@ describe("CfHarnessPromptLoop opening research", () => {
     const runId = "run-opening-research";
     const task = "Build a documented Common Fabric counter.";
     const requests: HarnessModelTurnRequest[] = [];
+    const checkpoints: {
+      transcript: readonly HarnessTranscriptMessage[];
+      runState: HarnessRunState;
+    }[] = [];
     try {
       const modelClient: HarnessModelClient = {
         providerId: "test-provider",
@@ -2194,6 +2198,11 @@ describe("CfHarnessPromptLoop opening research", () => {
               usage: { totalTokens: 11 },
             };
           }
+          expect(checkpoints).toHaveLength(1);
+          expect(checkpoints[0].transcript.at(-1)?.content).toBe(task);
+          expect(checkpoints[0].runState.openingResearch?.status).toBe(
+            "completed",
+          );
           return {
             assistant: {
               role: "assistant" as const,
@@ -2218,10 +2227,13 @@ describe("CfHarnessPromptLoop opening research", () => {
         allowedToolIds: ["research"],
       });
 
-      const result = await loop.runPrompt({
-        prompt: task,
+      const result = await loop.runTranscript({
+        transcript: [{ role: "user", content: task }],
         openingResearchTask: task,
         promptSlotBinding: directPromptSlotBinding,
+        onCheckpoint: (checkpoint) => {
+          checkpoints.push(structuredClone(checkpoint));
+        },
       });
 
       expect(requests.map((request) => request.runId)).toEqual([
@@ -2239,6 +2251,13 @@ describe("CfHarnessPromptLoop opening research", () => {
       }
       expect(handoff.content).toContain(
         "Host opening research handoff",
+      );
+      expect(checkpoints[0].transcript).toContainEqual(handoff);
+      expect(checkpoints[0].runState.researchRuns).toEqual(
+        result.runState.researchRuns,
+      );
+      expect(checkpoints[0].runState.cfcModelContext).toEqual(
+        result.runState.cfcModelContext,
       );
       expect(handoff.content).not.toContain("did:key:zOpeningText");
       expect(result.runState.researchRuns?.[0]?.kit.summary).toContain(
@@ -10257,6 +10276,7 @@ describe("CfHarnessPromptLoop budget finalization", () => {
   for (const cap of [1, 2, 100]) {
     it(`reserves the last of ${cap} root turns for findings without tools`, async () => {
       const requests: HarnessModelTurnRequest[] = [];
+      const budgetMessages: string[] = [];
       const runtime = new FakeSandboxRuntime();
       const loop = new CfHarnessPromptLoop({
         engine: new CfHarnessEngine({
@@ -10294,7 +10314,23 @@ describe("CfHarnessPromptLoop budget finalization", () => {
           },
         },
       });
-      const result = await loop.runPrompt({ prompt: "Research the schedule." });
+      const result = await loop.runPrompt({
+        prompt: "Research the schedule.",
+        onTranscriptEvent: ({ message, transcript }) => {
+          if (
+            message.role === "user" &&
+            message.content.startsWith("Host turn budget:")
+          ) {
+            expect(transcript.at(-1)).toEqual(message);
+            budgetMessages.push(message.content);
+          }
+        },
+      });
+      expect(budgetMessages).toHaveLength(cap > 2 ? 2 : 1);
+      expect(budgetMessages.at(-1)).toContain("final response now");
+      if (cap > 2) {
+        expect(budgetMessages[0]).toContain("two root turns remain");
+      }
       expect(requests).toHaveLength(cap);
       expect(requests.at(-1)?.tools).toEqual([]);
       expect(requests.at(-1)?.nativeModelToolIds).toEqual([]);
