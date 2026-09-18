@@ -25,7 +25,7 @@
  * not have. It is part of the FIXTURE, not a fixture itself, so
  * `parseVintagePath` declines everything inside one. Its shape lives in
  * `packages/piece/test/vintage-layout.ts`, which the snapshot/restore side needs
- * too and which is dependency-free so this module stays so.
+ * too and which imports nothing itself.
  *
  * The tree is deliberately NOT under `packages/patterns/`, which is the
  * obvious home for it and the wrong one. `tasks/build-binaries.ts` passes that
@@ -72,10 +72,11 @@
  *
  * Kept apart from `pattern-vintage-lib.ts`, which holds the capture,
  * comparison and reporting around a fixture and reaches the runner to do it.
- * This half is path parsing over a directory walk, and imports nothing beyond
- * the companion-directory rule, so the test topology in
- * `test-topology/gates.ts` can read the fixture names. Every lane loads that
- * topology before it runs anything.
+ * This half is path parsing over a directory walk. It reaches two leaves and
+ * nothing else — the companion-directory rule, and the code-point string
+ * comparison in `@commonfabric/utils/utf8` — so the test topology in
+ * `test-topology/gates.ts` can read the fixture names without loading the
+ * runner. Every lane loads that topology before it runs anything.
  */
 
 import { utf8Compare } from "@commonfabric/utils/utf8";
