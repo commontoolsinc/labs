@@ -29,12 +29,11 @@ import {
 import type { FabricValue } from "@/index.ts";
 import { isDeepFrozen, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
-import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@/fabric-primitives/for-testing-only.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
-import { FabricMap } from "@/fabric-instances/FabricMap.ts";
-import { FabricSet } from "@/fabric-instances/FabricSet.ts";
-import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import { UnknownValue } from "@/codec-common/UnknownValue.ts";
+import {
+  FABRIC_INSTANCE_EXAMPLE_MAKERS_FOR_TESTING_ONLY,
+  FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY,
+} from "@/for-testing-only.ts";
 import {
   FabricInstance,
   FabricPrimitive,
@@ -555,40 +554,26 @@ describe("cloneIfNecessary()", () => {
     readonly deepCloneImplemented: boolean;
   };
 
+  /**
+   * The `FabricInstance` classes whose `deepClone()` is more than a throwing
+   * stub. A class absent from here is expected to throw, so one that gains an
+   * implementation fails its cases until it is named.
+   */
+  const DEEP_CLONE_IMPLEMENTED: ReadonlySet<string> = new Set([
+    "FabricError",
+    "FabricLink",
+  ]);
+
   const subclassCases: readonly SubclassCase[] = [
-    // `FabricInstance` with full protocol coverage.
-    {
-      name: "FabricError",
-      factory: () => FabricError.fromNativeError(new Error("test")),
-      deepCloneImplemented: true,
-    },
-    {
-      name: "ProblematicValue",
-      factory: () => new ProblematicValue("Foo@1", "state-data", "boom"),
-      deepCloneImplemented: false,
-    },
-    {
-      name: "UnknownValue",
-      factory: () => new UnknownValue("Foo@1", "state-data"),
-      deepCloneImplemented: false,
-    },
-    // `FabricInstance` with all-protocol stubs (only shallow works).
-    {
-      name: "FabricMap",
-      factory: () =>
-        new FabricMap(
-          new Map<FabricValue, FabricValue>([[
-            "k",
-            1,
-          ]]),
-        ),
-      deepCloneImplemented: false,
-    },
-    {
-      name: "FabricSet",
-      factory: () => new FabricSet(new Set<FabricValue>([1])),
-      deepCloneImplemented: false,
-    },
+    // `FabricInstance` subclasses, one case per class, from the makers the
+    // classes' own package keeps complete.
+    ...Object.entries(FABRIC_INSTANCE_EXAMPLE_MAKERS_FOR_TESTING_ONLY).map((
+      [name, [factory]],
+    ): SubclassCase => ({
+      name,
+      factory,
+      deepCloneImplemented: DEEP_CLONE_IMPLEMENTED.has(name),
+    })),
     // `FabricPrimitive` subclasses (intrinsically immutable), one case per
     // class, from the examples the classes' own package keeps complete.
     ...Object.entries(FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY).map((
