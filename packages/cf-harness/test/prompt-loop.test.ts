@@ -10252,3 +10252,162 @@ Deno.test("CfHarnessPromptLoop surfaces a child's ok:false return as a coded fai
   });
   assertEquals(output.subagent.structuredReturn.validationError, undefined);
 });
+
+describe("CfHarnessPromptLoop budget finalization", () => {
+  for (const cap of [1, 2, 100]) {
+    it(`reserves the last of ${cap} root turns for findings without tools`, async () => {
+      const requests: HarnessModelTurnRequest[] = [];
+      const runtime = new FakeSandboxRuntime();
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: runtime,
+          model: "gpt-test",
+        }),
+        maxModelTurns: cap,
+        finalizeOnTurnLimit: true,
+        nativeModelToolIds: ["openai_web_search"],
+        modelClient: {
+          providerId: "openai-compatible-gateway",
+          complete: (request) => {
+            requests.push(
+              structuredClone({ ...request, onAttempt: undefined }),
+            );
+            return Promise.resolve({
+              assistant: requests.length === cap
+                ? {
+                  role: "assistant",
+                  content: "Verified findings; attachment remains unread.",
+                }
+                : {
+                  role: "assistant",
+                  content: "",
+                  toolCalls: [{
+                    id: `call-${requests.length}`,
+                    type: "function",
+                    function: {
+                      name: "bash",
+                      arguments: JSON.stringify({ command: "echo evidence" }),
+                    },
+                  }],
+                },
+            });
+          },
+        },
+      });
+      const result = await loop.runPrompt({ prompt: "Research the schedule." });
+      expect(requests).toHaveLength(cap);
+      expect(requests.at(-1)?.tools).toEqual([]);
+      expect(requests.at(-1)?.nativeModelToolIds).toEqual([]);
+      expect(requests.at(-1)?.transcript.at(-1)?.content).toContain(
+        "final response",
+      );
+      expect(result.finalAssistantText).toContain("Verified findings");
+      expect(result.taskOutcome).toEqual({
+        outcome: "gave-up",
+        reason:
+          "Root model turn budget reached; response contains partial findings.",
+      });
+      expect(result.runState.terminalReason).toBe("budget_finalized");
+    });
+  }
+
+  for (const content of ["", " \n\t"]) {
+    it(`keeps a blank final response as a failure (${JSON.stringify(content)})`, async () => {
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          model: "gpt-test",
+        }),
+        maxModelTurns: 1,
+        finalizeOnTurnLimit: true,
+        modelClient: {
+          providerId: "openai-compatible-gateway",
+          complete: () =>
+            Promise.resolve({ assistant: { role: "assistant", content } }),
+        },
+      });
+      await expect(loop.runPrompt({ prompt: "Research" })).rejects.toThrow(
+        "empty assistant response",
+      );
+      expect(loop.engine.getRunState().status).toBe("failed");
+    });
+  }
+
+  it("honors cancellation before the reserved final response", async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const loop = new CfHarnessPromptLoop({
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        model: "gpt-test",
+      }),
+      maxModelTurns: 2,
+      finalizeOnTurnLimit: true,
+      modelClient: {
+        providerId: "openai-compatible-gateway",
+        complete: () => {
+          calls += 1;
+          return Promise.resolve({
+            assistant: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{
+                id: "read",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "echo evidence" }),
+                },
+              }],
+            },
+          });
+        },
+      },
+    });
+    await expect(
+      loop.runTranscript({
+        transcript: [{ role: "user", content: "Research" }],
+        signal: controller.signal,
+        onCheckpoint: () => controller.abort(new Error("owner canceled")),
+      }),
+    ).rejects.toThrow("owner canceled");
+    expect(calls).toBe(1);
+    expect(loop.engine.getRunState().status).toBe("canceled");
+  });
+
+  it("refuses tool execution during finalization even with accompanying text", async () => {
+    const runtime = new FakeSandboxRuntime();
+    const loop = new CfHarnessPromptLoop({
+      engine: new CfHarnessEngine({
+        sandboxRuntime: runtime,
+        model: "gpt-test",
+      }),
+      maxModelTurns: 1,
+      finalizeOnTurnLimit: true,
+      modelClient: {
+        providerId: "openai-compatible-gateway",
+        complete: () =>
+          Promise.resolve({
+            assistant: {
+              role: "assistant",
+              content: "Done",
+              toolCalls: [{
+                id: "forbidden",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "touch unsafe" }),
+                },
+              }],
+            },
+          }),
+      },
+    });
+    await expect(loop.runPrompt({ prompt: "Research" })).rejects.toThrow(
+      "final response",
+    );
+    expect(
+      runtime.shellRequests.filter((r) => r.command.includes("touch unsafe")),
+    ).toHaveLength(0);
+  });
+});

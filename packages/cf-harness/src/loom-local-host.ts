@@ -609,6 +609,10 @@ export const createLoomLocalCfHarnessHost = async (
           : {}),
         credentialOwner: LOOM_LOCAL_CREDENTIAL_OWNER,
         basePromptLoopOptions: {
+          finalizeOnTurnLimit: true,
+          ...(processEnv.CF_HARNESS_CHAT_ARTIFACT_ROOT
+            ? { artifactRoot: processEnv.CF_HARNESS_CHAT_ARTIFACT_ROOT }
+            : {}),
           modelProvider: provider,
           modelAuthSource: binding.modelAuthSource,
           credentialOwner: LOOM_LOCAL_CREDENTIAL_OWNER,

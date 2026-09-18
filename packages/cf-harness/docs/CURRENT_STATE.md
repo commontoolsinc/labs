@@ -171,9 +171,10 @@ The current package provides:
   uses implicit caching because it rejects the API `prompt_cache_options` field;
 - interactive NDJSON stdio sessions with optional SQLite session, turn, event,
   replay, cancellation, and restore state; a session's durable transcript
-  advances only at a completed turn, so a failed, canceled, or interrupted turn
-  retains the transcript from before it while its tool and event history stays
-  on the audit trail; a completed turn's history is checked before it is
+  normally advances at a completed turn. The Loom host also retains complete
+  batches and opening research on failure, atomically with their matching
+  research/CFC state and omission provenance; canceled and interrupted activity
+  stays on the audit trail; a completed turn's history is checked before it is
   promoted, and promotion commits with the completion or not at all; and a
   restored session whose recorded history does not pair its tool calls with tool
   results preserves that history and adds explicit unknown-outcome results for

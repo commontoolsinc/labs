@@ -527,6 +527,7 @@ Deno.test("local Loom interactive host uses the same fixed Codex binding", async
     env: {
       CF_HARNESS_GATEWAY_BASE_URL: "https://must-not-be-used.invalid/",
       CF_HARNESS_GATEWAY_AUTH_MODE: "none",
+      CF_HARNESS_CHAT_ARTIFACT_ROOT: home + "/private-runs",
     },
     credentialStore: credentials,
     providerSettingsStore: configured("openai-codex"),
@@ -537,6 +538,11 @@ Deno.test("local Loom interactive host uses the same fixed Codex binding", async
   });
 
   await host.runInteractive([]);
+  assertEquals(observed?.basePromptLoopOptions?.finalizeOnTurnLimit, true);
+  assertEquals(
+    observed?.basePromptLoopOptions?.artifactRoot,
+    home + "/private-runs",
+  );
   assertEquals(observed?.basePromptLoopOptions?.modelProvider, "openai-codex");
   assertEquals(
     observed?.basePromptLoopOptions?.modelAuthSource,
