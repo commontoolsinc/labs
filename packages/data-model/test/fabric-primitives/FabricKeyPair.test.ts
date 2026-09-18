@@ -154,6 +154,12 @@ describe("FabricKeyPair", () => {
   });
 
   describe("instance members", () => {
+    describe(".schemaType", () => {
+      it("is `FabricKeyPair`", () => {
+        expect(materialPair().schemaType).toBe("FabricKeyPair");
+      });
+    });
+
     describe(".hasMaterial", () => {
       it("returns `true` for an instance built from bytes", () => {
         expect(materialPair().hasMaterial).toBe(true);

@@ -118,6 +118,26 @@ export type Immutable<T> = T extends ReadonlyArray<infer U>
   : T;
 
 /**
+ * Whether `T` is a union of more than one member: `true` for such a union, and
+ * `false` for a single type. Members are told apart by assignability, which
+ * bounds that in three ways. A union whose members are all mutually assignable,
+ * `Error | TypeError` among them, yields `false`. A union with a member that
+ * every other member is assignable to, and not the other way round, yields
+ * `boolean`: that member reports `false` and the rest `true`. And `never`, the
+ * union of no members, yields `never`, which `MustBeTrue` accepts vacuously.
+ * Compare the result with `Equal` where one of those can arise.
+ */
+export type IsUnion<T> = IsUnionOf<T, T>;
+
+/**
+ * Helper for `IsUnion`, which distributes over `Member` while holding the
+ * union it came from intact in `Whole`.
+ */
+type IsUnionOf<Member, Whole> = Member extends unknown
+  ? ([Whole] extends [Member] ? false : true)
+  : never;
+
+/**
  * The tag `typeOfIncludingNull()` returns: the result of `typeof`, plus
  * `null` for the value `null`, which `typeof` files under `object`.
  */

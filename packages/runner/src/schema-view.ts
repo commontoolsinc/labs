@@ -40,7 +40,6 @@ import type {
   JSONSchemaObj,
   JSONSchemaTypes,
 } from "@commonfabric/api";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model-schema";
 import { FabricPrimitive } from "@commonfabric/data-model";
 import type { FabricValue } from "@commonfabric/data-model";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -196,7 +195,7 @@ const jsonTypeOf = (value: unknown): string => {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   if (value instanceof FabricPrimitive) {
-    return schemaTypeOfFabricPrimitive(value);
+    return value.schemaType;
   }
   switch (typeof value) {
     case "undefined":

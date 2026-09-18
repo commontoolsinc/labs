@@ -964,6 +964,7 @@ that form the `FabricPrimitive` arm of `FabricValue`.
 // Shown for illustration only.
 // file: packages/data-model/src/interface.ts
 
+import type { FabricPrimitiveSchemaType } from "./api.ts";
 import { FABRIC_INSTANCE_PLUS_BRAND, FABRIC_PRIMITIVE_BRAND } from "./api.ts";
 
 /**
@@ -998,6 +999,15 @@ export abstract class FabricPrimitive extends BaseFabricSpecialObject {
   constructor() {
     super();
   }
+
+  /**
+   * Name of this instance's class in the schema `type` vocabulary: the `type`
+   * a schema names to admit this value by its class. Every instance of a class
+   * reports the same name, which need not be the name of the class. Each
+   * concrete class supplies its own, and the getter reads no instance state,
+   * so that it returns the same name when read off the class's `prototype`.
+   */
+  abstract get schemaType(): FabricPrimitiveSchemaType;
 }
 ```
 
@@ -1007,6 +1017,12 @@ and `#tag: string` for content IDs, `#bytes: Uint8Array` for byte sequences).
 The base class holds no state — its purpose is to provide a single
 `instanceof FabricPrimitive` check where code needs to identify these types
 uniformly (e.g., the conversion functions' freeze-bypass logic).
+
+Its one abstract member, `.schemaType`, is how a value reports the name its
+class has in the schema dialect's `type` vocabulary
+(`docs/specs/json_schema.md`). Every concrete class supplies it as a constant.
+The per-class listings in the sections that follow leave it out, as they leave
+out each class's codecs.
 
 #### 1.4.7 `FabricEpochNsec`
 
@@ -3352,9 +3368,11 @@ registrations. A caller needing classes of its own extends what this returns.
 | `registerSelfRep` | `null`, `boolean`, `number`, `string` | _(none)_ | Self-representing: emitted as-is. `number` is registered both ways; the codec is tried first. |
 
 The canonical tag strings live in `CODEC_TYPE_TAGS`
-(`codec-interface/codec-type-tags.ts`); the structural meta tags (`quote`,
-`hole`, `object`) live in `CODEC_META_TAGS`
-(`codec-interface/codec-meta-tags.ts`).
+(`codec-interface/codec-type-tags.ts`), which takes the `FabricPrimitive`
+classes' entries from `FABRIC_PRIMITIVE_CODEC_TYPE_TAGS`
+(`fabric-primitives/interface.ts`), where they sit with the other vocabularies
+that range over those classes; the structural meta tags (`quote`, `hole`,
+`object`) live in `CODEC_META_TAGS` (`codec-interface/codec-meta-tags.ts`).
 
 An un-codec'd `FabricSpecialObject` reaching the encoder is a **hard
 error** — every wire form is explicitly represented; there is no implicit

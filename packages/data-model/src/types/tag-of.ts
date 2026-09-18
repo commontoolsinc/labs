@@ -21,13 +21,15 @@ import {
   type FabricValueLayer,
   type FabricValuePlusLayer,
 } from "@/interface.ts";
+import {
+  FABRIC_PRIMITIVE_VALUE_TAGS,
+  type FabricPrimitiveValueTag,
+} from "@/fabric-primitives/interface.ts";
 import { toShortQuotedDebugString } from "@/value-debug";
 
 import { type PlusTypePredicate } from "./interface.ts";
 import {
   type ConvertibleJsValueTag,
-  FABRIC_PRIMITIVE_VALUE_TAGS,
-  type FabricPrimitiveValueTag,
   type FabricValuePlusTag,
   type FabricValueTag,
   VALUE_TAGS,

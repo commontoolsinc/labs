@@ -95,6 +95,10 @@ describe("impl", () => {
 
     it("renders a `FabricPrimitive` whose state holds itself down to the depth limit", () => {
       class Circular extends FabricPrimitive {
+        get schemaType(): never {
+          throw new Error("Unimplemented.");
+        }
+
         static get [REALM_CODEC]() {
           return {
             tagForValue: () => "Circular@1",

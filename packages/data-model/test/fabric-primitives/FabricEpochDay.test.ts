@@ -44,6 +44,12 @@ describe("FabricEpochDay", () => {
   });
 
   describe("instance members", () => {
+    describe(".schemaType", () => {
+      it("is `FabricEpochDay`", () => {
+        expect(new FabricEpochDay(0n).schemaType).toBe("FabricEpochDay");
+      });
+    });
+
     describe(".value", () => {
       it("wraps a `bigint` value", () => {
         const sd = new FabricEpochDay(19723n);

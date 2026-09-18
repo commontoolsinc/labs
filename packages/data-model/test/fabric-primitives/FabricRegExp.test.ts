@@ -86,6 +86,12 @@ describe("FabricRegExp", () => {
   });
 
   describe("instance members", () => {
+    describe(".schemaType", () => {
+      it("is `FabricRegExp`", () => {
+        expect(new FabricRegExp(/a/).schemaType).toBe("FabricRegExp");
+      });
+    });
+
     describe(".source", () => {
       it("returns the pattern source text", () => {
         expect(new FabricRegExp(/^foo\d+\.bar$/).source).toBe(

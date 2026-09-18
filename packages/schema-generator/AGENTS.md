@@ -31,8 +31,8 @@ via subpath exports. Entry point is `src/index.ts` (not `mod.ts`).
   (`{ type: "undefined" }`). The `unknown`/`undefined` type values are
   deliberate non-standard extensions, as are the `FabricPrimitive` type names
   (`{ type: "FabricBytes" }` and friends — see `FABRIC_PRIMITIVE_SCHEMA_TYPES`
-  in `packages/api/index.ts`), emitted for fields authored against those
-  classes.
+  in `packages/data-model/src/api.ts`), emitted for fields authored against
+  those classes.
 - Fail-loud inventory: `Map`/`Set`/`WeakMap`, `Cell<Stream<T>>`,
   `Default<undefined>`, unresolvable DeepDefault keys, and circular aliases
   THROW rather than degrade. An unformattable type also throws (complete
