@@ -265,10 +265,9 @@ headlessly. The tier's thread cases run under a workload of their own,
 `aggregates`, which demands every topic's present comment count and last
 activity and nothing else. Measure cold initialization, warm updates, and reopen
 or reconnect separately. T0 measured reopen in the browser tier and not
-reconnect: the browser measurement helper fails when the runtime client is
-replaced, which a page reload and a transport reconnect both do, so the browser
-tier's `reopen` series re-opens a topic within one live client and a browser
-reconnect is unmeasured. Hold runtime, source package, data, demand, and feature
+reconnect: inducing a transport reconnect needs a storage relay the Benchmarks
+workflow does not run, so the browser tier's `reopen` series re-opens a topic
+within one live client and a browser reconnect is unmeasured. Hold runtime, source package, data, demand, and feature
 flags constant between comparison arms; alternate repeated timing runs and
 report their distribution rather than a single favorable sample.
 

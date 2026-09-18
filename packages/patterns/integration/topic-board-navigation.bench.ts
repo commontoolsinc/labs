@@ -211,7 +211,7 @@ function commentBoard(): Promise<TopicBoardFixture> {
       topicCount: TOPIC_COUNT,
       demand: DEMAND,
     });
-    await report(
+    report(
       `seeded comment board ${seeded.boardId} in ${
         Math.round(performance.now() - startedAt)
       }ms`,
@@ -221,7 +221,7 @@ function commentBoard(): Promise<TopicBoardFixture> {
   return commentSeeding;
 }
 
-/** Returns the board the six navigation segments share. */
+/** Returns the board every segment but `comment` shares. */
 const mainBoard = (): Promise<TopicBoardFixture> => Promise.resolve(fixture);
 
 /**
@@ -275,8 +275,10 @@ const encoder = new TextEncoder();
  * Writes `message` to stderr from inside a bench body, where the JSON reporter
  * captures console output and `note()` above therefore cannot be used.
  */
-function report(message: string): Promise<number> {
-  return Deno.stderr.write(
+function report(message: string): void {
+  // `writeSync`, not `write`: these carry whole sample dumps, and a partial
+  // write would drop part of one silently.
+  Deno.stderr.writeSync(
     encoder.encode(`[topic-board-navigation] ${message}\n`),
   );
 }
@@ -324,7 +326,7 @@ const BACKLINK_TOPIC = (() => {
   return chosen;
 })();
 
-/** Titles the backlink segment's topic is cited by, and waits to see. */
+/** Titles the backlink segment's topic is cited by, which it waits to see. */
 const BACKLINK_ROWS = citedBy(BACKLINK_TOPIC).map(topicTitle);
 
 // A topic that cites as well as being cited shows both cards, and their rows
@@ -426,7 +428,7 @@ async function ensureProfile(page: Page): Promise<void> {
 
 /**
  * Shows the topic at `index` of `board` through the shell's own navigation, so
- * one runtime serves the whole sequence, and wait for the view to be that
+ * one runtime serves the whole sequence, and waits for the view to be that
  * topic. Reaching a topic by clicking needs it to be on a card or a link the
  * page already shows, which the topics these segments measure are not.
  */
@@ -497,8 +499,18 @@ async function reachBacklink(
   };
 }
 
-/** Cases whose read-accounted sample has been taken. */
-const sampled = new Set<string>();
+/**
+ * Invocations of each case so far, so that the read-accounted sample is taken
+ * around a measured iteration rather than the warm-up the benchmark discards.
+ */
+const invocations = new Map<string, number>();
+
+/** Whether this invocation of `name` is the one that samples. */
+function samplesThisTime(name: string): boolean {
+  const seen = (invocations.get(name) ?? 0) + 1;
+  invocations.set(name, seen);
+  return seen === WARMUP + 1;
+}
 
 /**
  * Takes `name`'s one read-accounted sample and writes it to stderr, the first
@@ -515,8 +527,7 @@ async function recordReadsOnce(
   board: () => Promise<TopicBoardFixture>,
   reach: (navigation: BoardSession) => Promise<() => Promise<unknown>>,
 ): Promise<void> {
-  if (sampled.has(name)) return;
-  sampled.add(name);
+  if (!samplesThisTime(name)) return;
   const navigation = await BoardSession.open({
     fixture: await board(),
     identity,
@@ -528,7 +539,7 @@ async function recordReadsOnce(
       program: await topicsProgram(),
       operation,
     });
-    await report(formatTopicsSample(sample).join("\n"));
+    report(formatTopicsSample(sample).join("\n"));
   } finally {
     await navigation.close();
   }
@@ -582,7 +593,7 @@ function benchSegment<Reached>(
       } catch (diagnosticError) {
         diagnostics = { unavailable: describeThrown(diagnosticError) };
       }
-      await report(
+      report(
         `failed attempt ${JSON.stringify({ ...failure, diagnostics })}`,
       );
       throw error;

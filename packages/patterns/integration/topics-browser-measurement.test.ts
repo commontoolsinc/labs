@@ -129,6 +129,31 @@ describe("topics-browser-measurement", () => {
     });
   }
 
+  /**
+   * Delivers one `scheduler.run.complete` marker to the page's telemetry,
+   * carrying a read sample so the samplers count it as a run, and `src` when
+   * one is given. Omitting `src` is the shape a run of something other than an
+   * authored module takes.
+   */
+  async function deliverRun(src: string | undefined): Promise<void> {
+    await session.page.evaluate((src: string | undefined) => {
+      const client = (globalThis as typeof globalThis & {
+        commonfabric?: { rt?: unknown };
+      }).commonfabric!.rt! as { emit: (e: string, m: unknown) => void };
+      client.emit("telemetry", {
+        type: "scheduler.run.complete",
+        ...(src === undefined ? {} : { src }),
+        durationMs: 1,
+        reads: {
+          proxyAccesses: 1,
+          linkResolutions: 0,
+          distinctDocuments: 1,
+          registeredDependencies: 1,
+        },
+      });
+    }, { args: [src] });
+  }
+
   /** Index of the seeded topic `pieceId` addresses. */
   function topicIndexOf(pieceId: string): number {
     return fixture.topics.findIndex((topic) =>
@@ -301,35 +326,48 @@ describe("topics-browser-measurement", () => {
       // page's telemetry carrying a `src` that `parseSrc()` rejects, alongside
       // the read sample that makes it a counted run.
 
-      const operation = () =>
-        session.page.evaluate(() => {
-          const scope = globalThis as typeof globalThis & {
-            commonfabric?: { rt?: { emit?: unknown } };
-          };
-          const client = scope.commonfabric!.rt! as unknown as {
-            emit: (event: string, marker: unknown) => void;
-          };
-          client.emit("telemetry", {
-            type: "scheduler.run.complete",
-            src: "not a source location",
-            durationMs: 1,
-            reads: {
-              proxyAccesses: 1,
-              linkResolutions: 0,
-              distinctDocuments: 1,
-              registeredDependencies: 1,
-            },
-          });
-        });
-
       await expect(
         measureTopicsReads(session.page, {
           label: "unparseable",
           program,
-          operation,
+          operation: () => deliverRun("not a source location"),
           mayRunNothing: true,
         }),
       ).rejects.toThrow("carried no source location to attribute them by");
+      expect(await samplesLeftInPage()).toEqual([]);
+    });
+
+    it("counts a run carrying no source location apart, and waives it only when declared", async () => {
+      // The branch that tells the two apart, driven with the one marker shape
+      // that reaches it. Without this the counter is only ever read as zero:
+      // the declared-to-run-nothing case completes no run at all, and the
+      // unparseable case above delivers a `src`.
+
+      const sample = await measureTopicsReads(session.page, {
+        label: "no source location",
+        program,
+        operation: () => deliverRun(undefined),
+        mayRunNothing: true,
+      });
+
+      checkSample(sample, () => {
+        expect(sample.runsWithoutSource).toBe(1);
+        // Counted apart for reporting, and still part of `remaining`, which
+        // is every run the sample could not place against a named lift.
+        expect(sample.remaining.runs).toBe(1);
+        expect(sample.lifts.map((lift) => lift.runs)).toEqual([0, 0, 0, 0]);
+      });
+
+      // The same run undeclared: the waiver is what admits it.
+      await expect(
+        measureTopicsReads(session.page, {
+          label: "no source location, undeclared",
+          program,
+          operation: () => deliverRun(undefined),
+        }),
+      ).rejects.toThrow(
+        "completed no run carrying an authored source location",
+      );
       expect(await samplesLeftInPage()).toEqual([]);
     });
 

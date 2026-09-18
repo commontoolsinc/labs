@@ -189,7 +189,7 @@ const reopenTopic = (topicCount: number): number => topicCount - 1;
 
 /**
  * Shows the piece `pieceId` through the shell's own navigation, so one runtime
- * serves the whole sequence, and wait for the selected view to be it.
+ * serves the whole sequence, and waits for the selected view to be it.
  */
 async function showPiece(
   session: BoardSession,
@@ -262,10 +262,18 @@ function topicsProgram(): Promise<TopicsProgram> {
 }
 
 /**
- * Sizes whose reopen samples have been written to stderr, so that each size
- * reports once and the rest of its iterations report nothing.
+ * Invocations of each size's reopen case so far, so that the samples written to
+ * stderr come from a measured iteration rather than from the warm-up, whose
+ * numbers the benchmark itself discards.
  */
-const reported = new Set<number>();
+const invocations = new Map<number, number>();
+
+/** Whether this invocation of `topicCount` is the one that reports. */
+function reportsThisTime(topicCount: number): boolean {
+  const seen = (invocations.get(topicCount) ?? 0) + 1;
+  invocations.set(topicCount, seen);
+  return seen === WARMUP + 1;
+}
 
 /**
  * Records a size's reopen with read accounting on, in a browser of its own.
@@ -330,8 +338,7 @@ for (const topicCount of SIZES) {
         interval: b,
         mayRunNothing: true,
       });
-      if (!reported.has(topicCount)) {
-        reported.add(topicCount);
+      if (reportsThisTime(topicCount)) {
         note(formatTopicsSample(sample).join("\n"));
         // Paired with the interval above, and taken after it so the timing the
         // benchmark reports carries none of the accounting's overhead. The

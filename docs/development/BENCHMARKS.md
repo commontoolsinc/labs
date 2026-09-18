@@ -365,9 +365,12 @@ far would charge this series for a board render, which the `<size>` series
 already measures and which at a hundred topics costs an order of magnitude more
 than the reopen.
 
-The second classified the runs themselves, because a reopen at first refused the
-read-accounted sample on most attempts — 14 refusals in 20 trials at a hundred
-topics, 19 in 20 at eight. Recording each run's raw source location across 32
+The second classified the runs themselves, because a reopen at first refused
+the read-accounted sample on every attempt. It refused by one of two paths: the
+attribution check, when a run keyed by the empty string was the whole
+population, on 14 of 20 trials at a hundred topics and 19 of 20 at eight; and
+the old no-runs guard on the rest, when the operation completed no run at all.
+Recording each run's raw source location across 32
 reopen trials and 16 first-open controls in the same environment: every reopen
 run that carried a read sample carried **no** source location, none carried one
 that failed to parse, and the first opens carried 416 parseable locations and
@@ -400,10 +403,10 @@ reopen that starts doing work again is visible rather than hidden.
 What `reopen` does not measure is worth stating, because the plan's phrase is
 "reopen or reconnect" and only the first half of it is measured here. The page,
 its shell, its worker and its runtime client stay up throughout, so this is not
-a runtime restart and not a reconnect. Neither is measurable through this
-helper: it fails when the runtime client is replaced, a page reload discards the
-realm holding the sample altogether, and a transport-level reconnect needs a
-storage relay the Benchmarks workflow does not run. Cold initialization is
+a runtime restart and not a reconnect. Neither is measured here. A page reload
+is out of the helper's reach outright, discarding the realm that holds the
+sample; a transport reconnect is not induced at all, since that needs a storage
+relay the Benchmarks workflow does not run. Cold initialization is
 measured separately, by the navigation benchmark's `load`, `sign in`, `board`
 and `open topic` segments, and a warm update by its `comment` segment.
 

@@ -216,7 +216,7 @@ export interface TopicsReadSample extends TopicsSampleBase {
   /** One row per named lift, in {@link TOPICS_LIFTS} order. */
   readonly lifts: readonly TopicsLiftRow[];
 
-  /** Every run that is not a named lift's. */
+  /** Every run this sample could not place against a named lift. */
   readonly remaining: ReadTotals;
 
   /** Completed runs with no read sample, having started before accounting. */
@@ -464,7 +464,7 @@ export async function measureTopicsReads(
         throw new Error(
           `${options.label}: the measured operation completed no run carrying ` +
             "an authored source location; declare `mayRunNothing` for an " +
-            "operation that may",
+            "operation that may complete none",
         );
       }
 
@@ -565,7 +565,7 @@ export async function timeTopicsOperation(
         if (workerRuns === 0 && !mayRunNothing) {
           throw new Error(
             `${options.label}: the timed operation ran nothing in the worker; ` +
-              "declare `mayRunNothing` for an operation that may",
+              "declare `mayRunNothing` for an operation that may run nothing",
           );
         }
         return {
@@ -649,13 +649,17 @@ export function formatTopicsSample(
       `  ${sample.runsWithoutReads} runs without a read sample; ` +
         `${sample.runsWithoutSource} with a read sample but no source ` +
         `location; ${sample.eventCommits} event commits${
-          sample.mayRunNothing ? ", declared that it may run nothing" : ""
+          sample.mayRunNothing
+            ? ", declared that it may complete no located run"
+            : ""
         }`,
     );
   } else {
     lines.push(
       `  ${sample.workerRuns} worker scheduler runs${
-        sample.mayRunNothing ? ", declared that it may run nothing" : ""
+        sample.mayRunNothing
+          ? ", declared that it may run nothing in the worker"
+          : ""
       }; telemetry and read accounting turned off before the interval`,
     );
   }
