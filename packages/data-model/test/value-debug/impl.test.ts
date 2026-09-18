@@ -129,6 +129,7 @@ describe("impl", () => {
       const names = [
         "maxDepth",
         "maxArrayLength",
+        "maxBufferLength",
         "maxProperties",
         "maxStringLength",
         "maxStringLines",

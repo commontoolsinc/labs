@@ -6,6 +6,7 @@
 export type ConversionLimits = {
   readonly maxDepth: number;
   readonly maxArrayLength: number;
+  readonly maxBufferLength: number;
   readonly maxProperties: number;
   readonly maxStringLength: number;
   readonly maxStringLines: number;

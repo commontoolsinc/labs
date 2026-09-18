@@ -32,6 +32,15 @@ const ABSOLUTE_MAX_ARRAY_LENGTH = 10000;
 const DEFAULT_MAX_ARRAY_LENGTH = 100;
 
 /**
+ * Number of bytes of a buffer a rendering stops at whatever its options say,
+ * so that a result is bounded in size whatever the input.
+ */
+const ABSOLUTE_MAX_BUFFER_LENGTH = 100000;
+
+/** Number of bytes of a buffer a rendering stops at, when its options do not say. */
+const DEFAULT_MAX_BUFFER_LENGTH = 200;
+
+/**
  * Number of properties of an object a conversion stops at whatever its
  * options say, so that a result is bounded in size whatever the input.
  */
@@ -162,6 +171,12 @@ function checkedLimits(
       DEFAULT_MAX_ARRAY_LENGTH,
       ABSOLUTE_MAX_ARRAY_LENGTH,
     ),
+    maxBufferLength: checkedLimit(
+      "maxBufferLength",
+      options?.maxBufferLength,
+      DEFAULT_MAX_BUFFER_LENGTH,
+      ABSOLUTE_MAX_BUFFER_LENGTH,
+    ),
     maxProperties: checkedLimit(
       "maxProperties",
       options?.maxProperties,
@@ -244,7 +259,9 @@ function renderDebugString(
  * says the object's actual count in place of the properties past it; and a
  * string longer than the string length given in `options`, two hundred
  * characters when not given, renders as an excerpt of that length followed by
- * the string's actual length.
+ * the string's actual length. A buffer within a `FabricPrimitive` with more
+ * bytes than the buffer length given in `options`, two hundred when not given,
+ * renders that many bytes followed by the buffer's actual length.
  *
  * How any of these renders is _not_ a contract. The rendering is meant for a
  * human reading a diagnostic, and it changes as that reading is improved;

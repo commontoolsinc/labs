@@ -2,11 +2,11 @@
   // The state of a `FabricPrimitive` is laid out within the same limits a
   // converted value is. No shipped primitive's realm encoding nests or holds
   // an array, so a class defined here stands in where one is needed.
-  "/options": { maxDepth: 2, maxArrayLength: 3 },
+  "/options": { maxDepth: 2, maxArrayLength: 3, maxBufferLength: 4 },
 
   "bytes past the limit": new FabricBytes(new Uint8Array([1, 2, 3, 4, 5])),
 
-  "bytes at the limit": new FabricBytes(new Uint8Array([1, 2, 3])),
+  "bytes at the limit": new FabricBytes(new Uint8Array([1, 2, 3, 4])),
 
   "array past the limit": (() => {
     class Listed extends FabricPrimitive {
@@ -52,14 +52,14 @@
 --
 
 bytes past the limit:
-/Bytes(buf[010203 ...length:5])
-/Bytes(buf [010203 ... length: 5])
+/Bytes(buf[01020304 ...length:5])
+/Bytes(buf [01020304 ... length: 5])
 /Bytes(buf [01020304 05])
 
 bytes at the limit:
-/Bytes(buf[010203])
-/Bytes(buf [010203])
-/Bytes(buf [010203])
+/Bytes(buf[01020304])
+/Bytes(buf [01020304])
+/Bytes(buf [01020304])
 
 array past the limit:
 /Listed(list:[1,2,3,...length:5])

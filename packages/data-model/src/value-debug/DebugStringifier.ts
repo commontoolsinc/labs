@@ -505,13 +505,13 @@ export class DebugStringifier {
   /**
    * Renders an `ArrayBuffer` as `buf [...]`, the space being the spacer, with
    * its bytes in hexadecimal and a space after every fourth byte in either
-   * mode. A buffer with more bytes than the maximum array length has that
+   * mode. A buffer with more bytes than the maximum buffer length has that
    * many rendered, and after them, set off by a space in either mode, its
    * length.
    */
   #renderBuffer(buffer: ArrayBuffer): string {
     const length = buffer.byteLength;
-    const cut = Math.min(length, this.#limits.maxArrayLength);
+    const cut = Math.min(length, this.#limits.maxBufferLength);
     const hex = [...new Uint8Array(buffer, 0, cut)]
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("")

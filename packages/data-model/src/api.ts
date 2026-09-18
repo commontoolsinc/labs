@@ -659,12 +659,21 @@ export interface DebugValueOptions {
    * integer, or `Infinity` for as many as the conversion allows. An array
    * with more elements than this has only the elements at indices below the
    * limit converted, and in place of the rest a form suggestive of the
-   * elision, which includes the array's actual length. This applies to the
-   * contents of a `FabricPrimitive` too, both to an array there and to the
-   * bytes of a buffer there. When absent, the limit is one hundred. A large
-   * value is capped.
+   * elision, which includes the array's actual length. This applies to an
+   * array within the contents of a `FabricPrimitive` too. When absent, the
+   * limit is one hundred. A large value is capped.
    */
   readonly maxArrayLength?: number;
+
+  /**
+   * Maximum number of bytes of a buffer which are rendered: a positive
+   * integer, or `Infinity` for as many as the rendering allows. A buffer is
+   * what holds the bytes of a `FabricPrimitive`, such as those of a
+   * `FabricBytes`. One with more bytes than this has only that many rendered,
+   * and after them a note of the elision, which includes the buffer's actual
+   * length. When absent, the limit is two hundred. A large value is capped.
+   */
+  readonly maxBufferLength?: number;
 
   /**
    * Maximum number of properties of an object which are represented: a
