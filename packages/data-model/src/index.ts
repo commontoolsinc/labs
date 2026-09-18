@@ -32,6 +32,7 @@ export {
 } from "./value-clone.ts";
 
 export {
+  debugStr,
   toCompactDebugString,
   toDebugKindString,
   toIndentedDebugString,
