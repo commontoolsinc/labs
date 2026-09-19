@@ -60,9 +60,11 @@ availability tables.
       measured against the run's observation ceiling with the same predicate
       `run_pattern` uses (`describeSinkReleaseRefusal` where a transaction is
       available, `atomsOutsideCeiling` over the disclosed label otherwise); a
-      row above the ceiling is replaced by a typed opaque entry; a row with no
-      readable label is reported as `CFC_LABEL_READ_FAILED_ATOM`, never as
-      public.
+      row above the ceiling is replaced by a typed opaque entry; a row whose
+      `ifc` is present and unreadable is refused as `cfc_label_read_failed`;
+      a row with no `ifc` is given the query's label by
+      `labelForUnlabeledLoomRow()`, a placeholder the implementation profile
+      publishes as a deviation.
 - [x] Ceiling forwarding: the pinned loom CLI takes no `--read-ceiling-file`
       on any retrieval command — loom's own scope is the broker's launch
       facets — so the configuration names the loom read-ceiling record
@@ -84,8 +86,9 @@ availability tables.
 - [x] Tests, `test/loom-retrieval.test.ts` and `test/tools/loom-retrieval.test.ts`,
       with a fake `ProcessRunner` returning fixture JSON: argv construction per
       command; `--json`/`--concise` always present; config validation failures
-      (relative path, empty transport); a `schemaVersion` mismatch refused; an
-      unlabeled hit refused; a hit above the ceiling sealed; the notice
+      (relative path, empty transport); a stated `schemaVersion` other than 1 refused
+      and an absent one accepted; an unlabeled hit given the query's label and
+      a malformed `ifc` refused; a hit above the ceiling sealed; the notice
       attached; availability gating in the descriptor tables; capability
       description lists the tools only when configured.
 - [x] Documents, all under `packages/cf-harness/`: `docs/LOOM_RETRIEVAL.md`
@@ -454,7 +457,9 @@ The per-request `agent` sink ceiling and any further `maxConfidentiality`
 work: the first take ships the static empty row under max enforcement with
 the builtin-side check, under which a request passing a labeled cell by
 reference is refused (design D5). Ranking (`priority` stays reserved). A
-durable per-user ledger and quota enforcement. Page and calendar mutation
-tools. A shared runner with delegated identity. Folding hosted pattern
-authoring into an agent request. Each is named in the design document under
-"Later, not sequenced" and gets its own plan when it is picked up.
+durable per-user ledger and quota enforcement. Loom tools returning real
+per-row labels, which retires the query-label assumption the stage-1 tools
+make for a row without `ifc`. Page and calendar mutation tools. A shared
+runner with delegated identity. Folding hosted pattern authoring into an agent
+request. Each is named in the design document under "Later, not sequenced" and
+gets its own plan when it is picked up.

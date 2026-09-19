@@ -326,10 +326,21 @@ describe("loom-retrieval", () => {
       expect(runner.calls).toHaveLength(0);
     });
 
-    it("refuses a search payload whose `schemaVersion` is absent or differs from the pinned one", async () => {
+    it("accepts a search payload that carries no `schemaVersion`", async () => {
+      const { schemaVersion: _version, ...unversioned } = searchPayload;
+      const output = await runLoomRetrievalCommand(
+        broker,
+        "search",
+        { query: "donuts" },
+        runnerReplying({ stdout: JSON.stringify(unversioned) }),
+      );
+      expect(output).toEqual({ status: "ok", payload: unversioned });
+    });
+
+    it("refuses a search payload whose `schemaVersion` is present and differs from the pinned one", async () => {
       for (
         const payload of [
-          { ...searchPayload, schemaVersion: undefined },
+          { ...searchPayload, schemaVersion: null },
           { ...searchPayload, schemaVersion: 2 },
           { ...searchPayload, schemaVersion: "1" },
         ]

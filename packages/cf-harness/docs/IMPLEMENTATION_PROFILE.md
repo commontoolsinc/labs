@@ -366,6 +366,20 @@ in-flight external side effect.
    ceiling to the serving runtime, at which point the scope requirement and the
    OFF-arm-only limit both retire.
 
+10. **Loom row labels assumed, not read.** A row a Loom retrieval tool returns
+    with no `ifc` field is given the label of the query that produced it — the
+    tool call's input label, the prompt slot's influence joined with the run's
+    accumulated model-context label — and that assumed label is what is measured
+    against the run's ceiling, recorded as the observation, and available to
+    stamp on a minted document. The pinned loom emits no `ifc` on any retrieval
+    payload, so this is the path every real row takes. The assumption can
+    under-label a row: what it holds is decided by its store, not by who asked.
+    A row whose `ifc` is present and unreadable is still refused, and loom's own
+    facet filtering still runs first on the host. The rule is
+    `labelForUnlabeledLoomRow()` in `src/tools/loom-retrieval.ts`; see
+    [Read-only Loom retrieval](LOOM_RETRIEVAL.md). Owner: `cf-harness` and loom.
+    Retirement: loom returns a label per row and the function reads it.
+
 ## Test evidence
 
 - `deno task test` — package contract suite.

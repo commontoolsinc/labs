@@ -161,8 +161,8 @@ What works today:
   - `loom_search`, `loom_page_discover`, `loom_page_inspect`, `loom_page_read`,
     `loom_people`, `loom_calendar_list`, `loom_context`, and `loom_profile`
     (present only with `--loom-retrieval-config`; read-only, each row measured
-    against the run's observation ceiling, a row without a readable label
-    withheld rather than read as public)
+    against the run's observation ceiling; a row loom returns without a label is
+    given the query's label, and one whose label is malformed is withheld)
   - `research` (present when the run resolves a documentation corpus or pattern
     index; performs bounded, iterative Common Fabric research over exact docs,
     skills, published pattern source and dependencies, and safe handle shapes,

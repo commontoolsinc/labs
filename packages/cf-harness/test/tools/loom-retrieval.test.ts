@@ -92,6 +92,7 @@ const contextWith = (
     config?: HarnessLoomRetrievalConfig;
     configured?: boolean;
     aborted?: boolean;
+    queryLabel?: unknown[];
   },
 ): { context: HarnessToolContext; calls: ProcessRunRequest[] } => {
   const calls: ProcessRunRequest[] = [];
@@ -117,6 +118,13 @@ const contextWith = (
       ? {
         cfcReadMaxConfidentiality: options
           .ceiling as HarnessToolContext["cfcReadMaxConfidentiality"],
+      }
+      : {}),
+    ...(options.queryLabel !== undefined
+      ? {
+        toolInputCfcLabel: {
+          confidentiality: options.queryLabel,
+        } as HarnessToolContext["toolInputCfcLabel"],
       }
       : {}),
     signal: controller.signal,
@@ -294,9 +302,10 @@ describe("loom-retrieval tools", () => {
       expect(calls).toHaveLength(0);
     });
 
-    it("admits a hit inside the ceiling, seals one above it, and refuses one without a readable label", async () => {
+    it("admits a hit inside the ceiling, seals one above it, labels one without `ifc` as the query, and refuses a malformed `ifc`", async () => {
       const { context } = contextWith({
         ceiling,
+        queryLabel: [OWNER],
         stdout: searchPayload([
           hit("m-1", { confidentiality: [OWNER, WORK], integrity: [] }),
           hit("m-2", { confidentiality: [OWNER, HEALTH] }),
@@ -309,12 +318,13 @@ describe("loom-retrieval tools", () => {
       );
       expect(output.kind).toBe("search");
       expect(output.notice).toBe(LOOM_RETRIEVAL_UNTRUSTED_NOTICE);
-      expect(output.admitted).toBe(1);
-      expect(output.withheld).toBe(3);
+      expect(output.admitted).toBe(2);
+      expect(output.withheld).toBe(2);
       expect(output.entries).toEqual([
         {
           status: "admitted",
           label: { confidentiality: [[OWNER], [WORK]], integrity: [] },
+          labelSource: "row",
           value: {
             sourceSystem: "google.gmail",
             sourceRef: "m-1",
@@ -325,7 +335,19 @@ describe("loom-retrieval tools", () => {
           },
         },
         { status: "withheld", reasonCode: "cfc_ceiling_exceeded" },
-        { status: "withheld", reasonCode: "cfc_label_read_failed" },
+        {
+          status: "admitted",
+          label: { confidentiality: [[OWNER]], integrity: [] },
+          labelSource: "query",
+          value: {
+            sourceSystem: "google.gmail",
+            sourceRef: "m-3",
+            collectionId: "google.gmail.message_summary",
+            title: "Mail m-3",
+            snippet: "snippet for m-3",
+            observedAt: "2026-09-18T10:00:00Z",
+          },
+        },
         { status: "withheld", reasonCode: "cfc_label_read_failed" },
       ]);
       // The envelope keeps the host's summary fields and nothing else.
@@ -371,7 +393,7 @@ describe("loom-retrieval tools", () => {
     it("yields no observation when nothing was admitted", async () => {
       const { context } = contextWith({
         ceiling,
-        stdout: searchPayload([hit("m-3", undefined)]),
+        stdout: searchPayload([hit("m-3", { confidentiality: "not-a-list" })]),
       });
       const output = ok(
         await loomSearchTool.invoke(context, { query: "donuts" }),
@@ -385,7 +407,54 @@ describe("loom-retrieval tools", () => {
       ).toBeUndefined();
     });
 
-    it("admits every labeled hit and still refuses an unlabeled one when the run declares no ceiling", async () => {
+    it("withholds a row without `ifc` when the query's label is above the ceiling, and records the query's label when it fits", async () => {
+      const payload = searchPayload([hit("m-3", undefined)]);
+      const above = ok(
+        await loomSearchTool.invoke(
+          contextWith({ ceiling, queryLabel: [HEALTH], stdout: payload })
+            .context,
+          { query: "donuts" },
+        ),
+      );
+      expect(above.entries).toEqual([
+        { status: "withheld", reasonCode: "cfc_ceiling_exceeded" },
+      ]);
+      const inside = ok(
+        await loomSearchTool.invoke(
+          contextWith({ ceiling, queryLabel: [WORK], stdout: payload }).context,
+          { query: "donuts" },
+        ),
+      );
+      expect(
+        inside.entries.map((entry) =>
+          entry.status === "admitted" && [entry.label, entry.labelSource]
+        ),
+      ).toEqual([[{ confidentiality: [[WORK]], integrity: [] }, "query"]]);
+      expect(
+        loomRetrievalModelContextObservation(
+          inside,
+          { toolId: "loom_search", outputId: inside.outputId },
+          "call-1",
+        )?.label,
+      ).toEqual({ confidentiality: [WORK] });
+    });
+
+    it("labels a row without `ifc` as public when the query carries no label", async () => {
+      const { context } = contextWith({
+        ceiling: [],
+        stdout: searchPayload([hit("m-3", undefined)]),
+      });
+      const output = ok(
+        await loomSearchTool.invoke(context, { query: "donuts" }),
+      );
+      expect(
+        output.entries.map((entry) =>
+          entry.status === "admitted" && [entry.label, entry.labelSource]
+        ),
+      ).toEqual([[{ confidentiality: [], integrity: [] }, "query"]]);
+    });
+
+    it("admits labeled and unlabeled hits alike when the run declares no ceiling", async () => {
       const { context } = contextWith({
         stdout: searchPayload([
           hit("m-2", { confidentiality: [OWNER, HEALTH] }),
@@ -397,7 +466,7 @@ describe("loom-retrieval tools", () => {
       );
       expect(output.entries.map((entry) => entry.status)).toEqual([
         "admitted",
-        "withheld",
+        "admitted",
       ]);
     });
 
@@ -657,6 +726,7 @@ describe("loom-retrieval tools", () => {
         expect(output.entries).toEqual([{
           status: "admitted",
           label: { confidentiality: [[OWNER]], integrity: [] },
+          labelSource: "row",
           value: { pageId: "P-12", title: "Plan" },
         }]);
         expect(output.envelope).toBeUndefined();
@@ -727,6 +797,41 @@ describe("loom-retrieval tools", () => {
       );
       expect(ok(unboundedOutput.output).entries.map((entry) => entry.status))
         .toEqual(["admitted", "admitted"]);
+    });
+  });
+
+  describe("query label", () => {
+    it("labels a row without `ifc` with the run's accumulated model-context label", async () => {
+      const payload = searchPayload([hit("m-3", undefined)]);
+      for (
+        const [runCeiling, status] of [
+          [[WORK], "admitted"],
+          [[OWNER], "withheld"],
+        ] as const
+      ) {
+        const { engine } = engineWith(payload, { ceiling: runCeiling });
+        await engine.recordCfcModelContextObservations([{
+          toolCallId: "earlier",
+          toolId: "read_file",
+          outputId: createToolOutputId("run-loom", "read_file", 1),
+          channels: ["stdout"],
+          label: { confidentiality: [WORK] },
+        }]);
+        const { output } = await engine.invokeBuiltinTool("loom_search", {
+          query: "donuts",
+        });
+        const [entry] = ok(output).entries;
+        expect(entry.status).toBe(status);
+        if (entry.status === "admitted") {
+          expect(entry.label).toEqual({
+            confidentiality: [[WORK]],
+            integrity: [],
+          });
+          expect(entry.labelSource).toBe("query");
+        } else {
+          expect(entry.reasonCode).toBe("cfc_ceiling_exceeded");
+        }
+      }
     });
   });
 
@@ -842,6 +947,7 @@ describe("loom-retrieval tools", () => {
       expect(output.entries).toEqual([{
         status: "admitted",
         label: { confidentiality: [[OWNER]], integrity: [] },
+        labelSource: "row",
         value: {
           canonicalId: "person:01H",
           displayName: "Alice",
@@ -880,7 +986,7 @@ describe("loom-retrieval tools", () => {
       expect(output.entries.map((entry) => entry.status)).toEqual([
         "admitted",
         "withheld",
-        "withheld",
+        "admitted",
       ]);
       expect(output.envelope).toBeUndefined();
     });
