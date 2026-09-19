@@ -69,9 +69,10 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
    * Delegates to the canonical debug renderer rather than formatting here, so
    * that this surface improves whenever that one does.
    *
-   * Duplicated on `BaseFabricInstance`, unavoidably. There is no shared base
-   * class below `FabricSpecialObject`, and `FabricSpecialObject` itself is the
-   * runtime-import-free abstract contract, so it cannot reach `value-debug`.
+   * Duplicated on `BaseFabricInstance`. The one class both extend is
+   * `BaseFabricSpecialObject`, and `value-debug` loads that module by way of
+   * `interface.ts`, so an import of `value-debug` from there would close a
+   * load-time cycle.
    */
   [Symbol.for("Deno.customInspect")](): string {
     return toCompactDebugString(this);
