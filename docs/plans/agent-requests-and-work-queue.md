@@ -425,35 +425,55 @@ are about collections:
 | `loom_page_discover` | `loom page discover --concise [--kind] [--limit]` | the canonical Page inventory |
 | `loom_page_inspect` | `loom page inspect <target> --concise` | a Page's context, `sourceVersion`, relations, and capability descriptors |
 | `loom_page_read` | `loom page read <target>` | the Page or Document source with its exact `sourceVersion` |
-| `loom_people` | `loom people <query> --json [--shape summary\|card]` | canonical person resolution: identifiers, pages, recent interaction summary |
-| `loom_calendar_list` | `loom calendar list --json [--since/--until]` | loom-native events from the calendar store |
-| `loom_context` | `loom context where\|activity\|hosted --json` | where the user is, current activity, hosted surfaces |
-| `loom_profile` | `loom profile --json` | the user's short resolver-backed identity |
+| `loom_people` | `loom people <query> --json [--shape summary\|card]`, lookups only — an email, phone, `handle:`, `person:`, `group:`, or `People/<Name>/about.md` path; the maintenance and group-write verbs the same positional carries are refused | canonical person resolution: identifiers, pages, recent interaction summary |
+| `loom_calendar_list` | `loom calendar list --json [--from/--to \| --all]` (`YYYY-MM-DD` dates) | loom-native events from the calendar store |
+| `loom_context` | `loom context where\|activity --json [--at] [--since/--until]`; `hosted` records channel coordinates and is refused | where the user is, current activity |
+| `loom_profile` | `loom profile --json [--fresh]` | the user's short resolver-backed identity |
 
-The first four are confirmed against the pinned loom checkout; the last four
-are named from loom's command inventory and phase 1 confirms each command's
-exact arguments and JSON shape before it ships, dropping any that turns out
-not to be read-only or not to answer in JSON. Page mutation (`create`,
-`replace`, `section …`, `relocate`, `trash`), calendar writes, and `wish` are
-out of the first take. `--concise` is passed by the host, not offered to the
-model: a full `inspect` exceeds the harness's tool-result bound and returns
-fragments that do not parse, which loom's own skill notes.
+All eight are confirmed against the pinned loom checkout: read-only, JSON on
+`--json`, with the argument surface the table shows and nothing else — no
+routing flag (`--rpc-queue`, `--instance`, `--engine`, `--person-ref`) reaches
+the model, and a value that would parse as a flag or as another verb is
+refused before a process starts. Page mutation (`create`, `replace`,
+`section …`, `relocate`, `trash`), calendar writes, and `wish` are out of the
+first take. `--concise` is passed by the host, not offered to the model: a
+full `inspect` exceeds the harness's tool-result bound and returns fragments
+that do not parse, which loom's own skill notes.
+[`packages/cf-harness/docs/LOOM_RETRIEVAL.md`](../../packages/cf-harness/docs/LOOM_RETRIEVAL.md)
+is the implementation reference.
 
-**Labels on Loom observations.** Loom connector rows carry `ifc` labels and
-loom's `/agent-search` honors a facet scope and a read ceiling injected by its
-broker. The tool passes the run's observation ceiling through the same
-channels the wish dispatcher uses (`--read-ceiling-file`, the facet header the
-broker writes), so loom's own filtering runs first, and the host measures the
-returned rows' labels against the ceiling again before they enter model
-context (gate 2) so that a loom version that returns an unlabeled row is
-refused rather than admitted. A `hits[]` entry whose label cannot be read is
-reported as a label, not as public — the disclosure rule in
-`cfc-label-disclosure.ts`. The same reported label is what the result writer
-stamps on a document it mints for a hit the answer references (section 1.3).
+**Labels on Loom observations.** Loom connector rows carry `ifc` labels in
+their stores, and loom's `/agent-search` honors the facet scope its broker was
+launched with (`fabric_local_agent_rpc.py serve --facets`), so loom's own
+filtering runs first. None of the retrieval commands takes a ceiling on argv,
+so the harness carries the ceiling on its own side: the retrieval
+configuration names the loom read-ceiling record a facet-scoped dispatch
+writes (`readCeilingFile`, the `run-ceiling` output with `loomReadCeiling`,
+`facets`, `facetSource`), the harness reads it on the host, checks its facets
+against the configured ones, and meets its clause list with the run's own
+ceiling. Every returned row's `ifc` label is then measured against that met
+ceiling before the row enters model context (gate 2), with the same predicate
+`run_pattern` uses over a disclosed label. A row above the ceiling is replaced
+by a typed opaque entry; a row whose label cannot be read — no `ifc`, or a
+clause that is not an atom or an `anyOf` over atoms — is refused as
+`cfc_label_read_failed`, never read as public, and refused even when the run
+declares no ceiling (the disclosure rule in `cfc-label-disclosure.ts`). The
+admitted rows' labels join into one model-context observation, and that same
+label is what the result writer stamps on a document it mints for a hit the
+answer references (section 1.3).
 
-**Loom's search JSON is deliberately unversioned** until a first external
-consumer appears; this is that consumer, and phase 1 adds `schemaVersion: 1`
-to the loom side and pins it in the tool.
+Against the pinned loom checkout, `loom search --json` emits no `ifc` on its
+hits, and the page, people, calendar, context, and profile payloads carry none
+either, so every real row is withheld until loom stamps its rows (assumption
+11). The tools are complete on the harness side and exercised against fixture
+output that carries labels.
+
+**The tool pins `schemaVersion: 1` on loom's search JSON** and refuses a
+payload that carries any other value or none. The stamp is loom's to add, in
+`render_json` (`lib/connectors/search.py`); a loom checkout without it has
+every `loom_search` call refused as `schema_version_mismatch`, which is the
+intended reading of an unversioned payload by its first external consumer
+(assumption 11).
 
 ### 1.7 Where a run executes, across two toolsheds
 
@@ -707,15 +727,18 @@ harness has a scripted model client (`packages/cf-harness/test/research.test.ts`
 `ScriptedModelClient`), and the runner's admission and settlement are
 exercised with a fake executor the way hosted authoring's stage 1 prescribes.
 
-**Phase 1 — Loom retrieval tools in the harness.** The tools of section 1.6
-over a `HarnessLoomRetrievalConfig` beside the authoring one; confirmation of
-each command's arguments and JSON shape; ceiling and facet forwarding; label
-measurement on returned rows; the untrusted-content notice; `schemaVersion`
-on loom's search JSON. Capability description lists the tools. *Acceptance:* a
-batch run over a fixture loom answers a search and a people lookup from a
-scripted model, an unlabeled row is refused, and the run report shows the
-tools' calls. Documents: `LOOM_AUTHORING.md` gains a sibling or a section,
-`IMPLEMENTATION_PROFILE.md` lists the tools.
+**Phase 1 — Loom retrieval tools in the harness. Built.** The tools of
+section 1.6 over a `HarnessLoomRetrievalConfig` beside the authoring one, each
+command's arguments and JSON shape confirmed against the pinned loom checkout;
+the run's ceiling met with the loom read-ceiling record on the host; label
+measurement on returned rows; the untrusted-content notice; a pinned
+`schemaVersion` on loom's search JSON. Capability description lists the tools.
+A scripted model over fixture output gets a search and a people lookup
+returned, an unlabeled row is refused, and the transcript shows the tools'
+calls. `packages/cf-harness/docs/LOOM_RETRIEVAL.md` is the reference, and
+`IMPLEMENTATION_PROFILE.md` lists the tools. What the phase rests on from the
+loom side — `ifc` on returned rows and the `schemaVersion` stamp — is
+assumption 11.
 
 **Phase 2 — The result writer in the harness.** The host-side routine of
 section 1.3: validate, resolve handles to links, mint labeled documents for
@@ -839,6 +862,16 @@ Listed so they can be overturned before phase 1.
     admits with a declared label.** The label comes from loom's `ifc` on the
     row; a row without one is refused before it reaches the model, so none
     reaches the writer.
+11. **Loom will stamp `ifc` on the rows its retrieval commands return, and
+    `schemaVersion: 1` on its search JSON.** Today `loom search --json`
+    carries neither: a search is refused as `schema_version_mismatch`, and
+    with the stamp in place its `hits[]` carry no `ifc`, as the page, people,
+    calendar, context, and profile payloads carry none, so the harness
+    withholds every real row as `cfc_label_read_failed` (section 1.6). The first take's demonstration (phase 6) rests on loom emitting the
+    label its stores already hold for each row; until then the tools answer
+    only fixture output. If loom does not, the alternative is a
+    host-configured label for loom-native payloads, which is a new trust
+    decision and gets its own ruling.
 
 ## Alternatives considered and set aside
 

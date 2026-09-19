@@ -8,7 +8,7 @@ on its own, and is testable without a model provider. Checkboxes are ticked
 as work lands; when the last stage of the first take (stage 6) lands, both
 documents are archived to `docs/history/plans/`.
 
-**Status:** stages 2 and 3 built; the checkboxes track the rest. Written
+**Status:** stages 1, 2, and 3 built; the checkboxes track the rest. Written
 2026-09-18 against `37b1acd3dd`.
 
 ## Ground rules for every stage
@@ -35,7 +35,7 @@ configuration the model cannot see, a command transport it cannot change,
 structured stdin, typed outputs, and admission through the tool-descriptor
 availability tables.
 
-- [ ] `src/loom-retrieval.ts` — sibling of `src/loom-authoring.ts`:
+- [x] `src/loom-retrieval.ts` — sibling of `src/loom-authoring.ts`:
       `HarnessLoomRetrievalConfig { cliPath, transport, readCeilingFile?, facets? }`
       reusing `HarnessLoomAuthoringTransport`; `LoomRetrievalCommand` union
       (`search`, `page.discover`, `page.inspect`, `page.read`, `people`,
@@ -44,11 +44,11 @@ availability tables.
       command takes it and `--concise` where `page` takes it, runs through
       `createClearedHostProcessEnv`, and parses stdout as JSON with a
       `schemaVersion` check for `search`.
-- [ ] Confirm each of `people`, `calendar list`, `context`, `profile` against
+- [x] Confirm each of `people`, `calendar list`, `context`, `profile` against
       the pinned loom checkout (`~/looms/primary/src/bin/loom`): read-only,
       JSON output, argument list. Drop from the union any that is not; record
       the dropped ones and why in `packages/cf-harness/docs/LOOM_RETRIEVAL.md`.
-- [ ] `src/tools/loom-retrieval.ts` — one `HarnessToolDefinition` per tool
+- [x] `src/tools/loom-retrieval.ts` — one `HarnessToolDefinition` per tool
       (`loom_search`, `loom_page_discover`, `loom_page_inspect`,
       `loom_page_read`, `loom_people`, `loom_calendar_list`, `loom_context`,
       `loom_profile`), each `effectClass: "read"`, each returning a bounded
@@ -56,21 +56,23 @@ availability tables.
       `web_fetch` results (`src/prompt-loop.ts`, the search notice), and each
       recording the rows' `ifc` labels as observations through the existing
       `HarnessCfcModelContext` accumulation.
-- [ ] Label measurement: before a row enters model context, its label is
+- [x] Label measurement: before a row enters model context, its label is
       measured against the run's observation ceiling with the same predicate
       `run_pattern` uses (`describeSinkReleaseRefusal` where a transaction is
       available, `atomsOutsideCeiling` over the disclosed label otherwise); a
       row above the ceiling is replaced by a typed opaque entry; a row with no
       readable label is reported as `CFC_LABEL_READ_FAILED_ATOM`, never as
       public.
-- [ ] Ceiling forwarding: the run's ceiling is written to a host temp file and
-      passed as `--read-ceiling-file`; facets from the config ride the
-      transport the way the authoring transport carries `actor`.
-- [ ] `src/contracts/tool-descriptor.ts` — the eight ids in `BuiltinToolId`;
+- [x] Ceiling forwarding: the pinned loom CLI takes no `--read-ceiling-file`
+      on any retrieval command — loom's own scope is the broker's launch
+      facets — so the configuration names the loom read-ceiling record
+      (`readCeilingFile`) and the harness meets its clause list with the
+      run's ceiling before measuring rows; `facets` must match the record's.
+- [x] `src/contracts/tool-descriptor.ts` — the eight ids in `BuiltinToolId`;
       `LOOM_RETRIEVAL_TOOL_IDS`; an `loomRetrievalAvailable` availability flag
       beside `loomAuthoringAvailable` in both the withheld and the offered
       lists.
-- [ ] `src/engine.ts` — input and output map entries; `src/tools/registry.ts`
+- [x] `src/engine.ts` — input and output map entries; `src/tools/registry.ts`
       — registration; `src/config.ts` and `src/session-assembly.ts` —
       `loomRetrieval?: HarnessLoomRetrievalConfig`, validated like
       `loomAuthoring`; `src/cli.ts` — `--loom-retrieval-config` and
@@ -79,18 +81,17 @@ availability tables.
 - [ ] Loom side (separate change in `~/looms/primary`): `schemaVersion: 1` on
       the `search --json` payload at `src/lib/connectors/search.py`, per the
       comment there.
-- [ ] Tests, `test/loom-retrieval.test.ts` and `test/tools/loom-retrieval.test.ts`,
+- [x] Tests, `test/loom-retrieval.test.ts` and `test/tools/loom-retrieval.test.ts`,
       with a fake `ProcessRunner` returning fixture JSON: argv construction per
       command; `--json`/`--concise` always present; config validation failures
       (relative path, empty transport); a `schemaVersion` mismatch refused; an
       unlabeled hit refused; a hit above the ceiling sealed; the notice
       attached; availability gating in the descriptor tables; capability
       description lists the tools only when configured.
-- [ ] Documents: `packages/cf-harness/docs/LOOM_RETRIEVAL.md` (new, the
-      sibling of `packages/cf-harness/docs/LOOM_AUTHORING.md`),
-      `packages/cf-harness/docs/IMPLEMENTATION_PROFILE.md` tool list,
-      `packages/cf-harness/docs/CURRENT_STATE.md` supported surfaces,
-      `packages/cf-harness/README.md` where it lists
+- [x] Documents, all under `packages/cf-harness/`: `docs/LOOM_RETRIEVAL.md`
+      (new, the sibling of `LOOM_AUTHORING.md`), `docs/IMPLEMENTATION_PROFILE.md`
+      tool list, `docs/CURRENT_STATE.md` supported surfaces, `README.md` where
+      it lists
       Loom tools; `deno task check-skill-facts` if a skill cites a path.
 
 *Exit:* a batch run with `--loom-retrieval-config` and a scripted model answers
