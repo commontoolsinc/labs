@@ -120,6 +120,7 @@ import {
   executeResolvedCallable,
   type InvocationOutcome,
   runtimeErrorLog,
+  VerbInputValidationError,
 } from "./callable.ts";
 import {
   type CellSelection,
@@ -2466,12 +2467,7 @@ export const NAMES_NO_PIECE = "names no piece";
  * A `cf piece call` target whose path does not lead to a piece: the position
  * holds no link, or the link it holds names a cell inside a piece.
  */
-export class LinkedPieceRefusal extends Error {
-  /** Error category used by CLI failure reports. */
-  override get name(): string {
-    return "LinkedPieceRefusal";
-  }
-}
+export class LinkedPieceRefusal extends Error {}
 
 /** Helper for {@link resolveLinkedPiece}, which compares two cell addresses. */
 function sameCellAddress(a: NormalizedFullLink, b: NormalizedFullLink) {
@@ -2491,9 +2487,10 @@ async function resolveThroughStoredLinks(
   cell: Cell<unknown>,
 ): Promise<Cell<unknown>> {
   let current = cell;
-  // Each round ends on a document the one before it had not loaded, so the
-  // bound is on the documents a chain of links crosses, and is generous.
-  for (let round = 0; round < 64; round++) {
+  // A round that moves ends on a document the rounds so far had not loaded,
+  // and a chain of stored links crosses finitely many; once all of a cycle's
+  // documents are local, the resolution itself throws on it.
+  while (true) {
     await current.sync();
     const next = current.resolveAsCell();
     if (
@@ -2504,10 +2501,6 @@ async function resolveThroughStoredLinks(
     ) return next;
     current = next;
   }
-  throw new Error(
-    `The links stored at ${current.getAsNormalizedFullLink().id} did not ` +
-      `settle on a target.`,
-  );
 }
 
 /**
@@ -2524,7 +2517,6 @@ async function isDocumentOf(
   const sameDocument = (link: NormalizedFullLink) =>
     sameCellAddress({ ...link, path: [] }, { ...owner, path: [] });
   const link = cell.getAsNormalizedFullLink();
-  if (sameDocument(link)) return true;
   const document = cell.runtime.getCellFromLink(
     { ...link, path: [], schema: undefined },
     undefined,
@@ -2532,7 +2524,8 @@ async function isDocumentOf(
   );
   await document.sync();
   const backLink = getMetaLink(document, "result");
-  return backLink !== undefined && sameDocument(backLink);
+  return sameDocument(link) ||
+    (backLink !== undefined && sameDocument(backLink));
 }
 
 /**
@@ -4210,6 +4203,33 @@ export async function executePieceCallable(
   // question.
   const commandPrefix = deps.helpCommandPrefix ??
     cliCommand(["piece", "call", "...", callableName]);
+  return await executeResolvedPieceCallable(
+    resolved,
+    rawArgs,
+    deps,
+    commandPrefix,
+  ).catch((error) => {
+    // The address the caller wrote names the holder of the link, so a
+    // refusal that sends them to the verb listing carries the piece whose
+    // verb it was.
+    if (
+      error instanceof VerbInputValidationError &&
+      resolved.linkedPiece !== undefined
+    ) error.linkedPiece = resolved.linkedPiece;
+    throw error;
+  });
+}
+
+/**
+ * Helper for {@link executePieceCallable}, which parses the verb's section
+ * and dispatches on the callable already resolved.
+ */
+async function executeResolvedPieceCallable(
+  resolved: ResolvedPieceCallable,
+  rawArgs: string[],
+  deps: PieceCallableDependencies,
+  commandPrefix: string,
+): Promise<ExecutedPieceCallable> {
   return await executeCallableCommand({
     resolved,
     execution: resolved,

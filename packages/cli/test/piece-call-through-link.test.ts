@@ -95,6 +95,8 @@ describe("piece-call-through-link", () => {
   let sameSpaceHolder: Cell<unknown>;
   let connections: string[];
   let errors: string[];
+  let hints: string[];
+  let opened: PiecesController[];
   let loadPieces: (config: SpaceConfig) => Promise<PiecesController>;
 
   /** Runs `program` as a piece in `space`, and returns its result cell. */
@@ -156,8 +158,9 @@ describe("piece-call-through-link", () => {
   async function call(
     target: string,
     flags: Partial<PieceCallCLIOptions> = {},
+    event: unknown = { id: "offer-1" },
   ): Promise<number | undefined> {
-    const payload = JSON.stringify({ id: "offer-1" });
+    const payload = JSON.stringify(event);
     let code: number | undefined;
     const viaFlag = flags.cell !== undefined;
     try {
@@ -181,7 +184,7 @@ describe("piece-call-through-link", () => {
           executePieceCallable: (config, name, args, deps = {}) =>
             executePieceCallable(config, name, args, { ...deps, loadPieces }),
           render: () => {},
-          hint: () => {},
+          hint: (message) => hints.push(message),
           announce: () => {},
           printError: (message) => errors.push(message),
           exit: (exitCode) => {
@@ -227,6 +230,8 @@ describe("piece-call-through-link", () => {
 
     connections = [];
     errors = [];
+    hints = [];
+    opened = [];
     loadPieces = (config) => {
       connections.push(config.space);
       const storage = EmulatedStorageManager.connectTo(server, { as: signer });
@@ -239,15 +244,22 @@ describe("piece-call-through-link", () => {
         own,
         { deferSpaceCellSync: true },
       );
+      let disposed = false;
       pieces.dispose = async () => {
+        if (disposed) return;
+        disposed = true;
         await own.dispose({ closeStorage: false });
         await storage.close();
       };
+      opened.push(pieces);
       return Promise.resolve(pieces);
     };
   });
 
   afterEach(async () => {
+    // The command leaves its last connection to the process's exit, so the
+    // ones a case opened are closed here.
+    for (const pieces of opened) await pieces.dispose();
     await runtime.dispose({ closeStorage: false });
     await manager.close();
     await server.close();
@@ -266,6 +278,16 @@ describe("piece-call-through-link", () => {
       const before = await readFresh(holder, [], "raw");
       await call(reference(holder, "inbox/piece"));
       expect(await readFresh(holder, [], "raw")).toEqual(before);
+    });
+
+    it("points a refused payload's hint at the linked piece", async () => {
+      const code = await call(reference(holder, "inbox/piece"), {}, { id: 5 });
+      expect(code).toBe(1);
+      const { space, id } = inbox.getAsNormalizedFullLink();
+      expect(hints.join("\n")).toContain(
+        `--cell //${space}/${id.replace(/^of:/, "")}@space `,
+      );
+      expect(await readFresh(inbox, ["offers"])).toEqual([]);
     });
 
     it("takes the same reference on `--cell`", async () => {

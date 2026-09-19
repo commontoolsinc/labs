@@ -790,7 +790,9 @@ export function verbInputErrorReport(
   return {
     message: error.message,
     hint: cliText(
-      `TIP: Run 'cf piece verbs --cell ${opts.piece} --json' to see each verb's expected input.`,
+      `TIP: Run 'cf piece verbs --cell ${
+        error.linkedPiece ?? opts.piece
+      } --json' to see each verb's expected input.`,
     ),
   };
 }
