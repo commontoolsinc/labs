@@ -49,7 +49,10 @@ import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
 import type { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "../src/storage/interface.ts";
 import * as V2Storage from "../src/storage/v2.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,
@@ -58,10 +61,6 @@ import {
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 import { refuseAtCommitBoundary } from "./refused-commit.ts";
-import type {
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-} from "../src/storage/interface.ts";
 import type { FabricValue } from "@commonfabric/data-model";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
