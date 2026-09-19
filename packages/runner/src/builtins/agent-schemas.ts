@@ -6,7 +6,7 @@
  * here because `packages/runner` sits below `packages/patterns` in the layer
  * stack and cannot import from it: `packages/patterns/system/agent-run.tsx`
  * and `agent-queue.tsx` state the same shapes as pattern-facing types, and
- * `packages/patterns/system/agent-schemas-parity.test.ts` holds the two
+ * `packages/runner/test/agent-schemas-parity.test.ts` holds the two
  * together.
  */
 
