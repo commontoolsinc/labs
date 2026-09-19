@@ -413,10 +413,7 @@ const requiredKeys = (schema: JSONSchema | undefined): readonly string[] =>
  * combinator of its own.
  */
 const allOfPartMayAdmit = (schema: JSONSchemaObj, key: string): boolean => {
-  const mayAdmit = (part: JSONSchema, depth: number): boolean => {
-    // Deep enough to be a definition that refers to itself. What it admits is
-    // left to the read below.
-    if (depth > MAX_ADMISSION_DEPTH) return true;
+  const mayAdmit = (part: JSONSchema): boolean => {
     const resolved = resolveBranch(part, schema);
     if (!isObjectOrArray(resolved)) return false;
     // A part that names the key has decided it, and `false` there refuses it
@@ -437,12 +434,10 @@ const allOfPartMayAdmit = (schema: JSONSchemaObj, key: string): boolean => {
       ...(resolved.anyOf ?? []),
       ...(resolved.oneOf ?? []),
       ...(resolved.allOf ?? []),
-    ].some((branch) => mayAdmit(branch, depth + 1));
+    ].some(mayAdmit);
   };
-  return (schema.allOf ?? []).some((part) => mayAdmit(part, 0));
+  return (schema.allOf ?? []).some(mayAdmit);
 };
-
-const MAX_ADMISSION_DEPTH = 8;
 
 const childSchema = (
   schema: JSONSchema | undefined,

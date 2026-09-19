@@ -1354,6 +1354,18 @@ describe("schema-view", () => {
           ["id"],
         ],
         [
+          "a part naming one key twelve `allOf`s down",
+          {
+            allOf: [
+              Array.from({ length: 12 }).reduce<unknown>(
+                (part) => ({ allOf: [part] }),
+                named,
+              ),
+            ],
+          },
+          ["id"],
+        ],
+        [
           "a part naming one key beside `properties` naming another",
           { properties: { q: { type: "number" } }, allOf: [named] },
           ["id"],
