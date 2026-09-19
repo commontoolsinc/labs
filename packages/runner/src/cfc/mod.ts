@@ -318,12 +318,15 @@ export {
   INITIAL_SINK_INVENTORY,
   isInitialSinkInventoryName,
   KNOWN_SINKS,
+  SINK_CLASSES,
   SINK_UNGATED_RATIONALES,
   sinkCeilingsOf,
+  sinkClassOf,
   ungatedSink,
 } from "./sink-inventory.ts";
 export type {
   KnownSinkName,
+  SinkClass,
   SinkGovernance,
   SinkGovernanceRegistry,
   SinkMaxConfidentiality,

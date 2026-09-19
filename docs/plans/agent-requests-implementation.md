@@ -8,7 +8,7 @@ on its own, and is testable without a model provider. Checkboxes are ticked
 as work lands; when the last stage of the first take (stage 6) lands, both
 documents are archived to `docs/history/plans/`.
 
-**Status:** stage 2 implemented; the other stages not started. Written
+**Status:** stages 2 and 3 built; the checkboxes track the rest. Written
 2026-09-18 against `37b1acd3dd`.
 
 ## Ground rules for every stage
@@ -182,20 +182,20 @@ against a real deployment.
 **Packages:** `packages/api`, `packages/runner`, `packages/static`.
 **Depends on:** nothing at compile time; stage 4 gives it a real executor.
 
-- [ ] `packages/api/index.ts` — `BuiltInAgentParams { task, inputs, resultSchema,
+- [x] `packages/api/index.ts` — `BuiltInAgentParams { task, inputs, resultSchema,
       maxConfidentiality?, tools? }` and `BuiltInAgentState<T> { pending,
       result?, error?, requestHash?, run? }` beside `BuiltInGenerateObjectParams`;
       `packages/static/assets/types/commonfabric.d.ts` regenerated or edited
       the way that file is maintained for the other builtins.
-- [ ] `packages/runner/src/builder/built-in.ts` — `export const agent =
+- [x] `packages/runner/src/builder/built-in.ts` — `export const agent =
       createNodeFactory({ type: "ref", implementation: "agent" })`;
       `builder/factory.ts` — export; `builder/builtin-replayability.ts` — row
       (non-replayable, effectful).
-- [ ] `packages/runner/src/builtins/agent-schemas.ts` — params schema
+- [x] `packages/runner/src/builtins/agent-schemas.ts` — params schema
       (`inputs` entries `asCell`, never values; `task` a string; `tools` an
       enum over the tool names the deployment publishes), result schema, and
       a reference to the shared `LlmDerived` stamp schema.
-- [ ] `packages/runner/src/builtins/agent.ts` — the raw builtin, modeled on
+- [x] `packages/runner/src/builtins/agent.ts` — the raw builtin, modeled on
       `generateObject` in `llm.ts`:
       - resolve inputs to links, snapshot the request with
         `createFrozenRequestSnapshot`, hash it;
@@ -215,34 +215,36 @@ against a real deployment.
         `result`, `outcome`, and `errorCode` by reading the record reactively;
       - `onRejected`: settle `pending: false` with an opaque error, the way
         the llm builtins do.
-- [ ] Tool check: a request whose `tools` names a tool absent from the
+- [x] Tool check: a request whose `tools` names a tool absent from the
       requester's `agentRunner.tools` entry (stage 4) fails before staging
       with `INVALID_INPUT`; when no `agentRunner` entry exists the request
       stages and stays `queued`.
-- [ ] `packages/runner/src/cfc/sink-inventory.ts` — `"agent"` in
+- [x] `packages/runner/src/cfc/sink-inventory.ts` — `"agent"` in
       `InitialSinkName` and `KNOWN_SINKS`; a sink-class field beside the
       inventory so the gate mints `sinkClass: "agent"` for this sink and
       keeps `"network"` for the rest (`prepare.ts`, `verifySinkRequestCeilings`,
       replacing the hardcoded literal with a lookup).
-- [ ] `packages/runner/src/runtime-presets.ts` — the `agent` row in
+- [x] `packages/runner/src/runtime-presets.ts` — the `agent` row in
       `MAX_ENFORCEMENT_SINK_GOVERNANCE`: a ceiling equal to the request's
       observation ceiling, which means the row is computed per request. If
       the registry's type only admits a static clause list, the row declares
       `[]` and the builtin meets its request against `maxConfidentiality`
       itself before staging, with a comment saying which of the two arms
       holds; record the choice in the design document's D5.
-- [ ] `packages/runner/src/builtins/index.ts` — registration with the result
+- [x] `packages/runner/src/builtins/index.ts` — registration with the result
       cell type.
-- [ ] Tests in `packages/runner/test/`: `agent-builtin.test.ts` (inputs
+- [x] Tests in `packages/runner/test/`: `agent-builtin.test.ts` (inputs
       serialized as links, task text as value, memo hit creates no record,
       abandonment settles, `pending`/`result` derive from a record a fake
       runner mutates); `agent-sink-governance.test.ts` (the `agent` row is
       total, the class is `agent`, a request whose task carries `User(other)`
       is refused under max enforcement, a request passing cells fits); the
-      CFC audit goldens that list sinks, regenerated with
-      `deno task cfc-audit-fixtures` and reviewed; the existing pinned
-      ungated-llm tests unchanged.
-- [ ] Documents: `docs/specs/server-side-execution/builtins.md` §2 row;
+      audit posture profile and posture tests that list sinks
+      (`packages/cf-harness/audit/profiles/max-enforcement.json` and the
+      tests beside it) updated by hand — the committed fixture tree lists no
+      sinks, so `deno task cfc-audit-fixtures` has nothing to regenerate; the
+      existing pinned ungated-llm tests unchanged.
+- [x] Documents: `docs/specs/server-side-execution/builtins.md` §2 row;
       `sink-inventory.ts` JSDoc; `docs/development/EXPERIMENTAL_OPTIONS.md`
       if the builtin ships behind a flag (recommended: `agentBuiltin`, default
       off until stage 6); `docs/common/` a pattern-author page for `agent()`
@@ -429,8 +431,11 @@ read through `gh api --paginate repos/commonfabric/labs/pulls/<n>/comments`.
 
 ## What is deliberately not in this plan
 
-Ranking (`priority` stays reserved). A durable per-user ledger and quota
-enforcement. Page and calendar mutation tools. A shared runner with delegated
-identity. Folding hosted pattern authoring into an agent request. Each is
-named in the design document under "Later, not sequenced" and gets its own
-plan when it is picked up.
+The per-request `agent` sink ceiling and any further `maxConfidentiality`
+work: the first take ships the static empty row under max enforcement with
+the builtin-side check, under which a request passing a labeled cell by
+reference is refused (design D5). Ranking (`priority` stays reserved). A
+durable per-user ledger and quota enforcement. Page and calendar mutation
+tools. A shared runner with delegated identity. Folding hosted pattern
+authoring into an agent request. Each is named in the design document under
+"Later, not sequenced" and gets its own plan when it is picked up.

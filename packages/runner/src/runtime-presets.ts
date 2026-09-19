@@ -286,6 +286,7 @@ export const EXPERIMENTAL_ENV_VARS = {
   serverExecution: "EXPERIMENTAL_SERVER_EXECUTION",
   viewScopedReplication: "EXPERIMENTAL_VIEW_SCOPED_REPLICATION",
   webViewScopedReplication: "EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION",
+  agentBuiltin: "EXPERIMENTAL_AGENT_BUILTIN",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
 /**
@@ -381,6 +382,10 @@ export const EXPERIMENTAL_FLAG_AUTHORITY = {
   // read the same stored data, so adoption is safe either way — but both
   // sides must run the same one.
   readerSchemaPrecedence: "server",
+  // Under server execution the server runs the builtin and creates the
+  // record; a client on the other value would stage requests the deployment
+  // never picks up, or refuse ones it would.
+  agentBuiltin: "server",
 } as const satisfies Record<
   keyof ExperimentalOptions,
   ExperimentalFlagAuthority
@@ -636,6 +641,17 @@ export const MAX_ENFORCEMENT_SINK_GOVERNANCE: SinkGovernanceRegistry = Object
     llmDialog: ungatedSink("llmDialog"),
     generateText: ungatedSink("generateText"),
     generateObject: ungatedSink("generateObject"),
+    // The `agent` sink's request carries references plus a task text, so an
+    // empty ceiling refuses only a task text built from labeled data. The
+    // registry admits a static clause list per sink and nothing per request,
+    // so the ceiling the design gives this sink — the request's own
+    // observation ceiling — is not expressible here; the builtin measures
+    // its request against the pattern's `maxConfidentiality` before staging
+    // (`builtins/agent.ts`), and this row is the deployment's static bound
+    // over that. A task text at the requester's own label is therefore
+    // refused under this posture until the gate reads a ceiling off the
+    // request.
+    agent: { ceiling: Object.freeze([]) },
   });
 
 /**
