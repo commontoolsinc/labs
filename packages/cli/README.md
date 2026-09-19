@@ -1014,6 +1014,77 @@ an id is replayable only within the session it was chosen in, and a session
 minted on the spot would make the replay name a different invocation. A call
 naming neither gets both, minted for that one call.
 
+## Agent runner
+
+`cf agent` groups the commands over agent requests, and prints its help when
+given no subcommand. `cf agent runner` is the per-user process that runs agent
+requests. A pattern's `agent()` call becomes an `AgentRun` record in the
+requesting space, listed in the requester's home-space agent queue
+(`wish '#agent_queue'`,
+[`HOME_SPACE.md`](../../docs/common/conventions/HOME_SPACE.md#agent-queue)). The
+runner holds the requester's identity, sits on the machine where their Loom
+instance lives, and pulls: nothing on a toolshed connects to it.
+
+```bash
+# Shown for illustration only.
+cf agent runner --identity ./my.key --api-url https://toolshed.example \
+  --local-api-url http://localhost:8000 \
+  --loom-retrieval-config /etc/loom/retrieval.json
+```
+
+| Option                      | Meaning                                                                                                   |
+| --------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `--identity`, `CF_IDENTITY` | The keyfile of the user whose requests this runner runs.                                                  |
+| `--api-url`, `CF_API_URL`   | The toolshed serving that user's home space.                                                              |
+| `--local-api-url`           | The toolshed the runner sits beside, recorded as the runner's `host`. Defaults to `--api-url`.            |
+| `--loom-retrieval-config`   | The host-owned JSON file backing the read-only Loom tools. Without it the runner offers no `loom_*` tool. |
+| `--tools`                   | Comma-separated tool names the runner offers. Defaults to what its configuration backs.                   |
+| `--max-concurrent`          | How many runs the process holds at once. Defaults to 1.                                                   |
+| `--lease-seconds`           | How far a claim's lease reaches past the run's last durable write. Defaults to 300.                       |
+| `--work-root`               | Where run workspaces and artifacts go. Defaults to `$CF_HARNESS_HOME/agent-runs`.                         |
+| `--model`                   | The model name passed to `cf-harness`.                                                                    |
+
+The model provider is the one `cf-harness` is configured with under
+`CF_HARNESS_HOME`.
+
+What the runner does, in order:
+
+1. Connects to the home toolshed as the identity, creates the home pattern if
+   the home space has none, and writes the queue's `agentRunner` entry
+   `{ host, tools, registeredAt }`. It refreshes the entry, with `lastClaimAt`,
+   on every claim.
+2. Subscribes to the queue's `entries` and to every record they name, reading
+   each record from the toolshed its entry's `host` names. It acts on a change
+   to either; it has no polling timer.
+3. Claims the oldest `queued` record whose `tools` it offers, while it holds
+   fewer than `--max-concurrent` runs. A claim is one commit: `state: claimed`,
+   `claim: { runner, leaseUntil }`, and `attempts` incremented. Two runners
+   racing for one record conflict, and the loser finds the record claimed.
+4. Runs the request with `cf-harness`: the request's inputs as input cells, its
+   `maxConfidentiality` as the fabric session's read ceiling, its task under the
+   prompt-slot role `context`. Each transcript event the harness persists renews
+   `claim.leaseUntil`.
+5. Hands the model's structured result to the harness's result writer, and
+   writes the record's terminal fields: `result`, `outcome`, `usage`,
+   `usageCoverage`, `modelTurns`, `toolCalls`, `runRef`.
+
+| A run that…                                           | ends                         |
+| ----------------------------------------------------- | ---------------------------- |
+| produced a result the writer wrote                    | `completed`                  |
+| hit the model-turn limit                              | `failed`, `LIMIT_REACHED`    |
+| failed in the model, a tool, or its result            | `failed`, `PROVIDER_FAILURE` |
+| had its result write refused by the space's policy    | `refused`, `REFUSED`         |
+| was cancelled (`cancelRequestedAt` set on the record) | `cancelled`, `CANCELLED`     |
+
+A `claimed` or `running` record whose `leaseUntil` has passed belongs to a
+runner that stopped. The next runner to see it, on start or on a queue change,
+queues it again when its `attempts` is 1 and ends it `failed` as `RUNNER_LOST`
+when its `attempts` is 2.
+
+A runner connects to at most two deployments, and only the home one is a full
+connection; the other is read and written as storage. This is the one command
+that the next section's rule does not bound to a single deployment.
+
 ## One deployment per process
 
 A `cf` process talks to one deployment. Opening a connection writes settings

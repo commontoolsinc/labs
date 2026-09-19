@@ -368,7 +368,11 @@ label.
 *the requester's own view*: `[User(requester)]` met with `PersonalSpace`
 clauses that name them, which is what "respect `PerUser<>`" means once the run
 acts as the requester (section 1.5) — the user-scoped instances it resolves are
-theirs, and another user's labeled data does not fit. Declared, it can only
+theirs, and another user's labeled data does not fit. The runner passes the
+result writer `[User(requester)]` for a request naming no ceiling, and gives
+the run's fabric session no read ceiling beyond what acting as the requester
+already bounds; the `PersonalSpace` clauses are later work with the rest of
+the ceiling (phase 7). Declared, it can only
 tighten: the runtime meets the pattern's clauses with the deployment's, the way
 `observationMaxConfidentiality` is met for `generateObject`
 (`effectiveObservationCeiling`), so a pattern cannot widen a run from inside.
@@ -583,6 +587,11 @@ problem. Set aside: a dedicated per-user queue space
 pointed at from the profile, which costs a minted space per user and puts the
 record and the builtin cell in different spaces.
 
+A home space that holds no queue — no home pattern, or one from before the
+field — has nowhere to list the record, so the index write fails and the
+record ends `refused` like any other record the effect cannot index.
+`cf agent runner` creates the home pattern on start when there is none.
+
 ### 2.3 The record
 
 ```text
@@ -598,7 +607,8 @@ AgentRun (PerUser, in the requesting space)
   stateSince
   claim?         { runner, leaseUntil }        while claimed or running
   attempts       claims made so far; runner-written, incremented by each claim
-  cancel         stream                         the one write a client makes
+  cancelRequestedAt?  set by a client asking the run to stop; the one write
+                 a client other than the runner makes
   result?        link to the result document the harness wrote
   outcome?       completed | failed | refused | cancelled
   errorCode?     one taxonomy shared with verb refusals (INVALID_INPUT, LIMIT_REACHED, …)
@@ -611,6 +621,21 @@ AgentRun (PerUser, in the requesting space)
   runRef?        operator-only reference to the run artifact root; never a value
   priority?      absent in the first take; reserved for ranking
 ```
+
+The canonical schema is `AgentRunRecordSchema` in
+`packages/runner/src/builtins/agent-schemas.ts`: `packages/runner` sits below
+`packages/patterns` in the layer stack and cannot import from it, so the
+pattern-facing `AgentRun` type in `packages/patterns/system/agent-run.tsx`
+restates the shape and `packages/runner/test/agent-schemas-parity.test.ts`
+holds the two together. The error codes are one module,
+`packages/runner/src/agent-error-codes.ts`.
+
+A cancel is a durable field and not a stream on the record: a stream event
+reaches only the runtime that runs its handler, and the runner is another
+process. `agent-run.tsx` gives a view over a record whose `cancel` stream sets
+`cancelRequestedAt`; a runner that sees the field on a record it is running
+aborts the run through the harness's `signal` and ends the record `cancelled`,
+and one that sees it on a `queued` record ends it without running it.
 
 The request fields are written by the server when the request commits; the
 runner writes everything from `claim` on. The two writer sets never overlap,
@@ -857,7 +882,12 @@ Listed so they can be overturned before phase 1.
    `serving-loop.md` §3d) — and what it leaves open is a blind-writing
    derivation later clobbering the authored fields, which cannot happen to
    a record the effect writes once and the builtin thereafter only reads.
-   The sibling-document fallback is not needed.
+   The sibling-document fallback is not needed. The executable check is
+   `packages/runner/test/agent-split-writer.test.ts`: a second client session
+   writes the runner's fields into a record the effect created, the commits
+   land, both writers' fields stand, and the builtin derives from them. It
+   runs with client runtimes on one memory server; under a serving runtime
+   the split rests on the spec reading above.
 10. **Minting a document for a Loom hit is an authored write the runtime
     admits with a declared label.** The label comes from loom's `ifc` on the
     row; a row without one is refused before it reaches the model, so none

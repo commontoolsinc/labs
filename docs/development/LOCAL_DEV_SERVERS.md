@@ -346,6 +346,41 @@ bundles, which is quicker than a restart.
 
 ---
 
+## Agent Runner (Optional)
+
+`cf agent runner` runs the agent requests a pattern makes with `agent()`. It is
+only needed when testing that builtin, which also needs the `agentBuiltin`
+experimental flag on
+([`EXPERIMENTAL_OPTIONS.md`](EXPERIMENTAL_OPTIONS.md)).
+
+The runner holds one user's identity, so it takes the identity whose requests
+it should run, and the toolshed serving that identity's home space. Against
+`dev-local` on a port offset of 100:
+
+```bash
+# Shown for illustration only.
+EXPERIMENTAL_AGENT_BUILTIN=true ./scripts/start-local-dev.sh --port-offset=100
+
+deno task cf agent runner \
+  --identity ./my.key \
+  --api-url http://localhost:8100
+```
+
+On start the runner creates the identity's home pattern if the home space has
+none, writes its `agentRunner` entry into the home space's agent queue, and then
+follows the queue. It prints a line when it claims a run and when the run ends,
+and it runs until interrupted. The model provider is the one `cf-harness` is
+configured with under `CF_HARNESS_HOME`; `--model` names a model, and
+`--loom-retrieval-config` names the host-owned file backing the read-only Loom
+tools. A run's workspace and artifacts go under `--work-root`, which defaults to
+`$CF_HARNESS_HOME/agent-runs`.
+
+When the home space and the runner's own toolshed are different deployments,
+`--api-url` names the first and `--local-api-url` the second. The
+[CLI README](../../packages/cli/README.md#agent-runner) describes the command.
+
+---
+
 ## Background Piece Service (Optional)
 
 The background-piece-service polls registered pieces and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled piece execution.

@@ -419,7 +419,7 @@ export class AgentRunner {
     // Yields once, so `#claim` has recorded this run as active before the
     // run's first write wakes a scan.
     await Promise.resolve();
-    const { record, runtime, host } = followed;
+    const { record, host } = followed;
     const leaseUntil = () =>
       new Date(this.#now().getTime() + this.#options.leaseMs).toISOString();
     let execution: AgentRunExecution | undefined;

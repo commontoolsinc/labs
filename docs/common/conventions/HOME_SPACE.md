@@ -37,6 +37,8 @@ The home space provides a persistent, user-owned storage location for:
   spaces
 - **Profile** - A list of the user's shared profiles, plus the chosen default
 - **Spaces** - A managed list of spaces the user has created or bookmarked
+- **Agent queue** - The index of the user's agent runs, and their registered
+  runner
 - **Settings** - User-level preferences including `defaultAppUrl`
 
 ## Favorites
@@ -127,6 +129,36 @@ The home space maintains a managed list of spaces in
 `defaultPattern.spaces`. Each entry has a `name` (required) and optional `did`.
 Users add spaces via the Spaces tab in the home pattern. Clicking a space link
 navigates to it (creating it if it doesn't exist yet).
+
+## Agent Queue
+
+The home default pattern holds the user's agent queue in
+`defaultPattern.agentQueue`, a piece of
+`packages/patterns/system/agent-queue.tsx`. It is discovered with
+`wish({ query: "#agent_queue" })`, a well-known home-space target. A hashtag
+search does not find it, because under `scope: ["~"]` that search reads the
+user's favorites only, and the queue is not a favorite.
+
+The piece holds two things:
+
+- `entries` - one `{ run, host }` entry per `AgentRun` record the user has
+  submitted, across spaces and toolsheds. The `agent` builtin appends an entry
+  when a request commits. `run` links to the record in the requesting space;
+  `host` is the origin of the toolshed serving that space, carried beside the
+  link because a link resolves a space and not the host that serves it.
+- `agentRunner` - the user's registered runner:
+  `{ host, tools, registeredAt, lastClaimAt }`. `cf agent runner` writes it
+  when it starts and refreshes it on every claim. It is owner-protected the way
+  the profile's share-inbox pointer is: the only writer is the piece's
+  `setAgentRunner` stream, and only the owner may send it. It holds no secret.
+  It exists so a consumer can say that no runner is registered, and so the
+  `agent` builtin can fail a request naming a tool the runner does not offer
+  before the request is staged.
+
+A request made in a home space that holds no queue — its home pattern does not
+exist, or is a version without the field — ends `refused`.
+[`docs/common/capabilities/agent.md`](../capabilities/agent.md) describes the
+request side.
 
 ## Custom Home Pattern
 

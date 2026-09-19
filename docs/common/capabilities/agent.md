@@ -84,6 +84,21 @@ const view = recommendation.pending
   inputs is a memo hit and creates nothing; a pattern that wants a fresh run
   includes an input that changes.
 
+## Who runs the request
+
+A request becomes an `AgentRun` record in the requesting space, listed in the
+requester's home-space agent queue
+([`HOME_SPACE.md`](../conventions/HOME_SPACE.md#agent-queue)). The requester's
+runner, `cf agent runner`, claims it from there and runs it; with no runner
+started, the record stays `queued`. A pattern reads whether one is registered
+from `wish({ query: "#agent_queue" })`, whose `agentRunner` is absent until a
+runner starts. A request made where the home space holds no queue ends
+`refused`.
+
+To stop a run, set `cancelRequestedAt` on its record — the `cancel` stream of
+`packages/patterns/system/agent-run.tsx` does — and the runner ends it
+`cancelled`.
+
 ## What the request carries, and what is measured
 
 The request is staged under the `agent` sink and measured at the commit
