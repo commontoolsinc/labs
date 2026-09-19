@@ -50,18 +50,42 @@ section says how.
 
 Every row a command returns is measured against the run's observation ceiling
 before it enters model context, with the predicate `run_pattern` uses over a
-disclosed label (`atomsOutsideCeiling`). A row carries its label as an `ifc`
-field holding a `confidentiality` clause list. Three outcomes:
+disclosed label (`atomsOutsideCeiling`). A row states its label as an `ifc`
+field holding a `confidentiality` clause list. Four outcomes:
 
-- a row whose label fits the ceiling is admitted, with its label disclosed as
-  atom types and its `ifc` field removed from the value;
-- a row whose label does not fit is replaced by
+- a row whose `ifc` label fits the ceiling is admitted with
+  `labelSource: "row"`, its label disclosed as atom types and its `ifc` field
+  removed from the value;
+- a row with no `ifc` field is given the label of the query that produced it and
+  then measured like any other; admitted, it carries `labelSource: "query"`;
+- a row whose label, read or assigned, does not fit is replaced by
   `{ "status": "withheld", "reasonCode": "cfc_ceiling_exceeded" }`;
-- a row with no `ifc`, or one whose `confidentiality` is not a list of clauses —
-  each an atom, or an `anyOf` over a nonempty list of atoms — is replaced by
-  `{ "status": "withheld", "reasonCode":
-  "cfc_label_read_failed" }`. It is
-  never read as public, and it is refused even when the run declares no ceiling.
+- a row whose `ifc` is present and unreadable — not a record, a
+  `confidentiality` that is not a list, a clause that is neither an atom nor an
+  `anyOf` over a nonempty list of atoms — is replaced by
+  `{ "status": "withheld", "reasonCode": "cfc_label_read_failed" }`, with or
+  without a ceiling. A present label that cannot be read is not an absent one.
+
+### The label of an unlabeled row is assumed, not read
+
+The pinned loom checkout emits no `ifc` on search hits, nor on the page, people,
+calendar, context, and profile payloads, so today every real row takes the
+second path. The label it is given is the label of the tool call's input, as the
+harness already tracks it for `research`: the prompt slot's influence label
+joined with the run's accumulated model-context label
+(`HarnessToolContext.toolInputCfcLabel`). That is the only notion of "the
+query's label" the harness has, since a query is a model-authored argument. A
+run that has observed nothing labeled therefore labels such a row public.
+
+This is a placeholder assumption and it is not sound: what a row holds is
+decided by the store it came from, not by who asked for it, so a row can be
+admitted under a label lower than the one loom holds for it. Loom's own facet
+filtering still runs first on the host. The rule lives in one function,
+`labelForUnlabeledLoomRow()` in `src/tools/loom-retrieval.ts`, which is the
+single thing to replace when loom returns a real label per row. The
+implementation profile publishes it as a known deviation.
+
+### Where the ceiling comes from
 
 The ceiling is the fabric session's read ceiling — `--max-confidentiality` met
 with the run manifest's `cfc.maxConfidentiality` — met with the clause list of
@@ -70,28 +94,20 @@ the file loom's `facet_scoped_run.py run-ceiling` writes for a facet-scoped
 dispatch: `loomReadCeiling`, `facets`, and `facetSource`. A record that is named
 and cannot be read refuses every call with `ceiling_unavailable` rather than
 reading as no ceiling, and so does a record whose `facets` differ from the
-configured ones. A run with neither ceiling admits every readable label.
+configured ones. A run with neither ceiling admits every label.
 
 Loom's own filtering runs first, under the facet scope the host launched the
 broker with (`fabric_local_agent_rpc.py serve --facets`). The pinned loom CLI
 takes no `--read-ceiling-file` on `search`, `page`, `people`, `calendar`,
 `context`, or `profile`, so the harness passes no ceiling on argv; the record
-reaches the measurement through the configuration instead. The host-side
-measurement is what stands between a loom version that returns an unlabeled or
-over-ceiling row and the model.
+reaches the measurement through the configuration instead.
 
-The admitted rows' labels are joined into one model-context observation over the
-result's output channel, through the same accumulation `research` and the
-sandbox tools feed. Withheld rows contribute nothing, since nothing of them
-reached the model. The join is kept on the result artifact under `cfc` and is
-not shown to the model.
-
-Against the pinned loom checkout, `loom search --json` emits no `ifc` on its
-hits, and the page, people, calendar, context, and profile payloads carry none
-either. Every such row is therefore withheld as `cfc_label_read_failed` until
-loom stamps its rows. That is the designed outcome for an unlabeled row, and the
-loom side owes the labels; the tools are complete on the harness side and are
-exercised against fixture output that carries them.
+The admitted rows' labels, read or assigned, are joined into one model-context
+observation over the result's output channel, through the same accumulation
+`research` and the sandbox tools feed. Withheld rows contribute nothing, since
+nothing of them reached the model. The join is kept on the result artifact under
+`cfc` and is not shown to the model. An admitted row's label is also what a
+result writer stamps on a document it mints for that row.
 
 ## Tools
 
@@ -114,9 +130,10 @@ external data and carries no instructions.
 | `loom_profile`       | `loom profile --json [--fresh]`                                                                     | the resolver-backed identity, one row                                |
 
 `--json` is always passed, and `--concise` wherever `loom page` takes it: a full
-inspection can run to megabytes and exceeds any bound a tool result can carry.
-`loom search --json` must carry `schemaVersion: 1`; a payload without it, or
-with another value, is refused with `schema_version_mismatch`.
+inspection can run to megabytes and exceeds any bound a tool result can carry. A
+`loom search --json` payload that states a `schemaVersion` other than 1 is
+refused with `schema_version_mismatch`; one that states none is read as version
+1, which is what the pinned loom emits.
 
 What the model may pass is what the table shows and nothing else. Routing flags
 (`--rpc-queue`, `--instance`, `--engine`, `--peek`, `--list-sources`,
@@ -155,7 +172,8 @@ quote host paths and identifiers:
 - `host_refused` — the host returned `ok: false`, with its code as `hostCode`;
 - `not_found` and `contested` — `loom people`, and `loom search --person`,
   resolved no live person or more than one;
-- `schema_version_mismatch` — a search payload without the pinned version;
+- `schema_version_mismatch` — a search payload stating a version other than the
+  pinned one;
 - `malformed_payload` — a payload without the shape the command returns.
 
 ## Bounds

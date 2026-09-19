@@ -118,6 +118,13 @@ export interface HarnessToolContext {
   /** Existing CFC label on a research task and its accumulated model context. */
   researchTaskCfcLabel?: IFCLabel;
 
+  /**
+   * The label of this tool call's input: the prompt slot's influence joined
+   * with everything the run's model context has observed, which is what a
+   * model-authored argument can carry. Absent when neither carries a label.
+   */
+  toolInputCfcLabel?: IFCLabel;
+
   /** Pattern attachments resolved by the host before the first model turn. */
   patternRefs?: readonly HarnessPatternRef[];
 

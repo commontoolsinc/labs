@@ -2633,7 +2633,14 @@ export class CfHarnessEngine {
         : {}),
       researchRuns: this.#runState.researchRuns ?? [],
       researchGoal: this.#runState.researchGoal,
-      ...(researchTaskCfcLabel !== undefined ? { researchTaskCfcLabel } : {}),
+      ...(researchTaskCfcLabel !== undefined
+        ? {
+          researchTaskCfcLabel,
+          // A research task and any other model-authored argument have the
+          // same provenance, so they carry the same label.
+          toolInputCfcLabel: researchTaskCfcLabel,
+        }
+        : {}),
       patternRefs: this.#runState.patternRefs ?? [],
       inputCells: this.#runState.inputCells ?? [],
       recordResearchRun: (run: HarnessResearchRunSummary) => {

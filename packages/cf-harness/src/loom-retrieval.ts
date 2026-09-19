@@ -61,7 +61,12 @@ export type LoomRetrievalCommand =
   | "context"
   | "profile";
 
-/** The `schemaVersion` a `loom search --json` payload must carry. */
+/**
+ * The `schemaVersion` of the `loom search --json` payload this module reads.
+ * A payload that states another version is refused; one that states none is
+ * read as this version, which is what a loom that does not stamp its payload
+ * emits.
+ */
 export const LOOM_SEARCH_SCHEMA_VERSION = 1;
 
 /** Arguments of `loom search`. One of `query` and `person` is required. */
@@ -620,14 +625,15 @@ export const runLoomRetrievalCommand = async (
     return failed("The host command did not succeed.");
   }
   if (
-    command === "search" &&
-    (!isRecord(payload) || payload.schemaVersion !== LOOM_SEARCH_SCHEMA_VERSION)
+    command === "search" && isRecord(payload) &&
+    Object.hasOwn(payload, "schemaVersion") &&
+    payload.schemaVersion !== LOOM_SEARCH_SCHEMA_VERSION
   ) {
     return {
       status: "error",
       code: "schema_version_mismatch",
       message:
-        `The search payload does not carry schemaVersion ${LOOM_SEARCH_SCHEMA_VERSION}.`,
+        `The search payload states a schemaVersion other than ${LOOM_SEARCH_SCHEMA_VERSION}.`,
     };
   }
   return { status: "ok", payload };
