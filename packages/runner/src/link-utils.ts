@@ -55,7 +55,6 @@ import { resolveExternalCfcSchemaRefAsDocument } from "./cfc/schema-refs.ts";
 import { createRef } from "./create-ref.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { ensureExternalSchemaClosure } from "./schema-ifc.ts";
-import { declaringManifestLink } from "./stream-declaration.ts";
 import {
   areNormalizedLinksSame,
   isNormalizedFullLink,
@@ -1051,10 +1050,15 @@ export function ownerStreamSchema(
     undefined,
     cell.tx,
   );
-  return declaringManifestLink(
-    owner.getMetaRaw("internal", META_READ_OPTIONS),
-    (link) => parseLink(link, owner),
-    (link) => areNormalizedLinksSame(link, target),
-    ContextualFlowControl.declaresStream,
-  )?.schema;
+  const manifest = owner.getMetaRaw("internal", META_READ_OPTIONS);
+  if (!Array.isArray(manifest)) return undefined;
+  for (const entry of manifest) {
+    if (!isObjectNotArray(entry)) continue;
+    const link = parseLink(entry.link, owner);
+    if (
+      link !== undefined && areNormalizedLinksSame(link, target) &&
+      ContextualFlowControl.declaresStream(link.schema)
+    ) return link.schema;
+  }
+  return undefined;
 }

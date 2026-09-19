@@ -18,7 +18,6 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import {
   declaredHandleKind,
-  declaringManifestLink,
   type ExternalReferenceResolver,
 } from "../src/stream-declaration.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -471,23 +470,6 @@ describe("stream declaration", () => {
 
     it("declares nothing where the resolver refuses the reference", () => {
       expect(declaredHandleKind(external, { resolveExternal: () => undefined }))
-        .toBeUndefined();
-    });
-
-    it("returns the first manifest link naming the target that declares a stream", () => {
-      const manifest = [
-        { link: { id: "a", schema: event } },
-        "not an entry",
-        { link: { id: "b", schema: { type: "number" } } },
-        { link: { id: "b", schema: event } },
-      ];
-      const linkOf = (raw: unknown) =>
-        raw as { id: string; schema?: JSONSchema };
-      expect(declaringManifestLink(manifest, linkOf, (l) => l.id === "b"))
-        .toEqual({ id: "b", schema: event });
-      expect(declaringManifestLink(manifest, linkOf, (l) => l.id === "c"))
-        .toBeUndefined();
-      expect(declaringManifestLink("no manifest", linkOf, () => true))
         .toBeUndefined();
     });
   });

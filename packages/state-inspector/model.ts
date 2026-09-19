@@ -58,7 +58,6 @@ import {
 } from "@commonfabric/data-model-schema/schema-refs";
 import {
   declaredHandleKind,
-  declaringManifestLink,
   definitionNamed,
   type ExternalReferenceResolver,
 } from "@commonfabric/runner/stream-declaration";
@@ -364,21 +363,21 @@ export function streamDeclarationOf(
 ): StreamDeclaration | undefined {
   const owner = linkId(doc.result);
   if (owner === undefined) return undefined;
+  const manifest = readDocument?.(owner)?.internal;
+  if (!Array.isArray(manifest)) return undefined;
   const resolveExternal = externalReferenceResolver(readDocument);
-  const link = declaringManifestLink(
-    readDocument?.(owner)?.internal,
-    (raw) => {
-      const decoded = decodedLinkOf(raw);
-      return decoded === null
-        ? undefined
-        : { ...decoded, schema: decoded.schema as JSONSchema | undefined };
-    },
-    (link) => link.id === id && (link.path?.length ?? 0) === 0,
-    (schema) => declaredHandleKind(schema, { resolveExternal }) === "stream",
-  );
-  if (link === undefined) return undefined;
-  const resolved = resolveSchemaMember(link.schema, readDocument);
-  return resolved === undefined ? undefined : { ...resolved, owner };
+  for (const entry of manifest) {
+    if (!isObjectNotArray(entry)) continue;
+    const link = decodedLinkOf(entry.link);
+    if (link === null || link.id !== id || (link.path?.length ?? 0) > 0) {
+      continue;
+    }
+    const schema = link.schema as JSONSchema | undefined;
+    if (declaredHandleKind(schema, { resolveExternal }) !== "stream") continue;
+    const resolved = resolveSchemaMember(schema, readDocument);
+    return resolved === undefined ? undefined : { ...resolved, owner };
+  }
+  return undefined;
 }
 
 /** A piece result value: carries render/name markers. */

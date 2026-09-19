@@ -1,14 +1,13 @@
 /**
- * How a stream is declared, read from the two places that carry the
- * declaration: the schema of a link that names the stream, and the manifest
- * link its owner keeps for it. A stream's document stores nothing that says
- * what it is, so a reader that has to tell a stream from a value reads one of
- * those two, and this module is that reading over plain schemas and plain
- * manifests. It carries none of the runtime, so a reader holding stored
- * documents and no live cells can take it as it is: what differs between the
- * two — how an external schema reference is resolved, how a manifest entry's
- * stored link is parsed, which link names the document in hand — arrives as
- * a function.
+ * What a schema declares about the handle at its root, read the one way
+ * every reader reads it. A stream's document stores nothing that says what
+ * it is: the declaration is on the schema of a link that names the stream —
+ * the manifest link its owner keeps for it among them — so a reader that
+ * has to tell a stream from a value reads a schema, and this module is that
+ * reading. It carries none of the runtime, so a reader holding stored
+ * documents and no live cells can take it as it is; the one thing that
+ * differs between the two, how an external schema reference is resolved,
+ * arrives as a function.
  */
 
 import type {
@@ -19,7 +18,7 @@ import type {
 } from "@commonfabric/api";
 import { isExternalSchemaRef } from "@commonfabric/data-model-schema/schema-refs";
 import { decodeJsonPointer } from "@commonfabric/utils/json-pointer";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 /** The handle kind `schema` declares by its own root `asCell`, if any. */
 function rootAsCellKind(schema: JSONSchema | undefined): CellKind | undefined {
@@ -190,35 +189,4 @@ export function declaresStream(
   resolveExternal?: ExternalReferenceResolver,
 ): boolean {
   return declaredHandleKind(schema, { resolveExternal }) === "stream";
-}
-
-/**
- * Among the entries of an owner's `internal` manifest, the link that declares
- * a stream at the document in hand: the first whose link `namesTarget`, and
- * whose schema `declares` one. `linkOf` parses an entry's stored `link`
- * member, and an entry it returns `undefined` for is passed over, as is one
- * that is not a record. `undefined` where no entry qualifies, and where
- * `manifest` is not a manifest at all.
- *
- * The schema returned is the manifest link's own, so it carries the event
- * schema the stream was declared with beside the declaration.
- */
-export function declaringManifestLink<
-  L extends { readonly schema?: JSONSchema },
->(
-  manifest: unknown,
-  linkOf: (link: unknown) => L | undefined,
-  namesTarget: (link: L) => boolean,
-  declares: (schema: JSONSchema | undefined) => boolean = (schema) =>
-    declaresStream(schema),
-): L | undefined {
-  if (!Array.isArray(manifest)) return undefined;
-  for (const entry of manifest) {
-    if (!isObjectNotArray(entry)) continue;
-    const link = linkOf(entry.link);
-    if (link !== undefined && namesTarget(link) && declares(link.schema)) {
-      return link;
-    }
-  }
-  return undefined;
 }

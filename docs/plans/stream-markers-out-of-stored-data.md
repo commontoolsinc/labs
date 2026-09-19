@@ -320,11 +320,10 @@ than what the list first said, the item says what it does now and why.
       stamped link there, through the reading the runtime applies. That
       reading is `@commonfabric/runner/stream-declaration`, a module carrying
       none of the runtime, which the runtime and the inspector both go
-      through — each supplying how it resolves an external schema reference
-      (the registry; the space's documents, refusing a member outside the
-      schema-meta grammar) and how it parses a manifest link (`parseLink`
-      over cells; the stored sigil form). The value check stays until stage
-      3. `classifyDocument` takes
+      through, each supplying how it resolves an external schema reference:
+      the registry, or the space's documents, refusing a member outside the
+      schema-meta grammar. The value check stays until stage 3.
+      `classifyDocument` takes
       the document's id, which the manifest entry is matched by, and a
       document reader, which the walk reads the owner and a manifest link's
       `cid:` reference through. The detail view names the manifest it read.
@@ -414,10 +413,12 @@ than what the list first said, the item says what it does now and why.
       value read. It covers links a handler or lift wrote into data before
       stage 1, which no setup pass rewrites (`data-updating.ts:1283` stamps
       only a new write), and the llm-dialog dispatch at
-      `builtins/llm-dialog.ts:2067`. The walk is `declaringManifestLink` in
-      `runner/src/stream-declaration.ts`, which `ownerStreamSchema`
-      (`link-utils.ts`) and the inspector's `streamDeclarationOf`
-      (`state-inspector/model.ts`) both call; the follow-up deletes it.
+      `builtins/llm-dialog.ts:2067`. The walk is a few lines over each
+      reader's own substrate — `ownerStreamSchema` (`link-utils.ts`) over
+      cells, the inspector's `streamDeclarationOf`
+      (`state-inspector/model.ts`) over stored documents — and what they
+      share is the reading of the manifest link they find,
+      `runner/src/stream-declaration.ts`; the follow-up deletes both walks.
 - [ ] Decide compatibility for pieces last set up before stage 1, before the
       value branch goes. Owner resolution covers a bare address whose owner
       manifest is stamped; a piece set up before stage 1 has an unstamped
