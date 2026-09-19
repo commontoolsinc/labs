@@ -840,7 +840,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         tx.prepareCfc();
         expect((await tx.commit()).error).toBeUndefined();
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -867,7 +867,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           "missing trusted-event policy input",
         );
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });
@@ -887,7 +887,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           "missing trusted-event policy input",
         );
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });

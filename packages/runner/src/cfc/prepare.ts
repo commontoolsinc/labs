@@ -3909,7 +3909,7 @@ const ifcEntryAppliesToAttemptedWrite = (
         tx,
         target,
         schema,
-        writeValueForTarget(tx, { ...target, path: writePath }),
+        effectiveValueForTarget(tx, { ...target, path: writePath }),
         root,
       )
     );

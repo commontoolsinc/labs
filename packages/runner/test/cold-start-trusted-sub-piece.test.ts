@@ -52,6 +52,17 @@ describe("cold start of a piece with trusted sub-pieces", () => {
   const newRuntime = () =>
     new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
 
+  // `start()` resolves before its piece-start commit settles, so a refused
+  // commit reaches a test only through the observer seam. What comes back is
+  // the list the observer fills, empty while the started graph stays up.
+  const observeStartFailures = (runtime: Runtime): string[] => {
+    const failures: string[] = [];
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(String((error as Error)?.message ?? error));
+    };
+    return failures;
+  };
+
   // Create the piece the way a shell does, then leave it stored and stopped.
   // The creating runtime is not disposed: the emulated storage is shared, and
   // disposing it takes the stored piece with it.
@@ -89,10 +100,7 @@ describe("cold start of a piece with trusted sub-pieces", () => {
   it("starts it, and its trusted surfaces drive the piece", async () => {
     const creator = newRuntime();
     const cold = newRuntime();
-    const failures: string[] = [];
-    cold.pieceStartCommitFailureObserver = ({ error }) => {
-      failures.push(String((error as Error)?.message ?? error));
-    };
+    const failures = observeStartFailures(cold);
     try {
       await storeStagedPublishPiece(creator);
 
@@ -138,6 +146,7 @@ describe("cold start of a piece with trusted sub-pieces", () => {
   it("still refuses an untrusted write to a contract-carrying field", async () => {
     const creator = newRuntime();
     const cold = newRuntime();
+    const failures = observeStartFailures(cold);
     try {
       await storeStagedPublishPiece(creator);
 
@@ -146,9 +155,17 @@ describe("cold start of a piece with trusted sub-pieces", () => {
         "cold-start-staged-publish",
       );
       await cell.sync();
-      await cold.start(cell);
+      expect(await cold.start(cell)).toBe(true);
       await cell.pull();
       await cold.idle();
+      // A refusal below is only evidence if the graph is up to refuse it: a
+      // piece that never started leaves the same values in place.
+      expect(
+        failures,
+        "the piece-start commit was refused, so the started graph was torn " +
+          "down",
+      ).toEqual([]);
+      expect(await cell.key("stage").pull()).toBe("drafting");
 
       // The same payload the renderer would carry, without the mark the
       // renderer puts on it. Admitting the setup replay must not admit this.
