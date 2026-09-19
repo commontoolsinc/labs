@@ -385,6 +385,10 @@ export {
   selectReferencedCfcSchemaDefs,
 } from "./schema-refs.ts";
 export {
+  LLM_DERIVED_RESULT_STAMP_SCHEMA,
+  withLlmDerivedStamp,
+} from "./llm-derived-stamp.ts";
+export {
   type SchemaOpaqueLinkSanitizationResult,
   type StructuredResultReservedKeys,
   validateAndSanitizeSchemaValueWithOpaqueLinks,

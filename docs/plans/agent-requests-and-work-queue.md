@@ -1,8 +1,9 @@
 # Agent requests from a pattern, and the queue that runs them
 
-**Status:** design, ruled on 2026-09-18; nothing is built. Written against
-`c89aef10a3`. Section 8 records the decisions and section 9 the assumptions
-the first take rests on.
+**Status:** design, ruled on 2026-09-18; phase 2 (the result writer, §1.3)
+is built, the rest is not. Written against `c89aef10a3`. The Decisions table
+records the rulings and the Assumptions section the assumptions the first take
+rests on.
 
 ## What this is
 
@@ -240,31 +241,58 @@ labels at the granularity of the documents it is written as, and the rule for
 how many documents that is follows.
 
 **Validation.** The model's structured result is validated against
-`resultSchema` and sanitized by the existing schema-opaque-link pass. `asCell`
-in that schema keeps the meaning it has: it marks a position that accepts an
-opaque reference — including one to content above the run's ceiling — and is
-a validation vocabulary, not a placement rule for links.
+`resultSchema`. `asCell` in that schema keeps the meaning it has: it marks a
+position that accepts an opaque reference — including one to content above the
+run's ceiling — so such a position is exempt from value validation, and the
+marker is a validation vocabulary rather than a placement rule for links. The
+schema-opaque-link sanitizer's string-sealing pass is not run: it withholds
+every free string a schema does not enumerate, which is the rule for a value
+leaving the fabric toward a model and not for text a model authored on its way
+in.
 
 **Every handle the result references becomes a link.** Wherever the result
-names a handle the run holds, at an `asCell` position or not, the host writes
-a link in its place. A handle to a cell becomes a link to that cell, so the
-consumer's read resolves the cell's own label. A handle to a referent that is
-not a cell — a Loom search hit, a Page read, a SQLite row — becomes a new
-document holding that content, labeled with the referent's label as the tool
-reported it, and a link to that document. A handle the run does not hold does
-not resolve, and the result fails rather than carrying an address the model
-composed (AH-REF-2). A recommendation list is then five links to five book
-cells and a short model-authored rationale per link.
+names a handle the run holds — as a token, as the canonical link string the
+inbound swap produces, or as a `{"@link": …}` object, at an `asCell` position
+or not — the host writes a link in its place. A handle to a cell becomes a
+link to that cell, so the consumer's read resolves the cell's own label. A
+handle to a referent that is not a cell — a Loom search hit, a Page read, a
+SQLite row — becomes a new document holding that content, declared with the
+referent's label as the tool reported it, and a link to that document. A
+handle the run does not hold, anywhere in the result — a whole position, a
+token inside prose, a property name — does not resolve, and the result fails
+before anything is written rather than carrying an address the model composed
+(AH-REF-2). A held handle in a property name stays the text it is, since a
+name cannot hold a link. A handle whose cell lies outside the session's space is refused
+too: the session's authority ends at its space. A recommendation list is then
+five links to five book cells and a short model-authored rationale per link.
+
+**A position's own ceiling.** Where the result schema declares
+`ifc.maxConfidentiality` at a position, the writer measures the referent placed
+there against it — every declaration reaching the position through `allOf`
+met into one — and seals the position with an opaque link where the referent's
+label does not fit. The declaration is then stripped from the schema the write
+goes through, because the runtime applies a position's `maxConfidentiality` to
+the whole transaction's join, which for this transaction is everything the run
+observed.
+
+**Two transactions.** The documents minted for non-cell referents are written
+first, in a transaction that reads nothing, so each carries its declared label
+alone. The result transaction then reads every one of them beside every cell
+the run observed, and writes the result.
 
 **What stays inline is labeled with the join.** Model-authored scalars — the
 rationales, a summary — stay in the result document. Their confidentiality is
 the join of what the model observed, and the writing transaction *derives*
 that join rather than asserting it: before the write, the host reads every
-cell the run observed (it holds their handles), so the transaction's consumed
-set is the real one and `deriveFlowJoin` stamps it; content that entered
-through a Loom tool contributes through the label declared on the document
-minted for it. Nothing in this path hands the runtime a label it has to trust
-from outside a transaction.
+cell the run observed (it holds their handles) and every document it minted,
+so the transaction's consumed set is the real one and `deriveFlowJoin` stamps
+it. The run's observation ceiling is declared on every node of the schema the
+result is written through, as the result document's store policy — and on
+every document a nested object splits into — so the commit boundary measures
+the derived join against the ceiling and refuses a join it does not admit.
+Nothing in this path hands the runtime a label it has to trust from outside a
+transaction: the declaration is a ceiling the runtime checks, and the label the
+document carries is the ceiling joined with what the transaction derived.
 
 **`LlmDerived`.** The host sets the transaction's implementation identity to
 the `agent` builtin before the write (`setCfcImplementationIdentity`), so the
@@ -272,9 +300,10 @@ result carries the runtime-minted integrity family a pattern cannot forge.
 The host is trusted code; this is the same line the llm builtins stand on.
 
 **Cost of this route.** The harness gains one host-side routine — a result
-writer over its fabric session that resolves handles to links, mints
-documents for non-cell referents, touches observed cells, and writes under the
-builtin identity — and no new model-facing tool. Against the alternative of
+writer over its fabric session (`packages/cf-harness/src/result-writer.ts`,
+`writeAgentResult`) that resolves handles to links, mints documents for
+non-cell referents, reads observed cells, and writes under the builtin
+identity — and no new model-facing tool. Against the alternative of
 the builtin stamping a label the runner reported, this removes the one trusted
 label input the earlier draft needed and gives per-referent labels for free.
 It is the cheaper design once the harness is writing anyway, and the harness
@@ -651,7 +680,7 @@ sums; nothing in the first take depends on it.
 [The implementation plan](agent-requests-implementation.md) sequences these
 as stages with files, tests, and gates; read it for order and this section
 for what each phase is for. Each phase lands on its own and is testable without an LLM provider: the
-harness has a scripted model client (`test/research.test.ts`,
+harness has a scripted model client (`packages/cf-harness/test/research.test.ts`,
 `ScriptedModelClient`), and the runner's admission and settlement are
 exercised with a fake executor the way hosted authoring's stage 1 prescribes.
 
@@ -726,7 +755,7 @@ Ruled 2026-09-18 unless marked.
 | --- | --- | --- |
 | D1 | Pattern surface | a class-2 builtin `agent` (§1.1 A) |
 | D2 | Result labeling | the harness writes the result: every referenced handle becomes a link, non-cell referents become labeled documents, inline text carries the derived join (§1.3) |
-| D3 | How the join is established | derived by the writing transaction reading the observed cells, not asserted by the runner; no trusted label input |
+| D3 | How the join is established | derived by the writing transaction reading the observed cells and the minted referent documents, not asserted by the runner; the run's ceiling is declared as the result's store policy and the runtime measures the derived join against it; no trusted label input |
 | D4 | Default observation ceiling | the requester's own view |
 | D5 | `agent` sink ceiling under max enforcement | the request's observation ceiling |
 | D6 | Run identity | the requester's, held by their runner |

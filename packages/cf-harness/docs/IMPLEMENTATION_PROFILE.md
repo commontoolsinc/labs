@@ -146,7 +146,21 @@ readiness.
   is configured. Dedicated Loom tools additionally invoke three fixed command
   ids through an operator-configured host CLI, using argv and stdin with pinned
   routing and attribution. This is an authority-only host boundary, not a new
-  flow-aware store commit gate; see [LOOM_AUTHORING.md](LOOM_AUTHORING.md).
+  flow-aware store commit gate; see [LOOM_AUTHORING.md](LOOM_AUTHORING.md). The
+  agent result writer (`src/result-writer.ts`) is a third trusted host path and
+  not a model tool: a host caller invokes it after a run reaches its structured
+  result, and it writes that result into the same configured space over the same
+  session. Its bounded authority is the session's (AH-TOOL-7): every handle the
+  result names must be one the run's table holds, a cell handle becomes a link
+  and never a copy, a non-cell referent becomes a document under the label its
+  tool reported, the cells the run observed are read through the writing
+  transaction so the runner derives the inline text's label, the write is
+  attributed to the `agent` builtin so the result carries the runtime-minted
+  `LlmDerived` family, and the run's observation ceiling is declared as the
+  result document's store policy so the runner's commit boundary — not the
+  writer — decides whether the derived join fits. A refusal reaches the caller
+  as a typed failure carrying the refusal code and the boundary's structured
+  detail, with no label atom in its message.
 - Network: explicit in configuration but still provisional. Sandboxed `bash`
   applies a direct-`curl` destination guard; `web_fetch` and web child profiles
   have their own bounded request policies.
@@ -354,9 +368,12 @@ in-flight external side effect.
 - `deno task test` — package contract suite.
 - Handle-table, prompt-loop-handle, cross-agent-handle, `describe_handle`,
   schema-shape, image-attachment, compaction, provenance, provider/auth,
-  `run_pattern`, Fabric-session-CFC, and local-Loom-host suites — model
-  boundary, observation integrity, context continuity, request attribution,
-  external side effects, and exact resume binding.
+  `run_pattern`, agent-result-writer, Fabric-session-CFC, and local-Loom-host
+  suites — model boundary, observation integrity, context continuity, request
+  attribution, external side effects, and exact resume binding. The
+  result-writer suite runs over an in-memory runtime at the fabric session's
+  enforcement rung and reads every label it asserts back through the runtime's
+  own label view.
 - Loom `tests/harness/` and dispatch tests — capability skew, commands,
   cancellation, mounts, structured results, interactive translation, and run
   review.
