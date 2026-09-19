@@ -67,6 +67,9 @@ const READS_NOTHING: ListingDeps = {
   getCellValue: () => {
     throw new Error("The cell was read.");
   },
+  listCallableKeys: () => {
+    throw new Error("The cell's callables were read.");
+  },
 };
 
 /** Helper for the cases below, which stands at the space's root. */
@@ -131,9 +134,19 @@ function cellKeys(keys: string[]): ListingDeps {
   return cellHolding(Object.fromEntries(keys.map((key) => [key, "a value"])));
 }
 
-/** Helper for the cases below, which stands `value` in for a cell's value. */
-function cellHolding(value: unknown): ListingDeps {
-  return { ...READS_NOTHING, getCellValue: () => Promise.resolve(value) };
+/**
+ * Helper for the cases below, which stands `value` in for a cell's value and
+ * `callables` in for the keys whose stored links declare a stream.
+ */
+function cellHolding(
+  value: unknown,
+  callables: readonly string[] = [],
+): ListingDeps {
+  return {
+    ...READS_NOTHING,
+    getCellValue: () => Promise.resolve(value),
+    listCallableKeys: () => Promise.resolve(new Set(callables)),
+  };
 }
 
 /** Helper for the cases below, which is `names` with no name written twice. */
@@ -435,19 +448,20 @@ describe("listing", () => {
         // stream is the piece's callable, an array and an object are walked
         // into, and everything else is where a path ends. `null` is the pair
         // that straddles the object test, being an object to `typeof` and not
-        // a container to anything else.
+        // a container to anything else. A stream holds nothing at its
+        // position; what makes it a callable is what its links declare.
 
         const listing = await list(
           atPiece(),
           cellHolding({
-            "add-reply": { $stream: true },
+            "add-reply": {},
             topics: [1, 2],
             author: { name: "a" },
             title: "a",
             replies: 14,
             done: false,
             nothing: null,
-          }),
+          }, ["add-reply"]),
         );
         expect(
           Object.fromEntries(listing.rows.map((row) => [row.name, row.kind])),
@@ -473,6 +487,35 @@ describe("listing", () => {
           cellHolding({ notes: { $stream: "later" } }),
         );
         expect(listing.rows[0].kind).toBe("container");
+      });
+
+      it("returns a key still holding the retired stream sentinel as a callable", async () => {
+        // A document written before streams were declared by schema holds
+        // `{ $stream: true }` where a stream stands, and its links say
+        // nothing. That is a callable all the same, until no such document
+        // remains.
+
+        const listing = await list(
+          atPiece(),
+          cellHolding({ "add-reply": { $stream: true } }),
+        );
+        expect(listing.rows[0].kind).toBe("callable");
+      });
+
+      it("asks which keys are callables of exactly the keys it lists", async () => {
+        const asked: string[][] = [];
+        const listing = await list(atPiece(), {
+          ...cellHolding({ a: 1, b: [1] }),
+          listCallableKeys: (_config, _path, keys) => {
+            asked.push([...keys]);
+            return Promise.resolve(new Set<string>());
+          },
+        });
+        expect(asked).toEqual([["a", "b"]]);
+        expect(listing.rows.map((row) => row.kind)).toEqual([
+          "value",
+          "container",
+        ]);
       });
 
       it("returns an array's indices as rows of what each element is", async () => {

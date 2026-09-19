@@ -4674,9 +4674,13 @@ export class CellBridge {
         resolvedCandidate = candidate;
       }
 
+      // The cell itself is the last thing asked, the way the CLI's detector
+      // asks it: a stream's document holds no value for either candidate to
+      // carry, and the link-derived cell answers from its stored links.
       const childSchema = expandSchemaReference(childCell.schema);
       let callableKind = classifyCallableEntry(candidate, childSchema) ??
-        classifyCallableEntry(resolvedCandidate, childSchema);
+        classifyCallableEntry(resolvedCandidate, childSchema) ??
+        classifyCallableEntry(childCell, childSchema);
 
       if (!callableKind) {
         try {

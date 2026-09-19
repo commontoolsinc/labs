@@ -16,6 +16,10 @@ import {
   parseLink,
 } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
+import {
+  declaredHandleKind,
+  type ExternalReferenceResolver,
+} from "../src/stream-declaration.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("stream-declaration");
@@ -443,6 +447,33 @@ describe("stream declaration", () => {
     });
   });
 
+  describe("the reading a reader holding no runtime shares", () => {
+    const event = { asCell: ["stream"], type: "number" } as JSONSchema & object;
+    const external = { $ref: "cid:evt" } as JSONSchema;
+
+    it("declares nothing for an external reference given no resolver", () => {
+      expect(declaredHandleKind(external)).toBeUndefined();
+    });
+
+    it("reads a resolved reference against the document it resolved to", () => {
+      const resolveExternal: ExternalReferenceResolver = () => ({
+        schema: { $ref: "#/$defs/Event" } as JSONSchema,
+        root: { $defs: { Event: event } } as JSONSchema,
+      });
+      expect(declaredHandleKind(external, { resolveExternal })).toBe("stream");
+      // The root it was reached from names another definition by that name.
+      expect(declaredHandleKind(external, {
+        root: { $defs: { Event: { asCell: ["cell"] } } } as JSONSchema,
+        resolveExternal,
+      })).toBe("stream");
+    });
+
+    it("declares nothing where the resolver refuses the reference", () => {
+      expect(declaredHandleKind(external, { resolveExternal: () => undefined }))
+        .toBeUndefined();
+    });
+  });
+
   describe("an address that names a stream's document alone", () => {
     const streamDocumentOf = async (cause: string) => {
       const { pattern, cell } = await runProgram(COUNTER, cause);
@@ -617,4 +648,80 @@ describe("stream declaration", () => {
       });
     }
   }
+});
+
+describe("a stream declared through a reference or a composition", () => {
+  const NUMBER_STREAM = { type: "number", asCell: ["stream"] } as const;
+  const WITH_DEFS = (event: JSONSchema): JSONSchema => ({
+    type: "object",
+    properties: { event: { $ref: "#/$defs/Event" } },
+    $defs: { Event: event, NumberStream: NUMBER_STREAM },
+  });
+  const declaredAt = (schema: JSONSchema) =>
+    ContextualFlowControl.declaredHandleKind(
+      ContextualFlowControl.getSchemaAtPath(schema, ["event"]),
+    );
+
+  it("reads the declaration through a local reference", () => {
+    expect(declaredAt(WITH_DEFS({ $ref: "#/$defs/NumberStream" }))).toBe(
+      "stream",
+    );
+  });
+
+  it("reads what any allOf branch declares, beside plain constraints", () => {
+    expect(declaredAt(WITH_DEFS({
+      allOf: [{ $ref: "#/$defs/NumberStream" }, { minimum: 0 }],
+    }))).toBe("stream");
+  });
+
+  it("reads what every anyOf branch declares, and nothing when one does not", () => {
+    expect(declaredAt(WITH_DEFS({
+      anyOf: [
+        { $ref: "#/$defs/NumberStream" },
+        { type: "undefined", asCell: ["stream"] },
+      ],
+    }))).toBe("stream");
+    expect(declaredAt(WITH_DEFS({
+      anyOf: [{ $ref: "#/$defs/NumberStream" }, { type: "null" }],
+    }))).toBeUndefined();
+    expect(declaredAt(WITH_DEFS({
+      anyOf: [{ $ref: "#/$defs/NumberStream" }, { asCell: ["cell"] }],
+    }))).toBeUndefined();
+  });
+
+  it("declares nothing where nothing is declared", () => {
+    expect(declaredAt(WITH_DEFS({ type: "number" }))).toBeUndefined();
+    expect(ContextualFlowControl.declaredHandleKind(undefined)).toBeUndefined();
+    expect(ContextualFlowControl.declaredHandleKind(true)).toBeUndefined();
+  });
+
+  it("makes a handle at such a position a stream with nothing stored", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      const holder = rt.getCell(
+        space,
+        "composed-stream-holder",
+        WITH_DEFS({
+          allOf: [{ $ref: "#/$defs/NumberStream" }, { minimum: 0 }],
+        }),
+      );
+      const event = holder.key("event");
+      expect(isStream(event)).toBe(true);
+      const received: unknown[] = [];
+      rt.scheduler.addEventHandler((_tx, payload) => {
+        received.push(payload);
+      }, event.getAsNormalizedFullLink());
+      event.send(5 as never);
+      await rt.idle();
+      expect(received).toEqual([5]);
+      expect(holder.getRaw()).toBeUndefined();
+    } finally {
+      await rt.dispose();
+      await storageManager.close();
+    }
+  });
 });

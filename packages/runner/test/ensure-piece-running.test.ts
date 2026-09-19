@@ -39,13 +39,12 @@ describe("ensurePieceRunning", () => {
 
   it("should return false for cells without result metadata", async () => {
     // Create a cell that has no piece structure (no result metadata, no pattern)
-    const orphanCell = runtime.getCell<{ $stream: true }>(
+    const orphanCell = runtime.getCell<unknown>(
       space,
       "orphan-cell-test",
-      undefined,
+      { asCell: ["stream"] },
       tx,
     );
-    orphanCell.set({ $stream: true });
 
     await tx.commit();
     tx = runtime.edit();
@@ -463,13 +462,12 @@ describe("ensurePieceRunning", () => {
 
   it("should handle events for cells without associated pieces gracefully", async () => {
     // Create a cell that has no piece structure
-    const orphanCell = runtime.getCell<{ $stream: true }>(
+    const orphanCell = runtime.getCell<unknown>(
       space,
       "orphan-event-cell-test",
-      undefined,
+      { asCell: ["stream"] },
       tx,
     );
-    orphanCell.set({ $stream: true });
 
     await tx.commit();
     tx = runtime.edit();
@@ -531,7 +529,7 @@ describe("queueEvent with auto-start", () => {
         { partialCause: "doubled" },
         {
           partialCause: "events",
-          schema: { default: { $stream: true } },
+          schema: { asCell: ["stream"] },
         },
       ],
       result: {
@@ -601,7 +599,6 @@ describe("queueEvent with auto-start", () => {
     setResultCell(doubledCell, resultCell);
     setResultCell(eventsCell, resultCell);
     argumentCell.set({ value: 5 });
-    eventsCell.setRaw({ $stream: true });
 
     await tx.commit();
     tx = runtime.edit();
@@ -665,7 +662,7 @@ describe("queueEvent with auto-start", () => {
         { partialCause: "doubled" },
         {
           partialCause: "events",
-          schema: { default: { $stream: true } },
+          schema: { asCell: ["stream"] },
         },
         { partialCause: "eventCount", schema: { default: 0 } },
       ],
@@ -764,8 +761,6 @@ describe("queueEvent with auto-start", () => {
     setResultCell(eventsCell, resultCell);
     setResultCell(eventCountCell, resultCell);
     argumentCell.set({ value: 5 });
-    // Set up derived cells - events must be set to $stream: true
-    eventsCell.setRaw({ $stream: true });
     eventCountCell.setRaw(0);
 
     await tx.commit();
@@ -831,7 +826,7 @@ describe("queueEvent with auto-start", () => {
         { partialCause: "doubled" },
         {
           partialCause: "events",
-          schema: { default: { $stream: true } },
+          schema: { asCell: ["stream"] },
         },
       ],
       result: {
@@ -914,7 +909,6 @@ describe("queueEvent with auto-start", () => {
     setResultCell(doubledCell, intermediateCell);
     setResultCell(eventsCell, intermediateCell);
     argumentCell.set({ value: 6 });
-    eventsCell.setRaw({ $stream: true });
     intermediateCell.setRaw({});
 
     setResultCell(intermediateCell, resultCell);

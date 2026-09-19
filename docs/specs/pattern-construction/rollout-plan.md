@@ -135,10 +135,11 @@
   - What's necessary for .equals() to be available? Should we make a new cell
     type just for that (useful to just reference an item, don't read or write,
     but also with the link itself not being opaque)
-- How should we handle streams vs the current { $stream: true } behavior?
-  - Use just the schema instead, e.g. in the redirect link. What's the override
-    rule? We can't turn a non-cell link into a Stream<>, so it should just be
-    for narrowing.
+- How should we handle streams vs the former `{ $stream: true }` behavior?
+  - Settled: the schema alone declares a stream, on the link and on the
+    stream's own document (`docs/plans/stream-markers-out-of-stored-data.md`).
+    What's the override rule? We can't turn a non-cell link into a Stream<>,
+    so it should just be for narrowing.
 
 ### Implementation Clarification Needed
 
