@@ -1174,9 +1174,9 @@ describe("schema-view", () => {
 
       describe("reached through", () => {
         // The plain shape is one path; each of these reaches the same
-        // refusal by another — the union arm of the narrowing, a `$ref`, the
-        // default a value takes, a child link — so a regression in one is not
-        // caught by pinning the others.
+        // refusal by another — the union arm of the narrowing, a `$ref`, a
+        // `default` riding beside a value that is there, a child link — so a
+        // regression in one is not caught by pinning the others.
 
         const rows: Array<[string, JSONSchema, string[]]> = [
           ["a `type` list", { ...closed, type: ["object", "null"] }, []],
@@ -1186,7 +1186,7 @@ describe("schema-view", () => {
             { $defs: { Closed: closed }, $ref: "#/$defs/Closed" },
             [],
           ],
-          ["a `default`", { ...closed, default: { id: "d" } }, []],
+          ["a `default` beside it", { ...closed, default: { id: "d" } }, []],
           [
             "a named property",
             { type: "object", properties: { row: closed } },
@@ -1222,6 +1222,39 @@ describe("schema-view", () => {
               await lazy.tx.commit();
             }
           });
+        }
+      });
+
+      it("leaves the refused properties out of a default it takes for an absent value", async () => {
+        // Nothing is stored, so each read takes the schema's `default`. A
+        // default is built from the properties the schema names rather than
+        // read through a view, and this schema names none.
+        const schema = {
+          ...closed,
+          default: { id: "d", driver: "y" },
+        } as const;
+        const read = (lazy: boolean) => {
+          const tx = runtime.edit();
+          if (lazy) tx.markLazyMaterialize(true);
+          const cell = runtime.getCell(
+            space,
+            "turned-down-names-none-absent",
+            schema,
+            tx,
+          );
+          return { tx, get: () => cell.get() };
+        };
+        const eager = read(false);
+        const lazy = read(true);
+        try {
+          expect(Object.keys(eager.get() as object)).toEqual([]);
+          const value = lazy.get() as Record<string, unknown>;
+          expect(Object.keys(value)).toEqual([]);
+          expect("driver" in value).toBe(false);
+          expect(value.driver).toBe(undefined);
+        } finally {
+          await eager.tx.commit();
+          await lazy.tx.commit();
         }
       });
 
@@ -1296,6 +1329,19 @@ describe("schema-view", () => {
             ],
           },
           ["id", "driver"],
+        ],
+        [
+          "a part that declares one key `false` beside an `additionalProperties` that is a schema",
+          {
+            allOf: [
+              {
+                type: "object",
+                properties: { id: false },
+                additionalProperties: { type: "string" },
+              },
+            ],
+          },
+          ["driver"],
         ],
         [
           "a part that is a `$ref` to a schema naming one key",

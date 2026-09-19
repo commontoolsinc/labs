@@ -406,8 +406,9 @@ const requiredKeys = (schema: JSONSchema | undefined): readonly string[] =>
  *
  * An eager read merges the keywords beside an `allOf` into each part before it
  * looks at a key, and the part's own keywords win that merge. So a part admits
- * a key by naming it, or by an `additionalProperties` that does not refuse it,
- * whatever the schema around it refuses. A part reaches either through a
+ * a key by naming it with a schema other than `false`, or, where it does not
+ * name the key, by an `additionalProperties` other than `false` — whatever the
+ * schema around it refuses. A part reaches either through a
  * `$ref`, resolved against the schema's `$defs`, and through the branches of a
  * combinator of its own.
  */
@@ -418,16 +419,17 @@ const allOfPartMayAdmit = (schema: JSONSchemaObj, key: string): boolean => {
     if (depth > MAX_ADMISSION_DEPTH) return true;
     const resolved = resolveBranch(part, schema);
     if (!isObjectOrArray(resolved)) return false;
+    // A part that names the key has decided it, and `false` there refuses it
+    // whatever the part's `additionalProperties` would let through.
+    if (
+      isObjectOrArray(resolved.properties) &&
+      Object.hasOwn(resolved.properties, key)
+    ) {
+      return (resolved.properties as Record<string, JSONSchema>)[key] !== false;
+    }
     if (
       resolved.additionalProperties !== undefined &&
       resolved.additionalProperties !== false
-    ) {
-      return true;
-    }
-    if (
-      isObjectOrArray(resolved.properties) &&
-      Object.hasOwn(resolved.properties, key) &&
-      (resolved.properties as Record<string, JSONSchema>)[key] !== false
     ) {
       return true;
     }
