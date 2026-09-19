@@ -1,0 +1,80 @@
+import { action, assert, pattern, TESTS, Writable } from "commonfabric";
+import AgentQueue from "./agent-queue.tsx";
+import type { AgentRun } from "./agent-run.tsx";
+
+const RUNNER = {
+  host: "https://local.example",
+  tools: ["loom_search"],
+  registeredAt: "2026-09-18T00:00:00.000Z",
+};
+
+export default pattern(() => {
+  const queue = AgentQueue({});
+  const record = new Writable<AgentRun>({
+    requestHash: "hash-1",
+    request: {},
+    piece: {},
+    space: {},
+    task: "recommend a book",
+    inputs: {},
+    resultSchema: {},
+    submittedAt: "2026-09-18T00:00:00.000Z",
+    state: "queued",
+    stateSince: "2026-09-18T00:00:00.000Z",
+  });
+
+  const assert_starts_with_no_entries = assert(() =>
+    queue.entries.get().length === 0
+  );
+  const assert_starts_with_no_runner = assert(() =>
+    queue.agentRunner === undefined
+  );
+
+  const action_register_runner = action(() => {
+    queue.setAgentRunner.send({ runner: RUNNER });
+  });
+  const assert_runner_registered = assert(() =>
+    queue.agentRunner?.host === RUNNER.host &&
+    queue.agentRunner?.tools[0] === "loom_search" &&
+    queue.agentRunner?.lastClaimAt === undefined
+  );
+
+  const action_refresh_on_claim = action(() => {
+    queue.setAgentRunner.send({
+      runner: { ...RUNNER, lastClaimAt: "2026-09-18T00:05:00.000Z" },
+    });
+  });
+  const assert_claim_refreshed = assert(() =>
+    queue.agentRunner?.lastClaimAt === "2026-09-18T00:05:00.000Z" &&
+    queue.agentRunner?.registeredAt === RUNNER.registeredAt
+  );
+
+  // The builtin appends entries as the runtime; a push stands in for it.
+  const action_append_entry = action(() => {
+    queue.entries.push({ run: record, host: "https://cloud.example" });
+  });
+  const assert_entry_links_the_record = assert(() =>
+    queue.entries.get().length === 1 &&
+    queue.entries.get()[0].host === "https://cloud.example" &&
+    queue.entries.get()[0].run.state === "queued"
+  );
+
+  const action_clear_runner = action(() => {
+    queue.setAgentRunner.send({});
+  });
+
+  return {
+    [TESTS]: [
+      { assertion: assert_starts_with_no_entries },
+      { assertion: assert_starts_with_no_runner },
+      { action: action_register_runner },
+      { assertion: assert_runner_registered },
+      { action: action_refresh_on_claim },
+      { assertion: assert_claim_refreshed },
+      { action: action_append_entry },
+      { assertion: assert_entry_links_the_record },
+      { action: action_clear_runner },
+      { assertion: assert_starts_with_no_runner },
+    ],
+  };
+});

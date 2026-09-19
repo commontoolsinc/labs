@@ -43,6 +43,7 @@ import {
   type UnsafeHostTrust,
 } from "../unsafe-host-trust.ts";
 import {
+  agent,
   cellFromUrl,
   compileAndRun,
   fetchBinary,
@@ -218,6 +219,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     llmDialog,
     generateObject,
     generateText,
+    agent,
     fetchBinary,
     cellFromUrl,
     renderCellReference,

@@ -10,6 +10,7 @@ import {
   type VNode,
   Writable,
 } from "commonfabric";
+import AgentQueue, { type AgentQueueOutput } from "./agent-queue.tsx";
 import FavoritesManager from "./favorites-manager.tsx";
 import Self from "../self.tsx";
 import {
@@ -72,6 +73,10 @@ export type HomeOutput = {
   profiles: Default<TrustedProfileList, []>;
   defaultProfile?: TrustedDefaultProfile;
   mru: Default<TrustedProfileMru, []>;
+  // The user's agent queue: the index of their agent runs and their
+  // registered runner. `wish({ query: "#agent_queue" })` resolves to it, and
+  // the `agent` builtin appends to its `entries`.
+  agentQueue: AgentQueueOutput;
   createProfile: Stream<CreateProfileEvent>;
   addFavorite: Stream<{
     piece: Writable<{ [NAME]?: string }>;
@@ -217,6 +222,7 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
 
   // Child components
   const favoritesComponent = FavoritesManager({});
+  const agentQueue = AgentQueue({});
   // Private self-model — the "real you" tier (values, neurotype, meaning Q&A),
   // home-local and never shared. Distinct from the outward profile/personas in
   // the Profile tab. Owns its own durable cell (seeded via Default<>).
@@ -340,6 +346,7 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
     profiles: profiles as any,
     defaultProfile: defaultProfile as any,
     mru: mru as any,
+    agentQueue,
 
     // Exported handlers
     addFavorite: addFavorite({ favorites }),

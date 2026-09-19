@@ -223,6 +223,7 @@ function getResolutionKind(parsed: ParsedWishTarget): string {
     case "#journal":
     case "#learned":
     case "#learnedSummary":
+    case "#agent_queue":
     case "#profile":
     case "#profileName":
     case "#profileAvatar":
@@ -949,6 +950,22 @@ function resolveHomeSpaceTarget(
       return [{
         cell: getHomeSpaceCell(ctx),
         pathPrefix: ["defaultPattern", "learned"],
+      }];
+    }
+
+    case "#agent_queue": {
+      // The user's agent queue: the index of their agent runs and their
+      // registered runner. A hashtag search would not find it, since under
+      // `scope: ["~"]` that search reads the user's favorites only.
+      const userDID = homeSpaceUserDID(ctx);
+      if (!userDID) {
+        throw new WishError(
+          "User identity DID not available for #agent_queue",
+        );
+      }
+      return [{
+        cell: getHomeSpaceCell(ctx),
+        pathPrefix: ["defaultPattern", "agentQueue"],
       }];
     }
 

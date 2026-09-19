@@ -107,6 +107,8 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["wait", "a patience in seconds"],
   ["group-size", "how many pieces one session serves; a count"],
   ["history-limit", "an operation history row count"],
+  ["max-concurrent", "how many agent runs one runner holds; a count"],
+  ["lease-seconds", "a lease length in seconds"],
   ["submission-after-seq", "a revision sequence number"],
   // Identifiers the caller brings from outside, or coins.
   ["did", "a DID, pasted from elsewhere"],
@@ -138,6 +140,11 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["path-json", "the same path written as a JSON array"],
   ["spaces", "a comma-separated list of the tokens --space takes"],
   ["stats-include", "a comma-separated list of timing categories"],
+  [
+    "tools",
+    "a comma-separated list of the tool names a runner offers, which the " +
+    "harness backing it decides and the CLI does not enumerate",
+  ],
   ["import", "an import specifier"],
   [
     "retarget",
@@ -147,6 +154,7 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["url", "a browser URL; its parts complete as --api-url, --space, --piece"],
   ["app-url", "a shell origin, which is not the api-url --api-url names"],
   ["repository", "a source repository URL"],
+  ["model", "a model name the harness's configured provider defines"],
   [
     "main-export",
     "an export name inside a pattern file, which needs the file compiled",

@@ -11,6 +11,25 @@ export default pattern(() => {
     ((home.profiles as unknown[])?.length ?? 0) === 0
   );
 
+  // The agent queue is held in a field of its own and starts empty, with no
+  // runner registered.
+  const assert_agent_queue_starts_empty = assert(() =>
+    home.agentQueue.entries.get().length === 0 &&
+    home.agentQueue.agentRunner === undefined
+  );
+  const action_register_runner = action(() => {
+    home.agentQueue.setAgentRunner.send({
+      runner: {
+        host: "https://local.example",
+        tools: [],
+        registeredAt: "2026-09-18T00:00:00.000Z",
+      },
+    });
+  });
+  const assert_runner_registered = assert(() =>
+    home.agentQueue.agentRunner?.host === "https://local.example"
+  );
+
   // NOTE: untrusted-write protection (sending the exported `createProfile`
   // stream from outside the trusted ProfileCreate surface must NOT create a
   // profile) is enforced by CFC and verified in
@@ -66,6 +85,9 @@ export default pattern(() => {
   return {
     [TESTS]: [
       { assertion: assert_initial_profile_missing },
+      { assertion: assert_agent_queue_starts_empty },
+      { action: action_register_runner },
+      { assertion: assert_runner_registered },
       { action: action_add_favorite },
       { action: action_remove_favorite },
       { action: action_remove_favorite_again },
