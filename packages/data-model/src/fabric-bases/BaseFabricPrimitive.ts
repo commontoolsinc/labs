@@ -71,8 +71,8 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
    *
    * Duplicated on `BaseFabricInstance`. The one class both extend is
    * `BaseFabricSpecialObject`, and `value-debug` loads that module by way of
-   * `interface.ts`, so an import of `value-debug` from there would close a
-   * load-time cycle.
+   * `interface.ts`, so an import of `value-debug` from there would cause a
+   * circular load-time dependency.
    */
   [Symbol.for("Deno.customInspect")](): string {
     return toCompactDebugString(this);
