@@ -31,6 +31,8 @@
     "./cli": "./src/cli.ts",
     "./provenance": "./src/provenance.ts",
     "./result-writer": "./src/result-writer.ts",
+    "./fabric-session": "./src/fabric-session.ts",
+    "./handle-table": "./src/handle-table.ts",
     "./gateway/openai-client": "./src/gateway/openai-client.ts",
     "./model/client": "./src/model/client.ts",
     "./model/usage": "./src/model/usage.ts",
