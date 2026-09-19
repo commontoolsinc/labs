@@ -290,6 +290,8 @@ const DIRECTIVE_CASES: Array<[string, string, string | undefined]> = [
   ["cf inspect spaces --dir ", "dirs", undefined],
   ["cf inspect html x --out ", "files", undefined],
   ["cf check --output ", "files", undefined],
+  ["cf agent runner --loom-retrieval-config ", "files", "*.json"],
+  ["cf agent runner --work-root ", "dirs", undefined],
   ["cf space set-home ", "files", "*.tsx"],
   ["cf piece set-home ", "files", "*.tsx"],
   ["cf piece getsrc ", "files", undefined],
