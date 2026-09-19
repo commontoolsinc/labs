@@ -3238,6 +3238,38 @@ describe("piece schema compatibility", () => {
       }
     });
 
+    it("permits boolean widening that preserves its effective default", () => {
+      for (const value of [false, true]) {
+        const narrower: JSONSchema = { type: "boolean", default: value };
+        const wider: JSONSchema = {
+          enum: [false, true, "auto"],
+          default: value,
+        };
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(narrower, wider),
+            pattern(wider, narrower),
+          )
+        ).not.toThrow();
+        for (
+          const changed of [
+            {
+              enum: [false, true, "auto"],
+              default: value === false ? true : "auto",
+            },
+            { enum: [false, true, "auto"] },
+          ] satisfies JSONSchema[]
+        ) {
+          expect(() =>
+            assertPatternSchemasBackwardCompatible(
+              pattern(narrower, true),
+              pattern(changed, true),
+            )
+          ).toThrow(/defaults changed/);
+        }
+      }
+    });
+
     it("permits nullable literal argument widening and result narrowing", () => {
       const wider: JSONSchema = { enum: ["open", "closed", null] };
       for (

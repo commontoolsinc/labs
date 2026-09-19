@@ -919,8 +919,8 @@ describe("piece source lifecycle", () => {
         name: "/main.tsx",
         contents: `
           import { type Cell, pattern } from "commonfabric";
-          export default pattern<{ seed: number }, { state: ${stateType} }>(
-            () => ({ state: 42 }),
+          export default pattern<{ flag: Cell<boolean> }, { state: ${stateType} }>(
+            ({ flag }) => ({ state: flag }),
           );
         `,
       }],
@@ -935,15 +935,52 @@ describe("piece source lifecycle", () => {
         properties: { state: { anyOf: expect.any(Array) } },
       });
     }
-    const piece = await pieces.create(wider, { input: { seed: 7 } });
-    await piece.setPattern(narrower);
-    expect(await piece.input.get(["seed"])).toBe(7);
-    expect(await piece.result.get(["state"])).toBe(42);
-    const state = await readPieceSourceState(runtime, piece.getCell());
-    expect(state.history.at(-1)?.operation).toBe("edit");
-    await expect(piece.setPattern(wider)).rejects.toThrow(
-      "Pattern schemas are not backward compatible",
-    );
+    // The result flows a boolean through the narrowed branch itself, so each
+    // stored value witnesses the narrowing rather than the untouched number
+    // branch.
+    for (const value of [false, true]) {
+      const piece = await pieces.create(wider, { input: { flag: value } });
+      await piece.setPattern(narrower);
+      expect(await piece.input.get(["flag"])).toBe(value);
+      expect(await piece.result.get(["state"])).toBe(value);
+      const state = await readPieceSourceState(runtime, piece.getCell());
+      expect(state.history.at(-1)?.operation).toBe("edit");
+      await expect(piece.setPattern(wider)).rejects.toThrow(
+        "Pattern schemas are not backward compatible",
+      );
+    }
+  });
+
+  it("applies compiled boolean widening that retains its default", async () => {
+    const program = (stateType: string): RuntimeProgram => ({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+          import { type Default, pattern } from "commonfabric";
+          export default pattern<{ state?: ${stateType} }, { active: boolean }>(
+            ({ state }) => ({ active: state === true }),
+          );
+        `,
+      }],
+    });
+    const narrower = program("Default<boolean, false>");
+    const wider = program('Default<boolean | "auto", false>');
+    for (const value of [false, true]) {
+      const piece = await pieces.create(narrower, { input: { state: value } });
+      await piece.setPattern(wider);
+      expect(await piece.input.get(["state"])).toBe(value);
+      expect(await piece.result.get(["active"])).toBe(value);
+      const state = await readPieceSourceState(runtime, piece.getCell());
+      expect(state.history.at(-1)?.operation).toBe("edit");
+      await expect(piece.setPattern(narrower)).rejects.toThrow(
+        "Pattern schemas are not backward compatible",
+      );
+    }
+    // A widening that also moves the default stays refused.
+    const piece = await pieces.create(narrower, { input: { state: true } });
+    await expect(piece.setPattern(program('Default<boolean | "auto", "auto">')))
+      .rejects.toThrow("Pattern schemas are not backward compatible");
   });
 
   it("applies a compiled union widening that retains a mixed-enum cell branch", async () => {
