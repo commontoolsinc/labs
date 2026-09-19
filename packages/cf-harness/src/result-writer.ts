@@ -876,11 +876,18 @@ export const writeAgentResult = async (
     await commitOrThrow(mintTx, "the documents minted for the result");
   }
 
-  const tx = runtime.edit();
+  // An observed cell's value can reach through links into documents this
+  // session has not loaded, and a read of an unloaded document records an
+  // absence the commit then finds untrue. Pulling each cell first loads what
+  // its value reaches, so the transaction below reads what is stored.
   for (const link of observedCells) {
     const cell = runtime.getCellFromLink<unknown>(link);
     await cell.sync();
-    cell.withTx(tx).get();
+    await cell.pull();
+  }
+  const tx = runtime.edit();
+  for (const link of observedCells) {
+    runtime.getCellFromLink<unknown>(link).withTx(tx).get();
   }
   for (const cell of minted.values()) {
     await cell.sync();

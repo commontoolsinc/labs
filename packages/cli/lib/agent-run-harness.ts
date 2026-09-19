@@ -263,10 +263,16 @@ async (run: ClaimedAgentRun): Promise<AgentRunExecution> => {
     ) {
       return { outcome: "refused", report };
     }
+    // The storage error's own text faces the operator; the record carries
+    // the code alone.
+    const detail = error instanceof AgentResultWriteError &&
+        error.rawCauseMessage !== undefined
+      ? ` (${error.rawCauseMessage})`
+      : "";
     options.report?.(
       `agent runner: writing the result failed: ${
         error instanceof Error ? error.message : String(error)
-      }`,
+      }${detail}`,
     );
     return { outcome: "failed", errorCode: PROVIDER_FAILURE, report };
   } finally {

@@ -350,6 +350,14 @@ and a result link, and observes `pending: false` and `result` on the node.
       `docs/common/conventions/HOME_SPACE.md` — the `#agent_queue` piece and
       `agentRunner` entry beside favorites; `docs/development/LOCAL_DEV_SERVERS.md`
       — how to start a runner against `dev-local`.
+- [ ] A structured result under an enforcing harness tool policy. The task
+      runs under the prompt-slot role `context`, and the harness's
+      `enforce-explicit` and `enforce-strict` tool policies refuse a
+      `context`-role run every tool that writes, so the model cannot write the
+      structured result file. The manual `dev-local` run completes with
+      `CF_HARNESS_CFC_ENFORCEMENT_MODE=observe`. The harness needs a way to
+      take the structured result that is not a sandbox write — its final
+      message, or a dedicated result tool admitted under `context`.
 - [ ] Observed Loom rows reach the result writer. The executor hands the
       writer every cell handle the run's table holds; a Loom row the run
       observed is not yet recorded as a document referent, so a result cannot
@@ -357,7 +365,9 @@ and a result link, and observes `pending: false` and `result` on the node.
 
 *Exit:* the stage-4 runner test suite passes across two test toolsheds, and a
 manual run against `dev-local` with a real harness and a scripted model moves
-a record from `queued` to `completed` with a result link that resolves.
+a record from `queued` to `completed` with a result link that resolves. Both
+hold, the second with the harness's tool policy at `observe` (the open item
+above).
 
 ## Stage 5 — Inspection
 

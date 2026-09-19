@@ -152,12 +152,16 @@ export async function agentRunnerAction(
         "pattern updates, then start the runner again.",
     );
   }
-  const registerRunner = async (entry: AgentRunnerEntry): Promise<void> => {
+  const registerRunner = (entry: AgentRunnerEntry): Promise<void> => {
+    // The controller's cell is bound to the transaction it was read under;
+    // an event is sent from an unbound one. The send settles when the
+    // handling's commit does.
     // deno-lint-ignore no-explicit-any
-    (homePattern.getCell() as any).key("agentQueue").key("setAgentRunner")
-      .send({ runner: entry });
-    await homePieces.runtime.idle();
-    await homePieces.synced();
+    const stream = (homePattern.getCell() as any).withTx()
+      .key("agentQueue").key("setAgentRunner");
+    return new Promise<void>((resolve) =>
+      stream.send({ runner: entry }, () => resolve())
+    );
   };
 
   const runner = new AgentRunner({
