@@ -2,18 +2,18 @@
  * Runtime schemas for the `agent` builtin: its parameters, its result cell,
  * the `AgentRun` record a request becomes, and the home-space index that
  * names every record a user has submitted. The record and index shapes are
- * the runner's definition of the queue a runner process reads; the
- * pattern-facing pieces in `packages/patterns/system` are expected to import
- * these rather than restate them.
- *
- * TODO(berni): Move the record and index schemas to
- * `packages/patterns/system` once the pieces that render and run the queue
- * exist, and import them here.
+ * the canonical definition of the queue a runner process reads. They live
+ * here because `packages/runner` sits below `packages/patterns` in the layer
+ * stack and cannot import from it: `packages/patterns/system/agent-run.tsx`
+ * and `agent-queue.tsx` state the same shapes as pattern-facing types, and
+ * `packages/patterns/system/agent-schemas-parity.test.ts` holds the two
+ * together.
  */
 
 import type { JSONSchema } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model-schema";
 
+import { AGENT_RUN_ERROR_CODES } from "../agent-error-codes.ts";
 import { LLM_DERIVED_RESULT_STAMP_SCHEMA } from "./llm-schemas.ts";
 
 /**
@@ -62,26 +62,6 @@ export type AgentRunState = (typeof AGENT_RUN_STATES)[number];
 export const AGENT_RUN_TERMINAL_STATES: ReadonlySet<AgentRunState> = new Set(
   ["completed", "failed", "refused", "cancelled"] as const,
 );
-
-/**
- * The error codes a run ends with, shared with the verb-refusal taxonomy:
- * `INVALID_INPUT` is a request the runner cannot act on, `LIMIT_REACHED` a
- * run ended by a model-turn, wall-time, or budget limit, `PROVIDER_FAILURE`
- * a model or tool that failed, `RUNNER_LOST` a run whose runner stopped
- * writing, `CANCELLED` a cancel the requester sent, and `REFUSED` a result
- * the boundary would not release.
- */
-export const AGENT_RUN_ERROR_CODES = [
-  "INVALID_INPUT",
-  "LIMIT_REACHED",
-  "PROVIDER_FAILURE",
-  "RUNNER_LOST",
-  "CANCELLED",
-  "REFUSED",
-] as const;
-
-/** One of {@link AGENT_RUN_ERROR_CODES}. */
-export type AgentRunErrorCode = (typeof AGENT_RUN_ERROR_CODES)[number];
 
 /**
  * The stamp the result document a run's harness writes carries: the same
@@ -157,10 +137,17 @@ export const AgentResultSchema = internSchema(
  * writes the request fields once, at creation: `requestHash`, `request`,
  * `piece`, `space`, `task`, `inputs`, `resultSchema`, `maxConfidentiality`,
  * `tools`, `submittedAt`, `state`, and `stateSince`. A runner writes
- * everything from `claim` on as an authored client, and moves `state` and
- * `stateSince` as it goes. The builtin never writes the record again; it
- * reads it, which is what lets a derived creation and later authored writes
- * share one document.
+ * everything from `claim` on as an authored client — `claim`, `attempts`,
+ * the terminal fields — and moves `state` and `stateSince` as it goes. The
+ * builtin never writes the record again; it reads it, which is what lets a
+ * derived creation and later authored writes share one document.
+ *
+ * `cancelRequestedAt` is the one field a client other than the runner
+ * writes: the `cancel` stream of `agent-run.tsx` sets it, and a runner that
+ * sees it on a record it is running aborts the run and ends the record
+ * `cancelled`. A stream event reaches only the runtime that runs the handler,
+ * so the durable field is what carries a cancel to a runner in another
+ * process.
  */
 export const AgentRunRecordSchema = internSchema(
   {
@@ -189,7 +176,8 @@ export const AgentRunRecordSchema = internSchema(
         },
         required: ["runner", "leaseUntil"],
       },
-      retries: { type: "number" },
+      attempts: { type: "number" },
+      cancelRequestedAt: { type: "string" },
       result: { asCell: ["cell"] },
       outcome: {
         type: "string",

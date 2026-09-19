@@ -2628,6 +2628,19 @@ describe("wish built-in", () => {
       expect((journal as any[])[0].narrative).toBe("first entry");
     });
 
+    it("resolves #agent_queue to the home agent queue", async () => {
+      const resolved = await resolveHomeTarget(
+        "agent-queue",
+        "agentQueue",
+        { entries: [], agentRunner: { host: "https://local.example" } },
+        "#agent_queue",
+      );
+      expect(resolved?.error).toBeUndefined();
+      expect((resolved?.result as any)?.agentRunner?.host).toBe(
+        "https://local.example",
+      );
+    });
+
     it("resolves #learned to the home learned object", async () => {
       const resolved = await resolveHomeTarget(
         "learned",

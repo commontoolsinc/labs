@@ -22,6 +22,7 @@ import type { Cell } from "../src/cell.ts";
 import { isCellLink } from "../src/link-utils.ts";
 import { Runtime, type RuntimeOptions } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { seedHomeAgentQueue } from "./support/agent-queue.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("agent builtin");
@@ -62,8 +63,14 @@ describe("agent builtin", () => {
   let tx: IExtendedStorageTransaction;
   let commonfabric: ReturnType<typeof createBuilder>["commonfabric"];
 
-  /** Builds the runtime under test; `agentBuiltin` is on unless overridden. */
-  const setUp = (options: Partial<RuntimeOptions> = {}) => {
+  /**
+   * Builds the runtime under test; `agentBuiltin` is on unless overridden.
+   * The home space holds an empty agent queue unless `seedQueue` is false.
+   */
+  const setUp = (
+    options: Partial<RuntimeOptions> = {},
+    { seedQueue = true }: { seedQueue?: boolean } = {},
+  ) => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("https://fabric.example/"),
@@ -72,6 +79,7 @@ describe("agent builtin", () => {
       ...options,
     });
     tx = runtime.edit();
+    if (seedQueue) seedHomeAgentQueue(runtime, space, tx);
     ({ commonfabric } = createTrustedBuilder(runtime));
   };
 
@@ -185,6 +193,43 @@ describe("agent builtin", () => {
       index.key("entries").key(0).key("run").resolveAsCell()
         .getAsNormalizedFullLink().id,
     ).toBe(record.getAsNormalizedFullLink().id);
+  });
+
+  it("writes the entry into the queue the home default pattern holds", async () => {
+    setUp();
+    const result = runAgentPattern("agent-index-home-piece");
+    await tx.commit();
+
+    await waitForRecord(result);
+    const queue = runtime.getHomeSpaceCell().key("defaultPattern")
+      // deno-lint-ignore no-explicit-any
+      .key("agentQueue" as any) as Cell<{ entries?: { host: string }[] }>;
+    const entries = await waitForCellValue<{ host: string }[]>(
+      runtime,
+      queue.key("entries"),
+      (value) => (value?.length ?? 0) > 0,
+    );
+
+    expect(entries.map((entry) => entry.host)).toEqual([
+      "https://fabric.example",
+    ]);
+  });
+
+  it("ends the record as `refused` when the home space holds no queue", async () => {
+    setUp({}, { seedQueue: false });
+    const result = runAgentPattern("agent-no-queue");
+    await tx.commit();
+
+    const settled = await waitForCellValue<AgentResult>(
+      runtime,
+      result,
+      (value) => value?.pending === false,
+    );
+    await runtime.settled();
+
+    expect(settled.error).toBe("REFUSED");
+    expect(agentQueueIndexCell(runtime, space).get()).toBeUndefined();
+    expect(runtime.getHomeSpaceCell().getRaw()).toBeUndefined();
   });
 
   it("creates no second record on a memo hit", async () => {
@@ -626,12 +671,10 @@ describe("agent builtin", () => {
   describe("the tool check against the registered runner", () => {
     it("fails before staging when `tools` names a tool the runner does not offer", async () => {
       setUp();
-      await runtime.editWithRetry((tx) => {
-        agentQueueIndexCell(runtime, space, tx).key("agentRunner").set({
-          host: "https://fabric.example",
-          tools: ["loom_search"],
-          registeredAt: "2026-09-18T00:00:00.000Z",
-        });
+      agentQueueIndexCell(runtime, space, tx).key("agentRunner").set({
+        host: "https://fabric.example",
+        tools: ["loom_search"],
+        registeredAt: "2026-09-18T00:00:00.000Z",
       });
       const result = runAgentPattern("agent-tool-refused", {
         tools: ["loom_profile"],
