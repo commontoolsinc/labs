@@ -55,6 +55,12 @@ The current package provides:
   include verified authored Loom receipts and the submitted origin. See
   [Durable Loom authoring](LOOM_AUTHORING.md) for authority, custody, and retry
   contracts;
+- read-only Loom retrieval — search, page discovery, inspection, and reads,
+  person resolution, calendar events, ambient context, and the profile — over
+  the same kind of host command transport, every row measured against the run's
+  observation ceiling before it enters model context. A row loom returns without
+  a label is given the query's label, an assumption the implementation profile
+  publishes as a deviation. See [Read-only Loom retrieval](LOOM_RETRIEVAL.md);
 - batch CLI execution with bounded model turns and optional streamed events;
 - machine-readable capability discovery with `--describe-capabilities`;
 - persistent provider configuration and structured config/auth control, with
