@@ -1347,6 +1347,7 @@ export class SchemaGenerator {
         isDefaultLibrarySourceFile: options.isDefaultLibrarySourceFile,
       }),
       ...(options?.printedFrom && { printedFrom: options.printedFrom }),
+      ...(options?.definesDocument && { definesDocument: true }),
       ...(schemaHints && { schemaHints }),
     };
     context = this.#withGenericBindings(type, context);
