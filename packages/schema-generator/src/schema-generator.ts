@@ -80,6 +80,7 @@ import {
   holdsIfcLabels,
   joinMemberIfcLabels,
   labeledValueMember,
+  settlePoliciesReadInPart,
   stateReferencedIfcLabels,
   withIfcLabels,
 } from "./ifc-labels.ts";
@@ -1381,6 +1382,7 @@ export class SchemaGenerator {
 
     if (unread.length > 0) reportUnreadTypes(context, unread);
 
+    settlePoliciesReadInPart(result);
     stateReferencedIfcLabels(result);
     assertScopeDeclarationsAreReachable(result);
     return result;
