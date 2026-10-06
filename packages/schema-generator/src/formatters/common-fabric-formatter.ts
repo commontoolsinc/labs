@@ -52,6 +52,13 @@ import {
 import { resolveWriterBinding } from "../typescript/writer-binding.ts";
 import { writerPolicyHeldBy } from "../typescript/writer-policy.ts";
 import {
+  type CarrierStamp,
+  carrierStamps,
+  CFC_CARRIER_PROPERTY,
+  cfcCarrierProperty,
+  memberValueType,
+} from "../typescript/cfc-carrier.ts";
+import {
   type CellWrapperKind,
   getCellBrand,
   getCellWrapperInfo,
@@ -61,10 +68,6 @@ import {
 import { hasDefaultMarker } from "../typescript/default-brand.ts";
 import { isDefaultLibrarySourceFile } from "../typescript/default-library.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
-import {
-  CFC_CARRIER_PROPERTY,
-  cfcCarrierProperty,
-} from "../typescript/cfc-carrier.ts";
 import {
   getScopeBrand,
   hasNestedScopeBrands,
@@ -125,24 +128,6 @@ const UNREAD: unique symbol = Symbol("unread syntax");
  * the type the checker resolves it to, as it does the direct spelling.
  */
 const lowersFromSyntax = (name: string): boolean => name !== "Projection";
-
-/**
- * The type of the value `member` holds, given `type`, its type: `type` less
- * the `undefined` that an optional member's `?` adds.
- */
-function memberValueType(
-  member: ts.Symbol,
-  type: ts.Type,
-  checker: ts.TypeChecker,
-): ts.Type {
-  if ((member.flags & ts.SymbolFlags.Optional) === 0 || !type.isUnion()) {
-    return type;
-  }
-  // `getNonNullableType` also removes a `null`, which `?` does not add.
-  return type.types.some((part) => (part.flags & ts.TypeFlags.Null) !== 0)
-    ? type
-    : checker.getNonNullableType(type);
-}
 
 const SCOPE_WRAPPER_NAMES: ReadonlySet<string> = new Set(
   Object.values(SCOPE_WRAPPER_FOR_SCOPE),
@@ -578,65 +563,6 @@ const cfcPayloadOf = (type: ts.Type): ts.Type | undefined => {
  */
 export const isCfcCarrier = (member: ts.Type): boolean =>
   cfcCarrierProperty(member) !== undefined;
-
-/**
- * One policy a CFC carrier records: its metadata, and the payload it was
- * written around, where the carrier records one (`CfcStamp` in
- * `packages/api/cfc.ts`). A carrier that holds its metadata alone records
- * none.
- */
-type CarrierStamp = {
-  readonly meta: ts.Type;
-  readonly of: ts.Type | undefined;
-};
-
-/** The members a `CfcStamp` holds. */
-const STAMP_MEMBER_NAMES: ReadonlySet<string> = new Set(["meta", "of"]);
-
-/** Whether `type` is a `CfcStamp`: an object holding `meta`, and `of` at most besides. */
-const isCarrierStamp = (type: ts.Type): boolean => {
-  if ((type.flags & ts.TypeFlags.Object) === 0) return false;
-  const names = type.getProperties().map((property) => property.name);
-  return names.includes("meta") &&
-    names.every((name) => STAMP_MEMBER_NAMES.has(name));
-};
-
-/**
- * The policies `value`, the type a carrier's `__ct_cfc__` holds, records. An
- * intersection or a mapped type folds several carriers into one, whose value
- * is then the intersection of what each held, and two spreads that may each
- * supply it make it their union; each member is a policy of its own.
- */
-const carrierStamps = (
-  value: ts.Type,
-  checker: ts.TypeChecker,
-): CarrierStamp[] => {
-  const parts = value.isIntersection() ||
-      (value.isUnion() && value.types.every(isCarrierStamp))
-    ? value.types
-    : [value];
-  return parts.map((part) => {
-    if (!isCarrierStamp(part)) return { meta: part, of: undefined };
-    const member = (name: string) => {
-      const symbol = part.getProperty(name);
-      return symbol &&
-        memberValueType(symbol, checker.getTypeOfSymbol(symbol), checker);
-    };
-    // The payload is what the policy was written around, as written: only
-    // the `undefined` its optional `?` adds is taken off, since the checker's
-    // non-nullable form of a parameter `T` is `T & {}`, which no binding
-    // names.
-    const ofSymbol = part.getProperty("of");
-    const of = ofSymbol && checker.getTypeOfSymbol(ofSymbol);
-    const definedOf = of?.isUnion()
-      ? of.types.filter((type) => (type.flags & ts.TypeFlags.Undefined) === 0)
-      : undefined;
-    return {
-      meta: member("meta")!,
-      of: definedOf?.length === 1 ? definedOf[0] : of,
-    };
-  });
-};
 
 /**
  * The payload `stamp`'s policy was written around, where `payload` holds the
@@ -2767,11 +2693,12 @@ export class CommonFabricFormatter implements TypeFormatter {
       checker.getTypeOfSymbol(carrier),
       checker,
     );
-    this.#reportCarriedWriter([value], context);
+    const stamps = carrierStamps(value, checker);
+    this.#reportCarriedWriter(stamps.map((stamp) => stamp.meta), context);
     return this.#withPlacedLabels(
       schema,
       type,
-      carrierStamps(value, checker).map((stamp) => ({
+      stamps.map((stamp) => ({
         type: stamp.meta,
         bound: context.boundTypeParameters,
         of: stamp.of,
@@ -4151,8 +4078,8 @@ export class CommonFabricFormatter implements TypeFormatter {
     const checker = context.typeChecker;
     const carried = cfcCarriedParts(type, checker);
     if (
-      !carried?.metadata.some((metadata) =>
-        writerPolicyHeldBy(metadata, checker)
+      !carried?.metadata.some((stamp) =>
+        writerPolicyHeldBy(stamp.meta, checker)
       )
     ) {
       return schema;
