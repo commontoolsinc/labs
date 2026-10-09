@@ -22,6 +22,7 @@ import {
   FLAKE_EXCLUSION_RATE,
   FULL_LANE_BOUND_SECONDS,
   FULL_LANE_BUDGET_SECONDS,
+  FULL_LANES_MAX,
   LANE_BOUND_SECONDS,
   LANE_BUDGET_SECONDS,
   LANES,
@@ -142,6 +143,15 @@ export interface Plan {
    * by.
    */
   overBudgetSeconds: number;
+
+  /**
+   * Mandatory identities that went past a lane's budget for want of a
+   * lane: no lane could hold them, and none was empty to run them alone.
+   * Zero means every mandatory identity either fit inside a lane's
+   * budget or ran alone, so more lanes would bring no more of them under
+   * it, apart from runs a repeated identity gave up.
+   */
+  overflowed: number;
 
   /**
    * Discretionary identities no lane can hold. One costing more than a
@@ -1303,6 +1313,7 @@ export function plan(input: PlanInput): Plan {
     b.cost - a.cost || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
   );
 
+  let overflowed = 0;
   for (const { key, reason, entry, runs } of required) {
     // An identity that would be repeated but fits nowhere runs fewer
     // times first, down to once, the way the discretionary passes do.
@@ -1322,6 +1333,12 @@ export function plan(input: PlanInput): Plan {
       spot: spotsFor(input, lanes, entry, 1, laneBudget, bound).shortest!,
       runs: 1,
     };
+    if (
+      taking === undefined &&
+      lanes.every((lane) => lane.selections.length > 0)
+    ) {
+      overflowed += 1;
+    }
     taken.add(key);
     place(input, chosen.spot, entry, reason, chosen.runs);
   }
@@ -1426,6 +1443,7 @@ export function plan(input: PlanInput): Plan {
     heldWithUnit,
     nonGating: everything ? excused(manifest) : [],
     overBudgetSeconds: overBudget,
+    overflowed,
     unschedulable,
     crowding,
   };
@@ -1529,102 +1547,61 @@ export function fixedCharges(
   return charges;
 }
 
+/** How many lanes the full run takes, and whether it wanted more. */
+export interface FullLaneCount {
+  lanes: number;
+
+  /** Whether the run overflows even the most lanes it may take. */
+  capped: boolean;
+}
+
 /**
- * How many lanes the full run needs.
+ * How many lanes the full run takes: the fewest, up to `most`, at which
+ * nothing mandatory overflows, so that each identity either fits a lane's
+ * budget or runs alone in a lane of its own.
  *
  * A pull request has a fixed number of lanes, so each one works out its
  * own share and no job sits ahead of them. `main` cannot: the number
  * depends on how much work there is, and the job matrix has to be known
  * before anything starts. So one job answers this, and an integer is the
- * whole of what it answers. The lanes then call `plan` over the same
- * manifest and take their own share of it, exactly as the pull-request
- * lanes do, so there is no second packing anywhere that could disagree
- * with the first.
+ * whole of what it hands the lanes. The lanes then call `plan` over the
+ * same manifest and take their own share of it, exactly as the
+ * pull-request lanes do, so there is no second packing anywhere that
+ * could disagree with the first.
  *
- * The search starts at what the work divided by a lane's budget comes to
- * and moves in both directions: down while dropping a lane costs under a
- * second, then up while adding one buys at least that. Both directions
- * are needed because that starting figure is an estimate rather than a
- * bound — it charges every execution the packer was asked for, and the
- * packer gives up runs to fit — so it can land either side of the
- * answer, and a search that only climbed would keep whatever it
- * overshot by.
- *
- * What it measures is the total by
- * which the lanes are over budget rather than the worst single lane: a
- * test costing more than a whole lane holds its own lane over budget at
- * every count, so the worst lane stops moving while every other lane is
- * still crowded, and a search reading the worst lane would stop there
- * and leave the rest of the run packed twice as tight as it asked for.
- * The total keeps falling while lanes are still worth adding and stops
- * falling once only the unsplittable part is left, which is where the
- * search stops. It terminates on that total, which cannot fall below
- * zero, and on one lane per identity being the finest packing there is.
+ * Each count is judged by whether its own plan overflowed, which needs
+ * no other count to compare against, so no count past `most` is ever
+ * packed. The count is found by bisection, which takes a lane added to
+ * leave nothing overflowing that did not before. Where that fails, the
+ * answer can be more lanes than the run needs, but never fewer: every
+ * count the bisection settles on below `most` is one it saw overflow
+ * nothing.
  */
 export function fullLaneCount(
   input: Omit<PlanInput, "policy" | "lanes" | "mandatory">,
-): number {
-  const manifest = input.manifest;
-  const budget = input.budgetSeconds ?? FULL_LANE_BUDGET_SECONDS;
-  // The tests' own corrected time, with no lane overhead in it, charged
-  // once for each run an identity asks for: counting one would put the
-  // search below a packing that cannot fit. It leaves out the runs a
-  // repeated identity's unit makes of the tests beside it and around it,
-  // and what each pass pays to start, which is why the search moves both
-  // ways.
-  const work = manifest.entries.reduce(
-    (total, entry) =>
-      total + entry.cost * entry.repeats *
-        chargesOf(manifest.calibration.suites[entry.suite]).correction,
-    0,
-  );
-  const most = Math.max(1, manifest.entries.length);
-  let count = Math.min(most, Math.max(1, Math.ceil(work / budget)));
-  const packed = (lanes: number) =>
+  most: number = FULL_LANES_MAX,
+): FullLaneCount {
+  const fits = (lanes: number) =>
     plan({
       ...input,
       // Under `everything` every identity is required, so there is
       // nothing a caller could add to this that would change the answer.
       mandatory: new Map(),
       policy: "everything",
-      budgetSeconds: budget,
       lanes,
-    });
-  /** Seconds by which the lanes are over budget, added up over all of them. */
-  const overrun = (result: Plan): number =>
-    result.lanes.reduce(
-      (total, lane) => total + Math.max(0, lane.projectedSeconds - budget),
-      0,
-    );
-  let best = overrun(packed(count));
-  // Fewer lanes first, while dropping one costs under a second. The
-  // figure above charges every execution the packer was asked for and
-  // the packer gives up runs to fit, so it can land past the fewest
-  // lanes that carry the run, and the climb below never comes back down.
-  // Leaving it there costs the default branch a job per commit for each
-  // lane the estimate overshot by.
-  //
-  // Measured against the overrun rather than against zero, because an
-  // identity costing more than a lane holds overruns at every count, so
-  // a run holding one would never shrink at all. What a lane has to buy
-  // to be worth keeping is the same second the climb below makes it buy.
-  while (count > 1) {
-    const fewer = overrun(packed(count - 1));
-    if (fewer >= best + 1) break;
-    count -= 1;
-    best = fewer;
+    }).overflowed === 0;
+  // A lane per identity leaves an empty lane for each one as it is
+  // placed, so nothing overflows there and no more lanes are needed.
+  let low = 1;
+  let high = Math.max(1, Math.min(most, input.manifest.entries.length));
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (fits(middle)) high = middle;
+    else low = middle + 1;
   }
-  while (best > 0 && count < most) {
-    const next = overrun(packed(count + 1));
-    // A lane has to buy at least a second to be worth adding. Stopping
-    // only on no improvement at all would let a run of ever smaller ones
-    // carry the search as far as there are identities, and a lane's
-    // budget is counted in seconds, so anything under one is noise.
-    if (next > best - 1) break;
-    count += 1;
-    best = next;
-  }
-  return count;
+  // The bisection never packs the count it started from, which is the
+  // cap when the cap is below a lane per identity.
+  return { lanes: high, capped: high === most && !fits(high) };
 }
 
 function laneLoad(lanes: readonly Filling[]): number {

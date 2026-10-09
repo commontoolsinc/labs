@@ -176,14 +176,30 @@ way a change's lanes do. What travels through job outputs is only the
 lane count and the `--full` that tells each lane to run everything, never
 which lane runs which test.
 
-The count is found by a search. It starts at the run's work divided by a
-lane's budget, counting every run each identity asks for. It then moves
-down while dropping a lane costs less than a second, and up while adding
-one saves at least a second. What it compares at each count is the total
-by which the lanes run past their budget, added up over every lane, rather
-than the longest lane. A test costing more than a whole lane keeps its own
-lane past budget at every count, so the longest lane stops falling while
-the others are still crowded.
+The count is the fewest lanes, up to `FULL_LANES_MAX`, at which nothing
+mandatory overflows. An identity overflows when no lane can hold it and
+no lane is empty to run it alone. So at the count chosen, every identity
+either fits inside a lane's budget or runs alone, and the only lanes past
+their budget each hold one test that no number of lanes would bring under
+it. A repeated identity whose runs do not all fit runs fewer times, which
+is not an overflow.
+
+Each count is judged by its own packing alone. Adding up how far the lanes
+run past their budget would not do, because that total does not fall
+steadily as lanes are added: while every lane is crowded, work that fits
+nowhere goes to the shortest lane and opens its suite there again, which
+can cost more than the budget the added lane brings. A search stopping
+where the total first stops falling can stop at half the lanes the run
+needs, and a count far short of the run's needs can show a smaller total
+than one close to it, so no total measured at one count says what another
+count would achieve.
+
+The search is a bisection between one lane and `FULL_LANES_MAX`, so it
+packs a handful of counts and none past the cap. It relies on an added
+lane not making anything overflow that did not before. Where the packing
+breaks that, the count can be more lanes than the run needs, but never
+fewer: every count it settles on below the cap is one it saw overflow
+nothing.
 
 Run it yourself to see how many jobs the default branch would take. Where
 nothing in the tree has a measured cost it answers from the shape of the
@@ -194,11 +210,12 @@ be arithmetic over an invented figure.
 
 Whichever way it gets its answer, it answers no more than
 `FULL_LANES_MAX`, so that one push's full run leaves runners for the
-changes waiting behind it. A run that needs more takes that many and says
-so on the error stream. Every test still runs when that happens. A test
-whose repeated runs fit in no lane runs fewer times, down to once, and a
-test that fits nowhere even once goes into the lane it leaves shortest,
-so the lanes run past their budget instead.
+changes waiting behind it. A run that overflows even that many lanes takes
+that many and says on the error stream that it needs more, which is the
+sign to raise `FULL_LANES_MAX`. Every test still runs when that happens.
+A test whose repeated runs fit in no lane runs fewer times, down to once,
+and a test that fits nowhere even once goes into the lane it leaves
+shortest, so the lanes run past their budget instead.
 
 ## How continuous integration runs the lanes
 
@@ -530,7 +547,7 @@ measurement to look at rather than a setting to fix.
 | `LANE_BUDGET_SECONDS` | 230 | seconds | derived | Nothing edits this. It is the bound less the prologue and the safety margin, so a budget that does not fit inside its own bound cannot be written down. |
 | `FULL_LANE_BOUND_SECONDS` | 1800 | seconds | chosen | Up when the run on `main` uses more jobs than it needs; down when `main` takes too long to say something broke. |
 | `FULL_LANE_BUDGET_SECONDS` | 1730 | seconds | derived | Nothing edits this. It is the full run's bound less the same prologue and safety margin a pull request's lane pays, since a lane of either run is the same job doing the same setup on the same runner. |
-| `FULL_LANES_MAX` | 30 | lanes | chosen | Up when the organization's runner limit rises; down when a push's full run crowds out the pull requests behind it. A full run needing more lanes than this takes this many, and a lane may then run past its budget. |
+| `FULL_LANES_MAX` | 30 | lanes | chosen | Up when the lane-count job says the full run needs more lanes than this, and the organization's runner limit has room; down when a push's full run crowds out the pull requests behind it. A full run needing more lanes than this takes this many, and a lane may then run past its budget. |
 | `FULL_RUN_LABEL` | ci: full | a label | chosen | Not a quantity. Change it only if the label collides with one the repository already uses for something else. |
 | `UNMEASURED_COST_SECONDS` | 1 | seconds | chosen | Up when a lane holding new tests runs long; down when it finishes early. It is reached for only by a suite with no measured unit at all, since a suite that has any charges an unmeasured one the larger of its units' mean and their ninetieth percentile. |
 | `VALUE_FLOOR` | 0.05 | score | chosen | Up when the cheap tail is not being swept up; down when it crowds out tests with a record of catching things. |
