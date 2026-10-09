@@ -161,6 +161,10 @@ describe("registration", () => {
       ]);
     });
 
+    it("cuts at separators that overlap", () => {
+      expect(enclosingNames("outer > > step")).toEqual(["outer", "outer >"]);
+    });
+
     it("returns nothing for a name with no separator", () => {
       expect(enclosingNames("outer>inner")).toEqual([]);
     });
@@ -183,6 +187,14 @@ describe("registration", () => {
       );
       expect(fileForName("outer > inner > deep", names)).toBe(
         "packages/a/inner.test.ts",
+      );
+    });
+
+    it("returns the file of a registered name that ends in the separator's mark", () => {
+      // A step of a test named "arrow >" reports as "arrow > > step".
+      const arrow = new Map([["arrow >", "packages/a/arrow.test.ts"]]);
+      expect(fileForName("arrow > > step", arrow)).toBe(
+        "packages/a/arrow.test.ts",
       );
     });
 

@@ -1669,9 +1669,10 @@ ignores every test inside it. Where a file declares a hook outside every
 invents. A lane therefore never lists the title of a `describe()`
 holding a test the lane runs. A `describe()` a lane chose runs its hooks
 with the tests inside it ignored. Ingestion records the case a
-`describe()` reports for itself where it failed on its own account, and
-where the manifest holds its title in the unit that ran and no other case
-in the report has that title. A record of any test inside a
+`describe()` reports for itself in two separate cases: whenever it fails
+on its own account, and on every run, pass or fail, once the manifest
+holds its title in the unit that ran and no other case in the report has
+that title. A record of any test inside a
 `describe()` also accounts for it, ignored or not, including one the
 lane's own skip list named and does not ship.
 A `describe()` whose `beforeAll` fails reports no test inside it, so its

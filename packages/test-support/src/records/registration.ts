@@ -63,13 +63,20 @@ export const NAME_SEPARATOR = " > ";
 
 /**
  * The names of every test enclosing the test a name identifies, outermost
- * first: `"a > b > c"` is inside `"a"` and `"a > b"`.
+ * first: `"a > b > c"` is inside `"a"` and `"a > b"`. Each separator is a
+ * place the name may be cut, overlapping ones included, so a step of a
+ * test named `"a >"`, which reports as `"a > > b"`, is inside `"a >"`.
  */
 export function enclosingNames(name: string): string[] {
-  const chain = name.split(NAME_SEPARATOR);
-  return chain.slice(1).map((_, depth) =>
-    chain.slice(0, depth + 1).join(NAME_SEPARATOR)
-  );
+  const names: string[] = [];
+  for (
+    let at = name.indexOf(NAME_SEPARATOR);
+    at >= 0;
+    at = name.indexOf(NAME_SEPARATOR, at + 1)
+  ) {
+    names.push(name.slice(0, at));
+  }
+  return names;
 }
 
 /**
