@@ -62,6 +62,17 @@ export const MACHINERY_MODULE_SUFFIXES: readonly string[] = [
 export const NAME_SEPARATOR = " > ";
 
 /**
+ * The names of every test enclosing the test a name identifies, outermost
+ * first: `"a > b > c"` is inside `"a"` and `"a > b"`.
+ */
+export function enclosingNames(name: string): string[] {
+  const chain = name.split(NAME_SEPARATOR);
+  return chain.slice(1).map((_, depth) =>
+    chain.slice(0, depth + 1).join(NAME_SEPARATOR)
+  );
+}
+
+/**
  * A name map as it travels: where the test process ran, and a registered
  * name against the repository-relative file it came from. The names are
  * what `Deno.test` was called with, and, for a file written with
@@ -186,17 +197,11 @@ export function fileForName(
   name: string,
   names: ReadonlyMap<string, string>,
 ): string | undefined {
-  const exact = names.get(name);
-  if (exact !== undefined) return exact;
-  let best: string | undefined;
-  let bestLength = -1;
-  for (const [registered, file] of names) {
-    if (registered.length <= bestLength) continue;
-    if (!name.startsWith(registered + NAME_SEPARATOR)) continue;
-    best = file;
-    bestLength = registered.length;
+  for (const registered of [...enclosingNames(name), name].reverse()) {
+    const file = names.get(registered);
+    if (file !== undefined) return file;
   }
-  return best;
+  return undefined;
 }
 
 /** Whether an entry of a map is one a read scoped to `ranIn` takes. */

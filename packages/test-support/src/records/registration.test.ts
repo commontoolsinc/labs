@@ -6,6 +6,7 @@ import {
   activeCapture,
   asDefinition,
   buildCapture,
+  enclosingNames,
   fileForName,
   MACHINERY_MODULE_SUFFIXES,
   NAME_MAP_PREFIX,
@@ -149,6 +150,19 @@ describe("registration", () => {
       expect(asDefinition(["a name"])).toBeUndefined();
       expect(asDefinition([{ sanitizeOps: false }, () => {}])).toBeUndefined();
       expect(asDefinition([42, body])).toBeUndefined();
+    });
+  });
+
+  describe("enclosingNames()", () => {
+    it("returns each enclosing name, outermost first", () => {
+      expect(enclosingNames("outer > inner > deep")).toEqual([
+        "outer",
+        "outer > inner",
+      ]);
+    });
+
+    it("returns nothing for a name with no separator", () => {
+      expect(enclosingNames("outer>inner")).toEqual([]);
     });
   });
 
