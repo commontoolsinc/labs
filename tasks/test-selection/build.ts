@@ -11,7 +11,7 @@
 
 import {
   type AliasResolver,
-  isMainPush,
+  isMainRun,
   parseReportGroups,
   type RunContext,
   type StoredReport,
@@ -343,7 +343,7 @@ export function provenance(
   const branch = context.branch ?? "";
   if (branch.length === 0) return undefined;
   // A baseline is a run of code the tree itself carries.
-  const place = isMainPush(context) ? "main" : "pr";
+  const place = isMainRun(context) ? "main" : "pr";
   return { place, source: branch };
 }
 

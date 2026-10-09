@@ -41,8 +41,13 @@ follows it. Both compare runs at **one point** only: the same commit, with the
 same seed or both without one. A test that depends on the order its siblings
 run in passes in one order and fails in another, which is a bug in the test
 rather than chance, so outcomes at one commit in different orders are not
-compared. The rules that read the default branch's most recent outcome, and
-those that count failures across sources, take runs in any order.
+compared. The rules that read the default branch's most recent outcome read
+it in the order of the run being judged, and fall back to the branch's most
+recent outcome in any order only where the branch has not run the identity in
+that one. The default branch runs in two orders at once, the day's and, in
+its daily run, the next day's, so an order-dependent test can be failing
+there in one and passing in the other. The rules that count failures across
+sources take runs in any order.
 
 ### What a catch is
 
@@ -51,7 +56,8 @@ something about a change or something about the test. A failure is a
 **catch** unless one of these holds:
 
 - The identity was already failing in the most recent run on the default
-  branch. The test was already broken and this run learned nothing.
+  branch, in the order described above. The test was already broken and
+  this run learned nothing.
 - The identity both passed and failed at one point, with nothing between
   the two runs but chance. That is a flake observation, and it is counted as
   one.
@@ -87,34 +93,49 @@ broke itself.
 
 On the default branch the crowd is judged at the failure that began a
 breakage, and a failure continuing it belongs to the same breakage until
-the branch passes, since the catch would be dated to the first failure.
+the branch passes in that failure's order, since the catch would be dated
+to the first failure. Where the branch has not yet run the identity in
+that order, as on the first run of a new day's order, the failure
+continues whatever breakage the branch was in when it last ran it.
 
 The publisher folds the objects one continuous-integration run uploaded
 in one batch, and carries what each run newly broke from one batch to
 the next for `SAME_COMMIT_REACH_DAYS`. A part of a run arriving in a later
 publisher run is judged with what was counted before it.
 
-A failure on the default branch cannot be judged when it happens. Every
-push there is a distinct commit with one run. When a test fails in that
-run, the run runs the test again, up to `RERUN_EXECUTIONS` times
+A run on the default branch is a run of that branch's own head: each
+push to it, and the daily run of every suite at its head under the seed
+the next day's commits will take
+([TESTING.md](../development/TESTING.md#tomorrows-seed-run-a-day-ahead)).
+A failure on the default branch cannot be judged when it happens. Each
+of those runs is the one run at its point. When a test fails in one of
+them, the run runs the test again, up to `RERUN_EXECUTIONS` times
 ([the guide](../development/test-selection.md#running-a-failure-again)), and
 a pass on one of those reruns is the test disagreeing with itself at that
 point, which counts as a flake observation. A failure every rerun repeats
 says nothing yet. Counting each such failure as a catch would make a test
 that is flaky enough to fail several times in a row look like the most
 valuable test in the repository. Such a failure waits for the next run on
-that branch. Still
-failing is the same breakage continuing, and nothing new is learned.
-Passing at the same point is the test disagreeing with itself, and counts
-as a flake observation. Passing at a later commit with the same seed counts
-as a catch: the change between the two commits fixed what the test found.
-Passing with a different seed is neither, and the failure is dropped: the
-order moved on, and an order-dependent test stops failing when it does, so
-the pass says nothing about whether a change fixed anything. That drops the
-catch of a real breakage whose fix landed on a later Pacific day than the
-breakage did, which is the price of not crediting an order change as a fix.
+that branch with the same seed. Still failing is the same breakage
+continuing, and nothing new is learned. Passing at the same point is the
+test disagreeing with itself, and counts as a flake observation. Passing
+at a later commit with the same seed counts as a catch: the change
+between the two commits fixed what the test found. Passing with a
+different seed judges nothing, since an order-dependent test stops
+failing when the order moves on, so that pass says nothing about whether
+a change fixed anything. The failure goes on waiting. A run with its seed
+is a later commit of the same Pacific day, a rerun of one of that day's
+commits, or, for a failure in the daily run under the next day's seed,
+one of the next day's commits. A pass that judges a failure in its own
+order also drops the failures waiting in other orders, since they are the
+same breakage seen in another order. A failure no run judges is dropped
+once it is older than the longest window a test's history keeps. That
+drops the catch of a real breakage whose fix landed on a later Pacific
+day than the breakage did, which is the price of not crediting an order
+change as a fix.
 A run of failures ended by one pass counts one catch, dated to the first of
-them, so a week of the branch being red is worth one catch and not seven.
+them in the pass's order, so a week of the branch being red is worth one
+catch and not seven.
 
 Nothing separates a failure a change fixed from one that healed itself, so
 a test flaky on the default branch is credited for its own noise. The
