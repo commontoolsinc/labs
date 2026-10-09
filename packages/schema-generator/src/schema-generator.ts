@@ -62,8 +62,6 @@ import {
   instantiatedPropertyType,
   instantiatedValueType,
   resolveWrapperNode,
-  safeGetIndexTypeOfType,
-  safeGetTypeOfSymbolAtLocation,
   soleNonNullishMember,
   type TypeWithInternals,
 } from "./type-utils.ts";
@@ -1309,18 +1307,14 @@ export class SchemaGenerator {
       );
     }
 
-    // Create unified context with all state
-    const cycles = this.#getCycles(type, checker);
-
     // A guess a wrapper recovers never reaches this list, so what arrives here
     // is what the finished schema accepts without having read it.
     const unread: ts.TypeNode[] = [];
 
+    // Create unified context with all state
     let context: GenerationContext = {
       // Immutable context
       typeChecker: checker,
-      cyclicTypes: cycles.types,
-      cyclicNames: cycles.names,
 
       // Accumulating state
       definitions: {},
@@ -3090,81 +3084,6 @@ export class SchemaGenerator {
           ];
       }),
     );
-  }
-
-  /**
-   * Detect cycles in the type graph
-   */
-  #getCycles(
-    type: ts.Type,
-    checker?: ts.TypeChecker,
-  ): { types: Set<ts.Type>; names: Set<string> } {
-    // Identity and name-based DFS cycle detection
-    const visiting = new Set<ts.Type>();
-    const stack: ts.Type[] = [];
-    const cycles = new Set<ts.Type>();
-    const cycleNames = new Set<string>();
-
-    const visit = (t: ts.Type) => {
-      if (visiting.has(t)) {
-        // Mark all nodes from the first occurrence of t on the stack to the end
-        const idx = stack.lastIndexOf(t);
-        if (idx >= 0) {
-          for (let i = idx; i < stack.length; i++) {
-            const tt = stack[i]!;
-            cycles.add(tt);
-            const nk = getNamedTypeKey(tt);
-            if (nk) cycleNames.add(nk);
-          }
-        } else {
-          cycles.add(t);
-          const nk = getNamedTypeKey(t);
-          if (nk) cycleNames.add(nk);
-        }
-        return;
-      }
-      visiting.add(t);
-      stack.push(t);
-
-      const flags = t.flags;
-      try {
-        if (flags & ts.TypeFlags.Union) {
-          const ut = t as ts.UnionType;
-          for (const mt of ut.types) {
-            visit(mt);
-          }
-        } else if (flags & ts.TypeFlags.Object) {
-          // Traverse properties
-          if (checker) {
-            for (const prop of checker.getPropertiesOfType(t)) {
-              const location: ts.Node = prop.valueDeclaration ??
-                (prop.declarations?.[0] as ts.Declaration);
-              const pt = safeGetTypeOfSymbolAtLocation(
-                checker,
-                prop,
-                location,
-                "cycle detection property",
-              );
-              if (pt) visit(pt);
-            }
-            // Traverse numeric index (arrays/tuples)
-            const idx = safeGetIndexTypeOfType(
-              checker,
-              t,
-              ts.IndexKind.Number,
-              "cycle detection numeric index",
-            );
-            if (idx) visit(idx);
-          }
-        }
-      } finally {
-        stack.pop();
-        visiting.delete(t);
-      }
-    };
-
-    if (checker) visit(type);
-    return { types: cycles, names: cycleNames };
   }
 
   /**

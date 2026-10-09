@@ -161,12 +161,6 @@ export interface GenerationContext {
   /** TypeScript type checker */
   readonly typeChecker: ts.TypeChecker;
 
-  /** Pre-computed cyclic type set */
-  readonly cyclicTypes: ReadonlySet<ts.Type>;
-
-  /** Pre-computed cyclic name set */
-  readonly cyclicNames: ReadonlySet<string>;
-
   // Accumulating state (grows during generation)
 
   /** Named type definitions for $refs */

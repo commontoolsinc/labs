@@ -566,11 +566,11 @@ it for its own type and for its payload's: `PerUser<never>` is
 which is read at `unknown`, around `unknown`: `PerUser<unknown[]>` read that
 way is `{ type: "array", items: { type: "unknown" }, scope: "user" }`.
 
-**Dead computation (observed implementation note):** every run performs a full
-DFS cycle pre-pass (`getCycles`, using `safe*` wrappers that
-`console.warn` and continue) and stores `cyclicTypes`/`cyclicNames` on the
-context (`interface.ts`) — but nothing reads either set
-(grep over `src/` finds writes only). Pure startup cost; a removal candidate.
+A recursion that instantiates its type without end, as `Nest<T[]>` inside
+`Nest<T>` does, meets no reading in progress, since each instantiation is a
+new type. The nesting bound (§11) ends it: the innermost reading accepts any
+value, and the remainder is reported as the `schema-type:unread` warning, or,
+in a CFC alias chain, as the `cfc-schema:recursion-limit` error.
 
 ## 6. Wrapper Types And The `asCell` Vocabulary
 
@@ -881,7 +881,9 @@ Default paths of §7:
   bare same-`type` → bare type; bare primitive types merge into sorted
   **`type` arrays** — how `string | undefined` becomes
   `{ type: ["string","undefined"] }` (fixture `default-with-undefined-union`).
-  Singletons unwrap.
+  A member with no `type`, as the `{}` a nesting bound leaves, accepts any
+  value, and no type merges into it: beside `undefined` the union stays an
+  `anyOf` of the two. Singletons unwrap.
 - **`widenLiterals`** additionally merges member schemas that differ only in
   their literal values, an `enum` or a `const` whose values share one base
   type, widening those to that type, before the anyOf pass
@@ -1966,19 +1968,18 @@ synthetic node resolution failure → `any` → `true`
    collision case.
 6. **`VNode`/`JSONSchema*` lack the lib-declaration guard** (§5.2); untested.
 7. **Node/type literal-encoding divergence** (`const` vs `enum`, §2).
-8. **Dead cycle pre-pass** (§5.4).
-9. **Stale `$schema` doc-comments** (`schema-generator.ts`); no
+8. **Stale `$schema` doc-comments** (`schema-generator.ts`); no
    code path emits `$schema` (grep).
-10. **Transformer merge wart** — options spread twice, before and after
-    uiContract/writeAuthorizedBy attachment
-    (`ts-transformers/.../schema-generator.ts`); idempotent for
-    literal options.
-11. **`plugin.ts` hint-type drift** (§2).
-12. **Untested helper modules** — `typescript/property-name.ts`,
+9. **Transformer merge wart** — options spread twice, before and after
+   uiContract/writeAuthorizedBy attachment
+   (`ts-transformers/.../schema-generator.ts`); idempotent for
+   literal options.
+10. **`plugin.ts` hint-type drift** (§2).
+11. **Untested helper modules** — `typescript/property-name.ts`,
     `property-optionality.ts`, `type-traversal.ts`, `wrapper-names.ts` have no
     dedicated unit tests (`test/typescript/` holds one cell-brand test);
     exercised indirectly through ts-transformers suites.
-13. **Primitive fallback sentinel** (§15) — silent, mis-typed, untested.
+12. **Primitive fallback sentinel** (§15) — silent, mis-typed, untested.
 
 ## 17. Test Workflow
 

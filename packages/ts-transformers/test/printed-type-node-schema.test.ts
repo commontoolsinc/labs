@@ -828,6 +828,107 @@ export default pattern<{ ref: Ref }>(({ ref }) => ({ ${before}ref, refs: [ref] }
     }
   });
 
+  describe("a generic alias that instantiates itself without end", () => {
+    // Each `Nest<T[]>` is a new type, so no reading of it meets one in
+    // progress, and the nesting bound ends the reading: the innermost level
+    // accepts any value and is reported as not fully read. A plain alias holds
+    // no policy that the unread remainder could discard, so the report is a
+    // warning.
+
+    const declaration =
+      "type Nest<T> = { v: T; ref: unknown; inner?: Nest<T[]> };";
+
+    /** `level` and each `Nest` level read inside it, outermost first. */
+    function levelsOf(level: Schema): Schema[] {
+      const inner = (level.properties as Record<string, Schema>).inner!;
+      const next = (inner.anyOf as Schema[] | undefined)?.find((member) =>
+        member.type === "object"
+      );
+      return next ? [level, ...levelsOf(next)] : [level];
+    }
+
+    /**
+     * Expects `nested` to read each level's `v` one array deeper than the
+     * last, down to an `inner` that accepts any value.
+     */
+    function expectReadToBound(nested: Schema): void {
+      const levels = levelsOf(nested);
+      const values = levels.map((level) =>
+        (level.properties as Record<string, Schema>).v
+      );
+      let expected: Schema = { type: "string" };
+      const expectedValues = levels.map(() => {
+        const value = expected;
+        expected = { type: "array", items: value };
+        return value;
+      });
+
+      expect(levels.length).toBeGreaterThan(1);
+      expect(values).toEqual(expectedValues);
+      expect((levels.at(-1)!.properties as Record<string, Schema>).inner)
+        .toEqual({ anyOf: [{}, { type: "undefined" }] });
+    }
+
+    /** Expects `diagnostics` to report the unread remainder as a warning. */
+    function expectUnreadWarning(
+      diagnostics: readonly TransformationDiagnostic[],
+    ): void {
+      const reported = diagnostics.filter((diagnostic) =>
+        diagnostic.type === "schema-type:unread" ||
+        diagnostic.type === "cfc-schema:recursion-limit"
+      );
+
+      expect(reported.length).toBeGreaterThan(0);
+      for (const { type, severity } of reported) {
+        expect({ type, severity }).toEqual({
+          type: "schema-type:unread",
+          severity: "warning",
+        });
+      }
+    }
+
+    it("reads a result printed from an inferred type to the nesting bound", async () => {
+      const diagnostics: TransformationDiagnostic[] = [];
+      const files = await transformFiles({
+        "/main.tsx": `/// <cts-enable />
+import { pattern } from "commonfabric";
+${declaration}
+function nest(): Nest<string> { return { v: "", ref: 1 }; }
+export default pattern(() => ({ nested: nest() }));`,
+      }, {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      });
+      const { output } = patternSchemas(parseModule(files["/main.tsx"]!));
+
+      expectReadToBound((output.properties as Record<string, Schema>).nested!);
+      expectUnreadWarning(diagnostics);
+    });
+
+    it("reads an annotated binding to the nesting bound, on both sides", async () => {
+      const diagnostics: TransformationDiagnostic[] = [];
+      const files = await transformFiles({
+        "/main.tsx": `/// <cts-enable />
+import { pattern } from "commonfabric";
+${declaration}
+export default pattern<{ a: Nest<string> }>(({ a }) => ({ a }));`,
+      }, {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      });
+      const { input, output } = patternSchemas(
+        parseModule(files["/main.tsx"]!),
+      );
+
+      for (const root of [input, output]) {
+        expectReadToBound((root.properties as Record<string, Schema>).a!);
+      }
+      expectUnreadWarning(diagnostics);
+    });
+  });
+
   describe("a printed result type that holds CFC labels", () => {
     const policy = {
       type: "https://commonfabric.org/cfc/atom/Policy",

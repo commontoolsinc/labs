@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { SchemaGenerationDiagnostic } from "../../src/interface.ts";
 import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
@@ -65,5 +66,50 @@ describe("Schema: Recursion variants", () => {
     const defs = s.$defs as any;
     expect(defs.A?.properties?.b?.$ref).toBe("#/$defs/B");
     expect(defs.B?.properties?.a?.$ref).toBe("#/$defs/A");
+  });
+
+  it("reads an alias that instantiates itself without end to the nesting bound, and reports the rest unread", async () => {
+    // Each `Nest<T[]>` is a new type, so no reading of it meets one in
+    // progress. The nesting bound ends the reading at a level that accepts
+    // any value, beside the `undefined` the optional member adds.
+
+    const code = `
+      type Nest<T> = { v: T; inner?: Nest<T[]> };
+      interface Root { a: Nest<string> }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "Root");
+    const diagnostics: SchemaGenerationDiagnostic[] = [];
+    const s = asObjectSchema(
+      new SchemaGenerator().generateSchema(type, checker, undefined, {
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      }),
+    );
+    const values: unknown[] = [];
+    let innermost: unknown;
+    let level: Record<string, unknown> | undefined =
+      (s.properties as Record<string, Record<string, unknown>>).a;
+    while (level) {
+      const properties = level.properties as Record<
+        string,
+        Record<string, unknown>
+      >;
+      values.push(properties.v);
+      innermost = properties.inner;
+      level = (properties.inner!.anyOf as Record<string, unknown>[]).find(
+        (member) => member.type === "object",
+      );
+    }
+    let expected: unknown = { type: "string" };
+    const expectedValues = values.map(() => {
+      const value = expected;
+      expected = { type: "array", items: value };
+      return value;
+    });
+
+    expect(values.length).toBeGreaterThan(1);
+    expect(values).toEqual(expectedValues);
+    expect(innermost).toEqual({ anyOf: [{}, { type: "undefined" }] });
+    expect(diagnostics.map(({ severity, type }) => ({ severity, type })))
+      .toEqual([{ severity: "warning", type: "schema-type:unread" }]);
   });
 });
