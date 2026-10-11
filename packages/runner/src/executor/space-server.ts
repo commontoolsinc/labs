@@ -317,6 +317,22 @@ export type SpaceServerPolicy = {
   storeReadThrough?: boolean;
 };
 
+/**
+ * What a SpaceServer hands `SpaceServerOptions.createWaveCommitSink`: the
+ * tenure's identity for its commits and the engines it reads.
+ */
+export type WaveCommitSinkDeps = {
+  space: MemorySpace;
+  engine: Engine.Engine;
+  /** The resolved engine of a foreign space a wave crossed into. */
+  foreignEngineFor: (space: MemorySpace) => Engine.Engine;
+  /** The tenure's holder, the session its derived commits are keyed under. */
+  sessionId: string;
+  localSeqRef: { value: number };
+  /** Called when the store refuses a home batch (serving-loop.md §2). */
+  onHomeRefused: () => void;
+};
+
 /** What a SpaceServer hands its runtime factory (see
  * SpaceServerOptions.createRuntime). */
 export type RuntimeFactoryContext = {
@@ -388,6 +404,13 @@ export type SpaceServerOptions = {
     sink: WaveCommitSink,
     space: MemorySpace,
   ) => WaveCommitSink;
+  /**
+   * Builds the tenure's wave commit sink in place of the engine-direct one,
+   * for a host whose store writer is elsewhere: the sink it returns carries
+   * each commit to that writer. Omitted, the tenure commits through
+   * `EngineWaveCommitSink` against its own engine.
+   */
+  createWaveCommitSink?: (deps: WaveCommitSinkDeps) => WaveCommitSink;
 
   /** Fired on each successfully committed wave — the host's
    * failure-streak reset signal (real served progress, as opposed to an
@@ -1424,38 +1447,50 @@ export class SpaceServer implements TransactionSealDestination {
     this.#lastFoldedDemandLeaves = demandRootCounters.leaves;
     const attachSqliteDbs = this.#options.server.attachWaveCommitSqliteDbs
       ?.bind(this.#options.server);
-    const sink = new EngineWaveCommitSink({
-      engineFor: (s) => s === space ? engine : this.#foreignEngineFor(s),
+    const sinkDeps: WaveCommitSinkDeps = {
+      space,
+      engine,
+      foreignEngineFor: (s) => this.#foreignEngineFor(s),
       sessionId: this.#holder,
       localSeqRef: this.#options.localSeqRef,
-      // The stage-G sqlite discharge: folded sqlite ops in wave batches
-      // attach their cell-db file(s) through the memory server's own
-      // machinery (same validations as the transact path), keyed by the
-      // accumulator's per-run scope keys. A server that cannot attach them
-      // from here leaves the sink to refuse such a batch.
-      ...(attachSqliteDbs === undefined ? {} : {
-        sqliteAttachmentsFor: (
-          s: MemorySpace,
-          operations: readonly Operation[],
-          scopeKeyByOpIndex: ReadonlyMap<number, string>,
-        ) =>
-          attachSqliteDbs(
-            s === space ? engine : this.#foreignEngineFor(s),
-            s,
-            operations,
-            scopeKeyByOpIndex,
-          ),
-      }),
       // A lapse the renewal drivers have not reached yet shows first as the
       // memory server refusing a derived commit (serving-loop.md §2).
       onHomeRefused: () => {
         this.#confirmLease(engine);
       },
-      // A served run's access-list change is admitted and committed by the
-      // memory server itself, through the check its sessions' commits pass.
-      commitServedAclChange: (change, envelope) =>
-        this.#options.server.commitServedAclChange({ ...change, ...envelope }),
-    });
+    };
+    const sink = this.#options.createWaveCommitSink?.(sinkDeps) ??
+      new EngineWaveCommitSink({
+        engineFor: (s) => s === space ? engine : this.#foreignEngineFor(s),
+        sessionId: this.#holder,
+        localSeqRef: this.#options.localSeqRef,
+        // The stage-G sqlite discharge: folded sqlite ops in wave batches
+        // attach their cell-db file(s) through the memory server's own
+        // machinery (same validations as the transact path), keyed by the
+        // accumulator's per-run scope keys. A server that cannot attach them
+        // from here leaves the sink to refuse such a batch.
+        ...(attachSqliteDbs === undefined ? {} : {
+          sqliteAttachmentsFor: (
+            s: MemorySpace,
+            operations: readonly Operation[],
+            scopeKeyByOpIndex: ReadonlyMap<number, string>,
+          ) =>
+            attachSqliteDbs(
+              s === space ? engine : this.#foreignEngineFor(s),
+              s,
+              operations,
+              scopeKeyByOpIndex,
+            ),
+        }),
+        onHomeRefused: sinkDeps.onHomeRefused,
+        // A served run's access-list change is admitted and committed by the
+        // memory server itself, through the check its sessions' commits pass.
+        commitServedAclChange: (change, envelope) =>
+          this.#options.server.commitServedAclChange({
+            ...change,
+            ...envelope,
+          }),
+      });
     this.#sink = this.#options.decorateWaveCommitSink?.(sink, space) ?? sink;
     // The effect channel (stage G, serving-loop.md §4–§5). Phase 6
     // threads the per-space egress budgets (§5's outstanding-effect cap

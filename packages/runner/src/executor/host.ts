@@ -135,6 +135,9 @@ export type ExecutorHostOptions = {
 
   /** Forwarded internal deterministic-verification seam. */
   decorateWaveCommitSink?: SpaceServerOptions["decorateWaveCommitSink"];
+  /** Forwarded to every SpaceServer this host builds; see
+   * `SpaceServerOptions.createWaveCommitSink`. */
+  createWaveCommitSink?: SpaceServerOptions["createWaveCommitSink"];
 
   /** DIAGNOSTIC (tests): forwarded to every SpaceServer this host
    * builds, with the space it serves — see `SpaceServerOptions`. */
@@ -619,6 +622,9 @@ export class ExecutorHost {
           ? {
             decorateWaveCommitSink: this.#options.decorateWaveCommitSink,
           }
+          : {}),
+        ...(this.#options.createWaveCommitSink !== undefined
+          ? { createWaveCommitSink: this.#options.createWaveCommitSink }
           : {}),
         onParked: (reason) => {
           parked = true;
