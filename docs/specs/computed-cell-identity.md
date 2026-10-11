@@ -143,30 +143,36 @@ instance's child at the positional spot. The first setup under a pattern that
 names it carries the child over (`planInstanceCarryOver`), taking the first of
 these that applies:
 
-1. Where the pattern the parent last set up, which `patternSetupIdentity`
-   names, is loaded and names the instance, the child is the one at the
+1. Where the pattern the parent last set up, which `patternSetupIdentity` names,
+   is loaded and names the instance, the child is the one at the
    `legacyPartialCause` that pattern gives the same instance name. This is
-   exact. An instance that pattern does not name, being new or positional
-   there, goes on to the next steps.
-2. Otherwise, it is the one set-up child, among the positional spots the
-   parent's manifest records, whose `patternIdentity` is the instance's own
+   exact.
+2. Where that pattern is loaded and does not name the instance, which is new or
+   positional there, the instance is matched by order. Counting the new
+   pattern's positional nodes and such instances of one pattern identity in the
+   order the builder numbered them, the i-th takes the child at the i-th
+   positional spot the previous pattern sets up under that identity, and with no
+   such spot, or no child set up there, the instance is new. So an instance
+   bound to a `const` in place of an inline one takes the inline one's child,
+   whatever is inserted around it, and so does a new instance of the same
+   pattern added where an inline one was deleted. Reordering instances of one
+   pattern in the same update hands each the state of the one whose place it
+   takes.
+3. Without that pattern, it is the one set-up child, among the positional spots
+   the parent's manifest records, whose `patternIdentity` is the instance's own
    child pattern identity, leaving out a child that a positional node of the
    pattern still sets up at its own spot under that same identity. More than one
    such child, or one that two instances would each take, goes on to the next
-   step. So an instance bound to a `const` in place of an inline one takes the
-   inline one's child, and so does a new instance of the same pattern added
-   where an inline one was deleted, when that child is the only unclaimed
-   positional child of its identity.
-3. Otherwise, it is the child at the instance's own `legacyPartialCause`,
-   which is where the child runs with no instance names, unless the parent
-   shows the children have moved spots: that child carries an instance name
-   stamp, or it runs a pattern identity other than the instance's own while
-   another sub-pattern node sets up the identity it runs, or a child of the
-   instance's own identity runs at another positional spot the manifest
-   records.
-4. Otherwise nothing is carried over. The instance starts fresh, and the setup
-   logs `instance-carry-over` naming it, its positional cause and the child
-   set up there, if any, and whether another instance keeps that child.
+   step.
+4. Otherwise, it is the child at the instance's own `legacyPartialCause`, which
+   is where the child runs with no instance names, unless the parent shows the
+   children have moved spots: that child carries an instance name stamp, or it
+   runs a pattern identity other than the instance's own while another
+   sub-pattern node sets up the identity it runs, or a child of the instance's
+   own identity runs at another positional spot the manifest records.
+5. Otherwise nothing is carried over. The instance starts fresh, and the setup
+   logs `instance-carry-over` naming it, its positional cause and the child set
+   up there, if any, and whether another instance keeps that child.
 
 A child is carried over by one instance at most. A start's pre-sync loads the
 previous pattern by identity first. The carried child's link is recorded by
@@ -174,14 +180,16 @@ instance name in the parent's `instanceChildren` meta, and binding the
 instance reads it there on every later start, so carrying a child over is a
 one-time transition for each deployed parent.
 
-Step 3 is what a parent does with no instance names at all, short of a sign
-that its children moved, so carrying a child over is never worse than running
-positionally. It is exact wherever the previous pattern builds or an identity
-matches. The corner left is a parent with no setup marker, or whose stored
-source no longer compiles, whose children's pattern identities all changed,
-and whose children moved in the same update. There a child can take another's
-state, as it does with no instance names; the vintage gate catches it loudly
-where a schema then refuses the stored argument.
+Step 4 is what a parent does with no instance names at all, short of a sign that
+its children moved, so carrying a child over is never worse than running
+positionally. Two corners are left. Where the previous pattern builds, the order
+match of step 2 is a guess for instances of one pattern reordered in the same
+update. Without the previous pattern, in a parent with no setup marker or whose
+stored source no longer compiles, a child can take another's state where its
+children moved in the same update and either their pattern identities all
+changed or more than one of them shares the instance's identity, as it does with
+no instance names; the vintage gate catches it loudly where a schema then
+refuses the stored argument.
 
 A named instance stamps its name on the child it sets up, in the child's
 `instanceName` meta. The parent's setup refuses (`refuseDisplacedChildren`),

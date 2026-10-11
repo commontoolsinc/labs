@@ -230,8 +230,9 @@ ahead of it can move it onto another instance's state. Bind a sub-pattern that
 holds state to a `const` in an update that changes nothing else around it: that
 update keeps the inline instance's state. Deleting an inline instance and adding
 a `const` instance of the same pattern in the same update hands the deleted
-one's state to the new one, where it was the only inline instance of that
-pattern.
+one's state to the new one, where the new one takes its place among that
+pattern's instances. Reordering instances of one pattern in the same update
+matches them by order, so each takes the state of the one whose place it takes.
 
 ## See Also
 
