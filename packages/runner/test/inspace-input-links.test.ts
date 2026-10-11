@@ -16,18 +16,27 @@ type Placement = { target: MemorySpace } | "parent's space";
 /** Which cell of the parent the handler hands to the child. */
 type Handed = "input" | "derived";
 
+/** A parent and the child its handler creates. */
+type Family = {
+  /** The parent, whose argument holds `topic`. */
+  parent: Cell<unknown>;
+
+  /** The child the parent's handler creates. */
+  child: Cell<{ topic: string }>;
+};
+
 /**
  * Runs, in `home`, a parent whose argument holds `topic`, and sends its
  * handler an event. The handler creates a child, placed by `placement`, and
  * hands it the cell `handed` names: the parent's own input, or a cell the
- * parent derives from it. Returns the child.
+ * parent derives from it.
  */
 async function createChild(
   runtime: Runtime,
   home: MemorySpace,
   placement: Placement,
   handed: Handed,
-): Promise<Cell<{ topic: string }>> {
+): Promise<Family> {
   const { handler, lift, pattern } = createTrustedBuilder(runtime)
     .commonfabric;
   const Child = pattern<{ topic: string }>(({ topic }) => ({ topic }));
@@ -85,7 +94,10 @@ async function createChild(
   await runtime.idle();
   await runtime.storageManager.synced();
   await room.pull();
-  return room.resolveAsCell() as Cell<{ topic: string }>;
+  return {
+    parent: result,
+    child: room.resolveAsCell() as Cell<{ topic: string }>,
+  };
 }
 
 /**
@@ -125,7 +137,7 @@ describe("inspace-input-links", () => {
   describe("a child in another space", () => {
     it("stores, in its argument, a link into the space of the parent's input", async () => {
       await withRuntime(async (runtime, home, other) => {
-        const child = await createChild(
+        const { child } = await createChild(
           runtime,
           home,
           { target: other },
@@ -140,7 +152,7 @@ describe("inspace-input-links", () => {
 
     it("reads the parent's input", async () => {
       await withRuntime(async (runtime, home, other) => {
-        const child = await createChild(
+        const { child } = await createChild(
           runtime,
           home,
           { target: other },
@@ -150,9 +162,27 @@ describe("inspace-input-links", () => {
       });
     });
 
+    it("writes through to the parent's input", async () => {
+      await withRuntime(async (runtime, home, other) => {
+        const { parent, child } = await createChild(
+          runtime,
+          home,
+          { target: other },
+          "input",
+        );
+        const tx = runtime.edit();
+        child.getArgumentCell<{ topic: string }>()!.key("topic").withTx(tx)
+          .set("dinner");
+        expect((await tx.commit().settled).error).toBeUndefined();
+        await runtime.idle();
+        const input = parent.getArgumentCell<{ topic: string }>()!;
+        expect(await input.key("topic").pull()).toBe("dinner");
+      });
+    });
+
     it("reads a cell the parent derives", async () => {
       await withRuntime(async (runtime, home, other) => {
-        const child = await createChild(
+        const { child } = await createChild(
           runtime,
           home,
           { target: other },
@@ -166,7 +196,7 @@ describe("inspace-input-links", () => {
   describe("a child in the parent's space", () => {
     it("reads the parent's input", async () => {
       await withRuntime(async (runtime, home) => {
-        const child = await createChild(
+        const { child } = await createChild(
           runtime,
           home,
           "parent's space",
