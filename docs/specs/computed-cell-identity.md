@@ -177,8 +177,10 @@ state, as it does with no instance names; the vintage gate catches it loudly
 where a schema then refuses the stored argument.
 
 A named instance stamps its name on the child it sets up, in the child's
-`instanceName` meta. A child is refused (`refuseDisplacedChild`), with an
-error naming both pattern identities, where it would set up:
+`instanceName` meta. The parent's setup refuses (`refuseDisplacedChildren`),
+with an error naming both pattern identities, before anything it stages
+commits, so a refused update leaves the piece running the pattern it ran
+before. A child is refused where it would set up:
 
 - over a child stamped with another instance's name, for a named instance or
   for a positional spot;

@@ -1050,6 +1050,19 @@ function storedManifestOf(cell: Cell<any>): InternalCellDescriptor[] {
   return Array.isArray(stored) ? stored as InternalCellDescriptor[] : [];
 }
 
+/**
+ * Whether the child `child` of the parent `parent` is managed independently:
+ * a child in a space of its own that owns its code and inputs, which it keeps
+ * after its owner detaches it. Its parent resumes it rather than setting it
+ * up.
+ */
+function resumesIndependently(child: Cell<any>, parent: Cell<any>): boolean {
+  return child.space !== parent.space &&
+    getPatternIdentityRef(child) !== undefined &&
+    (getPatternSource(child) !== undefined ||
+      getPieceSourceRevisions(child).length > 0);
+}
+
 /** A key naming the document `link` addresses: its space, id and scope. */
 function documentKey(link: NormalizedFullLink): string {
   return `${link.space}\0${link.id}\0${link.scope}`;
@@ -3672,6 +3685,9 @@ export class Runner {
     // it, which is what tells an instance the parent has not yet run under
     // its name.
     this.#recordInstanceCarryOver(tx, pattern, resultCell);
+    // Refused here, before anything commits, a displaced child leaves the
+    // piece as it was: a refusal from setup is the one no path applies.
+    this.#refuseDisplacedChildren(tx, pattern, resultCell);
     const internalManifest = this.#materializeDerivedInternalCells(
       tx,
       pattern,
@@ -13435,7 +13451,7 @@ export class Runner {
       const node = nodes.find((candidate) =>
         deepEqual(candidate.partialCause, descriptor.partialCause)
       );
-      if (node === undefined || node.module.targetSpaceRoot) {
+      if (node === undefined) {
         uncarried.push({ name });
         continue;
       }
@@ -13563,7 +13579,7 @@ export class Runner {
     const node = subPatternNodes(previous).find((candidate) =>
       deepEqual(candidate.partialCause, descriptor.partialCause)
     );
-    if (node === undefined || node.module.targetSpaceRoot) return undefined;
+    if (node === undefined) return undefined;
     const child = this.#childAtPartialCause(
       tx,
       resultCell,
@@ -13716,7 +13732,7 @@ export class Runner {
         const node = subPatternNodes(previous).find((candidate) =>
           deepEqual(candidate.partialCause, descriptor.partialCause)
         );
-        if (node === undefined || node.module.targetSpaceRoot) continue;
+        if (node === undefined) continue;
         children.push(
           this.#childAtPartialCause(
             undefined,
@@ -13734,6 +13750,42 @@ export class Runner {
       this.#preparedCarryOvers.set(key, carried);
     } else {
       this.#preparedCarryOvers.delete(key);
+    }
+  }
+
+  /**
+   * Throws, naming both pattern identities, when a sub-pattern node of
+   * `pattern` would set its child up over a child the parent `resultCell`
+   * keeps elsewhere (`#refuseDisplacedChild()`), for each node whose child
+   * this parent owns: not a child that is its space's root, nor one managed
+   * in a space of its own.
+   */
+  #refuseDisplacedChildren(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    resultCell: Cell<any>,
+  ): void {
+    const carried = readInstanceChildren(resultCell.withTx(tx));
+    for (const { module, partialCause } of subPatternNodes(pattern)) {
+      // A space's root sits where its space's genesis reserved it, whatever
+      // the node's cause, so no shift between this parent's spots moves it.
+      if (module.targetSpaceRoot) continue;
+      const instanceName = instanceNameOfPartialCause(partialCause);
+      const link = instanceName === undefined
+        ? undefined
+        : carried[instanceName];
+      const child = link !== undefined
+        ? this.#runtime.getCellFromLink(link, undefined, tx)
+        : this.#childAtPartialCause(tx, resultCell, module, partialCause);
+      if (resumesIndependently(child, resultCell)) continue;
+      this.#refuseDisplacedChild(
+        tx,
+        resultCell,
+        pattern,
+        module.implementation as Pattern,
+        child,
+        instanceName,
+      );
     }
   }
 
@@ -13756,11 +13808,8 @@ export class Runner {
     storedChild: Cell<any>,
     instanceName: string | undefined,
   ): void {
-    // Children read as committed: a sibling this instantiation already set up
-    // reads under the newer identity it is about to commit.
-    const committedChild = storedChild.withTx();
-    const stored = getPatternSetupIdentityRef(committedChild) ??
-      getPatternIdentityRef(committedChild);
+    const stored = getPatternSetupIdentityRef(storedChild) ??
+      getPatternIdentityRef(storedChild);
     const incoming = this.#runtime.patternManager.getArtifactEntryRef(
       childPattern,
     );
@@ -13770,7 +13819,7 @@ export class Runner {
     const holder = instanceName === undefined
       ? "a positional spot"
       : `instance "${instanceName}"`;
-    const stamped = getInstanceNameStamp(committedChild);
+    const stamped = getInstanceNameStamp(storedChild);
     if (stamped !== undefined && stamped !== instanceName) {
       throw new Error(
         `refusing to set up ${describe(incoming)} for ${holder} ` +
@@ -13797,8 +13846,8 @@ export class Runner {
     for (const { module, partialCause } of subPatternNodes(pattern)) {
       if (!isPositionalPartialCause(partialCause)) continue;
       const other = this.#childAtPartialCause(
-        undefined,
-        resultCell.withTx(),
+        tx,
+        resultCell,
         module,
         partialCause,
       );
@@ -13864,10 +13913,10 @@ export class Runner {
       // An independently managed child owns its code and inputs, including
       // after an owner detaches it. History keeps that fact after the origin
       // is cleared; ordinary untracked nested children still bind inputs.
-      const resumeExisting = crossSpace &&
-        getPatternIdentityRef(storedChild) !== undefined &&
-        (getPatternSource(storedChild) !== undefined ||
-          getPieceSourceRevisions(storedChild).length > 0);
+      const resumeExisting = resumesIndependently(
+        storedChild,
+        parentResultCell,
+      );
       if (crossSpace && !resumeExisting) {
         // Cross-space child pattern: run it inline in a multi-space transaction
         // (child space committed first) rather than re-instantiating it in a
@@ -13904,14 +13953,6 @@ export class Runner {
       // own would be followed twice; a cross-space child outlives the
       // program that made it and is what a release has to reach.
       if (!resumeExisting) {
-        this.#refuseDisplacedChild(
-          instanceTx,
-          parentResultCell,
-          pattern,
-          patternImpl,
-          storedChild,
-          plan.instanceName,
-        );
         if (
           plan.instanceName !== undefined &&
           getInstanceNameStamp(storedChild) !== plan.instanceName
