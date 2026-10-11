@@ -1265,13 +1265,22 @@ describe("instance-carry-over", () => {
       return cell;
     };
 
-    // The pieces the start's pre-sync plans nodes on, from here on in `rt`.
-    const presyncedPieces = (): Set<string> => {
-      const pieces = new Set<string>();
+    /**
+     * The pieces the pre-sync plans nodes on, from here on in `rt`, in the
+     * order it plans them. The first start after an update is the one that
+     * carries children over, so the first child of the parent `cell` listed
+     * is the one that start's pre-sync bound an instance to.
+     */
+    const presyncedPieces = (): string[] => {
+      const pieces: string[] = [];
       rt.runner.accessForTestingOnly.presyncPlanRecorder = (piece) =>
-        pieces.add(piece);
+        pieces.push(piece);
       return pieces;
     };
+
+    // The first piece in `pieces` other than the parent `cell`.
+    const firstChild = (pieces: string[], cell: Cell<unknown>) =>
+      pieces.find((piece) => piece !== cell.getAsNormalizedFullLink().id);
 
     it("is bound by the start's pre-sync to the positional child order matching carries over", async () => {
       await deployedParent("cold-order", {
@@ -1285,9 +1294,9 @@ describe("instance-carry-over", () => {
       const result = await update(cell, NAMED_WITH_SIBLING_NODE_CHILD);
 
       expect({
-        presynced: presynced.has(carried),
+        firstChild: firstChild(presynced, cell),
         aCount: result.aCount,
-      }).toEqual({ presynced: true, aCount: 7 });
+      }).toEqual({ firstChild: carried, aCount: 7 });
     });
 
     it("is bound by the start's pre-sync to the child at its own positional spot when its own source changed", async () => {
@@ -1302,9 +1311,9 @@ describe("instance-carry-over", () => {
       const result = await update(cell, NAMED_NEWER_NODE_CHILD);
 
       expect({
-        presynced: presynced.has(carried),
+        firstChild: firstChild(presynced, cell),
         aCount: result.aCount,
-      }).toEqual({ presynced: true, aCount: 7 });
+      }).toEqual({ firstChild: carried, aCount: 7 });
     });
   });
 });
