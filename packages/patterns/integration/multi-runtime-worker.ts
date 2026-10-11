@@ -1266,11 +1266,6 @@ const handlers: Record<
   },
 
   /**
-   * The timing measures this worker's loggers emitted since the last call,
-   * as the perf-investigation scripts read them, and nothing when emission
-   * is off. Drained on each call, so a capture is the measures of one window.
-   */
-  /**
    * The rendered view's reconciliation errors since the last call, as
    * messages, and nothing when the view mounted and reconciled cleanly or
    * the session holds no view. Drained on each call.
@@ -1279,6 +1274,11 @@ const handlers: Record<
     return Promise.resolve(viewRenderErrors.splice(0) as FabricValue);
   },
 
+  /**
+   * The timing measures this worker's loggers emitted since the last call,
+   * as the perf-investigation scripts read them, and nothing when emission
+   * is off. Drained on each call, so a capture is the measures of one window.
+   */
   timingMeasures() {
     const entries: { name: string; startTime: number; duration: number }[] = [];
     for (const entry of performance.getEntriesByType("measure")) {
