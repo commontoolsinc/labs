@@ -19,7 +19,8 @@ const instanceNames = new WeakMap<OpaqueCell<unknown>, string>();
 
 /**
  * Gives the sub-pattern instance `value` the instance name `name`, and returns
- * `value`. A value that is not a cell is returned as it is, unnamed.
+ * `value`. A value that is not a cell is returned as it is, unnamed, and the
+ * builder never names a stream root, so a name given to one has no effect.
  */
 export function nameInstance<T>(value: T, name: string): T {
   if (typeof name !== "string") {

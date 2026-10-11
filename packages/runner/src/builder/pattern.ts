@@ -407,16 +407,18 @@ function factoryFromPattern<T, R>(
     const generated = { $generated: anonymousPartialCauseCount++ };
     return isStream ? { ...generated, $kind: "stream" } : generated;
   };
-  const isUnnamedInternalRoot = (cell: ICell<unknown>): boolean => {
-    const { path, name, external } = exportCell(cell);
+  // A stream root never takes an instance name, so a name given to one does
+  // not keep another root from taking it.
+  const isNameableInternalRoot = (cell: ICell<unknown>): boolean => {
+    const { path, name, external, kind } = exportCell(cell);
     return !external && path.length === 0 && name === undefined &&
-      cellNameForCell(cell) === undefined;
+      kind !== "stream" && cellNameForCell(cell) === undefined;
   };
   // An instance name given to more than one root names none of them: each
   // stays positional, as it would be with no name at all.
   const instanceRootsByName = new Map<string, Set<OpaqueCell<any>>>();
   allCells.forEach((cell) => {
-    if (!isUnnamedInternalRoot(cell)) return;
+    if (!isNameableInternalRoot(cell)) return;
     const top = exportCell(cell).cell;
     const instanceName = instanceNameOf(top);
     if (instanceName === undefined) return;

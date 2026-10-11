@@ -129,8 +129,10 @@ builder takes that name as the instance's partial cause,
 input or authored `.for()` names it already. The name sits under the
 reserved `$generated` key, so no authored cause can equal it. An instance
 name given to more than one root in a pattern names none of them, and each
-keeps a positional cause. A named instance's child stays where it is however
-its siblings are rearranged, and moves only when the instance is renamed.
+keeps a positional cause. A stream root never takes an instance name, and a
+name given to one does not count toward another root's. A named instance's
+child stays where it is however its siblings are rearranged, and moves only
+when the instance is renamed.
 
 A named instance also records, as its descriptor's `legacyPartialCause`, the
 `{ $generated: N }` it would take without its name. It still consumes that
