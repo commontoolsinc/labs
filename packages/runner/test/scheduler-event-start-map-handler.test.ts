@@ -140,10 +140,34 @@ describe("scheduler-event-start-map-handler", () => {
    * Sends one event to `stream` and returns how it settled: `"done"` when its
    * handler committed, and otherwise the reason it was refused or dropped.
    */
-  async function sendAndSettle(stream: Cell<unknown>): Promise<string> {
+  function sendAndSettle(stream: Cell<unknown>): Promise<string> {
     const settled = defer<IExtendedStorageTransaction>();
     sendEvent(stream, {}, (tx) => settled.resolve(tx));
-    const status = (await settled.promise).status();
+    return outcomeOf(settled.promise);
+  }
+
+  /**
+   * Queues one event at `cell`'s address, which need not be a stream, and
+   * returns how it settled, as {@link sendAndSettle} does.
+   */
+  function queueAndSettle(
+    runtime: Runtime,
+    cell: Cell<unknown>,
+  ): Promise<string> {
+    const settled = defer<IExtendedStorageTransaction>();
+    runtime.scheduler.queueEvent(
+      cell.getAsNormalizedFullLink(),
+      {},
+      true,
+      (tx) => settled.resolve(tx),
+    );
+    return outcomeOf(settled.promise);
+  }
+
+  async function outcomeOf(
+    settled: Promise<IExtendedStorageTransaction>,
+  ): Promise<string> {
+    const status = (await settled).status();
     if (status.status !== "error") return status.status;
     const { error } = status;
     return "reason" in error && error.reason instanceof Error
@@ -207,6 +231,24 @@ describe("scheduler-event-start-map-handler", () => {
 
       expect(outcome).toBe("done");
       expect(await totalOf(runtime, result)).toBe(2);
+    });
+  });
+
+  describe("an address in the piece that no handler serves", () => {
+    it("drops its event once the piece has run", async () => {
+      // The negative of the cases above: demanding the piece's computations
+      // for an event is bounded by their running, so an address none of them
+      // binds a handler to still settles as a drop rather than waiting.
+
+      const { runtime, result } = await persistedPieceInFreshRuntime();
+      const row = await streamAt(result, ["rowButtons", 1]);
+
+      const outcome = await queueAndSettle(runtime, row);
+
+      expect(outcome).toBe(
+        `Event dropped: no handler registered for ${row.getAsNormalizedFullLink().id} after its piece ran`,
+      );
+      expect(await totalOf(runtime, result)).toBe(0);
     });
   });
 });

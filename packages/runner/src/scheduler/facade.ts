@@ -3290,6 +3290,7 @@ export class Scheduler {
     return {
       runtime: this.runtime,
       eventQueue: this.#eventQueue,
+      eventHandlers: this.#eventHandlers,
       backpressure: this.runtime.commitBackpressure,
       collectPendingLoadParkKeys: (event, deps) =>
         this.#collectPendingLoadParkKeys(event, deps),

@@ -414,6 +414,15 @@ export type QueuedEvent = {
   handlerLoadPending?: boolean;
 
   /**
+   * The id of the started piece whose computations register this event's
+   * handler when they run: a handler bound inside a `map` row exists only
+   * once the map has run, and starting the piece runs nothing. The head
+   * demands those computations, and drops only once they have all run and
+   * none of them registered a handler for the stream.
+   */
+  handlerFromPiece?: string;
+
+  /**
    * The FIFO slot is held while the stale-basis retry that requeued this
    * event waits for the state it will re-run against (the conflict's
    * catch-up and the pull of the document it names). The head parks the

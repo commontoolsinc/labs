@@ -802,6 +802,18 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           queuedEvent.action = (tx) => loadedHandler(tx, args.event);
           delete queuedEvent.handlerLoadPending;
         } else if (
+          verdict.started && verdict.graphIsInstalled?.() !== false &&
+          verdict.root !== undefined
+        ) {
+          // The piece is running with its pattern graph installed and has
+          // registered nothing for this stream yet. A handler a `map` binds
+          // per row registers only when the map runs, and starting the
+          // piece ran nothing, so this is not yet events.md §5's drop
+          // predicate ("no runnable handler"): the head demands the
+          // piece's computations and decides once they have run.
+          queuedEvent.handlerFromPiece = verdict.root.id;
+          delete queuedEvent.handlerLoadPending;
+        } else if (
           verdict.started && verdict.graphIsInstalled?.() !== false
         ) {
           // The piece is running with its pattern graph installed and
@@ -958,6 +970,7 @@ export function addSchedulerEventHandler(state: {
 export interface SchedulerEventExecutionState {
   readonly runtime: Runtime;
   readonly eventQueue: QueuedEvent[];
+  readonly eventHandlers: readonly [NormalizedFullLink, EventHandler][];
   readonly backpressure: CommitBackpressurePolicy;
   readonly collectPendingLoadParkKeys: (
     event: QueuedEvent,
@@ -1345,6 +1358,67 @@ export function preflightQueuedEventDependencies(state: {
   }
 }
 
+/**
+ * Decides a head whose started piece registered no handler for its stream
+ * (`QueuedEvent.handlerFromPiece`), and returns whether it may dispatch. A
+ * handler that has registered since is taken. Otherwise every computation of
+ * the piece that has not run against current state joins the pass as the
+ * event's transient demand, as an invalid handler closure does (scheduler-v2
+ * §7.5), and the head is decided again on the next tick. Once none is left to
+ * run and still no handler is registered, no handler can run, which is the
+ * drop predicate of events.md §5.
+ */
+function awaitHandlerFromPiece(
+  state: SchedulerEventExecutionState,
+  queuedEvent: QueuedEvent,
+  pieceRootId: string,
+  eventBlockingDeps: Set<Action>,
+): boolean {
+  const handler = findEventHandler(state.eventHandlers, queuedEvent.eventLink);
+  if (handler) {
+    const { event } = queuedEvent;
+    queuedEvent.handler = handler;
+    queuedEvent.action = (tx) => handler(tx, event);
+    delete queuedEvent.handlerFromPiece;
+    return true;
+  }
+  const unrun: Action[] = [];
+  for (const record of state.nodes.nodes()) {
+    if (record.status !== "invalid" && record.status !== "never-ran") continue;
+    if (!state.nodes.isComputation(record.action)) continue;
+    const identity = (record.action as Partial<TelemetryAnnotations>)
+      .schedulerObservationIdentity;
+    const roots = identity?.demandRootIds ??
+      (identity?.pieceRootId !== undefined ? [identity.pieceRootId] : []);
+    if (roots.includes(pieceRootId)) {
+      unrun.push(record.action);
+    }
+  }
+  const plan = planEventInvalidDependencyScheduling({
+    invalidDeps: unrun,
+    isDebouncedComputationWaiting: (dep) =>
+      state.isDebouncedComputationWaiting(dep),
+    getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
+    getNextEligibleRunTime: (dep) => state.getNextEligibleRunTime(dep),
+  });
+  for (const dep of plan.runnableDeps) {
+    state.pending.add(dep);
+    eventBlockingDeps.add(dep);
+  }
+  if (plan.runnableDeps.length === 0) {
+    if (plan.nextEligibleAt !== undefined) {
+      queuedEvent.notBefore = plan.nextEligibleAt;
+      state.scheduleWake(plan.nextEligibleAt);
+    } else {
+      state.dropEvent(
+        queuedEvent,
+        `Event dropped: no handler registered for ${queuedEvent.eventLink.id} after its piece ran`,
+      );
+    }
+  }
+  return false;
+}
+
 export async function processPullQueuedEventDuringExecute(
   state: SchedulerEventExecutionState,
   eventBlockingDeps: Set<Action>,
@@ -1377,6 +1451,16 @@ export async function processPullQueuedEventDuringExecute(
   // The head reserved its FIFO slot before its handler's piece loaded. Piece
   // completion hydrates the same object and queues a fresh execution tick.
   if (queuedEvent.handlerLoadPending) return;
+
+  if (
+    queuedEvent.handlerFromPiece !== undefined &&
+    !awaitHandlerFromPiece(
+      state,
+      queuedEvent,
+      queuedEvent.handlerFromPiece,
+      eventBlockingDeps,
+    )
+  ) return;
 
   // The head is a stale-basis retry holding its slot while the state it
   // re-runs against arrives; the readiness continuation queues a fresh tick.
