@@ -95,15 +95,20 @@ deadline as the multi-user latency bound; the OFF arm and clients.
 
 ## Stages
 
-1. [ ] **A cycle's phases on the health route.** Timing rows for each phase
+1. [x] **A cycle's phases on the health route.** Timing rows for each phase
    of a cycle, and the settle's three waits apart (the runtime's idle, the
    server's idle, the frame barrier), so the baseline below is per phase and
    each stage's effect is read from the same rows. The baseline is the
    record above: cycles, settle and cycle medians, `demandPassMs`, and the
    vote burst's wave count and time.
-2. [ ] **Demand as deltas.** The observer event carries rows, the space
-   server's mirror answers the pass, both arms. Expected: the pass drops from
-   8 and 96 ms to a lookup; cycle medians fall by that.
+2. [x] **Demand as deltas.** The observer event names the changed session,
+   the space server's mirror (`DemandShareCache`) re-reads that session's
+   rows alone and answers the pass from the mirror, both arms. The view
+   interests still cross as a request per publish; stage 4 takes the publish
+   off the critical path instead. Measured on the 30-topic seed under the
+   worker: the demand pass's median fell from 63 ms to 60 ms, and to 31 ms
+   with the store read-through on, so the pass's cost was the loads it
+   issues more than the rows it reads.
 3. [ ] **Local quiescence under read-through.** The settle's probe over the
    feed and the scheduler for the home space, the frame barrier kept for
    foreign sessions, the spec paragraph amended. Expected: settles end on

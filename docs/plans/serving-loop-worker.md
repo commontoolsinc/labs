@@ -95,10 +95,10 @@ registry would. The worker asks the main thread for `demandForSpace`,
 `viewInterestsForSpace`, `setViewSelection`, `foreignWriteAuthorityFor`,
 `checkServedAclChange`, `commitDelegatedAppend`, `idle` and `flushSessions`, and
 tells it of `noteExecutorCommit` and `noteLeaseReacquired` without waiting. The
-demand mirror compares rows, so a `SessionDemand` that arrives as a fresh object
-costs a row comparison where an identical object cost nothing; a generation
-number per session can restore that later if the comparison shows in the demand
-pass's time.
+demand set crosses as shares per session, read once and kept on the worker
+(`DemandShareCache`) until the server's `demandChanged` names that session
+again, so a demand pass hands the space server's mirror the objects it compared
+last time and asks the server only for the sessions whose demand moved.
 
 **Lifecycle verbs run in the worker, from a descriptor.** A verb reaches the
 host today as closures over a `PiecesController`. The route sends the verb's

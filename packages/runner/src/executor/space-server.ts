@@ -5314,6 +5314,7 @@ export class SpaceServer implements TransactionSealDestination {
     d.notCurrentRearms += notCurrentRearms;
     d.demandPasses += 1;
     d.demandPassMs += performance.now() - passStart;
+    timing.time(passStart, "executor", "wave", "demand-pass");
   }
 
   /**
@@ -6196,6 +6197,14 @@ export class SpaceServer implements TransactionSealDestination {
     // cycle means the wave's cost is the seal and the commit, not the
     // derivations, and the two are fixed in different places.
     const settleStart = performance.now();
+    // A probe segment is a phase of this settle only while the settle is
+    // still open: the probe keeps running after the deadline cuts the race,
+    // and a segment that resolves then measures what the loop waited out,
+    // not what the settle cost.
+    const probeRow = (start: number, phase: string) => {
+      if (exhausted) return;
+      timing.time(start, "executor", "wave", phase);
+    };
     try {
       while (true) {
         // RACE the deadline (serving-loop.md §3's second exhaustion
@@ -6206,7 +6215,9 @@ export class SpaceServer implements TransactionSealDestination {
         const step = await Promise.race([
           (async () => {
             await loadPass;
+            const runtimeIdleStart = performance.now();
             await runtime.idle();
+            probeRow(runtimeIdleStart, "settle-runtime-idle");
             // The probe and the floors that clamp the proof are read in one
             // synchronous stretch, as the exit probe below and the floors the
             // advance reads are, so no shadow promotion falls between them.
@@ -6230,14 +6241,18 @@ export class SpaceServer implements TransactionSealDestination {
             // it, a wave could advance W past an authored commit whose
             // demanded derivation never ran (the frame was still in
             // the flush queue).
+            const serverIdleStart = performance.now();
             await this.#options.server.idle();
+            probeRow(serverIdleStart, "settle-server-idle");
             // The INPUT barrier, not the durability barrier: sealed
             // commits settle at the wave commit BELOW, so the full
             // synced() would deadlock here (see
             // StorageManager.inputSynced). It also waits for the
             // loopback transport to hand over every frame the drain
             // above sent, which it does one frame per event-loop turn.
+            const barrierStart = performance.now();
             await runtime.storageManager.inputSynced?.();
+            probeRow(barrierStart, "settle-input-barrier");
             // One macrotask yield: a handed-over frame's application
             // schedules work; the yield lets it register dirtiness so
             // the isIdle() probe below sees it. (An application parked
@@ -6433,11 +6448,7 @@ export class SpaceServer implements TransactionSealDestination {
       // The owed re-drain rides quiet cycles too (round-2 thread 9): a
       // transport-failed delivery must retry on the NEXT loop cycle,
       // not wait for a new input wave or a re-activation.
-      await this.#viewPlanPublisher.publish(
-        runtime,
-        this.#options.server,
-        this.#options.space,
-      );
+      await this.#publishViewPlan(runtime);
       await this.#drainOutboxAppends(false);
       return;
     }
@@ -6523,7 +6534,9 @@ export class SpaceServer implements TransactionSealDestination {
     await this.#resolveForeignEngines(closing);
 
     const derivedThrough = advanceSealed ? advanceTo : this.#watermark;
+    const commitStart = performance.now();
     const outcome = await closing.commitWave(this.#sink!, { derivedThrough });
+    timing.time(commitStart, "executor", "wave", "commit");
     this.#servedWave = { wave: closing, outcome };
     if (outcome.aborted !== undefined) this.#barrierHead = undefined;
     if (outcome.seq !== undefined) {
@@ -6564,7 +6577,9 @@ export class SpaceServer implements TransactionSealDestination {
         warm: true,
       });
     }
+    const settledStart = performance.now();
     await closing.settled();
+    timing.time(settledStart, "executor", "wave", "settled");
     this.#reconcileDeliveryWritesAfterWave(closing);
     // A normal handler consequence clears `deliveryDeferral` in the same
     // accepted contribution that marks the entry. Retire the lease-local
@@ -6779,13 +6794,7 @@ export class SpaceServer implements TransactionSealDestination {
       }
     }
 
-    if (outcome.aborted === undefined) {
-      await this.#viewPlanPublisher.publish(
-        runtime,
-        this.#options.server,
-        this.#options.space,
-      );
-    }
+    if (outcome.aborted === undefined) await this.#publishViewPlan(runtime);
 
     // Drain the durable append rows (FP1): after a wave that landed
     // appends, and after any earlier drain left rows behind (a
@@ -6805,6 +6814,7 @@ export class SpaceServer implements TransactionSealDestination {
    * retries without fresh input. */
   async #drainOutboxAppends(hasNewAppends: boolean): Promise<void> {
     if (!hasNewAppends && !this.#outboxDrainOwed) return;
+    const outboxStart = performance.now();
     try {
       const drained = await this.#outbox?.deliverPendingAppends();
       this.#outboxDrainOwed = (drained?.remaining ?? 0) > 0;
@@ -6814,7 +6824,20 @@ export class SpaceServer implements TransactionSealDestination {
         "outbox drain failed; rows kept for re-send",
         error,
       ]);
+    } finally {
+      timing.time(outboxStart, "executor", "wave", "outbox");
     }
+  }
+
+  /** Publishes the space's view plan, timed as the cycle's `publish` phase. */
+  async #publishViewPlan(runtime: Runtime): Promise<void> {
+    const publishStart = performance.now();
+    await this.#viewPlanPublisher.publish(
+      runtime,
+      this.#options.server,
+      this.#options.space,
+    );
+    timing.time(publishStart, "executor", "wave", "publish");
   }
 
   /** Dispose the serving runtime under a DEADLINE (park liveness — the

@@ -230,12 +230,74 @@ console.error(
     `${after.counting}/${voters.length} sessions`,
 );
 
+/**
+ * The serving loop's side of one burst: how many waves it took and what a
+ * wave's phases cost, from the loop's own counters and timing rows, read
+ * before and after the burst. The rows are the loop's realm's, so under the
+ * worker they are the loop's alone, while on this thread the scheduler rows
+ * count the ten voters' runs as well. Nothing on the OFF arm, which serves
+ * nothing.
+ */
+async function loopCost(run: () => Promise<void>): Promise<string> {
+  const rows = [
+    "executor/wave/cycle",
+    "executor/wave/settle",
+    "executor/wave/commit",
+    "executor/wave/demand-pass",
+    "executor/wave/publish",
+    "scheduler/execute/event/handlerAction",
+    "scheduler/execute/settle",
+    "storage.v2:watchRefresh/watchAddSync",
+  ];
+  const snapshot = async () => {
+    const stats = harness.servingStats();
+    const timing = (await harness.servingDiagnostics()).timingStats as Record<
+      string,
+      Record<string, { count: number; totalTime: number }>
+    >;
+    const row = (name: string) => {
+      const [group, key] = name.includes(":")
+        ? name.split(":")
+        : [name.split("/")[0], name];
+      return timing[group]?.[key] ?? { count: 0, totalTime: 0 };
+    };
+    return {
+      waves: stats?.waves ?? 0,
+      exhausted: stats?.wavesBudgetExhausted ?? 0,
+      rows: Object.fromEntries(rows.map((name) => [name, row(name)])),
+    };
+  };
+  const before = await snapshot();
+  await run();
+  const after = await snapshot();
+  if (harness.servingStats() === undefined) return "no serving loop";
+  const phases = rows.map((name) => {
+    const count = after.rows[name].count - before.rows[name].count;
+    const total = after.rows[name].totalTime - before.rows[name].totalTime;
+    return `${name.replace("executor/wave/", "")} ${count} x ${
+      count === 0 ? 0 : (total / count).toFixed(1)
+    } ms`;
+  });
+  return `${after.waves - before.waves} waves (${
+    after.exhausted - before.exhausted
+  } at the deadline); ${phases.join(", ")}`;
+}
+
+console.error(
+  `[lunch-poll vote burst] one burst on the serving side: ${await loopCost(
+    async () => {
+      await burst(3);
+      await verifyBurst(3);
+    },
+  )}`,
+);
+
 // `Deno.bench` has no hook for "the file's benchmarks are done", so the ten
 // workers are released at process exit instead, where the listener runs
 // synchronously and `terminate()` is the form that fits.
 globalThis.addEventListener("unload", () => harness.terminate());
 
-let round = 3;
+let round = 4;
 
 Deno.bench({
   name: `vote burst ${voters.length}x${options.length}`,

@@ -73,6 +73,7 @@ import type {
   ServingLoopDiagnostics,
   ServingLoopHandle,
 } from "@commonfabric/runner/executor/serving-worker-host";
+import type { ServingLoopStats } from "@commonfabric/runner/executor/stats";
 import {
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
@@ -762,7 +763,7 @@ type HostedServer = {
   readonly server: Pick<MemoryServer, "watchAdmittedCommits">;
 
   /** The serving loop, when the server has one. */
-  readonly host?: Pick<ServingLoopHandle, "diagnostics">;
+  readonly host?: Pick<ServingLoopHandle, "diagnostics" | "stats">;
 
   /** The server's `idle()`, which covers storage and not a serving loop. */
   idle(): Promise<void>;
@@ -997,6 +998,14 @@ export class MultiRuntimeHarness {
     const session = this.session(label);
     this.sessions.splice(this.sessions.indexOf(session), 1);
     await session.disposeSession();
+  }
+
+  /**
+   * The serving loop's counters as it last reported them, from the loop the
+   * harness hosts; none when the harness hosts no loop.
+   */
+  servingStats(): ServingLoopStats | undefined {
+    return this.#server?.host?.stats();
   }
 
   /**

@@ -1637,7 +1637,10 @@ the per-epic implementation notes).
   variable on toolshed, read by the serving-host bootstrap
   ([`packages/toolshed/lib/server-execution.ts`](../../packages/toolshed/lib/server-execution.ts))
   into `SpaceServerPolicy.storeReadThrough`; a harness constructing an
-  `ExecutorHost` sets the policy field directly. Only the literal `true` turns
+  `ExecutorHost` sets the policy field directly, and a test's serving memory
+  server (`packages/runner/src/executor/serving-memory-server.deno.ts`) reads
+  the same variable for a policy that leaves the field unset, which is how a
+  lane runs its tests under the posture. Only the literal `true` turns
   it on; `false` and unset leave it off, and anything else warns and leaves it
   off. Meaningful only with the serving loop running
   ([`serverExecution`](#serverexecution) on).

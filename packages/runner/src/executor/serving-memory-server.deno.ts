@@ -52,6 +52,7 @@ import {
   type ServingLoopHandle,
   ServingWorker,
 } from "./serving-worker-host.ts";
+import type { SpaceServerPolicy } from "./space-server.ts";
 
 /** A memory server with a serving loop attached, for one test to own. */
 export interface ServingMemoryServer extends AsyncDisposable {
@@ -120,6 +121,11 @@ export type ServingMemoryServerOptions =
      * closure, so `prepareStorageManager` and the host's diagnostic hooks
      * other than `onActivationSettled` and `onSpaceParked` are refused under
      * it; a test that needs one says `false` here.
+     *
+     * The store read-through is the other posture the environment selects:
+     * `policy.storeReadThrough` left unset takes `true` when
+     * `SERVER_EXECUTION_STORE_READ_THROUGH` is the literal `true`, as a
+     * toolshed's does under that variable.
      */
     worker?: boolean;
   }
@@ -144,6 +150,22 @@ const temporaryStore = async (): Promise<TemporaryStore> => {
 /** Whether `options` select the worker, by their own say or the environment. */
 const runsInWorker = (options: ServingMemoryServerOptions): boolean =>
   options.worker ?? Deno.env.get("SERVER_EXECUTION_WORKER") === "true";
+
+/**
+ * The loop's policy, with the store read-through taken from the environment
+ * when `policy` leaves it unset, as the toolshed bootstrap takes it under
+ * `SERVER_EXECUTION_STORE_READ_THROUGH`: a lane sets that variable to the
+ * literal `true` to run every test that leaves it unset under the posture.
+ */
+const policyFromEnvironment = (
+  policy: SpaceServerPolicy | undefined,
+): SpaceServerPolicy | undefined => {
+  if (policy?.storeReadThrough !== undefined) return policy;
+  if (Deno.env.get("SERVER_EXECUTION_STORE_READ_THROUGH") !== "true") {
+    return policy;
+  }
+  return { ...policy, storeReadThrough: true };
+};
 
 /**
  * Starts a {@link ServingMemoryServer} reached in-process only, over a fresh
@@ -283,6 +305,7 @@ async function attachServingLoop(params: {
     ensureSpaceRoots = false,
     ...hostOptions
   } = params.options;
+  const policy = policyFromEnvironment(hostOptions.policy);
   let loop: ServingLoopHandle;
   if (params.worker) {
     const refused = WORKER_REFUSED_OPTIONS.filter((name) =>
@@ -304,9 +327,7 @@ async function attachServingLoop(params: {
         identity: serviceIdentity,
         apiUrl: params.apiUrl,
         ensureSpaceRoots,
-        ...(hostOptions.policy === undefined
-          ? {}
-          : { policy: hostOptions.policy }),
+        ...(policy === undefined ? {} : { policy }),
         ...(experimental === undefined ? {} : { experimental }),
         ...(hostOptions.onActivationSettled === undefined
           ? {}
@@ -330,6 +351,7 @@ async function attachServingLoop(params: {
   } else {
     const host = new ExecutorHost({
       ...hostOptions,
+      ...(policy === undefined ? {} : { policy }),
       ensureSpaceRoots,
       server: params.server,
       serviceIdentity: serviceIdentity.did(),

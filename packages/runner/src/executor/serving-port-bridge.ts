@@ -153,11 +153,12 @@ export class ServingPortBridge {
         this.#endpoint.notify("observer.commitAdmitted", { notice }),
       sessionOpened: (space) =>
         this.#endpoint.notify("observer.sessionOpened", { space }),
-      demandChanged: (space, reason, principal) =>
+      demandChanged: (space, reason, principal, sessionId) =>
         this.#endpoint.notify("observer.demandChanged", {
           space,
           reason,
           principal,
+          sessionId,
         }),
       sessionChanged: (event) => {
         if (replaying && event.kind === "opened") replayed.add(event.space);
@@ -299,6 +300,15 @@ export class ServingPortBridge {
       ({ space, excludePrincipal }) =>
         server.demandForSpace(
           space,
+          excludePrincipal === undefined ? {} : { excludePrincipal },
+        ),
+    );
+    endpoint.onRequest(
+      "server.demandForSessions",
+      ({ space, sessionIds, excludePrincipal }) =>
+        server.demandForSessions(
+          space,
+          sessionIds,
           excludePrincipal === undefined ? {} : { excludePrincipal },
         ),
     );

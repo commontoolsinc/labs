@@ -21,6 +21,7 @@ import {
 } from "@commonfabric/memory/v2/server";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { MemorySpace, Result } from "../storage/interface.ts";
+import { DemandShareCache } from "./demand-shares.ts";
 import {
   EngineWaveCommitSink,
   waveCommitFailureResult,
@@ -278,15 +279,18 @@ class PlaneMemoryServer implements HostMemoryServer {
   readonly #plane: ServingPlane;
   readonly #endpoint: ServingPlaneEndpoint;
   readonly #sessions: SessionMirror;
+  readonly #demandShares: DemandShareCache;
 
   constructor(
     plane: ServingPlane,
     endpoint: ServingPlaneEndpoint,
     sessions: SessionMirror,
+    demandShares: DemandShareCache,
   ) {
     this.#plane = plane;
     this.#endpoint = endpoint;
     this.#sessions = sessions;
+    this.#demandShares = demandShares;
   }
 
   setServerExecutionObserver(
@@ -407,10 +411,19 @@ class PlaneMemoryServer implements HostMemoryServer {
     space: string,
     options: { excludePrincipal?: string } = {},
   ): ReturnType<HostMemoryServer["demandForSpace"]> {
-    return this.#endpoint.request("server.demandForSpace", {
+    // The shares the server reported unchanged are handed over as the
+    // objects of the last pass; only the changed sessions' cross the port.
+    return this.#demandShares.sharesFor(
       space,
-      excludePrincipal: options.excludePrincipal,
-    });
+      this.#sessions.live(space),
+      options.excludePrincipal,
+      (sessionIds) =>
+        this.#endpoint.request("server.demandForSessions", {
+          space,
+          sessionIds,
+          excludePrincipal: options.excludePrincipal,
+        }),
+    );
   }
 
   viewInterestsForSpace(
@@ -433,6 +446,7 @@ class PlaneMemoryServer implements HostMemoryServer {
 export class ServingPlane {
   readonly #endpoint: ServingPlaneEndpoint;
   readonly #sessions = new SessionMirror();
+  readonly #demandShares = new DemandShareCache();
   readonly #engines = new Map<string, Promise<Engine.Engine>>();
   readonly #transports = new Map<
     number,
@@ -446,7 +460,12 @@ export class ServingPlane {
 
   constructor(endpoint: ServingPlaneEndpoint) {
     this.#endpoint = endpoint;
-    this.#server = new PlaneMemoryServer(this, endpoint, this.#sessions);
+    this.#server = new PlaneMemoryServer(
+      this,
+      endpoint,
+      this.#sessions,
+      this.#demandShares,
+    );
     this.#loopback = { createTransport: () => this.#createTransport() };
     endpoint.onNotice("observer.commitAdmitted", ({ notice }) => {
       this.#observer?.commitAdmitted?.(notice);
@@ -456,12 +475,16 @@ export class ServingPlane {
     });
     endpoint.onNotice(
       "observer.demandChanged",
-      ({ space, reason, principal }) => {
-        this.#observer?.demandChanged?.(space, reason, principal);
+      ({ space, reason, principal, sessionId }) => {
+        this.#demandShares.noteChanged(space, sessionId);
+        this.#observer?.demandChanged?.(space, reason, principal, sessionId);
       },
     );
     endpoint.onNotice("observer.sessionChanged", ({ event }) => {
       this.#sessions.apply(event);
+      if (event.kind === "removed") {
+        this.#demandShares.forget(event.space, event.sessionId);
+      }
       this.#observer?.sessionChanged?.(event);
     });
     endpoint.onNotice("loopback.frame", ({ transport, frame }) => {

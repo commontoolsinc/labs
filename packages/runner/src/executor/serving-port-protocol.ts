@@ -116,6 +116,14 @@ export type PlaneRequests = {
     params: { space: string; excludePrincipal: string | undefined };
     result: SessionDemand[];
   };
+  "server.demandForSessions": {
+    params: {
+      space: string;
+      sessionIds: string[];
+      excludePrincipal: string | undefined;
+    };
+    result: SessionDemand[];
+  };
   "server.viewInterestsForSpace": {
     params: { space: string; excludePrincipal: string | undefined };
     result: SessionViewInterest[];
@@ -221,6 +229,7 @@ export type BridgeNotices = {
     space: string;
     reason: DemandChangeReason | undefined;
     principal: string | undefined;
+    sessionId: string | undefined;
   };
   "observer.sessionChanged": { event: SessionLifecycleEvent };
   "loopback.frame": { transport: number; frame: string };

@@ -614,7 +614,11 @@ test process's loggers do not reach a worker. A worker takes no closure, so a
 test that passes
 `prepareStorageManager`, a diagnostic hook other than `onActivationSettled` or
 `onSpaceParked`, or verbs built from closures to the host says `worker: false`
-and runs its loop on this thread whatever the environment.
+and runs its loop on this thread whatever the environment. The store
+read-through is selected the same way: a `policy` that leaves
+`storeReadThrough` unset takes it from `SERVER_EXECUTION_STORE_READ_THROUGH`
+([`EXPERIMENTAL_OPTIONS.md`](EXPERIMENTAL_OPTIONS.md#server_execution_store_read_through)),
+so a lane runs every test that does not decide the posture itself under it.
 
 ```ts
 // Shown at module scope.

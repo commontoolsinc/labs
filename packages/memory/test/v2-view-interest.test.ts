@@ -468,7 +468,7 @@ describe("view interests", () => {
       expect(demanded()).not.toContain("of:unborn");
       expect(demanded()).toContain("of:arriving");
       expect(changed.calls.slice(notifications).map((call) => call.args))
-        .toEqual([[space, "push-growth", principal]]);
+        .toEqual([[space, "push-growth", principal, sessionId]]);
       messages.length = 0;
       await server.writeDocument(space, "of:unborn", { label: "orphan" });
       await server.flushSessions();
