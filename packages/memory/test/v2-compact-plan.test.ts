@@ -9,7 +9,12 @@ import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 
 import { applyCommit, close, type Engine, open } from "../v2/engine.ts";
-import { normalizePrefixes, planCompaction } from "../v2/compact.ts";
+import {
+  type CompactionReport,
+  formatCompactionReport,
+  normalizePrefixes,
+  planCompaction,
+} from "../v2/compact.ts";
 
 const A = "computed:a";
 const B = "computed:b";
@@ -331,6 +336,171 @@ describe("planCompaction", () => {
         selection: { prefixes: ["computed:"] },
       });
       expect(report.preconditions.foreignKeyViolations).toBe(1);
+    });
+  });
+
+  it("restricts the selection to one scope kind", async () => {
+    await withStore((db) => {
+      // Per-user and per-session instances of a computed id, as rows: the
+      // planner reads the tables, and a scope key is a column to it.
+      const seq = db.prepare(`SELECT MAX(seq) AS seq FROM "commit"`).get<
+        { seq: number }
+      >()!.seq;
+      for (
+        const [scopeKey, index] of [["user:did:key:zU", 0], [
+          "session:did:key:zU:s1",
+          1,
+        ]] as const
+      ) {
+        db.exec(
+          `INSERT INTO revision (branch, id, scope_key, seq, op_index, op, data, commit_seq)
+           VALUES ('', 'computed:scoped', '${scopeKey}', ${
+            seq - 1
+          }, ${index}, 'set', '{"value":0}', ${seq - 1}),
+                  ('', 'computed:scoped', '${scopeKey}', ${seq}, ${index}, 'patch', '[]', ${seq});
+           INSERT INTO head (branch, id, scope_key, seq, op_index, op)
+           VALUES ('', 'computed:scoped', '${scopeKey}', ${seq}, ${index}, 'patch');`,
+        );
+      }
+      const all = planCompaction(db, {
+        selection: { prefixes: ["computed:"] },
+      });
+      expect(all.instances.matched).toBe(4);
+      const space = planCompaction(db, {
+        selection: { prefixes: ["computed:"], scope: "space" },
+      });
+      expect(space.instances.matched).toBe(2);
+      expect(space.largest.map((plan) => plan.scopeKey)).toEqual(["space"]);
+      const user = planCompaction(db, {
+        selection: { prefixes: ["computed:"], scope: "user" },
+      });
+      expect(user.instances).toEqual({
+        matched: 1,
+        truncated: 1,
+        materialized: 1,
+        headOpChanges: 1,
+      });
+      expect(user.largest[0].scopeKey).toBe("user:did:key:zU");
+      const session = planCompaction(db, {
+        selection: { prefixes: ["computed:"], scope: "session" },
+      });
+      expect(session.largest[0].scopeKey).toBe("session:did:key:zU:s1");
+      expect(() => planCompaction(db, { selection: { prefixes: [""] } }))
+        .toThrow("not empty");
+    });
+  });
+
+  it("lists the ten instances losing the most rows", async () => {
+    await withStore((db, engine) => {
+      // Twelve more instances, the later ones losing more rows than the
+      // earlier, so each displaces a listed one; with computed:a that is
+      // thirteen candidates for a list of ten.
+      let local = 1000;
+      for (let index = 0; index < 12; index++) {
+        const id = `computed:many-${String(index).padStart(2, "0")}`;
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(local++, [{
+            op: "set",
+            id,
+            value: { value: { n: 0 } },
+          }]),
+        });
+        for (let patch = 0; patch <= index; patch++) {
+          applyCommit(engine, {
+            sessionId: "s:a",
+            commit: commit(local++, [{
+              op: "patch",
+              id,
+              patches: [{ op: "replace", path: "/value/n", value: patch + 1 }],
+            }]),
+          });
+        }
+      }
+      const report = planCompaction(db, {
+        selection: { prefixes: ["computed:"] },
+      });
+      expect(report.instances.truncated).toBe(13);
+      expect(report.largest.length).toBe(10);
+      expect(report.largest[0].id).toBe(A);
+      expect(
+        report.largest.every((plan, i) =>
+          i === 0 || plan.rowsDeleted <= report.largest[i - 1].rowsDeleted
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("formats the report an operator reads", async () => {
+    await withStore((db) => {
+      const plain = formatCompactionReport(
+        planCompaction(db, { selection: { prefixes: ["computed:"] } }),
+      );
+      for (
+        const expected of [
+          "selection  computed:",
+          "the head of every selected instance",
+          "2 matched, 1 lose rows, 1 boundaries materialized, 1 head ops change",
+          "15 rows deleted",
+          "one branch; genesis present; foreign keys intact; op_* rows 0",
+          "local_seq 1",
+          "largest    rows deleted",
+          "computed:a (space)",
+          "elapsed",
+        ]
+      ) {
+        expect(plain).toContain(expected);
+      }
+
+      const fifth = db.prepare(
+        `SELECT seq FROM revision WHERE id = ? ORDER BY seq ASC LIMIT 1 OFFSET 5`,
+      )
+        .get<{ seq: number }>(A)!.seq;
+      const newest =
+        db.prepare(`SELECT MAX(created_at) AS at FROM "commit"`).get<
+          { at: string }
+        >()!.at;
+      const bounded = formatCompactionReport(planCompaction(db, {
+        selection: { prefixes: ["computed:", "of:"], scope: "space" },
+        cut: { beforeSeq: fifth, before: newest, keepLast: 2 },
+      }));
+      expect(bounded).toContain("scope=space");
+      expect(bounded).toContain(`before-seq ${fifth}, before ${newest} (seq `);
+      expect(bounded).toContain("keep-last 2");
+
+      // Sizes past a gigabyte print as such; the rest in megabytes.
+      const report: CompactionReport = planCompaction(db, {
+        selection: { prefixes: ["computed:"] },
+      });
+      report.revisions.bytesDeleted = 2_500_000_000;
+      expect(formatCompactionReport(report)).toContain("2.50 GB");
+
+      // Every refusal the checks line can carry.
+      db.exec(`PRAGMA foreign_keys = OFF`);
+      db.exec(
+        `INSERT INTO revision (branch, id, scope_key, seq, op_index, op, data, commit_seq)
+         VALUES ('', 'of:dangling', 'space', 999, 0, 'set', '{"value":1}', 999)`,
+      );
+      db.exec(
+        `DROP TABLE op_field_epoch; DROP TABLE op_checkpoint; DROP TABLE snapshot; DROP TABLE branch;`,
+      );
+      db.exec(`DELETE FROM "commit" WHERE seq = 1`);
+      const refused = formatCompactionReport(
+        planCompaction(db, { selection: { prefixes: ["computed:"] } }),
+      );
+      for (
+        const expected of [
+          "branch table ABSENT (not checked)",
+          "REFUSED: no commit 1",
+          // The dangling row, and the genesis revision orphaned with its commit.
+          "REFUSED: 2 foreign-key violation(s)",
+          "op_* tables ABSENT (op_field_epoch, op_checkpoint)",
+          "snapshot table ABSENT",
+          "REFUSED: a store missing tables is not one a run will write",
+        ]
+      ) {
+        expect(refused).toContain(expected);
+      }
     });
   });
 });
