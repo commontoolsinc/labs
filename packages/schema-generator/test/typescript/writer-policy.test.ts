@@ -6,6 +6,7 @@ import {
   carriesWriterPolicy,
   holdsWriterPolicy,
   writerPolicyHeldBy,
+  writerPolicyHeldWithin,
 } from "../../src/typescript/writer-policy.ts";
 import { createTestProgram } from "../utils.ts";
 
@@ -106,6 +107,30 @@ describe("writer-policy", () => {
       expect(carriesWriterPolicy(types.labelled, checker)).toBe(false);
       expect(carriesWriterPolicy(types.member, checker)).toBe(false);
       expect(carriesWriterPolicy(types.plain, checker)).toBe(false);
+    });
+  });
+
+  describe("writerPolicyHeldWithin", () => {
+    it("names the alias that writes the policy a value the type holds carries", async () => {
+      const { checker, types } = await typesOf({
+        single: "{ value: Policy }",
+        set:
+          "{ byIndex: { [index: number]: WritePolicyAnyOf<string, [Policy]> } }",
+        stamped:
+          "{ value: Stamped<string, { readonly writePolicyAnyOf: [Policy] }> }",
+        labelled: '{ value: Confidential<string, ["secret"]> }',
+      });
+
+      expect(writerPolicyHeldWithin(types.single, checker)).toBe(
+        "WriteAuthorizedBy",
+      );
+      expect(writerPolicyHeldWithin(types.set, checker)).toBe(
+        "WritePolicyAnyOf",
+      );
+      expect(writerPolicyHeldWithin(types.stamped, checker)).toBe(
+        "WritePolicyAnyOf",
+      );
+      expect(writerPolicyHeldWithin(types.labelled, checker)).toBeUndefined();
     });
   });
 

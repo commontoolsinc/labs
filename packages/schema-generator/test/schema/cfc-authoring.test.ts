@@ -4266,6 +4266,24 @@ describe("Schema: CFC authoring aliases", () => {
       expect(diagnostics[0]!.message).toContain("`WritePolicyAnyOf`");
     });
 
+    it("names `WritePolicyAnyOf` for a policy set only a number index signature beside a string one holds", async () => {
+      const { diagnostics } = await generate(
+        `{ byIndex: {
+          [key: string]: unknown;
+          [index: number]: WritePolicyAnyOf<
+            string,
+            [WriteAuthorizedBy<unknown, typeof save>]
+          >;
+        } }`,
+        true,
+      );
+
+      expect(reports(diagnostics)).toEqual([
+        "error cfc-write-authorized-by:unread",
+      ]);
+      expect(diagnostics[0]!.message).toContain("`WritePolicyAnyOf`");
+    });
+
     it("reports a writer unread under a node the `definesDocument` hint marks, in a schema that otherwise views a document", async () => {
       // A fresh value a pattern's inferred result returns is data the result
       // document holds itself, inside a result that views other documents.

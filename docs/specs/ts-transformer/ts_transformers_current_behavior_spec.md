@@ -2470,12 +2470,18 @@ each operand of a fallback, wherever on the member spine it sits, a call on
 - a capture leaf printed from its type is read as the annotation of the member
   or binding it holds the value of, where that annotation denotes the type at
   hand and names a value binding, as `PolicyOf<typeof rules>` does
-  (`namesValueBinding` in `ast/type-building.ts`). The print spells the binding
+  (`readBindingAnnotation` and `namesValueBinding` in the schema generator's
+  `src/typescript/value-annotation.ts`). The print spells the binding
   as the structural type of the value it names, from which schema generation
   could not tell the binding. The leaf records the annotation as its `spelledBy`
   schema hint, and a print of the same type that a later pass rebuilds it into
-  keeps the hint; schema generation reads the node as the annotation spells the
-  type at hand (the schema-generator mapping spec's §13). A value captured whole
+  keeps the hint. A leaf that keeps its declaration's own node instead, as a
+  scope wrapper's does (`getPreservedTypeForBindingElement`), records no hint,
+  and a print a later pass rebuilds it into, of the whole value that node
+  spells, takes that node as its hint where the node names a value binding
+  (`carryNarrowing` in `transformers/type-shrinking.ts`). Schema generation
+  reads the node as the annotation spells the type at hand (the
+  schema-generator mapping spec's §13). A value captured whole
   thus keeps a label that names a binding, as a part of it does
   (`buildTypeElementsFromCaptureTree` in `ast/type-building.ts`;
   `carryNarrowing` in `transformers/type-shrinking.ts`;
@@ -2486,6 +2492,19 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   captures, with or without a nullable member (the schema-generator mapping
   spec's §8; `test/narrowed-capture-labels.test.ts` and the runner's
   `test/cfc-narrowed-capture-floor.test.ts`)
+- a lift-applied callback whose result is inferred, and which returns the value
+  of one binding or member, as its expression body or as the one statement of
+  its block, inside any parentheses, records that binding's annotation as its printed result's
+  `spelledBy` hint, by the same rule (`returnedValue` in
+  `closures/strategies/lift-applied-strategy.ts`), where every `typeof` the
+  annotation names is a `PolicyOf`'s rules. One that names a writer leaves the
+  result read from its type, as the result views the document that stores the
+  writer's policy, and reads that policy in part. A callback with several
+  returns may return the values of several bindings whose types are one type,
+  so it records none. A result written as an object literal is read member by
+  member at the annotations of the bindings its members read (the
+  schema-generator mapping spec's §13; the runner's
+  `test/cfc-result-policy-binding.test.ts`)
 - a pass that reads the structure of a node printed from a type reads the
   print's unfolding in its place: a node of the print's own kind built from the
   type it was printed from, each type node below it printed afresh from its own
