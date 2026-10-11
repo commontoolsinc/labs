@@ -453,7 +453,7 @@ describe("piece source reconciliation", () => {
 
       /** A running piece following the tracked pattern's system origin, current
        * at v1, with the route's advertised source switchable to v2. */
-      async function followingPiece() {
+      async function followingPiece(record?: (url: URL) => void) {
         const v1Identity = await identityFor(source("v1"));
         const v2Identity = await identityFor(source("v2"));
         let served = "v1";
@@ -461,6 +461,7 @@ describe("piece source reconciliation", () => {
           servingFetch(
             () => served === "v1" ? v1Identity : v2Identity,
             () => source(served),
+            record,
           ),
         );
         await stampSource(piece, PARENT_SOURCE);
@@ -497,6 +498,67 @@ describe("piece source reconciliation", () => {
 
         redeploy();
         replace(other.did());
+        await settle();
+
+        expect(getPatternIdentityRef(piece)).toEqual({
+          identity: v1Identity,
+          symbol: SYMBOL,
+        });
+      });
+
+      it("revalidates an unchanged piece once per replacement", async () => {
+        const replace = captureSessionReplaced();
+        const requests: string[] = [];
+        const { piece } = await followingPiece((url) => {
+          if (url.searchParams.has("identity")) requests.push(url.href);
+        });
+        requests.length = 0;
+
+        replace(piece.space);
+        await settle();
+
+        expect(requests).toHaveLength(1);
+      });
+
+      it("leaves a piece stopped while its legacy origin migrated on its source", async () => {
+        const replace = captureSessionReplaced();
+        const v1Identity = await identityFor(source("v1"));
+        const v2Identity = await identityFor(source("v2"));
+        let served = "v1";
+        const piece = await preparePiece(
+          servingFetch(
+            () => served === "v1" ? v1Identity : v2Identity,
+            () => source(served),
+          ),
+        );
+        await stampSource(piece, PARENT_PATH);
+        expect(await runtime.start(piece)).toBe(true);
+
+        const entered = defer<void>();
+        const release = defer<void>();
+        const read = runtime.patternManager.getPatternSourceProgramByIdentity
+          .bind(runtime.patternManager);
+        const held = stub(
+          runtime.patternManager,
+          "getPatternSourceProgramByIdentity",
+          async (...args) => {
+            entered.resolve();
+            await release.promise;
+            return await read(...args);
+          },
+        );
+        try {
+          const reconciled = reconcile(piece);
+          await entered.promise;
+          runtime.runner.stop(piece);
+          release.resolve();
+          await reconciled;
+        } finally {
+          held.restore();
+        }
+
+        served = "v2";
+        replace(piece.space);
         await settle();
 
         expect(getPatternIdentityRef(piece)).toEqual({

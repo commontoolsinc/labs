@@ -4,7 +4,10 @@
  * {@link SourceReconciler.reconcile} runs when a piece is opened: it reads the
  * origin the piece records, resolves it, and adopts the source it names when
  * that source has moved. Nothing reconciles a piece nobody opened, and no kind
- * of piece — a space root included — has a path of its own.
+ * of piece — a space root included — has a path of its own. A piece it follows
+ * is reconciled again when its source can have moved since: a fabric origin
+ * when the entity it names changes, and a `system:` origin when its space's
+ * memory session is replaced, as a host restart replaces every session.
  *
  * A user opening a piece is what opens most of them. The runtime also opens the
  * surfaces it instantiates for itself, and {@link SourceReconciler.open} is how:
@@ -511,7 +514,7 @@ export class SourceReconciler {
 
   /** Reconciles each piece following a system origin in `space` again. */
   #followSystemSources(space: MemorySpace): void {
-    for (const follower of this.#systemFollowers.values()) {
+    for (const follower of [...this.#systemFollowers.values()]) {
       if (follower.space === space) this.#reconcileFromSourceEvent(follower);
     }
   }
@@ -674,7 +677,11 @@ export class SourceReconciler {
         return this.#followFabric(resultCell, state, origin, signal);
       case "system":
         this.#unwatchSource(resultCell);
-        this.#systemFollowers.set(key, resultCell);
+        // A pass that a stop aborted while a legacy origin migrated must not
+        // follow the piece the stop released.
+        if (!signal.aborted && !this.#disposed) {
+          this.#systemFollowers.set(key, resultCell);
+        }
         return this.#followSystem(
           resultCell,
           state,
