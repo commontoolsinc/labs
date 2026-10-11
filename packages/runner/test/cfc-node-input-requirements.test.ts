@@ -750,8 +750,9 @@ describe("cfc node input requirements", () => {
   describe("references and absence", () => {
     const resolutionWith = (
       graphSchema?: JSONSchema,
+      path: readonly string[] = ["gate"],
     ): NodeInputResolution => ({
-      requirements: [{ path: ["gate"], requiredIntegrity: ["owner-gate"] }],
+      requirements: [{ path, requiredIntegrity: ["owner-gate"] }],
       codeSchemaKnown: true,
       codeSchema: undefined,
       graphSchema,
@@ -763,6 +764,7 @@ describe("cfc node input requirements", () => {
           graphSchema?: JSONSchema,
           // Writes in the checking transaction before the check.
           writeFirst?: (tx: IExtendedStorageTransaction) => void,
+          path?: readonly string[],
         ) => readonly unknown[],
         link: (schema?: unknown, path?: string[]) => unknown,
         write: (value: unknown) => Promise<void>,
@@ -800,6 +802,7 @@ describe("cfc node input requirements", () => {
           binding: unknown,
           graphSchema?: JSONSchema,
           writeFirst?: (tx: IExtendedStorageTransaction) => void,
+          path?: readonly string[],
         ) => {
           const tx = runtime.edit();
           try {
@@ -809,7 +812,7 @@ describe("cfc node input requirements", () => {
               "code",
               binding,
               base,
-              resolutionWith(graphSchema),
+              resolutionWith(graphSchema, path),
               internalVerifierRead,
             );
           } finally {
@@ -866,6 +869,30 @@ describe("cfc node input requirements", () => {
               )),
           ),
         ).toBe("input requiredIntegrity failed at /gate of code");
+      });
+    });
+
+    // A requirement on a collection's members, where a reference's own path
+    // or a missing document leads to no collection at all: no member is
+    // there to hold to it. The same absence under a requirement on the
+    // position itself is still refused.
+    it("requires nothing of the members of a collection a reference finds absent", async () => {
+      await withDocument(async (refusals, link, write) => {
+        await write({});
+        const members = ["gate", "*"];
+        expect(refusals({ gate: link() }, undefined, undefined, members))
+          .toEqual([]);
+        expect(
+          refusals(
+            { gate: link(undefined, ["nowhere", "list"]) },
+            undefined,
+            undefined,
+            members,
+          ),
+        ).toEqual([]);
+        expect(reason(refusals({ gate: link(undefined, ["nowhere"]) }))).toBe(
+          "input requiredIntegrity failed at /gate of code",
+        );
       });
     });
 
