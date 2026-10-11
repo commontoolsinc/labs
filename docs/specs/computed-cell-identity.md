@@ -179,10 +179,13 @@ these that applies:
    up there, if any, and whether another instance keeps that child.
 
 A child is carried over by one instance at most. A start's pre-sync loads the
-previous pattern by identity first. The carried child's link is recorded by
-instance name in the parent's `instanceChildren` meta, and binding the
-instance reads it there on every later start, so carrying a child over is a
-one-time transition for each deployed parent.
+previous pattern by identity first, and syncs the children at the positional
+spots the parent's manifest records and at the positional causes the previous
+pattern gives the instances it names, so the steps above find them in a runtime
+that has not read them yet. The carried child's link is recorded by instance
+name in the parent's `instanceChildren` meta, and binding the instance reads it
+there on every later start, so carrying a child over is a one-time transition
+for each deployed parent.
 
 Step 4 is what a parent does with no instance names at all, short of a sign that
 its children moved, so carrying a child over is never worse than running
