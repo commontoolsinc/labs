@@ -235,6 +235,16 @@ const ARRAY_IDENTITY_WRITER_METHODS = new Set([
   ...mergeableMethods("array-identity-writer"),
 ]);
 const ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS = new Set(["slice"]);
+/**
+ * Array methods whose result is an array of the receiver's own elements, so
+ * the result aliases the receiver.
+ */
+const ELEMENT_SUBSET_METHODS = new Set(["filter", "sort", "toSorted", "slice"]);
+/**
+ * Array methods whose result is one of the receiver's elements, so the result
+ * aliases an element of the receiver.
+ */
+const ELEMENT_LOOKUP_METHODS = new Set(["find", "findLast", "at"]);
 // The mergeable tail-append ops: the catalog methods that commit as a mergeable
 // `append`, which drops the op's own array read from conflict detection. A
 // handler that also reads the same collection then has a fragile read-then-push
@@ -2471,7 +2481,8 @@ export function analyzeFunctionCapabilities(
     // to a local, or written into a local collection, stays tracked. An
     // argument stays tracked when the callee's summary or declared signature
     // charged it, when the callee binds it by reference — a runtime call, a
-    // write through a cell — or when the callee only asks its shape. A value
+    // write through a cell — when it only compares it by identity, or when
+    // it only asks its shape. A value
     // a builder's callback returns is handed on by reference, this function's
     // own included when it is one; a helper's return is a value its caller
     // goes on to read. A value read where it stands is charged there.
@@ -2492,9 +2503,21 @@ export function analyzeFunctionCapabilities(
             !signatureCapabilityArgumentUses.has(destination.argument) &&
             !isLocalCollectionWrite(destination.call, destination.argument) &&
             !isRuntimeCall(destination.call) &&
+            !(
+              ts.isCallExpression(destination.call) &&
+              isKnownIdentityArgumentCall(destination.call, checker)
+            ) &&
             !isCellWrite(destination.call) &&
             !isArrayIsArrayCall(destination.call, checker);
       }
+    };
+
+    // Whether `usage` is an argument that a known identity call only compares.
+    const isIdentityOnlyArgument = (usage: ts.Expression): boolean => {
+      const parent = usage.parent;
+      return !!parent && ts.isCallExpression(parent) &&
+        parent.arguments.includes(usage) &&
+        isKnownIdentityArgumentCall(parent, checker);
     };
 
     const getIdentifierName = (
@@ -2607,16 +2630,20 @@ export function analyzeFunctionCapabilities(
         ts.isPropertyAccessExpression(current) ||
         ts.isElementAccessExpression(current)
       ) {
+        // The receiver is read through the wrappers that do not change its
+        // value, so `rows.find(...)!.id` reads the found row's `id` exactly as
+        // `rows.find(...)?.id` does.
+        const receiver = unwrapExpression(current.expression);
         const innerBinding = resolveBinding(current.expression) ??
-          (ts.isCallExpression(current.expression)
-            ? buildAliasBindingFromExpression(current.expression)
+          (ts.isCallExpression(receiver)
+            ? buildAliasBindingFromExpression(receiver)
             : undefined);
         const key = ts.isPropertyAccessExpression(current)
           ? current.name.text
           : getStaticElementKey(current.argumentExpression, checker);
         if (innerBinding && key !== undefined) {
-          if (ts.isCallExpression(current.expression)) {
-            pendingResolvedGetCalls?.push(current.expression);
+          if (ts.isCallExpression(receiver)) {
+            pendingResolvedGetCalls?.push(receiver);
           }
           return resolveShapePath(innerBinding, [key]);
         }
@@ -2626,8 +2653,8 @@ export function analyzeFunctionCapabilities(
           innerBinding && key === undefined &&
           isSourceRefBinding(innerBinding)
         ) {
-          if (ts.isCallExpression(current.expression)) {
-            pendingResolvedGetCalls?.push(current.expression);
+          if (ts.isCallExpression(receiver)) {
+            pendingResolvedGetCalls?.push(receiver);
           }
           const prefix = materializeSourceRef(innerBinding);
           return { root: prefix.root, path: prefix.path, dynamic: true };
@@ -2650,6 +2677,14 @@ export function analyzeFunctionCapabilities(
         const receiverBinding = resolveBinding(current.expression.expression);
         if (receiverBinding && isSourceRefBinding(receiverBinding)) {
           if (methodName === "get" && current.arguments.length === 0) {
+            return receiverBinding;
+          }
+          // The cell `resolveAsCell()` hands back is the receiver's, followed
+          // to its target, so what is done through it is done to the
+          // receiver. The call itself is charged where it is visited.
+          if (
+            methodName === "resolveAsCell" && current.arguments.length === 0
+          ) {
             return receiverBinding;
           }
           if (methodName === "key") {
@@ -2732,17 +2767,15 @@ export function analyzeFunctionCapabilities(
         const receiverExpr = current.expression.expression;
         const methodName = getCallMethodName(current.expression);
         if (
-          receiverExpr &&
-          (methodName === "filter" || methodName === "sort" ||
-            methodName === "toSorted" || methodName === "slice")
+          receiverExpr && methodName !== undefined &&
+          ELEMENT_SUBSET_METHODS.has(methodName)
         ) {
           return resolveBinding(receiverExpr);
         }
 
         if (
-          receiverExpr &&
-          (methodName === "find" || methodName === "findLast" ||
-            methodName === "at")
+          receiverExpr && methodName !== undefined &&
+          ELEMENT_LOOKUP_METHODS.has(methodName)
         ) {
           const binding = resolveArrayElementBinding(receiverExpr);
           if (binding && isSourceRefBinding(binding)) {
@@ -3159,10 +3192,15 @@ export function analyzeFunctionCapabilities(
         return undefined;
       }
 
+      // The callee is analyzed in the caller's mode: a caller that sees into
+      // its own nested callbacks must see into the callee's too, or what the
+      // callee does in one goes uncharged. Each summary cache is handed
+      // analyses of one mode only.
       return analyzeFunctionCapabilities(declaration, {
         checker,
         typeRegistry,
         interprocedural: true,
+        includeNestedCallbacks,
         summaryCache,
         inProgress,
       });
@@ -3671,12 +3709,7 @@ export function analyzeFunctionCapabilities(
             const resolvedSource = materializeSourceRef(source);
             const usage = outermostTransparentWrapper(node);
             const parent = usage.parent;
-            const identityOnlyArgumentUse = !!(
-              parent &&
-              ts.isCallExpression(parent) &&
-              parent.arguments.includes(usage) &&
-              isKnownIdentityArgumentCall(parent, checker)
-            );
+            const identityOnlyArgumentUse = isIdentityOnlyArgument(usage);
             // A value below the root that leaves the analysis whole is read
             // in full wherever it lands, so it is charged as a full-shape
             // read rather than a plain one: a plain read at a path keeps the
@@ -3693,8 +3726,7 @@ export function analyzeFunctionCapabilities(
             // whatever it reaches may read anything beneath it.
             if (
               !resolvedSource.dynamic && resolvedSource.path.length === 0 &&
-              !wholeValueEscape && !identityOnlyArgumentUse &&
-              escapesWhole(node)
+              !wholeValueEscape && escapesWhole(node)
             ) {
               recordEscape(resolvedSource.root, []);
             }
@@ -3869,7 +3901,10 @@ export function analyzeFunctionCapabilities(
             // destructured identifier; don't add a second read here.
             !signatureCapabilityArgumentUses.has(
               outermostTransparentWrapper(node),
-            )
+            ) &&
+            // A member a known identity call only compares is an identity use,
+            // recorded where the call is visited; a read here would end it.
+            !isIdentityOnlyArgument(outermostTransparentWrapper(node))
           ) {
             const ref = resolveSourceRef(node);
             if (ref) {
@@ -3945,6 +3980,23 @@ export function analyzeFunctionCapabilities(
           recordLocalMapSet(localReceiverName, node.arguments[1]);
         }
 
+        // An element a lookup finds, or the array of elements a subset
+        // returns, is a tracked value like the receiver it came from. Leaving
+        // the function whole — returned to a caller, handed to a callee with
+        // no summary — it is read in full where it lands, as a tracked
+        // identifier is. Read where it stands, it is charged by the member
+        // read that consumes it.
+        if (
+          localMethodName !== undefined &&
+          (ELEMENT_LOOKUP_METHODS.has(localMethodName) ||
+            ELEMENT_SUBSET_METHODS.has(localMethodName))
+        ) {
+          const derived = buildAliasBindingFromExpression(node);
+          if (derived && isSourceRefBinding(derived) && escapesWhole(node)) {
+            trackEscapeRef(materializeSourceRef(derived));
+          }
+        }
+
         const identityEqualsCall = isKnownIdentityEqualsCall(node, checker);
         const identityArgumentCall = isKnownIdentityArgumentCall(node, checker);
         const capabilityHandledArgs = new Set<number>();
@@ -3964,12 +4016,37 @@ export function analyzeFunctionCapabilities(
             capabilityHandledArgs.add(index);
             summaryHandledArgumentUses.add(argument);
 
-            if (source.dynamic || paramSummary.wildcard) {
-              markWildcard(source.root, source.path);
-              continue;
-            }
             if (paramSummary.hasUnverifiedCellUse) {
               markUnverifiedCellUse(source.root);
+            }
+            if (source.dynamic || paramSummary.wildcard) {
+              if (source.dynamic || source.path.length === 0) {
+                markWildcard(source.root, source.path);
+              } else {
+                // The callee's unknown access reaches only the value passed,
+                // not the members beside it: that value is read whole, its
+                // siblings narrow as their own reads say, and what the
+                // callee may write through it stays unverified.
+                trackEscapeRef(source);
+                markUnverifiedCellUse(source.root);
+              }
+              // A wildcard hides which members the callee touches, not that
+              // it reads or writes the argument. Its reads and writes still
+              // land on the argument, at the static prefix where the
+              // argument's own key is dynamic.
+              const at = (path: readonly string[]): SourceRef =>
+                source.dynamic ? source : {
+                  root: source.root,
+                  path: [...source.path, ...path],
+                  dynamic: false,
+                };
+              for (const readPath of paramSummary.readPaths) {
+                trackReadRef(at(readPath));
+              }
+              for (const writePath of paramSummary.writePaths) {
+                trackWriteRef(at(writePath));
+              }
+              continue;
             }
 
             for (const readPath of paramSummary.readPaths) {
@@ -4094,6 +4171,17 @@ export function analyzeFunctionCapabilities(
               } else {
                 trackReadRef(receiver);
               }
+            } else if (methodName === "resolveAsCell") {
+              // Resolving reads the receiver's links. The resolved cell may be
+              // handed anywhere and read there, so the receiver is kept whole;
+              // what may be written through it where the alias is not followed
+              // stays unverified. Reads and writes through the alias are
+              // charged where they occur.
+              if (!checker || isCellLikeExpression(receiverExpression)) {
+                markUnverifiedCellUse(receiver.root);
+              }
+              trackReadRef(receiver);
+              trackFullShapeReadRef(receiver);
             } else if (methodName === "elementById") {
               // Addresses a separately derived entity; attribute the access
               // conservatively to the whole array root.
@@ -4250,10 +4338,16 @@ export function analyzeFunctionCapabilities(
           }
         }
         if (identityArgumentCall) {
+          // An `assert` body's operand recording wraps each argument, and
+          // which source an argument comes from, and whether it is cell-like,
+          // are questions about the value the recording hands back. The
+          // member-access visit charges no read to a member argument and
+          // leaves its identity use to be recorded here.
           for (const argument of node.arguments) {
-            const source = resolveSourceRef(argument);
+            const comparedArgument = unwrapAssertCapture(argument);
+            const source = resolveSourceRef(comparedArgument);
             if (source) {
-              markIdentityUseRef(source, argument, {
+              markIdentityUseRef(source, comparedArgument, {
                 comparable: identityEqualsCall,
               });
             }

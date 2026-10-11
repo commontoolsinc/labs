@@ -73,10 +73,8 @@ const addPanel = handler({
         return;
     panels.set([...list, panel]);
 });
-function keep(value: unknown): boolean {
-    return value !== undefined;
-}
-__cfHardenFn(keep);
+// Declared without a body, so the analysis has no summary of what it reads.
+declare function keep(value: unknown): boolean;
 type PanelEvent = {
     panel: Writable<Panel>;
 };
@@ -139,7 +137,7 @@ const addThroughLocalHoldingRoot = handler({
     properties: {
         panel: {
             $ref: "#/$defs/Panel",
-            asCell: ["readonly"]
+            asCell: ["comparable"]
         }
     },
     required: ["panel"],
@@ -191,7 +189,7 @@ const addThroughRootFallback = handler({
     properties: {
         panel: {
             $ref: "#/$defs/Panel",
-            asCell: ["readonly"]
+            asCell: ["comparable"]
         }
     },
     required: ["panel"],
@@ -242,7 +240,7 @@ const addThroughArrayHoldingRoot = handler({
     properties: {
         panel: {
             $ref: "#/$defs/Panel",
-            asCell: ["readonly"]
+            asCell: ["comparable"]
         }
     },
     required: ["panel"],

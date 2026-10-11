@@ -89,7 +89,8 @@ If the server accepts the protocol, it returns:
     "presenceV1": true,
     "sessionClose": true,
     "admissionNotice": true,
-    "sessionReportV1": true
+    "sessionReportV1": true,
+    "syncCrossingsV1": true
   },
   "sessionOpen": {
     "audience": "did:key:z6Mk...",
@@ -234,6 +235,13 @@ in [Session Sync Payload](#423-session-sync-payload). It defaults to `false`
 when absent. The server sends compact sync payloads only when both peers
 advertise the capability; otherwise it sends the historical fully expanded
 shape.
+
+`syncCrossingsV1` is a server capability: its session sync payloads carry
+`crossings`, the links its schema traversals followed out of the space, as
+described in [Session Sync Payload](#423-session-sync-payload). It defaults to
+`false` when absent. A client of a server that does not advertise it finds
+those links by reading the documents it synced, and sends nothing on account
+of the flag.
 
 `entityIdListing` advertises support for `entity-id.list`. It defaults to
 `false` when absent. A client must not send the request unless the server
@@ -494,7 +502,14 @@ Rules:
   forever. A `retriable` authorization race (an expired, used, or mismatched
   challenge; a stale signed `exp`) or a transport-level disconnect can recover
   through retries on a transport that can discard its failed connection. A
-  permanent protocol-flag mismatch at `hello` ends the whole connection. See
+  `retriable` denial of a session that authenticates through `connection.auth`,
+  such as a router's while that space's toolshed is down, holds that session
+  alone: it keeps its watch intent and unconfirmed commits and retries its open
+  on the same connection with the reconnect backoff, while the connection's
+  other sessions restore. If a retry fails for a reason only a new connection
+  heals, the client discards the connection, after a backoff that grows with
+  each such restart. A permanent protocol-flag mismatch at `hello` ends the
+  whole connection. See
   [`../../features/authorization-failure-surfacing.md`](../../features/authorization-failure-surfacing.md)
   for how the client, the runner storage layer, and the CLI act on this
   classification end to end.
@@ -521,6 +536,7 @@ interface HelloMessage {
     stableExpressionResultIds?: boolean;
     messageCompressionV1?: boolean;
     syncSchemaTableV2?: boolean;
+    syncCrossingsV1?: boolean;
     entityIdListing?: boolean;
     entityIdPagination?: boolean;
     entityIdLookup?: boolean;
@@ -697,7 +713,9 @@ that space on this connection, and that the space's access list now grants
 of `READ`, and when an access-list change revokes a session for the same
 reason. An access-list commit that gives a recorded principal `READ` sends the
 notice to the connection the refusal was recorded on, and removes the record,
-so each refusal is told at most once. A change that leaves the principal
+so each refusal is told at most once. A grant written to the space's store by
+another process sends it at the space's next refresh turn after the server
+finds the change (see the capability cache under the ACL policy below). A change that leaves the principal
 without `READ` sends nothing, and the notice reaches no other connection.
 
 The notice is a hint and grants nothing. A client that acts on it opens the
@@ -756,6 +774,15 @@ interface SessionSync {
     branch: BranchId;
     id: EntityId;
   }>;
+  // Links the walks behind this frame's watches followed out of the space
+  // (servers advertising `syncCrossingsV1`; see below).
+  crossings?: Array<{
+    space: SpaceId;
+    id: EntityId;
+    scope?: CellScope;
+    path: string[];
+    schema?: JSONSchema;
+  }>;
 }
 ```
 
@@ -766,6 +793,20 @@ Semantics:
 - `deleted: true` means the entity is currently tombstoned
 - `removes` are not deletions in storage; they mean the entity is no longer in
   the session's relevant watch-set result
+- `crossings` are the value links a watch's schema traversal followed into
+  another space. The server walks one space, so it stops at such a link and
+  reports it instead: the target document by space, scope name, and id, and
+  the path within the document's value and the schema the read needed there,
+  which is what a walk rooted at the target would deliver. A client loads
+  each from the target space under that selector, so the documents a read
+  through the link reaches are local before anything reads them. A session
+  is told of each crossing once, on the first frame whose watches reach it,
+  and of all of them again on a `session.watch.set` that declares no
+  `holdings`. A crossing is a hint about what to load, never a holding: a
+  frame carrying only crossings is not empty, and a client that cannot load
+  a crossing's target, for want of access say, carries on without it. Only
+  servers advertising `syncCrossingsV1` send the field; a client of an
+  older server finds the links by reading what it synced.
 
 #### Negotiated schema-table encoding
 
@@ -832,8 +873,11 @@ carry them, so current servers leave alias schemas inline. Clients deployed
 against the earlier revision continue to expand references at alias schema
 positions, so those positions remain covered by the reservation rule below.
 
+The compaction interns the `schema` of each entry in `crossings` the same way,
+and the client expands it with the same table.
+
 The `schema-ref@2:` prefix is reserved in the `schema` field of `link@1` and
-`$alias` payloads. Link recognition follows the canonical cell-rep form — in
+`$alias` payloads, and of `crossings` entries. Link recognition follows the canonical cell-rep form — in
 the legacy representation, the single-key `{ "/": { "link@1": … } }`
 envelope — so an envelope carrying sibling keys is not a link and its contents
 are ordinary data. Memory servers MUST reject set or patch operations
@@ -1235,6 +1279,14 @@ refusal is permanent. One challenge accepts several keys, once each, so
 authenticating two keys needs no ordering between them. A client holding no
 usable challenge asks for one with `connection.challenge`.
 
+On direct connections the SDK shares a lease renewal's complete outcome with
+mounts for that key, including mounts arriving during the renewal's backoff.
+A retriable refusal keeps those mounts pending while the renewal retries with
+a fresh challenge. Its retry rate is independent of the number of waiting
+mounts. Permanent refusal, connection loss, client closure or failure, and a
+mount's cancellation end its wait. Canceling a mount leaves the renewal and
+other mounts running. Session restoration has its own retry policy.
+
 An authentication is a lease. It runs out at the invocation's `exp`, or an
 hour after it was accepted, whichever is sooner, and the response says
 which. From then on a `session.open` naming the principal is refused, a
@@ -1334,6 +1386,25 @@ The server's unauthenticated `writeDocument` operator path cannot create a
 fresh space or mutate the ACL document while ACL policy is active. Its access
 to ordinary documents in an already-created space remains a known deferred
 blob-authorization issue.
+
+The server caches, per space and principal, the capability the space's ACL
+resolves to. The cache is valid only for the store as it was when the entry
+was made: each space's entry records the store's SQLite `data_version`, read
+on the space's connection just before the ACL, and a cached decision is served
+only while a fresh reading matches. Otherwise the space's entries are dropped
+and the ACL is read again, on the current snapshot, before the operation is
+authorized. A commit the server makes to the ACL drops the entries itself. So
+a grant written to the space's store through another connection, by another
+process on the same host, admits its principal at that principal's next
+`session.open`, and a revocation written there refuses the principal's next
+command, without a restart. A change that lands while a request is being
+authorized is seen by the next request. When the dropped entries show the ACL
+document itself at a new revision, the space's next refresh turn also runs
+what follows an ACL commit the server makes: it revokes the sessions the
+change deauthorized, before any frame of that turn, and sends
+`session/admissible` for the principals it admits; the request that found the
+change schedules that turn. Each capability check costs one prepared pragma
+read.
 
 The challenge protects against replay of a captured signed `session.open` after
 the original WebSocket handshake has moved on.

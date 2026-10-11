@@ -42,8 +42,8 @@ import {
 } from "commonfabric";
 import {
   addParticipant,
-  participantEntries,
   type ParticipantRosterCell,
+  rosterProfiles,
 } from "../loom/participants.tsx";
 import {
   isSharedSpaceCatalog,
@@ -123,6 +123,43 @@ export const participantsOf = (
       profile === undefined || found.some((known) => equals(known, profile))
         ? found
         : [...found, profile],
+    [],
+  );
+
+/** A participant, with the principal their profile attests. */
+export interface ParticipantEntry {
+  /** The participant's profile. */
+  profile: ProfileCell;
+
+  /**
+   * The principal the profile's `represents-principal` label attests; absent
+   * when it attests none, or when the label can't be read where the entry is
+   * derived.
+   */
+  principal?: string;
+}
+
+/**
+ * One entry for each of `participants`, in their order, each with the
+ * principal its profile attests where that can be read.
+ */
+export const participantEntriesOf = (
+  participants: readonly ProfileCell[],
+): ParticipantEntry[] =>
+  participants.map((profile) => ({
+    profile,
+    principal: principalOf(profile, "represents-principal"),
+  }));
+
+/** The principals `entries` attest, each once, in the order of `entries`. */
+export const principalsOf = (
+  entries: readonly ParticipantEntry[],
+): string[] =>
+  entries.reduce<string[]>(
+    (found, { principal }) =>
+      principal === undefined || found.includes(principal)
+        ? found
+        : [...found, principal],
     [],
   );
 
@@ -547,11 +584,25 @@ export interface ChatRoomView {
   participants: ProfileCell[];
 
   /**
-   * The principal each of `participants` stands for, as its profile's
-   * `represents-principal` label attests it: each once, in the order of
-   * `participants`, leaving out a profile that attests none, or whose label
-   * can't be read where the list is derived. Like `participants`, it is not
+   * Those who joined the room itself, each added once through
+   * `addParticipant`, in the order they were added. Unlike `participants`, it
+   * lists no author it doesn't hold, and no participant of another space, so
+   * it is read from the roster alone. Like `participants`, it is a claim, not
    * proof of access.
+   */
+  roster: ProfileCell[];
+
+  /**
+   * One entry for each of `participants`, in their order: the profile, and the
+   * principal its `represents-principal` label attests, absent where it
+   * attests none or the label can't be read where the list is derived. Like
+   * `participants`, it is not proof of access.
+   */
+  participantEntries: ParticipantEntry[];
+
+  /**
+   * The principals `participantEntries` holds, each once, in the order of
+   * `participants`.
    */
   participantPrincipals: string[];
 
@@ -735,22 +786,21 @@ export const FabriChatRoomCore = pattern<
   // its own; a space whose root isn't there yet lists none.
   const space = wish<{ participants?: ProfileCell[] }>({ query: "#default" });
   const joined = computed(() =>
-    roster === undefined ? [] : participantEntries(roster)
+    roster === undefined ? [] : rosterProfiles(roster)
   );
   const listed = computed((): ProfileCell[] =>
     ownSpace ? [...joined] : [...(space.result?.participants ?? []), ...joined]
   );
   const participants = computed(() => participantsOf(listed, entries));
   // A profile lives in its owner's own space, and attests no one to a reader
-  // that space refuses, so the list is derived per session: one instance for
-  // every reader is one their runtimes hold differently.
+  // that space refuses, so the entries, and the principals taken from them,
+  // are derived per session: one instance for every reader is one their
+  // runtimes hold differently.
+  const participantEntries = computed((): PerSession<ParticipantEntry[]> =>
+    participantEntriesOf(participants)
+  );
   const participantPrincipals = computed((): PerSession<string[]> =>
-    participants.reduce<string[]>((found, participant) => {
-      const principal = principalOf(participant, "represents-principal");
-      return principal === undefined || found.includes(principal)
-        ? found
-        : [...found, principal];
-    }, [])
+    principalsOf(participantEntries)
   );
   const join = addParticipant({ roster });
   const canSend = computed(() => canActIn(messages, myProfile));
@@ -849,6 +899,8 @@ export const FabriChatRoomCore = pattern<
     recentActivity: activity,
     recentActivityExpiredThrough: expiredThrough,
     participants,
+    roster: joined,
+    participantEntries,
     participantPrincipals,
     addParticipant: join,
     messages: messageList,
@@ -1097,6 +1149,8 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       recentActivity: room.recentActivity,
       recentActivityExpiredThrough: room.recentActivityExpiredThrough,
       participants: room.participants,
+      roster: room.roster,
+      participantEntries: room.participantEntries,
       participantPrincipals: room.participantPrincipals,
       addParticipant: room.addParticipant,
       messages: room.messages,

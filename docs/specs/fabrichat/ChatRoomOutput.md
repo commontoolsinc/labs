@@ -18,7 +18,13 @@ interface ChatRoomOutput {
   /** The room's participants, plus any author it doesn't list. */
   participants: Cell<ChatProfile>[];
 
-  /** The principal each participant's profile attests, once each. */
+  /** Those who joined the room itself, in the order they joined. */
+  roster: Cell<ChatProfile>[];
+
+  /** Each participant's profile, with the principal it attests. */
+  participantEntries: { profile: Cell<ChatProfile>; principal?: string }[];
+
+  /** The principals `participantEntries` holds, once each. */
   participantPrincipals: string[];
 
   /** Adds a profile to those who joined the room, once. */
@@ -97,7 +103,7 @@ When the manager creates a space for a conversation, the creator and each
 other member hold OWNER. Its access list MUST NOT contain the `"*"`
 wildcard, so a room is not open to principals its space hasn't admitted,
 except for a group room its creator makes joinable by its link (see
-[`createGroup`](ChatManagerOutput.md#creategrouprequestid-string-members-string-title-string-joinablebylink-boolean)):
+[`createGroup`](ChatManagerOutput.md#creategrouprequestid-string-members-string-profiles-cellchatprofile-title-string-joinablebylink-boolean)):
 that one grants `"*"` WRITE, and its address is all that keeps it private. A
 direct room is never joinable by its link. A room in
 an existing space takes the space's access list as it is, and adds nothing to
@@ -154,15 +160,31 @@ space.
 - **`participants`** are links to profiles, compared with `equals()`: the
   profiles its space's root lists, as [membership](#membership) says, plus any
   author none of them is, each once. They are not proof of access.
-- **`participantPrincipals`** names the principal each of `participants` stands
-  for, as its profile's `represents-principal` label attests it: each once, in
-  the order of `participants`. A profile that attests none is left out, and so
-  is one whose label can't be read where the list is derived, as when the
-  profile's space refuses the reader, so two readers can read different lists.
-  It holds only the principals whose profiles can be read for the reader, so it
-  is a best-effort list of who is already in the room, not an access list, and
-  like `participants` it is a claim, not proof of access. A client uses it to
-  leave the people already in the room out of its own add control.
+- **`roster`** holds the profiles of those who joined the room itself, each
+  added once through
+  [`addParticipant`](#addparticipantprofile-cellchatprofile), in the order they
+  were added: for a room in a space of its own, its space's participants. It
+  lists no author it doesn't hold, so it is read from what the room stores
+  alone, without reading the room's messages, which is how a chat manager reads
+  who is in each of its user's rooms (see
+  [`ChatIndexEntry`](ChatIndexEntry.md#fields)). Like `participants`, it is a
+  claim, not proof of access.
+- **`participantEntries`** pairs each of `participants` with the principal it
+  stands for: one entry per participant, in the order of `participants`,
+  holding its `profile` and, as `principal`, the principal its profile's
+  `represents-principal` label attests. An entry has no `principal` when its
+  profile attests none, or when the label can't be read where the list is
+  derived, as when the profile's space refuses the reader, so two readers can
+  read different principals for the same participant. It is derived for each
+  reader and is best effort, not an access list, and like `participants` it is
+  a claim, not proof of access. A client uses it to name each participant and
+  to tell which of them is the reader, whose entry holds the reader's own
+  principal.
+- **`participantPrincipals`** is derivable from `participantEntries`: each
+  `principal` the entries hold, once, in the order of `participants`. Like the
+  entries, it is a best-effort list of who is already in the room, not an
+  access list. A client uses it to leave the people already in the room out of
+  its own add control.
 - **`messages`** is a [`ChatMessageList`](ChatMessageList.md): how many messages
   the room holds, the span of their times, and `latest`, the newest messages of
   the main conversation, which every member can read, a READ member included. It
@@ -200,14 +222,16 @@ client:
 
 - **`PerSpace`**: one instance for the whole room, the same for everyone the
   room's space admits. That is nearly everything: `about`, the messages,
-  `recentActivity` and `recentActivityExpiredThrough`, `participants`, and the
-  streams. These are the room: a link to the room names them, and passing the
-  link around, to another component or another person, passes the room.
+  `recentActivity` and `recentActivityExpiredThrough`, `participants` and
+  `roster`, and the streams. These are the room: a link to the room names them,
+  and passing the link around, to another component or another person, passes
+  the room.
 - **`PerSession`**: one instance per memory session in the room's space. That is
   `messages.windows`, the windows a session has opened onto the messages (see
-  [`ChatMessageList`](ChatMessageList.md#scope)), and `participantPrincipals`,
-  which each session derives under its own access. Passing the room's link to
-  someone else never passes a session's windows: they read their own.
+  [`ChatMessageList`](ChatMessageList.md#scope)), and `participantEntries` and
+  `participantPrincipals`, which each session derives under its own access.
+  Passing the room's link to someone else never passes a session's windows:
+  they read their own.
 - **`PerUser`**: one instance per user, which follows them across sessions.
   That is only `addRequests`, the outcomes of the reader's own adds. No one
   else reads them.
@@ -217,10 +241,10 @@ client:
   instance and no write.
 
 Some values are derived when they're read, and stored nowhere, so reading them
-needs no instance of anything: `participants`, and in `messages`, everything but
-`windows`. A session's windows come into being with its first `openWindow`, so a
-READ member, who can't write, never has any, and can still read
-`messages.latest`.
+needs no instance of anything: `participants` and `roster`, and in `messages`,
+everything but `windows`. A session's windows come into being with its first
+`openWindow`, so a READ member, who can't write, never has any, and can still
+read `messages.latest`.
 
 ## Streams
 
