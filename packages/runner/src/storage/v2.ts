@@ -1258,6 +1258,7 @@ export class StorageManager implements IStorageManager {
   #spaceAccessErrors = new Map<MemorySpace, Error>();
   #spaceAccessObservers = new Set<(space: MemorySpace, error: Error) => void>();
   #spaceAccessChangeObservers = new Set<(space: MemorySpace) => void>();
+  #spaceSessionReplacedObservers = new Set<(space: MemorySpace) => void>();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
 
@@ -1956,6 +1957,15 @@ export class StorageManager implements IStorageManager {
         syncReplayDependencies: (document) =>
           this.#syncCfcSchemaDocument(space, document),
         getTelemetry: () => this.#telemetry,
+        onSessionReplaced: () => {
+          for (const observer of [...this.#spaceSessionReplacedObservers]) {
+            try {
+              observer(space);
+            } catch (cause) {
+              console.error("space-session-replaced subscriber threw:", cause);
+            }
+          }
+        },
         onAccessChange: (error) => {
           const alreadyDenied = this.#spaceAccessErrors.has(space);
           if (error === undefined) {
@@ -2328,6 +2338,14 @@ export class StorageManager implements IStorageManager {
   subscribeSpaceAccessChange(observer: (space: MemorySpace) => void): Cancel {
     this.#spaceAccessChangeObservers.add(observer);
     return () => this.#spaceAccessChangeObservers.delete(observer);
+  }
+
+  /** @inheritDoc */
+  subscribeSpaceSessionReplaced(
+    observer: (space: MemorySpace) => void,
+  ): Cancel {
+    this.#spaceSessionReplacedObservers.add(observer);
+    return () => this.#spaceSessionReplacedObservers.delete(observer);
   }
 
   trackPendingCommit(
@@ -3250,6 +3268,9 @@ type ProviderOptions = {
   settings: IRemoteStorageProviderSettings;
   subscription: IStorageSubscription;
   onAccessChange?: (error: Error | undefined) => void;
+
+  /** Called when the space's memory session is replaced on reconnect. */
+  onSessionReplaced?: () => void;
 
   /**
    * The owning manager's authenticated session identity
@@ -4382,6 +4403,7 @@ export class SpaceReplica
   #lastAuthorizationError: IAuthorizationError | null = null;
   #onAccessChange?: (error: Error | undefined) => void;
   #cancelAccessLoss: Cancel | undefined;
+  #onSessionReplaced?: () => void;
 
   readonly #routeState: ProviderRouteState;
   readonly #routeGeneration: number;
@@ -4412,6 +4434,7 @@ export class SpaceReplica
     this.#space = options.space;
     this.#subscription = options.subscription;
     this.#onAccessChange = options.onAccessChange;
+    this.#onSessionReplaced = options.onSessionReplaced;
     this.#scopeKeyIdentity = options.scopeKeyIdentity;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
@@ -9971,6 +9994,7 @@ export class SpaceReplica
             // event intents re-submit under fresh localSeqs (the target's
             // eventId dedupe keeps a landed original sound — events.md §5).
             this.#eventAppendQueue?.kick();
+            this.#onSessionReplaced?.();
           };
           // A reconnect declares what this replica holds, so the server
           // re-delivers exactly what it lacks (see `holdings`).
