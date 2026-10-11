@@ -984,6 +984,11 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // cell and so the picker could not re-point it. The slot is a fresh cell;
     // the cell the default was kept in stays, as `legacyDefaultProfile`, and
     // is the default until one is chosen in the slot.
+    //
+    // Two of these baselines also report the scope the manager's `rooms`
+    // now declares under home's `chatManager`, which
+    // `fabrichat-view-scopes-break.md` records, so the entry names that
+    // path beside its own.
     pattern: "system/home.tsx",
     baselines: [
       "20261001T190916Z-5k9_Adl37zMhsNgG",
@@ -992,7 +997,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20261003T000427Z-oEfsHL584h6qI8sa",
       "20261003T003223Z-fDj2SHhwNCXbd-O3",
     ],
-    paths: ["result.defaultProfile"],
+    paths: [
+      "result.defaultProfile",
+      "result.chatManager.$VIEWS.chats.rooms",
+    ],
     reason:
       "home's default profile moves under `profile` in a fresh slot cell so the picker can re-point it, and a default chosen before stays the default until one is chosen in the slot",
     record: "docs/history/home-default-profile-slot-break.md",
@@ -1028,9 +1036,16 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // request outcome's room link admitted any `messages`; the candidate
     // types it. A link is always to a room output, whose `messages.count` is
     // a number, so no stored outcome reads differently.
+    //
+    // These baselines also report the scope the manager's `rooms` now
+    // declares, which `fabrichat-view-scopes-break.md` records, so the
+    // entry names that path beside its own.
     pattern: "fabrichat/manager.tsx",
     baselines: ["20261002T164437Z-O47ebJ7gn-iAk7TA"],
-    paths: ["argument.requests.*"],
+    paths: [
+      "argument.requests.*",
+      "result.$VIEWS.chats.rooms",
+    ],
     reason:
       "a manager's room link now types the room's `messages`, which the recorded link left open; every stored room link is to a room output whose `messages` the new type admits",
     record: "docs/history/fabrichat-room-link-messages-break.md",
@@ -1059,6 +1074,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // refused outcome gained `code`, which a client acts on. The recorded
     // outcomes left extra fields open, so a stored outcome admitted either of
     // any type; the candidate types them. No recorded outcome holds either.
+    //
+    // These baselines also report the scope the manager's `rooms` now
+    // declares, which `fabrichat-view-scopes-break.md` records, so the
+    // entry names that path beside its own.
     pattern: "fabrichat/manager.tsx",
     baselines: [
       "20261005T182129Z-yX4jdpH1wLhIowBh",
@@ -1066,7 +1085,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20261008T155754Z-m9jfHg3UGeF0e9_8",
       "20261008T210909Z-Kyy64jL0hYC-5p6Q",
     ],
-    paths: ["argument.requests.*"],
+    paths: [
+      "argument.requests.*",
+      "result.$VIEWS.chats.rooms",
+    ],
     reason:
       "a manager's index entry now types `revision`, and a refused outcome `code`, which the recorded outcomes left open; no stored request outcome holds either",
     record: "docs/history/fabrichat-index-revision-break.md",
@@ -1077,6 +1099,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // recorded link left it open, so a stored outcome admitted any `roster`;
     // the candidate types it. A link is always to a room output, which has no
     // `roster` or has a list of profile links.
+    //
+    // These baselines also report the scope the manager's `rooms` now
+    // declares, which `fabrichat-view-scopes-break.md` records, so the
+    // entry names that path beside its own.
     pattern: "fabrichat/manager.tsx",
     baselines: [
       "20261008T225324Z-Oj3DbCTq-94tEYN3",
@@ -1084,9 +1110,93 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20261009T210116Z-99YN5H9jf2UFET6M",
       "20261010T083035Z-Mp5ZALK-A2rUfm_u",
     ],
-    paths: ["argument.requests.*"],
+    paths: [
+      "argument.requests.*",
+      "result.$VIEWS.chats.rooms",
+    ],
     reason:
       "a manager's room link now types the room's `roster`, which the recorded link left open; every stored room link is to a room output with no `roster` or with a list of profile links, which the new type admits",
     record: "docs/history/fabrichat-room-link-roster-break.md",
+  },
+  {
+    // The room's `participantEntries` and `participantPrincipals` declare the
+    // per-session scope the computeds deriving them already had. The proof
+    // reports one issue per role, so each baseline names one of the two.
+    pattern: "fabrichat/room.tsx",
+    baselines: [
+      "20261009T204342Z-CDs_MQ1XE2LCiH4u",
+      "20261009T224608Z-kbmYR940TBNMF_bI",
+      "20261009T232213Z--scSLE7mEm1_Fn1A",
+      "20261010T060935Z-zf5A0zVmTHpJWJf1",
+      "20261010T142754Z-6o6cHELOFbTiS6Hv",
+      "20261011T013628Z-OxhmgRqIGmFAsRKK",
+    ],
+    paths: [
+      "result.$VIEWS.room.participantPrincipals",
+      "result.$VIEWS.room.participantEntries",
+    ],
+    reason:
+      "a room's participant entries and principals declare the per-session scope they are derived in; nothing is stored at either path for a reader to refuse",
+    record: "docs/history/fabrichat-view-scopes-break.md",
+  },
+  {
+    // The manager's `rooms` and `people` declare the per-session scope the
+    // computeds deriving them already had. The baselines the entries above
+    // name report `rooms` beside their own paths.
+    pattern: "fabrichat/manager.tsx",
+    baselines: [
+      "20261011T013628Z-pqvm47igo4Famzxe",
+    ],
+    paths: [
+      "result.$VIEWS.chats.rooms",
+      "result.$VIEWS.chats.people",
+    ],
+    reason:
+      "a manager's rooms and people declare the per-session scope they are derived in; nothing is stored at either path for a reader to refuse",
+    record: "docs/history/fabrichat-view-scopes-break.md",
+  },
+  {
+    // Home types its `chatManager` as the manager's output, so the scope the
+    // manager's `rooms` and `people` declare reaches home's contract too. The
+    // two baselines the default-profile slot entry names stay with it. Home is
+    // a required pattern, so this entry carries the ruling that lets it name
+    // one.
+    pattern: "system/home.tsx",
+    baselines: [
+      "20261003T212417Z-SrR1RyP2_xSZaWGa",
+      "20261003T224735Z-H6PR-p3yRuZx4uT2",
+      "20261005T182130Z-wlXO2zgoo42UKOky",
+      "20261005T223520Z-cZ5NgFU22GEGoqDI",
+      "20261005T225548Z-wpkYIzoula4xOPoD",
+      "20261006T012716Z-qzkTtxDyl_hBI5Zd",
+      "20261006T175424Z-q70r8YAKNKfMN02V",
+      "20261006T233810Z-JdwmtehG5ssBW1m_",
+      "20261007T161831Z-ir1SbxT9QugCd0Sh",
+      "20261007T225245Z-rfcz49a1bwITmz8H",
+      "20261008T022419Z-oJyRo7Wribob4Zfx",
+      "20261008T155754Z-k1iDJCnYbFdKtyBz",
+      "20261008T164451Z-n7gF99zc-4syFWet",
+      "20261008T210117Z-UFEwl2NpHQpxqXsF",
+      "20261008T214130Z-p3Zx6MHfQub4Jhqr",
+      "20261008T225325Z-PhnyFM45uYaav17c",
+      "20261008T231303Z-40_BirmSRf8AZ9Su",
+      "20261009T161814Z-Oyyi7wIUz7AJ5r33",
+      "20261009T210117Z-3GKaIZwG8Yel9N7f",
+      "20261010T055011Z-kPOS_bsln0EOlG9e",
+      "20261011T013629Z-onNetb9BZoDKytX7",
+    ],
+    paths: [
+      "result.chatManager.$VIEWS.chats.rooms",
+      "result.chatManager.$VIEWS.chats.people",
+    ],
+    reason:
+      "home's chat manager's rooms and people declare the per-session scope they are derived in; a home rolled forward still delivers them, and nothing is stored at either path for a reader to refuse",
+    record: "docs/history/fabrichat-view-scopes-break.md",
+    requiredPatternOverride: {
+      rulingBy: "Dan",
+      on: "2026-10-10",
+      reason:
+        'choosing to declare the scope once the measurements were in: "it looks like (b) is more correct to me", then "(a) sounds good"',
+    },
   },
 ];
