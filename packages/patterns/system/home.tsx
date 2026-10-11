@@ -573,7 +573,12 @@ const Home = pattern(
               const reason = typeof stored === "string" ? stored : "";
               const explanation = refusalReasonText(reason) ?? "";
               const code = reason || "none given";
-              const noticed = new Date(at).toLocaleString();
+              // The sandbox formats a date in UTC whatever the viewer's zone
+              // is, so the time names its zone.
+              const noticed = new Date(at).toLocaleString("en-US", {
+                timeZone: "UTC",
+                timeZoneName: "short",
+              });
               return (
                 <div id="home-private-inbox-refusal">
                   <cf-alert status="warning">
