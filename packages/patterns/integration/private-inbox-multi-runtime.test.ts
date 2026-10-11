@@ -924,7 +924,41 @@ describe("private inbox across runtimes", () => {
       "inbox-access-refused",
     );
 
+    // A runtime of the owner's started after the revocation sends the marked
+    // replacement first. The serving loop replaces the inbox; with server
+    // execution off, that runtime's own replacement is refused.
     const held = ["unreadableRefusedHome", "privateInbox", "piece"];
+    const late = await harness.addSession({
+      label: "private-inbox-owner-late",
+      identity: owner.identity,
+    });
+    try {
+      const lateRefusedBefore = await refusals(late);
+      await late.send("replaceUnreadableRefusedInbox", {}, REPLACE_CLICK);
+      await harness.settleUntil(async () =>
+        await refusals(late) > lateRefusedBefore ||
+        (await owner.read(held)) !== undefined
+      );
+      if (SERVER_EXECUTION) {
+        expect(await owner.read(held)).not.toBeUndefined();
+        expect(await owner.read(refusal)).toBeUndefined();
+      } else {
+        // TODO(danfuzz): Deliberately the wrong outcome. The replacement record
+        // keeps a typed link to the refused inbox, which a runtime started
+        // after the revocation can't commit, so CFC refuses the replacement and
+        // nothing changes. Once the record keeps the replaced inbox without the
+        // typed link, this runtime replaces it, and this step goes red.
+        expect(await refusals(late)).toBeGreaterThan(lateRefusedBefore);
+        expect(await owner.read(held)).toBeUndefined();
+        expect(await owner.read([...refusal, "reason"])).toBe(
+          "inbox-access-refused",
+        );
+        expect((await stranger.link(pointer)).id).toBe(unreadable.id);
+      }
+    } finally {
+      await harness.closeSession("private-inbox-owner-late");
+    }
+
     const refusedBefore = await refusals(owner);
     await owner.send("replaceUnreadableRefusedInbox", {}, REPLACE_CLICK);
     await harness.settleUntil(async () =>
