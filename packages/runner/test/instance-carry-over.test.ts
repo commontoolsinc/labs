@@ -123,13 +123,17 @@ const POSITIONAL_WITH_SIBLING = parentProgram([
 describe("instance-carry-over", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let rt: Runtime;
+  // Runtimes `freshRuntime()` has replaced, kept running until the case ends.
+  let replaced: Runtime[];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     rt = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    replaced = [];
   });
   afterEach(async () => {
     await rt?.dispose();
+    for (const runtime of replaced) await runtime.dispose();
     await storageManager?.close();
   });
 
@@ -221,6 +225,22 @@ describe("instance-carry-over", () => {
     await rt.idle();
     await cell.pull();
     return cell.get() as Record<string, unknown>;
+  };
+
+  /**
+   * A runtime of its own over the same storage, in place of `rt`, holding
+   * none of the patterns `rt` compiled, and the parent `name` as it reads it.
+   */
+  const freshRuntime = async (
+    name: string,
+  ): Promise<Cell<Record<string, unknown>>> => {
+    await rt.patternManager.flushCompileCacheWrites();
+    await rt.storageManager.synced();
+    replaced.push(rt);
+    rt = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    const cell = rt.getCell<Record<string, unknown>>(space, name);
+    await cell.sync();
+    return cell;
   };
 
   describe("a named instance", () => {
@@ -342,6 +362,32 @@ describe("instance-carry-over", () => {
       expect({ aCount: result.aCount, bCount: result.bCount }).toEqual({
         aCount: 7,
         bCount: 9,
+      });
+    });
+
+    it("keeps its deployed child's state through an update that moves it and changes its source, in a runtime that has not loaded the parent's previous pattern", async () => {
+      // Only the previous pattern places `a` here: its identity changed, and
+      // the spot `s` takes holds `a`'s deployed child. The start's pre-sync
+      // is what loads that pattern from the parent's stored source.
+
+      await deployedParent("fresh-runtime-previous-pattern");
+      const cell = await freshRuntime("fresh-runtime-previous-pattern");
+
+      const result = await update(
+        cell,
+        parentProgram(
+          [
+            "  const s = Other({ label: 's' });",
+            "  const a = Counter({ label: 'a' });",
+            "  return { views: [s, a], aCount: a.count, sCount: s.count };",
+          ].join("\n"),
+          `${COUNTER}// A newer version.\n`,
+        ),
+      );
+
+      expect({ aCount: result.aCount, sCount: result.sCount }).toEqual({
+        aCount: 7,
+        sCount: 0,
       });
     });
 
