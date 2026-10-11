@@ -3023,6 +3023,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     sink: ITransactionSealSink,
     commits: { space: MemorySpace; native: NativeStorageCommit }[],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    recordSplitCommitSpaces(this, commits.map(({ space }) => space));
     for (let i = 0; i < commits.length; i++) {
       const { space, native } = commits[i];
       // Same re-check as runSplitCommits: the sink builds this space's read

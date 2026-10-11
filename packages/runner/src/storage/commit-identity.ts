@@ -59,10 +59,8 @@ export function getCommitLocalSeq(
 }
 
 // The spaces a source transaction's split commit closes, in order, recorded
-// before the first of them is committed (storage/v2-transaction.ts). A split
-// commit applies each space's writes to its replica only once the space before
-// it has been accepted, so a recorded local seq for one of its spaces says
-// nothing of the others.
+// before the first of them is committed (storage/v2-transaction.ts). Each
+// space is committed only once the space before it is accepted.
 const splitSpacesBySource = new WeakMap<object, readonly MemorySpace[]>();
 
 /**
@@ -76,22 +74,21 @@ export function recordSplitCommitSpaces(
 }
 
 /**
- * Whether `source`'s writes are applied to this runtime's replicas: its
- * commit to `space` was built, and so was its commit to every other space a
- * split commit of it closes. Follow-up work reads what its origin wrote
- * wherever the origin wrote it, so it may run against the origin's
- * speculative state only once all of that state is there (scheduler-v2
- * §7.6: the depended-upon commit lands before the depending action
- * proceeds).
+ * Whether follow-up work in `space` may run against `source`'s speculative
+ * state, as a same-space follow-up does (scheduler-v2 §7.6): `source`'s
+ * commit to `space` is built, and it is the last commit `source` makes. A
+ * split commit closes each space only once the one before it is accepted, so
+ * where `space` is not the last, `source`'s writes to the later spaces are not
+ * applied yet and a precondition on its commit to `space` would not cover
+ * them; the follow-up waits for `source`'s verdict, as a cross-space one does.
  */
-export function isCommitAppliedLocally(
+export function isSameSpaceOrigin(
   source: IStorageTransaction | undefined,
   space: MemorySpace,
 ): boolean {
   if (!source || getCommitLocalSeq(source, space) === undefined) return false;
   const spaces = splitSpacesBySource.get(source);
-  return spaces === undefined ||
-    spaces.every((split) => getCommitLocalSeq(source, split) !== undefined);
+  return spaces === undefined || spaces[spaces.length - 1] === space;
 }
 
 /** Records the store seq `space` accepted `source`'s commit at. */

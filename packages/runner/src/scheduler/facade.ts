@@ -23,7 +23,7 @@ import type {
 import { startReadStats } from "../read-stats.ts";
 import {
   getCommitLocalSeq,
-  isCommitAppliedLocally,
+  isSameSpaceOrigin,
 } from "../storage/commit-identity.ts";
 import type {
   ChangeGroup,
@@ -3357,8 +3357,8 @@ export class Scheduler {
       lineageRunsAgain: (originTx) => this.#lineage.runsAgain(originTx),
       getOriginLocalSeq: (originTx, targetSpace) =>
         getCommitLocalSeq(originTx.tx, targetSpace),
-      isOriginAppliedLocally: (originTx, targetSpace) =>
-        isCommitAppliedLocally(originTx.tx, targetSpace),
+      isSameSpaceOrigin: (originTx, targetSpace) =>
+        isSameSpaceOrigin(originTx.tx, targetSpace),
       snapshotEventPreflightTraceContext: (trace) =>
         snapshotEventPreflightTraceContext(
           this.#eventPreflightDependencyState,
@@ -3973,7 +3973,7 @@ export class Scheduler {
     const head = this.#eventQueue[0];
     if (head?.originTx === undefined) return false;
     if (this.#lineage.originStatus(head.originTx) !== "pending") return false;
-    return !isCommitAppliedLocally(head.originTx.tx, head.eventLink.space);
+    return !isSameSpaceOrigin(head.originTx.tx, head.eventLink.space);
   }
 
   #updateMaterializerRegistration(action: Action): void {

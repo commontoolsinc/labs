@@ -1030,10 +1030,10 @@ export interface SchedulerEventExecutionState {
   ) => number | undefined;
 
   /**
-   * Whether `originTx`'s writes are applied to this runtime's replicas, in
-   * `space` and in every other space its commit closes.
+   * Whether a follow-up in `space` dispatches against `originTx`'s
+   * speculative state (scheduler-v2 §7.6's same-space origin).
    */
-  readonly isOriginAppliedLocally: (
+  readonly isSameSpaceOrigin: (
     originTx: IExtendedStorageTransaction,
     space: MemorySpace,
   ) => boolean;
@@ -1363,12 +1363,9 @@ export async function processPullQueuedEventDuringExecute(
 
   if (queuedEvent.originTx !== undefined) {
     const originStatus = state.lineageStatus(queuedEvent.originTx);
-    // The event runs against its origin's speculative state only once that
-    // state is all here. A split commit applies each later space's writes
-    // only after the space before it is accepted, so having one of them
-    // applied, even the event's own, is not enough: the handler reads what
-    // the origin wrote in the others too.
-    const sameSpace = state.isOriginAppliedLocally(
+    // A split-commit origin is same-space only where the event's space is the
+    // last it closes (`isSameSpaceOrigin`).
+    const sameSpace = state.isSameSpaceOrigin(
       queuedEvent.originTx,
       queuedEvent.eventLink.space,
     );

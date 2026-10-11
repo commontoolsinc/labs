@@ -1117,100 +1117,139 @@ describe("scheduler event lineage", () => {
     }
   });
 
-  it("holds a follow-up until every space its origin's split commit closes is applied", async () => {
-    // The origin commits its own space first and `secondSpace` after, one
-    // space at a time, as a create into a new space does. Its follow-up runs
-    // in the origin's first space and reads what the origin wrote in the
-    // second, which is applied only once the first space is accepted.
-    const streamA = runtime.getCell<unknown>(
-      space,
-      "lineage split stream a",
-      { asCell: ["stream"] },
-      tx,
-    );
-    const streamB = runtime.getCell<unknown>(
-      space,
-      "lineage split stream b",
-      { asCell: ["stream"] },
-      tx,
-    );
-    const first = runtime.getCell<number>(
-      space,
-      "lineage split first",
-      undefined,
-      tx,
-    );
-    const seen = runtime.getCell<unknown[]>(
-      space,
-      "lineage split seen",
-      undefined,
-      tx,
-    );
-    const second = runtime.getCell<number>(
-      secondSpace,
-      "lineage split second",
-      undefined,
-      tx,
-    );
-    first.set(0);
-    seen.set([]);
-    await tx.commit().settled;
-    tx = runtime.edit();
-    second.withTx(tx).set(0);
-    await tx.commit().settled;
-    tx = runtime.edit();
+  describe("follow-ups of an origin whose commit closes two spaces", () => {
+    // The origin writes `space` and `secondSpace` in one transaction and
+    // commits them one at a time, in `order`, as a create into a new space
+    // does: the later space is committed, and applied locally, only once the
+    // earlier one is accepted. Its follow-up runs in `space` and reads what
+    // the origin wrote in `secondSpace`.
+    async function splitOrigin(
+      label: string,
+      order: readonly (typeof space)[],
+    ) {
+      const streamA = runtime.getCell<unknown>(
+        space,
+        `${label} stream a`,
+        { asCell: ["stream"] },
+        tx,
+      );
+      const streamB = runtime.getCell<unknown>(
+        space,
+        `${label} stream b`,
+        { asCell: ["stream"] },
+        tx,
+      );
+      const first = runtime.getCell<number>(
+        space,
+        `${label} first`,
+        undefined,
+        tx,
+      );
+      const seen = runtime.getCell<unknown[]>(
+        space,
+        `${label} seen`,
+        undefined,
+        tx,
+      );
+      const second = runtime.getCell<number>(
+        secondSpace,
+        `${label} second`,
+        undefined,
+        tx,
+      );
+      first.set(0);
+      seen.set([]);
+      await tx.commit().settled;
+      tx = runtime.edit();
+      second.withTx(tx).set(0);
+      await tx.commit().settled;
+      tx = runtime.edit();
 
-    const gate = delayNextServerTransact(storageManager);
-    const handlerA: EventHandler = (handlerTx) => {
-      handlerTx.enableMultiSpaceWrites?.([space, secondSpace]);
-      first.withTx(handlerTx).set(1);
-      second.withTx(handlerTx).set(1);
-      runtime.scheduler.queueEvent(
+      runtime.scheduler.addEventHandler(
+        (handlerTx) => {
+          handlerTx.enableMultiSpaceWrites?.(order);
+          first.withTx(handlerTx).set(1);
+          second.withTx(handlerTx).set(1);
+          runtime.scheduler.queueEvent(
+            streamB.getAsNormalizedFullLink(),
+            1,
+            undefined,
+            undefined,
+            false,
+            { originTx: handlerTx },
+          );
+        },
+        streamA.getAsNormalizedFullLink(),
+      );
+      runtime.scheduler.addEventHandler(
+        (handlerTx) => {
+          const current = seen.withTx(handlerTx).get();
+          seen.withTx(handlerTx).set([
+            ...current,
+            second.withTx(handlerTx).get(),
+          ]);
+        },
         streamB.getAsNormalizedFullLink(),
-        1,
-        undefined,
-        undefined,
-        false,
-        { originTx: handlerTx },
       );
-    };
-    const handlerB: EventHandler = (handlerTx) => {
-      const current = seen.withTx(handlerTx).get();
-      seen.withTx(handlerTx).set([...current, second.withTx(handlerTx).get()]);
-    };
-    let idlePromise: Promise<void> | undefined;
-
-    runtime.scheduler.addEventHandler(
-      handlerA,
-      streamA.getAsNormalizedFullLink(),
-    );
-    runtime.scheduler.addEventHandler(
-      handlerB,
-      streamB.getAsNormalizedFullLink(),
-    );
-
-    try {
-      runtime.scheduler.queueEvent(streamA.getAsNormalizedFullLink(), {});
-      // The origin's first space is applied and held at the server; its
-      // second is not applied yet.
-      await waitForSignal(gate.started, "origin commit did not start");
-      idlePromise = runtime.idle();
-      await expectIdlePending(idlePromise);
-      expect(seen.get()).toEqual([]);
-
-      gate.confirm();
-      await idlePromise;
-      await waitForSchedulerCondition(
-        runtime,
-        () => seen.get().length === 1,
-        "follow-up did not dispatch after its origin's commit closed",
-      );
-      expect(seen.get()).toEqual([1]);
-    } finally {
-      gate.confirm();
-      gate.restore();
-      await idlePromise?.catch(() => {});
+      return {
+        send: () =>
+          runtime.scheduler.queueEvent(
+            streamA.getAsNormalizedFullLink(),
+            {},
+            false,
+          ),
+        seen: () => seen.get(),
+      };
     }
+
+    it("waits for the origin's verdict where the follow-up's space is not the last it closes", async () => {
+      const origin = await splitOrigin("split early", [space, secondSpace]);
+      const gate = delayNextServerTransact(storageManager);
+      let idlePromise: Promise<void> | undefined;
+      try {
+        origin.send();
+        // The origin's commit to `space` is applied and held at the server;
+        // its write to `secondSpace` is not applied yet.
+        await waitForSignal(gate.started, "origin commit did not start");
+        idlePromise = runtime.idle();
+        await expectIdlePending(idlePromise);
+        expect(origin.seen()).toEqual([]);
+
+        gate.confirm();
+        await idlePromise;
+        await waitForSchedulerCondition(
+          runtime,
+          () => origin.seen().length === 1,
+          "follow-up did not dispatch after its origin's verdict",
+        );
+        expect(origin.seen()).toEqual([1]);
+      } finally {
+        gate.confirm();
+        gate.restore();
+        await idlePromise?.catch(() => {});
+      }
+    });
+
+    it("drops the follow-up where the origin's first commit fails", async () => {
+      const origin = await splitOrigin("split fail", [space, secondSpace]);
+      const gate = delayNextServerTransact(storageManager);
+      let idlePromise: Promise<void> | undefined;
+      try {
+        origin.send();
+        await waitForSignal(gate.started, "origin commit did not start");
+        idlePromise = runtime.idle();
+        await expectIdlePending(idlePromise);
+
+        gate.fail();
+        await idlePromise;
+        await runtime.idle();
+        expect(origin.seen()).toEqual([]);
+      } finally {
+        gate.confirm();
+        gate.restore();
+        await idlePromise?.catch(() => {});
+      }
+    });
   });
 
   it("drops cross-space follow-ups when the origin fails", async () => {
