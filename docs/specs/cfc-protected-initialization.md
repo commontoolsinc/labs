@@ -13,9 +13,17 @@ the seed and records the cell's complete schema for CFC preparation. The value,
 schema document, and CFC envelope commit together. Failure aborts the operation.
 The default a pattern's setup writes into an internal cell it materializes for
 the pattern is recorded as the same initialization, whether the pattern exports
-the cell, passes it to a sub-pattern, or keeps it to itself. The reference that
-exposes the cell requires its own protection: changing that reference must not
-provide an alternative way to replace the protected value.
+the cell, passes it to a sub-pattern, or keeps it to itself. An internal cell
+with no default whose schema says who may write it (`writeAuthorizedBy`,
+`writePolicyAnyOf` or `uiContract`, at any depth) is seeded with `undefined` the
+same way, so its envelope commits with the seed and holds the cell to its writer
+from the first write. Without that seed the document would store no policy, and
+any code holding a link to it could write it. A cell whose schema makes it a
+link (`asCell`), such as the slot a lift fills with a cell it constructs, is not
+seeded so: the node that fills it writes it, and the policy belongs to the
+constructed cell, whose own seed stores it. The reference that exposes the
+cell requires its own protection: changing that reference must not provide an
+alternative way to replace the protected value.
 
 A setup that creates a new piece's argument document records, the same way, the
 default it writes into each concrete protected field the caller leaves to that

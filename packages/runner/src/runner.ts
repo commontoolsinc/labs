@@ -99,6 +99,7 @@ import {
   recordReferencedArgumentFields,
   recordReplayedArgumentSlots,
 } from "./cfc/reference-initialization.ts";
+import { cfcSchemaEntries } from "./cfc/schema-label-view.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { spaceReaderRole } from "./cfc/space-membership.ts";
 import { isTrustedGesture } from "./cfc/ui-contract.ts";
@@ -801,6 +802,41 @@ const recordRawBuiltinResultSchemaPolicyInput = (
     result.schema,
     "output",
   );
+};
+
+/** Whether `schema` says who may write a value it describes, at any depth. */
+const declaresWriter = (schema: JSONSchema | undefined): boolean =>
+  schema !== undefined &&
+  cfcSchemaEntries(schema).some(({ schema: entry }) =>
+    isObjectOrArray(entry) && isObjectOrArray(entry.ifc) &&
+    (entry.ifc.writeAuthorizedBy !== undefined ||
+      entry.ifc.writePolicyAnyOf !== undefined ||
+      entry.ifc.uiContract !== undefined)
+  );
+
+/**
+ * The value a pattern's derived internal cell is seeded with where it holds
+ * none, or `undefined` where it is seeded with nothing. A declared default is
+ * the seed. A cell with no default whose schema says who may write it
+ * (`declaresWriter()`) is seeded with `undefined`: the seed's envelope is what
+ * stores that policy, so a cell created without a value is held to its writer
+ * from its first write. A cell whose schema makes it a link (`asCell`) is
+ * not: it holds a reference the node that fills it writes, and the policy it
+ * describes is the referenced cell's, which that cell's own seed stores.
+ */
+const derivedCellSeed = (
+  descriptor: NonNullable<Pattern["derivedInternalCells"]>[number],
+): { readonly value: FabricValue } | undefined => {
+  const schema = descriptor.schema;
+  if (!isObjectOrArray(schema)) return undefined;
+  if (schema.default !== undefined) {
+    return {
+      value: fabricFromConvertibleJsValue(schema.default as JSONValue),
+    };
+  }
+  return schema.asCell === undefined && declaresWriter(schema)
+    ? { value: undefined }
+    : undefined;
 };
 
 /**
@@ -3556,32 +3592,28 @@ export class Runner {
           scopeRank(derivedScope) >
             scopeRank(resultCell.getAsNormalizedFullLink().scope))
       ) {
-        const schemaDefault = isObjectOrArray(descriptor.schema)
-          ? descriptor.schema.default as JSONValue | undefined
-          : undefined;
-        if (schemaDefault !== undefined) {
-          const currentValue = derivedCell.getRawUntyped({
-            meta: ignoreReadForScheduling,
-          });
-          if (currentValue === undefined) {
-            const seed = fabricFromConvertibleJsValue(schemaDefault);
-            derivedCell.setRawUntyped(seed);
-            // The cell is the pattern's own and absent until now, so its
-            // default is an initialization whether or not anything projects
-            // it: a result field, a sub-pattern's argument, or nothing.
-            const seeded = derivedCell.getAsNormalizedFullLink();
-            tx.recordCfcWritePolicyInput({
-              kind: "initialization",
-              mode: "seed",
-              target: {
-                space: seeded.space,
-                id: seeded.id,
-                scope: seeded.scope,
-                path: [...seeded.path],
-              },
-              value: seed,
-            }, runtimeWritePolicyAuthorization);
-          }
+        const seed = derivedCellSeed(descriptor);
+        if (
+          seed !== undefined &&
+          derivedCell.getRawUntyped({ meta: ignoreReadForScheduling }) ===
+            undefined
+        ) {
+          derivedCell.setRawUntyped(seed.value);
+          // The cell is the pattern's own and absent until now, so its seed
+          // is an initialization whether or not anything projects it: a
+          // result field, a sub-pattern's argument, or nothing.
+          const seeded = derivedCell.getAsNormalizedFullLink();
+          tx.recordCfcWritePolicyInput({
+            kind: "initialization",
+            mode: "seed",
+            target: {
+              space: seeded.space,
+              id: seeded.id,
+              scope: seeded.scope,
+              path: [...seeded.path],
+            },
+            value: seed.value,
+          }, runtimeWritePolicyAuthorization);
         }
       }
     }
@@ -8831,10 +8863,8 @@ export class Runner {
         if (scopeRank(derivedLink.scope) <= scopeRank(resultLink.scope)) {
           continue;
         }
-        const schemaDefault = isObjectOrArray(descriptor.schema)
-          ? descriptor.schema.default
-          : undefined;
-        if (schemaDefault === undefined) continue;
+        const seed = derivedCellSeed(descriptor);
+        if (seed === undefined) continue;
         if (!isCurrent()) return false;
         if (options.allowReadOnly && !this.#runtime.servingPosture) {
           let readOnly = readOnlySpaces.get(derivedLink.space);
@@ -8941,13 +8971,12 @@ export class Runner {
           // same ownership claim as setup through the ordinary writer-fit gate.
           recordRuntimeOwnedStore(tx, owner, derivedLink);
           setResultCell(derived, owner.asSchema(instance.pattern.resultSchema));
-          const value = fabricFromConvertibleJsValue(schemaDefault);
-          derived.setRawUntyped(value);
+          derived.setRawUntyped(seed.value);
           tx.recordCfcWritePolicyInput({
             kind: "initialization",
             mode: "seed",
             target: { ...derivedLink, path: [] },
-            value,
+            value: seed.value,
           }, runtimeWritePolicyAuthorization);
         });
         if (outcome.error) {
