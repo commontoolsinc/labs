@@ -2127,6 +2127,20 @@ export class Runner {
   >();
 
   /**
+   * Registrations a run installed in a transaction refused for a stale basis,
+   * by result document. The run keeps such a registration, but its graph read
+   * setup writes that never landed, and a winner's writes do not stand in for
+   * all of them: a nested child whose scope is not `space` has instances only
+   * this runtime writes. The next run of the same result retires the
+   * registration first, so the setup it re-issues instantiates the graph again
+   * instead of reusing one that holds nothing.
+   */
+  #registrationsInstalledByRefusedRuns = new Map<
+    `${MemorySpace}/${ScopeKey}/${URI}`,
+    Cancel
+  >();
+
+  /**
    * Tombstones for `#sessionPatternPointers` entries dropped by _capacity
    * eviction_ — never by the sanctioned removals (a real pattern's durable
    * stamps superseding the pointer; a failed staging's cleanup). Each records
@@ -7563,6 +7577,26 @@ export class Runner {
     resultCell: Cell<R>,
     options: RunnerRunOptions = {},
   ): RunResult<R> {
+    // Before anything this run stages: retiring a registration cancels any
+    // start pending for the result, and one staged here would take this
+    // transaction with it. It is retired outright rather than released, since
+    // a release leaves a result started in its own right running, and such a
+    // result keeps that lifetime across the retirement.
+    const docKey = this.#getDocKey(resultCell);
+    const refusedRegistration = this.#registrationsInstalledByRefusedRuns.get(
+      docKey,
+    );
+    if (refusedRegistration !== undefined) {
+      this.#registrationsInstalledByRefusedRuns.delete(docKey);
+      if (
+        this.#cancels.get(docKey) === refusedRegistration &&
+        !this.#usesScopedPrograms(resultCell)
+      ) {
+        const independent = this.#independentlyStartedResults.has(docKey);
+        this.#stopResult(resultCell);
+        if (independent) this.#independentlyStartedResults.add(docKey);
+      }
+    }
     const tx = providedTx ?? this.#runtime.edit();
     if (providedTx === undefined) {
       // Self-minted fallback arm (reached e.g. from wish's async
@@ -7680,6 +7714,12 @@ export class Runner {
           isConflictRejection(result.error) ||
           isStorageTransactionInconsistent(result.error)
         ) {
+          if (this.#cancels.get(docKey) === startedCancel) {
+            this.#registrationsInstalledByRefusedRuns.set(
+              docKey,
+              startedCancel,
+            );
+          }
           return;
         }
         this.releaseChild(resultCell, startedCancel);
@@ -9730,6 +9770,7 @@ export class Runner {
     const setupKey = this.#getSetupKey(resultCell);
     this.#scopedChildOwners.delete(key);
     this.#independentlyStartedResults.delete(key);
+    this.#registrationsInstalledByRefusedRuns.delete(key);
     // TODO(hixie): This reaches every pending commit-gated start for the result,
     // which is wider than a release's authority: one that another launch
     // scheduled goes too. Narrowing it needs the release to name the pending
@@ -9908,6 +9949,7 @@ export class Runner {
     // later start can join one; dropping the index releases the attempts too.
     this.#inFlightStartsByDoc.clear();
     this.#independentlyStartedResults.clear();
+    this.#registrationsInstalledByRefusedRuns.clear();
     for (const key of [...this.#pendingDeferredStarts.keys()]) {
       this.#cancelPendingDeferredStarts(key);
     }
