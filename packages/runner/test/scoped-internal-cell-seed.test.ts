@@ -9,6 +9,7 @@ import { Identity } from "@commonfabric/identity";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import type { JSONSchema } from "../src/builder/types.ts";
+import { commitCfcFieldValue } from "../src/cfc/label-representation.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { applyCfcPolicyToExistingValue } from "../src/cfc/policy-application.ts";
 import { setCfcImplementationIdentity } from "../src/cfc/trust-authority.ts";
@@ -346,6 +347,71 @@ describe("scoped-internal-cell-seed", () => {
       }
     });
   }
+
+  it("declares the owning piece's committed personal-space label on a cold session default", async () => {
+    // A piece whose label crossed a space boundary holds its personal-space
+    // owner as a `{digestOf}` commitment. A cold start seeds its session
+    // default under that label, and the default lives in the very space the
+    // commitment names.
+
+    const first = openRuntime(owner);
+    const compiled = await first.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `/// <cts-enable />
+          import { pattern, Writable } from "commonfabric";
+          export default pattern<Record<string, never>>(() => ({
+            tab: Writable.perSession.of<string>("overview"),
+          }));`,
+      }],
+    }, { space });
+    const original = first.getCell(space, "personal space with session state");
+    await first.runSynced(original, compiled, {});
+    await first.idle();
+    const committedPersonalSpace = {
+      type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+      owner: commitCfcFieldValue(space),
+    };
+    const protect = first.edit();
+    setCfcImplementationIdentity(protect, {
+      kind: "builtin",
+      builtinId: "scoped-seed-owner-policy",
+    });
+    applyCfcPolicyToExistingValue(
+      original.withTx(protect).asSchema({
+        ifc: { confidentiality: [committedPersonalSpace] },
+      }),
+    );
+    expect((await protect.commit().settled).error).toBeUndefined();
+    await first.storageManager.synced();
+
+    const second = openRuntime(owner);
+    const piece = second.getCell(space, "personal space with session state");
+    await piece.sync();
+    expect(await second.runner.start(piece)).toBe(true);
+    await second.idle();
+    const tab = piece.key("tab").resolveAsCell();
+    expect(tab.getRawUntyped()).toBe("overview");
+    const inspect = second.edit();
+    try {
+      const metadata = readStoredCfcMetadata(
+        inspect,
+        tab.getAsNormalizedFullLink(),
+      );
+      expect(metadata?.labelMap.entries).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: [],
+          origin: "declared",
+          label: expect.objectContaining({
+            confidentiality: expect.arrayContaining([committedPersonalSpace]),
+          }),
+        }),
+      ]));
+    } finally {
+      inspect.abort("committed personal space label assertions complete");
+    }
+  });
 
   it("initializes defaults in the run when dependency loading rejects", async () => {
     await load("user", owner);
