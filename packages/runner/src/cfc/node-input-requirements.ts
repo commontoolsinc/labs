@@ -228,17 +228,23 @@ const valuesAt = (value: unknown, path: readonly string[]): unknown[] => {
   );
 };
 
+/** A `default` a schema would supply, with its position below the path. */
+export type SuppliedDefault = {
+  readonly below: readonly string[];
+  readonly value: unknown;
+};
+
 /**
- * The `default`s `schema` would supply at `path`, each as a comparable key:
- * the part of a default above `path` that reaches it, and each default at or
- * below it with its position. `undefined` when a `$ref` does not resolve, so
- * what it would supply is not known.
+ * The `default`s `schema` would supply at `path`: the part of a default above
+ * `path` that reaches it, and each default at or below it with its position.
+ * `undefined` when a `$ref` does not resolve, so what it would supply is not
+ * known.
  */
 export const schemaDefaultsAt = (
   schema: unknown,
   path: readonly string[],
-): Set<string> | undefined => {
-  const found = new Set<string>();
+): SuppliedDefault[] | undefined => {
+  const found: SuppliedDefault[] = [];
   let unknown = false;
   const visited = new Map<object, Set<string>>();
   const walk = (
@@ -266,10 +272,10 @@ export const schemaDefaultsAt = (
     }
     if (Object.hasOwn(resolved, "default")) {
       const value: unknown = Reflect.get(resolved, "default");
-      if (rest.length === 0) found.add(JSON.stringify(["at", below, value]));
+      if (rest.length === 0) found.push({ below, value });
       else {
         for (const part of valuesAt(value, rest)) {
-          found.add(JSON.stringify(["at", [], part]));
+          found.push({ below: [], value: part });
         }
       }
     }
@@ -305,9 +311,11 @@ export const foreignDefaultAt = (
   if (foreign === undefined) return false;
   const supplied = schemaDefaultsAt(foreign, foreignPath);
   if (supplied === undefined) return true;
-  if (supplied.size === 0) return false;
-  const own = schemaDefaultsAt(code, codePath) ?? new Set<string>();
-  return [...supplied].some((key) => !own.has(key));
+  if (supplied.length === 0) return false;
+  const own = schemaDefaultsAt(code, codePath) ?? [];
+  // Compared structurally, so two schemas spelling one default with their
+  // keys in different orders agree.
+  return supplied.some((each) => !own.some((mine) => deepEqual(mine, each)));
 };
 
 /** What a node's binding gives one declared input path. */

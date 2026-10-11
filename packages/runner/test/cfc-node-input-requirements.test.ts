@@ -669,21 +669,22 @@ describe("cfc node input requirements", () => {
     });
 
     it("finds a default that could fill a path, and only such a default", () => {
-      expect(schemaDefaultsAt({ default: 1 }, [])?.size).toBe(1);
+      expect(schemaDefaultsAt({ default: 1 }, [])?.length).toBe(1);
       expect(
         schemaDefaultsAt(
           { properties: { gate: { default: { always: true } } } },
           ["gate"],
-        )?.size,
+        )?.length,
       ).toBe(1);
       expect(
         schemaDefaultsAt({ properties: { other: { default: "x" } } }, ["gate"])
-          ?.size,
+          ?.length,
       ).toBe(0);
-      expect(schemaDefaultsAt({ default: { other: 1 } }, ["gate"])?.size).toBe(
-        0,
-      );
-      expect(schemaDefaultsAt({ default: { gate: 1 } }, ["gate"])?.size).toBe(
+      expect(schemaDefaultsAt({ default: { other: 1 } }, ["gate"])?.length)
+        .toBe(
+          0,
+        );
+      expect(schemaDefaultsAt({ default: { gate: 1 } }, ["gate"])?.length).toBe(
         1,
       );
       expect(schemaDefaultsAt({ $ref: "#/$defs/missing" }, ["gate"]))
@@ -699,6 +700,16 @@ describe("cfc node input requirements", () => {
       const same = { properties: { gate: { default: { always: false } } } };
       const opened = { properties: { gate: { default: { always: true } } } };
       expect(foreignDefaultAt(same, ["gate"], code, ["gate"])).toBe(false);
+      // The same default with its keys in another order is the same default.
+      const twoKeys: JSONSchema = {
+        properties: { gate: { default: { always: false, until: 1 } } },
+      };
+      const reordered = {
+        properties: { gate: { default: { until: 1, always: false } } },
+      };
+      expect(foreignDefaultAt(reordered, ["gate"], twoKeys, ["gate"])).toBe(
+        false,
+      );
       expect(foreignDefaultAt(opened, ["gate"], code, ["gate"])).toBe(true);
       expect(foreignDefaultAt(opened, ["gate"], undefined, ["gate"])).toBe(
         true,
