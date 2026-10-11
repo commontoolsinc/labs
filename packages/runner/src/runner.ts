@@ -3097,20 +3097,26 @@ export class Runner {
     );
   }
 
-  /** Stage an argument write, materialize aliases in the same transaction, and
-   * reject the transaction unless the resulting value satisfies its schema. */
+  /**
+   * Stage an argument write, materialize aliases in the same transaction, and
+   * reject the transaction unless the resulting value satisfies its schema.
+   * `projection` is what the setup projects, where that is not the value being
+   * written: the policy recorder walks it rather than `argument`.
+   */
   #updateAndValidateArgument<T>(
     tx: IExtendedStorageTransaction,
     argumentLink: NormalizedFullLink,
     argument: T,
     argumentSchema: JSONSchema,
     defaults: FabricValue,
+    projection: unknown = argument,
   ): void {
     this.#updateArgument(
       tx,
       argumentLink,
       argument,
       argumentSchema,
+      projection,
     );
     this.#validateArgument(
       tx,
@@ -3604,8 +3610,23 @@ export class Runner {
         // bytes; instantiation reads the argument reactively once it loads.
         nextArgument = undefined;
       } else {
+        // A supplied argument is written over the slots the document already
+        // holds, as on the same-pattern branch above: a nested piece whose
+        // code changed is set up again with the argument its parent's
+        // expression carries, and its own state lives in the slots that
+        // expression leaves out. A default fills only a slot holding nothing,
+        // and the setup projects only what the caller supplied.
+        if (argument !== undefined) {
+          suppliedProjection = mergeSchemaDefaults<T>(
+            argument,
+            defaults as Partial<T>,
+            pattern.argumentSchema,
+          );
+        }
         nextArgument = mergeSchemaDefaults<T>(
-          argument === undefined ? previousArgument : argument,
+          argument === undefined
+            ? previousArgument
+            : this.#argumentOverStoredSlots(tx, argumentLink, argument),
           defaults as Partial<T>,
           pattern.argumentSchema,
         );
@@ -3639,6 +3660,7 @@ export class Runner {
           nextArgument,
           pattern.argumentSchema,
           defaults,
+          suppliedProjection ?? nextArgument,
         );
         argumentUpdated = true;
       }

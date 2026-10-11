@@ -10,7 +10,11 @@
  * argument document: `Runner.#applySetupState`, which a piece reaches when it
  * holds no registration (the nested piece its parent restarts), and
  * `Runner.#maybeReuseRunningSetup`, which a registered piece reaches when it is
- * run again with an argument.
+ * run again with an argument. They pin the route a changed pattern takes as
+ * well, the restage in `Runner.#applySetupState`, which a nested piece reaches
+ * when its code changed: the stored slots survive it, a slot holding nothing
+ * takes its default, and a stored slot the new code's input type refuses stops
+ * the setup rather than being replaced.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -19,6 +23,7 @@ import { Identity } from "@commonfabric/identity";
 
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { STORED_ARGUMENT_SCHEMA_REFUSAL } from "../src/stored-argument-refusal.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 const signer = await Identity.fromPassphrase("piece argument replay");
@@ -126,6 +131,46 @@ const startedPiece = async (
   return { cell, pattern };
 };
 
+/**
+ * The parent and child sources with `childSource` in place of the child's, and
+ * `parentSource` in place of the parent's when it is given.
+ */
+const changedFiles = (childSource: string, parentSource = PARENT_SOURCE) => [
+  { name: "/child.tsx", contents: childSource },
+  { name: "/main.tsx", contents: parentSource },
+];
+
+/** Compile the program `files` makes, rooted at the parent. */
+const compiledParent = (
+  runtime: Runtime,
+  files: { name: string; contents: string }[],
+  tx: ReturnType<Runtime["edit"]>,
+) =>
+  runtime.patternManager.compilePattern({ main: "/main.tsx", files }, {
+    space,
+    tx,
+  });
+
+/**
+ * Stop the piece in `cell` and run it again on the program `files` makes,
+ * leaving its argument to what the piece has stored, as an update of its code
+ * does.
+ */
+const runChanged = async (
+  runtime: Runtime,
+  cell: Awaited<ReturnType<typeof startedPiece>>["cell"],
+  files: { name: string; contents: string }[],
+) => {
+  runtime.runner.stop(cell);
+  const tx = runtime.edit();
+  const pattern = await compiledParent(runtime, files, tx);
+  const running = runtime.run(tx, pattern, undefined, cell);
+  await tx.commit().settled;
+  await running.pull();
+  await runtime.idle();
+  await cell.pull();
+};
+
 describe("piece argument replay", () => {
   it("keeps a nested piece's state when its parent is restarted", async () => {
     await withRuntime(async (runtime) => {
@@ -146,6 +191,107 @@ describe("piece argument replay", () => {
           "parent's expression names, and dropped the slots that expression " +
           "leaves to the piece",
       ).toEqual(["one", "two"]);
+    });
+  });
+
+  describe("when the nested piece's code changes", () => {
+    // Each change gives the nested piece a new pattern identity, so its
+    // parent sets it up again over its existing argument document with the
+    // argument the parent's expression carries.
+
+    it("keeps the nested piece's state across a change to a comment", async () => {
+      await withRuntime(async (runtime) => {
+        const { cell } = await startedPiece(
+          runtime,
+          parentProgram,
+          "child-comment-change",
+        );
+
+        await runChanged(
+          runtime,
+          cell,
+          changedFiles("// A comment and nothing else.\n" + CHILD_SOURCE),
+        );
+
+        expect(
+          cell.key("kept").get(),
+          "the nested piece was set up again with the argument its parent's " +
+            "expression names, and `kept` was written over with its default",
+        ).toEqual(["one", "two"]);
+      });
+    });
+
+    it("fills an input the changed code adds with its default, and keeps the stored ones", async () => {
+      await withRuntime(async (runtime) => {
+        const { cell } = await startedPiece(
+          runtime,
+          parentProgram,
+          "child-input-added",
+        );
+
+        const child = CHILD_SOURCE
+          .replace(
+            "  kept?: string[] | Default<[]>;\n",
+            "  kept?: string[] | Default<[]>;\n" +
+              "  note?: string | Default<'fresh'>;\n",
+          )
+          .replace(
+            "  kept: readonly string[];\n",
+            "  kept: readonly string[];\n  note: string;\n",
+          )
+          .replace(
+            "(({ kept }) => ({",
+            "(({ kept, note }) => ({\n  note,",
+          );
+        const parent = PARENT_SOURCE.replace(
+          "{ add: child.add, kept: child.kept }",
+          "{ add: child.add, kept: child.kept, note: child.note }",
+        );
+        expect(child).not.toBe(CHILD_SOURCE);
+        expect(child).toContain("({\n  note,");
+        expect(parent).not.toBe(PARENT_SOURCE);
+
+        await runChanged(runtime, cell, changedFiles(child, parent));
+
+        expect(cell.key("note").get()).toBe("fresh");
+        expect(cell.key("kept").get()).toEqual(["one", "two"]);
+      });
+    });
+
+    it("throws when the changed code's input type refuses a stored value, and leaves the value stored", async () => {
+      await withRuntime(async (runtime) => {
+        const { cell } = await startedPiece(
+          runtime,
+          parentProgram,
+          "child-input-narrowed",
+        );
+        runtime.runner.stop(cell);
+
+        // `kept` holds a list, and the changed code's input takes a number.
+        const child = CHILD_SOURCE
+          .replace(
+            "kept?: string[] | Default<[]>;",
+            "kept?: number | Default<0>;",
+          )
+          .replace("kept: readonly string[];", "kept: number;")
+          .replace("kept: Writable<string[]>", "kept: Writable<number>")
+          .replace("kept.push(text);", "kept.set(text.length);");
+        expect(child).toContain("kept.set(text.length);");
+        const tx = runtime.edit();
+        const pattern = await compiledParent(runtime, changedFiles(child), tx);
+
+        expect(() => runtime.run(tx, pattern, undefined, cell)).toThrow(
+          STORED_ARGUMENT_SCHEMA_REFUSAL,
+        );
+        tx.abort();
+
+        // The refused setup committed nothing, so the piece starts on its
+        // stored pattern with its stored state.
+        expect(await runtime.start(cell)).toBe(true);
+        await runtime.idle();
+        await cell.pull();
+        expect(cell.key("kept").get()).toEqual(["one", "two"]);
+      });
     });
   });
 
