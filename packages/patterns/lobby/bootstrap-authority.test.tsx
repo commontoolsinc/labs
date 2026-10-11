@@ -235,11 +235,11 @@ export default pattern(() => {
   // ============================================================
 
   // The stored role keeps working: its admin is recognized and can promote a
-  // second admin through the reviewed handler. The stored role took no writer
-  // contract when it was written, and the new schema does not adopt one over
-  // an existing value, so it stays writable by other code. Once the explicit
-  // roster holds a role, the bootstrap role no longer decides anything, which
-  // is what the last step checks.
+  // second admin through the reviewed handler. The handler never writes a
+  // bootstrap role that is already set, so nothing installs the role's writer
+  // contract over the stored one, and it stays writable by other code. Once
+  // the explicit roster holds a role, the bootstrap role no longer decides
+  // anything, which is what the last step checks.
 
   const legacyRoster = Writable.of<LobbyRosterValue>(DEFAULT_LOBBY_ROSTER);
   const legacyRegistry = Writable.of<LegacyRegistry>();

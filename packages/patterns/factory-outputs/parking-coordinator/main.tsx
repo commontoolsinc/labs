@@ -520,8 +520,9 @@ type ParkingSpotChangeKind = "add" | "edit" | "remove";
 
 /**
  * A spot change. `add` reads `spotNumber`, `label` and `notes`; `edit` reads
- * those plus `originalNumber` and `active`; `remove` reads `spotNumber`. A
- * field the event leaves out is taken from the matching form cell.
+ * those plus `originalNumber` and `active`; `remove` reads `spotNumber`. For
+ * `add` and `edit`, a field the event leaves out is taken from the matching
+ * form cell.
  */
 export interface ParkingSpotChangeEvent {
   spotNumber?: string;

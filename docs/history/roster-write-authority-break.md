@@ -57,25 +57,34 @@ which is the hole this change closes.
 
 ## What happens to pieces holding the old shape
 
-The stored value keeps loading and the pattern's own handler keeps writing it:
-a stored envelope with no write-authority set at a path takes the candidate's
-set on the first write the named handler makes there.
+The stored value keeps loading and the pattern's own handler keeps writing it.
+What the runtime does with a stored envelope that carries no write-authority
+set at a path is to store the set the first write there names, whichever
+code makes it. §8.15.4 says "Initialization never adopts an existing value",
+and leaves installing protection over one open (§14.3.4), so until that is
+settled a position stored before this change is protected only once a write
+has installed the set, and the write that installs it may name code other
+than the pattern's own handler.
 
 - **Parking.** The spot list takes the writer contract with the first spot
-  change an admin makes; from then on other code is refused.
+  change an admin makes; from then on other code is refused. Until then the
+  list is as writable as it was before.
 - **Group chat.** `commitTrustedAdminToggle` rewrites the whole registry,
   restating `bootstrapAdmin`, whenever the everyone-is-admin setting changes,
-  so the role takes the contract at the next such change.
+  so the role takes the contract at the next such change. The restatement
+  copies whatever role is stored, including one that other code set before
+  then.
 - **Lobby.** `commitTrustedLobbyAction` writes `bootstrapAdmin` only when it
-  locks down a lobby that has no explicit admin and no bootstrap role. A
-  lobby whose registry was stored before this change keeps an unprotected
-  bootstrap role, or an unprotected empty slot, until then. §8.15.4 says
-  "Initialization never adopts an existing value", and leaves installing
-  protection over one open (§14.3.4). Once the explicit roster holds a role,
-  the bootstrap role decides nothing, and the lobby never empties that
-  roster.
+  locks down a lobby that has neither an explicit admin nor a bootstrap
+  role. A lobby whose registry was stored before this change keeps an
+  unprotected bootstrap role, or an unprotected empty slot. A role other
+  code puts in that slot before the lockdown counts as the policy's admin,
+  so the lockdown keeps it and never writes the slot. Once the explicit
+  roster holds a role, the bootstrap role decides nothing, and the lobby
+  never empties that roster.
 
-A piece created after this change carries the contract from its first write.
+A piece created after this change carries the contract from creation: its
+registry and spot list are seeded under the new schema.
 
 Two behaviors change for callers:
 
@@ -85,7 +94,8 @@ Two behaviors change for callers:
   value."; a value the caller supplies is none of them, and the runtime
   treats it as the caller's write even where it equals the default. The pattern's tests and its admin-view integration fixture now
   leave `spots` to its default. A composing parent can still pass a spots
-  cell.
+  cell; a cell the parent seeded under its own schema carries no writer
+  until the first spot change an admin makes.
 - A bootstrap role links its subject's profile into a position that names its
   writer, and the runtime refuses to link a document that carries no label
   there. A real `#profile` carries its principal's label. The lobby tests'
