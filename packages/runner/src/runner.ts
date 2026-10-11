@@ -88,6 +88,7 @@ import {
   recordNewDocumentProtectedDefaults,
   recordNewProtectedDefaults,
 } from "./cfc/default-initialization.ts";
+import { readStoredCfcMetadata } from "./cfc/metadata.ts";
 import {
   CFC_POLICY_MANIFEST_DOC_SCHEMA,
   CFC_POLICY_MANIFEST_ID_PREFIX,
@@ -838,6 +839,20 @@ const derivedCellSeed = (
     ? { value: undefined }
     : undefined;
 };
+
+/**
+ * Whether `seed`, a derived internal cell's seed (`derivedCellSeed()`), is due
+ * at `link`, a document that holds no value. A default is. An `undefined` seed
+ * is due only while the document stores no envelope: storing one is all it
+ * does, and a document that stores one keeps it, so a cell that holds no value
+ * again, as a cleared one does, is not seeded on every start.
+ */
+const seedIsDue = (
+  tx: IExtendedStorageTransaction,
+  seed: { readonly value: FabricValue },
+  link: NormalizedFullLink,
+): boolean =>
+  seed.value !== undefined || readStoredCfcMetadata(tx, link) === undefined;
 
 /**
  * The kind-free ids of a pattern's derived internal cells on `resultCell` — the
@@ -3593,16 +3608,17 @@ export class Runner {
             scopeRank(resultCell.getAsNormalizedFullLink().scope))
       ) {
         const seed = derivedCellSeed(descriptor);
+        const seeded = derivedCell.getAsNormalizedFullLink();
         if (
           seed !== undefined &&
           derivedCell.getRawUntyped({ meta: ignoreReadForScheduling }) ===
-            undefined
+            undefined &&
+          seedIsDue(tx, seed, seeded)
         ) {
           derivedCell.setRawUntyped(seed.value);
           // The cell is the pattern's own and absent until now, so its seed
           // is an initialization whether or not anything projects it: a
           // result field, a sub-pattern's argument, or nothing.
-          const seeded = derivedCell.getAsNormalizedFullLink();
           tx.recordCfcWritePolicyInput({
             kind: "initialization",
             mode: "seed",
@@ -8954,7 +8970,8 @@ export class Runner {
           }
           if (
             derived.getRawUntyped({ meta: ignoreReadForScheduling }) !==
-              undefined
+              undefined ||
+            !seedIsDue(tx, seed, derivedLink)
           ) return;
           // A default belongs to its owning piece, so it carries the label on
           // the piece's root. The pattern pointer and the manifest read above
