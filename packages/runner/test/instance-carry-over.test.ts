@@ -620,7 +620,7 @@ describe("instance-carry-over", () => {
   });
 
   describe("a named instance's name", () => {
-    it("names neither of two children a handler's loop binds to one `const`", async () => {
+    it("gives each of two children a handler's loop binds to one `const` a child of its own", async () => {
       const program: RuntimeProgram = {
         main: "/main.tsx",
         files: [
