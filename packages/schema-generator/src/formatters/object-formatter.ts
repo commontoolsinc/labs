@@ -29,7 +29,10 @@ import {
   safeGetPropertyType,
 } from "../type-utils.ts";
 import { getCellWrapperInfo } from "../typescript/cell-brand.ts";
-import { holdsWriterPolicy } from "../typescript/writer-policy.ts";
+import {
+  holdsWriterPolicy,
+  writerPolicyHeldWithin,
+} from "../typescript/writer-policy.ts";
 import { reportUnreadWriterBinding } from "../writer-binding-diagnostics.ts";
 import { isInternalMemberName } from "../typescript/property-name.ts";
 import {
@@ -472,14 +475,15 @@ export class ObjectFormatter implements TypeFormatter {
       // A number index signature beside a string one is lowered as the string
       // one alone, so a writer policy only its values hold is lost. A document
       // stored that way would admit any writer to them.
-      if (
+      const lostPolicy =
         context.definesDocument && stringIndex && numberIndex &&
-        holdsWriterPolicy(numberIndex, checker) &&
-        !holdsWriterPolicy(stringIndex, checker)
-      ) {
+          !holdsWriterPolicy(stringIndex, checker)
+          ? writerPolicyHeldWithin(numberIndex, checker)
+          : undefined;
+      if (lostPolicy !== undefined) {
         reportUnreadWriterBinding(
           context,
-          "WriteAuthorizedBy",
+          lostPolicy,
           "This schema defines a document, which would admit any writer, and " +
             "a number index signature beside a string one is lowered as the " +
             "string one alone, so the writer policy its values hold is lost. " +
