@@ -10,7 +10,6 @@ import {
   trustExecutable,
 } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { RuntimeProgram } from "../src/harness/types.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import { observePendingDeferredStarts } from "./support/telemetry-observers.ts";
 import { createTransactionCommitReceipt } from "../src/storage/commit-receipt.ts";
@@ -104,126 +103,6 @@ describe("child run ownership", () => {
     runtime.runner.stop(parent);
 
     await expect(directStart).resolves.toBe(true);
-    expect(runtime.runner.cancels.has(key(child))).toBe(true);
-    runtime.runner.stop(child);
-  });
-
-  // A display only asks that what it shows run: rendering a pattern's child
-  // must not take the child from the pattern, which stops it with itself.
-  async function runningNestedChild(cause: string) {
-    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
-    const Child = pattern<{ value: number }>(({ value }) => ({
-      doubled: lift((input: number) => input * 2)(value),
-    }));
-    const Parent = pattern<{ value: number }>(({ value }) => ({
-      child: Child({ value }),
-    }));
-    const tx = runtime.edit();
-    const parent = runtime.getCell<{ child: { doubled: number } }>(
-      space,
-      cause,
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, Parent, { value: 3 }, parent);
-    expect((await tx.commit().settled).error).toBeUndefined();
-    await runtime.idle();
-    expect(await result.pull()).toEqual({ child: { doubled: 6 } });
-    const child = result.key("child").resolveAsCell() as Cell<
-      { doubled: number }
-    >;
-    return { parent, child };
-  }
-
-  it("leaves a nested child to its parent when a start does not claim it", async () => {
-    const { parent, child } = await runningNestedChild(
-      "unclaimed nested child parent",
-    );
-
-    const displayStart = runtime.start(child, { claims: false });
-    await expect(displayStart).resolves.toBe(true);
-    runtime.runner.stop(parent);
-    await runtime.idle();
-
-    expect(runtime.runner.cancels.has(key(child))).toBe(false);
-  });
-
-  it("lets a parent stop its child while only a start that does not claim is resolving", async () => {
-    const { parent, child } = await runningNestedChild(
-      "release during unclaimed start parent",
-    );
-
-    // The parent stops before the display's start decides; that start can
-    // never give the child a lifetime, so it does not hold the child.
-    const displayStart = runtime.start(child, { claims: false });
-    runtime.runner.stop(parent);
-    await expect(displayStart).resolves.toBe(false);
-    await runtime.idle();
-
-    expect(runtime.runner.cancels.has(key(child))).toBe(false);
-  });
-
-  it("lets a parent's release stop a child a start that does not claim has yet to install", async () => {
-    // A runtime that did not prepare the child loads it before installing it,
-    // so nothing is registered yet when the release comes; the display's start
-    // must not install the child afterwards.
-    const program: RuntimeProgram = {
-      main: "/main.tsx",
-      files: [{
-        name: "/main.tsx",
-        contents: [
-          "import { pattern } from 'commonfabric';",
-          "export default pattern<{ value: number }>(({ value }) => ({ value }));",
-        ].join("\n"),
-      }],
-    };
-    const tx = runtime.edit();
-    const Piece = await runtime.patternManager.compilePattern(program, {
-      space,
-      tx,
-    });
-    const result = runtime.getCell<{ value: number }>(
-      space,
-      "released before a display's start installs",
-      undefined,
-      tx,
-    );
-    await runtime.setup(tx, Piece, { value: 3 }, result);
-    expect((await tx.commit().settled).error).toBeUndefined();
-    await runtime.patternManager.flushCompileCacheWrites();
-    await runtime.storageManager.synced();
-
-    const other = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    try {
-      const theirs = other.getCellFromLink(result.getAsNormalizedFullLink());
-      await theirs.sync();
-      const displayStart = other.start(theirs, { claims: false });
-      other.runner.releaseChild(theirs, undefined);
-      await expect(displayStart).resolves.toBe(false);
-      await other.idle();
-      expect(other.runner.isRunning(theirs)).toBe(false);
-    } finally {
-      await other.dispose();
-    }
-  });
-
-  it("claims a nested child when a claiming start joins one that does not", async () => {
-    const { parent, child } = await runningNestedChild(
-      "joined claiming start parent",
-    );
-
-    // The second start joins the first one's attempt before it decides.
-    const displayStart = runtime.start(child, { claims: false });
-    const directStart = runtime.start(child);
-    await expect(displayStart).resolves.toBe(true);
-    await expect(directStart).resolves.toBe(true);
-    // Only the claim keeps the child once its parent stops.
-    runtime.runner.stop(parent);
-    await runtime.idle();
-
     expect(runtime.runner.cancels.has(key(child))).toBe(true);
     runtime.runner.stop(child);
   });

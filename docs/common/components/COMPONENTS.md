@@ -419,9 +419,9 @@ the policy placeholder in the same places. The exceptions:
   the required endorsement.
 
 A piece bound to `cf-render` also runs as it does when opened: showing the piece
-(full, its exported tile or chip, or the default tile) makes it run if it is not
-running, without taking it from a pattern that owns it, so a view computed for
-the viewer renders. The default chip only names the piece and starts nothing.
+(full, its exported tile or chip, or the default tile) starts it as opening it
+would, so a view computed for the viewer renders. The default chip only names
+the piece and starts nothing.
 
 `cf-picker` shows each of its `$items` through a `cf-render` of its own, so
 each item passes the same gates as a piece bound to `cf-render`, with the same

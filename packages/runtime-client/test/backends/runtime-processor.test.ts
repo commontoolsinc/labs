@@ -8404,7 +8404,7 @@ describe("runtime-processor", () => {
   describe("`RuntimeProcessor` vdom mount of a displayed piece", () => {
     // A render displays a piece as opening it directly does, so the piece
     // runs: a mount that names the piece it displays (`runsPiece`) starts it,
-    // without claiming it, and a mount that only reads leaves it alone.
+    // and a mount that only reads leaves it alone.
 
     async function stoppedPiece<T>(
       runtime: Runtime,
@@ -8511,22 +8511,6 @@ describe("runtime-processor", () => {
         const unmount = await mount(runtime, container.key("pinned"), piece);
         expect(runtime.runner.isRunning(piece)).toBe(true);
         expect(runtime.runner.isRunning(container)).toBe(false);
-        await unmount();
-      } finally {
-        await runtime.dispose();
-      }
-    });
-
-    it("leaves a displayed piece releasable by a pattern that owns it", async () => {
-      // The display does not claim the piece, so a release stops it.
-      const { runtime } = createRuntime();
-      try {
-        const piece = await doubler("releasable displayed piece")(runtime);
-        const unmount = await mount(runtime, piece.key("doubled"), piece);
-        expect(runtime.runner.isRunning(piece)).toBe(true);
-        runtime.runner.releaseChild(piece, undefined);
-        await runtime.idle();
-        expect(runtime.runner.isRunning(piece)).toBe(false);
         await unmount();
       } finally {
         await runtime.dispose();

@@ -430,12 +430,6 @@ type StartAttempt = {
   // instead of running a second resolution pipeline. Assigned by start() once
   // the pipeline promise exists.
   settled?: Promise<boolean>;
-  // Whether a caller of start() asked for the result to have a lifetime of
-  // its own. Joining callers share one attempt but not one ownership: any of
-  // them asking makes the attempt claim, which it can until it decides, as
-  // only an undecided attempt can be joined. False for a start that only asks
-  // the result to run, as rendering it does.
-  claims?: boolean;
   // The pattern keys this attempt has read inherited authority for. The walk
   // runs again from the top after the read, and must not read again for a
   // grant the durable metadata does not carry.
@@ -2121,13 +2115,6 @@ export class Runner {
    * machine-readable half.
    */
   #servedReceiptCasLosses = 0;
-
-  /**
-   * Registrations a start that does not claim (`claims: false`) installed,
-   * which no one owns yet. A parent's deferred start that finds one adopts it
-   * rather than yielding to it, as it would to a start with an owner.
-   */
-  #unclaimedRegistrations = new WeakSet<Cancel>();
 
   /**
    * Results started in their own right rather than as part of an enclosing
@@ -4094,62 +4081,40 @@ export class Runner {
    * different docs whose links resolve to the same piece do not join either;
    * they run separate resolutions and converge at the registration guard
    * before instantiation.
-   *
-   * `claims: false` asks only that the result run, as rendering it does: the
-   * start leaves an enclosing pattern's ownership of a running child as it
-   * is, and a result it starts stays releasable by a pattern that later
-   * instantiates it. The returned promise then reports whether the result is
-   * running. Ownership is per caller: a joining caller that claims makes the
-   * shared attempt claim.
    */
-  start<T = any>(
-    resultCell: Cell<T>,
-    options: { claims?: boolean } = {},
-  ): Promise<boolean> {
-    const claims = options.claims ?? true;
+  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
     const startKey = this.#getDocKey(resultCell);
     const inFlight = this.#inFlightStartsByDoc.get(startKey);
     if (
       inFlight?.settled !== undefined && this.#isStartAttemptCurrent(inFlight)
     ) {
-      if (claims) inFlight.claims = true;
       return inFlight.settled;
     }
     const attempt: StartAttempt = {
       lifecycleEpoch: this.#lifecycleEpoch,
       generationsByDoc: new Map(),
       preResolutionStopKeys: new Set(),
-      claims,
     };
     this.#activeStartAttempts.add(attempt);
     this.#trackStartAttempt(attempt, startKey);
     try {
       const settled = this.#doStart(resultCell, new Set(), attempt)
         .then((started) => {
-          // A claiming start gives the result a lifetime of its own, so an
-          // enclosing pattern releasing it later leaves it running. An attempt
-          // whose target a stop superseded claims nothing: the registration
-          // under the key belongs to whatever replaced it, and a stop that won
-          // the race leaves no registration at all. Both cases report that
-          // this start is not running. The check is scoped to the target: a
-          // stop of an intermediate link doc after the target's registration
-          // installed does not touch that registration, so it neither voids
-          // the claim nor the report.
+          // This start gives the result a lifetime of its own, so an enclosing
+          // pattern releasing it later leaves it running. An attempt whose
+          // target a stop superseded claims nothing: the registration under
+          // the key belongs to whatever replaced it, and a stop that won the
+          // race leaves no registration at all. Both cases report that this
+          // start is not running. The check is scoped to the target: a stop of
+          // an intermediate link doc after the target's registration installed
+          // does not touch that registration, so it neither voids the claim
+          // nor the report.
           const target = attempt.targetKey;
           const stillRunning = started && target !== undefined &&
             this.#isStartAttemptCurrentFor(attempt, target) &&
             this.#cancels.has(target);
-          // Decided: a later caller starts afresh, and decides its own claim.
-          if (this.#inFlightStartsByDoc.get(startKey) === attempt) {
-            this.#inFlightStartsByDoc.delete(startKey);
-          }
-          if (stillRunning && attempt.claims) {
+          if (stillRunning) {
             this.#independentlyStartedResults.add(target);
-            if (attempt.installedRegistration !== undefined) {
-              this.#unclaimedRegistrations.delete(
-                attempt.installedRegistration,
-              );
-            }
           }
           return stillRunning;
         })
@@ -4220,15 +4185,9 @@ export class Runner {
     // page that is still opening from being closed by its parent. An attempt
     // that then fails leaves the result registered until the runtime stops it,
     // which is the same bound the scheduler already accepts for a start that
-    // exhausts its retries. A start made with `claims: false`, as a display's
-    // is, never gives the result a lifetime, so it does not hold the child;
-    // the stop below supersedes it, installed or not.
-    const attempts = this.#activeStartAttemptsByDoc.get(key);
-    if (
-      attempts !== undefined &&
-      [...attempts].some((attempt) => attempt.claims !== false)
-    ) return;
-    if (registration === undefined && attempts === undefined) {
+    // exhausts its retries.
+    if ((this.#activeStartAttemptsByDoc.get(key)?.size ?? 0) > 0) return;
+    if (registration === undefined) {
       // A commit-gated start installs nothing until its transaction commits,
       // so a launch whose child is still gated holds that child through the
       // pending start alone. Cancelling it is what keeps the child from
@@ -6075,9 +6034,6 @@ export class Runner {
       } catch (err) {
         return Promise.reject(err);
       }
-      if (attempt.claims === false) {
-        this.#unclaimedRegistrations.add(attempt.installedRegistration);
-      }
 
       return Promise.resolve(true);
     }
@@ -6140,9 +6096,6 @@ export class Runner {
             attempt.options?.parentPieceRootId,
           ),
         });
-        if (attempt.claims === false) {
-          this.#unclaimedRegistrations.add(attempt.installedRegistration);
-        }
       } finally {
         // Synchronous instantiation cost of the resumed piece (pattern
         // setup, node wiring), distinct from the syncs around it.
@@ -7305,14 +7258,11 @@ export class Runner {
             this.#cancels.has(target);
           if (stillRunning && ownership !== undefined) {
             const current = this.#cancels.get(target!);
-            const adopted = current !== undefined &&
-              this.#unclaimedRegistrations.delete(current);
             if (
-              !adopted && (attempt.installedRegistration === undefined ||
-                current !== attempt.installedRegistration)
+              attempt.installedRegistration === undefined ||
+              current !== attempt.installedRegistration
             ) {
-              // Not this walk's own registration, nor one a start that does not
-              // claim left unowned: a COMPETING start claimed the
+              // Not this walk's own registration: a COMPETING start claimed the
               // result while the walk was in flight — installing into the
               // registry the recovery's entry emptied needs no stop, so no
               // generation bump witnesses it, and doStart's already-started

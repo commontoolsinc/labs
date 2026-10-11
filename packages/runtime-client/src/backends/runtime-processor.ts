@@ -4128,10 +4128,10 @@ export class RuntimeProcessor {
 
   /**
    * Starts the piece a mount displays, as opening it directly does
-   * (`VDomMountRequest.runsPiece`), without taking it from a pattern that
-   * owns it (`claims: false`). A cell that is not a piece, once its document
-   * has loaded, runs nothing, and a reference that names no cell only warns:
-   * the render goes on either way. Not awaited: the render does not wait on a
+   * (`VDomMountRequest.runsPiece`), and as the view-replication fallback
+   * starts a mounted root. A cell that is not a piece, once its document has
+   * loaded, runs nothing, and a reference that names no cell only warns: the
+   * render goes on either way. Not awaited: the render does not wait on a
    * start, and `Runtime.settled()` covers it.
    */
   #runDisplayedPiece(ref: CellRef): void {
@@ -4147,9 +4147,7 @@ export class RuntimeProcessor {
     }
     const start = piece.sync()
       .then(() =>
-        isPieceRoot(this.#runtime, piece)
-          ? this.#runtime.start(piece, { claims: false })
-          : false
+        isPieceRoot(this.#runtime, piece) ? this.#runtime.start(piece) : false
       )
       .catch((error: unknown) => {
         displayLogger.warn("display-start", () => [
