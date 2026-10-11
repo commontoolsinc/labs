@@ -119,10 +119,10 @@ describe("scheduler-event-start-map-handler", () => {
   }
 
   /**
-   * Resolves `path` from `result` to the stream it ends at, loading each
+   * Resolves `path` from `result` to the cell it ends at, loading each
    * document along the way, as a view rendering the stored result does.
    */
-  async function streamAt(
+  async function cellAt(
     result: Cell<Result>,
     path: readonly (string | number)[],
   ): Promise<Cell<unknown>> {
@@ -140,10 +140,38 @@ describe("scheduler-event-start-map-handler", () => {
    * Sends one event to `stream` and returns how it settled: `"done"` when its
    * handler committed, and otherwise the reason it was refused or dropped.
    */
-  async function sendAndSettle(stream: Cell<unknown>): Promise<string> {
+  function sendAndSettle(stream: Cell<unknown>): Promise<string> {
     const settled = defer<IExtendedStorageTransaction>();
     sendEvent(stream, {}, (tx) => settled.resolve(tx));
-    const status = (await settled.promise).status();
+    return outcomeOf(settled.promise);
+  }
+
+  /**
+   * Queues one event at `cell`'s address, which need not be a stream, and
+   * returns how it settled, as {@link sendAndSettle} does.
+   */
+  function queueAndSettle(
+    runtime: Runtime,
+    cell: Cell<unknown>,
+  ): Promise<string> {
+    const settled = defer<IExtendedStorageTransaction>();
+    runtime.scheduler.queueEvent(
+      cell.getAsNormalizedFullLink(),
+      {},
+      undefined,
+      (tx) => settled.resolve(tx),
+    );
+    return outcomeOf(settled.promise);
+  }
+
+  /**
+   * Helper for {@link sendAndSettle} and {@link queueAndSettle}, which reads
+   * the outcome off the transaction an event settled on.
+   */
+  async function outcomeOf(
+    settled: Promise<IExtendedStorageTransaction>,
+  ): Promise<string> {
+    const status = (await settled).status();
     if (status.status !== "error") return status.status;
     const { error } = status;
     return "reason" in error && error.reason instanceof Error
@@ -151,17 +179,22 @@ describe("scheduler-event-start-map-handler", () => {
       : error.message;
   }
 
+  /**
+   * Returns the piece's `total`. It reads that field alone, so a read made
+   * partway through a case demands nothing of the map.
+   */
   async function totalOf(runtime: Runtime, result: Cell<Result>) {
-    await result.pull();
+    const total = result.key("total");
+    await total.pull();
     await runtime.idle();
-    return result.get().total;
+    return total.get();
   }
 
   describe("a top-level handler", () => {
     it("runs on the event that starts its piece", async () => {
       const { runtime, result } = await persistedPieceInFreshRuntime();
 
-      const outcome = await sendAndSettle(await streamAt(result, ["addTen"]));
+      const outcome = await sendAndSettle(await cellAt(result, ["addTen"]));
 
       expect(outcome).toBe("done");
       expect(await totalOf(runtime, result)).toBe(10);
@@ -169,44 +202,113 @@ describe("scheduler-event-start-map-handler", () => {
   });
 
   describe("a handler a map makes", () => {
-    it("runs on the event that starts its piece", async () => {
-      const { runtime, result } = await persistedPieceInFreshRuntime();
+    // Every event in this group goes to the handler bound for the second row,
+    // through a link resolved before the map has run in this runtime. Each
+    // send lets the scheduler start the piece when no handler is registered
+    // for the stream, so a drop reported here comes from that start path.
 
-      const outcome = await sendAndSettle(
-        await streamAt(result, ["rowButtons", 1, "add"]),
+    describe("in a piece a live view reads", () => {
+      // A view rendering the piece holds a live read of the map's output, and
+      // rendering it does not start the piece.
+
+      it("runs on the first event to the piece, which starts it", async () => {
+        const { runtime, result } = await persistedPieceInFreshRuntime();
+        const rowStream = await cellAt(result, ["rowButtons", 1, "add"]);
+        const cancelView = result.key("rowButtons").sink(() => {});
+        await runtime.idle();
+
+        const outcome = await sendAndSettle(rowStream);
+        cancelView();
+
+        expect(outcome).toBe("done");
+        expect(await totalOf(runtime, result)).toBe(2);
+      });
+
+      it("runs on a second event, once the runtime has settled after the first", async () => {
+        // The first send is the case above, and its outcome is not what this
+        // one checks. Once the first event has started the piece, the view's
+        // read is demand enough for the map to run and bind the handler, so
+        // the same event sent again is delivered.
+
+        const { runtime, result } = await persistedPieceInFreshRuntime();
+        const rowStream = await cellAt(result, ["rowButtons", 1, "add"]);
+        const cancelView = result.key("rowButtons").sink(() => {});
+        await runtime.idle();
+        await sendAndSettle(rowStream);
+        await runtime.idle();
+        const before = await totalOf(runtime, result);
+
+        const outcome = await sendAndSettle(rowStream);
+        cancelView();
+
+        expect(outcome).toBe("done");
+        expect(await totalOf(runtime, result)).toBe(before + 2);
+      });
+    });
+
+    describe("in a piece nothing reads", () => {
+      // A sender with no view of the piece (a command line, an agent, another
+      // piece's handler) sends with nothing demanding the map's output.
+
+      it("runs on the event that starts its piece", async () => {
+        const { runtime, result } = await persistedPieceInFreshRuntime();
+        const rowStream = await cellAt(result, ["rowButtons", 1, "add"]);
+
+        const outcome = await sendAndSettle(rowStream);
+
+        expect(outcome).toBe("done");
+        expect(await totalOf(runtime, result)).toBe(2);
+      });
+
+      it("runs on an event to its started piece once the runtime has settled", async () => {
+        // The runtime has settled with the piece started, so no run is still
+        // under way when the event arrives.
+
+        const { runtime, result } = await persistedPieceInFreshRuntime();
+        const rowStream = await cellAt(result, ["rowButtons", 1, "add"]);
+        expect(await runtime.start(result)).toBe(true);
+        await runtime.idle();
+
+        const outcome = await sendAndSettle(rowStream);
+
+        expect(outcome).toBe("done");
+        expect(await totalOf(runtime, result)).toBe(2);
+      });
+
+      it("runs on an event to its started piece once something has read the map", async () => {
+        // The control for the case above, differing from it only in the read:
+        // demanding the map's output once is when the map runs and binds the
+        // handler for each row.
+
+        const { runtime, result } = await persistedPieceInFreshRuntime();
+        const rowStream = await cellAt(result, ["rowButtons", 1, "add"]);
+        expect(await runtime.start(result)).toBe(true);
+        await result.key("rowButtons").pull();
+        await runtime.idle();
+
+        const outcome = await sendAndSettle(rowStream);
+
+        expect(outcome).toBe("done");
+        expect(await totalOf(runtime, result)).toBe(2);
+      });
+    });
+  });
+
+  describe("an address in the piece that no handler serves", () => {
+    it("drops its event", async () => {
+      // The negative of the cases above. The row itself is in the piece, and
+      // nothing binds a handler to it, so its event settles as a drop rather
+      // than waiting, whatever the piece goes on to run.
+
+      const { runtime, result } = await persistedPieceInFreshRuntime();
+      const row = await cellAt(result, ["rowButtons", 1]);
+
+      const outcome = await queueAndSettle(runtime, row);
+
+      expect(outcome).toContain(
+        `Event dropped: no handler registered for ${row.getAsNormalizedFullLink().id}`,
       );
-
-      expect(outcome).toBe("done");
-      expect(await totalOf(runtime, result)).toBe(2);
-    });
-
-    it("runs on an event to its running piece before anything reads the map", async () => {
-      const { runtime, result } = await persistedPieceInFreshRuntime();
-      const rowStream = await streamAt(result, ["rowButtons", 1, "add"]);
-      expect(await sendAndSettle(await streamAt(result, ["addTen"])))
-        .toBe("done");
-
-      const outcome = await sendAndSettle(rowStream);
-
-      expect(outcome).toBe("done");
-      expect(await totalOf(runtime, result)).toBe(12);
-    });
-
-    it("runs on an event to its running piece once something has read the map", async () => {
-      // The control for the two cases above: the same send succeeds once the
-      // map's output has been demanded, which is when the map runs and binds
-      // the handler for each row.
-
-      const { runtime, result } = await persistedPieceInFreshRuntime();
-      const rowStream = await streamAt(result, ["rowButtons", 1, "add"]);
-      expect(await runtime.start(result)).toBe(true);
-      await result.key("rowButtons").pull();
-      await runtime.idle();
-
-      const outcome = await sendAndSettle(rowStream);
-
-      expect(outcome).toBe("done");
-      expect(await totalOf(runtime, result)).toBe(2);
+      expect(await totalOf(runtime, result)).toBe(0);
     });
   });
 });
