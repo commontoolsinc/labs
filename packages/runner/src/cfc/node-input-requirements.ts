@@ -36,9 +36,10 @@
  *   its path). Enumerating the collection reads its shape (§4.6.3), which is
  *   a read of the collection itself, governed by the collection's own labels
  *   and requirements, not its members'. So where the collection, or a
- *   container on the way to it, is empty or absent, the member requirement
- *   consumes nothing, in a stored document and in the binding alike; a
- *   member that is there is held to it.
+ *   container or document on the way to it, is empty or absent (whether the
+ *   declared path or a reference's own path led there), the member
+ *   requirement consumes nothing, in a stored document and in the binding
+ *   alike; a member that is there is held to it.
  * - A path read and found absent from a container is a `shape` observation
  *   (§4.6.3) carrying the integrity minted for the container's own current
  *   value (`ownEvidenceAt`): never a label it inherits from an ancestor, a
@@ -491,12 +492,12 @@ const reachThroughInput = (
       ? Reflect.get(value, segment)
       : undefined;
     if (child === undefined) {
+      // An absent container on the way to a collection's members, wherever
+      // the path to it came from: no member to hold to the requirement.
+      if (remaining.includes("*")) return;
       // A segment of a reference's own path that is not there is the
       // reference's choice, not an absence its container vouches for.
       if (fixed > 0) return noEvidence(through);
-      // An absent container on the way to a collection's members: no member
-      // to hold to the requirement.
-      if (remaining.includes("*")) return;
       return absentFrom(location, defaulting, through);
     }
     inDocument(
@@ -547,8 +548,11 @@ const reachThroughInput = (
     const root = { ...link, path: [] };
     documents.add(documentKey(root));
     const value: unknown = tx.readValueOrThrow(root, { meta });
-    // A document with no value at all is no container to be absent from.
-    if (value === undefined) return noEvidence(through);
+    // A document with no value at all is no container to be absent from,
+    // and holds no member of a collection the requirement is on.
+    if (value === undefined) {
+      return walk.includes("*") ? undefined : noEvidence(through);
+    }
     inDocument(
       root,
       value,
