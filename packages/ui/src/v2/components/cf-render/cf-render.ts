@@ -583,9 +583,11 @@ export class CFRender extends BaseElement {
    * Opens the piece a render displays, through the request the shell opens a
    * piece with (`getPiece` with `runIt`): the worker reconciles its source and
    * starts it, or leaves both to the view where the space replicates views.
-   * Not awaited, as the render does not wait on a start. A value inside a
-   * piece is not one to open, and a document that is not a piece fails to
-   * start, which a display of plain data shrugs off.
+   * Not awaited, as the render does not wait on a start. Only a piece opens:
+   * a cell at a path inside a document is left alone, and a document that is
+   * not a piece rejects the start ("no pattern identity"), as does a piece
+   * whose program fails to load; both only reach the debug log, since a
+   * display of plain data is common and the render shows what it can.
    */
   #openDisplayed(piece: CellHandle): void {
     if (piece.ref().path.length > 0) return;
@@ -640,7 +642,7 @@ export class CFRender extends BaseElement {
    */
   private _renderTileDefault(
     container: HTMLElement,
-    cell: CellHandle,
+    piece: CellHandle,
   ): () => void {
     const clip = globalThis.document.createElement("div");
     clip.className = "tile-clip";
@@ -648,7 +650,7 @@ export class CFRender extends BaseElement {
     scaler.className = "tile-default";
     clip.appendChild(scaler);
     container.appendChild(clip);
-    const inner = this._mount(scaler, cell, cell, this._renderGeneration);
+    const inner = this._mount(scaler, piece, piece, this._renderGeneration);
     const onClick = (e: MouseEvent) => this._navigateToPiece(e);
     clip.addEventListener("click", onClick);
     return () => {

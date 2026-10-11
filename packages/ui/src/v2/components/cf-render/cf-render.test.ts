@@ -1100,12 +1100,12 @@ describe("CFRender variants", () => {
       const element = new CFRender();
       const internals = element as unknown as Internals;
       const mounted: (readonly string[])[] = [];
-      const runs: CellHandle[] = [];
+      const opens: CellHandle[] = [];
       let defaults = 0;
       internals._containerRef = { value: {} as HTMLDivElement };
-      internals._mount = (_container, cell, runsPiece) => {
+      internals._mount = (_container, cell, displayed) => {
         mounted.push(cell.ref().path);
-        runs.push(runsPiece);
+        opens.push(displayed);
         return () => {};
       };
       internals._renderTileDefault = () => {
@@ -1115,8 +1115,8 @@ describe("CFRender variants", () => {
       element.cell = piece;
       element.variant = "tile";
       await internals._renderCell();
-      // The exported tile is the piece's own, and the piece is what runs.
-      expect(runs).toEqual([piece]);
+      // The exported tile is the piece's own, and the piece is what opens.
+      expect(opens).toEqual([piece]);
       outcomes.push({ mounted, defaults, schemas, reads });
     }
     expect(outcomes[0]).toEqual({
@@ -1178,6 +1178,89 @@ describe("CFRender variants", () => {
         true,
         piece.ref().scope,
       ]]);
+    } finally {
+      element.disconnectedCallback();
+      mockDocument.restore();
+    }
+  });
+
+  it("opens the piece its default tile shows", async () => {
+    const mockDocument = installMockDocument();
+    const create = mockDocument.document.createElement;
+    mockDocument.document.createElement = (tagName) =>
+      Object.assign(create(tagName), {
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        remove: () => {},
+      });
+    try {
+      const { cell: piece } = createRenderableCellHandle<unknown>(undefined, {
+        id: "of:fid1:piece-abcdef" as CellRef["id"],
+      });
+      const opened: unknown[][] = [];
+      Object.assign(piece.runtime(), {
+        getPiece: (...args: unknown[]) => {
+          opened.push(args);
+          return Promise.resolve(null);
+        },
+      });
+      const element = new CFRender();
+      const internals = element as unknown as Internals;
+      const cleanup = internals._renderTileDefault(
+        createMockElement("div") as unknown as HTMLElement,
+        piece,
+      );
+      expect(opened).toEqual([[
+        piece.id(),
+        piece.space(),
+        true,
+        piece.ref().scope,
+      ]]);
+      cleanup();
+    } finally {
+      mockDocument.restore();
+    }
+  });
+
+  it("opens nothing for a value at a path inside a document", async () => {
+    // A link may lead into a piece's document rather than to the piece; only
+    // a piece opens.
+    const mockDocument = installMockDocument();
+    const element = new CFRender();
+    try {
+      const { cell: link } = createRenderableCellHandle<unknown>(undefined, {
+        id: "of:fid1:link-holder" as CellRef["id"],
+        path: ["shown"],
+      });
+      const inner = createMockCellHandle<unknown>(undefined, {
+        id: "of:fid1:piece-abcdef" as CellRef["id"],
+        path: ["field"],
+      }) as CellHandle;
+      Object.assign(link, { resolveAsCell: () => Promise.resolve(inner) });
+      Object.assign(link.runtime(), { signal: new AbortController().signal });
+      const opened: unknown[][] = [];
+      const record = {
+        getPiece: (...args: unknown[]) => {
+          opened.push(args);
+          return Promise.resolve(null);
+        },
+      };
+      Object.assign(inner.runtime(), record);
+      Object.assign(link.runtime(), record);
+      const internals = element as unknown as Internals & {
+        _watchLinkTarget(
+          cell: CellHandle,
+          resolved: CellHandle,
+        ): Promise<CellHandle | undefined>;
+      };
+      internals._watchLinkTarget = (_cell, resolved) =>
+        Promise.resolve(resolved);
+      internals._containerRef = {
+        value: createMockElement("div") as unknown as HTMLDivElement,
+      };
+      element.cell = link;
+      await internals._renderCell();
+      expect(opened).toEqual([]);
     } finally {
       element.disconnectedCallback();
       mockDocument.restore();
