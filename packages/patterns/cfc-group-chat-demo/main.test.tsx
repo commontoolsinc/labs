@@ -20,6 +20,7 @@ import {
 } from "./logic.ts";
 import {
   type ChatAdminRegistryValue,
+  type ChatAdminRegistryView,
   chatAdminRolesValue,
   type EmptyMyProfileValue,
   type MyProfileCellValue,
@@ -30,6 +31,7 @@ import {
   type SharedMessagesValue,
   type SharedProfilesValue,
   type SharedRoomsValue,
+  type SharedRoomsView,
   TRUSTED_GROUP_CHAT_ADD_ROOM_ACTION,
   TRUSTED_GROUP_CHAT_ADMIN_SURFACE,
   TRUSTED_GROUP_CHAT_PROFILE_SURFACE,
@@ -104,6 +106,11 @@ export default pattern(() => {
     rooms,
     adminRegistry,
   } as GroupChatDemoInputArg);
+  // The assertions read the rooms and the registry as their readers declare
+  // them, without the stored lists' floors; the chats are wired the stored
+  // cells.
+  const roomsView: SharedRoomsView = rooms as never;
+  const adminRegistryView: ChatAdminRegistryView = adminRegistry as never;
 
   // Imported rows are appended via push: rewriting the whole list with
   // `messages.set([...])` re-writes the existing TRUSTED rows, which only the
@@ -154,7 +161,7 @@ export default pattern(() => {
   const assert_profile_bootstraps_admin = assert(() =>
     chat.currentUserIsAdmin === true &&
     chat.currentUserCanManageAdmins === true &&
-    chatAdminRolesValue(adminRegistry).length === 0
+    chatAdminRolesValue(adminRegistryView).length === 0
   );
   const assert_alice_sees_bob_without_bob_message = assert(() => {
     const participants = participantClaimsValue(profiles, myProfile, messages);
@@ -184,15 +191,16 @@ export default pattern(() => {
       hasText(toggleButton, "Admin via everyone");
   });
   const assert_bootstrap_admin_can_add_room = assert(() => {
-    const roomList = roomsValue(rooms);
+    const roomList = roomsValue(roomsView);
     return roomList.length === 1 &&
       roomList[0]?.name === "Ops";
   });
   const assert_everyone_disabled_seeds_alice = assert(() =>
     chat.currentUserIsAdmin === true &&
     bobChat.currentUserIsAdmin !== true &&
-    chatAdminRolesValue(adminRegistry).length === 1 &&
-    (adminRegistry.get() as { everyoneIsAdmin?: boolean }).everyoneIsAdmin ===
+    chatAdminRolesValue(adminRegistryView).length === 1 &&
+    (adminRegistryView.get() as { everyoneIsAdmin?: boolean })
+        .everyoneIsAdmin ===
       false
   );
   const assert_admin_view_explicit_alice = assert(() => {
@@ -216,27 +224,29 @@ export default pattern(() => {
   const assert_last_admin_removal_blocked = assert(() =>
     chat.currentUserIsAdmin === true &&
     bobChat.currentUserIsAdmin !== true &&
-    chatAdminRolesValue(adminRegistry).length === 1 &&
-    (adminRegistry.get() as { everyoneIsAdmin?: boolean }).everyoneIsAdmin ===
+    chatAdminRolesValue(adminRegistryView).length === 1 &&
+    (adminRegistryView.get() as { everyoneIsAdmin?: boolean })
+        .everyoneIsAdmin ===
       false
   );
   const assert_bob_cannot_add_room_after_lockdown = assert(() =>
-    roomsValue(rooms).length === 1
+    roomsValue(roomsView).length === 1
   );
   const assert_bob_admin_enabled = assert(() =>
     bobChat.currentUserIsAdmin === true &&
     bobChat.currentUserCanManageAdmins === true &&
-    chatAdminRolesValue(adminRegistry).length === 2 &&
-    (adminRegistry.get() as { everyoneIsAdmin?: boolean }).everyoneIsAdmin ===
+    chatAdminRolesValue(adminRegistryView).length === 2 &&
+    (adminRegistryView.get() as { everyoneIsAdmin?: boolean })
+        .everyoneIsAdmin ===
       false
   );
   const assert_bob_can_add_room = assert(() => {
-    const roomList = roomsValue(rooms);
+    const roomList = roomsValue(roomsView);
     return roomList.length === 2 &&
       roomList[1]?.name === "Bob room";
   });
   const assert_alice_can_still_add_room = assert(() => {
-    const roomList = roomsValue(rooms);
+    const roomList = roomsValue(roomsView);
     return roomList.length === 3 &&
       roomList[2]?.name === "Ops 2";
   });
@@ -247,18 +257,18 @@ export default pattern(() => {
   // failure, since a Bob who is still an admin can still create a room.
   const assert_bob_admin_revoked = assert(() =>
     bobChat.currentUserIsAdmin !== true &&
-    chatAdminRolesValue(adminRegistry).length === 1 &&
+    chatAdminRolesValue(adminRegistryView).length === 1 &&
     // The explicit `admins` list, which is the floored path. The length above
     // reads through `chatAdminRolesValue`, which falls back to the bootstrap
     // role when `admins` is absent, so it alone does not say the list landed.
-    (adminRegistry.get() as { admins?: { displayName: string }[] }).admins
+    (adminRegistryView.get() as { admins?: { displayName: string }[] }).admins
         ?.length === 1 &&
-    (adminRegistry.get() as { admins?: { displayName: string }[] })
+    (adminRegistryView.get() as { admins?: { displayName: string }[] })
         .admins?.[0]?.displayName === "Alice"
   );
   const assert_bob_cannot_add_room_after_revoke = assert(() =>
-    roomsValue(rooms).length === 3 &&
-    roomsValue(rooms)[2]?.name === "Ops 2"
+    roomsValue(roomsView).length === 3 &&
+    roomsValue(roomsView)[2]?.name === "Ops 2"
   );
   const assert_message_sent = assert(() =>
     messages.get().length === 1 &&
@@ -314,7 +324,7 @@ export default pattern(() => {
     (messages.get() as SharedChatMessage[]).every((message) =>
       !("id" in message)
     ) &&
-    roomsValue(rooms).every((room) => !("id" in room))
+    roomsValue(roomsView).every((room) => !("id" in room))
   );
 
   return {

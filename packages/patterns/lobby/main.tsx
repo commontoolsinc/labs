@@ -144,6 +144,36 @@ export type LobbyAdminRegistryValue =
   | Default<EmptyAdminRegistryValue>;
 export type LobbyAdminRegistryCell = Writable<LobbyAdminRegistryValue>;
 
+/**
+ * The roster as the code that reads it declares it: the same writer binding
+ * and mint as `LobbyAdminList`, without its floor. Who may change the roster
+ * is decided by that binding (an access-control capability, not value
+ * integrity), so a node reading the roster to decide requires nothing of it;
+ * an input requirement exists only where a node declares one. The stored
+ * roster keeps its floor through `LobbyAdminRegistryCell`, the pattern's
+ * argument.
+ */
+export type LobbyAdminListView = TrustedActionWrite<
+  AddIntegrity<
+    LobbyAdminRole[],
+    readonly [typeof LOBBY_ADMIN_INTEGRITY]
+  >,
+  typeof commitTrustedLobbyAction,
+  typeof TRUSTED_LOBBY_ACTION,
+  typeof TRUSTED_LOBBY_SURFACE
+>;
+
+export interface LobbyAdminRegistryViewStoredValue {
+  readonly admins?: LobbyAdminListView;
+  readonly bootstrapAdmin?: LobbyAdminBootstrapRole;
+  readonly everyoneIsAdmin?: LobbyEveryoneAdminFlag;
+}
+
+/** The registry as its readers declare it; see `LobbyAdminListView`. */
+export type LobbyAdminRegistryView = Writable<
+  LobbyAdminRegistryViewStoredValue | Default<EmptyAdminRegistryValue>
+>;
+
 const EMPTY_PARTICIPANTS: LobbyParticipant[] = [];
 const EMPTY_PARTICIPANT_VIEWS: LobbyParticipantView[] = [];
 
@@ -162,7 +192,7 @@ export const lobbyParticipantsValue = (
 };
 
 export const lobbyAdminRolesValue = (
-  adminRegistry: LobbyAdminRegistryCell,
+  adminRegistry: LobbyAdminRegistryView,
 ): LobbyAdminRole[] => {
   const explicitAdmins = adminRegistryEntries<LobbyAdminRole>(adminRegistry);
   if (explicitAdmins.length > 0) return explicitAdmins;
@@ -179,13 +209,13 @@ export const lobbyAdminRolesValue = (
 };
 
 export const lobbyEveryoneIsAdmin = (
-  adminRegistry: LobbyAdminRegistryCell,
+  adminRegistry: LobbyAdminRegistryView,
 ): boolean => adminRegistryEveryoneIsAdmin<LobbyAdminRole>(adminRegistry);
 
 export const currentLobbyAdminRole = (
   profile: LobbyProfileCell | undefined,
   roster: LobbyRosterCell,
-  adminRegistry: LobbyAdminRegistryCell,
+  adminRegistry: LobbyAdminRegistryView,
 ): LobbyAdminRole | undefined => {
   if (profile === undefined) return undefined;
 
@@ -215,7 +245,7 @@ export const currentLobbyAdminRole = (
 export const currentLobbyUserIsAdmin = (
   profile: LobbyProfileCell | LobbyProfile | undefined,
   roster: LobbyRosterCell,
-  adminRegistry: LobbyAdminRegistryCell,
+  adminRegistry: LobbyAdminRegistryView,
 ): boolean => {
   if (profile === undefined) return false;
   const isParticipant = lobbyParticipantsValue(roster).some((participant) =>
@@ -244,7 +274,7 @@ export type LobbyTrustedActionKind =
 export interface LobbyTrustedActionState {
   readonly kind: LobbyTrustedActionKind;
   readonly roster: LobbyRosterCell;
-  readonly adminRegistry: LobbyAdminRegistryCell;
+  readonly adminRegistry: LobbyAdminRegistryView;
   readonly viewerProfile?: LobbyProfileCell;
   readonly viewerName: string;
   readonly targetProfile?: LobbyProfileCell;
@@ -264,7 +294,7 @@ interface LobbyAdminPolicyChange {
 
 export const prepareTrustedLobbyAdminChange = (
   currentAdminRole: LobbyAdminRole | undefined,
-  adminRegistry: LobbyAdminRegistryCell,
+  adminRegistry: LobbyAdminRegistryView,
   targetProfile: LobbyProfileCell | undefined,
   targetName: string | undefined,
   nextEveryoneIsAdmin?: boolean,
@@ -401,7 +431,7 @@ export const commitTrustedLobbyAction = handler<
       remainingAdmins.length > 0 &&
       remainingAdmins.length !== adminRoles.length
     ) {
-      adminRegistry.key("admins").set(remainingAdmins as LobbyAdminList);
+      adminRegistry.key("admins").set(remainingAdmins as LobbyAdminListView);
     }
     return;
   }
@@ -425,7 +455,7 @@ export const commitTrustedLobbyAction = handler<
     );
   }
   if (nextPolicy.admins !== undefined) {
-    adminRegistry.key("admins").set(nextPolicy.admins as LobbyAdminList);
+    adminRegistry.key("admins").set(nextPolicy.admins as LobbyAdminListView);
   }
   if (nextPolicy.everyoneIsAdmin !== undefined) {
     adminRegistry.key("everyoneIsAdmin").set(
@@ -504,7 +534,7 @@ const PORCH_LIGHT = {
 interface LobbyParticipantRowInput {
   participant: LobbyParticipant;
   roster: LobbyRosterCell;
-  adminRegistry: LobbyAdminRegistryCell;
+  adminRegistry: LobbyAdminRegistryView;
   viewerProfile?: LobbyProfileCell;
   viewerName: string;
   currentUserIsAdmin: boolean;
@@ -518,7 +548,7 @@ interface LobbyParticipantRowOutput {
 export interface LobbyViewerStateInput {
   viewerProfile?: LobbyProfileCell;
   roster: LobbyRosterCell;
-  adminRegistry: LobbyAdminRegistryCell;
+  adminRegistry: LobbyAdminRegistryView;
 }
 
 export interface LobbyViewerStateOutput {
@@ -681,7 +711,9 @@ const LobbyParticipantRow = pattern<
 });
 
 const Lobby = pattern<LobbyInput, LobbyOutput>(({ roster, adminRegistry }) => {
-  const adminRegistryCell: LobbyAdminRegistryCell = adminRegistry!;
+  // The pattern reads its registry through the view; its argument keeps the
+  // stored floor.
+  const adminRegistryCell: LobbyAdminRegistryView = adminRegistry as never;
   const profileWish = wish<LobbyProfile>({ query: "#profile" });
   const myProfile = profileWish.result;
   const viewerState = LobbyViewerState({

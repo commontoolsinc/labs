@@ -179,6 +179,32 @@ export type LotWatchAdminRegistryValue =
 export type LotWatchAdminRegistryCell = Writable<LotWatchAdminRegistryValue>;
 
 /**
+ * The roster as the code that reads it declares it: the same writer binding
+ * and mint as `LotWatchAdminList`, without its floor. Who may change the
+ * roster is decided by that binding (an access-control capability, not value
+ * integrity), so a node reading the roster to decide requires nothing of it;
+ * an input requirement exists only where a node declares one. The stored
+ * roster keeps its floor through `LotWatchAdminRegistryCell`, the pattern's
+ * argument.
+ */
+export type LotWatchAdminListView = WriteAuthorizedBy<
+  AddIntegrity<
+    LotWatchAdminRole[],
+    readonly [typeof LOT_WATCH_ADMIN_INTEGRITY]
+  >,
+  typeof commitLotWatchAdminChange
+>;
+
+export interface LotWatchAdminRegistryViewStoredValue {
+  admins?: LotWatchAdminListView;
+}
+
+/** The registry as its readers declare it; see `LotWatchAdminListView`. */
+export type LotWatchAdminRegistryView = Writable<
+  LotWatchAdminRegistryViewStoredValue | Default<EmptyAdminRegistryValue>
+>;
+
+/**
  * Per-user switch that reveals the admin-management controls, and the only
  * check the roster's commit handler makes on the acting user. Any viewer can
  * turn it on for themselves, so it carries no integrity: a self-granted value
@@ -415,11 +441,11 @@ const lotWatchAdminSubject = (personName: string): LotWatchAdminSubject => ({
 });
 
 const lotWatchAdminRolesValue = (
-  registry: LotWatchAdminRegistryCell,
+  registry: LotWatchAdminRegistryView,
 ): LotWatchAdminRole[] => adminRegistryEntries<LotWatchAdminRole>(registry);
 
 const personIsLotWatchAdmin = (
-  registry: LotWatchAdminRegistryCell,
+  registry: LotWatchAdminRegistryView,
   personName: string | undefined,
 ): boolean => {
   const trimmed = (personName ?? "").trim();
@@ -431,7 +457,7 @@ const personIsLotWatchAdmin = (
 
 const prepareLotWatchAdminToggle = (
   managerMode: boolean,
-  registry: LotWatchAdminRegistryCell,
+  registry: LotWatchAdminRegistryView,
   rawName: string,
 ): LotWatchAdminRole[] | null => {
   const personName = rawName.trim();
@@ -458,7 +484,7 @@ type LotWatchAdminChangeKind = "toggle" | "grant" | "revoke";
 
 interface LotWatchAdminChangeState {
   kind: LotWatchAdminChangeKind;
-  adminRegistry: LotWatchAdminRegistryCell;
+  adminRegistry: LotWatchAdminRegistryView;
   adminManagerMode: LotWatchAdminManagerModeCell;
 }
 
@@ -503,7 +529,7 @@ const commitLotWatchAdminChange = handler<
     personName,
   );
   if (nextAdmins === null) return;
-  adminRegistry.key("admins").set(nextAdmins as LotWatchAdminList);
+  adminRegistry.key("admins").set(nextAdmins as LotWatchAdminListView);
 });
 
 // ============================================================
@@ -511,7 +537,17 @@ const commitLotWatchAdminChange = handler<
 // ============================================================
 
 export default pattern<LotWatchInput, LotWatchOutput>(
-  ({ spots, sightings, people, knownVehicles, adminRegistry }) => {
+  ({
+    spots,
+    sightings,
+    people,
+    knownVehicles,
+    adminRegistry: adminRegistryArgument,
+  }) => {
+    // The pattern reads its registry through the view; its argument keeps
+    // the stored floor.
+    const adminRegistry: LotWatchAdminRegistryView =
+      adminRegistryArgument as never;
     // ---- Cells (DESIGN §5) ----
     //
     // Each optional cell input materializes seeded from its type's `Default<>`

@@ -141,8 +141,12 @@ keeps a fixed threshold:
       requirements the identity binds.
 - [x] **The check** (labs#8670), at the strict default, for lifts, computed
       nodes and handlers, with tests that lead with §10's `to_city`.
-  - Fix each existing pattern the full CI run shows refused, so its honest
-    data satisfies its declaration.
+  - Admin-roster patterns (lobby, parking-coordinator, lot-watch, the
+    group-chat demo): the code that reads a roster declares it through a view
+    without the floor, keeping the writer binding and mint. Write authority,
+    not a self-mintable string atom, decides who may change a roster (§3.3,
+    §8.15.5); the stored floor and the argument and result contracts are
+    unchanged. profile-home's collector does the same for its list.
 - [ ] **After the ruling.**
   - Remove the marker and re-pin the spec snapshot.
   - Add a kernel manifest row for `verifyBoundInputRequirements`.

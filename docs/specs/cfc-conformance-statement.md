@@ -498,14 +498,25 @@ the log and the reach can go.
   from another item included. The same holds of absence: a binding may point
   at any container that carries the evidence and lacks the path, so code that
   reads an absent input as permission (an empty roster as "everyone is an
-  admin", say) relies on the container being the one it expects. Patterns
-  seed such inputs with an empty value, so the input is present and stamped. Binding two inputs to one item is what
-  instance-bound integrity (`scope.valueRef`, §4.5.1, §8.10.4) is for.
+  admin", say) relies on the container being the one it expects. Binding two
+  inputs to one item is what instance-bound integrity (`scope.valueRef`,
+  §4.5.1, §8.10.4) is for.
 - A `requiredIntegrity` inside an `anyOf` or `oneOf` branch is applied
   whichever branch the value takes, an over-taint; §4.2.1.1 keeps such
   declarations outside the normalized profile.
-- A document seeded before its pattern seeded an empty roster (`{}` rather
-  than `{ admins: [] }`) reads as an absent roster with no evidence, and its
-  nodes are refused until the owner writes the roster once: an over-taint.
+- A requirement on the members of a collection that a node's binding
+  supplies no members for (an empty or absent list in an event) consumes
+  nothing, while an empty collection read from a stored document is observed
+  with the container's own evidence; an under-taint confined to a binding
+  that hands the code no member.
+- Bare string atoms that patterns mint through `addIntegrity` ("lobby-admin"
+  and the like) can be minted by any non-builtin code, so a floor or an input
+  requirement on one is no authority check. Admin rosters are guarded by their
+  write-authority binding (§3.3: "an access-control capability ... not value
+  integrity"; §8.15.5), and the code that reads a roster declares no
+  requirement on it (only a declared requirement creates one, §8.10.3).
+- A piece still running the source it was deployed with keeps the input
+  requirements its old schemas declared, so its nodes refuse an unstamped or
+  empty roster under this check until its source updates: an over-taint.
 - The cycle check keys on each reference's target, so a chain that passes one
   target twice on different walks is refused, an over-taint.

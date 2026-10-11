@@ -152,6 +152,32 @@ export type ParkingAdminRegistryValue =
 export type ParkingAdminRegistryCell = Writable<ParkingAdminRegistryValue>;
 
 /**
+ * The roster as the code that reads it declares it: the same writer binding
+ * and mints as `ParkingAdminList`, without its floor. Who may change the
+ * roster is decided by that binding (an access-control capability, not value
+ * integrity), so a node reading the roster to decide requires nothing of it;
+ * an input requirement exists only where a node declares one. The stored
+ * roster keeps its floor through `ParkingAdminRegistryCell`, the pattern's
+ * argument and result.
+ */
+export type ParkingAdminListView = WriteAuthorizedBy<
+  AddIntegrity<
+    ParkingAdminRole[],
+    readonly [typeof PARKING_ADMIN_INTEGRITY]
+  >,
+  typeof commitParkingAdminChange
+>;
+
+export interface ParkingAdminRegistryViewStoredValue {
+  admins?: ParkingAdminListView;
+}
+
+/** The registry as its readers declare it; see `ParkingAdminListView`. */
+export type ParkingAdminRegistryView = Writable<
+  ParkingAdminRegistryViewStoredValue | Default<EmptyAdminRegistryValue>
+>;
+
+/**
  * Per-user switch that reveals the admin-management controls. Turning it on
  * grants nothing: every roster change is checked against the viewer's own
  * parking-admin role, so only an admin can make one — except while the roster
@@ -346,7 +372,7 @@ const resetModelOnMakeChange = handler<
 });
 
 const parkingAdminRolesValue = (
-  registry: ParkingAdminRegistryCell,
+  registry: ParkingAdminRegistryView,
 ): ParkingAdminRole[] => adminRegistryEntries<ParkingAdminRole>(registry);
 
 /**
@@ -355,13 +381,13 @@ const parkingAdminRolesValue = (
  * is what makes the answer independent of whatever name the profile carries.
  */
 const parkingAdminRoleForProfile = (
-  registry: ParkingAdminRegistryCell,
+  registry: ParkingAdminRegistryView,
   profile: ParkingProfileRef | undefined,
 ): ParkingAdminRole | undefined =>
   activeAdminRoleForSubject(parkingAdminRolesValue(registry), profile);
 
 const profileIsParkingAdmin = (
-  registry: ParkingAdminRegistryCell,
+  registry: ParkingAdminRegistryView,
   profile: ParkingProfileRef | undefined,
 ): boolean => subjectHasAdminRole(parkingAdminRolesValue(registry), profile);
 
@@ -380,7 +406,7 @@ const personForProfile = (
 // holds it may change it. An empty roster is the bootstrap case: the first
 // grant is open, and from then on the roster gates itself.
 const actorMayChangeParkingAdmins = (
-  registry: ParkingAdminRegistryCell,
+  registry: ParkingAdminRegistryView,
   profile: ParkingProfileRef | undefined,
 ): boolean =>
   profile !== undefined &&
@@ -393,7 +419,7 @@ const actorMayChangeParkingAdmins = (
  * authorize at all.
  */
 const viewerMayChangeParkingAdmins = (
-  registry: ParkingAdminRegistryCell,
+  registry: ParkingAdminRegistryView,
   profile: ParkingProfileRef | undefined,
   viewerName: string,
 ): boolean =>
@@ -402,7 +428,7 @@ const viewerMayChangeParkingAdmins = (
 
 const currentUserCanManageParkingAdmins = (
   managerMode: ParkingAdminManagerModeCell,
-  registry: ParkingAdminRegistryCell,
+  registry: ParkingAdminRegistryView,
   profile: ParkingProfileRef | undefined,
   viewerName: string,
 ): boolean =>
@@ -433,7 +459,7 @@ export interface ParkingAdminChangeEvent {
 
 interface ParkingAdminChangeState {
   kind: ParkingAdminChangeKind;
-  adminRegistry: ParkingAdminRegistryCell;
+  adminRegistry: ParkingAdminRegistryView;
   managerMode: ParkingAdminManagerModeCell;
   people: PeopleCell;
   viewerProfile: ParkingAdminSubject | undefined;
@@ -505,7 +531,7 @@ const commitParkingAdminChange = handler<
     nextRoles = roles.filter((role) => !equals(role.subject, target));
   }
 
-  adminRegistry.key("admins").set(nextRoles as ParkingAdminList);
+  adminRegistry.key("admins").set(nextRoles as ParkingAdminListView);
 });
 
 /**
@@ -623,7 +649,17 @@ export const DEFAULT_SPOTS: ParkingSpot[] = [
 // ============================================================
 
 export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
-  ({ spots, people, requests, adminRegistry, viewer }) => {
+  ({
+    spots,
+    people,
+    requests,
+    adminRegistry: adminRegistryArgument,
+    viewer,
+  }) => {
+    // The pattern reads its registry through the view; its argument and
+    // result keep the stored floor.
+    const adminRegistry: ParkingAdminRegistryView =
+      adminRegistryArgument as never;
     // Each optional cell input materializes seeded from its type's `Default<>`
     // when the caller wires nothing; a parent that owns the cells (e.g.
     // lot-with-coordinator-demo) shares them by passing them in.
@@ -3190,7 +3226,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       spots,
       people,
       requests,
-      adminRegistry: adminRegistry as PerSpace<ParkingAdminRegistryCell>,
+      adminRegistry: adminRegistryArgument as PerSpace<
+        ParkingAdminRegistryCell
+      >,
       adminMode: adminModeEnabled,
       currentPersonIsAdmin,
       currentUserCanManageAdmins,
