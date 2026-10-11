@@ -13432,12 +13432,13 @@ export class Runner {
    * this is exact wherever that pattern is loaded in this runtime and names
    * the instance. An instance that pattern, loaded, does not name is matched
    * to its positional children by order within each pattern identity.
-   * Without that pattern, an instance carries over the one child, among the
-   * positional spots the parent's manifest records, that runs the instance's
-   * own child pattern identity and that no positional node of `pattern` sets
-   * up at its own spot; failing that, the child at its own positional
-   * cause, unless the parent shows the children have moved spots. A child is
-   * carried over by one instance at most.
+   * Without that pattern, or where order places the instance at no set-up
+   * child, an instance carries over the one child, among the positional
+   * spots the parent's manifest records, that runs the instance's own child
+   * pattern identity and that no positional node of `pattern` sets up at its
+   * own spot; failing that, the child at its own positional cause, unless
+   * the parent shows the children have moved spots. A child is carried over
+   * by one instance at most.
    */
   #planInstanceCarryOver(
     resultCell: Cell<any>,
@@ -13527,7 +13528,9 @@ export class Runner {
     // matches it by order: the i-th of `pattern`'s instances of a pattern
     // identity, positional nodes and these instances together in the order
     // the builder numbered them, takes the child at the i-th positional spot
-    // the previous pattern sets up under that identity.
+    // the previous pattern sets up under that identity. One that order places
+    // at no set-up child, as when its own source changed in this update and
+    // its pattern identity with it, goes on to the steps that follow.
     if (previous !== undefined && unnamedBefore.length > 0) {
       const spotsBefore = this.#positionalSpotsByIdentity(previous);
       const numbered: {
@@ -13543,7 +13546,10 @@ export class Runner {
       }
       for (const entry of unnamedBefore) {
         const key = this.#patternIdentityKey(entry.module);
-        if (key === undefined) continue;
+        if (key === undefined) {
+          unmatched.push(entry);
+          continue;
+        }
         numbered.push({
           key,
           number: generatedNumber(entry.descriptor.legacyPartialCause),
@@ -13557,15 +13563,20 @@ export class Runner {
         counts.set(key, index + 1);
         if (entry === undefined) continue;
         const spot = spotsBefore.get(key)?.[index];
-        // No spot, or no child set up at it, makes the instance new.
-        if (spot === undefined) continue;
+        if (spot === undefined) {
+          unmatched.push(entry);
+          continue;
+        }
         const child = this.#childAtPartialCause(
           tx,
           parent,
           spot.module,
           spot.partialCause,
         );
-        if (getPatternIdentityRef(child) === undefined) continue;
+        if (getPatternIdentityRef(child) === undefined) {
+          unmatched.push(entry);
+          continue;
+        }
         const link = child.getAsNormalizedFullLink();
         if (claimed.has(documentKey(link))) {
           uncarried.push({
@@ -13579,10 +13590,10 @@ export class Runner {
         carried.set(entry.name, link);
       }
     }
-    // Without the previous pattern, an instance carries over the one child,
-    // among the positional spots the parent's manifest records, whose pattern
-    // identity is the instance's own child pattern identity. A child two
-    // instances would each take goes to neither.
+    // Where the previous pattern does not place it, an instance carries over
+    // the one child, among the positional spots the parent's manifest
+    // records, whose pattern identity is the instance's own child pattern
+    // identity. A child two instances would each take goes to neither.
     const picks = unmatched.map((entry) => ({
       entry,
       child: this.#soleRecordedChild(

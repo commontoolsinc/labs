@@ -151,19 +151,20 @@ these that applies:
    positional there, the instance is matched by order. Counting the new
    pattern's positional nodes and such instances of one pattern identity in the
    order the builder numbered them, the i-th takes the child at the i-th
-   positional spot the previous pattern sets up under that identity, and with no
-   such spot, or no child set up there, the instance is new. So an instance
-   bound to a `const` in place of an inline one takes the inline one's child,
-   whatever is inserted around it, and so does a new instance of the same
+   positional spot the previous pattern sets up under that identity. So an
+   instance bound to a `const` in place of an inline one takes the inline one's
+   child, whatever is inserted around it, and so does a new instance of the same
    pattern added where an inline one was deleted. Reordering instances of one
    pattern in the same update hands each the state of the one whose place it
-   takes.
-3. Without that pattern, it is the one set-up child, among the positional spots
-   the parent's manifest records, whose `patternIdentity` is the instance's own
-   child pattern identity, leaving out a child that a positional node of the
-   pattern still sets up at its own spot under that same identity. More than one
-   such child, or one that two instances would each take, goes on to the next
-   step.
+   takes. With no such spot, or no child set up there, the instance goes on to
+   the next step. An instance whose own source changed in the same update goes
+   on that way, since its pattern identity changed with it.
+3. Without that pattern, or where step 2 places the instance at no set-up child,
+   it is the one set-up child, among the positional spots the parent's manifest
+   records, whose `patternIdentity` is the instance's own child pattern
+   identity, leaving out a child that a positional node of the pattern still
+   sets up at its own spot under that same identity. More than one such child,
+   or one that two instances would each take, goes on to the next step.
 4. Otherwise, it is the child at the instance's own `legacyPartialCause`, which
    is where the child runs with no instance names, unless the parent shows the
    children have moved spots: that child carries an instance name stamp, or it
@@ -184,12 +185,13 @@ Step 4 is what a parent does with no instance names at all, short of a sign that
 its children moved, so carrying a child over is never worse than running
 positionally. Two corners are left. Where the previous pattern builds, the order
 match of step 2 is a guess for instances of one pattern reordered in the same
-update. Without the previous pattern, in a parent with no setup marker or whose
-stored source no longer compiles, a child can take another's state where its
-children moved in the same update and either their pattern identities all
-changed or more than one of them shares the instance's identity, as it does with
-no instance names; the vintage gate catches it loudly where a schema then
-refuses the stored argument.
+update. Steps 3 and 4 decide an instance without the previous pattern, in a
+parent with no setup marker or whose stored source no longer compiles, and an
+instance step 2 places at no set-up child. There a child can take another's
+state where its parent's children moved in the same update and either their
+pattern identities all changed or more than one of them shares the instance's
+identity, as it does with no instance names; the vintage gate catches it loudly
+where a schema then refuses the stored argument.
 
 A named instance stamps its name on the child it sets up, in the child's
 `instanceName` meta. The parent's setup refuses (`refuseDisplacedChildren`),

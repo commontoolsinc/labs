@@ -174,6 +174,31 @@ const DEPLOYED_TWO_NEWER_COUNTER = parentProgram(
   `${COUNTER}// A newer version.\n`,
 );
 
+// The parent as deployed with a `Counter` child `a` ahead of an `Other` child
+// `t`.
+const DEPLOYED_WITH_OTHER = parentProgram([
+  "  const [a, t] = [Counter({ label: 'a' }), Other({ label: 't' })];",
+  "  return { views: [a, t], aCount: a.count, tCount: t.count };",
+].join("\n"));
+
+// `DEPLOYED_WITH_OTHER` with `a` bound to a `const` under a newer version of
+// `Counter`'s own source, and a positional `Third` child `s` inserted ahead
+// of it, which puts `a`'s positional spot where `t` sat.
+const NAMED_NEWER_COUNTER_AFTER_POSITIONAL_SIBLING = parentProgram(
+  [
+    "  const [s] = [Third({ label: 's' })];",
+    "  const a = Counter({ label: 'a' });",
+    "  const [t] = [Other({ label: 't' })];",
+    "  return {",
+    "    views: [s, a, t],",
+    "    aCount: a.count,",
+    "    sCount: s.count,",
+    "    tCount: t.count,",
+    "  };",
+  ].join("\n"),
+  `${COUNTER}// A newer version.\n`,
+);
+
 describe("instance-carry-over", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let rt: Runtime;
@@ -646,6 +671,41 @@ describe("instance-carry-over", () => {
         const result = await update(cell, NAMED);
 
         expect(result.aCount).toBe(7);
+      });
+
+      it("keeps its child's state at its own positional spot when its own source changed in the same update", async () => {
+        // The child's pattern identity changed, so no positional child of the
+        // parent's previous pattern matches it by order.
+
+        const cell = await deployedParent("bound-later-newer-child", {
+          named: DEPLOYED,
+        });
+        const before = freshStarts();
+
+        const result = await update(cell, NAMED_WITH_NEWER_COUNTER);
+
+        expect(result.aCount).toBe(7);
+        expect(freshStarts() - before).toBe(0);
+      });
+
+      it("starts fresh, and reports it, rather than take the child of another pattern at its positional spot, when its own source changed and a positional sibling was inserted ahead of it", async () => {
+        // `a`'s positional spot holds `t`'s deployed child, whose pattern `t`
+        // still sets up, which is the sign the children moved.
+
+        const cell = await deployedParent("bound-later-newer-child-moved", {
+          deployed: DEPLOYED_WITH_OTHER,
+          named: DEPLOYED_WITH_OTHER,
+          counts: { aCount: 7, tCount: 3 },
+        });
+        const before = freshStarts();
+
+        const result = await update(
+          cell,
+          NAMED_NEWER_COUNTER_AFTER_POSITIONAL_SIBLING,
+        );
+
+        expect(result.aCount).toBe(0);
+        expect(freshStarts() - before).toBe(1);
       });
 
       it("keeps each child's state when two children of one pattern are bound to `const`s", async () => {
