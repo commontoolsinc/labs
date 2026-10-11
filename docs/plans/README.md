@@ -22,6 +22,11 @@ a record: archive it to `docs/history/plans/` following the procedure in
 - [Unify Weaver Ask and CF harness](weaver-ask-console.md) sequences typed
   callbacks, a cohesive handles module, one session UI for both command aliases,
   and hands-on demo validation across labs, Weaver, and Loom.
+- [The serving loop off the request thread](serving-loop-worker.md) moves the
+  server-execution host into a Web Worker of the toolshed process: the worker
+  reads the store on its own SQLite connections, sends wave commits and
+  everything else it needs from the memory server over a `MessagePort`, and
+  the request thread stops waiting behind waves.
 - [Memory router security requirements](memory-router-security-requirements.md)
   defines the authentication, authorization, isolation, and public-ingress
   gates for multiplexed Memory WebSockets routed to toolsheds.
