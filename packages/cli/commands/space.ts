@@ -35,6 +35,7 @@ import {
   formatCompactionReport,
   formatCompactionRun,
   planCompaction,
+  storeSchemaRefusals,
 } from "@commonfabric/memory/v2/compact";
 import type { CellScope } from "@commonfabric/memory/v2";
 import {
@@ -86,12 +87,22 @@ function liveStoreDirs(): string[] {
  * that rewrites a store's rows. A laptop mistake, not a host one; on the host
  * the rule is that the owning instance is stopped first.
  */
-function assertNotLiveStore(store: string): void {
+function assertNotLiveStore(path: string, role: "store" | "result"): void {
+  // The result does not exist yet, so it is placed by its directory; the
+  // store by itself. Both resolve through symlinks, as the server would.
   let real: string;
   try {
-    real = Deno.realPathSync(store);
+    real = role === "store"
+      ? Deno.realPathSync(path)
+      : `${Deno.realPathSync(path.replace(/\/[^/]*$/, "") || ".")}/${
+        path.replace(/^.*\//, "")
+      }`;
   } catch {
-    throw new ValidationError(`no store at ${store}`);
+    throw new ValidationError(
+      role === "store"
+        ? `no store at ${path}`
+        : `the directory of ${path} does not exist`,
+    );
   }
   for (const dir of liveStoreDirs()) {
     let liveDir: string;
@@ -102,8 +113,11 @@ function assertNotLiveStore(store: string): void {
     }
     if (real === liveDir || real.startsWith(`${liveDir}/`)) {
       throw new ValidationError(
-        `refusing to compact ${store}: it is inside ${dir}, which a local ` +
-          `server serves. Compact a copy of the backup, never a served file.`,
+        `refusing to ${
+          role === "store" ? "compact" : "write the result to"
+        } ${path}: it is inside ${dir}, which a local server serves. ` +
+          `Compact a copy of the backup, never a served file, and write the ` +
+          `result beside it.`,
       );
     }
   }
@@ -598,8 +612,10 @@ export const space = new Command()
   )
   .option(
     "--keep-payloads <duration:string>",
-    "Commits created within this window of the newest commit keep their " +
-      "payload: a number and a unit, such as 24h, 7d or 30m.",
+    "Commits created within this window of the newest client commit keep " +
+      "their payload: a number and a unit, such as 24h, 7d or 30m. Outside " +
+      "it a payload is hollowed unless its seq is 1, an op_* row references " +
+      "it, or it is a compaction commit.",
     { default: "24h" },
   )
   .option("--dry-run", "Compute and report; write nothing.")
@@ -621,8 +637,9 @@ export const space = new Command()
   )
   .option(
     "--verify-sample <n:integer>",
-    "With --verify: reconstruct every n-th document only and skip the " +
-      "fingerprint, for a quick pass during rehearsal.",
+    "With --verify: reconstruct every n-th document and check every n-th " +
+      "hollowed payload only, and skip the fingerprint: a quick pass during " +
+      "rehearsal, and a weaker claim.",
   )
   .action(async (options, store) => {
     if (options.verify) {
@@ -692,15 +709,23 @@ export const space = new Command()
           }
           throw error;
         }
-        out(!!options.json, report, () => {
+        // The schema preflight a run makes, so the dry run says whether the
+        // store is one a run would write at all.
+        const schema = await storeSchemaRefusals(space.db);
+        const schemaLine = schema.length === 0
+          ? "schema     current; a run would open this store without migrating it"
+          : `schema     REFUSED: ${schema.join("; ")}`;
+        out(!!options.json, { ...report, schema }, () => {
           console.log(formatCompactionReport(report));
+          console.log(schemaLine);
         });
       } finally {
         space.close();
       }
       return;
     }
-    assertNotLiveStore(store);
+    assertNotLiveStore(store, "store");
+    assertNotLiveStore(options.out ?? `${store}.compacted.sqlite`, "result");
     try {
       let planned = false;
       const run = await compactStore({

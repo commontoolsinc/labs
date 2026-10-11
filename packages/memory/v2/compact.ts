@@ -28,6 +28,7 @@ import {
   read,
   readRevision,
 } from "./engine.ts";
+import { isACL } from "../acl.ts";
 
 /**
  * Which instances a compaction selects. Prefixes match `id` (the namespaces
@@ -609,6 +610,9 @@ export const formatCompactionReport = (report: CompactionReport): string => {
         n(payloads.exemptGenesis)
       }; ` +
       `op_* keep ${n(payloads.exemptOpReferenced)}` +
+      (payloads.exemptCompaction > 0
+        ? `; earlier runs' commits keep ${n(payloads.exemptCompaction)}`
+        : "") +
       (payloads.alreadyHollowed > 0
         ? `; ${n(payloads.alreadyHollowed)} hollowed by an earlier run`
         : ""),
@@ -761,17 +765,155 @@ const HOLLOW_BATCH = 10_000;
 const storable = (value: unknown): FabricValue =>
   JSON.parse(JSON.stringify(value)) as FabricValue;
 
-const fileSize = (path: string): number => {
+/** The file's stat, or undefined for a file that is not there. Any other
+ * failure — a permission refused, an I/O error — is not absence and is
+ * rethrown: a companion the run cannot read is not a companion it may
+ * treat as empty. */
+const statIfPresent = (path: string): Deno.FileInfo | undefined => {
   try {
-    return Deno.statSync(path).size;
-  } catch {
-    return 0;
+    return Deno.statSync(path);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return undefined;
+    throw error;
   }
 };
 
-const hasColumn = (db: Database, table: string, column: string): boolean =>
-  db.prepare(`SELECT 1 FROM pragma_table_info(?) WHERE name = ?`)
-    .get(table, column) !== undefined;
+const fileSize = (path: string): number => statIfPresent(path)?.size ?? 0;
+
+type SchemaObject = { type: string; name: string; tbl_name: string };
+type SchemaColumn = {
+  name: string;
+  type: string;
+  notnull: number;
+  dflt_value: string | null;
+  pk: number;
+};
+
+/** Every table and index a database declares, with each table's columns. */
+const readSchema = (
+  db: Database,
+): { objects: SchemaObject[]; columns: Map<string, SchemaColumn[]> } => {
+  const objects = db.prepare(
+    `SELECT type, name, tbl_name FROM sqlite_master
+     WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'
+     ORDER BY type, name`,
+  ).all<SchemaObject>();
+  const columns = new Map<string, SchemaColumn[]>();
+  for (const object of objects) {
+    if (object.type !== "table") continue;
+    columns.set(
+      object.name,
+      db.prepare(
+        `SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info(?) ORDER BY cid`,
+      ).all<SchemaColumn>(object.name),
+    );
+  }
+  return { objects, columns };
+};
+
+/** The schema text of a database, for an exact before/after comparison. */
+const schemaText = (db: Database): string =>
+  db.prepare(
+    `SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name`,
+  ).all().map((row) => JSON.stringify(row)).join("\n");
+
+/**
+ * Tables the engine's migrations remove or rename on opening: a store
+ * holding one is a store the engine would rewrite.
+ */
+const LEGACY_TABLES = [
+  "scheduler_observation_replay",
+  "scheduler_read_index",
+  "scheduler_write_index",
+  "scheduler_action_state",
+  "scheduler_action_snapshot",
+  "scheduler_observation",
+  "scheduler_context_floor",
+  "op_integrated_id_migration",
+  "revision_unscoped_migration",
+  "head_unscoped_migration",
+  "snapshot_unscoped_migration",
+  "head_current_op_migration",
+];
+
+/**
+ * Why opening `db` through the engine would migrate it, or nothing. The
+ * engine's `open` creates every table and index it declares, adds every
+ * column a migration added since the store was written, and drops the
+ * tables earlier schemas kept; each is a write to the store before the run
+ * has decided to write anything. So the preflight compares the store's
+ * schema with the one a fresh engine declares — every object present, every
+ * declared column present with the declared type, nullability, default and
+ * key position — rather than re-deriving each migration's trigger, which a
+ * migration added later would silently miss. Pattern-created tables and
+ * their indexes are the store's own and are not held to the comparison.
+ */
+const schemaMigrationReasons = (
+  store: Database,
+  current: ReturnType<typeof readSchema>,
+): string[] => {
+  const actual = readSchema(store);
+  const reasons: string[] = [];
+  const have = new Set(actual.objects.map((o) => `${o.type}:${o.name}`));
+  const missing = current.objects.filter((o) =>
+    !have.has(`${o.type}:${o.name}`)
+  );
+  if (missing.length > 0) {
+    reasons.push(
+      `the store lacks ${missing.map((o) => `${o.type} ${o.name}`).join(", ")}`,
+    );
+  }
+  for (const [table, declared] of current.columns) {
+    const stored = actual.columns.get(table);
+    if (stored === undefined) continue;
+    const byName = new Map(stored.map((c) => [c.name, c]));
+    for (const column of declared) {
+      const found = byName.get(column.name);
+      if (found === undefined) {
+        reasons.push(`${table} has no ${column.name} column`);
+      } else if (
+        found.type !== column.type || found.notnull !== column.notnull ||
+        found.dflt_value !== column.dflt_value || found.pk !== column.pk
+      ) {
+        reasons.push(
+          `${table}.${column.name} is declared ${
+            describeColumn(found)
+          } where the engine declares ${describeColumn(column)}`,
+        );
+      }
+    }
+  }
+  const legacy = LEGACY_TABLES.filter((table) => have.has(`table:${table}`));
+  if (legacy.length > 0) {
+    reasons.push(`the store holds the legacy table(s) ${legacy.join(", ")}`);
+  }
+  return reasons;
+};
+
+const describeColumn = (column: SchemaColumn): string =>
+  `${column.type || "ANY"}${column.notnull ? " NOT NULL" : ""}${
+    column.dflt_value === null ? "" : ` DEFAULT ${column.dflt_value}`
+  }${column.pk ? " PRIMARY KEY" : ""}`;
+
+/**
+ * Why opening the store at `db` through the engine would migrate it — each
+ * a reason the run refuses it — or nothing. For the dry run to report, so an
+ * operator does not read a plan as write eligibility.
+ */
+export const storeSchemaRefusals = async (db: Database): Promise<string[]> =>
+  schemaMigrationReasons(db, await currentEngineSchema());
+
+/** The schema a fresh engine declares, read from one opened on nothing. */
+const currentEngineSchema = async (): Promise<
+  ReturnType<typeof readSchema>
+> => {
+  const fresh = await open({ url: new URL("memory:engine-schema") });
+  try {
+    return readSchema(fresh.database);
+  } finally {
+    close(fresh);
+  }
+};
 
 /**
  * The reasons a planned run must not write, in the order the plan states
@@ -815,8 +957,10 @@ export const refusals = (report: CompactionReport): string[] => {
  * transaction — materialize a patch boundary as a `set` holding the engine's
  * reconstruction at exactly that row, re-attribute the boundary whatever its
  * op, delete the rows and snapshots behind it; hollow every payload outside
- * the window in seq-ranged batches, except commit 1 and the commits an
- * `op_*` row references; write the ACL document's audit revision; check the
+ * the window in seq-ranged batches, except commit 1, the commits an `op_*`
+ * row references, and every compaction commit, whose payload is a run's
+ * record; write the ACL document's audit revision where the store has a live
+ * ACL document; check the
  * foreign keys and the file; `VACUUM INTO`. A run interrupted anywhere
  * leaves a store every reader can use, and a second run resumes it: an
  * instance whose boundary already points at a compaction commit with nothing
@@ -847,7 +991,7 @@ export const compactStore = async (
       );
     }
   }
-  if (fileSize(out) > 0 || safeStat(out) !== undefined) {
+  if (statIfPresent(out) !== undefined) {
     throw new CompactionRefused(
       `${out} exists; the result is never overwritten`,
     );
@@ -857,41 +1001,63 @@ export const compactStore = async (
   // the store for writing.
   const worklist: InstancePlan[] = [];
   let report: CompactionReport;
-  let aclHeads: Array<{ id: string; op: string }>;
+  let aclHeads: Array<{ id: string; op: string; data: string | null }>;
   const planning = new Database(store, { readonly: true });
+  let schemaBefore: string;
   try {
-    for (
-      const [table, column] of [
-        ["revision", "scope_key"],
-        ["head", "scope_key"],
-        ["head", "op"],
-      ] as const
-    ) {
-      if (!hasColumn(planning, table, column)) {
-        throw new CompactionRefused(
-          `${table} has no ${column} column: the store predates a migration the server runs on opening it, and a run writes only a store the server has opened`,
-        );
-      }
+    // The engine's `open` migrates a store that is behind its schema, and a
+    // refusal must leave the input unchanged; so the store is held to the
+    // current schema here, on a connection that cannot write.
+    const migrations = await storeSchemaRefusals(planning);
+    if (migrations.length > 0) {
+      throw new CompactionRefused(
+        `${
+          migrations.join("; ")
+        }: the store predates a migration the server runs on opening it, and a run writes only a store the server has opened`,
+      );
     }
+    schemaBefore = schemaText(planning);
     report = planCompaction(planning, {
       selection: options.selection,
       cut: options.cut,
       keepPayloadsMs: options.keepPayloadsMs,
       onInstance: (plan) => worklist.push(plan),
     });
+    // The plan names the commit this run inserts, not a commit a plan taken
+    // at another moment would have.
+    report.compactionCommit.sessionId = sessionId;
     const reasons = refusals(report);
     if (reasons.length > 0) {
       throw new CompactionRefused(`refused: ${reasons.join("; ")}`);
     }
     aclHeads = planning.prepare(
-      `SELECT id, op FROM head WHERE branch = '' AND scope_key = 'space' AND id LIKE ?`,
-    ).all<{ id: string; op: string }>(ACL_ID_PATTERN);
+      `SELECT h.id, h.op, r.data FROM head h
+       JOIN revision r ON r.branch = h.branch AND r.id = h.id AND r.scope_key = h.scope_key
+         AND r.seq = h.seq AND r.op_index = h.op_index
+       WHERE h.branch = '' AND h.scope_key = 'space' AND h.id LIKE ?`,
+    ).all<{ id: string; op: string; data: string | null }>(ACL_ID_PATTERN);
     if (aclHeads.length > 1) {
       throw new CompactionRefused(
         `the store holds ${aclHeads.length} ACL documents (${
           aclHeads.map((row) => row.id).join(", ")
         }); a space has one`,
       );
+    }
+    // The audit revision repeats the document's `value` as it stands, so
+    // what stands must be an ACL: a malformed one is the server's to repair
+    // (it fails closed on it), not the run's to re-state under its name.
+    if (aclHeads.length === 1 && aclHeads[0].op === "set") {
+      const value = aclHeads[0].data === null
+        ? undefined
+        : (decodeTrustedMemoryBoundary(aclHeads[0].data) as EntityDocument)
+          .value;
+      if (!isACL(value)) {
+        throw new CompactionRefused(
+          `${
+            aclHeads[0].id
+          } holds a value that is not an ACL; the run writes the audit revision only over a valid ACL document`,
+        );
+      }
     }
   } finally {
     planning.close();
@@ -906,6 +1072,13 @@ export const compactStore = async (
       );
     }
     const db = engine.database;
+    if (schemaText(db) !== schemaBefore) {
+      // The preflight above is what should have caught this; the store is a
+      // copy, and the operator takes a fresh one.
+      throw new Error(
+        "opening the store through the engine changed its schema although the preflight found it current; take a fresh copy of the backup and report this",
+      );
+    }
     db.exec("PRAGMA locking_mode = EXCLUSIVE");
     const tx = <T>(fn: () => T): T => db.transaction(fn).immediate();
 
@@ -916,6 +1089,11 @@ export const compactStore = async (
       const seq = db.prepare(
         `SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM "commit"`,
       ).get<{ seq: number }>()!.seq;
+      if (seq !== report.compactionCommit.seq) {
+        throw new Error(
+          `the next seq is ${seq}, not the plan's ${report.compactionCommit.seq}: the store changed since it was planned`,
+        );
+      }
       db.prepare(
         `INSERT INTO "commit" (seq, branch, session_id, local_seq, original, resolution, class)
          VALUES (?, '', ?, 1, ?, ?, 'system')`,
@@ -1192,14 +1370,6 @@ export const compactStore = async (
     };
   } finally {
     close(engine);
-  }
-};
-
-const safeStat = (path: string): Deno.FileInfo | undefined => {
-  try {
-    return Deno.statSync(path);
-  } catch {
-    return undefined;
   }
 };
 

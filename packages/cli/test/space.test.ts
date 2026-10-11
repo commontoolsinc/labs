@@ -169,6 +169,7 @@ describe("cf space compact", () => {
         materialized: 1,
         headOpChanges: 1,
       });
+      expect(report.schema).toEqual([]);
       expect(report.revisions.rowsDeleted).toBe(12);
       expect(report.largest[0].id).toBe("computed:x");
       expect((await Deno.stat(store)).mtime?.getTime()).toBe(before);
@@ -276,6 +277,17 @@ describe("cf space compact", () => {
       );
       expect(served.code).not.toBe(0);
       expect(text(served.stderr)).toContain("a local server serves");
+      // The result path is held to the same rail as the store.
+      const liveDir = `${root}/live`;
+      await Deno.mkdir(liveDir);
+      const outServed = await cf(
+        `space compact ${work} --documents computed: --out ${liveDir}/result.sqlite`,
+        { env: { DB_PATH: `${liveDir}/space.sqlite` } },
+      );
+      expect(outServed.code).not.toBe(0);
+      expect(text(outServed.stderr)).toContain("write the result to");
+      expect(await Deno.stat(`${liveDir}/result.sqlite`).catch(() => undefined))
+        .toBeUndefined();
     } finally {
       await Deno.remove(root, { recursive: true });
     }

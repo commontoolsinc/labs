@@ -1,6 +1,8 @@
 # `compact-space` — shrinking one space's history after a write storm
 
-**Status:** proposed; design only, nothing built. Written 2026-10-08 against
+**Status:** stages 1–3 landed (the bounded base search, the basis guard,
+the dry run); stage 4, the write path, in review; stages 5–8 open. Design
+written 2026-10-08 against
 the shared Topics space after
 [the October write storm](../history/development/performance/2026-10-07-topics-space-write-storm.md):
 21 GB on disk, 2.29 million commits, 46,729 computed documents rewritten
@@ -487,7 +489,7 @@ cf space compact <store.sqlite> [selection] [cut] [--dry-run] [--json]
 | `--before-seq <n>` | Rows with `seq < n` are candidates; the first row at or above `n` becomes the base. | the head: everything behind it |
 | `--before <timestamp>` | The same, with `n` taken as the newest commit created before the timestamp (`commit.created_at`, UTC). | — |
 | `--keep-last <n>` | Keep the newest `n` revisions per instance, the oldest of them rewritten as the base. | 0 |
-| `--keep-payloads <duration>` | Commit rows created within this window of the newest client commit (a compaction commit does not move it) keep their `original`; every older row's payload is hollowed except seq 1's and those an `op_*` row references, whether or not a surviving revision points at the commit (I6). The window bounds how far back a resubmission is answered faithfully rather than refused; it bounds no safety property. | `24h` |
+| `--keep-payloads <duration>` | Commit rows created within this window of the newest client commit (a compaction commit does not move it) keep their `original`; every older row's payload is hollowed except seq 1's, compaction commits', and those an `op_*` row references, whether or not a surviving revision points at the commit (I6). The window bounds how far back a resubmission is answered faithfully rather than refused; it bounds no safety property. | `24h` |
 | `--dry-run` | Compute and report; write nothing. | off |
 | `--json` | The report as JSON, per the `cf` JSON contract. | off |
 
@@ -700,15 +702,25 @@ it.
   "compaction": {
     "lastCommitSeq": 1494536,
     "compactedAt": "2026-10-09T18:00:00Z",
-    "runs": [{ "commitSeq": 1494537, "documents": "computed:", "hollowed": 1307316 }]
+    "runs": [{
+      "commitSeq": 1494537,
+      "runId": "2026-10-09T18:00:00.000Z",
+      "documents": "computed:",
+      "truncated": 232853,
+      "hollowed": 1307316,
+      "lastCommitSeq": 1494536
+    }]
   }
 }
 ```
 
 `lastCommitSeq` is the newest seq any hollowed or deleted row had; a reader
 that wants history older than it knows to ask for the archive. Each run
-appends its own entry to `runs`, with what it actually truncated and
-hollowed, so a resumed run and the run it resumed are both on record.
+that completes appends its own entry to `runs`, with what it actually
+truncated and hollowed; the audit revision is the last thing a run writes,
+so a run interrupted before it is on record only in its compaction commit,
+whose payload is the plan it set out with, and the run that resumes it
+reports what remained.
 
 **A space with no ACL document gets no marker.** The Topics space is one:
 its 2026-10-09 snapshot holds no `of:did:…` row at all, because the space
@@ -727,7 +739,8 @@ classifies an entity by its top-level paths and can learn one more. The
 shell's space header is where the icon belongs; that is a change for the
 shell's owners and is [left open](#what-is-deliberately-left-open) here, with
 the marker as the hook it hangs on. The compaction commit itself is the
-second record, with the run's report as its `original`, for `cf inspect`.
+other record — the only one where the store has no live ACL document — with
+the run's report as its `original`, for `cf inspect`.
 
 ### Rollback
 

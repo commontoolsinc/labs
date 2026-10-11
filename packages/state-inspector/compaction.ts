@@ -2,13 +2,18 @@
 // from (docs/plans/compact-space.md, §3 "Verification, in order"). Read-only
 // on both files, and deliberately a second implementation of what the run
 // claims: the heads are compared as rows, the documents through this
-// package's replay rather than the engine's, and the structural statements
-// of I4 and I6 are checked against the store rather than against the run's
-// own report, so that a run that misreported itself is caught by the
-// store it left behind.
+// package's replay rather than the engine's, each materialized boundary
+// against this package's exact-row reconstruction of the backup, the hollowed
+// set against the window the runs recorded, and the structural statements of
+// I4, I6 and I7 are checked against the store rather than against the run's
+// own report, so that a run that misreported itself is caught by the store it
+// left behind. Nothing here throws for what it finds in the files: a payload
+// that does not decode, a report that is not a plan, a table that lost rows
+// are each a named check that fails.
 
 import { hashStringOf } from "@commonfabric/data-model";
 import type { FabricValue } from "@commonfabric/api";
+import { isACL } from "@commonfabric/memory/acl";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import {
   type CompactionMarker,
@@ -21,7 +26,7 @@ import { COMPACTION_SESSION_PREFIX } from "@commonfabric/memory/v2/engine";
 import { openSpace, type SpaceDb } from "./db.ts";
 import { decodeStored } from "./decode.ts";
 import { contentFingerprint } from "./fingerprint.ts";
-import { reconstructOutcome } from "./reconstruct.ts";
+import { reconstructOutcome, reconstructRevision } from "./reconstruct.ts";
 
 export type CompactionCheck = {
   name: string;
@@ -51,17 +56,22 @@ export type VerifyCompactionOptions = {
   result: string;
   /** The store it was compacted from: the post-stop backup. */
   against: string;
-  /** Check every n-th document only, and skip the fingerprint: a quick pass
-   * during rehearsal. Absent, every head is reconstructed on both files. */
+  /** Reconstruct every n-th document and check every n-th hollowed payload
+   * only, and skip the fingerprint: a quick pass during rehearsal, and a
+   * weaker claim. Absent, every document and every payload is checked. */
   sample?: number;
 };
 
 const ACL_ID_PATTERN = "of:did:%";
-/** Hollowed payloads whose hash is checked against the backup when no
- * sample is asked for: enough to catch a marker written over the wrong
- * commit, bounded so the pass stays a hash per row rather than per byte of
- * the archive. */
-const HOLLOWED_HASH_CHECKS = 1000;
+/** The tables the history checks cover one by one; every other table is
+ * held to the backup whole (I7). */
+const HISTORY_TABLES = new Set(["commit", "revision", "snapshot", "head"]);
+const OP_TABLES = [
+  "op_field_epoch",
+  "op_submission",
+  "op_integrated",
+  "op_checkpoint",
+];
 
 const n = (value: number): string => value.toLocaleString("en-US");
 
@@ -74,11 +84,53 @@ const sameValue = (left: unknown, right: unknown): boolean =>
   encodeMemoryBoundary(left as FabricValue) ===
     encodeMemoryBoundary(right as FabricValue);
 
+const message = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/** Whether a decoded payload is a plan the run stored, shaped as the
+ * checks below read it. */
+const isReportShape = (value: unknown): value is CompactionReport => {
+  if (typeof value !== "object" || value === null) return false;
+  const report = value as Record<string, unknown>;
+  const instances = report.instances as Record<string, unknown> | undefined;
+  const payloads = report.payloads as Record<string, unknown> | undefined;
+  const hollowed = payloads?.hollowed as Record<string, unknown> | undefined;
+  const commit = report.compactionCommit as Record<string, unknown> | undefined;
+  const commits = (side: unknown) =>
+    typeof (side as Record<string, unknown> | undefined)?.commits === "number";
+  return typeof instances?.truncated === "number" &&
+    typeof instances?.headOpChanges === "number" &&
+    (payloads?.cutoffAt === null || typeof payloads?.cutoffAt === "string") &&
+    commits(hollowed?.owningHead) && commits(hollowed?.headless) &&
+    typeof commit?.seq === "number" && typeof commit?.sessionId === "string";
+};
+
+/** The marker a hollowed payload holds, or why it is not one. */
+const marker = (
+  original: string,
+): { marker: NonNullable<ReturnType<typeof decodeHollowedPayload>> } | {
+  error: string;
+} => {
+  try {
+    const decoded = decodeHollowedPayload(original);
+    if (
+      decoded === undefined || typeof decoded.hash !== "string" ||
+      typeof decoded.bytes !== "number" ||
+      typeof decoded.commitSeq !== "number" || typeof decoded.runId !== "string"
+    ) {
+      return { error: "not a hollowing marker" };
+    }
+    return { marker: decoded };
+  } catch (error) {
+    return { error: message(error) };
+  }
+};
+
 /**
  * Verifies `result` against `against`: steps 1 to 6 of the plan's §3, each
  * a named check that passes or fails on its own, so a failing verification
  * says which property the result lost. Throws only when a file cannot be
- * opened; everything else is a check.
+ * opened or attached; everything found inside the files is a check.
  */
 export function verifyCompaction(
   options: VerifyCompactionOptions,
@@ -89,6 +141,18 @@ export function verifyCompaction(
   const check = (name: string, passed: boolean, detail: string) => {
     checks.push({ name, passed, detail });
   };
+  const finish = (ok: boolean): CompactionVerification => ({
+    ok,
+    result: options.result,
+    against: options.against,
+    compactionCommits: records,
+    checks,
+    elapsedMs: performance.now() - started,
+  });
+  const stride = options.sample === undefined || options.sample <= 0
+    ? 1
+    : Math.floor(options.sample);
+  const sampled = stride > 1 || options.sample !== undefined;
 
   const main = openSpace(options.result);
   const backup = openSpace(options.against);
@@ -117,24 +181,51 @@ export function verifyCompaction(
     // The compaction commits: what the run inserted, and what it planned.
     const commits = main.all<{
       seq: number;
+      branch: string;
       session_id: string;
+      local_seq: number;
       created_at: string;
       original: string;
       class: string;
     }>(
-      `SELECT seq, session_id, created_at, original, class FROM main."commit"
-       WHERE session_id LIKE ? ORDER BY seq`,
+      `SELECT seq, branch, session_id, local_seq, created_at, original, class
+       FROM main."commit" WHERE session_id LIKE ? ORDER BY seq`,
       `${COMPACTION_SESSION_PREFIX}%`,
     );
+    const malformed: string[] = [];
     records = commits.map((row) => {
       let report: CompactionReport | undefined;
       try {
         const payload = decodeStored(row.original) as {
-          compaction?: { report?: CompactionReport };
+          compaction?: { report?: unknown };
         };
-        report = payload.compaction?.report;
-      } catch {
-        // A payload that is not the run's record is reported below.
+        const candidate = payload?.compaction?.report;
+        if (isReportShape(candidate)) {
+          report = candidate;
+          if (
+            candidate.compactionCommit.seq !== row.seq ||
+            candidate.compactionCommit.sessionId !== row.session_id
+          ) {
+            malformed.push(
+              `seq ${row.seq}: its plan names ${candidate.compactionCommit.sessionId} at seq ${candidate.compactionCommit.seq}`,
+            );
+          }
+        } else {
+          malformed.push(`seq ${row.seq}: payload is not a run's plan`);
+        }
+      } catch (error) {
+        malformed.push(
+          `seq ${row.seq}: payload does not decode (${message(error)})`,
+        );
+      }
+      if (row.class !== "system") {
+        malformed.push(`seq ${row.seq}: class ${row.class}`);
+      }
+      if (row.local_seq !== 1) {
+        malformed.push(`seq ${row.seq}: local_seq ${row.local_seq}`);
+      }
+      if (row.branch !== "") {
+        malformed.push(`seq ${row.seq}: branch ${row.branch}`);
       }
       return {
         seq: row.seq,
@@ -145,25 +236,14 @@ export function verifyCompaction(
     });
     check(
       "compaction commit recorded",
-      commits.length > 0 && commits.every((row) => row.class === "system") &&
-        records.every((record) => record.report !== undefined),
+      commits.length > 0 && malformed.length === 0,
       commits.length === 0
         ? "no compaction commit in the result"
         : `${commits.length} run(s): ${
           commits.map((row) => `seq ${row.seq} (${row.session_id})`).join(", ")
-        }${
-          commits.every((row) => row.class === "system")
-            ? ""
-            : "; a run's commit is not system-class"
-        }${
-          records.every((record) => record.report !== undefined)
-            ? ""
-            : "; a run's payload is not its plan"
-        }`,
+        }${malformed.length === 0 ? "" : `; ${malformed.join("; ")}`}`,
     );
-    if (commits.length === 0) {
-      return finish(false);
-    }
+    if (commits.length === 0) return finish(false);
     const seqs = commits.map((row) => row.seq);
     const inCompaction = `IN (${seqs.join(", ")})`;
     const last = seqs[seqs.length - 1];
@@ -261,26 +341,27 @@ export function verifyCompaction(
     // The rows pointing at a compaction commit, and what they may be: an
     // instance's oldest row (its boundary), or an ACL audit revision at the
     // commit's own seq.
+    const notAudit =
+      `NOT (r.id LIKE '${ACL_ID_PATTERN}' AND r.seq = r.commit_seq AND r.op_index = 0)`;
     const boundaries = count(
       main,
       `SELECT count(*) AS n FROM main.revision r
-       WHERE r.commit_seq ${inCompaction} AND NOT (r.id LIKE ? AND r.seq = r.commit_seq AND r.op_index = 0)`,
-      ACL_ID_PATTERN,
+       WHERE r.commit_seq ${inCompaction} AND ${notAudit}`,
     );
     const aclRevisions = count(
       main,
       `SELECT count(*) AS n FROM main.revision r
-       WHERE r.commit_seq ${inCompaction} AND r.id LIKE ? AND r.seq = r.commit_seq AND r.op_index = 0 AND r.op = 'set'`,
+       WHERE r.commit_seq ${inCompaction} AND r.id LIKE ? AND r.seq = r.commit_seq
+         AND r.op_index = 0 AND r.op = 'set'`,
       ACL_ID_PATTERN,
     );
     const boundariesWithRowsBelow = count(
       main,
       `SELECT count(*) AS n FROM main.revision r
-       WHERE r.commit_seq ${inCompaction} AND NOT (r.id LIKE ? AND r.seq = r.commit_seq)
+       WHERE r.commit_seq ${inCompaction} AND ${notAudit}
          AND EXISTS (SELECT 1 FROM main.revision b
            WHERE b.branch = r.branch AND b.id = r.id AND b.scope_key = r.scope_key
              AND (b.seq < r.seq OR (b.seq = r.seq AND b.op_index < r.op_index)))`,
-      ACL_ID_PATTERN,
     );
     const boundariesNotBases = count(
       main,
@@ -301,8 +382,8 @@ export function verifyCompaction(
 
     // Every row not attributed to a compaction commit is the backup's, byte
     // for byte, attribution included; every boundary row sits where a backup
-    // row sat; every backup row the result lacks is below a surviving row of
-    // its instance and above none.
+    // row sat and changed only as the plan states; every backup row the
+    // result lacks is below a surviving row of its instance and above none.
     const rowColumns =
       "branch, id, scope_key, seq, op_index, op, data, commit_seq";
     const changedRows = count(
@@ -323,19 +404,17 @@ export function verifyCompaction(
       main,
       `SELECT count(*) AS n FROM (
          SELECT ${boundaryColumns} FROM main.revision r
-         WHERE r.commit_seq ${inCompaction} AND NOT (r.id LIKE ? AND r.seq = r.commit_seq)
+         WHERE r.commit_seq ${inCompaction} AND ${notAudit}
          EXCEPT SELECT ${boundaryColumns} FROM against.revision)`,
-      ACL_ID_PATTERN,
     );
     const boundariesRewrittenWrong = count(
       main,
       `SELECT count(*) AS n FROM main.revision r JOIN against.revision a
          ON a.branch = r.branch AND a.id = r.id AND a.scope_key = r.scope_key
          AND a.seq = r.seq AND a.op_index = r.op_index
-       WHERE r.commit_seq ${inCompaction} AND NOT (r.id LIKE ? AND r.seq = r.commit_seq)
+       WHERE r.commit_seq ${inCompaction} AND ${notAudit}
          AND NOT ((a.op = 'patch' AND r.op = 'set')
                OR (a.op = r.op AND a.data IS r.data))`,
-      ACL_ID_PATTERN,
     );
     check(
       "boundaries keep their addresses and change only as the plan states",
@@ -350,6 +429,60 @@ export function verifyCompaction(
           : `; ${
             n(boundariesRewrittenWrong)
           } boundary row(s) whose op or data changed other than patch to set`),
+    );
+    // A materialized boundary holds exactly what the backup reconstructs at
+    // that row — not merely something the retained rows then patch into the
+    // right head. This package's exact-row reconstruction, against the
+    // engine's.
+    const materialized = main.all<{
+      branch: string;
+      id: string;
+      scope_key: string;
+      seq: number;
+      op_index: number;
+      data: string | null;
+    }>(
+      `SELECT r.branch, r.id, r.scope_key, r.seq, r.op_index, r.data
+       FROM main.revision r JOIN against.revision a
+         ON a.branch = r.branch AND a.id = r.id AND a.scope_key = r.scope_key
+         AND a.seq = r.seq AND a.op_index = r.op_index
+       WHERE r.commit_seq ${inCompaction} AND ${notAudit}
+         AND a.op = 'patch' AND r.op = 'set'
+       ORDER BY r.id, r.scope_key, r.seq, r.op_index`,
+    );
+    const wrongBoundaries: string[] = [];
+    let boundariesCompared = 0;
+    for (let index = 0; index < materialized.length; index += stride) {
+      const row = materialized[index];
+      boundariesCompared++;
+      let same = false;
+      try {
+        const expected = reconstructRevision(backup, {
+          branch: row.branch,
+          id: row.id,
+          scope: row.scope_key,
+          seq: row.seq,
+          opIndex: row.op_index,
+        });
+        same = row.data !== null && expected !== undefined &&
+          sameValue(decodeStored(row.data), expected);
+      } catch {
+        same = false;
+      }
+      if (!same && wrongBoundaries.length < 5) {
+        wrongBoundaries.push(
+          `${row.id} (${row.scope_key}) at ${row.seq}/${row.op_index}`,
+        );
+      }
+    }
+    check(
+      "materialized boundaries hold the backup's state at their row",
+      wrongBoundaries.length === 0,
+      `${n(boundariesCompared)} of ${n(materialized.length)} compared` +
+        (stride > 1 ? ` (every ${stride}th)` : "") +
+        (wrongBoundaries.length === 0
+          ? ""
+          : `; differ: ${wrongBoundaries.join(", ")}`),
     );
     const deletedRows = count(
       main,
@@ -379,30 +512,55 @@ export function verifyCompaction(
       `${n(deletedRows)} row(s) deleted` +
         (holes === 0 ? "" : `; ${n(holes)} left a hole or lost an instance`),
     );
-    const snapshotsChanged = count(
+    // Snapshots: none added or altered; none removed except at or below a
+    // boundary of a compacted instance, where the run deletes them.
+    const snapshotColumns = "branch, id, scope_key, seq, value";
+    const snapshotsAdded = count(
       main,
       `SELECT count(*) AS n FROM (
-         SELECT branch, id, scope_key, seq, value FROM main.snapshot
-         EXCEPT SELECT branch, id, scope_key, seq, value FROM against.snapshot)`,
+         SELECT ${snapshotColumns} FROM main.snapshot
+         EXCEPT SELECT ${snapshotColumns} FROM against.snapshot)`,
+    );
+    const snapshotsRemoved = count(
+      main,
+      `SELECT count(*) AS n FROM (
+         SELECT ${snapshotColumns} FROM against.snapshot
+         EXCEPT SELECT ${snapshotColumns} FROM main.snapshot)`,
+    );
+    const snapshotsRemovedWrongly = count(
+      main,
+      `SELECT count(*) AS n FROM against.snapshot s
+       WHERE NOT EXISTS (SELECT 1 FROM main.snapshot m
+           WHERE m.branch = s.branch AND m.id = s.id AND m.scope_key = s.scope_key AND m.seq = s.seq)
+         AND NOT EXISTS (SELECT 1 FROM main.revision r
+           WHERE r.branch = s.branch AND r.id = s.id AND r.scope_key = s.scope_key
+             AND r.commit_seq ${inCompaction} AND ${notAudit}
+             AND s.seq <= r.seq)`,
     );
     const snapshotsBelowBoundary = count(
       main,
       `SELECT count(*) AS n FROM main.snapshot s
        WHERE EXISTS (SELECT 1 FROM main.revision r
          WHERE r.branch = s.branch AND r.id = s.id AND r.scope_key = s.scope_key
-           AND r.commit_seq ${inCompaction} AND NOT (r.id LIKE ? AND r.seq = r.commit_seq)
+           AND r.commit_seq ${inCompaction} AND ${notAudit}
            AND s.seq <= r.seq)`,
-      ACL_ID_PATTERN,
     );
     check(
-      "snapshots are the backup's, none at or below a boundary",
-      snapshotsChanged === 0 && snapshotsBelowBoundary === 0,
-      (snapshotsChanged === 0
-        ? "no snapshot differs"
-        : `${n(snapshotsChanged)} differ`) +
+      "snapshots are the backup's, removed only at or below a boundary",
+      snapshotsAdded === 0 && snapshotsRemovedWrongly === 0 &&
+        snapshotsBelowBoundary === 0,
+      `${n(snapshotsRemoved)} snapshot(s) removed` +
+        (snapshotsAdded === 0
+          ? ""
+          : `; ${n(snapshotsAdded)} added or altered`) +
+        (snapshotsRemovedWrongly === 0
+          ? ""
+          : `; ${
+            n(snapshotsRemovedWrongly)
+          } removed above a boundary or from an untouched instance`) +
         (snapshotsBelowBoundary === 0
           ? ""
-          : `; ${n(snapshotsBelowBoundary)} at or below a boundary`),
+          : `; ${n(snapshotsBelowBoundary)} still at or below a boundary`),
     );
 
     // 3. Every document reads back identical, one excepted.
@@ -411,9 +569,6 @@ export function verifyCompaction(
        ORDER BY id, scope_key`,
       ACL_ID_PATTERN,
     );
-    const stride = options.sample === undefined || options.sample <= 0
-      ? 1
-      : Math.max(1, Math.ceil(instances.length / options.sample));
     let compared = 0;
     const mismatches: string[] = [];
     for (let index = 0; index < instances.length; index += stride) {
@@ -421,32 +576,37 @@ export function verifyCompaction(
       compared++;
       const left = reconstructOutcome(main, { id, scope: scope_key });
       const right = reconstructOutcome(backup, { id, scope: scope_key });
+      // Two unreadable payloads are not the same document: an identical
+      // status proves nothing when the status is that nothing could be read.
       const same = left.status === right.status &&
+        left.status !== "undecodable" &&
         (left.status !== "present" || right.status !== "present" ||
           sameValue(left.document, right.document));
       if (!same && mismatches.length < 5) {
         mismatches.push(`${id} (${scope_key})`);
       }
-      if (!same && mismatches.length >= 5) break;
     }
     check(
       "every document reads back identical",
       mismatches.length === 0,
       `${n(compared)} of ${n(instances.length)} instance(s) compared` +
         (stride > 1 ? ` (every ${stride}th)` : "") +
-        (mismatches.length === 0 ? "" : `; differ: ${mismatches.join(", ")}`),
+        (mismatches.length === 0
+          ? ""
+          : `; differ or unreadable: ${mismatches.join(", ")}`),
     );
 
-    // The ACL document: `value` unchanged, `compaction` the only member that
-    // differs, naming the newest compaction commit; its head at that commit.
-    const aclHeads = main.all<
-      { id: string; seq: number; op_index: number; op: string }
-    >(
+    // The ACL document. With a live one in the backup: a `set` at the newest
+    // compaction commit, `value` unchanged and an ACL, `compaction` the only
+    // member that differs and naming that commit. With a tombstone or none:
+    // untouched — the head exactly where the backup's was, no audit revision.
+    type AclHead = { id: string; seq: number; op_index: number; op: string };
+    const aclHeads = main.all<AclHead>(
       `SELECT id, seq, op_index, op FROM main.head WHERE branch = '' AND scope_key = 'space' AND id LIKE ?`,
       ACL_ID_PATTERN,
     );
-    const aclHeadsBefore = main.all<{ id: string }>(
-      `SELECT id FROM against.head WHERE branch = '' AND scope_key = 'space' AND id LIKE ?`,
+    const aclHeadsBefore = main.all<AclHead>(
+      `SELECT id, seq, op_index, op FROM against.head WHERE branch = '' AND scope_key = 'space' AND id LIKE ?`,
       ACL_ID_PATTERN,
     );
     if (aclHeadsBefore.length === 0) {
@@ -457,48 +617,148 @@ export function verifyCompaction(
           ? "the space has no ACL document; none was written"
           : "the backup has no ACL document but the result does",
       );
+    } else if (aclHeadsBefore.length > 1 || aclHeads.length > 1) {
+      check(
+        "ACL document",
+        false,
+        `${aclHeadsBefore.length} ACL document(s) in the backup, ${aclHeads.length} in the result`,
+      );
     } else {
-      const id = aclHeadsBefore[0].id;
-      const head = aclHeads.find((row) => row.id === id);
-      const left = reconstructOutcome(main, { id, scope: "space" });
-      const right = reconstructOutcome(backup, { id, scope: "space" });
-      let detail: string;
-      let passed = false;
-      if (left.status !== "present" || right.status !== "present") {
-        passed = left.status === right.status && aclRevisions === 0;
-        detail =
-          `the ACL document is ${left.status} in the result and ${right.status} in the backup`;
-      } else {
-        const after = left.document as Record<string, FabricValue>;
-        const before = right.document as Record<string, FabricValue>;
-        const keys = new Set([...Object.keys(after), ...Object.keys(before)]);
-        const differing = [...keys].filter((key) =>
-          !sameValue(after[key] ?? null, before[key] ?? null)
+      const before = aclHeadsBefore[0];
+      const head = aclHeads.find((row) => row.id === before.id);
+      const headText = head === undefined
+        ? "missing"
+        : `${head.seq}/${head.op_index} ${head.op}`;
+      if (before.op === "delete") {
+        const untouched = head !== undefined && head.seq === before.seq &&
+          head.op_index === before.op_index && head.op === "delete" &&
+          aclRevisions === 0;
+        check(
+          "ACL document",
+          untouched,
+          `tombstone in the backup at ${before.seq}/${before.op_index}; result head ${headText}` +
+            (aclRevisions === 0
+              ? ""
+              : `; ${n(aclRevisions)} audit revision(s) written over it`),
         );
-        const marker = after.compaction as CompactionMarker | undefined;
-        const namesLast = marker !== undefined && Array.isArray(marker.runs) &&
-          marker.runs.length > 0 &&
-          marker.runs[marker.runs.length - 1].commitSeq === last;
-        const headAtCommit = head !== undefined && head.seq === last &&
-          head.op_index === 0 && head.op === "set";
-        passed = differing.every((key) => key === "compaction") && namesLast &&
-          headAtCommit;
-        detail = `value ${
-          differing.includes("value") ? "CHANGED" : "unchanged"
-        }; differing members: ${differing.join(", ") || "none"}; marker ${
-          namesLast ? `names seq ${last}` : "missing or stale"
-        }; head ${
-          head === undefined
-            ? "missing"
-            : `${head.seq}/${head.op_index} ${head.op}`
-        }`;
+      } else {
+        const left = reconstructOutcome(main, {
+          id: before.id,
+          scope: "space",
+        });
+        const right = reconstructOutcome(backup, {
+          id: before.id,
+          scope: "space",
+        });
+        let passed = false;
+        let detail: string;
+        if (left.status !== "present" || right.status !== "present") {
+          detail =
+            `the ACL document is ${left.status} in the result and ${right.status} in the backup`;
+        } else {
+          const after = left.document as Record<string, FabricValue>;
+          const was = right.document as Record<string, FabricValue>;
+          const keys = new Set([...Object.keys(after), ...Object.keys(was)]);
+          const differing = [...keys].filter((key) =>
+            !sameValue(after[key] ?? null, was[key] ?? null)
+          );
+          const record = after.compaction as CompactionMarker | undefined;
+          const namesLast = record !== undefined &&
+            Array.isArray(record.runs) &&
+            record.runs.length > 0 &&
+            record.runs[record.runs.length - 1]?.commitSeq === last;
+          const headAtCommit = head !== undefined && head.seq === last &&
+            head.op_index === 0 && head.op === "set";
+          const validAcl = isACL(after.value);
+          passed = differing.every((key) => key === "compaction") &&
+            namesLast &&
+            headAtCommit && validAcl && aclRevisions === commits.length;
+          detail = `value ${
+            differing.includes("value") ? "CHANGED" : "unchanged"
+          }${validAcl ? "" : " and NOT an ACL"}; differing members: ${
+            differing.join(", ") || "none"
+          }; marker ${
+            namesLast ? `names seq ${last}` : "missing or stale"
+          }; head ${headText}; ${n(aclRevisions)} audit revision(s) for ${
+            n(commits.length)
+          } run(s)`;
+        }
+        check("ACL document", passed, detail);
       }
-      check("ACL document", passed, detail);
     }
+
+    // I7: everything that is not revision history is untouched — the schema,
+    // and every table but the four the checks above take apart, row for row
+    // with multiplicity. Pattern-created tables are among them.
+    const schemaDiff = count(
+      main,
+      `SELECT count(*) AS n FROM (
+         SELECT type, name, tbl_name, sql FROM main.sqlite_master WHERE name NOT LIKE 'sqlite_%'
+         EXCEPT SELECT type, name, tbl_name, sql FROM against.sqlite_master WHERE name NOT LIKE 'sqlite_%')
+       UNION ALL
+       SELECT count(*) FROM (
+         SELECT type, name, tbl_name, sql FROM against.sqlite_master WHERE name NOT LIKE 'sqlite_%'
+         EXCEPT SELECT type, name, tbl_name, sql FROM main.sqlite_master WHERE name NOT LIKE 'sqlite_%')`,
+    ) + (main.all<{ n: number }>(
+      `SELECT count(*) AS n FROM (
+         SELECT type, name, tbl_name, sql FROM against.sqlite_master WHERE name NOT LIKE 'sqlite_%'
+         EXCEPT SELECT type, name, tbl_name, sql FROM main.sqlite_master WHERE name NOT LIKE 'sqlite_%')`,
+    )[0]?.n ?? 0);
+    check(
+      "schema identical",
+      schemaDiff === 0,
+      schemaDiff === 0
+        ? "every table, index, view and trigger declared alike"
+        : `${n(schemaDiff)} schema object(s) differ`,
+    );
+    const otherTables = main.all<{ name: string }>(
+      `SELECT name FROM against.sqlite_master
+       WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`,
+    ).map((row) => row.name).filter((name) => !HISTORY_TABLES.has(name));
+    const tableDiffs: string[] = [];
+    for (const table of otherTables) {
+      const inMain = main.get(
+        `SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = ?`,
+        table,
+      ) !== undefined;
+      if (!inMain) {
+        tableDiffs.push(`${table} missing from the result`);
+        continue;
+      }
+      const columns = main.all<{ name: string }>(
+        `SELECT name FROM pragma_table_info(?)`,
+        table,
+      ).map((column) => `"${column.name.replace(/"/g, '""')}"`)
+        // The branch head advances to the compaction commit by design.
+        .filter((column) => !(table === "branch" && column === '"head_seq"'));
+      if (columns.length === 0) continue;
+      const list = columns.join(", ");
+      const quoted = `"${table.replace(/"/g, '""')}"`;
+      const grouped = (schema: string) =>
+        `SELECT ${list}, count(*) AS n FROM ${schema}.${quoted} GROUP BY ${list}`;
+      const diff = count(
+        main,
+        `SELECT count(*) AS n FROM (${grouped("main")} EXCEPT ${
+          grouped("against")
+        })`,
+      ) + count(
+        main,
+        `SELECT count(*) AS n FROM (${grouped("against")} EXCEPT ${
+          grouped("main")
+        })`,
+      );
+      if (diff > 0) tableDiffs.push(`${table}: ${n(diff)} row group(s) differ`);
+    }
+    check(
+      "tables outside the history are untouched",
+      tableDiffs.length === 0,
+      `${n(otherTables.length)} table(s) compared` +
+        (tableDiffs.length === 0 ? "" : `; ${tableDiffs.join("; ")}`),
+    );
 
     // 4. The fingerprint, which excludes generated cells: necessary, cheap
     //    relative to the replay above, skipped on a sampled pass.
-    if (stride === 1) {
+    if (!sampled) {
       try {
         const leftPrint = contentFingerprint(main);
         const rightPrint = contentFingerprint(backup);
@@ -510,94 +770,122 @@ export function verifyCompaction(
             : `${leftPrint.hash} ≠ ${rightPrint.hash}`,
         );
       } catch (error) {
-        // A store whose rows no longer replay is a failed check, not a
-        // crashed verification.
-        check(
-          "fingerprint",
-          false,
-          `could not be computed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
+        check("fingerprint", false, `could not be computed: ${message(error)}`);
       }
     }
 
-    // 5. Hollowed payloads: markers only where the rules allow, hashes that
-    //    match the backup's bytes.
+    // 5. Hollowed payloads: exactly the set the runs' windows reach, each
+    //    marker naming a compaction commit and the bytes it replaced; every
+    //    other commit column and every commit row the backup's.
     const hollowedRows = main.all<{ seq: number; original: string }>(
       `SELECT seq, original FROM main."commit" WHERE substr(original, 1, ?) = ? ORDER BY seq`,
       HOLLOWED_MARKER_PREFIX.length,
       HOLLOWED_MARKER_PREFIX,
     );
-    const hollowedGenesis = hollowedRows.some((row) => row.seq === 1);
-    const hollowedCompaction = hollowedRows.filter((row) =>
-      seqs.includes(row.seq)
-    ).length;
-    const opTables = [
-      "op_field_epoch",
-      "op_submission",
-      "op_integrated",
-      "op_checkpoint",
-    ]
-      .filter((table) =>
+    const hollowedSeqs = new Set(hollowedRows.map((row) => row.seq));
+    const cutoffs = records.map((record) => record.report?.payloads.cutoffAt)
+      .filter((at): at is string => typeof at === "string");
+    const payloadProblems: string[] = [];
+    if (cutoffs.length === 0) {
+      payloadProblems.push("no run recorded a payload window");
+    } else {
+      const cutoff = cutoffs.reduce((a, b) => (a > b ? a : b));
+      const opTables = OP_TABLES.filter((table) =>
         main.get(
-          `SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = ?`,
+          `SELECT 1 FROM against.sqlite_master WHERE type = 'table' AND name = ?`,
           table,
         ) !==
           undefined
       );
-    const hollowedOpReferenced = opTables.length === 0 ? 0 : count(
-      main,
-      `SELECT count(*) AS n FROM main."commit" c
-       WHERE substr(c.original, 1, ?) = ? AND c.seq IN (${
-        opTables.map((table) => `SELECT commit_seq FROM main."${table}"`).join(
-          " UNION ",
-        )
-      })`,
-      HOLLOWED_MARKER_PREFIX.length,
-      HOLLOWED_MARKER_PREFIX,
-    );
-    const hashStride = options.sample === undefined
-      ? Math.max(1, Math.ceil(hollowedRows.length / HOLLOWED_HASH_CHECKS))
-      : Math.max(1, Math.ceil(hollowedRows.length / options.sample));
+      const opref = opTables.length === 0
+        ? "SELECT NULL WHERE 0"
+        : opTables.map((table) => `SELECT commit_seq FROM against."${table}"`)
+          .join(" UNION ");
+      const eligible = main.all<{ seq: number }>(
+        `SELECT seq FROM against."commit"
+         WHERE created_at <= ? AND seq <> 1 AND session_id NOT LIKE ?
+           AND seq NOT IN (${opref})
+         ORDER BY seq`,
+        cutoff,
+        `${COMPACTION_SESSION_PREFIX}%`,
+      ).map((row) => row.seq);
+      const eligibleSet = new Set(eligible);
+      const notHollowed = eligible.filter((seq) => !hollowedSeqs.has(seq));
+      const notEligible = hollowedRows.filter((row) =>
+        !eligibleSet.has(row.seq)
+      );
+      if (notHollowed.length > 0) {
+        payloadProblems.push(
+          `${n(notHollowed.length)} payload(s) outside the window kept (seq ${
+            notHollowed.slice(0, 5).join(", ")
+          }${notHollowed.length > 5 ? ", …" : ""})`,
+        );
+      }
+      if (notEligible.length > 0) {
+        payloadProblems.push(
+          `${
+            n(notEligible.length)
+          } payload(s) hollowed inside the window or exempt (seq ${
+            notEligible.slice(0, 5).map((row) => row.seq).join(", ")
+          }${notEligible.length > 5 ? ", …" : ""})`,
+        );
+      }
+    }
     let hashed = 0;
     let hashMismatches = 0;
-    for (let index = 0; index < hollowedRows.length; index += hashStride) {
-      const row = hollowedRows[index];
-      const marker = decodeHollowedPayload(row.original);
-      const before = backup.get<{ original: string }>(
-        `SELECT original FROM "commit" WHERE seq = ?`,
-        row.seq,
+    const badMarkers: string[] = [];
+    const backupPayload = (seq: number) =>
+      backup.get<{ original: string; bytes: number }>(
+        `SELECT original, length(CAST(original AS BLOB)) AS bytes FROM "commit" WHERE seq = ?`,
+        seq,
       );
+    for (let index = 0; index < hollowedRows.length; index += stride) {
+      const row = hollowedRows[index];
       hashed++;
-      if (
-        marker === undefined || before === undefined ||
-        marker.hash !== hashStringOf(before.original)
-      ) hashMismatches++;
+      const decoded = marker(row.original);
+      if ("error" in decoded) {
+        if (badMarkers.length < 5) {
+          badMarkers.push(`seq ${row.seq}: ${decoded.error}`);
+        }
+        continue;
+      }
+      const before = backupPayload(row.seq);
+      if (before === undefined) {
+        hashMismatches++;
+        continue;
+      }
+      // A payload an earlier run hollowed is a marker in the backup too, and
+      // stays byte for byte; a payload this run hollowed hashes to its marker.
+      const same = before.original.startsWith(HOLLOWED_MARKER_PREFIX)
+        ? before.original === row.original
+        : decoded.marker.hash === hashStringOf(before.original) &&
+          decoded.marker.bytes === before.bytes &&
+          seqs.includes(decoded.marker.commitSeq);
+      if (!same) hashMismatches++;
     }
     check(
       "hollowed payloads",
-      !hollowedGenesis && hollowedCompaction === 0 &&
-        hollowedOpReferenced === 0 &&
-        hashMismatches === 0,
+      payloadProblems.length === 0 && hashMismatches === 0 &&
+        badMarkers.length === 0,
       `${n(hollowedRows.length)} hollowed; ${
         n(hashed)
-      } hash(es) checked against the backup` +
+      } marker(s) checked against the backup` +
+        (stride > 1 ? ` (every ${stride}th)` : "") +
         (hashMismatches === 0 ? "" : `, ${n(hashMismatches)} mismatch`) +
-        (hollowedGenesis ? "; commit 1 hollowed" : "") +
-        (hollowedCompaction === 0
+        (badMarkers.length === 0
           ? ""
-          : `; ${n(hollowedCompaction)} compaction commit(s) hollowed`) +
-        (hollowedOpReferenced === 0
-          ? ""
-          : `; ${n(hollowedOpReferenced)} op_*-referenced commit(s) hollowed`),
+          : `; malformed: ${badMarkers.join("; ")}`) +
+        (payloadProblems.length === 0 ? "" : `; ${payloadProblems.join("; ")}`),
     );
+    const commitColumns = main.all<{ name: string }>(
+      `SELECT name FROM pragma_table_info('commit')`,
+    ).map((column) => column.name).filter((name) => name !== "original")
+      .map((name) => `"${name}"`).join(", ");
     const commitsChanged = count(
       main,
       `SELECT count(*) AS n FROM (
-         SELECT seq, branch, session_id, local_seq, resolution, class FROM main."commit"
-         WHERE seq NOT ${inCompaction}
-         EXCEPT SELECT seq, branch, session_id, local_seq, resolution, class FROM against."commit")`,
+         SELECT ${commitColumns} FROM main."commit" WHERE seq NOT ${inCompaction}
+         EXCEPT SELECT ${commitColumns} FROM against."commit")`,
     );
     const commitsLost = count(
       main,
@@ -619,7 +907,9 @@ export function verifyCompaction(
         : `${n(commitsLost)} commit row(s) lost`) +
         (commitsChanged === 0
           ? ""
-          : `; ${n(commitsChanged)} commit row(s) changed`) +
+          : `; ${
+            n(commitsChanged)
+          } commit row(s) changed in a column other than the payload`) +
         (payloadsChanged === 0
           ? ""
           : `; ${n(payloadsChanged)} payload(s) changed without a marker`),
@@ -660,17 +950,6 @@ export function verifyCompaction(
     backup.close();
     main.close();
   }
-
-  function finish(ok: boolean): CompactionVerification {
-    return {
-      ok,
-      result: options.result,
-      against: options.against,
-      compactionCommits: records,
-      checks,
-      elapsedMs: performance.now() - started,
-    };
-  }
 }
 
 /** The verification as an operator reads it. */
@@ -678,7 +957,7 @@ export function formatCompactionVerification(
   verification: CompactionVerification,
 ): string {
   const lines = verification.checks.map((check) =>
-    `${check.passed ? "ok  " : "FAIL"} ${check.name.padEnd(56)} ${check.detail}`
+    `${check.passed ? "ok  " : "FAIL"} ${check.name.padEnd(64)} ${check.detail}`
   );
   lines.push(
     verification.ok

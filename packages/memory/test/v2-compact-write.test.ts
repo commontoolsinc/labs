@@ -202,6 +202,11 @@ describe("compactStore", () => {
     expect(run.rowsDeleted).toBe(15);
     expect(run.snapshotsDeleted).toBeGreaterThan(0);
     expect(run.acl).toEqual({ status: "marked", id: ACL });
+    expect(run.report.compactionCommit).toEqual({
+      seq: run.commitSeq,
+      sessionId: run.sessionId,
+      localSeq: 1,
+    });
     expect(run.sessionId).toBe(
       `${COMPACTION_SESSION_PREFIX}2026-10-11T00:00:00.000Z`,
     );
@@ -283,6 +288,7 @@ describe("compactStore", () => {
     const payload = db.prepare(`SELECT original FROM "commit" WHERE seq = ?`)
       .get<{ original: string }>(run.commitSeq)!.original;
     expect(payload).toContain('"runId"');
+    expect(payload).toContain(`"sessionId":"${run.sessionId}"`);
     expect(isHollowedPayload(payload)).toBe(false);
   });
 
@@ -892,6 +898,56 @@ describe("compactStore", () => {
       expect(reasons[1]).toContain("second branch (fork)");
       expect(reasons[2]).toContain("no commit 1");
       expect(reasons[3]).toContain("2 violation(s)");
+    });
+
+    it("refuses a store the engine would migrate on opening, leaving it untouched", async () => {
+      // A current store with one column the engine added since and one
+      // index it declares: `open` would add both back. The refusal must come
+      // from the read-only preflight, before anything can.
+      await build(standard);
+      const db = new Database(store);
+      db.exec(`ALTER TABLE "commit" DROP COLUMN holder`);
+      db.exec(`DROP INDEX idx_head_live_entity_ids`);
+      db.close();
+      const before = await Deno.readFile(store);
+      const refusal = compactStore({
+        store,
+        out,
+        selection: { prefixes: ["computed:"] },
+      });
+      await expect(refusal).rejects.toThrow(CompactionRefused);
+      await refusal.catch((error: Error) => {
+        expect(error.message).toContain("commit has no holder column");
+        expect(error.message).toContain("lacks index idx_head_live_entity_ids");
+        expect(error.message).toContain("predates a migration");
+      });
+      expect(await Deno.readFile(store)).toEqual(before);
+      expect(await Deno.stat(out).catch(() => undefined)).toBeUndefined();
+
+      // A legacy scheduler table the engine drops: refused the same way.
+      const legacy = new Database(backup);
+      legacy.exec(`CREATE TABLE scheduler_observation (x INTEGER)`);
+      legacy.close();
+      await expect(
+        compactStore({
+          store: backup,
+          out,
+          selection: { prefixes: ["computed:"] },
+        }),
+      ).rejects.toThrow("legacy table(s) scheduler_observation");
+    });
+
+    it("refuses an ACL document whose value is not an ACL", async () => {
+      await build((e) => {
+        standard(e);
+        applyCommit(e, {
+          sessionId: "s:a",
+          commit: ops(50, [setOp(ACL, { "not a did": "OWNER" })]),
+        });
+      });
+      await expect(
+        compactStore({ store, out, selection: { prefixes: ["computed:"] } }),
+      ).rejects.toThrow("not an ACL");
     });
 
     it("refuses a store from before the per-scope migration without opening it for writing", async () => {
