@@ -204,7 +204,11 @@ or missed contributor directly.
   write. What the alphabet does not model is a commit's ordered sequence
   of operations on one document: a commit here is one write of one value
   per path, which is the engine's per-document rule with the sequence
-  collapsed to its final effect. The replay of an arbitrary sequence, and
+  collapsed to its final effect. Nor does it model a positional op, so the
+  proof's second condition, idempotence on the stored document, is the
+  same membership test as the first here; the shipped rule waives it for a
+  session whose replica drops elided layers (`elidedVerdicts`), which the
+  model already matches. The replay of an arbitrary sequence, and
   what a patch can do to a document beyond adding a value, is the engine
   unit tests' and the differential harness's to check.
 - **Verdict delivery is a mode.** `atomic` fuses the server's verdict with

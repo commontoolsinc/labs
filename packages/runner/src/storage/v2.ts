@@ -9587,7 +9587,12 @@ export class SpaceReplica
         this.#scopeKeyIdentity(),
       )
       : undefined;
-    for (const { id, scope, scopeKey } of keys.values()) {
+    // Each operation's document, in the wire commit's order: an elision
+    // report names operations by that index.
+    const operationKeys = this.#touchedOf(operations, identity).map((
+      address,
+    ) => this.#docKeyOf(address));
+    for (const [key, { id, scope, scopeKey }] of keys.entries()) {
       const record = this.#record(id, scope, undefined, scopeKey);
       const pendingIndexes = record.pending.flatMap((entry, index) =>
         entry.localSeq === localSeq ? [index] : []
@@ -9600,6 +9605,24 @@ export class SpaceReplica
       }
       const firstPendingIndex = pendingIndexes[0]!;
       const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1]!;
+      // An accept that elided every operation on this document wrote
+      // nothing: the store already held what the layer would have written,
+      // and the frame carrying that is what covers the layer. The layer is
+      // dropped rather than promoted — a promotion would fold its ops over
+      // the confirmed base, a splice a second time, and would give the
+      // document a confirmed seq the store never gave it.
+      if (
+        applied.elidedOpIndexes !== undefined &&
+        operationKeys.every((operationKey, index) =>
+          operationKey !== key || applied.elidedOpIndexes!.includes(index)
+        )
+      ) {
+        record.pending = record.pending.filter((entry) =>
+          entry.localSeq !== localSeq
+        );
+        dropMaterializedSuffix(record, firstPendingIndex);
+        continue;
+      }
       // The verdict is in: a splice shown as the array its writer computed
       // (`displayedPatches`) promotes as the store applied it, which over a
       // moved array is a different value, so the layers are marked accepted

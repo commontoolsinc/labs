@@ -127,6 +127,14 @@ type ScriptedOutcome =
     onReceipt?: () => void;
 
     /**
+     * Accept the commit as an identity: every operation is reported
+     * elided, nothing is applied to the store, and the commit's reads are
+     * not validated, as the real server validates them and then proves the
+     * identity.
+     */
+    elideOps?: true;
+
+    /**
      * Skip validateReads for this commit. Forces the "impossible" late
      * accept — a server verdict resolving a pending dependency the client
      * already dropped — so the cascade's late-verdict suppression can be
@@ -249,10 +257,10 @@ class ScriptedServerModel {
       ? scripted.retryAfterSeq
       : undefined;
 
-    const readError =
-      scripted.kind === "accept" && scripted.skipReadValidation === true
-        ? null
-        : this.#validateReads(commit);
+    const readError = scripted.kind === "accept" &&
+        (scripted.skipReadValidation === true || scripted.elideOps === true)
+      ? null
+      : this.#validateReads(commit);
     if (readError) {
       return this.#reject(
         commit,
@@ -380,14 +388,19 @@ class ScriptedServerModel {
         commitSeq: this.serverSeq + 1,
         op: operation.op,
       }));
+    const scripted = this.scripted.get(commit.localSeq);
+    const elided = scripted?.kind === "accept" && scripted.elideOps === true;
     const applied = {
       seq: ++this.serverSeq,
       branch: "",
-      revisions,
+      revisions: elided ? [] : revisions,
+      ...(elided
+        ? { elidedOpIndexes: commit.operations.map((_, index) => index) }
+        : {}),
     } as AppliedCommit;
 
     for (const operation of commit.operations) {
-      if (operation.op === "sqlite") continue;
+      if (operation.op === "sqlite" || elided) continue;
       const next = applyOperation(
         operation,
         this.confirmed.get(operation.id as URI)?.value,
@@ -5579,6 +5592,52 @@ describe("memory-v2-stacked-commit", () => {
         responseGate.resolve();
         await expectResultOk(splice);
         expectVisible(harness, { A: { items: ["a", "b", "c", "x"] } });
+      } finally {
+        responseGate.resolve();
+        await harness.close();
+      }
+    });
+
+    it("drops the layer when the verdict elides the splice as an identity", async () => {
+      // The other writer's identical tail landed first, so the splice reaches
+      // the stored list from the reader's view and the server elides it.
+      // Nothing was written: the layer leaves the stack without a promotion,
+      // and the list's confirmed seq stays the frame's.
+      const harness = await createHarness();
+      const responseGate = Promise.withResolvers<void>();
+      try {
+        await seedAccepted(harness, DOCS.A, { items: ["a", "b"] });
+        await watch(harness);
+        harness.model.setOutcome(2, {
+          kind: "accept",
+          elideOps: true,
+          responseGate: responseGate.promise,
+          remoteInterleave: {
+            label: "foreign",
+            operations: [{
+              op: "set",
+              id: DOCS.A,
+              value: { items: ["a", "b", "c"] },
+            }],
+          },
+        });
+        const splice = growTo(harness, { items: ["a", "b", "c"] }, ["c"]);
+        harness.pushSync({
+          upserts: [{
+            id: DOCS.A,
+            seq: currentSeq(harness, DOCS.A) + 1,
+            value: { items: ["a", "b", "c"] },
+          }],
+        });
+        await clock.settle();
+        const frameSeq = currentSeq(harness, DOCS.A);
+        expectVisible(harness, { A: { items: ["a", "b", "c"] } });
+
+        responseGate.resolve();
+        await expectResultOk(splice);
+        expect(hasPendingOverlay(harness, DOCS.A)).toBe(false);
+        expectVisible(harness, { A: { items: ["a", "b", "c"] } });
+        expect(currentSeq(harness, DOCS.A)).toBe(frameSeq);
       } finally {
         responseGate.resolve();
         await harness.close();

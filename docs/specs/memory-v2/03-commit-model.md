@@ -390,11 +390,23 @@ patches it is judged as one write of the final value:
 - replayed on the document as the commit's read of that document saw it, the
   sequence yields the stored document;
 - replayed on the stored document, the sequence leaves it unchanged. This
-  condition is for the writer's replica, which re-folds the operations over
+  condition is for a writer's replica that re-folds the operations over
   whatever confirmed base it holds when the accept arrives: a sequence
   idempotent on the durable value lands on that value from any base between
   the read and the head, where a positional splice replayed over a base
-  already carrying its elements would duplicate them.
+  already carrying its elements would duplicate them. A session whose client
+  advertised `elidedVerdicts` (04-protocol.md §4.1) drops an elided layer
+  instead of re-folding it, and the server holds that session's commits to
+  the first condition alone: a splice that reaches the stored list from the
+  view that produced it is an identity for such a session.
+
+An accept reports the operations it elided on the verdict
+(`elidedOpIndexes`, 04-protocol.md §4.3.1). A replica that advertised
+`elidedVerdicts` drops a pending layer every operation of which the verdict
+elided: the store already holds what the layer would have written, the frame
+that carries it covers the layer, and a promotion would fold the layer's ops
+over the confirmed base a second time and give the document a confirmed seq
+the store never gave it.
 
 The reader's view of a document is reconstructed from the commit's own read
 of it, on the commit's branch: for a pending read, the document at the read's

@@ -109,7 +109,10 @@ describe("memory-v2-pending-splice-intended-array", () => {
     return { list, seen, cancel };
   };
 
-  it("shows the list as it is while the other session's identical tail lands first", async () => {
+  it("shows the list as it is while the other session's identical tail lands first, and the store elides the splice", async () => {
+    // The splice reaches the stored list from the view that produced it, so
+    // the server accepts it as an identity and writes nothing; the layer is
+    // dropped without a promotion.
     const doc = "intended-identical";
     const a = connect();
     const b = connect();
@@ -127,7 +130,7 @@ describe("memory-v2-pending-splice-intended-array", () => {
     expect(list.get()).toEqual(["e1", "e2", "e3"]);
 
     release.resolve();
-    expect(errorNameOf(await bVerdict)).toBe("ConflictError");
+    expect((await bVerdict).error).toBeUndefined();
     await flush();
     await b.runtime.idle();
     cancel();
@@ -135,7 +138,7 @@ describe("memory-v2-pending-splice-intended-array", () => {
     expect(list.get()).toEqual(["e1", "e2", "e3"]);
     expect(seen.filter((value) => Array.isArray(value) && value.length > 3))
       .toEqual([]);
-    expect(verdicts).toEqual(["ok", "ok", "ConflictError"]);
+    expect(verdicts).toEqual(["ok", "ok", "ok"]);
   });
 
   it("shows the list it computed, then the store's, when the other session's tail differs", async () => {

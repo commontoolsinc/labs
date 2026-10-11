@@ -64,7 +64,8 @@ The client MUST declare its protocol version in the first WebSocket message:
     "sessionReadCeiling": true,
     "presenceV1": true,
     "sessionClose": true,
-    "admissionNotice": true
+    "admissionNotice": true,
+    "elidedVerdicts": true
   }
 }
 ```
@@ -313,6 +314,15 @@ client connected to an older server, or a server connected to an older client,
 leaves a refused principal to learn of a later grant by opening the session
 again.
 
+`elidedVerdicts` advertises that the peer's replica drops a pending layer
+whose accept the verdict reports as elided (`elidedOpIndexes`, section
+4.3.1) rather than folding the layer's operations over its confirmed base.
+It is build-inherent and defaults to `false` when absent. A server waives
+the second condition of the identity proof (03-commit-model.md §3.6.1) only
+for sessions opened on a connection where both peers advertise it: an older
+client is held to both conditions, since its replica would fold a positional
+write a second time.
+
 `sessionReportV1` advertises that the server records the diagnostics a client
 reports about its own session with `session.report` (section 4.14). It is
 build-inherent and defaults to `false` when absent: a client connected to an
@@ -546,6 +556,7 @@ interface HelloMessage {
     sessionClose?: boolean;
     connectionAuth?: boolean;
     admissionNotice?: boolean;
+    elidedVerdicts?: boolean;
     sessionReportV1?: boolean;
     spaceKind?: boolean;
   };
@@ -917,6 +928,10 @@ interface Commit {
   invocationRef: Reference | null;
   authorizationRef: Reference | null;
   revisions: StoredRevision[];
+  // The operations the server elided: a `cid:` set of the stored content,
+  // or every operation of an identity commit (03-commit-model.md §3.6.1).
+  // An elided operation produced no revision and advanced no head.
+  elidedOpIndexes?: number[];
   createdAt: string;
 }
 

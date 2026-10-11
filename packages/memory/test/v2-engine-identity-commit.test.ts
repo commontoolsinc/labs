@@ -236,6 +236,77 @@ describe("applyCommit() with an identity commit", () => {
     ).toThrow(ConflictError);
   });
 
+  it("accepts a patch that reaches the stored document but is not idempotent on it, for a replica that drops elided layers", () => {
+    // The same race as above, from a session whose client advertised
+    // `elidedVerdicts`: its replica drops the elided layer rather than
+    // replaying the splice over the stored list, so the second condition
+    // guards nothing for it, and the write is elided.
+    const install = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp("of:list", ["a"])] }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:b",
+      commit: commit(1, {
+        operations: [patchOp("of:list", [
+          { op: "splice", path: "/value", index: 1, remove: 0, add: ["x"] },
+        ])],
+      }),
+    });
+    const headBefore = headSeqOf(engine, "of:list");
+
+    const verdict = applyCommit(engine, {
+      sessionId: "s:a",
+      replicaDropsElided: true,
+      commit: commit(2, {
+        reads: {
+          confirmed: [{ id: "of:list", path: [], seq: install.seq }],
+          pending: [],
+        },
+        operations: [patchOp("of:list", [
+          { op: "splice", path: "/value", index: 1, remove: 0, add: ["x"] },
+        ])],
+      }),
+    });
+
+    expect(verdict.elidedOpIndexes).toEqual([0]);
+    expect(verdict.revisions).toEqual([]);
+    expect(headSeqOf(engine, "of:list")).toBe(headBefore);
+  });
+
+  it("refuses a patch that does not reach the stored document, for a replica that drops elided layers", () => {
+    // Session b appended `y`, not `x`: the splice from the basis yields a
+    // list the store does not hold, and the first condition still refuses it.
+    const install = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp("of:list", ["a"])] }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:b",
+      commit: commit(1, {
+        operations: [patchOp("of:list", [
+          { op: "splice", path: "/value", index: 1, remove: 0, add: ["y"] },
+        ])],
+      }),
+    });
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        replicaDropsElided: true,
+        commit: commit(2, {
+          reads: {
+            confirmed: [{ id: "of:list", path: [], seq: install.seq }],
+            pending: [],
+          },
+          operations: [patchOp("of:list", [
+            { op: "splice", path: "/value", index: 1, remove: 0, add: ["x"] },
+          ])],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
   it("judges a patch on a document the commit did not read by its effect on the stored one", () => {
     const installSeq = installThenRewrite();
     applyCommit(engine, {

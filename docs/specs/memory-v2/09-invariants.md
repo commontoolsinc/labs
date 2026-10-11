@@ -120,7 +120,10 @@ inside the commit's transaction: per document, the commit's ordered `set`
 and `patch` operations replayed on the view the reader saw yield the stored
 document, and replayed on the stored document leave it unchanged, where a
 pending read's view is its declared confirmed basis with exactly the own
-layers it names replayed on it; a client claim would not do. The
+layers it names replayed on it; a client claim would not do. The second
+condition is waived for a session whose client advertised `elidedVerdicts`,
+since its replica drops an elided layer rather than folding it, and the
+first condition alone is what this invariant needs. The
 differential harness's reference model applies the idempotence half alone,
 so it admits a superset of what the engine admits. The TLA+ model's `IdentityMode = "elide"`
 (`PendingStacks_Identity.cfg`, `PendingStacks_ChannelIdentity.cfg`) certifies

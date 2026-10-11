@@ -116,6 +116,14 @@ export type SessionState = {
    * or scoped-read identity (those key on `principal`, the envelope).
    * Re-resolved on every open; a resume without the marker drops it. */
   actingPrincipal?: string;
+
+  /**
+   * Set when the opening connection's client advertised `elidedVerdicts`:
+   * its replica drops a layer the verdict elides rather than folding it, so
+   * the engine may elide a positional write for this session. Fresh per
+   * open, since it is the connection's.
+   */
+  elidedVerdicts?: boolean;
 };
 
 type OpenSessionState = {
@@ -163,6 +171,7 @@ export class SessionRegistry {
     principal?: string,
     actingPrincipal?: string,
     routed = false,
+    elidedVerdicts = false,
   ): OpenSessionState {
     this.#prune();
     const sessionId = session.sessionId ?? crypto.randomUUID();
@@ -248,6 +257,7 @@ export class SessionRegistry {
       // open's resolution against the current ACL; an open without the
       // marker carries none (fail-closed toward less authority).
       ...(actingPrincipal !== undefined ? { actingPrincipal } : {}),
+      ...(elidedVerdicts ? { elidedVerdicts: true } : {}),
     });
     return {
       sessionId,

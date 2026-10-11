@@ -1320,6 +1320,20 @@ export type MemoryProtocolFlags = {
   admissionNotice?: boolean;
 
   /**
+   * The peer's replica drops a pending layer whose accept the verdict
+   * reports as elided (`AppliedCommit.elidedOpIndexes`) rather than folding
+   * the layer's ops over its confirmed base. A server that sees a client
+   * advertise it waives the second condition of the identity proof
+   * (03-commit-model.md §3.6.1) for that session's commits: a write that
+   * reaches the stored document from the reader's view is an identity even
+   * where replaying it on the stored document would change it, as a
+   * positional `splice` does. Build-inherent, so a peer of this version
+   * always advertises it. Absent (an older client) parses to false, and the
+   * server then holds that session's commits to both conditions.
+   */
+  elidedVerdicts?: boolean;
+
+  /**
    * Server capability: the server records the diagnostics a client reports
    * about its own session with `session.report` (04-protocol.md §4.14).
    * Build-inherent, so a server of this version always advertises it.
@@ -1364,6 +1378,7 @@ export type WireMemoryProtocolFlags = {
   sessionClose?: boolean;
   connectionAuth?: boolean;
   admissionNotice?: boolean;
+  elidedVerdicts?: boolean;
   sessionReportV1?: boolean;
   routedAuthV1?: boolean;
 };
@@ -2581,6 +2596,9 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // the notice. A routed connection records no refusal, so it is told
   // nothing whatever both peers advertise.
   admissionNotice: true,
+  // Build-inherent: this build's replica drops an elided layer rather than
+  // folding its ops, so the server may elide a positional write for it.
+  elidedVerdicts: true,
   // Build-inherent: this build's server records the diagnostics a client
   // reports about its session.
   sessionReportV1: true,
@@ -2782,6 +2800,10 @@ export const parseMemoryProtocolFlags = (
   if (admissionNotice !== undefined && typeof admissionNotice !== "boolean") {
     return null;
   }
+  const elidedVerdicts = value.elidedVerdicts;
+  if (elidedVerdicts !== undefined && typeof elidedVerdicts !== "boolean") {
+    return null;
+  }
 
   const sessionReportV1 = value.sessionReportV1;
   if (sessionReportV1 !== undefined && typeof sessionReportV1 !== "boolean") {
@@ -2840,6 +2862,9 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older peer) parses to false: a server then sends that
     // client no `session/admissible`.
     admissionNotice: admissionNotice === true,
+    // Absent (an older client) parses to false: the server then holds that
+    // session's commits to both conditions of the identity proof.
+    elidedVerdicts: elidedVerdicts === true,
     // Absent (an older server) parses to false: a client then sends no
     // `session.report`.
     sessionReportV1: sessionReportV1 === true,
@@ -2884,6 +2909,7 @@ export const wireMemoryProtocolFlags = (
   sessionClose: flags.sessionClose,
   connectionAuth: flags.connectionAuth,
   admissionNotice: flags.admissionNotice,
+  elidedVerdicts: flags.elidedVerdicts,
   sessionReportV1: flags.sessionReportV1,
   routedAuthV1: flags.routedAuthV1,
   syncCrossingsV1: flags.syncCrossingsV1,
