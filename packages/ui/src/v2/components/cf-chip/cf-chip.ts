@@ -1,5 +1,5 @@
 import { css, html } from "lit";
-import { property, state } from "lit/decorators.js";
+import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import type { ColorIntent, ComponentSize } from "../theme-context.ts";
 
@@ -266,16 +266,14 @@ export class CFChip extends BaseElement {
         );
       }
 
+      /*
+       * The slot lays out no box of its own, so an empty one leaves no gap
+       * before the label, and a slotted icon is a flex item of the row.
+       */
       .chip-icon {
-        display: flex;
-        align-items: center;
+        display: contents;
         font-size: var(--cf-font-body-compact-size, 0.8125rem);
         line-height: 1;
-      }
-
-      /* An empty icon slot would still take a gap before the label. */
-      .chip-icon.empty {
-        display: none;
       }
 
       .chip-label {
@@ -349,10 +347,6 @@ export class CFChip extends BaseElement {
   @property({ type: String, reflect: true })
   accessor size: ComponentSize = "sm";
 
-  /** Whether any element is assigned to the icon slot. */
-  @state()
-  private accessor _hasIcon = false;
-
   private _handleRemove(e: Event): void {
     e.stopPropagation();
     this.emit("cf-remove");
@@ -361,12 +355,6 @@ export class CFChip extends BaseElement {
   private _handleClick(): void {
     if (this.interactive) {
       this.emit("cf-click");
-    }
-  }
-
-  private _handleIconSlotChange(e: Event): void {
-    if (e.target instanceof HTMLSlotElement) {
-      this._hasIcon = e.target.assignedElements().length > 0;
     }
   }
 
@@ -387,11 +375,7 @@ export class CFChip extends BaseElement {
               part="action"
               aria-labelledby="chip-label"
             >
-              <slot
-                name="icon"
-                class="chip-icon ${this._hasIcon ? "" : "empty"}"
-                @slotchange="${this._handleIconSlotChange}"
-              ></slot>
+              <slot name="icon" class="chip-icon"></slot>
               <span id="chip-label" class="chip-label">
                 <slot>${this.label}</slot>
               </span>
@@ -399,11 +383,7 @@ export class CFChip extends BaseElement {
           `
           : html`
             <span class="chip-content">
-              <slot
-                name="icon"
-                class="chip-icon ${this._hasIcon ? "" : "empty"}"
-                @slotchange="${this._handleIconSlotChange}"
-              ></slot>
+              <slot name="icon" class="chip-icon"></slot>
               <span id="chip-label" class="chip-label">
                 <slot>${this.label}</slot>
               </span>
