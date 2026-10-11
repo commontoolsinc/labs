@@ -317,8 +317,10 @@ The notice goes when the record is cleared.
 `packages/patterns/system/home.test.tsx` tests it, and
 `home-refusal-notice.test.tsx` beside it, with the refused inbox created by
 another user, checks that `inspectConfLabel` reports no user's label on the
-notice's sentence, where it reports one once the notice reads the refused
-inbox's offers.
+notice's sentence, where it reports one once the computed producing the notice's
+text reads the refused inbox's offers. It covers the notice's text only: the
+same read in the computed that decides whether the notice shows, or in another
+computed the notice renders, leaves the test green.
 
 A Home of a vintage whose ensure takes no refusal is sent the same event. Event
 schemas are open, so its handler is delivered the fields it declares, `adopt`
@@ -374,7 +376,9 @@ refused piece keeps its offers as they were, and Home no longer reads them, as
 it reads no refused inbox. Since the new piece is in the refused one's space,
 replacing helps when what the host refused is the piece, as for
 `inbox-offers-invalid` or `inbox-receive-missing`, and can't help when it is the
-space's access list.
+space's access list. Even then the replacement clears the record, and the notice
+doesn't come back: the deciding profile now points at the inbox Home holds,
+which the host keeps without vetting it again.
 
 A loom daemon reads its profile's pointer again at intervals, and when the
 pointer names another inbox it adopts that inbox if the inbox's space grants
@@ -393,14 +397,16 @@ doesn't depend on how a cleared pointer reads.
 
 One case the replacement can't handle: the refused inbox is one the owner could
 read when the profile was pointed at it, and its space has since revoked the
-owner's `READ`. With server execution off, a runtime of the owner's that never
-read that inbox can't replace it. `privateInboxReplacement` keeps a typed link
-to the refused inbox, and CFC refuses the commit for want of that inbox's label,
-so nothing changes: no inbox is created, no profile is re-pointed, and the
-refusal stays recorded. The owner sees nothing happen. The notice stays as it
-was, Home shows no error, and the refusal shows only as a warning in that
-runtime's log. A runtime that read the inbox before its access was revoked
-replaces it.
+owner's `READ`. With server execution off, the default, a runtime of the owner's
+started after the revocation can't replace it. `privateInboxReplacement` keeps a
+typed link to the refused inbox, and CFC refuses the commit for want of that
+inbox's label, so nothing changes: no inbox is created, no profile is
+re-pointed, and the refusal stays recorded. The owner sees nothing happen. The
+notice stays as it was, Home shows no error, and the refusal shows only as a
+warning in that runtime's log. A runtime started before the revocation replaces
+it, and so does the serving loop with server execution on.
+`private-inbox-multi-runtime.test.ts` pins the refusal, as a step marked to
+change once the record keeps the replaced inbox without the typed link.
 
 Replacing, refusing a send no click marks, re-pointing only the profiles that
 pointed at the refused inbox, replacing an inbox whose space has revoked the
