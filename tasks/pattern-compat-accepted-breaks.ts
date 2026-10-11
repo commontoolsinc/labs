@@ -1092,7 +1092,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     //
     // These baselines also report the scope the manager's `rooms` now
     // declares, which `fabrichat-view-scopes-break.md` records, so the
-    // entry names that path beside its own.
+    // entry names that path beside its own. They now report the `delivery`
+    // a request outcome gained, under the manager's views, where the proof
+    // reported `rooms`: it reports one issue per role. The entry names that
+    // path too, which `fabrichat-add-member-offer-break.md` records.
     pattern: "fabrichat/manager.tsx",
     baselines: [
       "20261008T225324Z-Oj3DbCTq-94tEYN3",
@@ -1103,6 +1106,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     paths: [
       "argument.requests.*",
       "result.$VIEWS.chats.rooms",
+      "result.$VIEWS.chats.requests.*",
     ],
     reason:
       "a manager's room link now types the room's `roster`, which the recorded link left open; every stored room link is to a room output with no `roster` or with a list of profile links, which the new type admits",
@@ -1149,6 +1153,11 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // computeds deriving them already had. This is the one baseline that has
     // `people`; the baselines the entries above name report `rooms` beside
     // their own paths.
+    //
+    // This baseline also reports the `delivery` and the refusal `code` a
+    // stored request outcome gained, which
+    // `fabrichat-add-member-offer-break.md` records, so the entry names that
+    // path beside its own.
     pattern: "fabrichat/manager.tsx",
     baselines: [
       "20261011T013628Z-pqvm47igo4Famzxe",
@@ -1156,6 +1165,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     paths: [
       "result.$VIEWS.chats.rooms",
       "result.$VIEWS.chats.people",
+      "argument.requests.*",
     ],
     reason:
       "a manager's rooms and people declare the per-session scope they are derived in; nothing is stored at either path for a reader to refuse",
@@ -1248,5 +1258,23 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       reason:
         'choosing to declare the scope once the measurements were in: "it looks like (b) is more correct to me", then "(a) sounds good"',
     },
+  },
+  {
+    // A request outcome gained `delivery`, which says how `offerRoom` told a
+    // member added to a room of it, and a refused one the `shared-inbox`
+    // code. The recorded outcomes left extra fields open and typed `code` as
+    // `space-own-chat` alone, so a stored outcome admitted either of any
+    // type; the candidate types them.
+    pattern: "fabrichat/manager.tsx",
+    baselines: [
+      "20261011T170652Z-2XdZAneyCTt2Teex",
+    ],
+    paths: [
+      "argument.requests.*",
+      "result.$VIEWS.chats.requests.*",
+    ],
+    reason:
+      "a manager's request outcome now types `delivery`, and a refused one the `shared-inbox` code, which the recorded outcomes left open; no stored request outcome holds either",
+    record: "docs/history/fabrichat-add-member-offer-break.md",
   },
 ];
