@@ -248,6 +248,7 @@ interface Input {
   >;
   bare: Writable<Default<{ fix: Fix }, { fix: { lat: 51.6 } }>>;
   ids: Writable<Default<string[], []>>;
+  filledIds: Writable<Default<string[], ["a"]>>;
   stampedIds: Writable<
     Default<AddIntegrity<string[], readonly ["owner-gate"]>, []>
   >;
@@ -269,6 +270,7 @@ export default pattern<Input>(
     wrap,
     bare,
     ids,
+    filledIds,
     stampedIds,
     settings,
     ownerLog,
@@ -299,6 +301,7 @@ const GATE_OUTPUTS = `
     settingsFixRun: coarsenOptional(settings.key("nested") as any),
     inventedRun: coarsenOptional({ fix, gate: gate.key("x") as any }),
     countRun: countStamped({ ids: ids as any }),
+    filledCountRun: countStamped({ ids: filledIds as any }),
     stampedCountRun: countStamped({ ids: stampedIds as any }),
     openGate: openGate({ gate }),
     forge: forge({ standIn }),
@@ -538,14 +541,16 @@ describe("cfc node input requirements", () => {
       });
     });
 
-    // An empty list is the absence of any entry: the seed has to be written
-    // with the evidence its entries require, as a pattern's setup does when
-    // the list's type mints it.
-    it("refuses an empty list no stamp vouches for, and runs on a stamped seed", async () => {
+    // A requirement on a list's entries applies to reads of its entries
+    // (§8.10.3); enumerating the list reads its shape, a read of the list
+    // itself (§4.6.3). An empty list has no entry to hold to it, stamped or
+    // not; an entry that is there is held to it.
+    it("runs on an empty list, and refuses a list holding an unstamped entry", async () => {
       await run(GATE_OUTPUTS, async (_send, read) => {
         const outputs = await read();
-        expect(outputs.countRun).toBeUndefined();
+        expect(outputs.countRun).toBe("0");
         expect(outputs.stampedCountRun).toBe("0");
+        expect(outputs.filledCountRun).toBeUndefined();
       });
     });
 

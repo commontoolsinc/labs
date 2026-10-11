@@ -30,9 +30,15 @@
  * - A value written in the node's binding itself (a literal in the wiring,
  *   including a handler's `$event` payload) carries no evidence, so it never
  *   satisfies a `requiredIntegrity`; a path the binding leaves out carries
- *   none either. A requirement on the members of a collection the binding
- *   supplies no members for (an empty or absent list in an event, say)
- *   consumes nothing, since there is no member to observe.
+ *   none either.
+ * - A requirement on the members of a collection (a `*` path) applies to
+ *   reads of its members (§8.10.3 checks a requirement against the reads at
+ *   its path). Enumerating the collection reads its shape (§4.6.3), which is
+ *   a read of the collection itself, governed by the collection's own labels
+ *   and requirements, not its members'. So where the collection, or a
+ *   container on the way to it, is empty or absent, the member requirement
+ *   consumes nothing, in a stored document and in the binding alike; a
+ *   member that is there is held to it.
  * - A path read and found absent from a container is a `shape` observation
  *   (§4.6.3) carrying the integrity minted for the container's own current
  *   value (`ownEvidenceAt`): never a label it inherits from an ancestor, a
@@ -44,9 +50,6 @@
  *   the code's schema does not declare (one a reference carries, or the
  *   graph's), the code would be handed the value that schema chose, which
  *   carries no evidence either.
- * - An empty container whose members carry a requirement (a `*` path) is the
- *   absence of any member, observed the same way: a seed the code requires
- *   evidence on has to be written with it.
  * - A cycle of references, or a chain longer than the runtime resolves,
  *   carries no evidence. The cycle check is keyed on each reference's target,
  *   so a chain that passes one target twice on different walks is refused
@@ -456,13 +459,9 @@ const reachThroughInput = (
     // container holds, so nothing vouches for it.
     if (!isPlainContainer(value)) return noEvidence(through);
     if (segment === "*") {
-      const members = Object.entries(value);
-      // An empty container enumerated: the absence of any member, observed
-      // with the container's own evidence, as a missing key is.
-      if (members.length === 0) {
-        return absentFrom(location, defaulting, through);
-      }
-      for (const [key, child] of members) {
+      // An empty container enumerated has no member to hold to the
+      // requirement; its shape is a read of the container (§4.6.3).
+      for (const [key, child] of Object.entries(value)) {
         inDocument(
           at(location, key),
           child,
@@ -482,6 +481,9 @@ const reachThroughInput = (
       // A segment of a reference's own path that is not there is the
       // reference's choice, not an absence its container vouches for.
       if (fixed > 0) return noEvidence(through);
+      // An absent container on the way to a collection's members: no member
+      // to hold to the requirement.
+      if (remaining.includes("*")) return;
       return absentFrom(location, defaulting, through);
     }
     inDocument(
@@ -568,22 +570,19 @@ const reachThroughInput = (
     }
     if (rest.length === 0) return heldAtPath(value);
     const [segment, ...remaining] = rest;
-    // A requirement on the members of a collection the wiring supplies no
-    // members for consumes nothing: the binding is plumbing, not a stored
-    // value anyone vouched for, and there is no member to observe.
-    const membersOnly = rest.includes("*");
-    // The wiring leaving a path out is otherwise the wiring's choice: no
-    // evidence.
-    if (!isPlainContainer(value)) {
-      return membersOnly && value === undefined ? undefined : noEvidence([]);
+    // Absent or empty on the way to a collection's members, as in a stored
+    // document: no member to hold to the requirement. Otherwise the wiring
+    // leaving a path out is the wiring's choice, and carries no evidence.
+    if (value === undefined && rest.includes("*")) return;
+    if (!isPlainContainer(value)) return noEvidence([]);
+    if (segment === "*") {
+      for (const child of Object.values(value)) inBinding(child, remaining);
+      return;
     }
-    const children = segment === "*"
-      ? Object.values(value)
-      : Object.hasOwn(value, segment)
-      ? [Reflect.get(value, segment)]
-      : [];
-    if (children.length === 0) return membersOnly ? undefined : noEvidence([]);
-    for (const child of children) inBinding(child, remaining);
+    if (!Object.hasOwn(value, segment)) {
+      return remaining.includes("*") ? undefined : noEvidence([]);
+    }
+    inBinding(Reflect.get(value, segment), remaining);
   };
 
   inBinding(binding, path);
