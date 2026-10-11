@@ -49,7 +49,20 @@ The host gives Home its inbox, normally once per runtime worker, when it first
 brings up the user's Home pattern: `PiecesController.ensurePrivateInbox()` in
 `packages/piece`, called from `RuntimeProcessor` in `packages/runtime-client`,
 which does it through `ensurePrivateInboxOf()` in
-`packages/piece/src/ops/private-inbox.ts`. It decides by one profile: the first,
+`packages/piece/src/ops/private-inbox.ts`.
+
+A worker brings up Home when a client asks it for any of three things, and the
+first of them in a worker starts the ensure: to ensure Home is running
+(`ensureHomePatternRunning()`), to create a space (`createSpace()`), or for the
+root pattern of the identity's own Home space to run (`getSpaceRootPattern()`,
+unless the request passes `start: false`). The shell asks for the last of these
+when it shows Home, so showing Home is enough to start the ensure. None of these
+waits for it. A request for another space's root starts no ensure, nor does a
+read of Home's root with `start: false`, which reads what the root exported
+without running it. The `cf` CLI brings Home up through `PiecesController`
+directly and never starts one.
+
+The ensure decides by one profile: the first,
 in the order `#profile` answers in, that points at an inbox. That order is
 `orderProfileCandidates()` in `packages/runner/src/profile-order.ts`, which the
 `wish` builtin answers `#profile` by: Home's default profile first, then by rank
