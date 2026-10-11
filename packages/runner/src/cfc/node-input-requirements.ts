@@ -208,6 +208,19 @@ const childSchemas = (
 };
 
 /** The values `value` holds at `path` (`*` matching any member). */
+/**
+ * The value at `path` in `value`, each segment a key as written: a key
+ * spelled `*` names that key, never every member.
+ */
+const valueAtExactly = (value: unknown, path: readonly string[]): unknown =>
+  path.reduce<unknown>(
+    (node, key) =>
+      isPlainContainer(node) && Object.hasOwn(node, key)
+        ? Reflect.get(node, key)
+        : undefined,
+    value,
+  );
+
 const valuesAt = (value: unknown, path: readonly string[]): unknown[] => {
   if (value === undefined) return [];
   if (path.length === 0) return [value];
@@ -457,7 +470,7 @@ const reachThroughInput = (
       // observed with the reference's integrity added.
       for (const reference of references) {
         const slot = { ...location, path: [...location.path, ...reference] };
-        const link = parseLink(valuesAt(value, reference)[0], slot);
+        const link = parseLink(valueAtExactly(value, reference), slot);
         if (link === undefined) noEvidence(through);
         else {
           // The reference sits below the walk's end, so the code's schema
@@ -481,7 +494,8 @@ const reachThroughInput = (
     if (!isPlainContainer(value)) return noEvidence(through);
     if (segment === "*") {
       // An empty container enumerated has no member to hold to the
-      // requirement; its shape is a read of the container (§4.6.3).
+      // requirement; its shape is a read of the container (§4.6.3). This is
+      // the absence rule marked at `absent`, for a collection with no member.
       for (const [key, child] of Object.entries(value)) {
         inDocument(
           at(location, key),
@@ -595,6 +609,8 @@ const reachThroughInput = (
     const [segment, ...remaining] = rest;
     if (!isPlainContainer(value)) return noEvidence([]);
     if (segment === "*") {
+      // An empty collection has no member to hold to the requirement: the
+      // absence rule marked at `absent`.
       for (const child of Object.values(value)) inBinding(child, remaining);
       return;
     }

@@ -61,7 +61,9 @@ Under [the correspondence procedure](../development/cfc-spec-correspondence.md):
 2. **Which schema's requirements apply is a semantic gap**, ruled in
    commonfabric/specs#62: the schema bound to the code identity that ran, to
    which a caller's schema can add requirements and from which it can remove
-   none. The labs site carries the one `SPEC-PENDING` marker.
+   none. Its labs site carries one `SPEC-PENDING` marker; the other marks
+   the absence rule (an absence consumes no requirement), pending its own
+   ruling request.
 3. **An identity guard resting on bound requirements** needs specs#51's
    §8.7.2 paragraph to allow it. A comment on specs#51 proposes the wording.
 4. **How the reads are found is a host arrangement**: the runner follows the

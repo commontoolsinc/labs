@@ -976,6 +976,21 @@ describe("cfc node input requirements", () => {
       });
     });
 
+    // A key spelled `*` in stored data is that key, not every member: the
+    // reference stored under it is the one followed.
+    it("follows the reference stored under a key spelled `*`", async () => {
+      await withDocument(async (refusals, link, write, base) => {
+        await write({ v: "chosen by other code" }, "of:chosen");
+        const to = (path: string[]) => ({
+          "/": { "link@1": { id: "of:chosen", space: base.space, path } },
+        });
+        await write({ gate: { "0": to(["missing"]), "*": to(["v"]) } });
+        expect(reason(refusals({ gate: link(undefined, ["gate"]) }))).toBe(
+          "input requiredIntegrity failed at /gate of code",
+        );
+      });
+    });
+
     it("refuses a reference cycle whose path grows", async () => {
       await withDocument(async (refusals, link, write) => {
         await write({ gate: link(undefined, ["gate", "inner"]) });
