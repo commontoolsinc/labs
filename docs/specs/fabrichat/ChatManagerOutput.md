@@ -23,8 +23,16 @@ interface ChatManagerOutput {
   requests: Record<
     string,
     | { status: "pending" }
-    | { status: "done"; entry?: ChatIndexEntry }
-    | { status: "refused"; reason: string; code?: "space-own-chat" }
+    | {
+      status: "done";
+      entry?: ChatIndexEntry;
+      delivery?: "offered" | "noticed";
+    }
+    | {
+      status: "refused";
+      reason: string;
+      code?: "space-own-chat" | "shared-inbox";
+    }
   >;
 
   /** Notices this user's requests have produced that no one has delivered. */
@@ -44,6 +52,12 @@ interface ChatManagerOutput {
     profiles?: Cell<ChatProfile>[];
     title: string;
     joinableByLink?: boolean;
+  }>;
+  offerRoom: Stream<{
+    requestId: string;
+    room: Cell<ChatRoomOutput>;
+    member?: string;
+    profile?: Cell<ChatProfile>;
   }>;
   accept: Stream<{
     requestId: string;
@@ -93,7 +107,11 @@ request names their profile and the profile points at one (see
 have been admitted to and by whom (see
 [delivering notices](#delivering-notices)). A client finds the profiles of the
 people this user already shares a room with in `people`, so a new room can name
-each of them by profile.
+each of them by profile. Someone this user adds to a room later, from the
+room's [`addMember`](ChatRoomOutput.md#addmemberrequestid-string-target--value-string--profile-cellchatprofile),
+is told the same way, through
+[`offerRoom`](#offerroomrequestid-string-room-cellchatroomoutput-member-string-profile-cellchatprofile),
+which the room sends.
 
 ## Views
 
@@ -118,8 +136,9 @@ same roster differently. Each room in it is read under the reader's own access,
 so a manager more than one principal reads, as one outside a home space can be,
 lists different rooms to a principal a room's space refuses than to its members.
 Stored once for every reader, a value readers derive differently is one their
-runtimes overwrite without end. A stream reads neither: a request names a room's
-members by principal or by profile itself.
+runtimes overwrite without end. A stream reads neither, except `offerRoom`,
+which reads `people` for the session that sends it: every other request names a
+room's members by principal or by profile itself.
 
 ## Facts
 
@@ -161,7 +180,8 @@ members by principal or by profile itself.
   reader can't read, names no one and is left out, and so are this user's own
   profiles. Like a roster, it is a claim, not an access list: a client uses
   it to offer the people to name a new room's members by, through
-  `createGroup`'s `profiles`.
+  `createGroup`'s `profiles`, and a room's add control the people to add, and
+  `offerRoom` offers a room through it to a member named by principal alone.
 
 ## Streams
 
@@ -188,7 +208,8 @@ These rules hold for every stream:
 - Every stream changes only this user's own manager, except `openDirect` and
   `createGroup`, which also create a room, grant other people access to it, and
   can offer it to the people the request names by profile, and add them to its
-  participants.
+  participants, and `offerRoom`, which can offer a room to the member it names
+  and add them to its participants.
   `openDirect`, `createGroup` and `accept` also add this user to the room's
   participants, which anyone the room's space admits may do.
 
@@ -196,6 +217,7 @@ These rules hold for every stream:
 | --- | --- | --- |
 | [`openDirect`](#opendirectrequestid-string-counterpart-string-profile-cellchatprofile) | `ChatStartSurface` | the direct room with `counterpart`, found or created |
 | [`createGroup`](#creategrouprequestid-string-members-string-profiles-cellchatprofile-title-string-joinablebylink-boolean) | `ChatStartSurface` | a new group room |
+| [`offerRoom`](#offerroomrequestid-string-room-cellchatroomoutput-member-string-profile-cellchatprofile) | none | a room this user added someone to, offered to them |
 | [`accept`](#acceptrequestid-string-room-cellchatroomoutput-counterpart-string-keeparchived-boolean) | none | an entry for a room this user has been admitted to |
 | [`forget`](#forgetrequestid-string-room-cellchatroomoutput-revision-string) | none | the entry removed from `rooms`; the room itself is untouched |
 | [`delivered`](#deliveredrequestid-string-id-string) | none | the notice removed from `outgoingNotices` |
@@ -248,8 +270,10 @@ conversation from splitting.
   `people` lists them. Each names the principal its `represents-principal`
   label attests, who is admitted as a member, and the room is offered to them
   through the share inbox the profile points at (see [offers](#offers)). A
-  person named by more than one profile is offered the room through the first.
-  This user's own profiles are ignored.
+  person named by more than one profile is offered the room through each
+  distinct inbox those profiles point at, once per inbox, and added to the
+  room's participants once. Profiles of two different people must not point at
+  the same inbox. This user's own profiles are ignored.
 - `title: string` — The room's title, which every member sees. Must not be
   empty.
 - `joinableByLink?: boolean` — Whether the room admits anyone who has its
@@ -268,8 +292,46 @@ Creates a group room. This is an outward act: it grants other people access.
   room's participants, produces a notice for each other member, and records the
   entry in `rooms`; adding this user to the new room's participants follows.
 - **Outcome:** `done` with the entry, or `refused` if `title` is empty,
-  `members` is absent, a member is not a principal's DID, or a profile in
-  `profiles` attests no principal.
+  `members` is absent, a member is not a principal's DID, a profile in
+  `profiles` attests no principal, or profiles of two different people point
+  at the same inbox, with the `code` `shared-inbox`. No setup points one
+  person's profile at another's inbox, so the request is refused whole, before
+  anything is created, granted, or offered, rather than handing each person an
+  offer meant for the other.
+
+### `offerRoom(requestId: string, room: Cell<ChatRoomOutput>, member?: string, profile?: Cell<ChatProfile>)`
+
+- `requestId: string` — Chosen by the sender, and unique among its requests. The
+  outcome is recorded under it in `requests`, and sending the same event again
+  with it changes nothing further. It is also the offer's `id`, which a share
+  inbox keeps one of per sender, so a room's
+  [`addMember`](ChatRoomOutput.md#addmemberrequestid-string-target--value-string--profile-cellchatprofile)
+  composes it from the room's space and the add's own `requestId`.
+- `room: Cell<ChatRoomOutput>` — A link to the room, one this user may add
+  people to.
+- `member?: string` — The DID of the person to tell of the room.
+- `profile?: Cell<ChatProfile>` — The person's profile, whose
+  `represents-principal` label must name `member`, or names the person when
+  `member` is absent.
+
+Tells someone this user has added to a room of the room. The room's
+`addMember` sends it, once it has granted the person access, and reads its
+outcome back as the add's `delivery`.
+
+- **Admitted:** without a reviewed gesture: the add that admitted the person
+  took one.
+- **Effect:** offers the room to the person (see [offers](#offers)): through
+  the share inbox `profile` points at, or, with no `profile`, through each
+  distinct inbox the profiles `people` lists for `member` point at, once per
+  inbox, as this session reads `people`. The first profile the room is offered
+  through is added to the room's participants. A person offered nothing, since
+  no profile known for them points at an inbox, gets a notice instead. It
+  grants nobody anything.
+- **Outcome:** `done` with `delivery`, `offered` or `noticed`, and no entry;
+  or `refused` if this user's catalog doesn't list the room, this user isn't an
+  OWNER of the room's space, `profile` attests no principal or names someone
+  other than `member`, `member` is not a principal's DID, or it is this user.
+  `offered` means sent, not received.
 
 ### `accept(requestId: string, room: Cell<ChatRoomOutput>, counterpart?: string, keepArchived?: boolean)`
 
@@ -397,10 +459,12 @@ direct room's `counterpart` against that label before it sends `accept`.
 When a request names a member's profile, as `openDirect`'s `profile` and
 `createGroup`'s `profiles` do, the manager offers the new room to that member
 through the share inbox the profile's `inbox` points at
-([`private-inbox.md`](../../features/private-inbox.md)), once, after the room is
-created, and adds the profile to the room's participants, through the room's
-`addParticipant`, without a step of the member's own. A profile that points at
-no inbox is offered nothing. The offer is the envelope a share inbox takes:
+([`private-inbox.md`](../../features/private-inbox.md)), once per distinct
+inbox among the member's profiles, after the room is created, and adds the
+first profile it offered the room through to the room's participants, through
+the room's `addParticipant`, without a step of the member's own. A profile that
+points at no inbox is offered nothing. `offerRoom` offers a room someone was
+added to the same way. The offer is the envelope a share inbox takes:
 
 - `kind` — `fabrichat-room`.
 - `id` — the request's `requestId`. The inbox keeps one offer per sender and
@@ -431,7 +495,7 @@ already in the catalog, archived or not, gets no acceptance. A notice is
 produced for each other member offered nothing: one known only by their DID,
 who has no profile to reach an inbox through, or one whose profile points at no
 inbox. A member sent an offer gets no notice, and nothing tells the
-sender whether the offer arrived.
+sender whether the offer arrived: `offerRoom`'s `offered` means sent.
 
 ## Crossing creations
 

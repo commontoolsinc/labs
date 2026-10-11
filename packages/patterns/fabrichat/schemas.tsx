@@ -469,8 +469,11 @@ export type ChatRequestOutcome =
     /** The request finished. */
     status: "done";
 
-    /** The entry it produced; absent for `forget`. */
+    /** The entry it produced; absent for `forget` and `offerRoom`. */
     entry?: ChatIndexEntry;
+
+    /** How `offerRoom` told the member of the room; absent for the others. */
+    delivery?: ChatOfferDelivery;
   }
   | {
     /** The request was refused. */
@@ -490,14 +493,37 @@ export type ChatRequestOutcome =
  * A refusal a client can act on, which stays the same whatever its `reason`
  * says. `space-own-chat`: `accept` named a social space's own chat, which a
  * user's chats don't list, since the catalog lists rooms by their own spaces.
+ * `shared-inbox`: `createGroup` named profiles of two people that point at
+ * the same share inbox, so an offer meant for one would reach the other.
  */
-export type ChatRefusalCode = "space-own-chat";
+export type ChatRefusalCode = "space-own-chat" | "shared-inbox";
+
+/**
+ * How a manager told a member of a room it offered them: `offered`, sent to
+ * at least one share inbox a profile of theirs points at, which says nothing
+ * of whether it arrived; `noticed`, queued as a notice for a client to
+ * deliver, since no profile of theirs it knows points at an inbox.
+ */
+export type ChatOfferDelivery = "offered" | "noticed";
+
+/**
+ * How an added member was told of the room: as their adder's manager told
+ * them, or `access-only`, not told at all, because the adder has no manager
+ * that tells them, or theirs refused to.
+ */
+export type AddMemberDelivery = ChatOfferDelivery | "access-only";
 
 /** The outcome of an add to a room's space, by its `requestId`. */
 export type AddMemberOutcome =
   | {
     /** The person was admitted, or held the access already. */
     status: "done";
+
+    /**
+     * How they were told of the room; absent until the adder's manager has
+     * decided.
+     */
+    delivery?: AddMemberDelivery;
   }
   | {
     /** The add was refused, and nothing was granted. */
@@ -516,9 +542,21 @@ export type AddMemberOutcome =
 /**
  * A refusal of an add a client can act on, which stays the same whatever its
  * `reason` says. `direct-room`: the room is a direct room, whose space keeps
- * its two members.
+ * its two members. `manager-pending`: whether the adder has a manager to tell
+ * the member of the room isn't known yet, so nothing was granted, and the same
+ * add sent again once it is known can succeed.
  */
-export type AddMemberRefusalCode = "direct-room";
+export type AddMemberRefusalCode = "direct-room" | "manager-pending";
+
+/**
+ * The `requestId` under which an add to the room in `space` asks the adder's
+ * manager to offer the room, given the add's own `requestId`, which the offer
+ * carries as its `id`. It names the room as well as the add, so adds to two
+ * rooms under one `requestId` neither share an outcome in the manager nor
+ * replace each other's offer in a share inbox.
+ */
+export const addMemberOfferId = (space: string, requestId: string): string =>
+  JSON.stringify(["addMember", space, requestId]);
 
 /**
  * The `kind` of a room's own space, as the space declares it, and as an offer

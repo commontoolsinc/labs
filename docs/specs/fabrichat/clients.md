@@ -135,7 +135,12 @@ A client that draws natively sends `addMember` through
 `[VIEWS]`, beside `canAdd`, which says whether the reader may add anyone, false
 in a direct room, and `addRequests`, where each add's outcome is recorded under
 its `requestId` (see
-[`ChatRoomOutput`](ChatRoomOutput.md#addmemberrequestid-string-target--value-string-)).
+[`ChatRoomOutput`](ChatRoomOutput.md#addmemberrequestid-string-target--value-string--profile-cellchatprofile)).
+An add that is done carries `delivery` once the reader's manager has told the
+person added of the room, or the room has found there is no one to tell them;
+until then, it is still being delivered. A client offers people to add from its
+user's manager's `people`, and names a person picked there by their profile as
+well as their address, so the manager offers the room through that profile.
 To leave the people already in the room out of its add control, it reads the
 room's `participantPrincipals`, the principals the room's `participantEntries`
 hold. It is a best-effort set to leave out, not an access list: someone who

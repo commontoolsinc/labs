@@ -1,9 +1,12 @@
 /**
  * A FabriChat room's add control: shown to an OWNER of a group room the
  * manager created in a space of its own, and refusing what it can refuse
- * before it grants anything. That an add admits someone to the room's space is
+ * before it grants anything, an add made before it is known whether the
+ * viewer has a manager among them. That an add admits someone to the room's
+ * space is
  * something only a space other than the test's own shows, so
- * `../integration/fabrichat-spaces-multi-runtime.test.ts` checks it.
+ * `../integration/fabrichat-spaces-multi-runtime.test.ts` checks it;
+ * `add-member-offers.test.tsx` covers telling them through a manager.
  */
 import {
   type AddIntegrity,
@@ -161,6 +164,20 @@ export default pattern(() => {
             recorded?.status === "refused" &&
             recorded.code === "direct-room" &&
             recorded.reason === "A direct chat keeps its two members.";
+        }),
+      },
+      // While it isn't known whether the viewer has a manager, a principal's
+      // address is refused, with a code a client can act on.
+      {
+        action: ownRoom.addMember,
+        event: typed(BOB, "add-pending"),
+        trustedUi: addGesture,
+      },
+      {
+        assertion: assert(() => {
+          const recorded = ownRoom[VIEWS].room.addRequests["add-pending"];
+          return recorded?.status === "refused" &&
+            recorded.code === "manager-pending";
         }),
       },
       // A space's own chat refuses an add, whatever reaches its stream.
