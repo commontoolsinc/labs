@@ -23,11 +23,22 @@ interface State {
     view: View;
     items: Item[];
     log: Writable<string>;
+    title: string;
 }
 function propOf(view: View): unknown {
     return view.value;
 }
 __cfHardenFn(propOf);
+function labeledBase(label: string) {
+    return class {
+        label = label;
+    };
+}
+__cfHardenFn(labeledBase);
+function formatterFor(name: string): <T>(value: T) => string {
+    return (value) => `${name}: ${String(value)}`;
+}
+__cfHardenFn(formatterFor);
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -62,6 +73,86 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
         }).set("x");
     }
     log.set(view.label);
+});
+const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        view: {
+            $ref: "#/$defs/View"
+        }
+    },
+    required: ["view"],
+    $defs: {
+        View: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "unknown"
+                },
+                label: {
+                    type: "string"
+                }
+            },
+            required: ["value", "label"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, (_, { view }) => {
+    interface Setter {
+        set(next: string): void;
+        (event: string): void;
+    }
+    interface Local extends Tagged {
+        label: string;
+    }
+    class Label implements Tagged {
+        tag = "label";
+    }
+    const setter = propOf(view) as Setter | null;
+    const local: Local = { tag: new Label().tag, label: view.label };
+    if (setter)
+        setter.set(local.label);
+});
+const __cfHandler_3 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        title: {
+            type: "string"
+        },
+        log: {
+            type: "string",
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["title", "log"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { title, log }) => {
+    class Named extends labeledBase(title) {
+    }
+    log.set(new Named().label);
+});
+const __cfHandler_4 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        title: {
+            type: "string"
+        },
+        view: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                }
+            },
+            required: ["label"]
+        },
+        log: {
+            type: "string",
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["title", "view", "log"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { title, log, view }) => {
+    const format = formatterFor(title)<string>;
+    log.set(format(view.label));
 });
 const __cfLift_1 = __cfHelpers.lift<{
     view: View;
@@ -160,8 +251,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     item: {
         value: Record<string, unknown>;
     };
-    get: (key: string) => unknown;
-}, string>(({ item, get }) => String((item.value as {
+}, string>(({ item }) => String((item.value as {
     get: (key: string) => unknown;
 })), {
     type: "object",
@@ -187,7 +277,7 @@ const __cfLift_4 = __cfHelpers.lift<{
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return (<span>
-            {__cfHelpers.ifElse({
+              {__cfHelpers.ifElse({
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
@@ -205,13 +295,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
             value: item.key("value")
         } }), __cfLift_3({ item: {
             value: item.key("value")
-        } })), __cfLift_4({
-        item: {
+        } })), __cfLift_4({ item: {
             value: item.key("value")
-        },
-        get: get
-    }), item.key("name"))}
-          </span>);
+        } }), item.key("name"))}
+            </span>);
 }, {
     type: "object",
     properties: {
@@ -264,29 +351,56 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     }
 } as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: captures-skip-type-positions
-// Verifies: a name that appears only inside a type is not captured
+// Verifies: a name that appears only in erased syntax is not captured
 //   (value as { set: (next: string) => void })  → no `next` capture
 //   (stream as { send: (event: …) => void })    → no `event` capture
 //   const copy: typeof view = view              → `view` captured for the
 //                                                 value, not for the type
+//   (item.value as { get: (key: string) => … })  → neither `get` nor `key`
+//   interface Setter { set(next: string): void } → no `next` capture
+//   interface Local extends Tagged / implements → no `Tagged` capture
+// and that a value inside a type-shaped node is still captured:
+//   class extends labeledBase(title)            → `title` captured
+//   formatterFor(title)<string>                 → `title` captured
 // Context: the same capture collector serves actions, computeds and array
-//   callbacks, and none of them may bind a type's parameter names as inputs:
-//   with no such binding in scope, an unshrunk state would require them and
-//   the callback would never run.
+//   callbacks, and none of them may bind an erased name as an input: with no
+//   such binding in scope, an unshrunk state would require it and the callback
+//   would never run.
 export default pattern((__cf_pattern_input) => {
     const view = __cf_pattern_input.key("view");
     const items = __cf_pattern_input.key("items");
     const log = __cf_pattern_input.key("log");
+    const title = __cf_pattern_input.key("title");
+    interface Tagged {
+        tag: string;
+    }
     const setIt = __cfHandler_1({
         view: view,
         log: log
     }).for({ stream: "setIt" }, true);
+    const viaDeclarations = __cfHandler_2({
+        view: view
+    }).for({ stream: "viaDeclarations" }, true);
+    const viaClassExtends = __cfHandler_3({
+        title: title,
+        log: log
+    }).for({ stream: "viaClassExtends" }, true);
+    const viaInstantiation = __cfHandler_4({
+        title: title,
+        log: log,
+        view: {
+            label: view.key("label")
+        }
+    }).for({ stream: "viaInstantiation" }, true);
     const summary = __cfLift_1({ view: view }).for("summary", true);
     return {
         [UI]: (<div>
-        <button type="button" onClick={setIt}>{summary}</button>
-        {items.mapWithPattern(__cfPattern_1, {})}
-      </div>),
+          <button type="button" onClick={setIt}>{summary}</button>
+          <button type="button" onClick={viaDeclarations}>declarations</button>
+          <button type="button" onClick={viaClassExtends}>extends</button>
+          <button type="button" onClick={viaInstantiation}>instantiate</button>
+          {items.mapWithPattern(__cfPattern_1, {})}
+        </div>),
     };
 }, {
     type: "object",
@@ -303,9 +417,12 @@ export default pattern((__cf_pattern_input) => {
         log: {
             type: "string",
             asCell: ["cell"]
+        },
+        title: {
+            type: "string"
         }
     },
-    required: ["view", "items", "log"],
+    required: ["view", "items", "log", "title"],
     $defs: {
         Item: {
             type: "object",
@@ -354,6 +471,9 @@ function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
     __cfHandler_1,
+    __cfHandler_2,
+    __cfHandler_3,
+    __cfHandler_4,
     __cfLift_1,
     __cfLift_2,
     __cfLift_3,

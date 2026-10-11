@@ -9,6 +9,7 @@ import {
   setParentPointers,
   typeToTypeNodeWithRegistry,
 } from "../../ast/mod.ts";
+import { isErasedAtEmit } from "../../ast/erased-syntax.ts";
 import { isModuleScopedDeclaration } from "../../ast/scope-analysis.ts";
 import { unwrapTransparentWrapperOnce } from "../../utils/expression.ts";
 import { TransformationContext } from "../../core/mod.ts";
@@ -294,16 +295,18 @@ function unionWithEnclosingScopeFreeIdentifiers(
   const addedNames = new Set<string>();
 
   const visit = (node: ts.Node): void => {
+    // Nothing named in erased syntax is a runtime input: not a type alias or
+    // interface an `as`/`satisfies` cast or a type argument mentions, and not
+    // a member of a type literal (`get` in `value as { get(): unknown }`),
+    // whose symbol is a property and so passes the value-space test below.
+    if (isErasedAtEmit(node)) return;
     if (ts.isIdentifier(node) && isReferenceSite(node)) {
       if (
         !alreadyCoveredNames.has(node.text) && !addedNames.has(node.text)
       ) {
         const symbol = checker.getSymbolAtLocation(node);
-        // Only capture value-space symbols. Type-only identifiers (type
-        // aliases, interfaces — type parameters are also filtered by
-        // `isEnclosingScopeDeclaration` below) can appear at reference
-        // sites in `as`/`satisfies` casts and generic type arguments;
-        // emitting them as runtime inputs would be a type error.
+        // Only capture value-space symbols; type parameters are also filtered
+        // by `isEnclosingScopeDeclaration` below.
         if (
           symbol &&
           (symbol.flags & ts.SymbolFlags.Value) !== 0 &&

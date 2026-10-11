@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { getMethodCallTarget, isMethodCall } from "../ast/mod.ts";
+import { isErasedAtEmit } from "../ast/erased-syntax.ts";
 import {
   isDeclaredWithinFunction,
   isFunctionDeclaration,
@@ -84,12 +85,12 @@ export class CaptureCollector {
     const captures = new Set<ts.Expression>();
 
     const visit = (node: ts.Node) => {
-      // A type is erased before the callback runs, so nothing named inside
-      // one is a value it closes over: not a function type's parameters
-      // (`(next: string) => void` in a cast), not a `typeof` query, not a type
-      // argument. The expression of an `extends Base<T>` clause is a value,
-      // so that node is still walked; its type arguments are skipped here.
-      if (ts.isTypeNode(node) && !ts.isExpressionWithTypeArguments(node)) {
+      // Erased syntax is gone before the callback runs, so nothing named in it
+      // is a value the callback closes over: not a function type's parameter
+      // (`next` in `(value as { set: (next: string) => void })`), not a local
+      // interface's member, not a name an `implements` clause or a `typeof`
+      // query mentions.
+      if (isErasedAtEmit(node)) {
         return;
       }
 
