@@ -961,13 +961,12 @@ operator took.
 
 ## Stages
 
-Each stage is a pull request. Stages 1 and 2 have landed, stage 3 is in
-review, and stage 4 onward is open. Two engine changes come
-first, and both have landed: the base search, because it preserves history,
-helps the uncompacted store from the deploy that carries it, and is the
-measurement the compaction decision was made against; and the basis guard,
-because no store may be compacted until the engine can tell compacted
-history from absence.
+Each stage is a pull request. Stages 1 through 3 have landed, and stage 4
+onward is open. Two engine changes came first, and both have landed: the
+base search, because it preserves history, helps the uncompacted store from
+the deploy that carries it, and is the measurement the compaction decision
+was made against; and the basis guard, because no store may be compacted
+until the engine can tell compacted history from absence.
 
 1. **The snapshot-bounded base search** — done ([labs#8628](https://github.com/commonfabric/labs/pull/8628)), measured on
    the August copy, on the 2026-10-09 production snapshot, and through a
@@ -986,7 +985,7 @@ history from absence.
    the tool will transform them, red on the engine before and green after;
    an uncompacted instance's genuine absence still proves identity as
    today, and so does a basis at the boundary itself.
-3. **Dry run and report** — [labs#8649](https://github.com/commonfabric/labs/pull/8649). `packages/memory/v2/compact.ts`
+3. **Dry run and report** — done ([labs#8649](https://github.com/commonfabric/labs/pull/8649)). `packages/memory/v2/compact.ts`
    with the selection, the cut, and the report, read-only; `cf space compact
    --dry-run` over it, which refuses to run without the flag until stage 4.
    Tests: a store built with the engine, patched past the snapshot interval,
