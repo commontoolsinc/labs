@@ -1,12 +1,14 @@
-// The serving runtime's loopback storage plane (server-execution v2
-// stage F, serving-loop.md §1 plane (a)): a StorageManager whose sessions
-// connect IN-PROCESS to the co-hosted memory server — the ONLY commit
-// path the loop's runtime uses — with the SAME signed `session.open`
-// production clients present. No parallel auth scheme: the loopback
-// session's principal is the service identity, verified by whatever
-// `authorizeSessionOpen` the host process configured, which is exactly
-// what makes the read-row admission's holder matching (protocol.md §2)
-// meaningful in production.
+/**
+ * The serving runtime's loopback storage plane (serving-loop.md §1 plane
+ * (a)): a StorageManager whose sessions connect to the memory server, in
+ * process or over transports that reach it on the thread that holds it, as
+ * the only commit path the loop's runtime uses, with the same signed
+ * `session.open` production clients present. No parallel auth scheme: the
+ * loopback session's principal is the service identity, verified by whatever
+ * `authorizeSessionOpen` the host process configured, which is what makes
+ * the read-row admission's holder matching (protocol.md §2) meaningful in
+ * production.
+ */
 
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import * as MemoryClient from "@commonfabric/memory/v2/client";

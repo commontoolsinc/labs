@@ -1,9 +1,10 @@
 /**
  * The runtime factory an `ExecutorHost` builds its per-space serving runtimes
- * with: a runtime over a loopback storage manager on the co-hosted memory
- * server, signing its session opens as the service identity, in the serving
- * posture. It is the one construction of a serving runtime, so a test that
- * builds its host with it serves its spaces the way a deployment does.
+ * with: a runtime over a loopback storage manager on the memory server,
+ * reached in-process or over transports from the thread that holds it,
+ * signing its session opens as the service identity, in the serving posture.
+ * It is the one construction of a serving runtime, so a test that builds its
+ * host with it serves its spaces the way a deployment does.
  */
 
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";

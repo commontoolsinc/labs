@@ -297,26 +297,27 @@ async function attachServingLoop(params: {
           "pass `worker: false` to run the loop on this thread",
       );
     }
-    const worker = new ServingWorker({
-      server: params.server,
-      identity: serviceIdentity,
-      apiUrl: params.apiUrl,
-      ensureSpaceRoots,
-      ...(hostOptions.policy === undefined
-        ? {}
-        : { policy: hostOptions.policy }),
-      ...(experimental === undefined ? {} : { experimental }),
-      ...(hostOptions.onActivationSettled === undefined
-        ? {}
-        : { onActivationSettled: hostOptions.onActivationSettled }),
-      ...(hostOptions.onSpaceParked === undefined
-        ? {}
-        : { onSpaceParked: hostOptions.onSpaceParked }),
-    });
+    let worker: ServingWorker | undefined;
     try {
+      worker = new ServingWorker({
+        server: params.server,
+        identity: serviceIdentity,
+        apiUrl: params.apiUrl,
+        ensureSpaceRoots,
+        ...(hostOptions.policy === undefined
+          ? {}
+          : { policy: hostOptions.policy }),
+        ...(experimental === undefined ? {} : { experimental }),
+        ...(hostOptions.onActivationSettled === undefined
+          ? {}
+          : { onActivationSettled: hostOptions.onActivationSettled }),
+        ...(hostOptions.onSpaceParked === undefined
+          ? {}
+          : { onSpaceParked: hostOptions.onSpaceParked }),
+      });
       await worker.ready;
     } catch (error) {
-      await worker.close();
+      await worker?.close();
       await params.close();
       throw error;
     }

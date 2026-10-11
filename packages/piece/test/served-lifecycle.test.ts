@@ -27,6 +27,10 @@ import {
 import { EmulatedStorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { loadVerifiedSourceClosure } from "../../runner/src/compilation-cache/cell-cache.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
+import {
+  buildServedLifecycleVerb,
+  servedLifecycleRunner,
+} from "../src/ops/served-lifecycle-verbs.ts";
 import { pieceId } from "../src/piece-id.ts";
 import { resolveSlugTargetCell } from "../src/slugs.ts";
 import {
@@ -37,8 +41,10 @@ import {
   finishServedRegistration,
   prepareServedRegistration,
   servedInstantiatePiece,
+  type ServedInstantiateReceipt,
   ServedLifecycleRefusal,
   type ServedPatternSource,
+  type ServedRegistrationPreparation,
   servedSetPieceSource,
   type ServedSetSourceRequest,
   servedUploadPattern,
@@ -857,6 +863,78 @@ export default pattern(() => {
       expect(refusal.code).toBe("compile-failed");
       expect(refusal.message).toContain("undefinedName");
       expect(host.stats().lifecycleVerbs).toEqual({ runs: 1, failures: 1 });
+    });
+  });
+
+  describe("descriptors", () => {
+    it("runs the verbs their descriptors name through the host, and demands the piece's root when asked", async () => {
+      const runner = servedLifecycleRunner(host, serviceSigner);
+      const ref = await runner.runLifecycleVerb(space, {
+        name: "upload",
+        request: { program: authorizedWriterProgram("v1") },
+      }) as { identity: string; symbol: string };
+      expect(ref.symbol).toBe("default");
+      const created = await runner.runLifecycleVerb(space, {
+        name: "instantiate",
+        request: {
+          source: { pattern: ref },
+          actingUser: aliceSigner.did(),
+          start: true,
+        },
+      }) as { pieceId: string; pattern: { identity: string } };
+      expect(created.pattern).toEqual(ref);
+      const successor = await runner.runLifecycleVerb(space, {
+        name: "upload",
+        request: { program: authorizedWriterProgram("v2") },
+      }) as { identity: string; symbol: string };
+      const replaced = await runner.runLifecycleVerb(space, {
+        name: "setsrc",
+        request: {
+          pieceId: created.pieceId,
+          pattern: successor,
+          actingUser: aliceSigner.did(),
+          start: false,
+        },
+      }) as { pieceId: string; pattern: { identity: string } };
+      expect(replaced.pieceId).toBe(created.pieceId);
+      expect(replaced.pattern.identity).toBe(successor.identity);
+      const pieces = await clientPieces();
+      const piece = await pieces.get(created.pieceId);
+      expect(getPatternIdentityRef(piece.getCell())).toEqual(successor);
+    });
+
+    it("prepares and finishes a registration from descriptors, carrying the preparation's error into the receipt", async () => {
+      const runner = servedLifecycleRunner(host, serviceSigner);
+      const root = await instantiate({ program: BASE_PROGRAM });
+      const pending = await instantiate({ program: BASE_PROGRAM }, undefined, {
+        register: true,
+      });
+      const pieces = await clientPieces();
+      await pieces.linkDefaultPattern(
+        (await pieces.get(root.pieceId)).getCell(),
+      );
+      const prepared = await runner.runLifecycleVerb(space, {
+        name: "registration-prepare",
+        request: { receipt: pending, actingUser: aliceSigner.did() },
+      }) as ServedRegistrationPreparation;
+      expect(prepared.error).toBe(
+        "The default pattern has no addPiece handler",
+      );
+      const finished = await runner.runLifecycleVerb(space, {
+        name: "registration-finish",
+        request: { prepared, actingUser: aliceSigner.did(), outcome: {} },
+      }) as ServedInstantiateReceipt;
+      expect(finished.registration.status).toBe("failed");
+    });
+
+    it("refuses to build a verb from a descriptor it does not know", () => {
+      expect(() =>
+        buildServedLifecycleVerb(
+          space,
+          { name: "frobnicate", request: {} } as never,
+          serviceSigner,
+        )
+      ).toThrow('no served lifecycle verb is named "frobnicate"');
     });
   });
 

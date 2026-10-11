@@ -254,7 +254,12 @@ export function startServerExecutionHost(options: {
   /** The patterns/compile base — the serving runtimes' `apiUrl`. */
   apiUrl: URL;
 
-  /** The serving runtimes' outbound fetch; unset, the platform fetch. */
+  /**
+   * The serving runtimes' outbound fetch on the main thread; unset, the
+   * platform fetch. The worker's entry (`lib/serving-worker.ts`) builds the
+   * same self-directed fetch in its own realm, and this one does not reach
+   * it.
+   */
   fetch?: RuntimeFetch;
 
   envGet?: EnvReader;

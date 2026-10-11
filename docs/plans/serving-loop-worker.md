@@ -78,11 +78,11 @@ main thread owns one `Server.connect()` per worker-side transport and posts the
 server's frames back. The port's transport is the in-process one's pump
 (`queuedFrameTransport` in the memory client) over the port: a server frame
 reaches the client on a turn of its own, frames held at close are dropped, and
-`delivered()` waits for the frames held. The client code was written against
-that discipline, and a transport handing frames over as they arrive let a
-session's deferred self-revocation reach it where the in-process one had dropped
-it. The protocol, the signed `session.open`, and the service principal are
-unchanged, which is what keeps the read-row admission's holder matching intact.
+`delivered()` waits for the frames held. The client holds to that discipline,
+a session's deferred self-revocation among the things that depend on a frame
+staged at close going nowhere, so a transport over the port keeps it. The
+protocol, the signed `session.open`, and the service principal are unchanged,
+which is what keeps the read-row admission's holder matching intact.
 
 **The server's observer crosses as events, its queries as requests.** The main
 thread installs the `ServerExecutionObserver` and forwards `commitAdmitted`,
@@ -165,10 +165,15 @@ commit's writes applied, so the rebase claims nothing they did not see.
 
 A worker that dies takes every serving runtime with it. The main thread's
 bridge treats its exit as a park of every space with the failure-park backoff
-the host already applies, and starts a fresh worker; the lease rows lapse on
-their TTL and the successor acquires them, which is the recovery
-`serving-loop.md` §6 already specifies for a lost tenure. A main thread that
-closes closes the port, and the worker's host closes as it does today.
+the host already applies, and starts a fresh worker under a holder of its
+own. Once the dead worker is gone, the main thread releases the lease rows
+its holder held in every space it opened: a host leaves a space parked on
+another holder's live lease rather than contending for it, so a successor
+that waited out the rows' TTL would also wait for the next session, event,
+or demand change to activate the space. With the rows released, the
+successor acquires them as it activates, which is the recovery
+`serving-loop.md` §6 specifies for a lost tenure. A main thread that closes
+closes the port, and the worker's host closes as it does today.
 
 ## What does not change
 
@@ -212,13 +217,16 @@ and the flag below selects between the two.
    pass: its own, the watermark and reviewed-send tests, the CLI's
    agent-connections test, and the pattern integration tests the
    `MultiRuntimeHarness` drives, with one open exception. The private-inbox
-   test, whose pieces span several spaces, fails or stalls under the worker:
+   test, whose pieces span several spaces, fails or stalls under the worker
+   with the basis race below closed:
    the home space's serving runtime attempts foreign scoped reads and
    foreign writes from `map` runs that in-process it never attempts, so the
    append it waits for is refused or never derives. The evidence points at
    the home runtime materializing a foreign space's derivations itself while
    that space's own loop lags behind it, which the in-process ordering never
-   let happen; the cause is not yet pinned. A lane running the ON arm under
+   let happen; the cause is not yet pinned. The fabrichat room-principals
+   test, where a runtime one space refuses reads a list the loop derives
+   across it, fails the same way on some runs. A lane running the ON arm under
    the worker is a question for stage 6, with the default.
 5. [ ] **Measure.** The vote probe and the Topics seed under the worker against
    the in-process loop on the same box: client watch-add latency, the

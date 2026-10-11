@@ -66,13 +66,19 @@ import type {
   ServedAclChange,
   ServedAclChangeVerdict,
 } from "@commonfabric/memory/v2/server";
+import { getLogger } from "@commonfabric/utils/logger";
 import type { MemorySpace, Result } from "../storage/interface.ts";
-import type {
-  WaveCommitRejection,
-  WaveCommitSink,
-  WaveSpaceCommit,
+import {
+  warmWritesOf,
+  type WaveCommitRejection,
+  type WaveCommitSink,
+  type WaveSpaceCommit,
 } from "./wave.ts";
 
+const logger = getLogger("engine-wave-sink", {
+  enabled: true,
+  level: "warn",
+});
 export function waveCommitFailureResult(
   error: unknown,
 ): { error: WaveCommitRejection } {
@@ -546,16 +552,36 @@ export class EngineWaveCommitSink implements WaveCommitSink {
     const record = selectCommitsSince(engine, { fromSeq: seq - 1, limit: 1 })
       .find((entry) => entry.seq === seq);
     if (record === undefined) return;
-    this.#reportCommit({
-      space: batch.space,
-      seq,
-      class: batch.home ? "derived" : "authored",
-      ...(batch.home && batch.holder !== undefined
-        ? { holder: batch.holder }
-        : {}),
-      sessionId: record.sessionId,
-      writes: record.writes as AdmittedCommitNotice["writes"],
-      ...(batch.home ? {} : { warm: true }),
-    });
+    try {
+      this.#reportCommit(
+        batch.home
+          ? {
+            space: batch.space,
+            seq,
+            class: "derived",
+            // The lease holder the batch names, which is this sink's own
+            // session: the loop commits under the holder's session.
+            holder: batch.holder ?? this.#sessionId,
+            sessionId: record.sessionId,
+            writes: record.writes as AdmittedCommitNotice["writes"],
+          }
+          : {
+            space: batch.space,
+            seq,
+            class: "authored",
+            sessionId: record.sessionId,
+            writes: warmWritesOf(batch),
+            warm: true,
+          },
+      );
+    } catch (error) {
+      // The commit is in the store whatever the report did, so a failure to
+      // announce it is logged rather than returned as a failed commit, which
+      // would send the wave back to commit the same writes again.
+      logger.error("wave-commit-report-failed", () => [
+        `reporting the wave commit at seq ${seq} in ${batch.space} failed`,
+        error,
+      ]);
+    }
   }
 }

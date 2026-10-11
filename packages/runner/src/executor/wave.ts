@@ -1207,8 +1207,9 @@ export class WaveAccumulator
   }
 
   /**
-   * The doc instances (`${id} ${scopeKey}`) the home commit wrote; empty
-   * until it has landed.
+   * The doc instances (`${id} ${scopeKey}`) the home commit wrote as the
+   * replica holds them, which leaves out the docs it rebased; empty until it
+   * has landed.
    */
   get committedHomeKeys(): ReadonlySet<string> {
     return this.#committedHomeKeys;
@@ -1247,10 +1248,11 @@ export class WaveAccumulator
    * seal leaves when it opens this wave while that commit is in flight to
    * the store. A doc in `keys` that sits exactly at `seq` is not a conflict
    * for any contribution here, each of which read the replica with the
-   * commit's writes applied (a run that read them stale is refused at its
-   * own commit and never seals); the sink still re-verifies that the doc
-   * sits there. A commit at or below the basis is covered by the basis
-   * itself and leaves no note.
+   * commit's writes applied: the replica's claim check refuses a run that
+   * read them stale at its own commit (`StorageTransactionInconsistent`),
+   * so no such run seals. The sink still re-verifies that the doc sits
+   * there. A commit at or below the basis is covered by the basis itself and
+   * leaves no note.
    */
   noteOwnWaveCommit(seq: number, keys: ReadonlySet<string>): void {
     if (seq <= this.#basisSeq) return;
@@ -2626,10 +2628,17 @@ export class WaveAccumulator
           foreignSeqs,
           orphanRefused,
         );
+        // A doc this wave rebased sits at a field merge the replica never
+        // held, so it is left out: a successor's write to it conflicts.
         const committed = new Set<string>();
         for (const contribution of this.#survivors(requeued, droppedWhole)) {
           for (const key of homeWrites[contribution.index].keys()) {
-            if (!droppedDocs[contribution.index].has(key)) committed.add(key);
+            if (
+              !droppedDocs[contribution.index].has(key) &&
+              !rebasedDocs[contribution.index].has(key)
+            ) {
+              committed.add(key);
+            }
           }
         }
         this.#committedHomeKeys = committed;

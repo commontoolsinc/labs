@@ -5,7 +5,10 @@
 // component, when one dies.
 
 import { type Identity, realmValueFromKeyPair } from "@commonfabric/identity";
-import { adoptProcessInstanceId } from "@commonfabric/memory/v2/execution-lease";
+import {
+  adoptProcessInstanceId,
+  executionLeaseHolder,
+} from "@commonfabric/memory/v2/execution-lease";
 import type { Server } from "@commonfabric/memory/v2/server";
 import { getLogger } from "@commonfabric/utils/logger";
 import { terminateWorker } from "@commonfabric/utils/worker-lifetime";
@@ -81,12 +84,14 @@ export type ServingWorkerOptions = {
 type WorkerGeneration = {
   worker: Worker;
   bridge: ServingPortBridge;
+  /** The lease holder this worker's rows name. */
+  holder: string;
   ready: Promise<void>;
   lifetimeLock: string | undefined;
 };
 
 /**
- * The serving loop running in a Worker. `start()` spawns it; `ready`
+ * The serving loop running in a Worker. Constructing one spawns it; `ready`
  * settles once the worker's host serves; `close()` closes the host and the
  * worker. A worker that fails is replaced after the same backoff the host
  * applies to a space whose tenures keep failing, and the replacement adopts a
@@ -96,6 +101,8 @@ type WorkerGeneration = {
 export class ServingWorker {
   readonly #options: ServingWorkerOptions;
   #generation: WorkerGeneration | undefined;
+  /** The teardown of the last worker that failed, while it runs. */
+  #terminating: Promise<void> | undefined;
   #failures = 0;
   #closed = false;
 
@@ -115,30 +122,37 @@ export class ServingWorker {
     return this.#generation?.bridge.stats();
   }
 
-  /** The worker's counters as of now. */
-  requestStats(): Promise<ServingLoopStats> {
-    return this.#bridge().requestStats();
+  /** The worker's counters as of now, once its host serves. */
+  async requestStats(): Promise<ServingLoopStats> {
+    await this.ready;
+    return await this.#bridge().requestStats();
   }
 
-  /** What the worker's realm logged, as of now. */
-  diagnostics(): Promise<ServingLoopDiagnostics> {
-    return this.#bridge().requestDiagnostics();
+  /** What the worker's realm logged, as of now, once its host serves. */
+  async diagnostics(): Promise<ServingLoopDiagnostics> {
+    await this.ready;
+    return await this.#bridge().requestDiagnostics();
   }
 
-  /** Runs a lifecycle verb on the worker's host. */
-  runLifecycleVerb(
+  /** Runs a lifecycle verb on the worker's host, once it serves. */
+  async runLifecycleVerb(
     space: MemorySpace,
     verb: LifecycleVerbDescriptor,
   ): Promise<unknown> {
-    return this.#bridge().runLifecycleVerb(space, verb);
+    await this.ready;
+    return await this.#bridge().runLifecycleVerb(space, verb);
   }
 
-  /** Closes the worker's host, then the worker; settles once both are gone. */
+  /**
+   * Closes the worker's host, then the worker; settles once both are gone,
+   * and once a worker that failed before the call has been torn down.
+   */
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
     const generation = this.#generation;
     this.#generation = undefined;
+    await this.#terminating;
     if (generation === undefined) return;
     try {
       await generation.ready;
@@ -187,6 +201,7 @@ export class ServingWorker {
     const generation: WorkerGeneration = {
       worker,
       bridge,
+      holder: executionLeaseHolder(identity.did(), processInstanceId),
       lifetimeLock: undefined,
       ready: Promise.resolve(),
     };
@@ -211,14 +226,25 @@ export class ServingWorker {
   /**
    * Replaces a worker that reported an error it did not handle. Its bridge
    * closes first, which closes the loopback connections its runtimes held, so
-   * the server sees their sessions detach; the lease rows it wrote lapse on
-   * their own.
+   * the server sees their sessions detach; once the worker is gone, the lease
+   * rows it held are released, so its successor, which carries a holder of
+   * its own, acquires them without waiting out their TTL.
    */
   #onWorkerFailed(generation: WorkerGeneration, message: string): void {
     if (this.#generation !== generation) return;
     this.#generation = undefined;
     generation.bridge.close();
-    void terminateWorker(generation.worker, generation.lifetimeLock);
+    this.#terminating = terminateWorker(
+      generation.worker,
+      generation.lifetimeLock,
+    ).then(() => generation.bridge.releaseLeasesOf(generation.holder)).catch(
+      (error) => {
+        logger.warn("worker-teardown-failed", () => [
+          "tearing down the failed serving worker failed",
+          error,
+        ]);
+      },
+    );
     if (this.#closed) return;
     this.#failures += 1;
     const delayMs = failureParkBackoffDelayMs(

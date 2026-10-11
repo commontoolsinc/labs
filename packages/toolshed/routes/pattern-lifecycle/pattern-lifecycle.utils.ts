@@ -121,7 +121,7 @@ const servedRefusalOf = (
     return undefined;
   }
   const { code } = error as { code?: unknown };
-  return typeof code === "string" && code in REFUSAL_STATUS
+  return typeof code === "string" && Object.hasOwn(REFUSAL_STATUS, code)
     ? { code: code as ServedLifecycleRefusalCode, message: error.message }
     : undefined;
 };

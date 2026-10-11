@@ -4328,6 +4328,7 @@ export const queuedFrameTransport = (
   };
   return {
     async send(payload: string) {
+      if (closed) throw connectionError("memory transport closed");
       await connection.receive(payload);
     },
     close() {
@@ -4381,13 +4382,17 @@ export const loopback = (
     };
   },
 ): Transport => {
-  // The connection calls back only once the transport below exists.
-  const built: { transport?: QueuedFrameTransport } = {};
-  const connection = server.connect((message) => {
-    built.transport?.deliver(encodeMemoryBoundary(message));
+  // The transport exists before the connection, so a frame the server
+  // sends as it connects is queued rather than lost.
+  const built: { connection?: ReturnType<typeof server.connect> } = {};
+  const transport = queuedFrameTransport({
+    receive: (payload) => built.connection!.receive(payload),
+    close: () => built.connection?.close(),
   });
-  built.transport = queuedFrameTransport(connection);
-  return built.transport;
+  built.connection = server.connect((message) => {
+    transport.deliver(encodeMemoryBoundary(message));
+  });
+  return transport;
 };
 
 /**

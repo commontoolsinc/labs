@@ -604,8 +604,8 @@ one of its providers goes.
 Either shape runs its loop in a Worker of the test's process when
 `SERVER_EXECUTION_WORKER` is `true` in the environment, as a toolshed does under
 that variable ([`EXPERIMENTAL_OPTIONS.md`](EXPERIMENTAL_OPTIONS.md#server_execution_worker)),
-over a store in a temporary directory, since a worker cannot open a
-non-persistent one. `serving.host` is then the loop's handle, with `stats()` and
+unless its `worker` option says otherwise, over a store in a temporary
+directory, since a worker cannot open a non-persistent one. `serving.host` is then the loop's handle, with `stats()` and
 `close()`, and its `host` is `undefined`; on this thread `serving.host.host` is
 the `ExecutorHost`. Either way `serving.host.diagnostics()` answers with the
 logger counts and timing statistics of the realm the loop runs in, which is

@@ -12,6 +12,7 @@ import {
   encodeMemoryBoundary,
 } from "@commonfabric/memory/v2";
 import type { Engine } from "@commonfabric/memory/v2/engine";
+import { releaseExecutionLease } from "@commonfabric/memory/v2/execution-lease";
 import type { ServedAclChange, Server } from "@commonfabric/memory/v2/server";
 import { getLogger } from "@commonfabric/utils/logger";
 import { applyAccessListChanges, validateStoredAcl } from "../acl-manager.ts";
@@ -96,6 +97,8 @@ export class ServingPortBridge {
   >;
   readonly #connections = new Map<number, LoopbackConnection>();
   readonly #sinks = new Map<string, BridgeSink>();
+  /** Every space the worker opened an engine for. */
+  readonly #openedSpaces = new Set<string>();
   readonly #workerReady = Promise.withResolvers<void>();
   readonly #releaseServerExecution: () => void;
   #stats: ServingLoopStats | undefined;
@@ -216,6 +219,22 @@ export class ServingPortBridge {
     this.#releaseServerExecution();
   }
 
+  /**
+   * Releases the lease rows `holder` holds in every space the worker opened:
+   * what the worker's successor needs when the worker died holding them,
+   * since the host leaves a space parked on another holder's live lease
+   * rather than contending for it. A row held by anyone else is left alone.
+   */
+  async releaseLeasesOf(holder: string): Promise<void> {
+    const { server } = this.#options;
+    for (const space of this.#openedSpaces) {
+      releaseExecutionLease(await server.engineForSpace(space), {
+        space,
+        holder,
+      });
+    }
+  }
+
   /** The sink for `sessionId`, built on first use. */
   #sinkFor(sessionId: string): BridgeSink {
     let entry = this.#sinks.get(sessionId);
@@ -245,9 +264,8 @@ export class ServingPortBridge {
       onHomeRefused: () => {
         state.homeRefused = true;
       },
-      // Reported here, with the apply, rather than by the worker once the
-      // reply reaches it: the fan-out of the rows is then under way before
-      // the loop acts on the commit.
+      // Reported here, with the apply: the fan-out of the rows is under way
+      // before the loop, on its own thread, acts on the commit.
       reportCommit: (notice) => server.noteExecutorCommit(notice),
       commitServedAclChange: (change, envelope) =>
         server.commitServedAclChange({ ...change, ...envelope }),
@@ -268,6 +286,7 @@ export class ServingPortBridge {
             "thread cannot open; a serving worker needs a file store",
         );
       }
+      this.#openedSpaces.add(space);
       return { url: engine.url.href };
     });
     endpoint.onRequest("server.idle", () => server.idle());

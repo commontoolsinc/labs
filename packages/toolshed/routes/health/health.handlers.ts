@@ -72,10 +72,11 @@ export const stats: AppRouteHandler<StatsRoute> = async (c) => {
   const sessionReports = getSessionReports();
   // The serving loop's own logger counts and timings, when it runs in a
   // worker of this process: `logCounts` and `timingStats` above are this
-  // thread's, which then hold none of the loop's.
+  // thread's, which then hold none of the loop's. A worker between a failure
+  // and its replacement answers nothing, and the block is then left out.
   const loop = serverExecutionHost();
   const servingLoopRealm = loop !== undefined && loop.host === undefined
-    ? await loop.diagnostics()
+    ? await loop.diagnostics().catch(() => undefined)
     : undefined;
   return c.json({
     timestamp: Date.now(),

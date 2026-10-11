@@ -836,11 +836,12 @@ export class MultiRuntimeHarness {
       });
     const targetUrl = options.apiUrl ?? server!.url;
     const apiUrl = targetUrl.href;
-    // A served handler reads the pattern environment of the process its
+    // A served handler reads the pattern environment of the realm its
     // serving loop runs in, which a toolshed sets to its own address. The
-    // serving loop hosted here runs in this process, so this process's is set
-    // to the address the harness hosts, as a handler run by a session's own
-    // runtime sees it, until the harness is disposed or terminated.
+    // loop hosted here runs in this process, or in a worker that sets its
+    // own, so this process's is set to the address the harness hosts, as a
+    // handler run by a session's own runtime sees it, until the harness is
+    // disposed or terminated.
     const releasePatternEnvironment = serverExecutionOn && server !== undefined
       ? claimPatternEnvironment(targetUrl)
       : () => {};
@@ -999,6 +1000,19 @@ export class MultiRuntimeHarness {
   }
 
   /**
+   * What the serving loop's realm logged: the loop the harness hosts, where
+   * it runs, which is this process when the loop runs on its main thread and
+   * the worker when it runs there, and this process when the harness hosts
+   * no loop.
+   */
+  servingDiagnostics(): Promise<ServingLoopDiagnostics> {
+    return this.#server?.host?.diagnostics() ?? Promise.resolve({
+      loggerCounts: getLoggerCountsBreakdown(),
+      timingStats: getTimingStatsBreakdown(),
+    });
+  }
+
+  /**
    * Let all runtimes finish local work and exchange pending sync traffic. Each
    * round is one full cross-runtime hop, driven by real completion signals
    * rather than a timer:
@@ -1037,19 +1051,6 @@ export class MultiRuntimeHarness {
    * first-order consequence commit. The wait returns at once where there is
    * no overlay and so no outstanding intent, as on an OFF-posture toolshed.
    */
-  /**
-   * What the serving loop's realm logged: the loop the harness hosts, where
-   * it runs, which is this process when the loop runs on its main thread and
-   * the worker when it runs there, and this process when the harness hosts
-   * no loop.
-   */
-  servingDiagnostics(): Promise<ServingLoopDiagnostics> {
-    return this.#server?.host?.diagnostics() ?? Promise.resolve({
-      loggerCounts: getLoggerCountsBreakdown(),
-      timingStats: getTimingStatsBreakdown(),
-    });
-  }
-
   async settle(rounds = 2): Promise<void> {
     const quiescenceDeadline = this.#awaitsServedConsequences
       ? Date.now() + SERVED_SETTLE_QUIESCENCE_BUDGET_MS

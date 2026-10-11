@@ -1143,8 +1143,9 @@ export type Engine = {
    * SQLite, and nothing a transaction wrote is remembered before it commits
    * or left behind when it rolls back.
    *
-   * An entry is served without asking SQLite while the connection's data
-   * version ({@link dataVersion}) is the one it was recorded under: a commit
+   * An entry is served from the map, after one data-version check and no
+   * read of the branch row, while the connection's data version
+   * ({@link dataVersion}) is the one it was recorded under: a commit
    * through another connection to the store, the serving loop's worker
    * beside the memory server's connection or the other way round, moves
    * that version, and the next read then asks SQLite again. A name with no

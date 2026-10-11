@@ -335,7 +335,11 @@ export class PortEndpoint<
     const id = this.#nextId++;
     const { promise, resolve, reject } = Promise.withResolvers<unknown>();
     this.#pending.set(id, { resolve, reject });
-    this.#post({ t: "req", id, method, params });
+    const failure = this.#post({ t: "req", id, method, params });
+    if (failure !== undefined) {
+      this.#pending.delete(id);
+      reject(failure);
+    }
     return promise as Promise<OutRequests[Method]["result"]>;
   }
 
@@ -382,16 +386,21 @@ export class PortEndpoint<
     for (const { reject } of pending) reject(reason);
   }
 
-  #post(envelope: Envelope): void {
+  /**
+   * Posts `envelope`, reporting a failure to post to the fault handler and
+   * returning it, so a request can settle on it.
+   */
+  #post(envelope: Envelope): Error | undefined {
     try {
       this.#port.postMessage(envelope);
+      return undefined;
     } catch (error) {
-      this.#onFault(
-        new Error(
-          `posting a ${envelope.t} message on the serving port failed`,
-          { cause: error },
-        ),
+      const failure = new Error(
+        `posting a ${envelope.t} message on the serving port failed`,
+        { cause: error },
       );
+      this.#onFault(failure);
+      return failure;
     }
   }
 
