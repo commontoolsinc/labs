@@ -809,6 +809,8 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     paths: [
       "argument.adminRegistry.everyoneIsAdmin",
       "result.adminRegistry.everyoneIsAdmin",
+      "argument.adminRegistry.bootstrapAdmin",
+      "result.adminRegistry.bootstrapAdmin",
       "result.profileDraft",
       "result.messageDraft",
       "result.hostMessageDraft",
@@ -825,7 +827,9 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     reason:
       "the everyone-is-admin flag's `true` branch carries the write claim its type declares" +
       "; and the drafts removed, with the trusted streams taking the text a " +
-      "`cf-submit-input` click carries (docs/history/cfc-chat-demo-submit-input-break.md)",
+      "`cf-submit-input` click carries (docs/history/cfc-chat-demo-submit-input-break.md)" +
+      "; and the bootstrap admin role names its writer (" +
+      "docs/history/roster-write-authority-break.md)",
     record: "docs/history/everyone-admin-write-claim-restored-break.md",
   },
   {
@@ -864,6 +868,8 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     pattern: "cfc-group-chat-demo/main.tsx",
     baselines: ["20260923T205929Z-mHuHgI9LlBLCu53t"],
     paths: [
+      "argument.adminRegistry.bootstrapAdmin",
+      "result.adminRegistry.bootstrapAdmin",
       "result.profileDraft",
       "result.messageDraft",
       "result.hostMessageDraft",
@@ -878,7 +884,9 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "result.hostLookalikeSend",
     ],
     reason:
-      "the drafts removed, with the trusted streams taking the text a `cf-submit-input` click carries",
+      "the drafts removed, with the trusted streams taking the text a `cf-submit-input` click carries" +
+      "; and the bootstrap admin role names its writer (" +
+      "docs/history/roster-write-authority-break.md)",
     record: "docs/history/cfc-chat-demo-submit-input-break.md",
   },
   {
@@ -1070,5 +1078,59 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     reason:
       "a manager's index entry now types `revision`, and a refused outcome `code`, which the recorded outcomes left open; no stored request outcome holds either",
     record: "docs/history/fabrichat-index-revision-break.md",
+  },
+  {
+    // The lobby's bootstrap admin role decides who is admin while the explicit
+    // roster is empty, and carried no write authority, so any code holding the
+    // registry could make itself the sole admin. It now carries the roster's
+    // `TrustedActionWrite` binding, which the proof compares exactly.
+    pattern: "lobby/main.tsx",
+    baselines: [
+      "20260729T022742Z-GhLFnf8OCmke_Jje",
+      "20260825T220126Z-EwdaMHAm2pYWzotF",
+      "20260831T222745Z-vwBXJaBcSaFeqPqy",
+      "20260909T184755Z-cx1Z_vlIBmAlVPDa",
+    ],
+    paths: ["argument.adminRegistry.bootstrapAdmin"],
+    reason:
+      "the bootstrap admin role names the one handler that may write it, so " +
+      "code the role does not name can no longer make itself the sole admin",
+    record: "docs/history/roster-write-authority-break.md",
+  },
+  {
+    // The parking spot list's floor was met by its own mint for any writer,
+    // so it decided nothing. The list now names the one handler every spot
+    // action goes through. The four older baselines are forgiven by the
+    // entries above, whose roster paths the proof reports there.
+    pattern: "factory-outputs/parking-coordinator/main.tsx",
+    baselines: [
+      "20260831T170522Z-_XKsZR_YXl9KpumB",
+      "20260831T222745Z-QfwqattilRDGXZc6",
+      "20260903T213920Z-di1kE0dvmOYRvT9G",
+      "20260909T184755Z-soDh0eM4uUL1tYyU",
+    ],
+    paths: ["argument.spots"],
+    reason:
+      "the spot list names the one handler that may write it, so code the " +
+      "list does not name can no longer replace the lot's spots",
+    record: "docs/history/roster-write-authority-break.md",
+  },
+  {
+    // The group chat demo's bootstrap admin role, as the lobby's. The two
+    // older contracts that also report it are forgiven, for the same paths,
+    // by the entries above that already name them.
+    pattern: "cfc-group-chat-demo/main.tsx",
+    baselines: [
+      "20260923T232812Z-h-me8Kndg91BgtVA",
+      "20261004T000822Z-kUNF5sBKWx27omx3",
+    ],
+    paths: [
+      "argument.adminRegistry.bootstrapAdmin",
+      "result.adminRegistry.bootstrapAdmin",
+    ],
+    reason:
+      "the bootstrap admin role names the one handler that may write it, so " +
+      "code the role does not name can no longer make itself the sole admin",
+    record: "docs/history/roster-write-authority-break.md",
   },
 ];

@@ -175,11 +175,19 @@ export type ParkingSpotEntry = AddIntegrity<
  * and a floored write may only consume reads that all carry one witness for the
  * floor, so the roster's endorsement and the spot list's floor have to be the
  * same atom.
+ *
+ * The mint satisfies the floor for whoever writes through this schema, so the
+ * floor does not decide who may write. `WriteAuthorizedBy` does:
+ * `commitParkingSpotChange` is the only handler that may modify the list, no
+ * matter which pattern holds a link to the spots cell.
  */
 export type ParkingSpotList = RequiresIntegrity<
-  AddIntegrity<
-    ParkingSpotEntry[],
-    readonly [typeof PARKING_ADMIN_INTEGRITY]
+  WriteAuthorizedBy<
+    AddIntegrity<
+      ParkingSpotEntry[],
+      readonly [typeof PARKING_ADMIN_INTEGRITY]
+    >,
+    typeof commitParkingSpotChange
   >,
   readonly [typeof PARKING_ADMIN_INTEGRITY]
 >;
@@ -506,6 +514,147 @@ const commitParkingAdminChange = handler<
   }
 
   adminRegistry.key("admins").set(nextRoles as ParkingAdminList);
+});
+
+type ParkingSpotChangeKind = "add" | "edit" | "remove";
+
+/**
+ * A spot change. `add` reads `spotNumber`, `label` and `notes`; `edit` reads
+ * those plus `originalNumber` and `active`; `remove` reads `spotNumber`. For
+ * `add` and `edit`, a field the event leaves out is taken from the matching
+ * form cell.
+ */
+export interface ParkingSpotChangeEvent {
+  spotNumber?: string;
+  label?: string;
+  notes?: string;
+  originalNumber?: string;
+  active?: boolean;
+}
+
+interface ParkingSpotChangeState {
+  kind: ParkingSpotChangeKind;
+  spots: SpotsCell;
+  requests: RequestsCell;
+  adminRegistry: ParkingAdminRegistryCell;
+  viewerProfile: ParkingAdminSubject | undefined;
+  newSpotNumber: Writable<string>;
+  newSpotLabel: Writable<string>;
+  newSpotNotes: Writable<string>;
+  addSpotError: Writable<string>;
+  addSpotFormOpen: Writable<boolean>;
+  editingSpotNumber: Writable<string | null>;
+  editSpotNum: Writable<string>;
+  editSpotLabel: Writable<string>;
+  editSpotNotes: Writable<string>;
+  editSpotActive: Writable<boolean>;
+  removeSpotConfirmTarget: Writable<string | null>;
+}
+
+/**
+ * The one place the spot list is written. `ParkingSpotList` names this
+ * handler in its `writeAuthorizedBy` contract, so a write from anywhere else,
+ * another action in this pattern or another pattern sharing the spots cell,
+ * is refused by the runtime. Every change requires the acting viewer to hold
+ * a parking-admin role.
+ *
+ * It stays private to this module for the reason `commitParkingAdminChange`
+ * does: its role check reads the cells it is bound to, so only this module's
+ * own bindings, against this pattern's own cells, may drive it.
+ */
+const commitParkingSpotChange = handler<
+  ParkingSpotChangeEvent,
+  ParkingSpotChangeState
+>((event, state) => {
+  const { kind, spots, requests, adminRegistry, viewerProfile } = state;
+  // Compare the terminal profile cell, as `commitParkingAdminChange` does:
+  // the binding reaches the profile through per-viewer state.
+  if (
+    !viewerProfile ||
+    !parkingAdminRoleForProfile(adminRegistry, viewerProfile.resolveAsCell())
+  ) {
+    return;
+  }
+
+  if (kind === "add") {
+    const {
+      spotNumber: spotNumArg = state.newSpotNumber.get() ?? "",
+      label = state.newSpotLabel.get() ?? "",
+      notes = state.newSpotNotes.get() ?? "",
+    } = event ?? {};
+    const trimNum = spotNumArg.trim();
+    if (!trimNum) return;
+    const current = spots.get();
+    if (current.some((s) => s.spotNumber === trimNum)) {
+      state.addSpotError.set(`Spot #${trimNum} already exists.`);
+      return;
+    }
+    state.addSpotError.set("");
+    spots.set([
+      ...current,
+      {
+        spotNumber: trimNum,
+        label: label.trim(),
+        notes: notes.trim(),
+        active: true,
+      },
+    ] as ParkingSpotList);
+    state.newSpotNumber.set("");
+    state.newSpotLabel.set("");
+    state.newSpotNotes.set("");
+    state.addSpotFormOpen.set(false);
+    return;
+  }
+
+  if (kind === "edit") {
+    const {
+      originalNumber = state.editingSpotNumber.get() ?? "",
+      spotNumber: spotNumArg = state.editSpotNum.get() ?? "",
+      label = state.editSpotLabel.get() ?? "",
+      notes = state.editSpotNotes.get() ?? "",
+      active = state.editSpotActive.get() ?? true,
+    } = event ?? {};
+    const trimNum = spotNumArg.trim();
+    if (!trimNum) return;
+    const current = spots.get();
+    if (
+      trimNum !== originalNumber &&
+      current.some((s) => s.spotNumber === trimNum)
+    ) return;
+
+    spots.set(
+      current.map((s) =>
+        s.spotNumber === originalNumber
+          ? {
+            ...s,
+            spotNumber: trimNum,
+            label: label.trim(),
+            notes: notes.trim(),
+            active,
+          }
+          : s
+      ) as ParkingSpotList,
+    );
+
+    if (trimNum !== originalNumber) {
+      requests.set(
+        requests.get().map((r) =>
+          r.assignedSpot === originalNumber
+            ? { ...r, assignedSpot: trimNum }
+            : r
+        ),
+      );
+    }
+    state.editingSpotNumber.set(null);
+    return;
+  }
+
+  spots.set(
+    spots.get().filter((s) =>
+      s.spotNumber !== event?.spotNumber
+    ) as ParkingSpotList,
+  );
+  state.removeSpotConfirmTarget.set(null);
 });
 
 /**
@@ -1058,42 +1207,42 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       );
     });
 
+    // Every spot-list write goes through the one handler the list's
+    // `writeAuthorizedBy` contract names, bound here to this pattern's cells.
+    const spotChangeState = {
+      spots,
+      requests,
+      adminRegistry,
+      viewerProfile: actingProfile,
+      newSpotNumber,
+      newSpotLabel,
+      newSpotNotes,
+      addSpotError,
+      addSpotFormOpen,
+      editingSpotNumber,
+      editSpotNum,
+      editSpotLabel,
+      editSpotNotes,
+      editSpotActive,
+      removeSpotConfirmTarget,
+    };
+    const commitAddSpot = commitParkingSpotChange({
+      kind: "add",
+      ...spotChangeState,
+    });
+    const commitEditSpot = commitParkingSpotChange({
+      kind: "edit",
+      ...spotChangeState,
+    });
+    const commitRemoveSpot = commitParkingSpotChange({
+      kind: "remove",
+      ...spotChangeState,
+    });
+    // The published streams keep their own event shapes and forward to the
+    // committing handler.
     const addSpot = action<
       { spotNumber: string; label: string; notes: string }
-    >((event) => {
-      if (
-        !parkingAdminRoleForProfile(adminRegistry, actingProfile)
-      ) {
-        return;
-      }
-      const {
-        spotNumber: spotNumArg = newSpotNumber.get() ?? "",
-        label = newSpotLabel.get() ?? "",
-        notes = newSpotNotes.get() ?? "",
-      } = event ?? {};
-      const trimNum = spotNumArg.trim();
-      if (!trimNum) return;
-      const current = spots.get();
-      if (current.some((s) => s.spotNumber === trimNum)) {
-        addSpotError.set(`Spot #${trimNum} already exists.`);
-        return;
-      }
-      addSpotError.set("");
-      spots.set([
-        ...current,
-        {
-          spotNumber: trimNum,
-          label: label.trim(),
-          notes: notes.trim(),
-          active: true,
-        },
-      ] as ParkingSpotList);
-      newSpotNumber.set("");
-      newSpotLabel.set("");
-      newSpotNotes.set("");
-      addSpotFormOpen.set(false);
-    });
-
+    >((event) => commitAddSpot.send(event ?? {}));
     const editSpot = action<
       {
         originalNumber: string;
@@ -1102,67 +1251,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         notes: string;
         active: boolean;
       }
-    >((event) => {
-      if (
-        !parkingAdminRoleForProfile(adminRegistry, actingProfile)
-      ) {
-        return;
-      }
-      const {
-        originalNumber = editingSpotNumber.get() ?? "",
-        spotNumber: spotNumArg2 = editSpotNum.get() ?? "",
-        label: editSpotLabelArg = editSpotLabel.get() ?? "",
-        notes: editSpotNotesArg = editSpotNotes.get() ?? "",
-        active: editSpotActiveArg = editSpotActive.get() ?? true,
-      } = event ?? {};
-      const trimNum = spotNumArg2.trim();
-      if (!trimNum) return;
-      const current = spots.get();
-      if (
-        trimNum !== originalNumber &&
-        current.some((s) => s.spotNumber === trimNum)
-      ) return;
-
-      spots.set(
-        current.map((s) =>
-          s.spotNumber === originalNumber
-            ? {
-              ...s,
-              spotNumber: trimNum,
-              label: editSpotLabelArg.trim(),
-              notes: editSpotNotesArg.trim(),
-              active: editSpotActiveArg,
-            }
-            : s
-        ) as ParkingSpotList,
-      );
-
-      if (trimNum !== originalNumber) {
-        requests.set(
-          requests.get().map((r) =>
-            r.assignedSpot === originalNumber
-              ? { ...r, assignedSpot: trimNum }
-              : r
-          ),
-        );
-      }
-      editingSpotNumber.set(null);
-    });
-
-    const removeSpot = action<{ spotNumber: string }>(
-      ({ spotNumber: spotNumArg3 }) => {
-        if (
-          !parkingAdminRoleForProfile(adminRegistry, actingProfile)
-        ) {
-          return;
-        }
-        spots.set(
-          spots.get().filter((s) =>
-            s.spotNumber !== spotNumArg3
-          ) as ParkingSpotList,
-        );
-        removeSpotConfirmTarget.set(null);
-      },
+    >((event) => commitEditSpot.send(event ?? {}));
+    const removeSpot = action<{ spotNumber: string }>((event) =>
+      commitRemoveSpot.send(event ?? {})
     );
 
     const adminOverride = action<

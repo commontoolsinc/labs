@@ -1,4 +1,14 @@
-import { assert, computed, pattern, TESTS, UI, Writable } from "commonfabric";
+import {
+  type AddIntegrity,
+  assert,
+  handler,
+  pattern,
+  type RepresentsCurrentUser,
+  TESTS,
+  UI,
+  Writable,
+  type WriteAuthorizedBy,
+} from "commonfabric";
 import Lobby, {
   addSelfToLobby,
   commitTrustedLobbyAction,
@@ -23,6 +33,35 @@ const trustedLobbyGesture = {
 
 type LobbyInputArg = Parameters<typeof Lobby>[0];
 
+/**
+ * A profile labeled with the principal who wrote it, as a real `#profile` is.
+ * The bootstrap role links its subject's profile into a position that names
+ * its writer, and the runtime refuses to link a document that carries no
+ * label there.
+ */
+type TestProfile = RepresentsCurrentUser<
+  WriteAuthorizedBy<LobbyProfile, typeof writeTestProfile>
+>;
+
+/** A stand-in for a verified identity assertion, which carries a label. */
+type TestIdentityAssertion = AddIntegrity<
+  { type: string; value: string; verifiedAt: string },
+  readonly ["lobby-test-identity"]
+>;
+
+/** What `writeTestProfile` is bound to. */
+interface TestProfileWrite {
+  profile: Writable<TestProfile>;
+  value: LobbyProfile;
+}
+
+const writeTestProfile = handler<void, TestProfileWrite>((
+  _,
+  { profile, value },
+) => {
+  profile.set(value as TestProfile);
+});
+
 const participantNames = (roster: LobbyRosterCell): string[] =>
   lobbyParticipantsValue(roster).map((participant) => participant.name);
 
@@ -31,11 +70,31 @@ export default pattern(() => {
   const adminRegistry = Writable.of<LobbyAdminRegistryValue>(
     {} as LobbyAdminRegistryValue,
   );
-  const aliceProfile = Writable.of<LobbyProfile>({ name: "Alice" });
-  const bobProfile = Writable.of<LobbyProfile>({ name: "Bob" });
-  const firstAlexProfile = Writable.of<LobbyProfile>({ name: "Alex" });
-  const secondAlexProfile = Writable.of<LobbyProfile>({ name: "Alex" });
-  const blankProfile = Writable.of<LobbyProfile>({ name: "   " });
+  const aliceProfile = Writable.of<TestProfile>();
+  const write_aliceProfile = writeTestProfile({
+    profile: aliceProfile,
+    value: { name: "Alice" },
+  });
+  const bobProfile = Writable.of<TestProfile>();
+  const write_bobProfile = writeTestProfile({
+    profile: bobProfile,
+    value: { name: "Bob" },
+  });
+  const firstAlexProfile = Writable.of<TestProfile>();
+  const write_firstAlexProfile = writeTestProfile({
+    profile: firstAlexProfile,
+    value: { name: "Alex" },
+  });
+  const secondAlexProfile = Writable.of<TestProfile>();
+  const write_secondAlexProfile = writeTestProfile({
+    profile: secondAlexProfile,
+    value: { name: "Alex" },
+  });
+  const blankProfile = Writable.of<TestProfile>();
+  const write_blankProfile = writeTestProfile({
+    profile: blankProfile,
+    value: { name: "   " },
+  });
 
   const viewerRoster = Writable.of<LobbyRosterValue>(DEFAULT_LOBBY_ROSTER);
   const viewerAdminRegistry = Writable.of<LobbyAdminRegistryValue>(
@@ -43,16 +102,22 @@ export default pattern(() => {
   );
   // Lobby transports the original assertion cell without interpreting it;
   // profile publication and downstream consumers enforce its integrity.
-  const selectedVerifiedIdentity = Writable.of({
+  // It carries a label, as a real assertion does, because the labeled profile
+  // that links it refuses a link to a document with none.
+  const selectedVerifiedIdentity = Writable.of<TestIdentityAssertion>({
     type: "github.login",
     value: "octocat",
     verifiedAt: "2026-07-15T22:03:28.000Z",
   });
-  const selectedProfile = computed((): LobbyProfile => ({
-    initialNameApplied: "Selected Profile",
-    externalLinks: [{ label: "GitHub", url: "https://github.com/octocat" }],
-    verifiedIdentities: [selectedVerifiedIdentity],
-  }));
+  const selectedProfile = Writable.of<TestProfile>();
+  const write_selectedProfile = writeTestProfile({
+    profile: selectedProfile,
+    value: {
+      initialNameApplied: "Selected Profile",
+      externalLinks: [{ label: "GitHub", url: "https://github.com/octocat" }],
+      verifiedIdentities: [selectedVerifiedIdentity],
+    },
+  });
   const selectedViewer = LobbyViewerState({
     viewerProfile: selectedProfile,
     roster: viewerRoster,
@@ -261,6 +326,12 @@ export default pattern(() => {
 
   return {
     [TESTS]: [
+      { action: write_selectedProfile },
+      { action: write_aliceProfile },
+      { action: write_bobProfile },
+      { action: write_firstAlexProfile },
+      { action: write_secondAlexProfile },
+      { action: write_blankProfile },
       { assertion: assert_selected_profile_drives_viewer_state },
       { action: selectedAddSelf },
       { assertion: assert_selected_profile_joined },

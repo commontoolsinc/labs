@@ -57,21 +57,9 @@ describe("parking coordinator admin view integration test", () => {
     const piece = await cc.create(program, {
       start: true,
       input: {
-        spots: [
-          {
-            spotNumber: "1",
-            label: "Near entrance",
-            notes: "",
-            active: true,
-          },
-          { spotNumber: "5", label: "", notes: "", active: true },
-          {
-            spotNumber: "12",
-            label: "Compact only",
-            notes: "Tight, no large vehicles",
-            active: true,
-          },
-        ],
+        // `spots` is left to its declared default: the spot list names the
+        // one handler that may write it, so a caller-supplied list would be
+        // a write that handler did not make.
         people: [
           {
             name: "Alice",
