@@ -107,6 +107,14 @@ let renderView = false;
 let viewMountCancel: (() => void) | undefined;
 
 /**
+ * What the rendered view's reconciler reported since `renderErrors` last
+ * read them: a view that fails to mount or to reconcile is otherwise a view
+ * that silently derives nothing, and a measurement over it measures the
+ * data alone.
+ */
+const viewRenderErrors: string[] = [];
+
+/**
  * The result cells of the pieces other than the attached one that a command
  * has addressed, keyed by {@link addressKey}. A piece enters on the first
  * command to reach it, once it has opened, so one that could not be opened is
@@ -249,7 +257,7 @@ async function attachPiece(next: PieceController): Promise<void> {
     ? new WorkerReconciler({
       onOps: () => {},
       onError: (error) => {
-        console.error("view render failed:", error);
+        viewRenderErrors.push(error.message);
       },
     }).mount(result().key("$UI").asSchema(rendererVDOMSchema))
     : undefined;
@@ -1262,6 +1270,15 @@ const handlers: Record<
    * as the perf-investigation scripts read them, and nothing when emission
    * is off. Drained on each call, so a capture is the measures of one window.
    */
+  /**
+   * The rendered view's reconciliation errors since the last call, as
+   * messages, and nothing when the view mounted and reconciled cleanly or
+   * the session holds no view. Drained on each call.
+   */
+  renderErrors() {
+    return Promise.resolve(viewRenderErrors.splice(0) as FabricValue);
+  },
+
   timingMeasures() {
     const entries: { name: string; startTime: number; duration: number }[] = [];
     for (const entry of performance.getEntriesByType("measure")) {

@@ -140,6 +140,16 @@ expect(await voters[0].read(["userCount"])).toBe(VOTERS);
 
 const votes = voters.length * options.length;
 
+// Every voter's view shows the poll, and mounted without error: a view that
+// failed to mount derives nothing, and the burst over it would read as a
+// fast one.
+for (const voter of voters) {
+  expect(await voter.client().call("viewText", {}), voter.label).toContain(
+    TITLES[0],
+  );
+  expect(await voter.renderErrors(), voter.label).toEqual([]);
+}
+
 /** The vote each voter casts for each option in `round`. */
 function colorOf(index: number, position: number, round: number): string {
   return COLORS[(index + position + round) % COLORS.length];
@@ -201,7 +211,10 @@ async function afterBurst(): Promise<void> {
   await harness.settle();
 }
 
-/** Validate each replica's vote distribution outside the measured interval. */
+/**
+ * Validate each replica's vote distribution, and that its view reconciled
+ * without error, outside the measured interval.
+ */
 async function verifyBurst(round: number): Promise<void> {
   const expected = options.map((_, position) =>
     COLORS.map((color) =>
@@ -210,6 +223,7 @@ async function verifyBurst(round: number): Promise<void> {
     )
   );
   await Promise.all(voters.map(async (voter) => {
+    expect(await voter.renderErrors(), voter.label).toEqual([]);
     const result = await voter.read(["votes"]) as {
       optionId: string;
       voteType: string;

@@ -740,6 +740,17 @@ export class MultiRuntimeSession {
   }
 
   /**
+   * The rendered view's reconciliation errors since the last call, as
+   * messages; empty when the view, if the session holds one, mounted and
+   * reconciled cleanly. A test that measures a rendered view reads this
+   * outside its measured interval and fails on anything here, since a view
+   * that failed to mount derives nothing and would pass as a fast one.
+   */
+  async renderErrors(): Promise<string[]> {
+    return await this.#client.call("renderErrors") as string[];
+  }
+
+  /**
    * The timing measures this session's loggers emitted since the last call,
    * in the shape the perf-investigation scripts read; empty unless the worker
    * runs with `CF_TIMING_MEASURES=1` in its environment. Drained on each call.
