@@ -23,10 +23,12 @@ import {
   schemaDefaultsAt,
 } from "../src/cfc/node-input-requirements.ts";
 import type { CfcNodeInputRefusal } from "../src/cfc/types.ts";
+import type { NormalizedFullLink } from "../src/link-utils.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
   internalVerifierRead,
   isInternalVerifierRead,
@@ -759,9 +761,12 @@ describe("cfc node input requirements", () => {
         refusals: (
           binding: unknown,
           graphSchema?: JSONSchema,
+          // Writes in the checking transaction before the check.
+          writeFirst?: (tx: IExtendedStorageTransaction) => void,
         ) => readonly unknown[],
         link: (schema?: unknown, path?: string[]) => unknown,
         write: (value: unknown) => Promise<void>,
+        base: NormalizedFullLink,
       ) => Promise<void> | void,
     ) => {
       const storageManager = StorageManager.emulate({ as: signer });
@@ -791,9 +796,14 @@ describe("cfc node input requirements", () => {
           tx.writeValueOrThrow({ ...base, path: [] }, value as never);
           await tx.commit().settled;
         };
-        const refusals = (binding: unknown, graphSchema?: JSONSchema) => {
+        const refusals = (
+          binding: unknown,
+          graphSchema?: JSONSchema,
+          writeFirst?: (tx: IExtendedStorageTransaction) => void,
+        ) => {
           const tx = runtime.edit();
           try {
+            writeFirst?.(tx);
             return nodeInputRefusals(
               tx,
               "code",
@@ -806,7 +816,7 @@ describe("cfc node input requirements", () => {
             tx.abort();
           }
         };
-        await body(refusals, link, write);
+        await body(refusals, link, write, base);
       } finally {
         await runtime.dispose();
         await storageManager.close();
@@ -829,6 +839,33 @@ describe("cfc node input requirements", () => {
         expect(reason(refusals({}))).toBe(
           "input requiredIntegrity failed at /gate of code",
         );
+      });
+    });
+
+    // A check in a transaction that has written a document it reads would
+    // see a value whose label is not derived yet, and is refused; a write
+    // elsewhere (an event's delivery, say) leaves the check as it was.
+    it("refuses a check that reads a document its transaction wrote", async () => {
+      await withDocument(async (refusals, link, write, base) => {
+        await write({});
+        expect(
+          reason(
+            refusals(
+              { gate: link() },
+              undefined,
+              (tx) => tx.writeValueOrThrow({ ...base, path: [] }, { other: 1 }),
+            ),
+          ),
+        ).toBe("input requiredIntegrity of code checked after a write");
+        expect(
+          reason(
+            refusals({ gate: link() }, undefined, (tx) =>
+              tx.writeValueOrThrow(
+                { ...base, id: "of:elsewhere", path: [] },
+                { other: 1 },
+              )),
+          ),
+        ).toBe("input requiredIntegrity failed at /gate of code");
       });
     });
 

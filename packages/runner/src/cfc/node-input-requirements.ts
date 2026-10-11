@@ -61,7 +61,7 @@ import { isSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectOrArray, isPlainContainer } from "@commonfabric/utils/types";
 
-import type { JSONSchema } from "../builder/types.ts";
+import type { CellScope, JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { MAX_PATH_RESOLUTION_LENGTH } from "../link-resolution.ts";
 import { addressKey } from "../link-types.ts";
@@ -329,7 +329,19 @@ type InputReach = {
    * followed to reach it.
    */
   readonly observations: (readonly CfcAtom[])[];
+  /** Each document the walk read, keyed by `documentKey`. */
+  readonly documents: ReadonlySet<string>;
 };
+
+/** A document's identity, whatever path within it is addressed. */
+const documentKey = (
+  address: { space: string; id: string; scope?: CellScope },
+): string =>
+  JSON.stringify([
+    address.space,
+    address.id,
+    normalizeCellScope(address.scope),
+  ]);
 
 /** `left` and `right` together, each atom once. */
 const union = (
@@ -378,6 +390,7 @@ const reachThroughInput = (
   const locations: InputReach["locations"] = [];
   const observations: (readonly CfcAtom[])[] = [];
   const followed = new Set<string>();
+  const documents = new Set<string>();
   const { codeSchema, graphSchema } = resolution;
   const graphDefaults = foreignDefaultAt(graphSchema, path, codeSchema, path);
 
@@ -532,6 +545,7 @@ const reachThroughInput = (
     // The verifier's own read (§8.10.1, §18.6.2): marked by `meta`, so it
     // enters no consumed set; the observation it supports is recorded here.
     const root = { ...link, path: [] };
+    documents.add(documentKey(root));
     const value: unknown = tx.readValueOrThrow(root, { meta });
     // A document with no value at all is no container to be absent from.
     if (value === undefined) return noEvidence(through);
@@ -586,7 +600,7 @@ const reachThroughInput = (
   };
 
   inBinding(binding, path);
-  return { locations, observations };
+  return { locations, observations, documents };
 };
 
 /**
@@ -595,10 +609,12 @@ const reachThroughInput = (
  * `meta`, which marks them as the verifier's own (§8.10.1, §18.6.2), so they
  * are not consumed inputs of anything else in the transaction.
  *
- * Labels are the stored ones, so the check is made before the transaction
- * writes: a transaction that has written may have changed a value whose label
- * the boundary pass has not yet derived, and is refused instead. The runner
- * checks before the node's code runs, when nothing has been written.
+ * Labels are the stored ones, so a document the transaction has already
+ * written may hold a value whose label the boundary pass has not yet derived:
+ * a check that reads such a document is refused instead. The runner checks
+ * before the node's code runs; what the transaction wrote before then (an
+ * event's delivery, say) is in other documents. Where the transaction cannot
+ * say which documents it wrote, any write refuses.
  */
 export const nodeInputRefusals = (
   tx: IExtendedStorageTransaction,
@@ -615,12 +631,15 @@ export const nodeInputRefusals = (
     }];
   }
   if (resolution.requirements.length === 0) return [];
-  if (tx.hasWrites()) {
-    return [{
-      reason: `input requiredIntegrity of ${code} checked after a write`,
-      verdict: true,
-    }];
-  }
+  const written = tx.hasWrites()
+    ? new Set((tx.getWriteAttemptLog?.() ?? []).map(documentKey))
+    : new Set<string>();
+  const afterAWrite = {
+    reason: `input requiredIntegrity of ${code} checked after a write`,
+    verdict: true,
+  };
+  // Written, but the transaction keeps no log of where.
+  if (tx.hasWrites() && written.size === 0) return [afterAWrite];
   const trust = cfcFloorTrustContext(tx);
   const refusals: CfcNodeInputRefusal[] = [];
   for (const requirement of resolution.requirements) {
@@ -632,6 +651,10 @@ export const nodeInputRefusals = (
       meta,
       resolution,
     );
+    if ([...reach.documents].some((document) => written.has(document))) {
+      refusals.push(afterAWrite);
+      continue;
+    }
     const observations: (readonly CfcAtom[])[] = [
       ...reach.locations.flatMap(({ location, leaves, references, through }) =>
         consumedIntegrityAt(tx, location, leaves, references).map(
