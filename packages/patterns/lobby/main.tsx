@@ -20,7 +20,7 @@ import {
   activeAdminRoleForSubject,
   adminRegistryEntries,
   adminRegistryEveryoneIsAdmin,
-  type SeededAdminRegistryValue,
+  type EmptyAdminRegistryValue,
 } from "../cfc/admin/mod.ts";
 /**
  * A small shared lobby: people join with their Fabric profile, everyone can
@@ -141,7 +141,7 @@ export interface LobbyAdminRegistryStoredValue {
 
 export type LobbyAdminRegistryValue =
   | LobbyAdminRegistryStoredValue
-  | Default<SeededAdminRegistryValue>;
+  | Default<EmptyAdminRegistryValue>;
 export type LobbyAdminRegistryCell = Writable<LobbyAdminRegistryValue>;
 
 const EMPTY_PARTICIPANTS: LobbyParticipant[] = [];

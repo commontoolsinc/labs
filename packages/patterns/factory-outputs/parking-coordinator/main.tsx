@@ -22,7 +22,7 @@ import {
 import {
   activeAdminRoleForSubject,
   adminRegistryEntries,
-  type SeededAdminRegistryValue,
+  type EmptyAdminRegistryValue,
   subjectHasAdminRole,
 } from "../../cfc/admin/mod.ts";
 import {
@@ -148,7 +148,7 @@ export interface ParkingAdminRegistryStoredValue {
 
 export type ParkingAdminRegistryValue =
   | ParkingAdminRegistryStoredValue
-  | Default<SeededAdminRegistryValue>;
+  | Default<EmptyAdminRegistryValue>;
 export type ParkingAdminRegistryCell = Writable<ParkingAdminRegistryValue>;
 
 /**

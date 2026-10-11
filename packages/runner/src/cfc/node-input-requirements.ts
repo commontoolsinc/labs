@@ -21,13 +21,18 @@
  * code reads, so it can only refuse more.
  *
  * What each observation carries:
- * - A reference is followed to its target, which supplies the observation's
- *   integrity. The slot that holds a reference contributes confidentiality
- *   only (§8.2.4), so it is not an integrity observation here; evidence
- *   copied onto a reference from its target (§8.2.5) never counts.
+ * - A reference is followed to its target. What it reaches is observed with
+ *   the target's integrity and the reference's own together (§8.2.4,
+ *   `I_T ∪ I_R_applicable`): the slot's label as the container's writer left
+ *   it, never evidence copied onto the reference from its target (§8.2.5).
+ *   The reference's confidentiality is never removed, and is not checked
+ *   here.
  * - A value written in the node's binding itself (a literal in the wiring,
  *   including a handler's `$event` payload) carries no evidence, so it never
- *   satisfies a `requiredIntegrity`.
+ *   satisfies a `requiredIntegrity`; a path the binding leaves out carries
+ *   none either. A requirement on the members of a collection the binding
+ *   supplies no members for (an empty or absent list in an event, say)
+ *   consumes nothing, since there is no member to observe.
  * - A path read and found absent from a container is a `shape` observation
  *   (§4.6.3) carrying the integrity minted for the container's own current
  *   value (`ownEvidenceAt`): never a label it inherits from an ancestor, a
@@ -563,14 +568,21 @@ const reachThroughInput = (
     }
     if (rest.length === 0) return heldAtPath(value);
     const [segment, ...remaining] = rest;
-    // The wiring leaving a path out is the wiring's choice: no evidence.
-    if (!isPlainContainer(value)) return noEvidence([]);
+    // A requirement on the members of a collection the wiring supplies no
+    // members for consumes nothing: the binding is plumbing, not a stored
+    // value anyone vouched for, and there is no member to observe.
+    const membersOnly = rest.includes("*");
+    // The wiring leaving a path out is otherwise the wiring's choice: no
+    // evidence.
+    if (!isPlainContainer(value)) {
+      return membersOnly && value === undefined ? undefined : noEvidence([]);
+    }
     const children = segment === "*"
       ? Object.values(value)
       : Object.hasOwn(value, segment)
       ? [Reflect.get(value, segment)]
       : [];
-    if (children.length === 0) return noEvidence([]);
+    if (children.length === 0) return membersOnly ? undefined : noEvidence([]);
     for (const child of children) inBinding(child, remaining);
   };
 

@@ -10,7 +10,10 @@ import { cfcLabelViewForCell } from "../src/cfc/mod.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { setCfcImplementationIdentity } from "../src/storage/extended-storage-transaction.ts";
+import {
+  ExtendedStorageTransaction,
+  setCfcImplementationIdentity,
+} from "../src/storage/extended-storage-transaction.ts";
 
 const signer = await Identity.fromPassphrase(
   "profile-home-verified-identities",
@@ -268,6 +271,69 @@ describe("profile-home verified external identities", () => {
       await result.pull();
       expect(result.key("verifiedIdentities").get()).toEqual([]);
     } finally {
+      await runtime.dispose();
+    }
+  });
+
+  // The list the profile collects into starts empty, and only a builtin can
+  // stamp its entries. An event with nothing to publish or revoke, on that
+  // empty list, is no reason to refuse anything.
+  it("refuses nothing for an empty publish or revoke on the empty list", async () => {
+    const reasons: string[] = [];
+    const record =
+      ExtendedStorageTransaction.prototype.recordCfcNodeInputRefusal;
+    ExtendedStorageTransaction.prototype.recordCfcNodeInputRefusal = function (
+      this: ExtendedStorageTransaction,
+      refusal,
+    ) {
+      reasons.push(refusal.reason);
+      return record.call(this, refusal);
+    };
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+    });
+    try {
+      const setupTx = runtime.edit();
+      const pattern = await runtime.patternManager.compilePattern(PROGRAM, {
+        space,
+        tx: setupTx,
+      });
+      const result = runtime.run(
+        setupTx,
+        // deno-lint-ignore no-explicit-any
+        pattern as any,
+        { initialName: "Ada Lovelace" },
+        runtime.getCell(
+          space,
+          "profile-home empty identity events",
+          undefined,
+          setupTx,
+        ),
+      );
+      runtime.prepareTxForCommit(setupTx);
+      expect((await setupTx.commit().settled).error).toBeUndefined();
+      await result.pull();
+
+      for (
+        const stream of [
+          "publishVerifiedIdentities",
+          "revokeVerifiedIdentities",
+        ]
+      ) {
+        for (const event of [{}, { identities: [] }]) {
+          const tx = runtime.edit();
+          result.withTx(tx).key(stream).send(event);
+          runtime.prepareTxForCommit(tx);
+          expect((await tx.commit().settled).error).toBeUndefined();
+          await runtime.idle();
+        }
+      }
+      await result.pull();
+      expect(result.key("verifiedIdentities").get()).toEqual([]);
+      expect(reasons).toEqual([]);
+    } finally {
+      ExtendedStorageTransaction.prototype.recordCfcNodeInputRefusal = record;
       await runtime.dispose();
     }
   });

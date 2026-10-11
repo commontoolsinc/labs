@@ -21,7 +21,7 @@ import {
 } from "commonfabric";
 import {
   adminRegistryEntries,
-  type SeededAdminRegistryValue,
+  type EmptyAdminRegistryValue,
 } from "../../cfc/admin/mod.ts";
 import { normalizePlateId, US_STATES } from "../../vehicles.ts";
 
@@ -175,7 +175,7 @@ export interface LotWatchAdminRegistryStoredValue {
 
 export type LotWatchAdminRegistryValue =
   | LotWatchAdminRegistryStoredValue
-  | Default<SeededAdminRegistryValue>;
+  | Default<EmptyAdminRegistryValue>;
 export type LotWatchAdminRegistryCell = Writable<LotWatchAdminRegistryValue>;
 
 /**
