@@ -9,7 +9,12 @@
 import { Identity, keyPairFromRealmValue } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { adoptProcessInstanceId } from "@commonfabric/memory/v2/execution-lease";
+import {
+  getLoggerCountsBreakdown,
+  getTimingStatsBreakdown,
+} from "@commonfabric/utils/logger";
 import { holdWorkerLifetimeLock } from "@commonfabric/utils/worker-lifetime";
+import { setPatternEnvironment } from "../builder/env.ts";
 import type { ModuleByteCache, RuntimeFetch } from "../runtime.ts";
 import { ExecutorHost, type LifecycleVerb } from "./host.ts";
 import { ServingPlane, servingPlaneEndpoint } from "./serving-port-plane.ts";
@@ -50,6 +55,10 @@ export function serveFromPort(
   const endpoint = servingPlaneEndpoint(port);
   endpoint.onRequest("worker.init", async (init) => {
     adoptProcessInstanceId(init.processInstanceId);
+    // The environment a served handler's `fetch` resolves against is this
+    // realm's, so it is set here to what the process that started the worker
+    // serves patterns from, as that process sets its own.
+    setPatternEnvironment({ apiUrl: new URL(init.apiUrl) });
     const identity = await Identity.fromKeyPair(
       keyPairFromRealmValue(init.serviceKeyPair, "the serving worker's key"),
     );
@@ -88,6 +97,11 @@ export function serveFromPort(
     });
     plane.serve({
       stats: () => host.stats(),
+      // This realm's loggers: the serving loop's own counts and timings.
+      diagnostics: () => ({
+        loggerCounts: getLoggerCountsBreakdown(),
+        timingStats: getTimingStatsBreakdown(),
+      }),
       runLifecycleVerb: (space, verb) => {
         if (options.buildLifecycleVerb === undefined) {
           return Promise.reject(

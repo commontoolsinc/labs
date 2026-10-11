@@ -13,6 +13,10 @@ import type {
 } from "@commonfabric/memory/v2";
 import { ProtocolError } from "@commonfabric/memory/v2";
 import type {
+  getLoggerCountsBreakdown,
+  TimingStatsBreakdown,
+} from "@commonfabric/utils/logger";
+import type {
   AdmittedCommitNotice,
   DemandChangeReason,
   ServedAclChange,
@@ -69,6 +73,16 @@ export type ViewSelection = Parameters<Server["setViewSelection"]>[2];
 export type LifecycleVerbDescriptor = {
   readonly name: string;
   readonly request: unknown;
+};
+
+/**
+ * What the serving loop's realm logged: its loggers' counts and timing
+ * statistics, which are the process's own where the loop runs on the main
+ * thread and the worker's where it runs there.
+ */
+export type ServingLoopDiagnostics = {
+  loggerCounts: ReturnType<typeof getLoggerCountsBreakdown>;
+  timingStats: TimingStatsBreakdown;
 };
 
 /** What the worker's entry module needs to build its host. */
@@ -191,6 +205,7 @@ export type BridgeRequests = {
     result: { lifetimeLock: string | undefined };
   };
   "host.stats": { params: null; result: ServingLoopStats };
+  "host.diagnostics": { params: null; result: ServingLoopDiagnostics };
   "host.runLifecycleVerb": {
     params: { space: MemorySpace; verb: LifecycleVerbDescriptor };
     result: unknown;

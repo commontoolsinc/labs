@@ -2317,6 +2317,14 @@ export class SpaceServer implements TransactionSealDestination {
     return identities;
   }
 
+  /**
+   * The wave open at the call, if a seal has opened one: what the cycle
+   * asks after awaiting a commit, having closed the wave it committed.
+   */
+  #waveOpenNow(): WaveAccumulator | undefined {
+    return this.#currentWave;
+  }
+
   #openWave(): WaveAccumulator {
     if (this.#currentWave === undefined) {
       const { engine, space } = this.#options;
@@ -2932,7 +2940,8 @@ export class SpaceServer implements TransactionSealDestination {
       limit: 1,
     });
     const record = records.find((entry) => entry.seq === outcome.ok.seq);
-    if (record !== undefined) {
+    // A sink that reports its commits itself has reported this one.
+    if (record !== undefined && sink.reportsCommits !== true) {
       this.#options.server.noteExecutorCommit({
         space: this.#options.space,
         seq: record.seq,
@@ -3119,7 +3128,8 @@ export class SpaceServer implements TransactionSealDestination {
       limit: 1,
     });
     const record = records.find((entry) => entry.seq === committedSeq);
-    if (record !== undefined) {
+    // A sink that reports its commits itself has reported this one.
+    if (record !== undefined && sink.reportsCommits !== true) {
       this.#options.server.noteExecutorCommit({
         space: this.#options.space,
         seq: record.seq,
@@ -6516,7 +6526,16 @@ export class SpaceServer implements TransactionSealDestination {
     const outcome = await closing.commitWave(this.#sink!, { derivedThrough });
     this.#servedWave = { wave: closing, outcome };
     if (outcome.aborted !== undefined) this.#barrierHead = undefined;
-    if (outcome.seq !== undefined) this.#lastCommittedWaveSeq = outcome.seq;
+    if (outcome.seq !== undefined) {
+      this.#lastCommittedWaveSeq = outcome.seq;
+      // A wave a seal opened while this commit was in flight took a basis
+      // the commit has passed: the commit is noted to it, so the next
+      // cycle's writes to the documents it touched rebase rather than drop.
+      this.#waveOpenNow()?.noteOwnWaveCommit(
+        outcome.seq,
+        closing.committedHomeKeys,
+      );
+    }
     // The EXPLICIT WARM REQUEST (serving-loop.md §1's third activation
     // trigger; RULED 2026-08-21): every foreign provisioning batch this
     // wave durably committed is reported to the co-hosted memory server
@@ -6533,6 +6552,8 @@ export class SpaceServer implements TransactionSealDestination {
     // rolls a landed foreign commit back).
     for (const foreign of outcome.foreignCommits) {
       this.#options.stats.warmRequests += 1;
+      // A sink that reports its commits itself has reported this one.
+      if (this.#sink?.reportsCommits === true) continue;
       this.#options.server.noteExecutorCommit({
         space: foreign.space,
         seq: foreign.seq,
@@ -6744,7 +6765,8 @@ export class SpaceServer implements TransactionSealDestination {
         limit: 1,
       });
       const record = records.find((entry) => entry.seq === outcome.seq);
-      if (record !== undefined) {
+      // A sink that reports its commits itself has reported this one.
+      if (record !== undefined && this.#sink?.reportsCommits !== true) {
         this.#options.server.noteExecutorCommit({
           space: this.#options.space,
           seq: record.seq,

@@ -69,6 +69,14 @@ import type {
   CfcWriteFloorMode,
 } from "@commonfabric/runner/cfc";
 import { listenServingMemoryServer } from "@commonfabric/runner/executor/serving-memory-server.deno";
+import type {
+  ServingLoopDiagnostics,
+  ServingLoopHandle,
+} from "@commonfabric/runner/executor/serving-worker-host";
+import {
+  getLoggerCountsBreakdown,
+  getTimingStatsBreakdown,
+} from "@commonfabric/utils/logger";
 import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
 import { terminateWorker } from "@commonfabric/utils/worker-lifetime";
 import {
@@ -753,6 +761,9 @@ type HostedServer = {
   /** The memory server, whose admitted commits include the serving loop's. */
   readonly server: Pick<MemoryServer, "watchAdmittedCommits">;
 
+  /** The serving loop, when the server has one. */
+  readonly host?: Pick<ServingLoopHandle, "diagnostics">;
+
   /** The server's `idle()`, which covers storage and not a serving loop. */
   idle(): Promise<void>;
 
@@ -1026,6 +1037,19 @@ export class MultiRuntimeHarness {
    * first-order consequence commit. The wait returns at once where there is
    * no overlay and so no outstanding intent, as on an OFF-posture toolshed.
    */
+  /**
+   * What the serving loop's realm logged: the loop the harness hosts, where
+   * it runs, which is this process when the loop runs on its main thread and
+   * the worker when it runs there, and this process when the harness hosts
+   * no loop.
+   */
+  servingDiagnostics(): Promise<ServingLoopDiagnostics> {
+    return this.#server?.host?.diagnostics() ?? Promise.resolve({
+      loggerCounts: getLoggerCountsBreakdown(),
+      timingStats: getTimingStatsBreakdown(),
+    });
+  }
+
   async settle(rounds = 2): Promise<void> {
     const quiescenceDeadline = this.#awaitsServedConsequences
       ? Date.now() + SERVED_SETTLE_QUIESCENCE_BUDGET_MS

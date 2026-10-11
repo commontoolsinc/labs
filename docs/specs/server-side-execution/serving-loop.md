@@ -42,6 +42,23 @@ toolshed process
    └─ activation policy (which spaces are active)
 ```
 
+*(AMENDED 2026-10-11: under `SERVER_EXECUTION_WORKER` the `ExecutorHost`
+and everything under it run in a Web Worker of the toolshed process, and
+the memory server, the HTTP routes and the store's one writer stay on the
+main thread. The worker reads the store through SQLite connections of its
+own and reaches the memory server over a port: its wave commits cross to a
+sink on the main thread (plane (a)'s commits, so the store keeps one
+writer), its serving runtimes' storage sessions cross as frames, the
+server's observer crosses as events, and the three session questions the
+loop asks synchronously are answered from a mirror the server's session
+lifecycle keeps current. The lease rows (plane (c)) stay the worker's own
+writes. The lease holder's process component is minted by the main thread
+per worker start, so a worker started in place of one that died never
+shares its predecessor's holder.
+[`docs/plans/serving-loop-worker.md`](../../plans/serving-loop-worker.md)
+places each crossing; the in-process arrangement, the default, is
+unchanged.)*
+
 A space is ACTIVE when it has ≥1 live client session or undelivered
 events; otherwise it MAY be parked (lease released, loop stopped, and
 the runtime disposed or kept for the space's next tenure — Parking
@@ -1190,7 +1207,16 @@ the 2026-08-24 ruling; the owner may re-rule it).
   commit is in flight (a read probe against the serving runtime) would
   otherwise leave a wave whose basis the loop's own commit has already
   passed, and the next cycle's writes to the documents it touched — the
-  watermark advance among them — would be dropped against it. That input
+  watermark advance among them — would be dropped against it. A wave a
+  seal did open while the commit was in flight keeps that basis, and the
+  commit is noted to it as it lands (AMENDED 2026-10-11): a document the
+  wave writes that sits exactly at the commit's seq is rebased to that
+  head, which the sink re-verifies, rather than counted as conflicting.
+  The wave's contributions read the replica with the commit's writes
+  applied, since a run that read them stale is refused at its own commit
+  and never seals. With the loop on another thread from the store's
+  writer, a commit is in flight for a round trip and seals arrive during
+  it as a matter of course. That input
   seq is what the wave CLAIMS its view covers, and the view its
   runs read is the replica's, which can sit below it: a commit admitted
   between a run's reads and the seal that opens the wave is counted in

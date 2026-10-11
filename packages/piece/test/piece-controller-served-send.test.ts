@@ -61,8 +61,12 @@ describe("piece-controller", () => {
       apiUrl: new URL(import.meta.url),
       serviceIdentity: serviceSigner,
       policy: { flushDeadlineMs: 5_000, idleParkMs: 600_000 },
+      // The verbs below are closures over the host, which a loop in a
+      // worker cannot take.
+      worker: false,
     });
-    ({ server, host } = serving);
+    server = serving.server;
+    host = serving.host.host!;
     session = createSession({
       identity: serviceSigner,
       spaceDid: space as DID,

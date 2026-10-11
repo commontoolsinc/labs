@@ -7,6 +7,7 @@
 
 import type { FabricValue } from "@commonfabric/data-model";
 import {
+  acquireServerExecutionEnabler,
   decodeTrustedMemoryBoundary,
   encodeMemoryBoundary,
 } from "@commonfabric/memory/v2";
@@ -27,6 +28,7 @@ import {
   PortEndpoint,
   type PortLike,
   type ServedAclChangeData,
+  type ServingLoopDiagnostics,
   type ServingWorkerInit,
 } from "./serving-port-protocol.ts";
 import {
@@ -77,9 +79,12 @@ export type ServingPortBridgeOptions = {
 
 /**
  * The server's end of the port. Constructing one installs the process's
- * serving-loop stats provider; `attach()`, which `init()` calls once the
- * worker's host serves, installs the server's execution observer. One bridge
- * serves per process, as one in-process host does.
+ * serving-loop stats provider and claims the process's ambient
+ * server-execution flag, which the memory server's admission of derived
+ * commits reads and which the host, in its own realm, cannot claim for this
+ * one; `attach()`, which `init()` calls once the worker's host serves,
+ * installs the server's execution observer. One bridge serves per process, as
+ * one in-process host does.
  */
 export class ServingPortBridge {
   readonly #options: ServingPortBridgeOptions;
@@ -92,6 +97,7 @@ export class ServingPortBridge {
   readonly #connections = new Map<number, LoopbackConnection>();
   readonly #sinks = new Map<string, BridgeSink>();
   readonly #workerReady = Promise.withResolvers<void>();
+  readonly #releaseServerExecution: () => void;
   #stats: ServingLoopStats | undefined;
   #attached = false;
   #closed = false;
@@ -102,6 +108,7 @@ export class ServingPortBridge {
       logger.warn("port-fault", () => ["the serving port faulted", error]);
     });
     this.#installHandlers();
+    this.#releaseServerExecution = acquireServerExecutionEnabler();
     registerServingLoopStatsProvider(() =>
       this.#stats ?? emptyServingLoopStats()
     );
@@ -172,6 +179,11 @@ export class ServingPortBridge {
     return stats;
   }
 
+  /** What the worker's realm logged, as of now. */
+  requestDiagnostics(): Promise<ServingLoopDiagnostics> {
+    return this.#endpoint.request("host.diagnostics", null);
+  }
+
   /** Runs a lifecycle verb on the worker's host; its receipt comes back as data. */
   runLifecycleVerb(
     space: MemorySpace,
@@ -201,6 +213,7 @@ export class ServingPortBridge {
     this.#workerReady.reject(closed);
     this.#workerReady.promise.catch(() => {});
     this.#endpoint.close(closed);
+    this.#releaseServerExecution();
   }
 
   /** The sink for `sessionId`, built on first use. */
@@ -232,6 +245,10 @@ export class ServingPortBridge {
       onHomeRefused: () => {
         state.homeRefused = true;
       },
+      // Reported here, with the apply, rather than by the worker once the
+      // reply reaches it: the fan-out of the rows is then under way before
+      // the loop acts on the commit.
+      reportCommit: (notice) => server.noteExecutorCommit(notice),
       commitServedAclChange: (change, envelope) =>
         server.commitServedAclChange({ ...change, ...envelope }),
     });

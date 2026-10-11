@@ -10,6 +10,7 @@ import {
   getSlowQueries,
 } from "@commonfabric/memory/v2/server";
 import { getServingLoopStats } from "@commonfabric/runner/executor/stats";
+import { serverExecutionHost } from "@/lib/server-execution.ts";
 import {
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
@@ -45,7 +46,7 @@ export const index: AppRouteHandler<IndexRoute> = (c) => {
 
 const serverStartTimestamp = Date.now();
 
-export const stats: AppRouteHandler<StatsRoute> = (c) => {
+export const stats: AppRouteHandler<StatsRoute> = async (c) => {
   // The serving loop's §7 counters
   // (docs/specs/server-side-execution/serving-loop.md §7): present only
   // when an ExecutorHost runs in this process (the ON arm), so an OFF-arm
@@ -69,12 +70,20 @@ export const stats: AppRouteHandler<StatsRoute> = (c) => {
   // breaker's trips and clears, beside the commit rates of the same
   // sessions. Present whenever a memory server is co-hosted.
   const sessionReports = getSessionReports();
+  // The serving loop's own logger counts and timings, when it runs in a
+  // worker of this process: `logCounts` and `timingStats` above are this
+  // thread's, which then hold none of the loop's.
+  const loop = serverExecutionHost();
+  const servingLoopRealm = loop !== undefined && loop.host === undefined
+    ? await loop.diagnostics()
+    : undefined;
   return c.json({
     timestamp: Date.now(),
     serverStart: serverStartTimestamp,
     logCounts: getLoggerCountsBreakdown(),
     timingStats: getTimingStatsBreakdown(),
     slowQueries: [...getSlowQueries()],
+    ...(servingLoopRealm === undefined ? {} : { servingLoopRealm }),
     ...(documentCaches === undefined ? {} : { documentCaches }),
     ...(commitRates === undefined ? {} : { commitRates }),
     ...(sessionReports === undefined ? {} : { sessionReports }),

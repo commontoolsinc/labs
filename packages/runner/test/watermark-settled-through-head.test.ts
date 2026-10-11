@@ -7,7 +7,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import type { ExecutorHost } from "../src/executor/host.ts";
+import type { ServingLoopHandle } from "../src/executor/serving-worker-host.ts";
 import {
   type ServingMemoryServer,
   startServingMemoryServer,
@@ -31,7 +31,7 @@ const aliceSigner = await Identity.fromPassphrase("settled through head alice");
 describe("waitForSettledThroughHead()", () => {
   let serving: ServingMemoryServer;
   let server: MemoryV2Server.Server;
-  let host: ExecutorHost;
+  let host: ServingLoopHandle;
   let manager: EmulatedStorageManager;
   let runtime: Runtime;
 

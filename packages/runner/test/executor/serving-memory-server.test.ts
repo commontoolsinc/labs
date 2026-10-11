@@ -166,7 +166,7 @@ describe("serving-memory-server", () => {
       expect(serving.close()).toBe(first);
       await first;
       await serving[Symbol.asyncDispose]();
-      expect(serving.host.stats().activeSpaces).toBe(0);
+      expect(serving.host.stats()?.activeSpaces ?? 0).toBe(0);
     });
   });
 

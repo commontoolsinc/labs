@@ -11,10 +11,11 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { terminateWorker } from "@commonfabric/utils/worker-lifetime";
 import type { ExperimentalOptions } from "../runtime.ts";
 import type { MemorySpace } from "../storage/interface.ts";
-import { failureParkBackoffDelayMs } from "./host.ts";
+import { type ExecutorHost, failureParkBackoffDelayMs } from "./host.ts";
 import { ServingPortBridge } from "./serving-port-bridge.ts";
 import type {
   LifecycleVerbDescriptor,
+  ServingLoopDiagnostics,
   ServingWorkerInit,
 } from "./serving-port-protocol.ts";
 import type { SpaceServerPolicy } from "./space-server.ts";
@@ -24,6 +25,28 @@ const logger = getLogger("serving-worker-host", {
   enabled: true,
   level: "warn",
 });
+
+/**
+ * The serving loop as whatever starts it hands it back, whichever thread
+ * runs it: a toolshed's bootstrap, or the serving memory server tests build.
+ */
+export type ServingLoopHandle = {
+  /** The loop's counters: the host's, or the last the worker posted. */
+  stats(): ServingLoopStats | undefined;
+
+  /**
+   * What the loop's realm logged: this process's loggers where the loop
+   * runs on its main thread, the worker's where it runs there.
+   */
+  diagnostics(): Promise<ServingLoopDiagnostics>;
+
+  /** The host, when the loop runs on this thread; `undefined` in a worker. */
+  readonly host: ExecutorHost | undefined;
+
+  close(): Promise<void>;
+};
+
+export type { ServingLoopDiagnostics } from "./serving-port-protocol.ts";
 
 export type ServingWorkerOptions = {
   server: Server;
@@ -95,6 +118,11 @@ export class ServingWorker {
   /** The worker's counters as of now. */
   requestStats(): Promise<ServingLoopStats> {
     return this.#bridge().requestStats();
+  }
+
+  /** What the worker's realm logged, as of now. */
+  diagnostics(): Promise<ServingLoopDiagnostics> {
+    return this.#bridge().requestDiagnostics();
   }
 
   /** Runs a lifecycle verb on the worker's host. */

@@ -36,6 +36,7 @@ import {
   PortEndpoint,
   type PortLike,
   type ServedAclChangeData,
+  type ServingLoopDiagnostics,
 } from "./serving-port-protocol.ts";
 import type { WaveCommitSinkDeps } from "./space-server.ts";
 import type { ServingLoopStats } from "./stats.ts";
@@ -68,6 +69,7 @@ export const servingPlaneEndpoint = (port: PortLike): ServingPlaneEndpoint =>
 /** What the worker's host answers the server's thread with. */
 export type ServingPlaneHost = {
   stats: () => ServingLoopStats;
+  diagnostics: () => ServingLoopDiagnostics;
   runLifecycleVerb: (
     space: MemorySpace,
     verb: LifecycleVerbDescriptor,
@@ -151,78 +153,34 @@ class SessionMirror {
 }
 
 /**
- * One loopback connection's transport: each frame the client sends is a
- * request the server's thread answers once its connection took it, and each
- * frame the server sends arrives as a notice and is handed over as it
- * arrives, so nothing is held and `delivered()` is left out.
+ * One loopback connection's transport: a
+ * {@link MemoryClient.queuedFrameTransport} whose client frames are requests
+ * the server's thread answers once its connection took them, and whose server
+ * frames arrive as notices. The frames reach the client the way they do over
+ * the in-process loopback, one per turn, and a close drops the frames still
+ * held.
  */
-class PlaneTransport implements MemoryClient.Transport {
-  readonly #endpoint: ServingPlaneEndpoint;
-  readonly #id: number;
-  readonly #unregister: () => void;
-  #receiver: (payload: string) => void = () => {};
-  #closeReceiver: ((error?: Error) => void) | undefined;
-  #closed = false;
-
-  constructor(
-    endpoint: ServingPlaneEndpoint,
-    id: number,
-    unregister: () => void,
-  ) {
-    this.#endpoint = endpoint;
-    this.#id = id;
-    this.#unregister = unregister;
-  }
-
-  async send(payload: string): Promise<void> {
-    if (this.#closed) {
-      throw MemoryClient.connectionError(
-        "the serving plane's loopback connection is closed",
-      );
-    }
-    try {
-      await this.#endpoint.request("loopback.send", {
-        transport: this.#id,
-        payload,
-      });
-    } catch (error) {
-      if (this.#endpoint.closed) {
-        throw MemoryClient.connectionError("the serving port closed", error);
+const planeTransport = (
+  endpoint: ServingPlaneEndpoint,
+  id: number,
+  unregister: () => void,
+): MemoryClient.QueuedFrameTransport =>
+  MemoryClient.queuedFrameTransport({
+    async receive(payload) {
+      try {
+        await endpoint.request("loopback.send", { transport: id, payload });
+      } catch (error) {
+        if (endpoint.closed) {
+          throw MemoryClient.connectionError("the serving port closed", error);
+        }
+        throw error;
       }
-      throw error;
-    }
-  }
-
-  close(): Promise<void> {
-    if (!this.#closed) {
-      this.#closed = true;
-      this.#unregister();
-      this.#endpoint.notify("loopback.close", { transport: this.#id });
-    }
-    return Promise.resolve();
-  }
-
-  setReceiver(receiver: (payload: string) => void): void {
-    this.#receiver = receiver;
-  }
-
-  setCloseReceiver(receiver: (error?: Error) => void): void {
-    this.#closeReceiver = receiver;
-  }
-
-  /** Hands one server frame to the client. */
-  deliver(frame: string): void {
-    if (!this.#closed) this.#receiver(frame);
-  }
-
-  /** Reports the connection lost, as the port closing loses it. */
-  lose(error: Error): void {
-    if (this.#closed) return;
-    this.#closed = true;
-    this.#unregister();
-    this.#closeReceiver?.(error);
-  }
-}
+    },
+    close() {
+      unregister();
+      endpoint.notify("loopback.close", { transport: id });
+    },
+  });
 
 /**
  * The tenure's wave commit sink on the worker: the three reads run on the
@@ -244,6 +202,11 @@ class PlaneWaveCommitSink implements WaveCommitSink {
         space === deps.space ? deps.engine : deps.foreignEngineFor(space),
       sessionId: deps.sessionId,
     });
+  }
+
+  /** The sink on the server's thread reports each commit as it applies it. */
+  get reportsCommits(): boolean {
+    return true;
   }
 
   currentHeads(
@@ -471,7 +434,10 @@ export class ServingPlane {
   readonly #endpoint: ServingPlaneEndpoint;
   readonly #sessions = new SessionMirror();
   readonly #engines = new Map<string, Promise<Engine.Engine>>();
-  readonly #transports = new Map<number, PlaneTransport>();
+  readonly #transports = new Map<
+    number,
+    MemoryClient.QueuedFrameTransport
+  >();
   readonly #server: HostMemoryServer;
   readonly #loopback: LoopbackPlane;
   #observer: ServerExecutionObserver | undefined;
@@ -530,6 +496,7 @@ export class ServingPlane {
   /** Installs what the server's thread may ask of the worker's host. */
   serve(host: ServingPlaneHost): void {
     this.#endpoint.onRequest("host.stats", () => host.stats());
+    this.#endpoint.onRequest("host.diagnostics", () => host.diagnostics());
     this.#endpoint.onRequest(
       "host.runLifecycleVerb",
       ({ space, verb }) => host.runLifecycleVerb(space, verb),
@@ -580,7 +547,8 @@ export class ServingPlane {
     if (this.#closed) return;
     this.#closed = true;
     const lost = new Error("the serving plane closed");
-    for (const transport of [...this.#transports.values()]) {
+    for (const [id, transport] of [...this.#transports]) {
+      this.#transports.delete(id);
       transport.lose(lost);
     }
     const engines = [...this.#engines.values()];
@@ -600,12 +568,13 @@ export class ServingPlane {
 
   #createTransport(): MemoryClient.Transport {
     const id = this.#nextTransport++;
-    const transport = new PlaneTransport(this.#endpoint, id, () => {
+    const transport = planeTransport(this.#endpoint, id, () => {
       this.#transports.delete(id);
     });
     this.#transports.set(id, transport);
     this.#endpoint.request("loopback.open", { transport: id }).catch(
       (error) => {
+        this.#transports.delete(id);
         transport.lose(
           MemoryClient.connectionError(
             "opening a loopback connection failed",

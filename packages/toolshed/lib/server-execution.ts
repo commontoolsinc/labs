@@ -21,30 +21,28 @@ import {
   SERVING_RUNTIME_EXPERIMENTAL,
   servingRuntimeFactory,
 } from "@commonfabric/runner/executor/serving-runtime";
-import { ServingWorker } from "@commonfabric/runner/executor/serving-worker-host";
-import type { ServingLoopStats } from "@commonfabric/runner/executor/stats";
+import {
+  type ServingLoopHandle,
+  ServingWorker,
+} from "@commonfabric/runner/executor/serving-worker-host";
 import type { Server as MemoryServer } from "@commonfabric/memory/v2/server";
 import type { Identity } from "@commonfabric/identity";
 import {
   servedLifecycleRunner,
   type ServedLifecycleVerbRunner,
 } from "@commonfabric/piece/ops";
+import {
+  getLoggerCountsBreakdown,
+  getTimingStatsBreakdown,
+} from "@commonfabric/utils/logger";
 import { ProcessModuleByteCache } from "@commonfabric/test-support/compile-byte-cache";
 
 /**
  * The serving loop as the rest of this process reaches it, whichever thread
- * runs it: the lifecycle verbs the route sends, the loop's counters, and its
+ * runs it: the lifecycle verbs the route sends, and the loop's counters and
  * close.
  */
-export type ServingLoop = ServedLifecycleVerbRunner & {
-  /** The loop's counters: the host's, or the last the worker posted. */
-  stats(): ServingLoopStats | undefined;
-
-  /** The host, when the loop runs on this thread; `undefined` in a worker. */
-  readonly host: ExecutorHost | undefined;
-
-  close(): Promise<void>;
-};
+export type ServingLoop = ServedLifecycleVerbRunner & ServingLoopHandle;
 
 let loop: ServingLoop | undefined;
 
@@ -309,6 +307,7 @@ export function startServerExecutionHost(options: {
     loop = {
       runLifecycleVerb: (space, verb) => worker.runLifecycleVerb(space, verb),
       stats: () => worker.stats(),
+      diagnostics: () => worker.diagnostics(),
       host: undefined,
       close: () => worker.close(),
     };
@@ -338,6 +337,11 @@ export function startServerExecutionHost(options: {
     loop = {
       ...servedLifecycleRunner(host, options.identity),
       stats: () => host.stats(),
+      diagnostics: () =>
+        Promise.resolve({
+          loggerCounts: getLoggerCountsBreakdown(),
+          timingStats: getTimingStatsBreakdown(),
+        }),
       host,
       close: () => host.close(),
     };

@@ -26,48 +26,62 @@ The host touches the memory server and the store at a bounded set of points.
 Each is placed below; the placement is the design.
 
 **Reads of the store stay reads, on the worker's own connection.** The loop
-reads `serverSeq`, the pending stream-event documents, commits since a
-sequence, document heads, retirable effect instances, and, under the store
-read-through posture, documents, all through `Engine.*` on an engine object.
-Every one of those is a SQLite query, and the engine's decoded-document cache
-is keyed by revision identity, so a second connection to the same WAL-mode
-file reads every committed revision and can serve nothing stale. The worker
-opens one engine per space it serves, read-through included, at the file the
-main thread names once it has opened the space itself, so the server's own
-engine map holds every space the worker serves, which its synchronous lease
-scan reads. A store that is not a file cannot be shared this way, so the
-worker needs a file store. Three writes stay on the worker's connection, each
-small and serialized by SQLite's lock with the engine's 5 s busy timeout: the
-lease rows the loop writes (`execution-lease.ts`), which the main thread's
-admission reads from SQLite each time; the outbox's retirement of a delivered
-row; and the outbox's failure notice for an append the target refused, a
-derived commit of the loop's own that the server does not fan out whichever
-thread writes it. The owner a space's access list names is read the same way,
-through `resolveSpaceOwnerOf` on the worker's engine.
+reads `serverSeq`, the pending stream-event documents, commits since a sequence,
+document heads, retirable effect instances, and, under the store read-through
+posture, documents, all through `Engine.*` on an engine object. Every one of
+those is a SQLite query; the engine's decoded-document cache is keyed by
+revision identity, and its branch-head cache is dropped whenever the
+connection's data version shows another connection's commit, so a second
+connection to the same WAL-mode file reads every committed revision and serves
+nothing stale. The worker opens one engine per space it serves, read-through
+included, at the file the main thread names once it has opened the space itself,
+so the server's own engine map holds every space the worker serves, which its
+synchronous lease scan reads. A store that is not a file cannot be shared this
+way, so the worker needs a file store. Three writes stay on the worker's
+connection, each small and serialized by SQLite's lock with the engine's 5 s
+busy timeout: the lease rows the loop writes (`execution-lease.ts`), which the
+main thread's admission reads from SQLite each time; the outbox's retirement of
+a delivered row; and the outbox's failure notice for an append the target
+refused, a derived commit of the loop's own that the server does not fan out
+whichever thread writes it. The busy timeout covers a transaction that takes the
+write lock up front, so every transaction the engine opens is immediate, the
+schema's and the migrations' at open included: a deferred one that reads first
+and writes after fails at once, rather than waiting, when the other connection
+committed in between. The owner a space's access list names is read the same
+way, through `resolveSpaceOwnerOf` on the worker's engine.
 
 **Wave commits cross to the main thread.** `EngineWaveCommitSink` applies a
 wave's one derived commit inside the engine transaction that also writes its
-basis rows, re-verifies its documents, attaches the wave's sqlite cell
-databases through the memory server, and reports the commit to the server
-(`noteExecutorCommit`) for dirtiness and fan-out. The store keeps one writer
+basis rows, re-verifies its documents, attaches the wave's sqlite cell databases
+through the memory server, and reports the commit to the server
+(`noteExecutorCommit`) for dirtiness and fan-out. On the main thread the sink
+reports the commit itself, as it applies it, and the worker's loop reports
+nothing for it: a notice posted by the worker once the reply reached it would
+let the server's fan-out of the wave's rows fall behind the loop's next step,
+which in-process follows the apply synchronously. The store keeps one writer
 with one view of its own commits: the worker sends the `WaveSpaceCommit` (data
-throughout: operations, preconditions, confirmed reads, annotations, basis
-rows, consequence ids, delegated carriage, outbox appends) in the memory
-boundary's encoding, and the main thread applies it through a sink of its own
-per session, returning the result. The counter that keys the session's commits
-stays with the worker, because the outbox's own writes draw from the same
-counter under the same session: each commit crosses with the number the worker
-minted for it, and the main thread's sink is handed that number. The
-served-ACL-change commit crosses the same way, as the list of changes it
-applies; the main thread rebuilds the function from the list.
+throughout: operations, preconditions, confirmed reads, annotations, basis rows,
+consequence ids, delegated carriage, outbox appends) in the memory boundary's
+encoding, and the main thread applies it through a sink of its own per session,
+returning the result. The counter that keys the session's commits stays with the
+worker, because the outbox's own writes draw from the same counter under the
+same session: each commit crosses with the number the worker minted for it, and
+the main thread's sink is handed that number. The served-ACL-change commit
+crosses the same way, as the list of changes it applies; the main thread
+rebuilds the function from the list.
 
-**The serving runtime's storage plane crosses as frames.** The serving
-runtime's `StorageManager` connects to the memory server through
-`LoopbackStorageManager`, a `Transport` that hands frames to
-`Server.connect()` in-process. The worker uses the same manager over a
-`Transport` that posts each frame on the port; the main thread owns one
-`Server.connect()` per worker-side transport and posts the server's frames
-back. The protocol, the signed `session.open`, and the service principal are
+**The serving runtime's storage plane crosses as frames.** The serving runtime's
+`StorageManager` connects to the memory server through `LoopbackStorageManager`,
+a `Transport` that hands frames to `Server.connect()` in-process. The worker
+uses the same manager over a `Transport` that posts each frame on the port; the
+main thread owns one `Server.connect()` per worker-side transport and posts the
+server's frames back. The port's transport is the in-process one's pump
+(`queuedFrameTransport` in the memory client) over the port: a server frame
+reaches the client on a turn of its own, frames held at close are dropped, and
+`delivered()` waits for the frames held. The client code was written against
+that discipline, and a transport handing frames over as they arrive let a
+session's deferred self-revocation reach it where the in-process one had dropped
+it. The protocol, the signed `session.open`, and the service principal are
 unchanged, which is what keeps the read-row admission's holder matching intact.
 
 **The server's observer crosses as events, its queries as requests.** The main
@@ -95,7 +109,21 @@ as data.
 **Stats cross on every cycle.** The worker posts the host's `ServingLoopStats`
 at the end of each wave cycle, at each activation and park, and on request;
 the main thread registers a stats provider that returns the latest copy, so
-`/api/health/stats` keeps its shape.
+`/api/health/stats` keeps its shape. The loop's own logger counts and timing
+statistics are the worker realm's, so they cross on request
+(`ServingLoopHandle.diagnostics()`): the health route adds them as
+`servingLoopRealm` while the loop runs in a worker, and a test that reads a
+refusal the loop's own CFC gate logged asks the handle rather than its own
+process's loggers.
+
+**The main thread holds two things on the worker's behalf.** The ambient
+server-execution flag, which the memory server's admission of derived
+commits reads and which the host claims in its own realm, is claimed by the
+bridge for the server's realm while it serves. The serving-loop stats
+provider the health route reads is the bridge's, returning the counters the
+worker last posted. The pattern environment a served handler's `fetch`
+resolves against is the worker realm's own, set from the address the worker is
+started with, as the process sets its own from the same address.
 
 **The lease holder's process component is minted per worker start.** The
 holder a space's lease and derived commits name is the service identity plus
@@ -123,6 +151,18 @@ message posted to a worker before its listener exists is dropped, so the
 worker's entry posts a ready notice first and the main thread sends nothing,
 the host's options included, until it has arrived.
 
+A wave commit is in flight for a port round trip, and the serving runtime's
+scheduler keeps running through it, so a seal that opens the next wave during
+the flight is routine where in-process it was a rarity: that wave takes its
+basis from the worker's connection before the commit has landed, and every
+document the commit wrote would then count as conflicting for it, dropping
+the loop's bookkeeping and the derivations that read it wave after wave. The
+space server notes each landed home commit to the wave open at the time
+(`noteOwnWaveCommit`), and the wave rebases a write to a document sitting
+exactly at that commit's seq to that head, which the sink re-verifies, in
+place of the conflict. The wave's contributions read the replica with the
+commit's writes applied, so the rebase claims nothing they did not see.
+
 A worker that dies takes every serving runtime with it. The main thread's
 bridge treats its exit as a park of every space with the failure-park backoff
 the host already applies, and starts a fresh worker; the lease rows lapse on
@@ -132,9 +172,10 @@ closes closes the port, and the worker's host closes as it does today.
 
 ## What does not change
 
-The loop, the wave, the demand pass, the outbox, the lease, the sink, and the
-protocol are untouched. What changes is who holds the engine object the loop
-reads, which thread the sink runs on, and how the host reaches the server. The
+The loop, the demand pass, the outbox, the lease, the sink, and the protocol
+are untouched, and the wave takes the one addition above. What changes is who
+holds the engine object the loop reads, which thread the sink runs on, and how
+the host reaches the server. The
 in-process arrangement stays available: it is what every existing test runs,
 and the flag below selects between the two.
 
@@ -163,10 +204,22 @@ and the flag below selects between the two.
    both paths; the health route reads the relayed stats through the
    provider the bridge registers. The flag is registered in
    [`EXPERIMENTAL_OPTIONS.md`](../development/EXPERIMENTAL_OPTIONS.md).
-4. [ ] **The ON-arm suites under the worker.** The pattern integration tests
-   that run against a toolshed pass with the worker on; the serving memory
-   server used by in-process tests gains a worker mode over a temporary file
-   store, and the executor suites that can run under it do.
+4. [x] **The ON-arm suites under the worker.** The serving memory server
+   tests build (`serving-memory-server.deno.ts`) runs its loop in a worker
+   over a temporary file store when `SERVER_EXECUTION_WORKER` is `true`, and
+   refuses the closures a worker cannot take, so a test that hands the loop
+   one says `worker: false`. Under that variable, the suites built on it
+   pass: its own, the watermark and reviewed-send tests, the CLI's
+   agent-connections test, and the pattern integration tests the
+   `MultiRuntimeHarness` drives, with one open exception. The private-inbox
+   test, whose pieces span several spaces, fails or stalls under the worker:
+   the home space's serving runtime attempts foreign scoped reads and
+   foreign writes from `map` runs that in-process it never attempts, so the
+   append it waits for is refused or never derives. The evidence points at
+   the home runtime materializing a foreign space's derivations itself while
+   that space's own loop lags behind it, which the in-process ordering never
+   let happen; the cause is not yet pinned. A lane running the ON arm under
+   the worker is a question for stage 6, with the default.
 5. [ ] **Measure.** The vote probe and the Topics seed under the worker against
    the in-process loop on the same box: client watch-add latency, the
    per-vote and per-topic client cost, and the serving loop's own wave
