@@ -66,9 +66,11 @@ settled a position stored before this change is protected only once a write
 has installed the set, and the write that installs it may name code other
 than the pattern's own handler.
 
-- **Parking.** The spot list takes the writer contract with the first spot
-  change an admin makes; from then on other code is refused. Until then the
-  list is as writable as it was before.
+- **Parking.** The spot list is as writable as it was before until a write
+  installs a writer set. When an admin's spot change is that write, the list
+  names `commitParkingSpotChange` and refuses other code from then on; a
+  write by other code whose schema names a writer can install that writer
+  instead.
 - **Group chat.** `commitTrustedAdminToggle` rewrites the whole registry,
   restating `bootstrapAdmin`, whenever the everyone-is-admin setting changes,
   so the role takes the contract at the next such change. The restatement
@@ -95,7 +97,8 @@ Two behaviors change for callers:
   treats it as the caller's write even where it equals the default. The pattern's tests and its admin-view integration fixture now
   leave `spots` to its default. A composing parent can still pass a spots
   cell; a cell the parent seeded under its own schema carries no writer
-  until the first spot change an admin makes.
+  until a write installs one, which may be an admin's spot change or a write
+  by other code.
 - A bootstrap role links its subject's profile into a position that names its
   writer, and the runtime refuses to link a document that carries no label
   there. A real `#profile` carries its principal's label. The lobby tests'

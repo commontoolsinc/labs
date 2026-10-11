@@ -128,6 +128,8 @@ export type ChatAdminList = RequiresIntegrity<
  * carries the roster's `TrustedActionWrite` binding: only
  * `commitTrustedAdminToggle`, from a gesture on the trusted admin surface, may
  * modify it.
+ * A role stored before the role named its writer carries no writer until
+ * a write installs one.
  */
 export type ChatAdminBootstrapRole = TrustedActionWrite<
   AddIntegrity<

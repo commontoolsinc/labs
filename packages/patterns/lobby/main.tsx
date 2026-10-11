@@ -125,6 +125,8 @@ export type LobbyAdminList = RequiresIntegrity<
  * carries the same `TrustedActionWrite` binding as the roster: only
  * `commitTrustedLobbyAction`, from a gesture on the trusted lobby surface, may
  * modify it.
+ * A role stored before the role named its writer carries no writer until
+ * a write installs one.
  */
 export type LobbyAdminBootstrapRole = TrustedActionWrite<
   AddIntegrity<
