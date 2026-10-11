@@ -369,3 +369,24 @@ export const placementCells = (
       (placement.row + placement.dRow * i) * cols + placement.col +
       placement.dCol * i,
   );
+
+/**
+ * The hidden word whose run starts at one of the cells `a` and `b` and ends
+ * at the other, read either way, or undefined: what a player selects by
+ * tapping a word's first and last letter.
+ */
+export const placementBetween = (
+  puzzle: Pick<WordSearch, "cols" | "placements">,
+  a: number,
+  b: number,
+): Placement | undefined =>
+  puzzle.placements.find((p) => {
+    const cells = placementCells(p, puzzle.cols);
+    const first = cells[0];
+    const last = cells[cells.length - 1];
+    return (first === a && last === b) || (first === b && last === a);
+  });
+
+/** A placement's identity: its word and where it runs, so a reshuffled puzzle shares none. */
+export const placementKey = (p: Placement): string =>
+  `${p.word}@${p.row},${p.col},${p.dRow},${p.dCol}`;
