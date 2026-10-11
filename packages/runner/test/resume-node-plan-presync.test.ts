@@ -23,6 +23,7 @@ import { entityKey } from "../src/scheduler/keys.ts";
 import type { SessionFactory } from "../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { newSharedServer, TestStorageManager } from "./memory-v2-test-utils.ts";
+import { awaitReplica } from "./support/serving-waits.ts";
 
 const signer = await Identity.fromPassphrase("resume node plan presync");
 const space = signer.did();
@@ -511,16 +512,19 @@ describe("resume node plan pre-sync", () => {
       "late handle parent",
     );
     await rt2.idle();
+    // The resume found nothing to deliver, so the arrival waited on below is
+    // the write's.
+    expect(localOnB(counter)).toBe(false);
 
     const tx2 = rt1.edit();
     counter.withTx(tx2).set({ n: 1 });
     expect((await tx2.commit().settled).error).toBeUndefined();
-    await rt1.storageManager.synced();
-    await rt2.storageManager.synced();
-    // Read nothing here: a read of the document would kick its load and
-    // mask a subscription the pre-sync failed to leave. The handler's own
-    // read is the check.
-    expect(localOnB(counter)).toBe(true);
+    // The write reaches replica B in a fan-out frame the server sends on its
+    // refresh cadence, after it has answered the commit, so the wait is on
+    // that arrival. Nothing here reads the document: a read would kick its
+    // load and mask a subscription the pre-sync failed to leave. Without the
+    // subscription no frame carries the document and the wait never returns.
+    await awaitReplica(managerB, () => localOnB(counter));
 
     resumed.key("bump").send({});
     await rt2.idle();
