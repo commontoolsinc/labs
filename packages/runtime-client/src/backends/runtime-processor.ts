@@ -4097,12 +4097,15 @@ export class RuntimeProcessor {
       if (active) cancelRender = reconciler.mount(cell);
       return { rootId: reconciler.getRootNodeId() };
     };
-    if (!this.#runtime.viewScopedReplicationRequested) {
-      // In view-scoped replication the mount above is itself the demand that
-      // a visible root run; here a display has to ask (`runsPiece`).
+    // A view the server replicates is itself the demand that a visible root
+    // run; anywhere else a display has to ask (`runsPiece`).
+    const runPiece = () => {
       if (request.runsPiece !== undefined) {
-        this.#runDisplayedPiece(getCell(this.#runtime, request.runsPiece));
+        this.#runDisplayedPiece(request.runsPiece);
       }
+    };
+    if (!this.#runtime.viewScopedReplicationRequested) {
+      runPiece();
       return render();
     }
     return this.#runtime.viewReplication.mount(
@@ -4112,6 +4115,8 @@ export class RuntimeProcessor {
     ).then((cancel) => {
       if (!active) cancel?.();
       else cancelView = cancel;
+      // No cancel: the space does not replicate views, or has fallen back.
+      if (active && cancel === undefined) runPiece();
       return render();
     }).catch((error) => {
       mount.cancel();
@@ -4125,10 +4130,21 @@ export class RuntimeProcessor {
    * Starts the piece a mount displays, as opening it directly does
    * (`VDomMountRequest.runsPiece`), without taking it from a pattern that
    * owns it (`claims: false`). A cell that is not a piece, once its document
-   * has loaded, runs nothing. Not awaited: the render does not wait on a
+   * has loaded, runs nothing, and a reference that names no cell only warns:
+   * the render goes on either way. Not awaited: the render does not wait on a
    * start, and `Runtime.settled()` covers it.
    */
-  #runDisplayedPiece(piece: Cell<unknown>): void {
+  #runDisplayedPiece(ref: CellRef): void {
+    let piece: Cell<unknown>;
+    try {
+      piece = getCell(this.#runtime, ref);
+    } catch (error) {
+      displayLogger.warn("display-start", () => [
+        "A displayed piece's reference names no cell",
+        error,
+      ]);
+      return;
+    }
     const start = piece.sync()
       .then(() =>
         isPieceRoot(this.#runtime, piece)

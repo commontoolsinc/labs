@@ -5,11 +5,13 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { setPatternSource } from "../src/runner.ts";
 
 const signer = await Identity.fromPassphrase("inspace-child-reload");
 const spaceA = signer.did();
 const spaceB = (await Identity.fromPassphrase("inspace child target B")).did();
 const spaceC = (await Identity.fromPassphrase("inspace child target C")).did();
+const spaceD = (await Identity.fromPassphrase("inspace child target D")).did();
 
 // A handler that materializes a child piece in ANOTHER space via
 // `Child.inSpace(...)({...})` (the multi-profile flow: profile-create.tsx pushes
@@ -200,6 +202,81 @@ describe("inSpace child piece reload from its own space", () => {
       await childCell.pull();
       const value = childCell.getAsQueryResult() as { label: string };
       expect(value.label).toBe("static-hi");
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+  it("a parent resuming its child owns a run a display started first", async () => {
+    // A display starts what it shows without claiming it (`claims: false`),
+    // and may reach a child before the child's parent, resuming, does. The
+    // parent then owns that run, so stopping the parent stops it.
+    const PROGRAM_D: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "",
+            "export const child = pattern<{ label: string }>(({ label }) => ({",
+            "  label,",
+            "}));",
+            "",
+            "export default pattern(() => ({",
+            `  kid: child.inSpace("${spaceD}")({ label: 'displayed' }),`,
+            "}));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const rt1 = newRuntime();
+    const rt2 = newRuntime();
+    try {
+      const tx1 = rt1.edit();
+      const parent = await rt1.patternManager.compilePattern(PROGRAM_D, {
+        space: spaceA,
+        tx: tx1,
+      });
+      const resultCell1 = rt1.getCell<Record<string, unknown>>(
+        spaceA,
+        "inspace displayed child parent",
+        undefined,
+        tx1,
+      );
+      // deno-lint-ignore no-explicit-any
+      const r1 = rt1.run(tx1, parent as any, {}, resultCell1);
+      await tx1.commit().settled;
+      await r1.pull();
+      await rt1.idle();
+      const kidLink = r1.key("kid").asSchema(
+        // deno-lint-ignore no-explicit-any
+        { type: "unknown", asCell: ["cell"] } as any,
+        // deno-lint-ignore no-explicit-any
+      ).get() as any;
+      // A child with a source origin of its own, as a system pattern's
+      // cross-space child has, is resumed rather than run again on reload.
+      const stamp = rt1.edit();
+      setPatternSource(kidLink, stamp, "/api/patterns/displayed-child.tsx");
+      expect((await stamp.commit().settled).error).toBeUndefined();
+      await rt1.patternManager.flushCompileCacheWrites();
+      await rt1.storageManager.synced();
+
+      const child = rt2.getCellFromLink(kidLink.getAsNormalizedFullLink());
+      await child.sync();
+      expect(await rt2.start(child, { claims: false })).toBe(true);
+      const parentCell = rt2.getCellFromLink(
+        resultCell1.getAsNormalizedFullLink(),
+      );
+      await parentCell.sync();
+      expect(await rt2.start(parentCell)).toBe(true);
+      await rt2.idle();
+      expect(rt2.runner.isRunning(child)).toBe(true);
+
+      rt2.runner.stop(parentCell);
+      await rt2.idle();
+      expect(rt2.runner.isRunning(child)).toBe(false);
     } finally {
       await rt2.dispose();
       await rt1.dispose();

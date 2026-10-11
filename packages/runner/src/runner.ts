@@ -2123,6 +2123,13 @@ export class Runner {
   #servedReceiptCasLosses = 0;
 
   /**
+   * Registrations a start that does not claim (`claims: false`) installed,
+   * which no one owns yet. A parent's deferred start that finds one adopts it
+   * rather than yielding to it, as it would to a start with an owner.
+   */
+  #unclaimedRegistrations = new WeakSet<Cancel>();
+
+  /**
    * Results started in their own right rather than as part of an enclosing
    * pattern, which is what navigating to a nested result does. An enclosing
    * pattern releasing such a result leaves it running; only stopping it
@@ -4138,6 +4145,11 @@ export class Runner {
           }
           if (stillRunning && attempt.claims) {
             this.#independentlyStartedResults.add(target);
+            if (attempt.installedRegistration !== undefined) {
+              this.#unclaimedRegistrations.delete(
+                attempt.installedRegistration,
+              );
+            }
           }
           return stillRunning;
         })
@@ -4208,15 +4220,15 @@ export class Runner {
     // page that is still opening from being closed by its parent. An attempt
     // that then fails leaves the result registered until the runtime stops it,
     // which is the same bound the scheduler already accepts for a start that
-    // exhausts its retries. A start that does not claim, as a display's does,
-    // never gives the result a lifetime, so it does not hold the child; the
-    // stop below supersedes it.
+    // exhausts its retries. A start made with `claims: false`, as a display's
+    // is, never gives the result a lifetime, so it does not hold the child;
+    // the stop below supersedes it, installed or not.
     const attempts = this.#activeStartAttemptsByDoc.get(key);
     if (
       attempts !== undefined &&
       [...attempts].some((attempt) => attempt.claims !== false)
     ) return;
-    if (registration === undefined) {
+    if (registration === undefined && attempts === undefined) {
       // A commit-gated start installs nothing until its transaction commits,
       // so a launch whose child is still gated holds that child through the
       // pending start alone. Cancelling it is what keeps the child from
@@ -6063,6 +6075,9 @@ export class Runner {
       } catch (err) {
         return Promise.reject(err);
       }
+      if (attempt.claims === false) {
+        this.#unclaimedRegistrations.add(attempt.installedRegistration);
+      }
 
       return Promise.resolve(true);
     }
@@ -6125,6 +6140,9 @@ export class Runner {
             attempt.options?.parentPieceRootId,
           ),
         });
+        if (attempt.claims === false) {
+          this.#unclaimedRegistrations.add(attempt.installedRegistration);
+        }
       } finally {
         // Synchronous instantiation cost of the resumed piece (pattern
         // setup, node wiring), distinct from the syncs around it.
@@ -7287,11 +7305,14 @@ export class Runner {
             this.#cancels.has(target);
           if (stillRunning && ownership !== undefined) {
             const current = this.#cancels.get(target!);
+            const adopted = current !== undefined &&
+              this.#unclaimedRegistrations.delete(current);
             if (
-              attempt.installedRegistration === undefined ||
-              current !== attempt.installedRegistration
+              !adopted && (attempt.installedRegistration === undefined ||
+                current !== attempt.installedRegistration)
             ) {
-              // Not this walk's own registration: a COMPETING start claimed the
+              // Not this walk's own registration, nor one a start that does not
+              // claim left unowned: a COMPETING start claimed the
               // result while the walk was in flight — installing into the
               // registry the recovery's entry emptied needs no stop, so no
               // generation bump witnesses it, and doStart's already-started

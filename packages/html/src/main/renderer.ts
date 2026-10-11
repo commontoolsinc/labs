@@ -100,9 +100,9 @@ export class VDomRenderer {
    *
    * @param container - The DOM element to render into
    * @param cellRef - The cell reference to render
+   * @param options - `runsPiece`: see `RenderOptions.runsPiece`
    * @returns A cancel function to stop rendering
    */
-  /** `options.runsPiece`: see `RenderOptions.runsPiece`. */
   async render(
     container: HTMLElement,
     cellRef: CellRef,

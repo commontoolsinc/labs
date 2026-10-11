@@ -10,6 +10,7 @@ import {
   trustExecutable,
 } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import { observePendingDeferredStarts } from "./support/telemetry-observers.ts";
 import { createTransactionCommitReceipt } from "../src/storage/commit-receipt.ts";
@@ -160,6 +161,53 @@ describe("child run ownership", () => {
     await runtime.idle();
 
     expect(runtime.runner.cancels.has(key(child))).toBe(false);
+  });
+
+  it("lets a parent's release stop a child a start that does not claim has yet to install", async () => {
+    // A runtime that did not prepare the child loads it before installing it,
+    // so nothing is registered yet when the release comes; the display's start
+    // must not install the child afterwards.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          "import { pattern } from 'commonfabric';",
+          "export default pattern<{ value: number }>(({ value }) => ({ value }));",
+        ].join("\n"),
+      }],
+    };
+    const tx = runtime.edit();
+    const Piece = await runtime.patternManager.compilePattern(program, {
+      space,
+      tx,
+    });
+    const result = runtime.getCell<{ value: number }>(
+      space,
+      "released before a display's start installs",
+      undefined,
+      tx,
+    );
+    await runtime.setup(tx, Piece, { value: 3 }, result);
+    expect((await tx.commit().settled).error).toBeUndefined();
+    await runtime.patternManager.flushCompileCacheWrites();
+    await runtime.storageManager.synced();
+
+    const other = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      const theirs = other.getCellFromLink(result.getAsNormalizedFullLink());
+      await theirs.sync();
+      const displayStart = other.start(theirs, { claims: false });
+      other.runner.releaseChild(theirs, undefined);
+      await expect(displayStart).resolves.toBe(false);
+      await other.idle();
+      expect(other.runner.isRunning(theirs)).toBe(false);
+    } finally {
+      await other.dispose();
+    }
   });
 
   it("claims a nested child when a claiming start joins one that does not", async () => {

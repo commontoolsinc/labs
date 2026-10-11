@@ -40,6 +40,7 @@ import {
   entityIdFrom,
   type EventIntentOutcome,
   type IExtendedStorageTransaction,
+  isCell,
   parseLink,
   popFrame,
   pushFrame,
@@ -8432,13 +8433,15 @@ describe("runtime-processor", () => {
       }));
 
     /** Mounts `cell`, naming `runsPiece` as the piece displayed, and lets the
-     * runtime settle; the returned function unmounts. */
+     * runtime settle; the returned function unmounts. `processorRuntime`
+     * stands in for the runtime the worker sees. */
     async function mount(
       runtime: Runtime,
       cell: Cell<unknown>,
-      runsPiece: Cell<unknown> | undefined,
+      runsPiece: CellRef | Cell<unknown> | undefined,
+      processorRuntime: Runtime = runtime,
     ): Promise<() => Promise<void>> {
-      const state = buildProcessor({ runtime });
+      const state = buildProcessor({ runtime: processorRuntime });
       // handleVDomMount posts to the worker scope; stub it for this thread.
       const hadPostMessage = "postMessage" in globalThis;
       const originalPostMessage = (globalThis as any).postMessage;
@@ -8451,13 +8454,13 @@ describe("runtime-processor", () => {
         }
       };
       try {
-        state.handleVDomMount({
+        await state.handleVDomMount({
           type: RequestType.VDomMount,
           mountId: 1,
           cell: createCellRef(cell),
-          ...(runsPiece === undefined
-            ? {}
-            : { runsPiece: createCellRef(runsPiece) }),
+          ...(runsPiece === undefined ? {} : {
+            runsPiece: isCell(runsPiece) ? createCellRef(runsPiece) : runsPiece,
+          }),
         });
         await runtime.settled();
       } catch (error) {
@@ -8549,6 +8552,81 @@ describe("runtime-processor", () => {
         const unmount = await mount(runtime, plain.key("text"), plain);
         expect(runtime.runner.isRunning(plain)).toBe(false);
         expect(warnings()).toBe(before);
+        await unmount();
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    /** `runtime`, as the worker sees it with view-scoped replication asked
+     * for, where the server's registration of a mounted view answers
+     * `registration`. */
+    const viewScoped = (
+      runtime: Runtime,
+      registration: (() => void) | undefined,
+    ): Runtime =>
+      new Proxy(runtime, {
+        get(target, property) {
+          if (property === "viewScopedReplicationRequested") return true;
+          if (property === "viewReplication") {
+            return { mount: () => Promise.resolve(registration) };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+
+    it("starts a displayed piece where the space does not replicate views", async () => {
+      // View-scoped replication asked for, but the space has no view support
+      // or fell back: no view demands the piece, so the display asks.
+      const { runtime } = createRuntime();
+      try {
+        const piece = await doubler("piece in a space without views")(runtime);
+        const unmount = await mount(
+          runtime,
+          piece.key("doubled"),
+          piece,
+          viewScoped(runtime, undefined),
+        );
+        expect(runtime.runner.isRunning(piece)).toBe(true);
+        await unmount();
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("leaves a displayed piece to the view where the space replicates it", async () => {
+      const { runtime } = createRuntime();
+      try {
+        const piece = await doubler("piece in a space with views")(runtime);
+        const unmount = await mount(
+          runtime,
+          piece.key("doubled"),
+          piece,
+          viewScoped(runtime, () => {}),
+        );
+        expect(runtime.runner.isRunning(piece)).toBe(false);
+        await unmount();
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("renders a mount whose piece reference names no cell, and warns", async () => {
+      const { runtime } = createRuntime();
+      const warnings = () =>
+        getLogger("runtime-client.display").countsByKey["display-start"]
+          ?.warn ?? 0;
+      try {
+        const piece = await doubler("piece named by a broken reference")(
+          runtime,
+        );
+        // As it would arrive over the connection from a faulty client.
+        const broken: CellRef = JSON.parse('{"id":"of:no-space"}');
+        const before = warnings();
+        const unmount = await mount(runtime, piece.key("doubled"), broken);
+        expect(warnings()).toBe(before + 1);
+        expect(runtime.runner.isRunning(piece)).toBe(false);
         await unmount();
       } finally {
         await runtime.dispose();

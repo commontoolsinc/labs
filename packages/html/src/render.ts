@@ -32,10 +32,10 @@ export interface RenderOptions {
   /**
    * The piece the render displays, which then runs, as opening that piece
    * directly makes it run: it is started if it is not running, without taking
-   * it from a pattern that owns it. Apart from `view`, which can be a path
-   * into another document that only links to the piece; a cell that is not a
-   * piece runs nothing. Leave unset for a render that only reads, such as a
-   * chip naming a piece.
+   * it from a pattern that owns it. It is named apart from `view`, which can
+   * be a path into another document that only links to the piece. A cell that
+   * is not a piece runs nothing. Leave unset for a render that only reads,
+   * such as a chip naming a piece.
    */
   runsPiece?: CellHandle<unknown>;
 }
