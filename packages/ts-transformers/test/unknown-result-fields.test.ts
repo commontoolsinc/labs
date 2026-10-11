@@ -1275,6 +1275,397 @@ export default pattern(() => ({
       ]]);
     });
 
+    it("binds a call's type parameter from its best-priority candidates, then its default, then its constraint", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function makeNote(): Note<unknown> { return { ref: 1 }; }
+function wrap<T>(v: T): Note<T> { return { ref: v }; }
+function orNull<T>(a: T, b: T | null): T { return b ?? a; }
+function partly<T>(a: T, b: Partial<T>): T { return b ? a : a; }
+function blocked<T>(a: T, b: NoInfer<T>): T { return b ? a : a; }
+function constrained<T extends Note<unknown>>(): T { return makeNote() as T; }
+function only<T>(f: (x: T) => void): T { void f; return null as T; }
+function branch<T>(x: T extends string ? never : T): T { return x as T; }
+const contravariant = only((x: Note<unknown>) => void x);
+export default pattern(() => ({
+  orNull: orNull(makeNote(), wrap(op())),
+  partly: partly(makeNote(), { ref: op() }),
+  blocked: blocked(makeNote(), makeNote()),
+  constrained: constrained(),
+  contravariant: { inner: contravariant },
+  branch: branch(makeNote()),
+  orNullInferred: orNull(wrap(op()), makeNote()),
+  blockedInferred: blocked(wrap(op()), makeNote()),
+  branchInferred: branch(wrap(op())),
+}));`),
+      ).toEqual([[
+        "orNull.ref",
+        "orNullInferred.ref",
+        "blockedInferred.ref",
+        "branchInferred.ref",
+      ]]);
+    });
+
+    it("keeps the candidates the checker keeps, whatever order the arguments come in", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function makeNote(): Note<unknown> { return { ref: 1 }; }
+function wrap<T>(v: T): Note<T> { return { ref: v }; }
+class Box<T> { constructor(public ref: T) {} }
+const sample = new Box(op());
+function nullFirst<T>(b: T | null, a: T): T { return b ?? a; }
+function blocked<T>(a: T, b: NoInfer<T>): T { return b ? a : a; }
+function both<T>(x: T, f: (v: T) => void): T { return f ? x : x; }
+function free<T extends unknown>(): T { return null as T; }
+function firstAll<T>(...xs: T[]) { return xs[0]; }
+function split<T, U>(x: U[] | T): { t: T; u: U } {
+  return {} as { t: T; u: U };
+}
+function pickU<T>(x: T[] | T): T { return Array.isArray(x) ? x[0] : x; }
+type Maybe<T> = T | null;
+function pickM<T>(a: Maybe<T>, b: T | null): T { return (a ?? b)!; }
+const maybe: Maybe<Note<unknown>> = makeNote();
+const looseList = [wrap(op())];
+const bothValue = both(makeNote(), (v: typeof sample) => void v);
+function only<T>(f: (x: T) => void): T { void f; return null as T; }
+const thisValue = only(function (this: void, x: typeof sample) { void x; });
+function freeNote<T extends unknown>(): Note<T> { return { ref: null as T }; }
+function partialFirst<T>(b: Partial<T>, a: T): T { return b ? a : a; }
+function selfOf<T>(this: T): T { return this; }
+class Carrier<T> {
+  selfOf = selfOf;
+  constructor(public ref: T) {}
+}
+const carrier = new Carrier(makeNote());
+function either<T>(x: T | Box<unknown>, y: T): T { return y ?? x; }
+function inner<T>(x: { v: T } | T, y: T): T { return y ?? x; }
+function intersected<T>(x: T & { n: number }): T { return x; }
+function narrowed<T>(x: T extends object ? T : never): T { return x as T; }
+export default pattern(() => ({
+  nullFirst: nullFirst(wrap(op()), makeNote()),
+  blocked: blocked(makeNote(), wrap(op())),
+  both: bothValue,
+  free: { v: free() },
+  spread: firstAll(...looseList),
+  split: split([makeNote()]),
+  single: pickU(wrap(op())),
+  aliased: pickM(maybe, wrap(op())),
+  thisCallback: { v: thisValue },
+  freeNote: freeNote(),
+  partialFirst: partialFirst({ ref: op() }, makeNote()),
+  carried: carrier.selfOf().ref,
+  closeMatch: either(sample, makeNote()),
+  matched: inner({ v: makeNote(), ref: op() }, makeNote()),
+  intersected: intersected({ ...makeNote(), n: 1 }),
+  narrowed: narrowed(makeNote()),
+}));`),
+      ).toEqual([[
+        "nullFirst.ref",
+        "free.v",
+        "spread.ref",
+        "single.ref",
+        "aliased.ref",
+        "thisCallback.v.ref",
+        "freeNote.ref",
+      ]]);
+    });
+
+    it("binds a field's written type as written, so a call returning it whole declares nothing, and follows a callback or a class however it is written", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function makeNote(): Note<unknown> { return { ref: 1 }; }
+function wrap<T>(v: T): Note<T> { return { ref: v }; }
+function note(): { ref: unknown } { return { ref: 1 }; }
+function idField<T>(n: Note<T>): T { return n.ref; }
+function getA<T>(o: { a: T }): T { return o.a; }
+function getU<T>(o: { u: T }): T { return o.u; }
+function first<T>(xs: readonly T[]) { return xs[0]; }
+function run<T>(options: { make: () => T }): T { return options.make(); }
+function build<T>(C: new () => T): T { return new C(); }
+function opened<T>(n: Note<T>) { return { inner: n.ref }; }
+function getRef<T>({ ref }: { ref: T }) { return { ref }; }
+function boxOn<T>(x: T) { return wrap(x); }
+class Defaulted<T = Note<unknown>> { value!: T; }
+const NoteMaker: new () => Note<unknown> = class { ref: unknown = 1; };
+const bagUnknown: { [key: string]: unknown } = {};
+const holder: { list: unknown[] } = { list: [] };
+const field: { u: unknown } = { u: 1 };
+const viaTypeof: typeof field = field;
+const eitherMaker: (() => Note<unknown>) | (() => Note<unknown>) = makeNote;
+const flag = [1].length > 0;
+export default pattern(() => ({
+  whole: { v: idField(makeNote()) },
+  indexed: { v: getA(bagUnknown) },
+  element: { v: first(holder.list) },
+  typeofField: { v: getU(viaTypeof) },
+  cast: opened(wrap(op()) as Note<unknown>),
+  constructed: build(NoteMaker),
+  defaulted: build(Defaulted),
+  union: run({ make: eitherMaker }),
+  either: computed(() => run(flag ? { make: makeNote } : { make: makeNote })),
+  destructured: getRef(note()),
+  passedOn: boxOn(makeNote().ref),
+}));`),
+      ).toEqual([["whole.v", "indexed.v", "element.v", "typeofField.v"]]);
+    });
+
+    it("reads a tuple argument, a tuple spread, and a rest tuple slot by slot", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function makeNote(): Note<unknown> { return { ref: 1 }; }
+function wrap<T>(v: T): Note<T> { return { ref: v }; }
+function firstOf<T, U>(pair: [T, U]): T { return pair[0]; }
+function firstHeld<T, U>(pair: readonly [T, U]): T { return pair[0]; }
+function firstPassed<T, U>(a: T, b: U): T { return b ? a : a; }
+function firstRest<T, U>(...args: [T, U]): T { return args[0]; }
+const args: [Note<unknown>, unknown] = [makeNote(), op()];
+const held = [makeNote(), op()] as const;
+const loose = [wrap(op()), makeNote()] as const;
+export default pattern(() => ({
+  pair: firstOf([makeNote(), op()]),
+  held: firstHeld(held),
+  spread: firstPassed(...args),
+  rest: firstRest(makeNote(), op()),
+  pairInferred: firstOf([wrap(op()), 1]),
+  spreadInferred: firstPassed(...loose),
+  restInferred: firstRest(wrap(op()), 1),
+}));`),
+      ).toEqual([[
+        "pairInferred.ref",
+        "spreadInferred.ref",
+        "restInferred.ref",
+      ]]);
+    });
+
+    it("reads a parameter's type by its members, inherited ones included, its signatures, and the type arguments of an instance the argument makes", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function makeNote(): Note<unknown> { return { ref: 1 }; }
+function wrap<T>(v: T): Note<T> { return { ref: v }; }
+interface Parent<T> { value: T }
+interface Child<T> extends Parent<T> {}
+function inherited<T>(x: Child<T>): T { return x.value; }
+function via<T>(o: { get(): T }): T { return o.get(); }
+class Maker { ref: unknown = 1; }
+class Loose { ref = op(); }
+function build<T>(C: new () => T): T { return new C(); }
+function recordOf<K extends string, T>(r: Record<K, T>): T {
+  return Object.values(r)[0] as T;
+}
+function mapped<T>(m: Map<string, T>) { return m.get("a")!; }
+const viaLoose = via({ get: () => wrap(op()) });
+export default pattern(() => ({
+  inherited: inherited({ value: makeNote() }),
+  via: via({ get: makeNote }),
+  built: build(Maker),
+  record: recordOf({ a: makeNote() }),
+  mapped: mapped(new Map([["a", makeNote()]])),
+  inheritedInferred: inherited({ value: wrap(op()) }),
+  viaInferred: viaLoose,
+  builtInferred: build(Loose),
+  recordInferred: recordOf({ a: wrap(op()) }),
+  mappedInferred: mapped(new Map([["a", wrap(op())]])),
+}));`),
+      ).toEqual([[
+        "inheritedInferred.ref",
+        "viaInferred.ref",
+        "builtInferred.ref",
+        "recordInferred.ref",
+        "mappedInferred.ref",
+      ]]);
+    });
+
+    it("follows an argument or a receiver through bindings, annotations, members, and calls to where its parts were written", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function makeNote(): Note<unknown> { return { ref: 1 }; }
+function wrap<T>(v: T): Note<T> { return { ref: v }; }
+function load<T>(opts: { load: () => T }): T { return opts.load(); }
+interface Load<T> { load: () => T }
+function loadVia<T>(opts: Load<T>): T { return opts.load(); }
+class Holder<T> {
+  constructor(public value: T) {}
+  read(): T { return this.value; }
+}
+class Child<T> extends Holder<T> {}
+type H<T> = Holder<T>;
+function holder() { return new Holder(makeNote()); }
+const opts = { load: makeNote };
+const annotated: { load: () => Note<unknown> } = { load: makeNote };
+const viaInterface: Load<Note<unknown>> = { load: makeNote };
+const looseOpts = { load: () => wrap(op()) };
+const child = new Child(makeNote());
+const aliased: H<Note<unknown>> = new Holder(makeNote());
+const member = { holder: new Holder(makeNote()) };
+const looseMember = { holder: new Holder(wrap(op())) };
+export default pattern(() => ({
+  opts: load(opts),
+  annotated: load(annotated),
+  viaInterface: loadVia(viaInterface),
+  child: child.read(),
+  aliased: aliased.read(),
+  member: member.holder.read(),
+  called: holder().read(),
+  optsInferred: load(looseOpts),
+  memberInferred: looseMember.holder.read(),
+}));`),
+      ).toEqual([["optsInferred.ref", "memberInferred.ref"]]);
+    });
+
+    it("follows an argument to where each of its parts was written, however the argument is written", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function makeNote(): Note<unknown> { return { ref: 1 }; }
+function wrap<T>(v: T): Note<T> { return { ref: v }; }
+function passOn<T>(x: T) { return x; }
+function opened<T>(note: Note<T>) { return { inner: note.ref }; }
+function first<T>(xs: readonly T[]) { return xs[0]; }
+function firstAll<T>(...xs: T[]) { return xs[0]; }
+function keyed<T>(bag: { [key: string]: T }) { return bag.a; }
+function byIndex<T>(xs: { [index: number]: T }): T { return xs[0]!; }
+function via<T>(o: { get(): T }): T { return o.get(); }
+function valueOf<T>(o: { readonly value: T }): T { return o.value; }
+function build<T>(C: new () => T): T { return new C(); }
+function mapped<T>(m: Map<string, T>) { return m.get("a")!; }
+function pickU<T>(x: T[] | T): T { return Array.isArray(x) ? x[0] : x; }
+function setAt<T, K extends keyof T>(o: T, k: K, v: T[K]): T {
+  return k && v ? o : o;
+}
+type Pair<T> = { left: T; right: number };
+function left<T>(p: Pair<T>) { return p.left; }
+function makePair(): Pair<Note<unknown>> { return { left: makeNote(), right: 1 }; }
+interface Repo<T> { get(): T }
+class Maker { ref: unknown = 1; }
+class OtherMaker { ref: unknown = 2; }
+enum Mode { On }
+const modes: { [key: string]: Mode } = {};
+const flag = [1].length > 0;
+const list = [makeNote()];
+const annotated: Array<Note<unknown>> = [makeNote()];
+const frozen: readonly Note<unknown>[] = [makeNote()];
+const wrapped: (Note<unknown>) = makeNote();
+const bag: { [key: string]: Note<unknown> } = {};
+const literalTyped: { a: Note<unknown> } = { a: makeNote() };
+const getter: { get(): Note<unknown> } = { get: makeNote };
+const repo: Repo<Note<unknown>> = { get: makeNote };
+const Ctor: new () => Maker = Maker;
+const maybeNote: Note<unknown> | undefined = makeNote();
+type Maybe<T> = T | null;
+function unmaybe<T>(m: Maybe<T>): T { return m!; }
+const maybe: Maybe<Note<unknown>> = makeNote();
+interface Picked extends Pick<Note<unknown>, "ref"> {}
+const picked: Picked = { ref: 1 };
+const viaMethod = via({ get() { return makeNote(); } });
+const viaGetter = valueOf({ get value() { return makeNote(); } });
+export default pattern<{ s: string }>(({ s }) => ({
+  satisfied: opened(makeNote() satisfies Note<unknown>),
+  spreadList: firstAll(...list),
+  arrayAnnotated: first(annotated),
+  readonlyAnnotated: first(frozen),
+  parenthesized: opened(wrapped),
+  indexed: keyed(bag),
+  anyMember: keyed(literalTyped),
+  byIndex: byIndex([makeNote()]),
+  byIndexAnnotated: byIndex(annotated),
+  byIndexReadonly: byIndex(frozen),
+  modes: keyed(modes),
+  emptyBag: { v: keyed({}) },
+  emptyIndex: { v: byIndex([]) },
+  unionedIndex: keyed(flag ? { a: makeNote() } : { a: makeNote() }),
+  unionedArray: pickU(flag ? [makeNote()] : makeNote()),
+  indexedTarget: setAt(makeNote(), "ref", op()),
+  builtEither: build(flag ? Maker : OtherMaker),
+  nullable: opened(maybeNote!),
+  aliasArgument: unmaybe(maybe),
+  picked: opened(picked),
+  methodSignature: via(getter),
+  interfaceMethod: via(repo),
+  constructorType: build(Ctor),
+  method: viaMethod,
+  getter: viaGetter,
+  aliasResult: left(makePair()),
+  typedMap: mapped(new Map<string, Note<unknown>>()),
+  spreadLiteral: opened({ ...makeNote() }),
+  castTypeof: opened(wrapped as typeof wrapped),
+  none: passOn(undefined),
+  chosen: computed(() => passOn(flag ? makeNote() : wrap(op()))),
+  dynamic: computed(() => passOn({ a: makeNote(), b: wrap(op()) }[s])),
+  byIndexInferred: byIndex([wrap(op())]),
+}));`),
+      ).toEqual([[
+        "emptyBag.v",
+        "chosen.ref",
+        "dynamic.ref",
+        "byIndexInferred.ref",
+      ]]);
+    });
+
+    it("reads every kind of parameter type the checker infers through: the receiver, keys, templates, a value or its thunk, and a generic rest", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function makeNote(): Note<unknown> { return { ref: 1 }; }
+function wrap<T>(v: T): Note<T> { return { ref: v }; }
+function self<T>(this: T): T { return this; }
+const holder = { n: makeNote(), self };
+const looseHolder = { n: wrap(op()), self };
+function pickKey<T>(o: T, k: keyof T): T { return k ? o : o; }
+function tagged<T extends string>(x: \`id-\${T}\`): T { return x.slice(3) as T; }
+function lazy<T>(x: T | (() => T)): T {
+  return typeof x === "function" ? (x as () => T)() : x;
+}
+function collect<T extends unknown[]>(...args: T): T { return args; }
+const lazyLoose = lazy(() => wrap(op()));
+function renamedIn<T>(r: { [K in keyof T as \`x_\${string & K}\`]: T[K] }): T {
+  return r as unknown as T;
+}
+export default pattern(() => ({
+  self: holder.self().n,
+  key: pickKey(makeNote(), "ref"),
+  tag: tagged("id-a"),
+  lazyValue: lazy(makeNote()),
+  lazyThunk: lazy(makeNote),
+  selfInferred: looseHolder.self().n,
+  lazyInferred: lazyLoose,
+  collected: collect(makeNote(), op()),
+  remapped: { v: renamedIn({ x_ref: makeNote() }) },
+}));`),
+      ).toEqual([[
+        "selfInferred.ref",
+        "lazyInferred.ref",
+        "collected[]",
+        "remapped.v",
+      ]]);
+    });
+
+    it("reads an indexed access type by each key its index type's literals name", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function makeNote(): Note<unknown> { return { ref: 1 }; }
+function wrap<T>(v: T): Note<T> { return { ref: v }; }
+const sample = { a: makeNote(), b: makeNote(), bad: wrap(op()) };
+type Key = "a";
+function one(): (typeof sample)[Key] { return sample.a; }
+function either(): (typeof sample)["a" | "b"] { return sample.a; }
+function any(): (typeof sample)["a" | "bad"] { return sample.a; }
+function wide(): Record<string, number>[string] { return 1; }
+export default pattern(() => ({
+  one: one(),
+  either: either(),
+  any: any(),
+  wide: wide(),
+}));`),
+      ).toEqual([["any.ref"]]);
+    });
+
     it("reads a call's type parameters from the arguments that supply them, however a parameter receives one", async () => {
       expect(
         await reportedPaths(`function op(): unknown { return 1; }
@@ -1481,6 +1872,7 @@ function wrap<T>(v: T): Note<T> { return { ref: v }; }
 const lifted = lift<number, typeof sample>(() => sample);
 class Loaded { ref = op(); }
 function keep() { return written; }
+type OrSample<T> = T | typeof sample;
 export default pattern(() => ({
   result: computed(() => {
     const held: typeof sample = sample;
@@ -1507,11 +1899,12 @@ export default pattern(() => ({
     const awaitedKept: Awaited<ReturnType<typeof keep>> = keep();
     const awaitedClass: Awaited<Loaded> = new Loaded();
     const defaulted: Default<Loaded> = new Loaded();
+    const unioned: OrSample<Box<string>> = sample;
     const awaitedList: Awaited<{ list: unknown[] }> = { list: [] };
     const awaitedBag: Awaited<{ bag: Record<string, unknown> }> = { bag: {} };
     return {
       held, picked, extended, kept, field, renamed, indexed, recorded, tree,
-      bag, parts, loose, element, awaited, awaitedKept, defaulted, awaitedClass, awaitedList, awaitedBag,
+      bag, parts, loose, element, awaited, awaitedKept, defaulted, unioned, awaitedClass, awaitedList, awaitedBag,
       cast: sample as typeof sample,
       member: holder().inner.ref,
     };
@@ -1534,6 +1927,7 @@ export default pattern(() => ({
         "result.element.e.ref",
         "result.awaited.ref",
         "result.defaulted.ref",
+        "result.unioned.ref",
         "result.awaitedClass.ref",
         "result.cast.ref",
         "result.member",

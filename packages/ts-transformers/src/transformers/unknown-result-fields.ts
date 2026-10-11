@@ -704,8 +704,16 @@ function accessedKeys(
   access: MemberAccess,
   checker: ts.TypeChecker,
 ): readonly string[] | undefined {
-  if (ts.isPropertyAccessExpression(access)) return [access.name.text];
-  const type = checker.getTypeAtLocation(access.argumentExpression);
+  return ts.isPropertyAccessExpression(access)
+    ? [access.name.text]
+    : literalKeys(checker.getTypeAtLocation(access.argumentExpression));
+}
+
+/**
+ * The keys a key of `type` may be: each literal of a literal type or a union
+ * of them, or `undefined` for a type that is no literal.
+ */
+function literalKeys(type: ts.Type): readonly string[] | undefined {
   const literals = type.isUnion() ? type.types : [type];
   return literals.every((literal) =>
       literal.isStringLiteral() || literal.isNumberLiteral()
@@ -1442,6 +1450,7 @@ function newReading(): TypeReading {
     tracing: new Set(),
     substitution: new Map(),
     nodeOpen: new Map(),
+    inferenceDepth: 0,
   };
 }
 
@@ -1487,6 +1496,9 @@ interface TypeReading {
    * type, are open, so a type that holds itself is read a bounded depth.
    */
   readonly nodeOpen: Map<ts.Node, number>;
+
+  /** How deep `inferFrom()` is reading, across the calls it reads into. */
+  inferenceDepth: number;
 }
 
 //
@@ -1717,11 +1729,11 @@ function returnProvenance(
 }
 
 /** What `read` gives with `reading` reading under `substitution`. */
-function withSubstitution(
+function withSubstitution<T>(
   reading: TypeReading,
   substitution: Substitution,
-  read: () => DeclaredPositions,
-): DeclaredPositions {
+  read: () => T,
+): T {
   const outer = reading.substitution;
   reading.substitution = substitution;
   try {
@@ -1794,10 +1806,17 @@ function symbolProvenance(
       : ts.isBindingElement(declaration)
       ? getDeclaredTypeNodeForBindingElement(declaration, checker)
       : undefined;
-  // A destructured binding's type is inferred from the field's written type,
-  // and holds the field's value whole.
+  // A destructured binding holds the field's value, as the field's written
+  // type declares it, until something reassigns it, after which its type,
+  // inferred from the field's, declares only what a whole value of it does.
   const written = writtenNode
-    ? readTypeNode(writtenNode, reading.substitution, false, checker, reading)
+    ? readTypeNode(
+      writtenNode,
+      reading.substitution,
+      ts.isBindingElement(declaration) && !reassigned(resolved, checker),
+      checker,
+      reading,
+    )
     : false;
   if (
     writtenNode && !ts.isBindingElement(declaration) &&
@@ -1936,16 +1955,23 @@ function traceProvenance(
 //
 // What each type parameter of a call, a construction, or a written type
 // stands for in a reading: the type argument written for it, or what the
-// arguments passed supply it, as matching each argument against the type its
-// parameter writes finds it, or, where nothing can supply it, its written
-// default. One left unbound was inferred from nothing the reading knows, and
-// declares nothing.
+// arguments passed supply it, or, where nothing can supply it, its written
+// default or constraint. One left unbound was inferred from nothing the
+// reading knows, and declares nothing.
+//
+// What the arguments supply is found the way the checker infers type
+// arguments (`inferTypeArguments()` and `inferTypes()` in TypeScript's
+// checker): each argument is read against the type of the parameter it is
+// passed to, through that type's structure, and only the candidates found at
+// the best priority count. Where the checker reads an argument's type, this
+// reads its provenance, through a `Source` that follows the argument to where
+// each of its parts was written.
 //
 
 /** What a type parameter stands for in a reading. */
 type TypeArgument = WrittenArgument | InferredArgument;
 
-/** A type argument written out, or a written default. */
+/** A type argument written out, or a written default or constraint. */
 interface WrittenArgument {
   /** Which kind of type argument this is. */
   readonly kind: "written";
@@ -1971,10 +1997,11 @@ type Substitution = ReadonlyMap<ts.TypeParameterDeclaration, TypeArgument>;
 
 /**
  * What each type parameter of `declaration` stands for in `call`: its written
- * type argument, or the arguments the call infers it from, or, where none
- * can, its default. A method's call also binds the type parameters of the
- * class or the interface declaring it, as `receiverSubstitution()` finds the
- * value it is called on gives them.
+ * type argument, or what the arguments infer, as `inferFromArguments()` finds
+ * it. A method's call also binds the type parameters of the class or the
+ * interface declaring it, as the value it is called on instantiates them, and
+ * the type parameters of the declaration whose body holds the call keep what
+ * they stand for.
  */
 function callSubstitution(
   declaration: ts.SignatureDeclaration,
@@ -1982,16 +2009,16 @@ function callSubstitution(
   checker: ts.TypeChecker,
   reading: TypeReading,
 ): Substitution {
-  const receiver = ts.isCallExpression(call) && methodCallee(call)?.receiver;
+  const receiver = ts.isCallExpression(call)
+    ? methodCallee(call)?.receiver
+    : undefined;
   const owner = declaration.parent;
-  // The type parameters of the declaration whose body holds the call keep
-  // what they stand for, as a callback's type naming them does.
   const outer = new Map([
     ...reading.substitution,
     ...(receiver &&
         (ts.isClassLike(owner) || ts.isInterfaceDeclaration(owner)) &&
         owner.typeParameters?.length
-      ? receiverSubstitution(receiver, owner, checker, reading)
+      ? valueSource(receiver, checker, reading).instance(owner) ?? []
       : []),
   ]);
   const own = declaration.typeParameters ?? [];
@@ -2002,85 +2029,24 @@ function callSubstitution(
       ...bindTypeArguments(own, call.typeArguments, reading.substitution),
     ]);
   }
-  return new Map([
-    ...outer,
-    ...substitutionFrom(
-      own,
-      matchArguments(
-        declaration.parameters,
-        ts.isCallExpression(call) ? call.arguments : [],
-        new Set(own),
-        checker,
-        reading,
-      ),
-    ),
-  ]);
-}
-
-/**
- * What the type parameters of `owner` stand for in the value `receiver`
- * evaluates to: a binding's annotation naming `owner` with its type arguments,
- * or, as `definitionOf()` reads the receiver, the instance a construction of
- * `owner` makes or what a call's written return type names. Nothing is bound
- * for any other receiver.
- */
-function receiverSubstitution(
-  receiver: ts.Expression,
-  owner: ts.ClassLikeDeclaration | ts.InterfaceDeclaration,
-  checker: ts.TypeChecker,
-  reading: TypeReading,
-): Substitution {
-  const naming = (node: ts.TypeNode | undefined, substitution: Substitution) =>
-    node && ts.isTypeReferenceNode(node) &&
-      genericDeclaration(node, checker) === owner
-      ? bindTypeArguments(
-        owner.typeParameters ?? [],
-        node.typeArguments,
-        substitution,
-      )
-      : new Map<ts.TypeParameterDeclaration, TypeArgument>();
-  const inner = unwrapCallee(receiver);
-  const binding = ts.isIdentifier(inner)
-    ? bindingOf(checker.getSymbolAtLocation(inner), checker)?.declaration
-    : undefined;
-  if (
-    binding && (ts.isVariableDeclaration(binding) || ts.isParameter(binding)) &&
-    binding.type
-  ) {
-    return naming(binding.type, reading.substitution);
-  }
-  const definition = definitionOf(receiver, checker);
-  if (definition && ts.isNewExpression(definition)) {
-    return definitionOf(definition.expression, checker) === owner &&
-        ts.isClassLike(owner)
-      ? constructionSubstitution(owner, definition, checker, reading)
-      : naming(undefined, reading.substitution);
-  }
-  const declaration = definition && ts.isCallExpression(definition)
-    ? checker.getResolvedSignature(definition)?.declaration
-    : undefined;
-  return declaration && !ts.isJSDocSignature(declaration)
-    ? naming(
-      declaration.type,
-      callSubstitution(
-        declaration,
-        definition as ts.CallExpression,
-        checker,
-        reading,
-      ),
-    )
-    : naming(undefined, reading.substitution);
+  const inference = newInference(own, checker, reading);
+  inferFromArguments(
+    inference,
+    declaration,
+    ts.isCallExpression(call) ? call.arguments : [],
+    receiver,
+  );
+  return new Map([...outer, ...inferredSubstitution(own, inference)]);
 }
 
 /**
  * What each type parameter of `constructed` stands for in the instance
- * `construction` makes: its written type argument, or the arguments the
- * constructor infers it from, or, where none can, its default. An inherited
- * constructor's parameters are matched against the arguments in terms of the
- * class declaring it, and what that class's type parameters are found to hold
- * is matched down through each `extends` clause on the way to `constructed`.
- * Where the construction calls a constructor `constructed` neither declares
- * nor inherits through an `extends` clause this reads, no argument can name a
+ * `construction` makes: its written type argument, or what the arguments
+ * infer. An inherited constructor's parameters are read in terms of the class
+ * declaring it, and what that class's type parameters are inferred from is
+ * read down through each `extends` clause on the way to `constructed`. Where
+ * the construction calls a constructor `constructed` neither declares nor
+ * inherits through an `extends` clause this reads, no argument can name a
  * type parameter of `constructed`, so each takes its default.
  */
 function constructionSubstitution(
@@ -2097,45 +2063,41 @@ function constructionSubstitution(
       reading.substitution,
     );
   }
-  const passed = construction.arguments ?? [];
   const constructor = checker.getResolvedSignature(construction)?.declaration;
   const chain = constructor && ts.isConstructorDeclaration(constructor)
     ? classesUpTo(constructed, constructor.parent, checker)
     : undefined;
-  // A constructor `constructed` does not declare, or inherit through `extends`
-  // clauses this reads, has parameters no type parameter of it can be named
-  // in, and with none, every one takes its default.
   if (!constructor || !ts.isConstructorDeclaration(constructor) || !chain) {
-    return substitutionFrom(own, new Map());
+    return inferredSubstitution(own, newInference(own, checker, reading));
   }
-  let sites = matchArguments(
-    constructor.parameters,
-    passed,
-    new Set(constructor.parent.typeParameters ?? []),
+  let inference = newInference(
+    constructor.parent.typeParameters ?? [],
     checker,
     reading,
+  );
+  inferFromArguments(
+    inference,
+    constructor,
+    construction.arguments ?? [],
+    undefined,
   );
   for (let index = chain.length - 2; index >= 0; index--) {
     const child = chain[index]!;
     const heritage = extendsClause(child)!;
-    const below: InferenceSites = new Map();
+    const below = newInference(child.typeParameters ?? [], checker, reading);
     (chain[index + 1]!.typeParameters ?? []).forEach((parameter, position) => {
-      const found = sites.get(parameter);
+      const found = bestCandidates(inference, parameter);
       const argument = heritage.typeArguments?.[position];
       if (!found || !argument) return;
-      matchType(
-        argument,
-        matchedValue(() => found.reduce(alternatives, true)),
-        new Set(child.typeParameters ?? []),
+      inferFrom(
         below,
-        checker,
-        reading,
-        0,
+        unionSource(found),
+        checker.getTypeFromTypeNode(argument),
       );
     });
-    sites = below;
+    inference = below;
   }
-  return substitutionFrom(own, sites);
+  return inferredSubstitution(own, inference);
 }
 
 /**
@@ -2171,359 +2133,6 @@ function extendsClause(
     ?.types[0];
 }
 
-/** The provenance each inference site of a type parameter supplies. */
-type InferenceSites = Map<ts.TypeParameterDeclaration, DeclaredPositions[]>;
-
-/** A value matched against a written type. */
-interface MatchedValue {
-  /** The provenance of the value. */
-  positions(): DeclaredPositions;
-
-  /** The argument the value is passed as, where it is one. */
-  readonly expression?: ts.Expression;
-}
-
-/** A matched value whose provenance is read once, when first asked for. */
-function matchedValue(
-  read: () => DeclaredPositions,
-  expression?: ts.Expression,
-): MatchedValue {
-  let known: DeclaredPositions | undefined;
-  return {
-    positions: () => known ??= read(),
-    expression,
-  };
-}
-
-/**
- * The provenance each of `targets` is inferred from where `passed` is passed
- * to `parameters`: each argument matched against the written type of the
- * parameter it reaches, `this` aside. A spread argument reaches as many
- * parameters as its tuple type holds, or every one after it.
- */
-function matchArguments(
-  parameters: readonly ts.ParameterDeclaration[],
-  passed: readonly ts.Expression[],
-  targets: ReadonlySet<ts.TypeParameterDeclaration>,
-  checker: ts.TypeChecker,
-  reading: TypeReading,
-): InferenceSites {
-  const sites: InferenceSites = new Map();
-  const params = parameters.filter((parameter) =>
-    !(ts.isIdentifier(parameter.name) && parameter.name.text === "this")
-  );
-  const rest = params.at(-1)?.dotDotDotToken ? params.at(-1) : undefined;
-  const match = (index: number, value: MatchedValue) => {
-    const parameter = params[index] ?? rest;
-    if (!parameter?.type) return;
-    matchType(
-      parameter.type,
-      // A rest parameter holds an array of the arguments it collects.
-      parameter === rest
-        ? matchedValue(() => new Map([[ELEMENT_POSITIONS, value.positions()]]))
-        : value,
-      targets,
-      sites,
-      checker,
-      reading,
-      0,
-    );
-  };
-  let index = 0;
-  for (const argument of passed) {
-    if (!ts.isSpreadElement(argument)) {
-      match(
-        index++,
-        matchedValue(
-          () => typeProvenance(argument, checker, reading),
-          argument,
-        ),
-      );
-      continue;
-    }
-    const spread = matchedValue(() =>
-      below(
-        typeProvenance(argument.expression, checker, reading),
-        ELEMENT_POSITIONS,
-      )
-    );
-    const type = checker.getTypeAtLocation(argument.expression);
-    const tuple = checker.isTupleType(type)
-      ? (type as ts.TypeReference).target as ts.TupleType
-      : undefined;
-    if (tuple && !tuple.hasRestElement) {
-      for (let slot = 0; slot < tuple.fixedLength; slot++) {
-        match(index++, spread);
-      }
-    } else {
-      // Every parameter from here on may take a part of the spread value.
-      for (; index < params.length; index++) match(index, spread);
-      break;
-    }
-  }
-  return sites;
-}
-
-/**
- * The expression an object literal `expression` writes under `key`, if it
- * writes one there as a property's value or a shorthand property's name.
- */
-function propertyValue(
-  expression: ts.Expression,
-  key: PositionKey,
-): ts.Expression | undefined {
-  const literal = unwrapCallee(expression);
-  if (!ts.isObjectLiteralExpression(literal)) return undefined;
-  for (const property of literal.properties) {
-    if (
-      (ts.isPropertyAssignment(property) ||
-        ts.isShorthandPropertyAssignment(property)) &&
-      ts.isIdentifier(property.name) && property.name.text === key
-    ) {
-      return ts.isPropertyAssignment(property)
-        ? property.initializer
-        : property.name;
-    }
-  }
-  return undefined;
-}
-
-/** The type a tuple element written `element` holds. */
-function tupleElementType(element: ts.TypeNode): ts.TypeNode {
-  const rest = ts.isRestTypeNode(element) ||
-    (ts.isNamedTupleMember(element) && !!element.dotDotDotToken);
-  const type =
-    ts.isNamedTupleMember(element) || ts.isOptionalTypeNode(element) ||
-      ts.isRestTypeNode(element)
-      ? element.type
-      : element;
-  // A rest element written as an array type holds that array's elements.
-  return rest && ts.isArrayTypeNode(type) ? type.elementType : type;
-}
-
-/**
- * Records in `sites` where `value`, matched against the written type `node`,
- * supplies one of `targets`: at a reference to it, and through the parts of
- * literals, arrays, tuples, unions, reactive wrappers, a callback's return
- * type, and the members of a generic declaration, nested at most
- * `MAX_TYPE_NESTING` deep, each argument of which is matched against what its
- * parameter is found to hold. A callback's parameters supply nothing: the call
- * types them. A target named anywhere else is inferred from something the
- * match does not read, which declares nothing.
- */
-function matchType(
-  node: ts.TypeNode,
-  value: MatchedValue,
-  targets: ReadonlySet<ts.TypeParameterDeclaration>,
-  sites: InferenceSites,
-  checker: ts.TypeChecker,
-  reading: TypeReading,
-  depth: number,
-): void {
-  const named = typeParametersIn(node, checker);
-  if (!named.some((parameter) => parameter && targets.has(parameter))) return;
-  const recur = (inner: ts.TypeNode, innerValue: MatchedValue) =>
-    matchType(inner, innerValue, targets, sites, checker, reading, depth);
-  // The parts under keys a match cannot name are any of the value's parts.
-  const part = (key: PositionKey) =>
-    matchedValue(
-      () =>
-        key === UNNAMED_POSITIONS
-          ? anyPart(value.positions())
-          : below(value.positions(), key),
-      value.expression && propertyValue(value.expression, key),
-    );
-  if (ts.isParenthesizedTypeNode(node)) return recur(node.type, value);
-  if (
-    ts.isTypeOperatorNode(node) &&
-    node.operator === ts.SyntaxKind.ReadonlyKeyword
-  ) {
-    return recur(node.type, value);
-  }
-  if (ts.isUnionTypeNode(node) || ts.isIntersectionTypeNode(node)) {
-    for (const member of node.types) recur(member, value);
-    return;
-  }
-  if (ts.isArrayTypeNode(node)) {
-    return recur(node.elementType, part(ELEMENT_POSITIONS));
-  }
-  if (ts.isTupleTypeNode(node)) {
-    for (const element of node.elements) {
-      recur(tupleElementType(element), part(ELEMENT_POSITIONS));
-    }
-    return;
-  }
-  if (ts.isTypeLiteralNode(node)) {
-    for (const member of node.members) {
-      matchMember(member, recur, part, checker);
-    }
-    return;
-  }
-  if (
-    (ts.isFunctionTypeNode(node) || ts.isConstructorTypeNode(node)) &&
-    value.expression
-  ) {
-    const expression = value.expression;
-    recur(
-      node.type,
-      matchedValue(() => functionProvenance(expression, checker, reading)),
-    );
-    // A callback's parameters are typed from the call, not the other way.
-    return;
-  }
-  if (ts.isTypeReferenceNode(node)) {
-    const parameter = typeParameterFor(node, checker);
-    if (parameter) {
-      if (targets.has(parameter)) addSite(sites, parameter, value.positions());
-      return;
-    }
-    const args = node.typeArguments ?? [];
-    const type = checker.getTypeFromTypeNode(node);
-    if (args.length === 1 && wrapsPayload(type, checker)) {
-      return recur(args[0]!, value);
-    }
-    if (args.length === 1 && checker.isArrayType(type)) {
-      return recur(args[0]!, part(ELEMENT_POSITIONS));
-    }
-    const declaration = genericDeclaration(node, checker);
-    if (declaration?.typeParameters?.length) {
-      // A declaration nested in itself repeats what the levels above match.
-      if (depth >= MAX_TYPE_NESTING) return;
-      // Match the declaration's own structure against the value, then each
-      // argument against what its parameter was found to hold.
-      const inner = new Set(declaration.typeParameters);
-      const innerSites: InferenceSites = new Map();
-      const innerMatch = (member: ts.TypeNode, memberValue: MatchedValue) =>
-        matchType(
-          member,
-          memberValue,
-          inner,
-          innerSites,
-          checker,
-          reading,
-          depth + 1,
-        );
-      if (ts.isTypeAliasDeclaration(declaration)) {
-        innerMatch(declaration.type, value);
-      } else {
-        for (const member of declaration.members) {
-          matchMember(member, innerMatch, part, checker);
-          // A parameter property is a member the constructor declares.
-          if (ts.isConstructorDeclaration(member)) {
-            for (const parameter of member.parameters) {
-              if (ts.getModifiers(parameter)?.length) {
-                matchMember(parameter, innerMatch, part, checker);
-              }
-            }
-          }
-        }
-      }
-      declaration.typeParameters.forEach((innerParameter, index) => {
-        const argument = args[index];
-        const found = innerSites.get(innerParameter);
-        if (!argument) return;
-        if (!found) {
-          // Inferred through a part the match does not read.
-          markMentioned(argument, targets, sites, checker);
-          return;
-        }
-        recur(
-          argument,
-          matchedValue(() => found.reduce(alternatives, true)),
-        );
-      });
-      return;
-    }
-  }
-  markMentioned(node, targets, sites, checker);
-}
-
-/**
- * Helper for `matchType()`, which matches the part of a value that `member`,
- * a member of a written object type, declares against the type the member
- * writes: a property's, a parameter property's, or an index signature's for
- * the parts under keys a match cannot name. A method's type is matched only
- * through the value's other members.
- */
-function matchMember(
-  member: ts.Node,
-  match: (type: ts.TypeNode, value: MatchedValue) => void,
-  part: (key: PositionKey) => MatchedValue,
-  checker: ts.TypeChecker,
-): void {
-  if (ts.isIndexSignatureDeclaration(member)) {
-    match(member.type, part(UNNAMED_POSITIONS));
-    return;
-  }
-  if (
-    !(ts.isPropertySignature(member) || ts.isPropertyDeclaration(member) ||
-      ts.isParameter(member)) || !member.type
-  ) {
-    return;
-  }
-  const key = ts.isParameter(member)
-    ? ts.isIdentifier(member.name) ? member.name.text : undefined
-    : getPropertyNameText(member.name, checker);
-  match(member.type, part(key ?? UNNAMED_POSITIONS));
-}
-
-/**
- * Records each of `targets` that `node` names as inferred from something the
- * match does not read.
- */
-function markMentioned(
-  node: ts.Node,
-  targets: ReadonlySet<ts.TypeParameterDeclaration>,
-  sites: InferenceSites,
-  checker: ts.TypeChecker,
-): void {
-  for (const named of typeParametersIn(node, checker)) {
-    if (named && targets.has(named)) addSite(sites, named, false);
-  }
-}
-
-/**
- * Records that `parameter` is inferred, among its other sites, from a value
- * with `positions`.
- */
-function addSite(
-  sites: InferenceSites,
-  parameter: ts.TypeParameterDeclaration,
-  positions: DeclaredPositions,
-): void {
-  const list = sites.get(parameter);
-  if (list) list.push(positions);
-  else sites.set(parameter, [positions]);
-}
-
-/**
- * The substitution for `parameters` given `sites`: each parameter inferred
- * from what its sites supply, as alternatives, or, with none, standing for its
- * written default, or, with neither, unbound.
- */
-function substitutionFrom(
-  parameters: readonly ts.TypeParameterDeclaration[],
-  sites: InferenceSites,
-): Substitution {
-  const substitution = new Map<ts.TypeParameterDeclaration, TypeArgument>();
-  for (const parameter of parameters) {
-    const found = sites.get(parameter);
-    if (found?.length) {
-      substitution.set(parameter, {
-        kind: "inferred",
-        positions: found.reduce(alternatives, true),
-      });
-    } else if (parameter.default) {
-      substitution.set(parameter, {
-        kind: "written",
-        node: parameter.default,
-        substitution,
-      });
-    }
-  }
-  return substitution;
-}
-
 /**
  * The substitution binding `parameters` to the type arguments `written`, each
  * read with `outer`, or, past them, to each parameter's default.
@@ -2551,6 +2160,1491 @@ function bindTypeArguments(
     }
   });
   return substitution;
+}
+
+/**
+ * The substitution `inference` gives `parameters`: each inferred from its
+ * candidates, covariant ones first, or, with none, standing for its written
+ * default, or else its written constraint, as the checker takes them. One
+ * with none of these is unbound.
+ */
+function inferredSubstitution(
+  parameters: readonly ts.TypeParameterDeclaration[],
+  inference: Inference,
+): Substitution {
+  const substitution = new Map<ts.TypeParameterDeclaration, TypeArgument>();
+  for (const parameter of parameters) {
+    const found = bestCandidates(inference, parameter);
+    const written = parameter.default ??
+      (parameter.constraint && !isUnconstrained(parameter.constraint)
+        ? parameter.constraint
+        : undefined);
+    // A single candidate written out stands for the type written, which
+    // declares a reference wherever the parameter is a field's type.
+    const [only] = found ?? [];
+    const writing = found?.length === 1 ? only!.written : undefined;
+    if (writing) {
+      substitution.set(parameter, { kind: "written", ...writing });
+    } else if (found) {
+      substitution.set(parameter, {
+        kind: "inferred",
+        positions: found
+          .map((candidate) => candidate.positions())
+          .reduce(alternatives, true),
+      });
+    } else if (written) {
+      substitution.set(parameter, {
+        kind: "written",
+        node: written,
+        substitution,
+      });
+    }
+  }
+  return substitution;
+}
+
+/**
+ * Whether the constraint `node` admits `unknown`, which a type parameter with
+ * no candidate then takes.
+ */
+function isUnconstrained(node: ts.TypeNode): boolean {
+  return node.kind === ts.SyntaxKind.UnknownKeyword ||
+    node.kind === ts.SyntaxKind.AnyKeyword;
+}
+
+//
+// Inference
+//
+
+/** What `inferFrom()` collects for the type parameters of one call. */
+interface Inference {
+  /** The checker every type is read through. */
+  readonly checker: ts.TypeChecker;
+
+  /** The reading the arguments' provenance is read within. */
+  readonly reading: TypeReading;
+
+  /** The type parameters being inferred, by their type. */
+  readonly targets: ReadonlyMap<ts.Type, ts.TypeParameterDeclaration>;
+
+  /** The candidates found so far, by type parameter. */
+  readonly candidates: Map<ts.TypeParameterDeclaration, Candidates>;
+
+  /** The priority inferences are made at; lower takes precedence. */
+  priority: number;
+
+  /** Whether inferences are made from a parameter's position. */
+  contravariant: boolean;
+
+  /** Whether each type mentions a type parameter being inferred. */
+  readonly mentions: Map<ts.Type, boolean>;
+
+  /** How many candidates have been recorded, at whatever priority. */
+  recorded: number;
+}
+
+/** The candidates a type parameter is inferred from, at one priority. */
+interface Candidates {
+  /** The priority they were found at. */
+  readonly priority: number;
+
+  /** Each candidate found in a covariant position. */
+  readonly covariant: Source[];
+
+  /** Each candidate found in a contravariant position. */
+  readonly contravariant: Source[];
+}
+
+/**
+ * Priorities a candidate is found at, as the checker ranks them: a candidate
+ * found only at a worse priority is discarded once one at a better priority is
+ * found.
+ */
+const InferencePriority = {
+  /** A type parameter alone among a union's or an intersection's members. */
+  NakedTypeVariable: 1,
+  /** A homomorphic mapped type, read backwards. */
+  HomomorphicMappedType: 8,
+  /** A mapped type's key constraint. */
+  MappedTypeConstraint: 32,
+  /** A branch of a conditional type, in a contravariant position. */
+  ContravariantConditional: 64,
+  /** `keyof T`. */
+  LiteralKeyof: 256,
+} as const;
+
+/** How deep `inferFrom()` reads before it takes what it has. */
+const MAX_INFERENCE_DEPTH = 8;
+
+/** An inference of `parameters` with nothing found yet. */
+function newInference(
+  parameters: readonly ts.TypeParameterDeclaration[],
+  checker: ts.TypeChecker,
+  reading: TypeReading,
+): Inference {
+  return {
+    checker,
+    reading,
+    targets: new Map(
+      parameters.map((parameter) => [
+        checker.getTypeAtLocation(parameter.name),
+        parameter,
+      ]),
+    ),
+    candidates: new Map(),
+    priority: 0,
+    contravariant: false,
+    mentions: new Map(),
+    recorded: 0,
+  };
+}
+
+/**
+ * What `parameter` is inferred from, at the best priority: the covariant
+ * candidates, or, with none, the contravariant ones.
+ */
+function bestCandidates(
+  inference: Inference,
+  parameter: ts.TypeParameterDeclaration,
+): Source[] | undefined {
+  const found = inference.candidates.get(parameter);
+  const candidates = found?.covariant.length
+    ? found.covariant
+    : found?.contravariant;
+  return candidates?.length ? candidates : undefined;
+}
+
+/** Records `candidate` as one for `parameter` at the current priority. */
+function addCandidate(
+  inference: Inference,
+  parameter: ts.TypeParameterDeclaration,
+  candidate: Source,
+): void {
+  let found = inference.candidates.get(parameter);
+  if (!found || inference.priority < found.priority) {
+    found = { priority: inference.priority, covariant: [], contravariant: [] };
+    inference.candidates.set(parameter, found);
+  } else if (inference.priority > found.priority) {
+    return;
+  }
+  (inference.contravariant ? found.contravariant : found.covariant).push(
+    candidate,
+  );
+  inference.recorded++;
+}
+
+/** What `read` does with `flag` added to the priority. */
+function atPriority(inference: Inference, flag: number, read: () => void) {
+  const outer = inference.priority;
+  inference.priority |= flag;
+  try {
+    read();
+  } finally {
+    inference.priority = outer;
+  }
+}
+
+/** What `read` does in the opposite variance. */
+function inverted(inference: Inference, read: () => void) {
+  inference.contravariant = !inference.contravariant;
+  try {
+    read();
+  } finally {
+    inference.contravariant = !inference.contravariant;
+  }
+}
+
+/**
+ * Infers what the arguments `passed` to the function `declaration` supply its
+ * type parameters, as the checker does: the receiver against the `this`
+ * parameter, each argument against the type of the parameter at its position,
+ * a spread of a tuple slot by slot and any other spread against every
+ * parameter after it, and the arguments a rest parameter collects as a tuple
+ * against its type.
+ */
+function inferFromArguments(
+  inference: Inference,
+  declaration: ts.SignatureDeclaration,
+  passed: readonly ts.Expression[],
+  receiver: ts.Expression | undefined,
+): void {
+  const { checker, reading } = inference;
+  const signature = checker.getSignatureFromDeclaration(declaration);
+  const thisParameter = signature?.thisParameter;
+  if (thisParameter && receiver) {
+    inferFrom(
+      inference,
+      valueSource(receiver, checker, reading),
+      checker.getTypeOfSymbol(thisParameter),
+    );
+  }
+  // The arguments by the position they reach, with a spread whose length is
+  // not known reaching every position after it.
+  const slots: Source[] = [];
+  let open: Source | undefined;
+  for (const argument of passed) {
+    if (!ts.isSpreadElement(argument)) {
+      slots.push(valueSource(argument, checker, reading));
+      continue;
+    }
+    const spread = valueSource(argument.expression, checker, reading);
+    const type = checker.getTypeAtLocation(argument.expression);
+    const tuple = checker.isTupleType(type)
+      ? (type as ts.TypeReference).target as ts.TupleType
+      : undefined;
+    if (tuple && !tuple.hasRestElement) {
+      for (let slot = 0; slot < tuple.fixedLength; slot++) {
+        slots.push(spread.element(slot));
+      }
+    } else {
+      open = spread.element();
+      break;
+    }
+  }
+  const parameters = signature?.parameters ?? [];
+  const last = declaration.parameters.at(-1);
+  const rest = last?.dotDotDotToken ? parameters.length - 1 : undefined;
+  const positional = rest ?? parameters.length;
+  for (let index = 0; index < positional; index++) {
+    const source = slots[index] ?? (index >= slots.length ? open : undefined);
+    if (!source) continue;
+    inferFrom(inference, source, checker.getTypeOfSymbol(parameters[index]!));
+  }
+  if (rest !== undefined) {
+    const collected = slots.slice(rest);
+    if (open) collected.push(open);
+    inferFrom(
+      inference,
+      tupleSource(collected, open !== undefined),
+      checker.getTypeOfSymbol(parameters[rest]!),
+    );
+  }
+}
+
+/**
+ * Infers what `source` supplies the type parameters `target` names, as the
+ * checker's `inferFromTypes()` does: a type parameter takes the source whole;
+ * `NoInfer<T>` supplies nothing, and another substitution type is read as its
+ * type variable; a union's and an intersection's members are read as
+ * `inferToMembers()` reads them; a conditional type's branches are each read;
+ * a homomorphic mapped type is read backwards; an array, a tuple, an instance
+ * of a generic declaration the source instantiates too, and any other object
+ * type by its members, signatures and index signatures, as
+ * `inferFromObjectType()` reads them.
+ */
+function inferFrom(inference: Inference, source: Source, target: ts.Type) {
+  if (!mentionsTargets(inference, target)) return;
+  // The inferences of calls read inside one another share one depth.
+  const { reading } = inference;
+  if (reading.inferenceDepth > MAX_INFERENCE_DEPTH) return;
+  reading.inferenceDepth++;
+  try {
+    inferFromType(inference, source, target);
+  } finally {
+    reading.inferenceDepth--;
+  }
+}
+
+/**
+ * Helper for `inferFrom()`, which reads `target` once it mentions a type
+ * parameter being inferred.
+ */
+function inferFromType(inference: Inference, source: Source, target: ts.Type) {
+  const { checker } = inference;
+  if (isNoInfer(target)) return;
+  const parameter = inference.targets.get(target);
+  if (parameter) {
+    addCandidate(inference, parameter, source);
+    return;
+  }
+  // Another substitution type is read as the type variable it stands for.
+  if ((target.flags & ts.TypeFlags.Substitution) !== 0) {
+    inferFrom(inference, source, (target as ts.SubstitutionType).baseType);
+    return;
+  }
+  if (target.isUnion() || target.isIntersection()) {
+    inferToMembers(inference, source, target.types, target.isUnion());
+    return;
+  }
+  if ((target.flags & ts.TypeFlags.Conditional) !== 0) {
+    const root = (target as ts.ConditionalType).root.node;
+    atPriority(
+      inference,
+      inference.contravariant ? InferencePriority.ContravariantConditional : 0,
+      () =>
+        inferToMembers(inference, source, [
+          checker.getTypeFromTypeNode(root.trueType),
+          checker.getTypeFromTypeNode(root.falseType),
+        ], true),
+    );
+    return;
+  }
+  if ((target.flags & ts.TypeFlags.Index) !== 0) {
+    // `keyof T` infers `T` from an object of the source's keys, which holds
+    // no `unknown`.
+    const keyed = inference.targets.get((target as ts.IndexType).type);
+    if (keyed) {
+      atPriority(
+        inference,
+        InferencePriority.LiteralKeyof,
+        () => addCandidate(inference, keyed, declaredSource),
+      );
+    }
+    return;
+  }
+  if ((target.flags & ts.TypeFlags.TemplateLiteral) !== 0) {
+    // A template literal infers strings.
+    for (const type of (target as ts.TemplateLiteralType).types) {
+      const named = inference.targets.get(type);
+      if (named) addCandidate(inference, named, declaredSource);
+    }
+    return;
+  }
+  if ((target.flags & ts.TypeFlags.Object) === 0) return;
+  if (
+    ((target as ts.ObjectType).objectFlags & ts.ObjectFlags.Mapped) !== 0 &&
+    inferToMappedType(inference, source, target)
+  ) {
+    return;
+  }
+  inferFromObjectType(inference, source, target as ts.ObjectType);
+}
+
+/**
+ * Helper for `inferFromType()`, which reads the members of a union or an
+ * intersection, as the checker's `inferToMultipleTypes()` does. A union member
+ * the source closely matches, as an array matches `U[]`, takes it, and a type
+ * parameter alone among the members takes the whole source at a lower
+ * priority. Otherwise each other member the source could be is read, and a
+ * single type parameter among the members takes the source at the current
+ * priority where none of them took it, and at the lower priority where one
+ * did or where there are several. An intersection's members are each read, and
+ * a single type parameter among them takes the source at the lower priority.
+ */
+function inferToMembers(
+  inference: Inference,
+  source: Source,
+  members: readonly ts.Type[],
+  union: boolean,
+) {
+  const naked = members.filter((member) => inference.targets.has(member));
+  const others = members.filter((member) => !inference.targets.has(member));
+  const nakedAt = (priority: number) =>
+    atPriority(inference, priority, () => {
+      for (const member of naked) {
+        addCandidate(inference, inference.targets.get(member)!, source);
+      }
+    });
+  if (!union) {
+    for (const member of others) inferFrom(inference, source, member);
+    if (naked.length === 1) nakedAt(InferencePriority.NakedTypeVariable);
+    return;
+  }
+  const type = source.type();
+  const close = type && others.find((member) => closelyMatches(type, member));
+  if (close) {
+    inferFrom(inference, source, close);
+    nakedAt(InferencePriority.NakedTypeVariable);
+    return;
+  }
+  const before = inference.recorded;
+  for (const member of others) {
+    if (couldHold(inference.checker, source, member)) {
+      inferFrom(inference, source, member);
+    }
+  }
+  if (naked.length === 0) return;
+  nakedAt(
+    naked.length === 1 && inference.recorded === before
+      ? 0
+      : InferencePriority.NakedTypeVariable,
+  );
+}
+
+/**
+ * Whether the type `source` closely matches the union member `member`, as the
+ * checker's `isTypeCloselyMatchedBy()` judges it: object types of one symbol,
+ * or instances of one alias.
+ */
+function closelyMatches(source: ts.Type, member: ts.Type): boolean {
+  return ((source.flags & member.flags & ts.TypeFlags.Object) !== 0 &&
+    !!source.symbol && source.symbol === member.symbol) ||
+    (!!source.aliasSymbol && !!source.aliasTypeArguments &&
+      source.aliasSymbol === member.aliasSymbol);
+}
+
+/**
+ * Whether a value `source` describes could be of the union member `member`,
+ * judged by kind: an array or a tuple, a function, or another object.
+ */
+function couldHold(
+  checker: ts.TypeChecker,
+  source: Source,
+  member: ts.Type,
+): boolean {
+  const type = source.type();
+  if (!type) return true;
+  const kinds = type.isUnion() ? type.types : [type];
+  const arrayLike = (candidate: ts.Type) =>
+    checker.isArrayType(candidate) || checker.isTupleType(candidate);
+  if (arrayLike(member)) return kinds.some(arrayLike);
+  if (member.getCallSignatures().length > 0) {
+    return kinds.some((kind) => kind.getCallSignatures().length > 0);
+  }
+  return kinds.some((kind) =>
+    (kind.flags & (ts.TypeFlags.Object | ts.TypeFlags.NonPrimitive)) !== 0
+  );
+}
+
+/**
+ * Helper for `inferFromType()`, which reads a mapped type the checker infers
+ * to: one whose keys are `keyof T` infers `T` from the source read backwards,
+ * as the source's own provenance; one whose keys are a type parameter infers
+ * that parameter from the source's keys, which hold no `unknown`, and its
+ * template from any of the source's parts. `false` for one written with an
+ * `as` clause, which the checker reads as any other object type.
+ */
+function inferToMappedType(
+  inference: Inference,
+  source: Source,
+  target: ts.Type,
+): boolean {
+  const { checker } = inference;
+  const declaration = target.symbol?.declarations?.find(ts.isMappedTypeNode);
+  if (!declaration || declaration.nameType) return false;
+  // The mapped type's nodes name the type parameters of the alias that
+  // writes it, which stand for the alias's arguments here.
+  const alias = target.aliasSymbol?.declarations?.find(
+    ts.isTypeAliasDeclaration,
+  );
+  const typeOf = (node: ts.TypeNode): ts.Type | undefined => {
+    if (ts.isTypeReferenceNode(node)) {
+      const parameter = typeParameterFor(node, checker);
+      const index = parameter && alias?.typeParameters?.indexOf(parameter);
+      if (index !== undefined && index >= 0) {
+        return target.aliasTypeArguments?.[index];
+      }
+    }
+    return alias ? undefined : checker.getTypeFromTypeNode(node);
+  };
+  const constraint = declaration.typeParameter.constraint;
+  if (
+    constraint && ts.isTypeOperatorNode(constraint) &&
+    constraint.operator === ts.SyntaxKind.KeyOfKeyword
+  ) {
+    const object = typeOf(constraint.type);
+    if (object) {
+      atPriority(
+        inference,
+        InferencePriority.HomomorphicMappedType,
+        () => inferFrom(inference, source, object),
+      );
+    }
+    return true;
+  }
+  const keys = constraint && typeOf(constraint);
+  const keyed = keys && inference.targets.get(keys);
+  if (keyed) {
+    atPriority(
+      inference,
+      InferencePriority.MappedTypeConstraint,
+      () => addCandidate(inference, keyed, declaredSource),
+    );
+  }
+  const template = declaration.type && typeOf(declaration.type);
+  const values = source.anyPart();
+  if (template && values) inferFrom(inference, values, template);
+  return true;
+}
+
+/**
+ * Helper for `inferFromType()`, which reads an object type: an array's
+ * elements; a tuple's slots, each from the source's slot, a rest slot from any
+ * element; the type arguments of an instance of a class or an interface the
+ * source instantiates too; and otherwise each property, inherited ones
+ * included, from the source's part under its name, each call signature's
+ * return type from what the source returns and its parameters, in the
+ * opposite variance, from those the source writes, each construct signature
+ * from what the source constructs, and each index signature from any of the
+ * source's parts.
+ */
+function inferFromObjectType(
+  inference: Inference,
+  source: Source,
+  target: ts.ObjectType,
+) {
+  const { checker } = inference;
+  if (checker.isTupleType(target)) {
+    const flags = ((target as ts.TypeReference).target as ts.TupleType)
+      .elementFlags;
+    checker.getTypeArguments(target as ts.TypeReference).forEach(
+      (element, index) => {
+        const variable = (flags[index]! & ts.ElementFlags.Variable) !== 0;
+        inferFrom(
+          inference,
+          variable ? source.element() : source.element(index),
+          element,
+        );
+      },
+    );
+    return;
+  }
+  // What an array or an iterable holds is its elements, which the checker
+  // reaches through the iterator protocol.
+  if (checker.isArrayType(target) || isIterable(target)) {
+    const [element] = checker.getTypeArguments(target as ts.TypeReference);
+    if (element) inferFrom(inference, source.element(), element);
+    return;
+  }
+  if ((target.objectFlags & ts.ObjectFlags.Reference) !== 0) {
+    const declaration = target.symbol?.declarations?.find((
+      candidate,
+    ): candidate is ts.ClassLikeDeclaration | ts.InterfaceDeclaration =>
+      ts.isClassLike(candidate) || ts.isInterfaceDeclaration(candidate)
+    );
+    const instance = declaration && source.instance(declaration);
+    if (declaration && instance) {
+      const argumentTypes = checker.getTypeArguments(
+        target as ts.TypeReference,
+      );
+      declaration.typeParameters?.forEach((parameter, index) => {
+        const argument = instance.get(parameter);
+        const argumentType = argumentTypes[index];
+        if (argument && argumentType) {
+          inferFrom(
+            inference,
+            argumentSource(argument, checker, inference.reading),
+            argumentType,
+          );
+        }
+      });
+      return;
+    }
+  }
+  // A library's object type is read by its type arguments and its signatures,
+  // as above and below, and not by its members, whose types it never needs
+  // resolved for the program.
+  const members = declaredInLibrary(target)
+    ? []
+    : checker.getPropertiesOfType(target);
+  for (const property of members) {
+    inferFrom(
+      inference,
+      source.member(property.name),
+      withoutMissing(checker.getTypeOfSymbol(property), property),
+    );
+  }
+  for (const signature of target.getCallSignatures()) {
+    inferFrom(
+      inference,
+      source.returns(),
+      checker.getReturnTypeOfSignature(signature),
+    );
+    signature.parameters.forEach((parameter, index) => {
+      const written = source.parameter(index);
+      if (!written) return;
+      inverted(
+        inference,
+        () => inferFrom(inference, written, checker.getTypeOfSymbol(parameter)),
+      );
+    });
+  }
+  for (const signature of target.getConstructSignatures()) {
+    inferFrom(
+      inference,
+      source.constructs(),
+      checker.getReturnTypeOfSignature(signature),
+    );
+  }
+  for (
+    const index of declaredInLibrary(target)
+      ? []
+      : checker.getIndexInfosOfType(target)
+  ) {
+    const values = source.anyPart();
+    if (values) inferFrom(inference, values, index.type);
+  }
+}
+
+/**
+ * `type` without the `undefined` an optional `property` adds to it, as the
+ * checker reads an optional property's type for inference.
+ */
+function withoutMissing(type: ts.Type, property: ts.Symbol): ts.Type {
+  if ((property.flags & ts.SymbolFlags.Optional) === 0 || !type.isUnion()) {
+    return type;
+  }
+  const present = type.types.filter((member) =>
+    (member.flags & ts.TypeFlags.Undefined) === 0
+  );
+  return present.length === 1 ? present[0]! : type;
+}
+
+/** Whether every declaration of `type` is in a declaration file. */
+function declaredInLibrary(type: ts.Type): boolean {
+  const declarations = type.symbol?.declarations;
+  return !!declarations?.length &&
+    declarations.every((declaration) =>
+      declaration.getSourceFile().isDeclarationFile
+    );
+}
+
+/** The library's types of a value that yields its elements. */
+const ITERABLE_NAMES = new Set([
+  "Iterable",
+  "IterableIterator",
+  "AsyncIterable",
+  "ArrayLike",
+]);
+
+/** Whether `type` instantiates one of the library's iterable types. */
+function isIterable(type: ts.ObjectType): boolean {
+  return (type.objectFlags & ts.ObjectFlags.Reference) !== 0 &&
+    !!type.symbol && ITERABLE_NAMES.has(type.symbol.name) &&
+    !!type.symbol.declarations?.every((declaration) =>
+      declaration.getSourceFile().isDeclarationFile
+    );
+}
+
+/** Whether `type` is `NoInfer<T>`, which supplies no inference. */
+function isNoInfer(type: ts.Type): boolean {
+  return (type.flags & ts.TypeFlags.Substitution) !== 0 &&
+    ((type as ts.SubstitutionType).constraint.flags & ts.TypeFlags.Unknown) !==
+      0;
+}
+
+/**
+ * Whether `type` names, anywhere in it, a type parameter `inference` infers.
+ */
+function mentionsTargets(inference: Inference, type: ts.Type): boolean {
+  const known = inference.mentions.get(type);
+  if (known !== undefined) return known;
+  // A type that holds itself mentions what its other parts do.
+  inference.mentions.set(type, false);
+  const { checker } = inference;
+  const any = (types: readonly ts.Type[] | undefined) =>
+    !!types?.some((part) => mentionsTargets(inference, part));
+  let mentions = inference.targets.has(type) || any(type.aliasTypeArguments);
+  if (!mentions) {
+    if (type.isUnionOrIntersection()) {
+      mentions = any(type.types);
+    } else if ((type.flags & ts.TypeFlags.Conditional) !== 0) {
+      const conditional = type as ts.ConditionalType;
+      mentions = any([
+        conditional.checkType,
+        conditional.extendsType,
+        checker.getTypeFromTypeNode(conditional.root.node.trueType),
+        checker.getTypeFromTypeNode(conditional.root.node.falseType),
+      ]);
+    } else if ((type.flags & ts.TypeFlags.Index) !== 0) {
+      mentions = any([(type as ts.IndexType).type]);
+    } else if ((type.flags & ts.TypeFlags.IndexedAccess) !== 0) {
+      const access = type as ts.IndexedAccessType;
+      mentions = any([access.objectType, access.indexType]);
+    } else if ((type.flags & ts.TypeFlags.Substitution) !== 0) {
+      mentions = any([(type as ts.SubstitutionType).baseType]);
+    } else if ((type.flags & ts.TypeFlags.TemplateLiteral) !== 0) {
+      mentions = any((type as ts.TemplateLiteralType).types);
+    } else if ((type.flags & ts.TypeFlags.Object) !== 0) {
+      const object = type as ts.ObjectType;
+      if ((object.objectFlags & ts.ObjectFlags.Reference) !== 0) {
+        mentions = any(checker.getTypeArguments(object as ts.TypeReference));
+      } else if ((object.objectFlags & ts.ObjectFlags.Mapped) !== 0) {
+        const declaration = object.symbol?.declarations?.find(
+          ts.isMappedTypeNode,
+        );
+        mentions = !!declaration &&
+          typeParametersIn(declaration, checker).some((named) =>
+            !!named && [...inference.targets.values()].includes(named)
+          );
+      } else {
+        // A library's object type names an inferred parameter only through its
+        // type arguments, read above, or its signatures; reading its members
+        // would instantiate types the program never needed.
+        const members = declaredInLibrary(object)
+          ? []
+          : checker.getPropertiesOfType(object).map((property) =>
+            checker.getTypeOfSymbol(property)
+          );
+        mentions = any(members) ||
+          [...object.getCallSignatures(), ...object.getConstructSignatures()]
+            .some((signature) =>
+              any([
+                checker.getReturnTypeOfSignature(signature),
+                ...signature.parameters.map((parameter) =>
+                  checker.getTypeOfSymbol(parameter)
+                ),
+              ])
+            ) ||
+          (!declaredInLibrary(object) &&
+            any(
+              checker.getIndexInfosOfType(object).map((index) => index.type),
+            ));
+      }
+    }
+  }
+  inference.mentions.set(type, mentions);
+  return mentions;
+}
+
+//
+// Sources
+//
+
+/**
+ * A value inference reads against a parameter's type, by its parts, as the
+ * checker reads the value's type: each part followed to where it was written
+ * where the value is written out, and read from the value's provenance
+ * otherwise.
+ */
+interface Source {
+  /** The provenance of the whole value. */
+  positions(): DeclaredPositions;
+
+  /** The value's static type, where it has one. */
+  type(): ts.Type | undefined;
+
+  /** The part under `key`. */
+  member(key: string): Source;
+
+  /** The element in slot `index`, or any element. */
+  element(index?: number): Source;
+
+  /**
+   * Any part: a member under any key, or any element, or `undefined` for a
+   * value known to hold none, which supplies no inference.
+   */
+  anyPart(): Source | undefined;
+
+  /** What the value returns when called. */
+  returns(): Source;
+
+  /** What the value makes when constructed. */
+  constructs(): Source;
+
+  /** The type written for parameter `index` of a function the value is. */
+  parameter(index: number): Source | undefined;
+
+  /**
+   * What the type parameters of `owner` stand for in the value, where it is an
+   * instance of `owner` or of a declaration below it.
+   */
+  instance(
+    owner: ts.ClassLikeDeclaration | ts.InterfaceDeclaration,
+  ): Substitution | undefined;
+
+  /**
+   * The type the value is written as, where it is a type written out as a
+   * field's or a type argument, whose `unknown` declares a reference.
+   */
+  readonly written?: {
+    readonly node: ts.TypeNode;
+    readonly substitution: Substitution;
+  };
+}
+
+/** A value whose every position is declared, as a key or a string is. */
+const declaredSource: Source = opaqueSource(() => true);
+
+/**
+ * A source known only by its provenance, read by `read` once when first asked
+ * for: a part is the part of that provenance, and a function's result declares
+ * nothing.
+ */
+function opaqueSource(
+  read: () => DeclaredPositions,
+  type?: () => ts.Type | undefined,
+): Source {
+  let known: DeclaredPositions | undefined;
+  const positions = () => known ??= read();
+  return {
+    positions,
+    type: () => type?.(),
+    member: (key) => opaqueSource(() => below(positions(), key)),
+    element: () => opaqueSource(() => below(positions(), ELEMENT_POSITIONS)),
+    anyPart: () => opaqueSource(() => anyPart(positions())),
+    returns: () => opaqueSource(() => false),
+    constructs: () => opaqueSource(() => false),
+    parameter: () => undefined,
+    instance: () => undefined,
+  };
+}
+
+/** `source`, with its provenance read by `positions` instead. */
+function withPositions(
+  source: Source,
+  positions: () => DeclaredPositions,
+): Source {
+  return { ...source, positions };
+}
+
+/**
+ * A value that is any one of `sources`, each read as an alternative. With no
+ * source it has no parts, so each is declared.
+ */
+function unionSource(sources: readonly Source[]): Source {
+  if (sources.length === 0) return declaredSource;
+  if (sources.length === 1) return sources[0]!;
+  const each = (read: (source: Source) => Source) =>
+    unionSource(sources.map(read));
+  return {
+    ...opaqueSource(() =>
+      sources.map((source) => source.positions()).reduce(alternatives, true)
+    ),
+    member: (key) => each((source) => source.member(key)),
+    element: (index) => each((source) => source.element(index)),
+    anyPart: () => {
+      const parts = sources.flatMap((source) => source.anyPart() ?? []);
+      return parts.length > 0 ? unionSource(parts) : undefined;
+    },
+    returns: () => each((source) => source.returns()),
+    constructs: () => each((source) => source.constructs()),
+  };
+}
+
+/**
+ * The arguments a rest parameter collects, as a tuple of `slots`, the last of
+ * which stands for any number of elements where `open` says so.
+ */
+function tupleSource(slots: readonly Source[], open: boolean): Source {
+  const any = () => unionSource(slots);
+  const base = opaqueSource(() =>
+    new Map([[ELEMENT_POSITIONS, any().positions()]])
+  );
+  return {
+    ...base,
+    element: (index) =>
+      index === undefined || (open && index >= slots.length - 1)
+        ? any()
+        : slots[index] ?? declaredSource,
+    anyPart: any,
+  };
+}
+
+/** The source a type argument stands for. */
+function argumentSource(
+  argument: TypeArgument,
+  checker: ts.TypeChecker,
+  reading: TypeReading,
+): Source {
+  return argument.kind === "written"
+    ? nodeSource(argument.node, argument.substitution, checker, reading, true)
+    : opaqueSource(() => argument.positions);
+}
+
+/**
+ * The value `expression` evaluates to, read under `substitution`, by its
+ * parts: an object literal's members and an array literal's elements by slot,
+ * a binding's annotation or its initializer where nothing reassigns it, a
+ * member of a value it reads, a cast's type, a function's result and written
+ * parameters, the arms of a conditional, and the type parameters an instance
+ * a construction or a call makes takes. Its provenance is always
+ * `typeProvenance()`'s.
+ */
+function valueSource(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  reading: TypeReading,
+  substitution: Substitution = reading.substitution,
+): Source {
+  const under = <T>(read: () => T) =>
+    withSubstitution(reading, substitution, read);
+  const base = opaqueSource(
+    () => under(() => typeProvenance(expression, checker, reading)),
+    () => checker.getTypeAtLocation(expression),
+  );
+  const shaped = (source: Source) =>
+    withPositions({ ...source, type: base.type }, base.positions);
+  const follow = (inner: ts.Expression) =>
+    valueSource(inner, checker, reading, substitution);
+  if (
+    ts.isParenthesizedExpression(expression) ||
+    ts.isNonNullExpression(expression) ||
+    ts.isSatisfiesExpression(expression)
+  ) {
+    return shaped(follow(expression.expression));
+  }
+  if (
+    ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression)
+  ) {
+    return shaped(
+      ts.isConstTypeReference(expression.type)
+        ? follow(expression.expression)
+        : nodeSource(expression.type, substitution, checker, reading),
+    );
+  }
+  if (ts.isIdentifier(expression)) {
+    const { parent } = expression;
+    const binding = bindingOf(
+      ts.isShorthandPropertyAssignment(parent) && parent.name === expression
+        ? checker.getShorthandAssignmentValueSymbol(parent)
+        : checker.getSymbolAtLocation(expression),
+      checker,
+    );
+    const declaration = binding?.declaration;
+    if (!binding || !declaration) return base;
+    if (
+      ts.isFunctionDeclaration(declaration) ||
+      ts.isFunctionExpression(declaration) ||
+      ts.isArrowFunction(declaration)
+    ) {
+      return shaped(
+        functionSource(declaration, substitution, checker, reading),
+      );
+    }
+    if (ts.isClassDeclaration(declaration)) {
+      return {
+        ...base,
+        constructs: () =>
+          opaqueSource(() =>
+            classInstancePositions(declaration, checker, reading)
+          ),
+      };
+    }
+    if (
+      (ts.isVariableDeclaration(declaration) || ts.isParameter(declaration)) &&
+      declaration.type
+    ) {
+      return shaped(
+        nodeSource(declaration.type, substitution, checker, reading),
+      );
+    }
+    if (
+      ts.isVariableDeclaration(declaration) && declaration.initializer &&
+      !reassigned(binding.resolved, checker) &&
+      !reading.tracing.has(declaration)
+    ) {
+      return shaped(follow(declaration.initializer));
+    }
+    return base;
+  }
+  if (ts.isObjectLiteralExpression(expression)) {
+    const parts = literalMembers(expression, checker, reading, substitution);
+    return {
+      ...base,
+      member: (key) => {
+        const part = parts.named.get(key);
+        return part && !parts.unnamed ? part : base.member(key);
+      },
+      anyPart: () =>
+        parts.unnamed
+          ? base.anyPart()
+          : parts.named.size > 0
+          ? unionSource([...parts.named.values()])
+          : undefined,
+    };
+  }
+  if (ts.isArrayLiteralExpression(expression)) {
+    const elements = expression.elements;
+    const spread = elements.findIndex(ts.isSpreadElement);
+    const plain = (spread < 0 ? elements : elements.slice(0, spread))
+      .map((element) =>
+        ts.isOmittedExpression(element) ? declaredSource : follow(element)
+      );
+    const every = () =>
+      unionSource(
+        elements.map((element) =>
+          ts.isSpreadElement(element)
+            ? follow(element.expression).element()
+            : ts.isOmittedExpression(element)
+            ? declaredSource
+            : follow(element)
+        ),
+      );
+    return {
+      ...base,
+      element: (index) =>
+        index !== undefined && index < plain.length ? plain[index]! : every(),
+      // An array's elements, even none, are what its number index holds.
+      anyPart: every,
+    };
+  }
+  if (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) {
+    return shaped(functionSource(expression, substitution, checker, reading));
+  }
+  if (ts.isConditionalExpression(expression)) {
+    return shaped(
+      unionSource([follow(expression.whenTrue), follow(expression.whenFalse)]),
+    );
+  }
+  if (
+    ts.isPropertyAccessExpression(expression) ||
+    ts.isElementAccessExpression(expression)
+  ) {
+    const keys = accessedKeys(expression, checker);
+    if (keys?.length !== 1) return base;
+    return shaped(follow(expression.expression).member(keys[0]!));
+  }
+  if (ts.isNewExpression(expression)) {
+    const constructed = definitionOf(expression.expression, checker);
+    if (
+      constructed &&
+      (ts.isClassDeclaration(constructed) || ts.isClassExpression(constructed))
+    ) {
+      return {
+        ...base,
+        instance: (owner) =>
+          heritageSubstitutions(
+            [constructed],
+            under(() =>
+              constructionSubstitution(
+                constructed,
+                expression,
+                checker,
+                reading,
+              )
+            ),
+            checker,
+          ).get(owner) as Substitution | undefined,
+      };
+    }
+    return shaped(
+      resultSource(expression, base, checker, reading, substitution),
+    );
+  }
+  if (ts.isCallExpression(expression)) {
+    return shaped(
+      resultSource(expression, base, checker, reading, substitution),
+    );
+  }
+  return base;
+}
+
+/**
+ * The members an object literal writes, by name, each read as `valueSource()`
+ * reads its value, and whether it also holds parts under names it does not
+ * write, through a spread or a computed key, which leave its parts to its
+ * provenance.
+ */
+function literalMembers(
+  literal: ts.ObjectLiteralExpression,
+  checker: ts.TypeChecker,
+  reading: TypeReading,
+  substitution: Substitution,
+): { named: Map<string, Source>; unnamed: boolean } {
+  const named = new Map<string, Source>();
+  let unnamed = false;
+  for (const property of literal.properties) {
+    const key = property.name && !ts.isSpreadAssignment(property)
+      ? getPropertyNameText(property.name, checker)
+      : undefined;
+    if (key === undefined) {
+      unnamed = true;
+      continue;
+    }
+    if (ts.isPropertyAssignment(property)) {
+      named.set(
+        key,
+        valueSource(property.initializer, checker, reading, substitution),
+      );
+    } else if (ts.isShorthandPropertyAssignment(property)) {
+      named.set(
+        key,
+        valueSource(property.name, checker, reading, substitution),
+      );
+    } else if (ts.isMethodDeclaration(property)) {
+      named.set(
+        key,
+        functionSource(property, substitution, checker, reading),
+      );
+    } else if (ts.isGetAccessorDeclaration(property)) {
+      named.set(
+        key,
+        opaqueSource(() =>
+          withSubstitution(
+            reading,
+            substitution,
+            () => returnProvenance(property, checker, reading) ?? false,
+          )
+        ),
+      );
+    }
+  }
+  return { named, unnamed };
+}
+
+/**
+ * A function `declaration` declares, read under `substitution`: what it
+ * returns, as `returnProvenance()` reads it, and its written parameters.
+ */
+function functionSource(
+  declaration: ts.SignatureDeclaration,
+  substitution: Substitution,
+  checker: ts.TypeChecker,
+  reading: TypeReading,
+): Source {
+  const base = opaqueSource(() => true);
+  return {
+    ...base,
+    returns: () =>
+      declaration.type
+        ? nodeSource(declaration.type, substitution, checker, reading)
+        : opaqueSource(() =>
+          withSubstitution(
+            reading,
+            substitution,
+            () => returnProvenance(declaration, checker, reading) ?? false,
+          )
+        ),
+    parameter: (index) => {
+      const written = declaration.parameters.filter((parameter) =>
+        !(ts.isIdentifier(parameter.name) && parameter.name.text === "this")
+      )[index]?.type;
+      return written && nodeSource(written, substitution, checker, reading);
+    },
+  };
+}
+
+/**
+ * The result of `call`, a call or a construction, read through the return type
+ * its signature's declaration writes, with the call's type parameters bound,
+ * or, where that type is inferred, as any of what the declaration's body
+ * returns, or as `base` otherwise.
+ */
+function resultSource(
+  call: ts.CallExpression | ts.NewExpression,
+  base: Source,
+  checker: ts.TypeChecker,
+  reading: TypeReading,
+  substitution: Substitution,
+): Source {
+  const declaration = checker.getResolvedSignature(call)?.declaration;
+  if (!declaration || ts.isJSDocSignature(declaration)) return base;
+  const bound = () =>
+    withSubstitution(
+      reading,
+      substitution,
+      () =>
+        ts.isCallExpression(call)
+          ? callSubstitution(declaration, call, checker, reading)
+          : constructSubstitution(declaration, call, checker, reading),
+    );
+  if (declaration.type) {
+    let known: Source | undefined;
+    const written = () =>
+      known ??= nodeSource(declaration.type!, bound(), checker, reading);
+    return {
+      ...base,
+      member: (key) => written().member(key),
+      element: (index) => written().element(index),
+      anyPart: () => written().anyPart(),
+      returns: () => written().returns(),
+      constructs: () => written().constructs(),
+      instance: (owner) => written().instance(owner),
+    };
+  }
+  const body = "body" in declaration ? declaration.body : undefined;
+  if (!body || reading.tracing.has(declaration)) return base;
+  const returned = () =>
+    unionSource(
+      returnedExpressions(body).map((expression) =>
+        valueSource(expression, checker, reading, bound())
+      ),
+    );
+  return {
+    ...base,
+    member: (key) => returned().member(key),
+    element: (index) => returned().element(index),
+    anyPart: () => returned().anyPart(),
+    instance: (owner) => returned().instance(owner),
+  };
+}
+
+/**
+ * What the type parameters of the construct signature `declaration` stand
+ * for in `construction`, as `inferFromArguments()` finds them.
+ */
+function constructSubstitution(
+  declaration: ts.SignatureDeclaration,
+  construction: ts.NewExpression,
+  checker: ts.TypeChecker,
+  reading: TypeReading,
+): Substitution {
+  const own = declaration.typeParameters ?? [];
+  if (construction.typeArguments?.length) {
+    return new Map([
+      ...reading.substitution,
+      ...bindTypeArguments(
+        own,
+        construction.typeArguments,
+        reading.substitution,
+      ),
+    ]);
+  }
+  const inference = newInference(own, checker, reading);
+  inferFromArguments(
+    inference,
+    declaration,
+    construction.arguments ?? [],
+    undefined,
+  );
+  return new Map([
+    ...reading.substitution,
+    ...inferredSubstitution(own, inference),
+  ]);
+}
+
+/**
+ * The positions an instance of the class `declaration` declares when its type
+ * parameters take what nothing supplies them: their defaults or constraints.
+ */
+function classInstancePositions(
+  declaration: ts.ClassDeclaration,
+  checker: ts.TypeChecker,
+  reading: TypeReading,
+): DeclaredPositions {
+  const own = declaration.typeParameters ?? [];
+  const symbol = declaration.name &&
+    checker.getSymbolAtLocation(declaration.name);
+  return symbol
+    ? declaredMembers(
+      checker.getDeclaredTypeOfSymbol(symbol),
+      heritageSubstitutions(
+        [declaration],
+        inferredSubstitution(own, newInference(own, checker, reading)),
+        checker,
+      ),
+      checker,
+      reading,
+    )
+    : false;
+}
+
+/**
+ * The value of the written type `node`, read under `substitution`, by its
+ * parts: a type literal's members, an array's or a tuple's elements, a
+ * function type's result and parameters, the members and the instance of the
+ * interface or the class a reference names, read through its declaration
+ * with its type parameters bound, the value `typeof` names, and what a type
+ * parameter stands for. Its provenance is always `readTypeNode()`'s.
+ */
+function nodeSource(
+  node: ts.TypeNode,
+  substitution: Substitution,
+  checker: ts.TypeChecker,
+  reading: TypeReading,
+  inField = false,
+): Source {
+  const base: Source = {
+    ...opaqueSource(
+      () => readTypeNode(node, substitution, inField, checker, reading),
+      () => checker.getTypeFromTypeNode(node),
+    ),
+    written: inField ? { node, substitution } : undefined,
+  };
+  const shaped = (source: Source) =>
+    withPositions({ ...source, type: base.type }, base.positions);
+  const follow = (inner: ts.TypeNode, bound = substitution, field = inField) =>
+    nodeSource(inner, bound, checker, reading, field);
+  if (ts.isParenthesizedTypeNode(node)) return shaped(follow(node.type));
+  if (
+    ts.isTypeOperatorNode(node) &&
+    node.operator === ts.SyntaxKind.ReadonlyKeyword
+  ) {
+    return shaped(follow(node.type));
+  }
+  if (ts.isUnionTypeNode(node)) {
+    return shaped(
+      lazySource(() => unionSource(node.types.map((member) => follow(member)))),
+    );
+  }
+  if (ts.isTypeLiteralNode(node)) {
+    return {
+      ...base,
+      ...membersSource(node.members, substitution, base, checker, reading),
+    };
+  }
+  if (ts.isFunctionTypeNode(node)) {
+    return {
+      ...base,
+      ...functionSource(node, substitution, checker, reading),
+      positions: base.positions,
+      type: base.type,
+    };
+  }
+  if (ts.isConstructorTypeNode(node)) {
+    return { ...base, constructs: () => follow(node.type) };
+  }
+  if (ts.isArrayTypeNode(node)) {
+    return {
+      ...base,
+      element: () => follow(node.elementType),
+      anyPart: () => follow(node.elementType),
+    };
+  }
+  if (ts.isTupleTypeNode(node)) {
+    const every = () =>
+      unionSource(
+        node.elements.map((element) => follow(tupleElementType(element))),
+      );
+    return {
+      ...base,
+      element: (index) => {
+        const element = index === undefined ? undefined : node.elements[index];
+        return element &&
+            !ts.isRestTypeNode(element) &&
+            !(ts.isNamedTupleMember(element) && element.dotDotDotToken)
+          ? follow(tupleElementType(element))
+          : every();
+      },
+      anyPart: every,
+    };
+  }
+  if (ts.isTypeQueryNode(node) && ts.isIdentifier(node.exprName)) {
+    return shaped(valueSource(node.exprName, checker, reading));
+  }
+  if (!ts.isTypeReferenceNode(node)) return base;
+  // A type parameter stands for its type argument, which carries a written
+  // type's reading on into the call that passes it again.
+  const parameter = typeParameterFor(node, checker);
+  if (parameter) {
+    const argument = substitution.get(parameter);
+    return argument ? shaped(argumentSource(argument, checker, reading)) : base;
+  }
+  const args = node.typeArguments ?? [];
+  const type = checker.getTypeFromTypeNode(node);
+  const [first] = args;
+  if (first && args.length === 1 && wrapsPayload(type, checker)) {
+    return shaped(follow(first));
+  }
+  if (first && args.length === 1 && checker.isArrayType(type)) {
+    return {
+      ...base,
+      element: () => follow(first),
+      anyPart: () => follow(first),
+    };
+  }
+  const declaration = genericDeclaration(node, checker);
+  if (!declaration) return base;
+  const bound = bindTypeArguments(
+    declaration.typeParameters ?? [],
+    args,
+    substitution,
+  );
+  const symbol = checker.getSymbolAtLocation(node.typeName);
+  const resolved = symbol && resolveAlias(symbol, checker);
+  if (ts.isTypeAliasDeclaration(declaration)) {
+    return readsStructurally(declaration.type, checker)
+      ? shaped(follow(declaration.type, bound))
+      : base;
+  }
+  const owners = heritageSubstitutions(
+    (resolved?.declarations ?? []).filter((candidate) =>
+      ts.isInterfaceDeclaration(candidate) ||
+      ts.isClassDeclaration(candidate) ||
+      ts.isClassExpression(candidate)
+    ) as (ts.InterfaceDeclaration | ts.ClassLikeDeclaration)[],
+    bound,
+    checker,
+  );
+  return {
+    ...base,
+    member: (key) => {
+      const property = type.getProperty(key);
+      const declared = property?.valueDeclaration ??
+        property?.declarations?.[0];
+      const owner = declared && memberOwner(declared);
+      const ownerSubstitution = owner && owners.get(owner);
+      if (!declared || !ownerSubstitution) return base.member(key);
+      if (
+        ts.isMethodDeclaration(declared) || ts.isMethodSignature(declared)
+      ) {
+        return functionSource(declared, ownerSubstitution, checker, reading);
+      }
+      const written = memberTypeNode(property);
+      return written
+        ? follow(written, ownerSubstitution, true)
+        : base.member(key);
+    },
+    instance: (owner) => owners.get(owner) as Substitution | undefined,
+  };
+}
+
+/**
+ * Helper for `nodeSource()`, which reads the parts a written object type's
+ * `members` declare: a property's or a method's under its name, and an index
+ * signature's under any other name and as any part. Each part is read when it
+ * is first asked for, since a type may hold itself.
+ */
+function membersSource(
+  members: readonly ts.TypeElement[],
+  substitution: Substitution,
+  base: Source,
+  checker: ts.TypeChecker,
+  reading: TypeReading,
+): Pick<Source, "member" | "anyPart"> {
+  const named = new Map<string, () => Source>();
+  const indexed: (() => Source)[] = [];
+  for (const member of members) {
+    if (ts.isIndexSignatureDeclaration(member)) {
+      indexed.push(() =>
+        nodeSource(member.type, substitution, checker, reading, true)
+      );
+      continue;
+    }
+    const key = member.name && getPropertyNameText(member.name, checker);
+    const type = ts.isPropertySignature(member) ? member.type : undefined;
+    if (key === undefined) continue;
+    if (ts.isMethodSignature(member)) {
+      named.set(
+        key,
+        () => functionSource(member, substitution, checker, reading),
+      );
+    } else if (type) {
+      named.set(
+        key,
+        () => nodeSource(type, substitution, checker, reading, true),
+      );
+    }
+  }
+  const index = () => unionSource(indexed.map((read) => read()));
+  return {
+    member: (key) =>
+      named.get(key)?.() ??
+        (indexed.length > 0 ? index() : base.member(key)),
+    anyPart: () => {
+      const all = [...named.values(), ...indexed];
+      return all.length > 0
+        ? unionSource(all.map((read) => read()))
+        : undefined;
+    },
+  };
+}
+
+/**
+ * A source made by `make` only when one of its parts is first asked for, so a
+ * type that holds itself is read only as deep as a read goes.
+ */
+function lazySource(make: () => Source): Source {
+  let made: Source | undefined;
+  const source = () => made ??= make();
+  return {
+    positions: () => source().positions(),
+    type: () => source().type(),
+    member: (key) => source().member(key),
+    element: (index) => source().element(index),
+    anyPart: () => source().anyPart(),
+    returns: () => source().returns(),
+    constructs: () => source().constructs(),
+    parameter: (index) => source().parameter(index),
+    instance: (owner) => source().instance(owner),
+    get written() {
+      return source().written;
+    },
+  };
+}
+
+/** The type a tuple element written `element` holds. */
+function tupleElementType(element: ts.TypeNode): ts.TypeNode {
+  const rest = ts.isRestTypeNode(element) ||
+    (ts.isNamedTupleMember(element) && !!element.dotDotDotToken);
+  const type =
+    ts.isNamedTupleMember(element) || ts.isOptionalTypeNode(element) ||
+      ts.isRestTypeNode(element)
+      ? element.type
+      : element;
+  // A rest element written as an array type holds that array's elements.
+  return rest && ts.isArrayTypeNode(type) ? type.elementType : type;
 }
 
 //
@@ -2677,17 +3771,13 @@ function readTypeNode(
       : false;
   }
   if (ts.isIndexedAccessTypeNode(node)) {
+    // A key whose type is a literal, or a union of them, reads each part it
+    // names; an array's index reads its elements; any other key, any part.
     const object = read(node.objectType);
-    const index = node.indexType;
-    if (
-      ts.isLiteralTypeNode(index) &&
-      (ts.isStringLiteral(index.literal) || ts.isNumericLiteral(index.literal))
-    ) {
-      return below(object, index.literal.text);
-    }
+    const keys = literalKeys(checker.getTypeFromTypeNode(node.indexType));
+    if (keys) return partsAt(object, keys);
     if (typeof object === "boolean") return object;
-    return object.get(ELEMENT_POSITIONS) ??
-      [...object.values()].reduce<DeclaredPositions>(alternatives, true);
+    return object.get(ELEMENT_POSITIONS) ?? anyPart(object);
   }
   if (ts.isMappedTypeNode(node) && readsStructurally(node, checker)) {
     const key = node.typeParameter;
@@ -2922,25 +4012,16 @@ function heritageSubstitutions(
       clause.token === ts.SyntaxKind.ExtendsKeyword
     );
     for (const heritage of extended.flatMap((clause) => clause.types)) {
-      const definition = definitionOf(heritage.expression, checker);
-      const symbol = checker.getSymbolAtLocation(heritage.expression);
-      const resolved = symbol && resolveAlias(symbol, checker);
-      const bases: (ts.InterfaceDeclaration | ts.ClassLikeDeclaration)[] =
-        definition &&
-          (ts.isClassDeclaration(definition) ||
-            ts.isClassExpression(definition))
-          ? [definition]
-          : (resolved?.declarations ?? []).filter((d) =>
-            ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)
-          ) as (ts.InterfaceDeclaration | ts.ClassLikeDeclaration)[];
-      for (const base of bases) {
+      for (
+        const [base, args] of heritageBases(
+          heritage.expression,
+          heritage.typeArguments,
+          checker,
+        )
+      ) {
         heritageSubstitutions(
           [base],
-          bindTypeArguments(
-            base.typeParameters ?? [],
-            heritage.typeArguments,
-            substitution,
-          ),
+          bindTypeArguments(base.typeParameters ?? [], args, substitution),
           checker,
           into,
         );
@@ -2948,6 +4029,49 @@ function heritageSubstitutions(
     }
   }
   return into;
+}
+
+/**
+ * The interfaces and classes the `extends` clause naming `name` with `args`
+ * reaches, each with the type arguments it is given: the class or the
+ * interfaces it names, or, through an alias of a mapped type that keeps the
+ * parts of one of its arguments, as `Pick` and `Partial` do, the declaration
+ * that argument names.
+ */
+function heritageBases(
+  name: ts.Node,
+  args: readonly ts.TypeNode[] | undefined,
+  checker: ts.TypeChecker,
+): [ts.InterfaceDeclaration | ts.ClassLikeDeclaration, typeof args][] {
+  const definition = ts.isExpression(name)
+    ? definitionOf(name, checker)
+    : undefined;
+  if (
+    definition &&
+    (ts.isClassDeclaration(definition) || ts.isClassExpression(definition))
+  ) {
+    return [[definition, args]];
+  }
+  const symbol = checker.getSymbolAtLocation(name);
+  const declarations = (symbol && resolveAlias(symbol, checker))
+    ?.declarations ?? [];
+  const bases = declarations.filter((declaration) =>
+    ts.isInterfaceDeclaration(declaration) ||
+    ts.isClassDeclaration(declaration)
+  ) as (ts.InterfaceDeclaration | ts.ClassLikeDeclaration)[];
+  if (bases.length > 0) return bases.map((base) => [base, args]);
+  const alias = declarations.find(ts.isTypeAliasDeclaration);
+  const template = alias && ts.isMappedTypeNode(alias.type)
+    ? alias.type.type
+    : undefined;
+  const kept = template && ts.isIndexedAccessTypeNode(template) &&
+      ts.isTypeReferenceNode(template.objectType)
+    ? typeParameterFor(template.objectType, checker)
+    : undefined;
+  const argument = kept && args?.[alias!.typeParameters?.indexOf(kept) ?? -1];
+  return argument && ts.isTypeReferenceNode(argument)
+    ? heritageBases(argument.typeName, argument.typeArguments, checker)
+    : [];
 }
 
 /**
@@ -3050,10 +4174,13 @@ function typeParameterFor(
     : undefined;
 }
 
-/** Whether `type` is a reactive wrapper whose schema is its payload's. */
+/**
+ * Whether `type` is a reactive wrapper whose schema is its payload's. A union
+ * is not one: unwrapping rebuilds it whether or not a member was a wrapper.
+ */
 function wrapsPayload(type: ts.Type, checker: ts.TypeChecker): boolean {
   const unwrapped = unwrapOpaqueLikeType(type, checker);
-  return unwrapped !== undefined && unwrapped !== type;
+  return !type.isUnion() && unwrapped !== undefined && unwrapped !== type;
 }
 
 /**

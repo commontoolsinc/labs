@@ -997,18 +997,36 @@ not known, and declares nothing. So these are declared:
   literal's from its parts, a binding's from its initializer, a parameter's
   with no type written from its default, and a call's whose return type is
   inferred from what the function's body returns, read with the call's type
-  parameters bound. A call infers a type parameter from each argument matched
-  against the type its parameter writes, the `this` parameter aside, through
-  the parts of literals, arrays, tuples, unions, index signatures, reactive
-  wrappers, the members of a generic declaration, and a callback's return
-  type, which is read through the callback's own signature; a rest parameter
-  takes each argument past it, and a spread argument as many parameters as its
-  tuple type holds. A type parameter named anywhere else is inferred from
-  something the match does not read, and declares nothing. A method's call
-  also binds the type parameters of the class or the interface declaring it,
-  from a construction of it or a written type naming it that the receiver is
-  read from. A part read by a key whose type is no literal may be any part, and
-  a key whose type is a literal, or a union of them, reads each part it names
+  parameters bound. A call's type parameters are inferred as the checker
+  infers them (`inferTypeArguments()` and `inferTypes()` in TypeScript's
+  checker): the receiver against the `this` parameter, each argument against
+  the type of the parameter at its position, a tuple spread slot by slot and
+  any other spread against every parameter after it, and the arguments a rest
+  parameter collects as a tuple. A parameter's type is read as the checker
+  reads it: a type parameter takes the argument whole, `NoInfer<T>` nothing,
+  a union's or an intersection's members each, a conditional type's branches
+  each, a homomorphic mapped type backwards, an array or an iterable through
+  its elements, a tuple slot by slot, an instance of a class or an interface
+  the argument instantiates too by its type arguments, and any other object
+  type by its properties, inherited ones included, its signatures, and its
+  index signatures; a library's object type is read by its type arguments and
+  its signatures alone. A union's lone type parameter takes the argument at
+  the normal priority where no other member takes it, and at a lower one where
+  a member closely matches the argument or takes it. Only the candidates found
+  at the best priority count, as the checker ranks them, and those from a
+  callback's parameters only where none other is found; a type parameter with
+  none takes its written default, or else its written constraint. The argument is followed to where each of its parts was
+  written: an object literal's members, an array literal's elements by slot,
+  a binding's annotation or its initializer, a member of a value it reads, a
+  function's result and written parameters, and the type arguments of an
+  instance a construction or a call makes. A candidate that is a field's or a
+  type argument's written type stands for that type, so its `unknown`
+  declares a reference wherever the type parameter is a field's type; any
+  other candidate stands for its provenance. A method's call also binds the
+  type parameters of the class or the interface declaring it, as its receiver
+  instantiates them. A part read by a key whose type is no literal may be any
+  part, and a key whose type is a literal, or a union of them, reads each part
+  it names, in an element access and in an indexed access type alike
 - another pattern's result, which passed this check in its own compile; a
   cell; a literal, a function, or JSX
 
