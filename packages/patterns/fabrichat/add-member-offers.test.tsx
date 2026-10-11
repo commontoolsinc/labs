@@ -8,8 +8,8 @@
  * at, joins her to the room's roster, and reads `offered`; an add of Carol by
  * a profile pointing at no inbox queues a notice for her, and reads `noticed`.
  * An add naming a profile that attests no one, or someone other than the
- * address it names, is refused. To a viewer with no manager, an add reads
- * `access-only` at once. A group named by both of Alice's profiles,
+ * address it names, is refused. To a viewer with no manager, or one whose
+ * manager hasn't resolved, an add reads `access-only` at once. A group named by both of Alice's profiles,
  * which point at two inboxes, is offered once to each, and lists her once;
  * one named by two of her profiles pointing at one inbox is offered there
  * once; and one naming profiles of Alice and Carol that point at the same
@@ -40,6 +40,7 @@ import {
   findNodeById,
   propValue,
   readValue,
+  textContent,
 } from "../test/vnode-helpers.ts";
 import PrivateInbox, { type OfferEvent } from "../system/private-inbox.tsx";
 import type { ShareInboxPiece } from "../system/profile-home.tsx";
@@ -191,9 +192,6 @@ interface ManagedRoomInput extends Records {
   /** The viewer's adds' outcomes. */
   addRequests: Writable<Record<string, AddMemberOutcome>>;
 
-  /** Whether the viewer has a manager. */
-  hasManager: boolean;
-
   /** The viewer's manager, when they have one. */
   manager?: RoomManager;
 }
@@ -226,7 +224,6 @@ const ManagedRoom = pattern<ManagedRoomInput, ManagedRoomOutput>(
       roster: input.roster,
       addRequests: input.addRequests,
       self: input[SELF],
-      hasManager: input.hasManager,
       manager: input.manager,
     } as RoomArg);
     return {
@@ -248,6 +245,10 @@ const pickerOf = (root: unknown): string => {
     countElements(picker, "cf-profile-badge")
   }`;
 };
+
+/** What the room shows the session about its latest add. */
+const shownOf = (root: unknown): string =>
+  textContent(findNodeById(root, "fabrichat-add-member-outcome")).trim();
 
 /** A room's records, which every participant's room over them shares. */
 interface Records {
@@ -350,7 +351,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     counters: setup.room.counters,
     roster: setup.roster,
     addRequests: Writable.of<Record<string, AddMemberOutcome>>({}),
-    hasManager: true,
     manager: {
       offerRoom: manager.offerRoom,
       requests: manager.requests,
@@ -368,7 +368,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     counters: setup.room.counters,
     roster: setup.roster,
     addRequests: Writable.of<Record<string, AddMemberOutcome>>({}),
-    hasManager: false,
   });
   // Alice's profile, reached as a room reaches it: through her message.
   const aliceProfile = profileOf(
@@ -428,8 +427,11 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
             .get()[addMemberOfferId(setup.roomSpace.get(), "add-unlisted")];
           return outcome?.status === "done" &&
             outcome.delivery === "access-only" &&
+            outcome.deliveryRefusal ===
+              "The room isn't among this user's chats." &&
             verdict?.status === "refused" &&
-            verdict.reason === "The room isn't among this user's chats.";
+            shownOf(room[UI]) ===
+              `Added ${setup.aliceDid.get()}, who couldn't be told of this chat: The room isn't among this user's chats. Send them its link.`;
         }),
       },
       { action: action_list_room },
@@ -450,6 +452,8 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
             outcome.delivery === "offered" &&
             room.participantPrincipals.includes(setup.aliceDid.get()) &&
             pickerOf(room[UI]) === "none:0" &&
+            shownOf(room[UI]) ===
+              `Added ${setup.aliceDid.get()}, and offered them this chat.` &&
             !notices.get().some((notice) =>
               notice.recipient === setup.aliceDid.get()
             );
@@ -508,7 +512,10 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         assertion: assert(() => {
           const outcome = unmanaged.addRequests["add-alone"];
           return outcome?.status === "done" &&
-            outcome.delivery === "access-only";
+            outcome.delivery === "access-only" &&
+            outcome.deliveryRefusal === undefined &&
+            shownOf(unmanaged[UI]) ===
+              `Added ${setup.carolDid.get()}. Send them this chat's link.`;
         }),
       },
       // A group named by both of Alice's profiles is offered to each of her

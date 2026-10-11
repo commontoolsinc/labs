@@ -508,8 +508,8 @@ export type ChatOfferDelivery = "offered" | "noticed";
 
 /**
  * How an added member was told of the room: as their adder's manager told
- * them, or `access-only`, not told at all, because the adder has no manager
- * that tells them, or theirs refused to.
+ * them, or `access-only`, not told at all, because the adder had no manager to
+ * tell them when they added them, or theirs refused to.
  */
 export type AddMemberDelivery = ChatOfferDelivery | "access-only";
 
@@ -524,6 +524,12 @@ export type AddMemberOutcome =
      * decided.
      */
     delivery?: AddMemberDelivery;
+
+    /**
+     * Why the adder's manager refused to tell them of the room, where it did,
+     * which makes `delivery` `access-only`.
+     */
+    deliveryRefusal?: string;
   }
   | {
     /** The add was refused, and nothing was granted. */
@@ -542,11 +548,9 @@ export type AddMemberOutcome =
 /**
  * A refusal of an add a client can act on, which stays the same whatever its
  * `reason` says. `direct-room`: the room is a direct room, whose space keeps
- * its two members. `manager-pending`: whether the adder has a manager to tell
- * the member of the room isn't known yet, so nothing was granted, and the same
- * add sent again once it is known can succeed.
+ * its two members.
  */
-export type AddMemberRefusalCode = "direct-room" | "manager-pending";
+export type AddMemberRefusalCode = "direct-room";
 
 /**
  * The `requestId` under which an add to the room in `space` asks the adder's

@@ -84,6 +84,7 @@ import {
 import { bodyText, FabriChatMessageRow } from "./message-row.tsx";
 import {
   type AboutRecord,
+  type AddMemberDelivery,
   addMemberOfferId,
   type AddMemberOutcome,
   type AddMemberRefusalCode,
@@ -430,8 +431,9 @@ export type AddRequestsCell = Writable<
 /**
  * `outcomes`, where each add that is done with no `delivery` of its own takes
  * the one the viewer's manager decided for it, which `requests` records under
- * `addMemberOfferId()`: its `delivery`, or `access-only` where the manager
- * refused to tell the member. An add whose verdict hasn't landed keeps none.
+ * `addMemberOfferId()`: its `delivery`, or, where the manager refused to tell
+ * the member, `access-only`, with the manager's reason as
+ * `deliveryRefusal`. An add whose verdict hasn't landed keeps none.
  */
 export const withDeliveries = (
   outcomes: Readonly<Record<string, AddMemberOutcome>>,
@@ -447,14 +449,34 @@ export const withDeliveries = (
         return [id, outcome];
       }
       const verdict = requests?.[addMemberOfferId(space, id)];
+      if (verdict?.status === "refused") {
+        return [id, {
+          ...outcome,
+          delivery: "access-only",
+          deliveryRefusal: verdict.reason,
+        }];
+      }
       const delivery = verdict?.status === "done"
         ? verdict.delivery
-        : verdict?.status === "refused"
-        ? "access-only"
         : undefined;
       return [id, delivery === undefined ? outcome : { ...outcome, delivery }];
     }),
   );
+
+/** What the session's latest add came to, which the control shows. */
+interface LatestAdd {
+  /** The add's `requestId`. */
+  requestId: string;
+
+  /** Whom it admitted, when it did. */
+  member?: string;
+
+  /** How they were told of the room, where the add itself decided it. */
+  delivery?: AddMemberDelivery;
+
+  /** Why it was refused, when it was. */
+  refusal?: string;
+}
 
 /** What adding a member is bound to. */
 interface AddMemberState {
@@ -471,7 +493,7 @@ interface AddMemberState {
   requests?: AddRequestsCell;
 
   /** What the session's latest add came to, which the control shows. */
-  outcome: Writable<string>;
+  latest: Writable<LatestAdd | undefined>;
 
   /**
    * The room itself, as the viewer's manager links it; absent for a core used
@@ -479,10 +501,14 @@ interface AddMemberState {
    */
   self?: Cell<ChatRoomLink>;
 
-  /** Whether the viewer has a manager; absent while that isn't known. */
-  hasManager?: boolean;
+  /**
+   * Whether the room can ask the viewer's manager to tell someone of it: the
+   * viewer has a manager that has resolved, with an `offerRoom`, and the room
+   * has `self` to name itself by.
+   */
+  canOffer: boolean;
 
-  /** The viewer's manager's `offerRoom`, when `hasManager` holds. */
+  /** The viewer's manager's `offerRoom`, when `canOffer` holds. */
   offerRoom?: Stream<OfferRoomRequest>;
 
   /**
@@ -502,9 +528,9 @@ interface AddMemberState {
  * or by both, which then have to agree. The viewer's manager offers them the
  * room through the profile's share inbox, or, given only their address,
  * through the profiles its people list for them, and decides how they were
- * told; a viewer with no manager admits them and tells them nothing. An add
- * made before it is known whether the viewer has a manager is refused, so
- * that each add that is done is told one way or the other.
+ * told. An add with no manager to send to, because the viewer has none or
+ * theirs hasn't resolved, admits them and tells them nothing, and records so
+ * at once.
  */
 const commitAddMember = handler<AddMemberEvent, AddMemberState>(
   (
@@ -514,24 +540,23 @@ const commitAddMember = handler<AddMemberEvent, AddMemberState>(
       ownSpace,
       kind,
       requests,
-      outcome,
+      latest,
       self,
-      hasManager,
+      canOffer,
       offerRoom,
       picked,
     },
   ) => {
     const requestId = event?.requestId ?? eventKey();
     if (requests?.key(requestId).get() !== undefined) return;
-    const record = (result: AddMemberOutcome, shown: string): void => {
-      requests?.key(requestId).set(result);
-      outcome.set(shown);
-    };
-    const refuse = (reason: string, code?: AddMemberRefusalCode): void =>
-      record(
-        { status: "refused", reason, ...(code === undefined ? {} : { code }) },
+    const refuse = (reason: string, code?: AddMemberRefusalCode): void => {
+      requests?.key(requestId).set({
+        status: "refused",
         reason,
-      );
+        ...(code === undefined ? {} : { code }),
+      });
+      latest.set({ requestId, refusal: reason });
+    };
     // A space's own chat shares its space, whose members are its own
     // business, whatever a rendering shows.
     if (!ownSpace) {
@@ -564,13 +589,6 @@ const commitAddMember = handler<AddMemberEvent, AddMemberState>(
       refuse("That profile isn't theirs.");
       return;
     }
-    if (hasManager === undefined) {
-      refuse(
-        "Your chats haven't loaded yet. Try again in a moment.",
-        "manager-pending",
-      );
-      return;
-    }
     try {
       grantSpaceAccess(room, member, "OWNER");
     } catch (error) {
@@ -587,7 +605,7 @@ const commitAddMember = handler<AddMemberEvent, AddMemberState>(
     // and records it, which the room's `addRequests` then reads.
     const space = spaceOf(room);
     if (
-      hasManager && offerRoom !== undefined && self !== undefined &&
+      canOffer && offerRoom !== undefined && self !== undefined &&
       space !== undefined
     ) {
       offerRoom.send({
@@ -596,13 +614,12 @@ const commitAddMember = handler<AddMemberEvent, AddMemberState>(
         member,
         ...(profile === undefined ? {} : { profile }),
       });
-      record({ status: "done" }, `Added ${member}.`);
+      requests?.key(requestId).set({ status: "done" });
+      latest.set({ requestId, member });
       return;
     }
-    record(
-      { status: "done", delivery: "access-only" },
-      `Added ${member}. Send them this chat's link.`,
-    );
+    requests?.key(requestId).set({ status: "done", delivery: "access-only" });
+    latest.set({ requestId, member, delivery: "access-only" });
   },
 );
 
@@ -632,10 +649,10 @@ export interface AddMemberInput {
    */
   self?: Cell<ChatRoomLink>;
 
-  /** Whether the viewer has a manager; absent while that isn't known. */
-  hasManager?: boolean;
-
-  /** The viewer's manager, when `hasManager` holds. */
+  /**
+   * The viewer's manager; absent while the viewer has none, or theirs hasn't
+   * resolved.
+   */
   manager?: RoomManager;
 
   /** The principals of those already in the room, whom the picker leaves out. */
@@ -652,6 +669,12 @@ export interface AddMemberOutput {
 
   /** Admits the person the event names, from a trusted gesture. */
   add: Stream<AddMemberEvent>;
+
+  /**
+   * The outcome of each of the viewer's adds, with how the person was told of
+   * the room once that is decided.
+   */
+  outcomes: Record<string, AddMemberOutcome>;
 
   /**
    * Whether the viewer can add someone: an OWNER of a group room in a space of
@@ -674,22 +697,25 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
       kind,
       requests,
       self,
-      hasManager,
       manager,
       present,
     },
   ) => {
-    const outcome = new Writable.perSession<string>("");
-    const offerRoom = manager?.offerRoom;
+    const latest = new Writable.perSession<LatestAdd | undefined>(undefined);
+    // Read as values: a handler bound to a manager that isn't there is bound
+    // to a stream that still reads as present, whose sends are dropped.
+    const canOffer = computed(() =>
+      manager?.offerRoom !== undefined && self !== undefined
+    );
     const bindings = {
       room,
       ownSpace,
       kind,
       requests,
-      outcome,
+      latest,
       self,
-      hasManager,
-      offerRoom,
+      canOffer,
+      offerRoom: manager?.offerRoom,
     };
     const add = commitAddMember(bindings);
     const canAdd = computed(() =>
@@ -701,8 +727,30 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
     const addDisplay = computed((): ChatDisplay =>
       canAdd && myProfile?.get() !== undefined ? "flex" : "none"
     );
+    const outcomes = computed((): Record<string, AddMemberOutcome> =>
+      withDeliveries(requests?.get() ?? {}, spaceOf(room), manager?.requests)
+    );
+    // What the session's latest add came to: how the person was told of the
+    // room, once that is decided, and what to do where they weren't.
+    const shown = computed((): string => {
+      const add = latest.get();
+      if (add === undefined) return "";
+      if (add.refusal !== undefined) return add.refusal;
+      const recorded = outcomes[add.requestId];
+      const done = recorded?.status === "done" ? recorded : undefined;
+      const delivery = done?.delivery ?? add.delivery;
+      return delivery === undefined
+        ? `Added ${add.member}.`
+        : delivery === "offered"
+        ? `Added ${add.member}, and offered them this chat.`
+        : delivery === "noticed"
+        ? `Added ${add.member}. Your chats remind you to send them this chat's link.`
+        : done?.deliveryRefusal !== undefined
+        ? `Added ${add.member}, who couldn't be told of this chat: ${done.deliveryRefusal} Send them its link.`
+        : `Added ${add.member}. Send them this chat's link.`;
+    });
     const outcomeDisplay = computed((): ChatDisplay =>
-      (outcome.get() ?? "") === "" ? "none" : "block"
+      shown === "" ? "none" : "block"
     );
     // Each person the manager lists who isn't in the room, by the first
     // profile attesting them, per session, as the manager's people are.
@@ -772,11 +820,12 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
             hidden
             style={{ display: outcomeDisplay }}
           >
-            <cf-text variant="caption">{outcome}</cf-text>
+            <cf-text variant="caption">{shown}</cf-text>
           </div>
         </cf-vstack>
       ),
       add,
+      outcomes,
       canAdd,
     };
   },
@@ -970,12 +1019,9 @@ export interface FabriChatRoomCoreInput {
   self?: Cell<ChatRoomLink>;
 
   /**
-   * Whether the viewer has a manager to tell someone they add of the room;
-   * absent while that isn't known.
+   * The viewer's manager, which tells someone they add of the room; absent
+   * while the viewer has none, or theirs hasn't resolved.
    */
-  hasManager?: boolean;
-
-  /** The viewer's manager, when `hasManager` holds. */
   manager?: RoomManager;
 }
 
@@ -1014,7 +1060,6 @@ export const FabriChatRoomCore = pattern<
     startsDirect,
     startDirect,
     self,
-    hasManager,
     manager,
   } = input;
   const composer = new Writable.perSession<ComposerState>({});
@@ -1081,17 +1126,9 @@ export const FabriChatRoomCore = pattern<
     kind,
     requests: addRequests,
     self,
-    hasManager,
     manager,
     present: participantPrincipals,
   });
-  const addOutcomes = computed((): Record<string, AddMemberOutcome> =>
-    withDeliveries(
-      addRequests?.get() ?? {},
-      spaceOf(messages),
-      manager?.requests,
-    )
-  );
   const cannotSend = computed(() => !canSend);
   // The policy is a document of its own, which `about` links.
   const policy = new Writable.perSpace<ChatRoomPolicy>(FABRICHAT_POLICY);
@@ -1186,7 +1223,7 @@ export const FabriChatRoomCore = pattern<
     ...streams,
     addMember: addMember.add,
     canAdd: addMember.canAdd,
-    addRequests: addOutcomes,
+    addRequests: addMember.outcomes,
   };
   const closeThread = action(() => composer.key("thread").set(undefined));
   const cancelReply = action(() => composer.key("replyTo").set(undefined));
@@ -1400,15 +1437,6 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       }
     >({ query: "#chatManager" });
     const startsDirect = computed(() => managerWish.result !== undefined);
-    // A wish with neither a result nor an error is still being resolved,
-    // which says nothing yet of whether the viewer has a manager.
-    const hasManager = computed((): boolean | undefined =>
-      managerWish.result !== undefined
-        ? true
-        : managerWish.error !== undefined
-        ? false
-        : undefined
-    );
     // Hidden by a prop rather than a branch, and `hidden` until the prop has a
     // value, as `FabriChatMessageRow` says.
     const setupDisplay = computed((): ChatDisplay =>
@@ -1429,7 +1457,6 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
         startsDirect,
         startDirect: managerWish.result?.openDirect,
         self,
-        hasManager,
         manager: managerWish.result,
       },
     );

@@ -83,12 +83,12 @@ interface ChatRoomOutput {
   /** The outcome of each of this reader's adds, by its `requestId`. */
   addRequests: Record<
     string,
-    | { status: "done"; delivery?: "offered" | "noticed" | "access-only" }
     | {
-      status: "refused";
-      reason: string;
-      code?: "direct-room" | "manager-pending";
+      status: "done";
+      delivery?: "offered" | "noticed" | "access-only";
+      deliveryRefusal?: string;
     }
+    | { status: "refused"; reason: string; code?: "direct-room" }
   >;
   [UI]: VNode;
   [VIEWS]: { room: object };
@@ -214,7 +214,9 @@ space.
 - **`addRequests`** holds the outcome of each of the reader's
   [`addMember`](#addmemberrequestid-string-target--value-string--profile-cellchatprofile)
   requests, by its `requestId`, and for each add that is done, how the person
-  added was told of the room, once that is decided.
+  added was told of the room, once that is decided. It reads the verdicts from
+  the reader's own manager, so it is the reader's alone, like the outcomes it
+  holds.
 - **`recentActivity`** is a log of what the room recorded recently: each message
   sent, edited, deleted, or obliterated, and each reaction added or removed, as
   a [`ChatRoomActivity`](ChatRoomActivity.md), in `seq` order. A client follows
@@ -600,34 +602,37 @@ with them.
   `requestId` composed of the room's space and the add's own. The manager
   offers them the room through their profile's share inbox, or, given only
   their address, through the profiles its `people` lists for them, and
-  otherwise produces a notice for them. A reader with no manager is told
+  otherwise produces a notice for them. An add with no manager to send to,
+  because the reader has none or theirs hasn't resolved yet, tells the person
   nothing more.
 - **Refused:** a direct room, whose space keeps its two members; an address
   that is not a principal's DID, a `profile` that attests no principal or
   names someone other than `target.value`, a sender without OWNER, a room that
-  shares an existing space, and anything the space's access list refuses; and
-  an add made while it isn't known yet whether the reader has a manager,
-  before anything is granted. The rendering tells the session what came of its
-  add, and shows a direct room no add control.
+  shares an existing space, and anything the space's access list refuses. The
+  rendering tells the session what came of its add, and how the person was
+  told of the room once that is decided, and shows a direct room no add
+  control.
 - **Outcome:** recorded in `addRequests`: `done`, or `refused` with a `reason`
-  for a person to read. A refusal a client can act on also carries a `code`,
-  which stays the same whatever the `reason` says: `direct-room` for a direct
-  room, and `manager-pending` for an add made before the reader's manager was
-  known, which the same event sent again can then complete. The others carry
-  none. An add the stream doesn't admit, as one without the gesture, records
-  nothing.
+  for a person to read. A direct room's refusal also carries the `code`
+  `direct-room`, which stays the same whatever the `reason` says; the others
+  carry none. An add the stream doesn't admit, as one without the gesture,
+  records nothing.
 - **Delivery:** a `done` add carries `delivery`, how the person was told of
   the room: `offered`, sent to at least one share inbox, which says nothing of
   whether it arrived; `noticed`, a notice in the manager's `outgoingNotices`
-  for a client to deliver; or `access-only`, told nothing, because the reader
-  has no manager, their manager has no `offerRoom`, or their manager refused
-  to tell anyone of this room, as it does for a room its catalog doesn't list.
-  An add with no manager to send to records `access-only` at once. Otherwise
+  for a client to deliver; or `access-only`, told nothing, so that the adder
+  has to send them the room's link. An add with no manager to send to records
+  `access-only` at once: the reader has no manager, theirs hasn't resolved yet,
+  or theirs has no `offerRoom`. Nothing is ever offered for such an add, even
+  once a manager resolves, since nothing runs then to send it. Otherwise
   `delivery` is the manager's verdict, which `addRequests` reads from the
-  manager's `requests` once it is recorded, and is absent until then. The
-  manager records a verdict for every `offerRoom` it receives, so every add
-  that is done gets a `delivery` eventually, and a client may show an add with
-  none as still being delivered.
+  manager's `requests` once it is recorded, and is absent until then. A
+  manager that refuses to tell anyone of the room, as it does for a room its
+  catalog doesn't list, makes it `access-only`, with the manager's `reason` as
+  `deliveryRefusal`. The manager records a verdict for every `offerRoom` it
+  receives, so every add that is done gets a `delivery` eventually, either at
+  once or when the verdict lands, and an absent one always means the verdict
+  is still coming.
 
 ### `addParticipant(profile: Cell<ChatProfile>)`
 
