@@ -105,3 +105,39 @@ wait for coverage or rejection repair. The default keeps the coverage hold.
 Each receipt belongs to its own invocation. Starting a second commit on a
 transaction that is already pending or complete returns that invocation's
 completion error on both stages, even when the original commit succeeded.
+
+## Naming the commit
+
+An accepted commit lands at a position in its space's commit log, the same
+sequence every document revision in that space carries as `since`.
+`tx.committedSeq(space)` returns that position once the commit's `verdict` has
+resolved, and `undefined` before it, for a space that refused the commit, and
+for a space the transaction wrote nothing to. A multi-space commit that fails
+partway keeps the positions of the spaces that accepted it.
+
+A handler's commit is named the same way from the transaction a sender's commit
+callback receives. `handlingCommitSeq(runtime, tx)` returns the position at
+which the handling committed its receipt: the callback's own transaction when
+it committed the handling, the earlier delivery's commit when the transaction
+was refused as `receipt-exists`, and the serving run's commit under server
+execution, where the callback receives the sender's local echo. It returns
+`undefined` when the handling wrote no receipt, which needs commit
+preconditions or server execution.
+
+```ts
+// Shown at module scope.
+import {
+  type Cell,
+  handlingCommitSeq,
+  type IExtendedStorageTransaction,
+  type Runtime,
+  sendEvent,
+} from "@commonfabric/runner";
+
+declare const runtime: Runtime;
+declare const stream: Cell<{ title: string }>;
+
+const handled = Promise.withResolvers<IExtendedStorageTransaction>();
+sendEvent(stream, { title: "next" }, (tx) => handled.resolve(tx));
+const seq = await handlingCommitSeq(runtime, await handled.promise);
+```
