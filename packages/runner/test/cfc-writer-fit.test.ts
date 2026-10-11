@@ -17,6 +17,7 @@ import { runtimeOwnedStoreOwnerKey } from "../src/cfc/runtime-owned-stores.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
 import { getDerivedInternalCellLink, parseLink } from "../src/link-utils.ts";
 import { CFC_LABEL_READ_FAILED_ATOM } from "../src/cfc/observation.ts";
+import { commitCfcFieldValue } from "../src/cfc/label-representation.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
@@ -3507,6 +3508,90 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         await runtime.dispose();
         await storageManager.close();
       }
+    });
+
+    describe("a personal-space owner persisted as a commitment", () => {
+      // A label that crossed a space boundary persists `PersonalSpace.owner`
+      // as its `{digestOf}` commitment (§4.6.4.1), and a transaction reading
+      // it carries the clause in that form. Which space the clause names is
+      // an equality question, which the commitment answers the same way the
+      // plaintext does.
+
+      const declaredClausesAfterSubstrateWrite = async (
+        name: string,
+        owner: string,
+      ) => {
+        const storageManager = StorageManager.emulate({ as: signer });
+        const runtime = newRuntime(storageManager);
+        try {
+          const committedPersonalSpace = {
+            type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+            owner: commitCfcFieldValue(owner),
+          };
+          await seedSecretSource(runtime, `${name}-source`, [
+            committedPersonalSpace,
+          ]);
+
+          const tx = runtime.edit();
+          tx.setCfcEnforcementMode("enforce-strict");
+          const source = runtime.getCell(
+            signer.did(),
+            `${name}-source`,
+            undefined,
+            tx,
+          );
+          const raw = source.getRaw() as { secret?: string };
+          const result = runtime.getCell(
+            signer.did(),
+            `${name}-result`,
+            undefined,
+            tx,
+          );
+          const substrate = runtime.getCell(
+            signer.did(),
+            `${name}-substrate`,
+            undefined,
+            tx,
+          );
+          recordRuntimeOwnedStore(runtime, tx, result, substrate);
+          substrate.set({ copied: `${raw.secret}!` });
+          const substrateId = substrate.getAsNormalizedFullLink().id;
+          tx.prepareCfc();
+          const committed = await tx.commit().settled;
+          return {
+            committed,
+            committedPersonalSpace,
+            declared: replicaEntries(storageManager, substrateId)
+              .filter((entry) => entry.origin === "declared")
+              .flatMap((entry) => entry.label.confidentiality ?? []),
+          };
+        } finally {
+          await runtime.dispose();
+          await storageManager.close();
+        }
+      };
+
+      it("declares one naming the target's own space", async () => {
+        const { committed, committedPersonalSpace, declared } =
+          await declaredClausesAfterSubstrateWrite(
+            "writer-fit-seam-committed-own-personal",
+            signer.did(),
+          );
+        expect(committed.error).toBeUndefined();
+        expect(declared).toContainEqual(committedPersonalSpace);
+      });
+
+      it("rejects one naming a space other than the target's", async () => {
+        const { committed, declared } =
+          await declaredClausesAfterSubstrateWrite(
+            "writer-fit-seam-committed-other-personal",
+            OTHER_SPACE,
+          );
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(declared).toEqual([]);
+      });
     });
 
     it("rejects a substrate write whose marker the runtime did not record", async () => {

@@ -7,6 +7,7 @@ export { parseExternalSchemaRef } from "@commonfabric/data-model-schema/schema-r
 export { lookupSchemaDocument } from "./schema-registry.ts";
 export { mapSubschemas } from "@commonfabric/data-model-schema/schema-walk";
 export { FOREIGN_HOST_LIMIT, Runtime } from "./runtime.ts";
+export { handlingCommittedBy } from "./handling-commit.ts";
 export { ensureSESLockdown } from "./sandbox/ses-runtime.ts";
 export {
   fabricAuthorityMatchesSpaceHost,
