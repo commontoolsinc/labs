@@ -2392,6 +2392,13 @@ export function analyzeFunctionCapabilities(
     // Arguments a callee's own summary charged, so the identifier handler
     // does not also treat them as values that left the analysis.
     const summaryHandledArgumentUses = new WeakSet<ts.Expression>();
+    // Arguments a known identity call recorded as compared, each as the
+    // expression its source was resolved from. The call is visited before
+    // its arguments, so the visits below ask this set whether an argument is
+    // compared rather than following its parent pointer to the call: a stage
+    // that rebuilds the call can leave a reused argument's parent at a call
+    // that is no longer where the argument sits.
+    const identityArgumentUses = new WeakSet<ts.Expression>();
     const unreadableCellArguments: UnreadableCellArgument[] = [];
 
     // Whether a call writes its argument into a local collection — a `push`,
@@ -3904,9 +3911,11 @@ export function analyzeFunctionCapabilities(
             !signatureCapabilityArgumentUses.has(
               outermostTransparentWrapper(node),
             ) &&
-            // A member a known identity call only compares is an identity use,
-            // recorded where the call is visited; a read here would end it.
-            !isIdentityOnlyArgument(outermostTransparentWrapper(node))
+            // A member a known identity call recorded as compared is an
+            // identity use; a read here would end it. A member the call did
+            // not record is read, so whatever the call failed to resolve
+            // stays in the schema rather than being shrunk out of it.
+            !identityArgumentUses.has(node)
           ) {
             const ref = resolveSourceRef(node);
             if (ref) {
@@ -4353,8 +4362,7 @@ export function analyzeFunctionCapabilities(
           // An `assert` body's operand recording wraps each argument, and
           // which source an argument comes from, and whether it is cell-like,
           // are questions about the value the recording hands back. The
-          // member-access visit charges no read to a member argument and
-          // leaves its identity use to be recorded here.
+          // member-access visit charges no read to a member recorded here.
           for (const argument of node.arguments) {
             const comparedArgument = unwrapAssertCapture(argument);
             const source = resolveSourceRef(comparedArgument);
@@ -4362,6 +4370,7 @@ export function analyzeFunctionCapabilities(
               markIdentityUseRef(source, comparedArgument, {
                 comparable: identityEqualsCall,
               });
+              identityArgumentUses.add(comparedArgument);
             }
           }
         }

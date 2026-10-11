@@ -2440,8 +2440,9 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   on the value rather than on the recording helper's untyped result
   (`unwrapAssertCapture` in `utils/expression.ts`;
   `test/assert-diagnostics.test.ts`). A known identity call's arguments are
-  read through the same way, so `equals(refusal.inbox, x)` in an `assert` body
-  records `inbox` as a comparable use, as it does in a `computed`. Beyond
+  read through the same way, so a member an `assert` body compares, as in
+  `equals(refusal.inbox, x)` or `equals(holder.get().inbox, x)`, is a
+  comparable use, as it is in a `computed`. Beyond
   those two, a recording in argument position still hides what it wraps from
   the callee's capability contract, so `assert(() => helper(count))` charges
   `count` whatever its own use in the body says, while
@@ -2619,7 +2620,14 @@ computation's input schema:
   checker is available (`policy/capability-analysis.ts`,
   `isKnownIdentityArgumentCall`). An argument is an identity use whether it is
   a binding or a member access (`equals(state.selected, x)`), and is not
-  charged a read (fixture `handler-schema/identity-member-argument`).
+  charged a read (fixture `handler-schema/identity-member-argument`). The call
+  decides which of its arguments it compares when it is visited, from the
+  arguments it resolved a source for, before the arguments themselves are
+  visited. The member-access visit skips its read only for a member the call
+  recorded, so a member the call could not resolve is read rather than shrunk
+  out, and an argument a later stage rebuilt or wrapped is judged by the tree
+  being analyzed rather than by where its parent pointer points
+  (`identityArgumentUses`; `test/assert-diagnostics.test.ts`).
 - A whole-root identity use records path `[]` and passthrough. `identityOnly` is
   true only when that root identity path survives normalization and the root has
   no non-identity use, ordinary reads/writes, or wildcard. Nested uses populate
