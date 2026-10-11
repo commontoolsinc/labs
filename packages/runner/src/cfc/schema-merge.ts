@@ -724,6 +724,44 @@ const resolveReferenceSide = (
   return isObjectNotArray(resolved) ? resolved as JSONSchemaObj : side;
 };
 
+/**
+ * A branch's structural correspondence key. Policies and reference targets
+ * are reconciled by the node merge; reference boundaries and every other
+ * constraint, including discriminators and literal defaults, stay in the key.
+ * Definition maps are inert below the merged document's root.
+ */
+const unionBranchShape = (schema: JSONSchema): JSONSchema => {
+  if (!isObjectNotArray(schema)) return schema;
+  const { ifc: _ifc, $defs: _defs, ...shape } = schema;
+  return mapSubschemas(
+    typeof shape.$ref === "string" ? { ...shape, $ref: "" } : shape,
+    unionBranchShape,
+    { includeUnused: true, visitBooleans: true },
+  );
+};
+
+/** Match policy-bearing union branches only when each has a unique counterpart. */
+const correspondingUnionBranches = (
+  existing: readonly JSONSchema[],
+  candidate: readonly JSONSchema[],
+  path: string,
+): readonly JSONSchema[] => {
+  const left = existing.map((branch) => hashStringOf(unionBranchShape(branch)));
+  const right = candidate.map((branch) =>
+    hashStringOf(unionBranchShape(branch))
+  );
+  if (
+    left.length !== right.length || new Set(left).size !== left.length ||
+    new Set(right).size !== right.length ||
+    right.some((shape) => !left.includes(shape))
+  ) {
+    throw new Error(
+      `cannot reconcile policy-bearing union branches at ${path || "/"}`,
+    );
+  }
+  return right.map((shape) => existing[left.indexOf(shape)]);
+};
+
 const mergeSchemaNode = (
   existing: JSONSchema,
   candidate: JSONSchema,
@@ -734,6 +772,8 @@ const mergeSchemaNode = (
 ): JSONSchema => {
   let left = asSchemaObject(existing, path);
   let right = asSchemaObject(candidate, path);
+  const originalLeft = left;
+  const originalRight = right;
   // Two references already resolved against each other higher on this path
   // are recursive definitions meeting themselves; resolving them again would
   // not terminate, so they merge as references from there down. Against an
@@ -912,6 +952,37 @@ const mergeSchemaNode = (
     options,
   );
   const mergedDefault = mergeDefaults(left.default, right.default);
+  const unions: { anyOf?: JSONSchema[]; oneOf?: JSONSchema[] } = {};
+  for (const keyword of ["anyOf", "oneOf"] as const) {
+    const leftBranches = left[keyword];
+    const rightBranches = right[keyword];
+    if (
+      childReferences === undefined || leftBranches === undefined ||
+      rightBranches === undefined || deepEqual(leftBranches, rightBranches)
+    ) continue;
+    const policyRoot = { $defs: childReferences.definitions };
+    if (
+      ![...leftBranches, ...rightBranches].some((branch) =>
+        hasReachableIfc(branch, policyRoot)
+      )
+    ) continue;
+    const counterparts = correspondingUnionBranches(
+      leftBranches,
+      rightBranches,
+      path,
+    );
+    unions[keyword] = rightBranches.map((branch, index) =>
+      mergeSchemaNode(
+        counterparts[index],
+        branch,
+        path,
+        logicalPath,
+        options,
+        childReferences,
+      )
+    );
+    assertNoDivergentIfcBranches({ [keyword]: unions[keyword] }, path);
+  }
   // `$defs` is settled by `mergeCfcSchemaEnvelopes()` at the root, where both
   // documents' maps are hoisted into one before the walk; below the root a
   // `$defs` is inert, and the spread carries it as it does any other key.
@@ -923,8 +994,9 @@ const mergeSchemaNode = (
     default: _default,
     ...rest
   } = { ...left, ...right };
-  return {
+  const merged: JSONSchemaObj = {
     ...rest,
+    ...unions,
     ...(Object.keys(mergedProperties).length > 0
       ? { properties: mergedProperties }
       : {}),
@@ -939,6 +1011,28 @@ const mergeSchemaNode = (
     ...(required !== undefined ? { required } : {}),
     ...(mergedDefault !== undefined ? { default: mergedDefault } : {}),
   };
+  // A reconciled body equal to either referenced body keeps that reference.
+  // Shared policy definitions then stay shared inside union branches too.
+  // IFC siblings stay expanded: resolveKeepingBodyClaims() restores body
+  // claims that the sibling masks during ordinary reference resolution.
+  if (left !== originalLeft || right !== originalRight) {
+    const { $defs: _leftDefs, ...leftBody } = left;
+    const { $defs: _rightDefs, ...rightBody } = right;
+    const { $defs: _mergedDefs, ...mergedBody } = merged;
+    if (
+      left !== originalLeft && originalLeft.ifc === undefined &&
+      deepEqual(leftBody, mergedBody)
+    ) {
+      return originalLeft;
+    }
+    if (
+      right !== originalRight && originalRight.ifc === undefined &&
+      deepEqual(rightBody, mergedBody)
+    ) {
+      return originalRight;
+    }
+  }
+  return merged;
 };
 
 /** Checks every reachable policy position without unfolding reference cycles. */

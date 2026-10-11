@@ -2,7 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
 import { validateSchemaValue } from "@commonfabric/runner/cfc";
-import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
+import type {
+  FabricPrimitiveSchemaType,
+  JSONSchemaObj,
+} from "@commonfabric/api";
 import type { FabricPrimitive } from "@commonfabric/data-model";
 import {
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
@@ -168,6 +171,39 @@ describe("piece schema compatibility", () => {
     it("returns false for unresolved references", () => {
       const reference = { $ref: "#/$defs/missing" } as const;
       expect(schemasHaveSameContract(reference, reference)).toBe(false);
+    });
+
+    it("ignores unrelated definitions while retaining a recursive contract's reachable defaults", () => {
+      const root = (fallback = "Donut"): JSONSchemaObj => ({
+        $defs: {
+          row: {
+            type: "object",
+            properties: {
+              title: { $ref: "#/$defs/text" },
+              children: { type: "array", items: { $ref: "#/$defs/row" } },
+            },
+          },
+          text: { type: "string", default: fallback },
+          unrelated: { type: "number" },
+        },
+      });
+      const reference = { $ref: "#/$defs/row" } as const;
+      const addedDefinition = {
+        ...root(),
+        $defs: {
+          ...root().$defs,
+          unrelated: { type: "string" },
+          meeting: { type: "object", default: {} },
+        },
+      } as const;
+      expect(schemasHaveSameContract(reference, reference, {
+        sourceRoot: root(),
+        targetRoot: addedDefinition,
+      })).toBe(true);
+      expect(schemasHaveSameContract(reference, reference, {
+        sourceRoot: addedDefinition,
+        targetRoot: root("Glaze"),
+      })).toBe(false);
     });
 
     it("returns false when the consumer value contract changes", () => {

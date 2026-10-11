@@ -6,7 +6,9 @@ import {
 } from "@commonfabric/runner";
 import {
   cfcSchemaResolvedRoot,
+  cfcSchemaWithInheritedDefs,
   type IfcKey,
+  pruneCfcSchemaDefinitions,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
   validateSchemaDefinition,
@@ -2208,10 +2210,19 @@ function schemaSubtreesEqual(left: unknown, right: unknown): boolean {
 }
 
 function schemasResolveEqually(
-  source: unknown,
-  target: unknown,
+  source: JSONSchema,
+  target: JSONSchema,
   context: Pick<CompatibilityContext, "sourceRoot" | "targetRoot">,
 ): boolean {
+  // A resolved fragment carries its document's definition map. Only the
+  // transitive closure of definitions it uses belongs to its contract.
+  const contract = (schema: JSONSchema, root: JSONSchema) =>
+    pruneCfcSchemaDefinitions(cfcSchemaWithInheritedDefs(
+      schema,
+      isObjectNotArray(root) ? root.$defs : undefined,
+    ));
+  source = contract(source, context.sourceRoot);
+  target = contract(target, context.targetRoot);
   if (!schemaSubtreesEqual(source, target)) return false;
 
   const refs = new Set<string>();
@@ -2227,7 +2238,10 @@ function schemasResolveEqually(
     );
     if (
       sourceResolved === undefined || targetResolved === undefined ||
-      !schemaSubtreesEqual(sourceResolved, targetResolved)
+      !schemaSubtreesEqual(
+        pruneCfcSchemaDefinitions(sourceResolved),
+        pruneCfcSchemaDefinitions(targetResolved),
+      )
     ) {
       return false;
     }
