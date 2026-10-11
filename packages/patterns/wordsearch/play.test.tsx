@@ -53,9 +53,17 @@ const cellButtons = (node: unknown): unknown[] => {
   ];
 };
 
-/** The cell waiting for a word's other end, as drawn; -1 for none. */
+/** The cell waiting for a word's other end, as labelled; -1 for none. */
 const waiting = (ui: unknown): number =>
-  cellButtons(ui).findIndex((b) => propValue(b, "aria-pressed") === true);
+  cellButtons(ui).findIndex((b) =>
+    String(propValue(b, "aria-label")).endsWith(", selected")
+  );
+
+/** The cells drawn as part of a found word, in grid order. */
+const marked = (ui: unknown): number[] =>
+  cellButtons(ui).flatMap((b, i) =>
+    String(propValue(b, "style")).includes("color-primary)") ? [i] : []
+  );
 
 /** Whether the Start over button is disabled. */
 const startOverDisabled = (ui: unknown): boolean =>
@@ -96,6 +104,23 @@ export default pattern(() => {
   const found = new Writable<string[]>([]);
   const play = WordSearchPlay({ puzzle, found });
 
+  // A word and its reversal, which share one run when words run backwards.
+  const pairPuzzle = computed(() =>
+    generateWordSearch({
+      words: ["star", "rats"],
+      rows: 8,
+      cols: 8,
+      diagonals: true,
+      backwards: true,
+      seed: 2,
+    })
+  );
+  const pair = WordSearchPlay({
+    puzzle: pairPuzzle,
+    found: new Writable<string[]>([]),
+  });
+  const pairTap = pair.tap;
+
   const tap = play.tap;
 
   return {
@@ -107,6 +132,17 @@ export default pattern(() => {
       { action: tapEnds({ puzzle, tap, n: 0, reversed: false }) },
       { assertion: assert(() => play.foundCount === 1) },
       { assertion: assert(() => waiting(play[UI]) === -1) },
+      // Its cells are drawn found, and no others.
+      {
+        assertion: assert(() =>
+          JSON.stringify(marked(play[UI])) ===
+            JSON.stringify(
+              [...placementCells(puzzle.placements[0], puzzle.cols)].sort(
+                (a, b) => a - b,
+              ),
+            )
+        ),
+      },
 
       // Its last letter, then its first: found too.
       { action: tapEnds({ puzzle, tap, n: 1, reversed: true }) },
@@ -147,9 +183,12 @@ export default pattern(() => {
       { action: tapEnds({ puzzle, tap, n: 0, reversed: true }) },
       { assertion: assert(() => found.get().length === 3) },
 
-      // Starting over forgets the finds.
+      // Starting over forgets the finds, and any waiting first tap.
       { assertion: assert(() => !startOverDisabled(play[UI])) },
+      { action: action(() => play.tap.send({ index: 0 })) },
+      { assertion: assert(() => waiting(play[UI]) === 0) },
       { action: action(() => play.restart.send()) },
+      { assertion: assert(() => waiting(play[UI]) === -1) },
       { assertion: assert(() => play.foundCount === 0 && !play.solved) },
       { assertion: assert(() => found.get().length === 0) },
 
@@ -157,6 +196,7 @@ export default pattern(() => {
       // do not count for it.
       { action: tapEnds({ puzzle, tap, n: 0, reversed: false }) },
       { assertion: assert(() => play.foundCount === 1) },
+      { action: action(() => play.tap.send({ index: 5 })) },
       { action: action(() => seed.set(2)) },
       { assertion: assert(() => play.foundCount === 0) },
       {
@@ -164,6 +204,32 @@ export default pattern(() => {
           textContent(play[UI]).includes("Puzzle changed")
         ),
       },
+      // A first tap made in the old arrangement waits for nothing.
+      { assertion: assert(() => waiting(play[UI]) === -1) },
+      // The next find keeps only this arrangement's finds.
+      { action: tapEnds({ puzzle, tap, n: 1, reversed: false }) },
+      { assertion: assert(() => found.get().length === 1) },
+
+      // A word and its reversal share a run: tapping its ends twice, the
+      // same way both times, finds both, so the puzzle can be solved.
+      {
+        action: tapEnds({
+          puzzle: pairPuzzle,
+          tap: pairTap,
+          n: 0,
+          reversed: false,
+        }),
+      },
+      { assertion: assert(() => pair.foundCount === 1) },
+      {
+        action: tapEnds({
+          puzzle: pairPuzzle,
+          tap: pairTap,
+          n: 0,
+          reversed: false,
+        }),
+      },
+      { assertion: assert(() => pair.foundCount === 2 && pair.solved) },
     ],
   };
 });

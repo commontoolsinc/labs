@@ -23,9 +23,9 @@ import {
 } from "commonfabric";
 
 import {
-  placementBetween,
   placementCells,
   placementKey,
+  placementsBetween,
   type WordSearch as Puzzle,
 } from "./generator.ts";
 import { byWord, cellStyle, gridStyle, WORD_LIST_STYLE } from "./view.ts";
@@ -69,10 +69,19 @@ export const WordSearchPlay = pattern<
   WordSearchPlayInput,
   WordSearchPlayOutput
 >(({ title, puzzle, found }) => {
-  // The cell tapped first, waiting for a word's other end (-1 for none), and
-  // whether the last second tap missed: this tab's alone.
-  const anchor = Writable.perSession.of(-1);
+  // The cell tapped first, waiting for a word's other end, in the
+  // arrangement it was tapped in, and whether the last second tap missed:
+  // this tab's alone.
+  const anchor = Writable.perSession.of({ at: "", index: -1 });
   const missed = Writable.perSession.of(false);
+
+  // The arrangement: a first tap in another one waits for nothing.
+  const arrangement = computed(() =>
+    `${puzzle.rows}x${puzzle.cols}:${puzzle.grid.join("")}`
+  );
+  const waitingAt = computed(() =>
+    anchor.get().at === arrangement ? anchor.get().index : -1
+  );
 
   const keys = computed(() => puzzle.placements.map(placementKey));
   // Finds in this arrangement: a key from another one is not one.
@@ -99,31 +108,33 @@ export const WordSearchPlay = pattern<
       );
     }
     missed.set(false);
-    const first = anchor.get();
+    const first = anchor.get().at === arrangement ? anchor.get().index : -1;
     if (first < 0) {
-      anchor.set(index);
+      anchor.set({ at: arrangement, index });
       return;
     }
     if (first === index) {
-      anchor.set(-1);
+      anchor.set({ at: "", index: -1 });
       return;
     }
-    const hit = placementBetween(puzzle, first, index);
-    if (hit === undefined) {
+    const hits = placementsBetween(puzzle, first, index);
+    if (hits.length === 0) {
       // Not a word's two ends: say so, and take this tap as a new first one.
       missed.set(true);
-      anchor.set(index);
+      anchor.set({ at: arrangement, index });
       return;
     }
-    anchor.set(-1);
-    const key = placementKey(hit);
+    anchor.set({ at: "", index: -1 });
+    // Only this arrangement's finds are kept.
     const current = found.get().filter((k) => keys.includes(k));
-    if (!current.includes(key)) found.set([...current, key]);
+    // A word and its reversal share a run: the first not yet found is found.
+    const hit = hits.find((p) => !current.includes(placementKey(p)));
+    if (hit !== undefined) found.set([...current, placementKey(hit)]);
   });
 
   const restart = action(() => {
     found.set([]);
-    anchor.set(-1);
+    anchor.set({ at: "", index: -1 });
     missed.set(false);
   });
 
@@ -137,14 +148,14 @@ export const WordSearchPlay = pattern<
         .filter((p) => foundHere.includes(placementKey(p)))
         .flatMap((p) => placementCells(p, puzzle.cols)),
     );
-    const first = anchor.get();
+    const first = waitingAt;
     return puzzle.grid.join("").split("").map((letter, index) => ({
       index,
       letter,
       label: `${letter}, row ${Math.floor(index / puzzle.cols) + 1}, ` +
         `column ${(index % puzzle.cols) + 1}` +
-        (marked.has(index) ? ", found" : ""),
-      waiting: index === first,
+        (marked.has(index) ? ", found" : "") +
+        (index === first ? ", selected" : ""),
       style: cellStyle({ marked: marked.has(index), waiting: index === first }),
     }));
   });
@@ -152,6 +163,9 @@ export const WordSearchPlay = pattern<
   const words = computed(() =>
     byWord(puzzle.placements).map((p) => ({
       label: p.label,
+      spoken: foundHere.includes(placementKey(p))
+        ? `${p.label}, found`
+        : p.label,
       style: foundHere.includes(placementKey(p))
         ? "text-decoration: line-through; " +
           "color: var(--cf-theme-color-text-muted);"
@@ -206,7 +220,6 @@ export const WordSearchPlay = pattern<
                     type="button"
                     style={cell.style}
                     aria-label={cell.label}
-                    aria-pressed={cell.waiting}
                     onClick={() => tap.send({ index: cell.index })}
                   >
                     {cell.letter}
@@ -215,7 +228,9 @@ export const WordSearchPlay = pattern<
               </div>
               <div style={WORD_LIST_STYLE}>
                 {words.map((word) => (
-                  <span style={word.style}>{word.label}</span>
+                  <span style={word.style} aria-label={word.spoken}>
+                    {word.label}
+                  </span>
                 ))}
               </div>
             </cf-vstack>

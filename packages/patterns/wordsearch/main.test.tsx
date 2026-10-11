@@ -71,6 +71,14 @@ export default pattern(() => {
         }),
       },
       { assertion: assert(() => !onlyForwards(maker.puzzle)) },
+      // The Play tab follows the maker's puzzle as its words change.
+      {
+        assertion: assert(() =>
+          textContent(maker[UI]).includes(
+            `0 of ${maker.puzzle.placements.length} found`,
+          ) && maker.puzzle.placements.length > 4
+        ),
+      },
       {
         action: action(() => {
           diagonals.set(false);

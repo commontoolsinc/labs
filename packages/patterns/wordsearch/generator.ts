@@ -371,21 +371,30 @@ export const placementCells = (
   );
 
 /**
- * The hidden word whose run starts at one of the cells `a` and `b` and ends
- * at the other, read either way, or undefined: what a player selects by
- * tapping a word's first and last letter.
+ * The hidden words whose run has its ends at the cells `a` and `b`: what a
+ * player selects by tapping a word's first and last letter. Those read from
+ * `a` to `b` come first. More than one can match, since a word and its
+ * reversal (STAR, RATS) share one run when words may run backwards.
  */
-export const placementBetween = (
-  puzzle: Pick<WordSearch, "cols" | "placements">,
+export const placementsBetween = (
+  puzzle: { readonly cols: number; readonly placements: readonly Placement[] },
   a: number,
   b: number,
-): Placement | undefined =>
-  puzzle.placements.find((p) => {
+): Placement[] => {
+  const ends = (p: Placement) => {
     const cells = placementCells(p, puzzle.cols);
-    const first = cells[0];
-    const last = cells[cells.length - 1];
-    return (first === a && last === b) || (first === b && last === a);
+    return [cells[0], cells[cells.length - 1]];
+  };
+  const forward = puzzle.placements.filter((p) => {
+    const [first, last] = ends(p);
+    return first === a && last === b;
   });
+  const backward = puzzle.placements.filter((p) => {
+    const [first, last] = ends(p);
+    return first === b && last === a;
+  });
+  return [...forward, ...backward];
+};
 
 /** A placement's identity: its word and where it runs, so a reshuffled puzzle shares none. */
 export const placementKey = (p: Placement): string =>
