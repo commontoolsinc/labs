@@ -58,7 +58,7 @@ export default pattern<WordSearchMakerInput, WordSearchMakerOutput>(
       seed,
     });
     // The same puzzle, to play; its finds are each player's own.
-    const play = WordSearchPlay({ puzzle: puzzle.puzzle });
+    const play = WordSearchPlay({ title, puzzle: puzzle.puzzle });
     // Which view of the puzzle this tab shows.
     const view = Writable.perSession.of("make");
     // The size the grid has, which a typed-in value may have been brought to.

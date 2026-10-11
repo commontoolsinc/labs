@@ -18,7 +18,13 @@ import {
   UI,
   Writable,
 } from "commonfabric";
-import { textContent } from "../test/vnode-helpers.ts";
+import {
+  childNodes,
+  findNode,
+  propValue,
+  readValue,
+  textContent,
+} from "../test/vnode-helpers.ts";
 import {
   generateWordSearch,
   type Placement,
@@ -35,6 +41,30 @@ const ends = (
   const cells = placementCells(puzzle.placements[n], puzzle.cols);
   return [cells[0], cells[cells.length - 1]];
 };
+
+/** The cells' buttons under `node`, in grid order. */
+const cellButtons = (node: unknown): unknown[] => {
+  const value = readValue(node);
+  const isButton = typeof value === "object" && value !== null &&
+    "name" in value && readValue(value.name) === "button";
+  return [
+    ...(isButton ? [value] : []),
+    ...childNodes(value).flatMap(cellButtons),
+  ];
+};
+
+/** The cell waiting for a word's other end, as drawn; -1 for none. */
+const waiting = (ui: unknown): number =>
+  cellButtons(ui).findIndex((b) => propValue(b, "aria-pressed") === true);
+
+/** Whether the Start over button is disabled. */
+const startOverDisabled = (ui: unknown): boolean =>
+  propValue(
+    findNode(ui, (n) =>
+      textContent(n).trim() === "Start over" &&
+      propValue(n, "disabled") !== undefined),
+    "disabled",
+  ) === true;
 
 /** Tap the two ends of the placement at `n`, last end first when `reversed`. */
 const tapEnds = handler<
@@ -64,19 +94,19 @@ export default pattern(() => {
     })
   );
   const found = new Writable<string[]>([]);
-  const anchor = new Writable(-1);
-  const play = WordSearchPlay({ puzzle, found, anchor });
+  const play = WordSearchPlay({ puzzle, found });
 
   const tap = play.tap;
 
   return {
     [TESTS]: [
       { assertion: assert(() => play.foundCount === 0 && !play.solved) },
+      { assertion: assert(() => startOverDisabled(play[UI])) },
 
       // A word's first letter, then its last: found.
       { action: tapEnds({ puzzle, tap, n: 0, reversed: false }) },
       { assertion: assert(() => play.foundCount === 1) },
-      { assertion: assert(() => anchor.get() === -1) },
+      { assertion: assert(() => waiting(play[UI]) === -1) },
 
       // Its last letter, then its first: found too.
       { action: tapEnds({ puzzle, tap, n: 1, reversed: true }) },
@@ -94,15 +124,17 @@ export default pattern(() => {
       { assertion: assert(() => play.foundCount === 2) },
       {
         assertion: assert(() =>
-          anchor.get() === placementCells(puzzle.placements[2], puzzle.cols)[1]
+          waiting(play[UI]) ===
+            placementCells(puzzle.placements[2], puzzle.cols)[1]
         ),
       },
+      { assertion: assert(() => textContent(play[UI]).includes("Not a word")) },
 
       // Tapping the waiting letter again lets it go.
       {
-        action: action(() => play.tap.send({ index: anchor.get() })),
+        action: action(() => play.tap.send({ index: waiting(play[UI]) })),
       },
-      { assertion: assert(() => anchor.get() === -1) },
+      { assertion: assert(() => waiting(play[UI]) === -1) },
 
       // The last word solves the puzzle.
       { action: tapEnds({ puzzle, tap, n: 2, reversed: false }) },
@@ -115,9 +147,11 @@ export default pattern(() => {
       { action: tapEnds({ puzzle, tap, n: 0, reversed: true }) },
       { assertion: assert(() => found.get().length === 3) },
 
-      // Starting over forgets this puzzle's finds.
+      // Starting over forgets the finds.
+      { assertion: assert(() => !startOverDisabled(play[UI])) },
       { action: action(() => play.restart.send()) },
       { assertion: assert(() => play.foundCount === 0 && !play.solved) },
+      { assertion: assert(() => found.get().length === 0) },
 
       // A reshuffle hides the same words elsewhere: last arrangement's finds
       // do not count for it.
@@ -125,6 +159,11 @@ export default pattern(() => {
       { assertion: assert(() => play.foundCount === 1) },
       { action: action(() => seed.set(2)) },
       { assertion: assert(() => play.foundCount === 0) },
+      {
+        assertion: assert(() =>
+          textContent(play[UI]).includes("Puzzle changed")
+        ),
+      },
     ],
   };
 });
