@@ -1005,6 +1005,51 @@ function instanceChildRecord(
   return { space: link.space, id: link.id, scope: link.scope };
 }
 
+/**
+ * The named instances of `pattern` that `parent` has not yet run under their
+ * names, with the parent's recorded manifest and `instanceChildren`, or
+ * `undefined` when there are none, or when the parent's manifest records no
+ * positional spot for any of them to carry a child over from.
+ */
+function pendingInstances(
+  parent: Cell<any>,
+  pattern: Pattern,
+):
+  | {
+    pending: DerivedInternalCellDescriptor[];
+    manifest: InternalCellDescriptor[];
+    recordedChildren: Record<string, NormalizedFullLink>;
+  }
+  | undefined {
+  const instances = (pattern.derivedInternalCells ?? []).filter((descriptor) =>
+    descriptor.legacyPartialCause !== undefined
+  );
+  if (instances.length === 0) return undefined;
+  const manifest = storedManifestOf(parent);
+  if (!manifest.some((entry) => isPositionalPartialCause(entry.partialCause))) {
+    return undefined;
+  }
+  const recordedChildren = readInstanceChildren(parent);
+  const pending = instances.filter((descriptor) => {
+    const name = instanceNameOfPartialCause(descriptor.partialCause);
+    return name !== undefined && recordedChildren[name] === undefined &&
+      !manifest.some((entry) =>
+        deepEqual(entry.partialCause, descriptor.partialCause)
+      );
+  });
+  return pending.length === 0
+    ? undefined
+    : { pending, manifest, recordedChildren };
+}
+
+/** The derived internal cell manifest `cell` holds, as setup recorded it. */
+function storedManifestOf(cell: Cell<any>): InternalCellDescriptor[] {
+  const stored = convertibleJsFromFabricValue(
+    cell.getMetaRaw("internal", { meta: ignoreReadForScheduling }),
+  );
+  return Array.isArray(stored) ? stored as InternalCellDescriptor[] : [];
+}
+
 /** A key naming the document `link` addresses: its space, id and scope. */
 function documentKey(link: NormalizedFullLink): string {
   return `${link.space}\0${link.id}\0${link.scope}`;
@@ -13360,27 +13405,10 @@ export class Runner {
   } {
     const carried = new Map<string, NormalizedFullLink>();
     const uncarried: UncarriedInstance[] = [];
-    const instances = (pattern.derivedInternalCells ?? []).filter((
-      descriptor,
-    ) => descriptor.legacyPartialCause !== undefined);
-    if (instances.length === 0) return { carried, uncarried };
     const parent = tx === undefined ? resultCell : resultCell.withTx(tx);
-    const recorded = convertibleJsFromFabricValue(
-      parent.getMetaRaw("internal", { meta: ignoreReadForScheduling }),
-    );
-    if (!Array.isArray(recorded) || recorded.length === 0) {
-      return { carried, uncarried };
-    }
-    const manifest = recorded as InternalCellDescriptor[];
-    const recordedChildren = readInstanceChildren(parent);
-    const pending = instances.filter((descriptor) => {
-      const name = instanceNameOfPartialCause(descriptor.partialCause);
-      return name !== undefined && recordedChildren[name] === undefined &&
-        !manifest.some((entry) =>
-          deepEqual(entry.partialCause, descriptor.partialCause)
-        );
-    });
-    if (pending.length === 0) return { carried, uncarried };
+    const found = pendingInstances(parent, pattern);
+    if (found === undefined) return { carried, uncarried };
+    const { pending, manifest, recordedChildren } = found;
 
     const claimed = new Set<string>(
       Object.values(recordedChildren).map(documentKey),
@@ -13637,11 +13665,9 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern,
   ): Promise<void> {
-    if (
-      !(pattern.derivedInternalCells ?? []).some((descriptor) =>
-        descriptor.legacyPartialCause !== undefined
-      )
-    ) {
+    // Nothing pending means nothing to load or sync: the work below is for
+    // the one setup that carries a parent's children over.
+    if (pendingInstances(resultCell, pattern) === undefined) {
       this.#preparedCarryOvers.delete(this.#getDocKey(resultCell));
       return;
     }
