@@ -352,7 +352,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "SisP60ACgDdPCQb_6LGGwqxWMYbgXPCPfTYRwqODNOI",
+                  "moduleIdentity": "t3l66CrqcF9Wof_2-psRxCLyqs1GZHQGKNvF1qVVWUQ",
                   "path": [
                     "setAvatar"
                   ]
@@ -378,7 +378,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "SisP60ACgDdPCQb_6LGGwqxWMYbgXPCPfTYRwqODNOI",
+                  "moduleIdentity": "t3l66CrqcF9Wof_2-psRxCLyqs1GZHQGKNvF1qVVWUQ",
                   "path": [
                     "setBio"
                   ]
@@ -403,7 +403,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "SisP60ACgDdPCQb_6LGGwqxWMYbgXPCPfTYRwqODNOI",
+                  "moduleIdentity": "t3l66CrqcF9Wof_2-psRxCLyqs1GZHQGKNvF1qVVWUQ",
                   "path": [
                     "mutateElements"
                   ]
@@ -432,7 +432,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "SisP60ACgDdPCQb_6LGGwqxWMYbgXPCPfTYRwqODNOI",
+                  "moduleIdentity": "t3l66CrqcF9Wof_2-psRxCLyqs1GZHQGKNvF1qVVWUQ",
                   "path": [
                     "mutateExternalProfileLinks"
                   ]
@@ -461,7 +461,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "SisP60ACgDdPCQb_6LGGwqxWMYbgXPCPfTYRwqODNOI",
+                  "moduleIdentity": "t3l66CrqcF9Wof_2-psRxCLyqs1GZHQGKNvF1qVVWUQ",
                   "path": [
                     "setInbox"
                   ]
@@ -492,7 +492,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "SisP60ACgDdPCQb_6LGGwqxWMYbgXPCPfTYRwqODNOI",
+                  "moduleIdentity": "t3l66CrqcF9Wof_2-psRxCLyqs1GZHQGKNvF1qVVWUQ",
                   "path": [
                     "setName"
                   ]
@@ -572,7 +572,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "SisP60ACgDdPCQb_6LGGwqxWMYbgXPCPfTYRwqODNOI",
+                  "moduleIdentity": "t3l66CrqcF9Wof_2-psRxCLyqs1GZHQGKNvF1qVVWUQ",
                   "path": [
                     "publishVerifiedIdentities"
                   ]
@@ -1465,6 +1465,64 @@
         },
         "type": "object"
       },
+      "PrivateInboxReplacement": {
+        "properties": {
+          "inbox": {
+            "$ref": "#/$defs/ShareInboxPiece",
+            "description": "The refused inbox, which the profiles pointing at it no longer advertise."
+          },
+          "reason": {
+            "description": "The host's code for why it refused that inbox, as the refusal held it.",
+            "type": "string"
+          },
+          "refusedAt": {
+            "description": "When Home first recorded the refusal, as the refusal held it.",
+            "type": "number"
+          },
+          "replacedAt": {
+            "description": "When the owner had Home replace the inbox, in milliseconds since the epoch.\nA handler's clock reads to the second.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "inbox",
+          "reason",
+          "refusedAt",
+          "replacedAt"
+        ],
+        "type": "object"
+      },
+      "PrivateInboxReplacementHolder": {
+        "$ref": "#/$defs/PrivateInboxReplacementRecord",
+        "ifc": {
+          "uiContract": {
+            "action": "ReplaceRefusedPrivateInbox",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "PrivateInboxRefusalSurface"
+            ],
+            "trustedPattern": "PrivateInboxRefusalSurface"
+          },
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/system/private-inbox.tsx",
+              "moduleIdentity": "tMQokoYPRCPmbrD8RQK_CMfnEIocqc3S_dhsy3M9H8M",
+              "path": [
+                "replaceRefusedPrivateInbox"
+              ]
+            }
+          }
+        }
+      },
+      "PrivateInboxReplacementRecord": {
+        "properties": {
+          "replacement": {
+            "$ref": "#/$defs/PrivateInboxReplacement",
+            "description": "The replacement."
+          }
+        },
+        "type": "object"
+      },
       "ProfileElement": {
         "properties": {
           "cell": true,
@@ -1827,7 +1885,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-create.tsx",
-                  "moduleIdentity": "RlhZaT0xCDbL18czAJuXk_zLMrdY43PYUfvlxwRVjxU",
+                  "moduleIdentity": "mobGiQcNxkSi4SEyil66ekrr3BBxgFDeROBRAWl_qho",
                   "path": [
                     "setDefaultProfile"
                   ]
@@ -1855,7 +1913,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-create.tsx",
-              "moduleIdentity": "RlhZaT0xCDbL18czAJuXk_zLMrdY43PYUfvlxwRVjxU",
+              "moduleIdentity": "mobGiQcNxkSi4SEyil66ekrr3BBxgFDeROBRAWl_qho",
               "path": [
                 "submitProfileCreation"
               ]
@@ -1871,7 +1929,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-create.tsx",
-              "moduleIdentity": "RlhZaT0xCDbL18czAJuXk_zLMrdY43PYUfvlxwRVjxU",
+              "moduleIdentity": "mobGiQcNxkSi4SEyil66ekrr3BBxgFDeROBRAWl_qho",
               "path": [
                 "submitProfileCreation"
               ]
@@ -1891,7 +1949,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-create.tsx",
-              "moduleIdentity": "RlhZaT0xCDbL18czAJuXk_zLMrdY43PYUfvlxwRVjxU",
+              "moduleIdentity": "mobGiQcNxkSi4SEyil66ekrr3BBxgFDeROBRAWl_qho",
               "path": [
                 "setMruProfile"
               ]
@@ -1915,7 +1973,7 @@
             "writeAuthorizedBy": {
               "__ctWriterIdentityOf": {
                 "file": "/packages/patterns/system/profile-create.tsx",
-                "moduleIdentity": "RlhZaT0xCDbL18czAJuXk_zLMrdY43PYUfvlxwRVjxU",
+                "moduleIdentity": "mobGiQcNxkSi4SEyil66ekrr3BBxgFDeROBRAWl_qho",
                 "path": [
                   "setMruProfile"
                 ]
@@ -2088,6 +2146,9 @@
         "$ref": "#/$defs/PrivateInboxRefusalHolder",
         "default": {}
       },
+      "privateInboxReplacement": {
+        "$ref": "#/$defs/PrivateInboxReplacementHolder"
+      },
       "profiles": {
         "$ref": "#/$defs/TrustedProfileList",
         "default": []
@@ -2150,6 +2211,12 @@
         ],
         "type": "object"
       },
+      "replaceRefusedPrivateInbox": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
       "retainedPrivateInboxes": {
         "default": [],
         "items": {
@@ -2180,12 +2247,14 @@
       "privateInbox",
       "retainedPrivateInboxes",
       "privateInboxRefusal",
+      "privateInboxReplacement",
       "sharedSpaceCatalog",
       "registerSharedSpace",
       "changeSharedSpaceMembership",
       "removeSharedSpace",
       "createProfile",
       "ensurePrivateInbox",
+      "replaceRefusedPrivateInbox",
       "addFavorite",
       "removeFavorite",
       "addJournalEntry",

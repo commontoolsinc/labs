@@ -1314,11 +1314,13 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     },
   },
   {
-    // The same ruling, against the home baseline recorded with the scope
-    // the manager's views declare.
+    // The same ruling, against the home baselines recorded with the scope
+    // the manager's views declare, and with the action that replaces a
+    // refused private inbox.
     pattern: "system/home.tsx",
     baselines: [
       "20261011T170655Z-AJPqLNiOact-MHN0",
+      "20261011T215215Z-wYgeQ3_Ossuzky4g",
     ],
     paths: [
       "result.chatManager.$VIEWS.chats.requests.*",

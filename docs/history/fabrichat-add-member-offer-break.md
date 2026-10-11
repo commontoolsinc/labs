@@ -32,7 +32,7 @@ alternative accepted previously is not accepted by the candidate":
   `result.$VIEWS.chats.people` instead, as it did before.
 - `system/home.tsx`, whose result types its `chatManager` as
   `FabriChatManagerOutput`, at `result.chatManager.$VIEWS.chats.requests.*`,
-  against five baselines.
+  against six baselines.
 
 The recorded outcomes left a `done` outcome's extra fields open, and typed a
 refusal's `code` as `space-own-chat` alone. So a stored outcome admitted a
@@ -47,9 +47,10 @@ under `fabrichat-room-link-roster-break.md` and
 `fabrichat-view-scopes-break.md`, name the new path beside their own and cite
 this record for it. The four Home baselines move from the entry of
 `fabrichat-view-scopes-break.md` to one of this record's naming both paths, as
-that record moved two of its own. The manager's and Home's newest baselines,
-recorded with `fabrichat-view-scopes-break.md`, carry no entry before this one,
-and get entries of this record's.
+that record moved two of its own. The manager's and Home's baselines recorded
+with `fabrichat-view-scopes-break.md`, and Home's recorded with the action that
+replaces a refused private inbox, carry no entry before this one, and get
+entries of this record's.
 
 ## Why this could not be done compatibly
 
