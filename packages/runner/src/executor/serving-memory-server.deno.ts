@@ -122,10 +122,11 @@ export type ServingMemoryServerOptions =
      * other than `onActivationSettled` and `onSpaceParked` are refused under
      * it; a test that needs one says `false` here.
      *
-     * The store read-through is the other posture the environment selects:
-     * `policy.storeReadThrough` left unset takes `true` when
-     * `SERVER_EXECUTION_STORE_READ_THROUGH` is the literal `true`, as a
-     * toolshed's does under that variable.
+     * The environment fills two more of the policy's fields when they are
+     * left unset, as a toolshed's bootstrap does: `storeReadThrough` takes
+     * `true` when `SERVER_EXECUTION_STORE_READ_THROUGH` is the literal
+     * `true`, and `flushDeadlineMs` takes `SERVER_EXECUTION_FLUSH_DEADLINE_MS`
+     * when that is a positive number.
      */
     worker?: boolean;
   }
@@ -152,19 +153,31 @@ const runsInWorker = (options: ServingMemoryServerOptions): boolean =>
   options.worker ?? Deno.env.get("SERVER_EXECUTION_WORKER") === "true";
 
 /**
- * The loop's policy, with the store read-through taken from the environment
- * when `policy` leaves it unset, as the toolshed bootstrap takes it under
- * `SERVER_EXECUTION_STORE_READ_THROUGH`: a lane sets that variable to the
- * literal `true` to run every test that leaves it unset under the posture.
+ * The loop's policy, with what `policy` leaves unset taken from the
+ * environment as the toolshed bootstrap takes it: the store read-through
+ * from `SERVER_EXECUTION_STORE_READ_THROUGH`, on for the literal `true`,
+ * and the flush deadline from `SERVER_EXECUTION_FLUSH_DEADLINE_MS`, a
+ * positive number of milliseconds. A lane sets the first to run every test
+ * that leaves it unset under the posture; a benchmark sets the second to
+ * measure a cadence.
  */
 const policyFromEnvironment = (
   policy: SpaceServerPolicy | undefined,
 ): SpaceServerPolicy | undefined => {
-  if (policy?.storeReadThrough !== undefined) return policy;
-  if (Deno.env.get("SERVER_EXECUTION_STORE_READ_THROUGH") !== "true") {
-    return policy;
+  let resolved = policy;
+  if (
+    resolved?.storeReadThrough === undefined &&
+    Deno.env.get("SERVER_EXECUTION_STORE_READ_THROUGH") === "true"
+  ) {
+    resolved = { ...resolved, storeReadThrough: true };
   }
-  return { ...policy, storeReadThrough: true };
+  if (resolved?.flushDeadlineMs === undefined) {
+    const deadline = Number(Deno.env.get("SERVER_EXECUTION_FLUSH_DEADLINE_MS"));
+    if (Number.isFinite(deadline) && deadline > 0) {
+      resolved = { ...resolved, flushDeadlineMs: deadline };
+    }
+  }
+  return resolved;
 };
 
 /**
