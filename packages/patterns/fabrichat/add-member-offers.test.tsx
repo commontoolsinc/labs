@@ -9,7 +9,10 @@
  * a profile pointing at no inbox queues a notice for her, and reads `noticed`.
  * An add naming a profile that attests no one, or someone other than the
  * address it names, is refused. To a viewer with no manager, or one whose
- * manager hasn't resolved, an add reads `access-only` at once. A group named by both of Alice's profiles,
+ * manager hasn't resolved, an add reads `access-only` at once. The manager
+ * refuses to offer anything but a group room, and an add whose id is too long
+ * to key an offer by, which then reads `access-only` with the manager's
+ * reason. A group named by both of Alice's profiles,
  * which point at two inboxes, is offered once to each, and lists her once;
  * one named by two of her profiles pointing at one inbox is offered there
  * once; and one naming profiles of Alice and Carol that point at the same
@@ -97,6 +100,9 @@ const addGesture = {
 };
 
 const typed = (text: string) => ({ type: "click", target: { value: text } });
+
+/** An add's id longer than an offer's may be, once a room's space keys it. */
+const LONG_ID = "x".repeat(320);
 
 /**
  * A person's own profile, labeled with the principal who wrote it, which only
@@ -438,6 +444,41 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       // The room's picker offers Alice, whom Bob's people list and the room
       // doesn't.
       { assertion: assert(() => pickerOf(room[UI]) === "block:1") },
+      // An offer names a group room, and nothing else in its space.
+      {
+        action: manager.offerRoom,
+        event: {
+          requestId: "o-not-room",
+          room: setup.room.messages,
+          member: setup.aliceDid,
+        },
+      },
+      {
+        assertion: assert(() => {
+          const refused = requests.get()["o-not-room"];
+          return refused?.status === "refused" &&
+            refused.reason === "The request names no group room.";
+        }),
+      },
+      // An add whose id is too long to key an offer by tells no one, and
+      // says why.
+      {
+        action: room.addMember,
+        event: {
+          requestId: LONG_ID,
+          target: { value: setup.aliceDid },
+        },
+        trustedUi: addGesture,
+      },
+      {
+        assertion: assert(() => {
+          const outcome = room.addRequests[LONG_ID];
+          return outcome?.status === "done" &&
+            outcome.delivery === "access-only" &&
+            outcome.deliveryRefusal ===
+              "The request's id is too long to key an offer by.";
+        }),
+      },
       // Named by her chat address alone, Alice is offered the room through the
       // profile Bob's people list for her, and joins its roster.
       {

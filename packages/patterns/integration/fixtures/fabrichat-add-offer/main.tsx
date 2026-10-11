@@ -62,7 +62,7 @@ const createProfile = handler<
   { profiles: Writable<ProfileHomeOutput[]> }
 >((event, { profiles }) => {
   profiles.push(
-    ProfileHome.inSpace(undefined, { grants: { "*": "WRITE" } })({
+    ProfileHome.inSpace(undefined, { grants: { "*": "WRITE" }, root: true })({
       initialName: event?.name ?? "Someone",
     }) as ProfileHomeOutput,
   );

@@ -62,6 +62,7 @@ import {
   Writable,
 } from "commonfabric";
 import {
+  OFFER_ID_MAX_LENGTH,
   OFFER_TITLE_MAX_LENGTH,
   type OfferEvent,
   type PrivateInboxOutput,
@@ -993,6 +994,25 @@ const performManagerAct = (
       recordOutcome(state, requestId, {
         status: "refused",
         reason: "This user can't add people to the room.",
+      });
+      return;
+    }
+    // People are added only to a group room, which its creator's record
+    // says it is; a link to anything else in the room's space, such as one
+    // of its messages, has no such record.
+    if (aboutRecordOf(room).key("kind").get() !== "group") {
+      recordOutcome(state, requestId, {
+        status: "refused",
+        reason: "The request names no group room.",
+      });
+      return;
+    }
+    // The request's id is the offer's, which a share inbox cuts to a bounded
+    // length, so a longer one could be taken for another's.
+    if (requestId.length > OFFER_ID_MAX_LENGTH) {
+      recordOutcome(state, requestId, {
+        status: "refused",
+        reason: "The request's id is too long to key an offer by.",
       });
       return;
     }
