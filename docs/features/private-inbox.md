@@ -287,27 +287,30 @@ of Home.
 The record is a field of Home's result, `privateInboxRefusal`, so `cf` and an
 agent each read it as they read any other field of Home, at Home's root, the
 link the `#default` wish answers with in the Home space
-(`docs/common/conventions/HOME_SPACE.md`, "Custom Home Pattern"). Being a
-field of Home, it lives in the owner's Home space. Home's `ensurePrivateInbox` is a stream on its result, and its handler
-does not ask who sent an event, so the owner's own code can record a refusal of
-any listed profile's inbox, with any code, or clear the record, as it can move
-Home between two inboxes its profiles advertise.
+(`docs/common/conventions/HOME_SPACE.md`, "Custom Home Pattern"). Being a field
+of Home, it lives in the owner's Home space. Home's `ensurePrivateInbox` is a
+stream on its result, and its handler does not ask who sent an event, so the
+owner's own code can record a refusal of any listed profile's inbox, with any
+code, or clear the record, as it can move Home between two inboxes its profiles
+advertise.
 
 While the record holds a refusal, Home shows a notice above its tabs, whichever
 tab is open, saying that what others share may not arrive. It shows the code,
 with a sentence saying what the code means when it is one of the host's codes,
 `INBOX_ADOPTION_REFUSALS` in `packages/piece/src/ops/private-inbox.ts`, and
-`refusedAt`, in the viewer's local time. Home's sentences are in
+`refusedAt`, in UTC, with the zone named. Home's sentences are in
 `packages/patterns/system/private-inbox-refusal-text.ts`, and
 `private-inbox-refusal-text.test.ts` beside it fails while one of the host's
-codes has none. It reads the record's `reason` and `refusedAt` and nothing else,
-so it never reads through the record's link to the refused inbox, and nothing
-the refused inbox's owner labels reaches Home's rendering. A code Home doesn't
-know is shown as given. The notice carries a "Use a new inbox" button, as
-"Replacing a refused inbox" says, and says that a loom daemon running as another
-identity than the owner's stops receiving loom shares once the owner uses it.
-The notice goes when the record is cleared.
-`packages/patterns/system/home.test.tsx` tests it.
+codes has none. The pattern sandbox formats a date given no zone in UTC and one
+given a zone in that zone, while a date's local getters read the host's zone, so
+the notice gives UTC explicitly. It reads the record's `reason` and `refusedAt`
+and nothing else, so it never reads through the record's link to the refused
+inbox, and nothing the refused inbox's owner labels reaches Home's rendering. A
+code Home doesn't know is shown as given, and an empty one as `none given`. The
+notice carries a "Use a new inbox" button, as "Replacing a refused inbox" says,
+and says that a loom daemon running as another identity than the owner's stops
+receiving loom shares once the owner uses it. The notice goes when the record is
+cleared. `packages/patterns/system/home.test.tsx` tests it.
 
 A Home of a vintage whose ensure takes no refusal is sent the same event. Event
 schemas are open, so its handler is delivered the fields it declares, `adopt`

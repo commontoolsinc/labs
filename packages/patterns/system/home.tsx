@@ -386,16 +386,16 @@ const Home = pattern(
     // deciding profile points at.
     const privateInboxRefusal = new Writable<PrivateInboxRefusalHolder>({})
       .for("privateInboxRefusal");
-    // The refusal notice reads the refusal's code and time, and never its
-    // `inbox`: the stored link carries the label the refused inbox's owner
-    // gives its offers. The notice renders after everything else, for the
-    // reason the chats panel does, and the screen's header slot shows it
-    // above the tabs.
     // The last refusal the owner had Home replace, which only the notice's
     // button writes.
     const privateInboxReplacement = new Writable<PrivateInboxReplacementHolder>(
       {},
     ).for("privateInboxReplacement");
+    // The refusal notice reads the refusal's code and time, and never its
+    // `inbox`: the stored link carries the label the refused inbox's owner
+    // gives its offers. The notice renders after everything else, for the
+    // reason the chats panel does, and the screen's header slot shows it
+    // above the tabs.
     const refusalReason = privateInboxRefusal.key("refusal").key("reason");
     const refusedAt = privateInboxRefusal.key("refusal").key("refusedAt");
     // Untrusted-write regression surface: this stream is exported so tests can
@@ -578,7 +578,13 @@ const Home = pattern(
               const reason = typeof stored === "string" ? stored : "";
               const explanation = refusalReasonText(reason) ?? "";
               const code = reason || "none given";
-              const noticed = new Date(at).toLocaleString();
+              // The sandbox formats a date given no zone in UTC and one given
+              // a zone in that zone, while a date's local getters read the
+              // host's zone, so the zone is given here and named in the text.
+              const noticed = new Date(at).toLocaleString("en-US", {
+                timeZone: "UTC",
+                timeZoneName: "short",
+              });
               return (
                 <div
                   id="home-private-inbox-refusal"

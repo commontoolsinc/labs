@@ -10,6 +10,7 @@ import {
 } from "commonfabric";
 import {
   findElementByExactText,
+  findNode,
   findNodeById,
   findNodeByProp,
   hasText,
@@ -39,6 +40,29 @@ const REFUSED_AT = Date.UTC(2026, 9, 9, 12, 0, 0);
 function refusalNoticeIn(ui: unknown): unknown {
   return findNodeById(ui, "home-private-inbox-refusal");
 }
+
+/**
+ * Whether the rendering `ui` holds the refusal notice inside an element given
+ * the screen's header slot, which is what shows it above the tabs.
+ */
+function refusalNoticeInHeaderSlot(ui: unknown): boolean {
+  return findNode(ui, (node) =>
+    propValue(node, "slot") === "header" &&
+    refusalNoticeIn(node) !== undefined) !== undefined;
+}
+
+/**
+ * Each of the host's refusal codes, with a fragment of the sentence the notice
+ * shows for it and of no other code's sentence.
+ */
+const REFUSAL_SENTENCES: readonly (readonly [string, string])[] = [
+  ["inbox-home-space", "It is in your Home space"],
+  ["inbox-profile-space", "It is in the profile's own space"],
+  ["inbox-access-refused", "Home was refused access to it."],
+  ["inbox-adoption-acl-mismatch", "does not make you its owner"],
+  ["inbox-offers-invalid", "It holds no list of offers."],
+  ["inbox-receive-missing", "It has no way to receive offers."],
+];
 
 /**
  * Whether the rendering `ui` shows the button that replaces the refused inbox,
@@ -236,10 +260,11 @@ export default pattern(() => {
     !hasText(home[UI], "No spaces yet. Create one below.")
   );
 
-  // The refusal notice shows while Home records a refusal, with the host's code
-  // as given, a sentence saying what a code Home knows means, when Home first
-  // recorded it, and the button that replaces the refused inbox, marked as its
-  // trusted surface's action; it is gone once the record is cleared.
+  // The refusal notice shows while Home records a refusal, in the screen's
+  // header slot, with the host's code as given, a sentence saying what a code
+  // Home knows means, when Home first recorded it, in UTC, and the button that
+  // replaces the refused inbox, marked as its trusted surface's action; it is
+  // gone once the record is cleared.
   const refusedInbox = PrivateInbox({ offers: [] });
   const assert_no_refusal_notice = assert(() =>
     refusalNoticeIn(home[UI]) === undefined
@@ -259,13 +284,50 @@ export default pattern(() => {
       refusalNoticeIn(home[UI]),
       "Reason: inbox-adoption-acl-mismatch.",
     ) &&
-    hasText(refusalNoticeIn(home[UI]), "does not make you its owner") &&
     hasText(
       refusalNoticeIn(home[UI]),
-      new Date(REFUSED_AT).toLocaleString(),
+      "First noticed 10/9/2026, 12:00:00 PM UTC.",
     ) &&
     hasText(refusalNoticeIn(home[UI]), "stops receiving loom shares") &&
+    refusalNoticeInHeaderSlot(home[UI]) &&
     offersReplacementIn(home[UI])
+  );
+  // Each code the host sends shows its own sentence, and a record with an empty
+  // code says that none was given.
+  const sentenceSteps = REFUSAL_SENTENCES.flatMap(([code, fragment]) => [
+    {
+      action: action(() => {
+        home.privateInboxRefusal.set({
+          refusal: {
+            reason: code,
+            inbox: linkOf(refusedInbox),
+            refusedAt: REFUSED_AT,
+          },
+        });
+      }),
+    },
+    {
+      assertion: assert(() =>
+        hasText(refusalNoticeIn(home[UI]), `Reason: ${code}.`) &&
+        hasText(refusalNoticeIn(home[UI]), fragment) &&
+        REFUSAL_SENTENCES.every(([other, otherFragment]) =>
+          other === code ||
+          !hasText(refusalNoticeIn(home[UI]), otherFragment)
+        )
+      ),
+    },
+  ]);
+  const action_record_codeless_refusal = action(() => {
+    home.privateInboxRefusal.set({
+      refusal: {
+        reason: "",
+        inbox: linkOf(refusedInbox),
+        refusedAt: REFUSED_AT,
+      },
+    });
+  });
+  const assert_codeless_refusal_says_none_given = assert(() =>
+    hasText(refusalNoticeIn(home[UI]), "Reason: none given.")
   );
   const action_record_unknown_refusal = action(() => {
     home.privateInboxRefusal.set({
@@ -278,7 +340,9 @@ export default pattern(() => {
   });
   const assert_unknown_code_shown_as_given = assert(() =>
     hasText(refusalNoticeIn(home[UI]), "Reason: inbox-from-a-newer-host.") &&
-    !hasText(refusalNoticeIn(home[UI]), "does not make you its owner")
+    REFUSAL_SENTENCES.every(([, fragment]) =>
+      !hasText(refusalNoticeIn(home[UI]), fragment)
+    )
   );
   const action_clear_refusal = action(() => {
     home.privateInboxRefusal.set({});
@@ -323,6 +387,9 @@ export default pattern(() => {
       { assertion: assert_no_refusal_notice },
       { action: action_record_refusal },
       { assertion: assert_refusal_notice_shown },
+      ...sentenceSteps,
+      { action: action_record_codeless_refusal },
+      { assertion: assert_codeless_refusal_says_none_given },
       { action: action_record_unknown_refusal },
       { assertion: assert_unknown_code_shown_as_given },
       { action: action_clear_refusal },

@@ -779,7 +779,10 @@ The strict-only delta is:
     principal the sole owner of the space whose id it is. The same-space
     spelling stays admissible, because there the clause names the space the
     bytes are already in, and if that space stops being personal its
-    audience and its replica set grow together. A person-audience clause is
+    audience and its replica set grow together. An owner persisted as its
+    `{digestOf}` commitment names the space its plaintext would, since
+    which space a clause names is an equality question and §4.6.4.1 has a
+    commitment answer one the same way. A person-audience clause is
     not a container clause: `User(alice)` is honored by the reader check
     whoever holds the bytes.
   - **Growth only.** Within the walk, the ceiling the declaration starts
