@@ -220,6 +220,16 @@ export class PiecesController<T = unknown> {
   #diagnosticConsole: RuntimeConsole;
 
   /**
+   * The pieces this controller has opened, reconciling and starting each, by
+   * document. Opening one again while it still runs asks for nothing more:
+   * its source was reconciled when it was opened, as the shell's own cache
+   * of opened pieces assumes, so a renderer that opens the piece the shell
+   * has just opened costs no second origin check. A piece that stopped is
+   * reconciled again when it is next opened.
+   */
+  #opened = new Set<string>();
+
+  /**
    * Promise resolved when the controller is ready.
    */
   ready: Promise<void>;
@@ -1018,8 +1028,13 @@ export class PiecesController<T = unknown> {
     // made the canonical cell local, so this resolves over local links with no
     // further sync. Idempotent for a normal top-level piece.
     let piece = addressed.resolveAsCell();
+    const opening = reconcile && start && !viewScoped;
+    const doc = piece.getAsNormalizedFullLink();
+    const openedKey = `${doc.space}/${doc.scope}/${doc.id}`;
+    const alreadyOpen = opening && this.#opened.has(openedKey) &&
+      this.runtime.runner.isRunning(piece);
 
-    if (reconcile && !viewScoped) {
+    if (reconcile && !viewScoped && !alreadyOpen) {
       const outcome = await timePiecePhase(
         "get.reconcileSource",
         () => reconcilePieceSource(this.runtime, piece),
@@ -1032,13 +1047,14 @@ export class PiecesController<T = unknown> {
         piece = await piece.withTx().sync();
       }
     }
-    if (start && !viewScoped) {
+    if (start && !viewScoped && !alreadyOpen) {
       // start() handles pattern loading and running. It's idempotent - no
       // effect if already running.
-      await timePiecePhase(
+      const running = await timePiecePhase(
         "get.runtime.start",
         () => this.runtime.start(piece),
       );
+      if (opening && running) this.#opened.add(openedKey);
     }
 
     // If caller provided a schema, use it
