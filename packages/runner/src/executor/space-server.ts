@@ -6530,7 +6530,8 @@ export class SpaceServer implements TransactionSealDestination {
       this.#lastCommittedWaveSeq = outcome.seq;
       // A wave a seal opened while this commit was in flight took a basis
       // the commit has passed: the commit is noted to it, so the next
-      // cycle's writes to the documents it touched rebase rather than drop.
+      // cycle's writes to the documents it wrote as the replica holds them
+      // rebase rather than drop.
       this.#waveOpenNow()?.noteOwnWaveCommit(
         outcome.seq,
         closing.committedHomeKeys,

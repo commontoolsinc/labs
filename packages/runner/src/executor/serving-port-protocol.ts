@@ -325,7 +325,8 @@ export class PortEndpoint<
 
   /**
    * Sends one request and settles with its answer, or rejects with the error
-   * the other side's handler threw, or with the reason this end was closed.
+   * the other side's handler threw, with the reason this end was closed, or
+   * with the failure to post it when the port refuses the message.
    */
   request<Method extends keyof OutRequests & string>(
     method: Method,

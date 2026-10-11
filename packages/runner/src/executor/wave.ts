@@ -1208,8 +1208,8 @@ export class WaveAccumulator
 
   /**
    * The doc instances (`${id} ${scopeKey}`) the home commit wrote as the
-   * replica holds them, which leaves out the docs it rebased; empty until it
-   * has landed.
+   * replica holds them, which leaves out the docs it field-merged against a
+   * concurrent commit; empty until it has landed.
    */
   get committedHomeKeys(): ReadonlySet<string> {
     return this.#committedHomeKeys;
@@ -2081,6 +2081,12 @@ export class WaveAccumulator
      * doc still sits exactly there inside its store transaction). */
     const rebasedHeads = new Map<string, number>();
 
+    /** Rebased docs whose write was field-merged against a concurrent
+     * commit: the store then holds a merge the replica never did, which
+     * is why the successor wave is not told of these. A doc rebased with
+     * its write standing whole is not among them. */
+    const mergedDocs = new Set<string>();
+
     const heads = new Map(
       await sink.currentHeads(this.#space, [...allDocs.values()]),
     );
@@ -2238,6 +2244,7 @@ export class WaveAccumulator
             if (this.#rebases(contribution, doc, concurrent)) {
               rebasedDocs[contribution.index].add(key);
               rebasedHeads.set(key, heads.get(key) ?? 0);
+              mergedDocs.add(key);
             } else if (contribution.context.kind === "event-handler") {
               requeued.add(contribution.index);
               break;
@@ -2628,14 +2635,13 @@ export class WaveAccumulator
           foreignSeqs,
           orphanRefused,
         );
-        // A doc this wave rebased sits at a field merge the replica never
+        // A doc this wave field-merged sits at a merge the replica never
         // held, so it is left out: a successor's write to it conflicts.
         const committed = new Set<string>();
         for (const contribution of this.#survivors(requeued, droppedWhole)) {
           for (const key of homeWrites[contribution.index].keys()) {
             if (
-              !droppedDocs[contribution.index].has(key) &&
-              !rebasedDocs[contribution.index].has(key)
+              !droppedDocs[contribution.index].has(key) && !mergedDocs.has(key)
             ) {
               committed.add(key);
             }
@@ -2673,6 +2679,7 @@ export class WaveAccumulator
           // this doc so the next resolve pass re-decides against the
           // new head (§3d's re-CAS).
           rebasedHeads.delete(key);
+          mergedDocs.delete(key);
           for (const perContribution of rebasedDocs) {
             perContribution.delete(key);
           }
