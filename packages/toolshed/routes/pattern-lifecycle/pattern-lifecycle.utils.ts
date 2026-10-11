@@ -321,7 +321,13 @@ export async function processInstantiate(
 ): Promise<LifecycleResult<InstantiateReceipt>> {
   const timings: LifecyclePhaseTiming[] = [];
   const result = await instantiate(deps, callerDid, input, timings);
-  annotateRequestSpan(deps.requestSpan, input.requestKey, timings);
+  // A caller that sends no key gets the one the server generated, in the
+  // receipt; a refusal has only the caller's.
+  annotateRequestSpan(
+    deps.requestSpan,
+    result.status === 200 ? result.body.requestKey : input.requestKey,
+    timings,
+  );
   return result.status === 200
     ? { status: 200, body: { ...result.body, timings } }
     : result;

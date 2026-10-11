@@ -41,7 +41,7 @@ closure the space already holds. A body naming both or neither fails validation.
 | verb          | body                                                                                                                     | receipt                                                                                                                                          |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `upload`      | `program`                                                                                                                | `{ pattern }` — the pointer the space now holds the program under                                                                                |
-| `instantiate` | `program` or `pattern`; optional `argument`, `repository`, `slug`, `force`, `register`, `start`, `requestKey`            | `{ pieceId, pattern, slug?, requestKey, registration: { status, error?, attempt?, terminal? }, timings }`                                                 |
+| `instantiate` | `program` or `pattern`; optional `argument`, `repository`, `slug`, `force`, `register`, `start`, `requestKey`            | `{ pieceId, pattern, slug?, requestKey, registration: { status, error?, attempt?, terminal? }, timings? }`                                                 |
 | `setsrc`      | `piece`; `program` or `pattern`; optional `repository`, `dangerouslyAllowIncompatibleSchema`, `expectedPattern`, `start` | `{ pieceId, pattern, revisionId, seq, detachedOrigin }` — the accepted setup transaction's receipt, `seq` its position in the space's commit log |
 
 Once creation commits, a preparation or completion refusal returns the created
@@ -58,9 +58,10 @@ for a cycle of the serving loop to take the verb (`<verb>.queue`), the verb's
 own run (`<verb>.run`), the wave commit after it (`<verb>.commit`), and the
 durability read (`<verb>.confirm`). `registration.delivery` is the wait for the
 registration event to take effect. The request's trace span carries the same
-durations as `cf.lifecycle.<phase>_ms` attributes, together with
-`cf.request_key`, so a creation a caller reports by its key can be found among
-the traces.
+durations as `cf.lifecycle.<phase>_ms` attributes, together with the request
+key as `cf.request_key` — the receipt's, which the server generates when the
+caller sends none, or for a refusal the caller's own — so a creation a caller
+reports by its key can be found among the traces.
 
 A refusal is a JSON body `{ error, code }`. `code` is stable and is what a
 client branches on; `error` is prose for a person.

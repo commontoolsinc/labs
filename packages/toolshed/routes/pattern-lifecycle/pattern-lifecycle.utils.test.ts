@@ -595,6 +595,25 @@ export default pattern(() => {
     );
   });
 
+  it("marks the request span with the key the server generated when the caller sent none", async () => {
+    const attributes = new Map<string, unknown>();
+    const requestSpan: NonNullable<LifecycleDeps["requestSpan"]> = {
+      setAttribute(key, value) {
+        attributes.set(key, value);
+        return this;
+      },
+    };
+    const created = ok(
+      await processInstantiate({ ...deps, requestSpan }, alice.did(), {
+        space,
+        program: PROGRAM,
+        register: false,
+      }),
+    );
+    expect(created.requestKey).toMatch(/\S/);
+    expect(attributes.get("cf.request_key")).toBe(created.requestKey);
+  });
+
   it("instantiates for an owner and for a writer, and uploads the pattern they share", async () => {
     const created = ok(
       await processInstantiate(deps, alice.did(), {
