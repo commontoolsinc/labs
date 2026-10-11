@@ -21,11 +21,32 @@ import {
   SERVING_RUNTIME_EXPERIMENTAL,
   servingRuntimeFactory,
 } from "@commonfabric/runner/executor/serving-runtime";
+import { ServingWorker } from "@commonfabric/runner/executor/serving-worker-host";
+import type { ServingLoopStats } from "@commonfabric/runner/executor/stats";
 import type { Server as MemoryServer } from "@commonfabric/memory/v2/server";
 import type { Identity } from "@commonfabric/identity";
+import {
+  servedLifecycleRunner,
+  type ServedLifecycleVerbRunner,
+} from "@commonfabric/piece/ops";
 import { ProcessModuleByteCache } from "@commonfabric/test-support/compile-byte-cache";
 
-let host: ExecutorHost | undefined;
+/**
+ * The serving loop as the rest of this process reaches it, whichever thread
+ * runs it: the lifecycle verbs the route sends, the loop's counters, and its
+ * close.
+ */
+export type ServingLoop = ServedLifecycleVerbRunner & {
+  /** The loop's counters: the host's, or the last the worker posted. */
+  stats(): ServingLoopStats | undefined;
+
+  /** The host, when the loop runs on this thread; `undefined` in a worker. */
+  readonly host: ExecutorHost | undefined;
+
+  close(): Promise<void>;
+};
+
+let loop: ServingLoop | undefined;
 
 /** The production default for the per-space outstanding-network-effect
  * cap (serving-loop.md §5; README §3.8's multi-tenancy contract needs a
@@ -201,8 +222,31 @@ export function ensureSpaceRootsFromEnv(
 }
 
 /**
- * Start the serving loop's host when the flag is on. Called once from
- * toolshed startup, after the memory server exists. Returns the host (or
+ * Whether the serving loop runs in a Worker of this process
+ * (`SERVER_EXECUTION_WORKER`): the literal `true` selects the worker; `false`
+ * and unset keep the loop on this thread, and anything else warns and keeps
+ * it there.
+ */
+export function serverExecutionWorkerFromEnv(
+  envGet: EnvReader,
+  warn: (message: string) => void = (message) => console.warn(message),
+): boolean {
+  const raw = envGet("SERVER_EXECUTION_WORKER");
+  if (raw === "true") return true;
+  if (raw !== undefined && raw !== "" && raw !== "false") {
+    warn(
+      "Server-execution v2: ignoring SERVER_EXECUTION_WORKER=" +
+        `${JSON.stringify(raw)} (expected "true" or "false"); the serving ` +
+        "loop stays on the main thread",
+    );
+  }
+  return false;
+}
+
+/**
+ * Start the serving loop when the flag is on: in a Worker of this process
+ * under `SERVER_EXECUTION_WORKER`, on this thread otherwise. Called once from
+ * toolshed startup, after the memory server exists. Returns the loop (or
  * undefined off the flag) so shutdown can close it.
  */
 export function startServerExecutionHost(options: {
@@ -216,7 +260,7 @@ export function startServerExecutionHost(options: {
   fetch?: RuntimeFetch;
 
   envGet?: EnvReader;
-}): ExecutorHost | undefined {
+}): ServingLoop | undefined {
   const envGet = options.envGet ?? Deno.env.get;
   // The process's ONE flag resolution (server-execution-flag.ts): the
   // explicit env value, else the first-party default — the same answer
@@ -246,45 +290,76 @@ export function startServerExecutionHost(options: {
         "their home space from the engine; default is OFF)",
     );
   }
-  host = new ExecutorHost({
-    policy,
-    ensureSpaceRoots,
-    server: options.server,
-    serviceIdentity: options.identity.did(),
-    // The serving runtimes' own flags: the environment's, with the ones
-    // every serving runtime forces on top. `/api/meta` publishes those same
-    // forced flags below.
-    createRuntime: servingRuntimeFactory({
+  if (serverExecutionWorkerFromEnv(envGet)) {
+    console.log(
+      "Server-execution v2: serving loop in a Worker by " +
+        "SERVER_EXECUTION_WORKER=true (default is the main thread)",
+    );
+    // The worker's entry adds the lifecycle verbs, the self-directed fetch
+    // and the module cache itself (lib/serving-worker.ts).
+    const worker = new ServingWorker({
       server: options.server,
       identity: options.identity,
       apiUrl: options.apiUrl,
-      ...(options.fetch !== undefined ? { fetch: options.fetch } : {}),
+      workerModule: new URL("./serving-worker.ts", import.meta.url),
+      policy,
+      ensureSpaceRoots,
       experimental,
-      // One cache for every space this host serves. A space's root pattern
-      // compiles into that space's own storage closure, which a fresh space
-      // never holds; the shared cache is what lets a later space's activation
-      // skip the transform-and-emit step for modules this process compiled.
-      moduleByteCache: new ProcessModuleByteCache(),
-    }),
-  });
+    });
+    loop = {
+      runLifecycleVerb: (space, verb) => worker.runLifecycleVerb(space, verb),
+      stats: () => worker.stats(),
+      host: undefined,
+      close: () => worker.close(),
+    };
+  } else {
+    const host = new ExecutorHost({
+      policy,
+      ensureSpaceRoots,
+      server: options.server,
+      serviceIdentity: options.identity.did(),
+      // The serving runtimes' own flags: the environment's, with the ones
+      // every serving runtime forces on top. `/api/meta` publishes those same
+      // forced flags below.
+      createRuntime: servingRuntimeFactory({
+        server: options.server,
+        identity: options.identity,
+        apiUrl: options.apiUrl,
+        ...(options.fetch !== undefined ? { fetch: options.fetch } : {}),
+        experimental,
+        // One cache for every space this host serves. A space's root pattern
+        // compiles into that space's own storage closure, which a fresh space
+        // never holds; the shared cache is what lets a later space's
+        // activation skip the transform-and-emit step for modules this
+        // process compiled.
+        moduleByteCache: new ProcessModuleByteCache(),
+      }),
+    });
+    loop = {
+      ...servedLifecycleRunner(host, options.identity),
+      stats: () => host.stats(),
+      host,
+      close: () => host.close(),
+    };
+  }
   // Only now, with the loop actually up: what `/api/meta` adds to the base
   // posture, so a client adopting this deployment's flags gets the ones the
   // SERVING runtimes run rather than only the generic webhook runtime's.
   publishServingExperimentalOverrides(SERVING_RUNTIME_EXPERIMENTAL);
-  return host;
+  return loop;
 }
 
 /**
- * The serving loop's host while it runs, for the routes that hand it work
- * — the pattern-lifecycle verbs among them; `undefined` off the flag.
+ * The serving loop while it runs, for the routes that hand it work — the
+ * pattern-lifecycle verbs among them; `undefined` off the flag.
  */
-export function serverExecutionHost(): ExecutorHost | undefined {
-  return host;
+export function serverExecutionHost(): ServingLoop | undefined {
+  return loop;
 }
 
 export async function stopServerExecutionHost(): Promise<void> {
-  await host?.close();
-  host = undefined;
+  await loop?.close();
+  loop = undefined;
   // Nothing serves any more, so `/api/meta` reports the base posture again.
   publishServingExperimentalOverrides(null);
 }

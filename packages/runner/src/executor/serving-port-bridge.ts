@@ -76,9 +76,10 @@ export type ServingPortBridgeOptions = {
 };
 
 /**
- * The server's end of the port. Constructing one installs the server's
- * execution observer and the process's serving-loop stats provider, so one
- * bridge serves per process, as one in-process host does.
+ * The server's end of the port. Constructing one installs the process's
+ * serving-loop stats provider; `attach()`, which `init()` calls once the
+ * worker's host serves, installs the server's execution observer. One bridge
+ * serves per process, as one in-process host does.
  */
 export class ServingPortBridge {
   readonly #options: ServingPortBridgeOptions;
@@ -92,6 +93,7 @@ export class ServingPortBridge {
   readonly #sinks = new Map<string, BridgeSink>();
   readonly #workerReady = Promise.withResolvers<void>();
   #stats: ServingLoopStats | undefined;
+  #attached = false;
   #closed = false;
 
   constructor(options: ServingPortBridgeOptions) {
@@ -100,20 +102,6 @@ export class ServingPortBridge {
       logger.warn("port-fault", () => ["the serving port faulted", error]);
     });
     this.#installHandlers();
-    options.server.setServerExecutionObserver({
-      commitAdmitted: (notice) =>
-        this.#endpoint.notify("observer.commitAdmitted", { notice }),
-      sessionOpened: (space) =>
-        this.#endpoint.notify("observer.sessionOpened", { space }),
-      demandChanged: (space, reason, principal) =>
-        this.#endpoint.notify("observer.demandChanged", {
-          space,
-          reason,
-          principal,
-        }),
-      sessionChanged: (event) =>
-        this.#endpoint.notify("observer.sessionChanged", { event }),
-    });
     registerServingLoopStatsProvider(() =>
       this.#stats ?? emptyServingLoopStats()
     );
@@ -128,7 +116,48 @@ export class ServingPortBridge {
     init: ServingWorkerInit,
   ): Promise<{ lifetimeLock: string | undefined }> {
     await this.#workerReady.promise;
-    return await this.#endpoint.request("worker.init", init);
+    const answer = await this.#endpoint.request("worker.init", init);
+    this.attach();
+    return answer;
+  }
+
+  /**
+   * Installs the server's execution observer, forwarding its events to the
+   * worker from here on. The worker's host has to be serving, with its own
+   * observer installed on its plane, or the events have nowhere to go: a
+   * notice posted before the worker listens is dropped, and one that arrives
+   * before the host exists finds no observer.
+   *
+   * Installing the observer replays the server's sessions, which brings the
+   * worker's session mirror up to date; the sessions that opened before this
+   * then get the activation trigger their opens would have been, once per
+   * space, since the host gates each on the sessions the mirror holds.
+   */
+  attach(): void {
+    if (this.#attached || this.#closed) return;
+    this.#attached = true;
+    const replayed = new Set<string>();
+    let replaying = true;
+    this.#options.server.setServerExecutionObserver({
+      commitAdmitted: (notice) =>
+        this.#endpoint.notify("observer.commitAdmitted", { notice }),
+      sessionOpened: (space) =>
+        this.#endpoint.notify("observer.sessionOpened", { space }),
+      demandChanged: (space, reason, principal) =>
+        this.#endpoint.notify("observer.demandChanged", {
+          space,
+          reason,
+          principal,
+        }),
+      sessionChanged: (event) => {
+        if (replaying && event.kind === "opened") replayed.add(event.space);
+        this.#endpoint.notify("observer.sessionChanged", { event });
+      },
+    });
+    replaying = false;
+    for (const space of replayed) {
+      this.#endpoint.notify("observer.sessionOpened", { space });
+    }
   }
 
   /** The counters the worker last posted, or none before its first. */

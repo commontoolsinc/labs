@@ -216,11 +216,15 @@ type RequestShape = { params: unknown; result: unknown };
 type RequestMap = Record<string, RequestShape>;
 type NoticeMap = Record<string, unknown>;
 
-/** An error as it crosses the port. */
+/**
+ * An error as it crosses the port: its name, message and stack, and the
+ * `code` a refusal names its condition by, where it has one.
+ */
 type PortFault = {
   readonly name: string;
   readonly message: string;
   readonly stack: string | undefined;
+  readonly code: string | undefined;
 };
 
 type Envelope =
@@ -234,21 +238,35 @@ type Envelope =
   | { readonly t: "err"; readonly id: number; readonly fault: PortFault }
   | { readonly t: "note"; readonly method: string; readonly params: unknown };
 
-const faultOf = (error: unknown): PortFault =>
-  error instanceof Error
-    ? { name: error.name, message: error.message, stack: error.stack }
-    : { name: "Error", message: String(error), stack: undefined };
+const faultOf = (error: unknown): PortFault => {
+  if (!(error instanceof Error)) {
+    return {
+      name: "Error",
+      message: String(error),
+      stack: undefined,
+      code: undefined,
+    };
+  }
+  const code = (error as { code?: unknown }).code;
+  return {
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+    code: typeof code === "string" ? code : undefined,
+  };
+};
 
 /**
  * The error a fault stands for on this side. A `ProtocolError` keeps its
  * class, because the outbox tells a deterministic refusal from a transport
- * failure by it; every other error keeps its name and message.
+ * failure by it; every other error keeps its name, message and code.
  */
 const errorOf = (fault: PortFault): Error => {
   const error = fault.name === "ProtocolError"
     ? new ProtocolError(fault.message)
     : Object.assign(new Error(fault.message), { name: fault.name });
   if (fault.stack !== undefined) error.stack = fault.stack;
+  if (fault.code !== undefined) Object.assign(error, { code: fault.code });
   return error;
 };
 

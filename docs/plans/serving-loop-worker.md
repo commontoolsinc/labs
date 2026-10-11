@@ -154,10 +154,14 @@ and the flag below selects between the two.
    worker entry and `ServingWorker` (`serving-worker-host.ts`) starts one and
    replaces one that dies. A unit test runs a host in a Worker against a
    file-backed memory server and settles an authored commit through it.
-3. [ ] **Toolshed wiring under `SERVER_EXECUTION_WORKER`.** The bootstrap
-   starts the worker and the bridge when the variable is `true`, in-process
-   otherwise; lifecycle verbs go through descriptors on both paths; the
-   health route reads the relayed stats. The flag is registered in
+3. [x] **Toolshed wiring under `SERVER_EXECUTION_WORKER`.** The bootstrap
+   (`packages/toolshed/lib/server-execution.ts`) starts a `ServingWorker`
+   over the toolshed's own entry (`lib/serving-worker.ts`) when the variable
+   is `true`, the in-process host otherwise, and hands the routes a
+   `ServingLoop` either way; the pattern-lifecycle verbs cross as the
+   descriptors `@commonfabric/piece`'s `served-lifecycle-verbs.ts` names on
+   both paths; the health route reads the relayed stats through the
+   provider the bridge registers. The flag is registered in
    [`EXPERIMENTAL_OPTIONS.md`](../development/EXPERIMENTAL_OPTIONS.md).
 4. [ ] **The ON-arm suites under the worker.** The pattern integration tests
    that run against a toolshed pass with the worker on; the serving memory

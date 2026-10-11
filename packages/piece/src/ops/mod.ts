@@ -144,6 +144,13 @@ export {
   type ServedSetSourceRequest,
   servedUploadPattern,
 } from "./served-lifecycle.ts";
+export {
+  buildServedLifecycleVerb,
+  type ServedLifecycleReceipts,
+  servedLifecycleRunner,
+  type ServedLifecycleVerbDescriptor,
+  type ServedLifecycleVerbRunner,
+} from "./served-lifecycle-verbs.ts";
 
 export {
   inspectProfileNameProtection,

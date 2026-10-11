@@ -33,6 +33,13 @@ export type ServingWorkerOptions = {
 
   /** The serving runtimes' patterns and compile base. */
   apiUrl: URL;
+
+  /**
+   * The worker's entry module. Default: the runner's own, which builds no
+   * lifecycle verbs; a deployment names an entry of its own that calls
+   * `serveFromPort()` with the verbs and fetch it uses.
+   */
+  workerModule?: URL;
   policy?: SpaceServerPolicy;
   ensureSpaceRoots?: boolean;
   experimental?: ExperimentalOptions;
@@ -134,7 +141,8 @@ export class ServingWorker {
     const processInstanceId = crypto.randomUUID();
     adoptProcessInstanceId(processInstanceId);
     const worker = new Worker(
-      new URL("./serving-worker.ts", import.meta.url),
+      this.#options.workerModule ??
+        new URL("./serving-worker.ts", import.meta.url),
       { type: "module", name: "serving-loop" },
     );
     const bridge = new ServingPortBridge({

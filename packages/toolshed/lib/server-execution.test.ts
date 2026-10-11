@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { toFileUrl } from "@std/path";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { Server as MemoryServer } from "@commonfabric/memory/v2/server";
 import { Identity } from "@commonfabric/identity";
@@ -429,10 +430,10 @@ describe("startServerExecutionHost with the store read-through on", () => {
         }),
       );
       await until(
-        () => host!.spaceServer(space)?.active === true,
+        () => host!.host!.spaceServer(space)?.active === true,
         "the space to activate on the client's session",
       );
-      expect(host!.stats().activeSpaces).toBe(1);
+      expect(host!.stats()?.activeSpaces).toBe(1);
       // The client's watch is demand: the serving loop loads the demanded
       // root through its replica, and under the posture that read comes
       // from the engine through the installed read-through, counted as
@@ -449,13 +450,68 @@ describe("startServerExecutionHost with the store read-through on", () => {
         },
       }]);
       await until(
-        () => host!.stats().storeReads > 0,
+        () => (host!.stats()?.storeReads ?? 0) > 0,
         "the demanded root to be read through the engine",
       );
     } finally {
       await connection.close();
       await stopServerExecutionHost();
       await server.close();
+    }
+  });
+
+  it("serves a space from a Worker under SERVER_EXECUTION_WORKER=true, relaying the loop's counters", async () => {
+    // The same end to end, with the loop in a worker of this process: the
+    // bootstrap starts the worker over the file store the memory server
+    // owns, the client's session open crosses to it as an event, and the
+    // counters it posts are what `stats()` reads.
+    const identity = await Identity.fromPassphrase("serving worker service");
+    const client = await Identity.fromPassphrase("serving worker client");
+    const space = (await Identity.fromPassphrase("serving worker space")).did();
+    const directory = await Deno.makeTempDir({ prefix: "serving-worker-" });
+    const server = new MemoryServer({
+      store: toFileUrl(`${directory}/`),
+      subscriptionRefreshDelayMs: 0,
+      authorizeSessionOpen: authorizeLoopbackSessionOpen,
+      sessionOpenAuth: { audience: "did:key:z6Mk-serving-worker" },
+    });
+    const knobs: Record<string, string> = {
+      EXPERIMENTAL_SERVER_EXECUTION: "true",
+      SERVER_EXECUTION_WORKER: "true",
+      SERVER_EXECUTION_ENSURE_SPACE_ROOTS: "false",
+    };
+    const loop = startServerExecutionHost({
+      server,
+      identity,
+      apiUrl: new URL("http://toolshed.test"),
+      envGet: (name) => knobs[name],
+    });
+    expect(loop).toBeDefined();
+    expect(loop!.host).toBeUndefined();
+    const connection = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+    });
+    try {
+      await connection.mount(
+        space,
+        {},
+        (_space, _descriptor, context) => ({
+          invocation: {
+            aud: context.audience,
+            challenge: context.challenge.value,
+          },
+          authorization: { principal: client.did() },
+        }),
+      );
+      await until(
+        () => loop!.stats()?.activeSpaces === 1,
+        "the worker to activate the space on the client's session",
+      );
+    } finally {
+      await connection.close();
+      await stopServerExecutionHost();
+      await server.close();
+      await Deno.remove(directory, { recursive: true });
     }
   });
 });
