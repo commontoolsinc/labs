@@ -19,7 +19,8 @@
  * another principal's inbox has it replaced by its owner: a send of the
  * replacement that no click on the refusal notice's button marks is refused,
  * and a marked one creates the Home's own inbox and points the refused
- * profile at it.
+ * profile at it, including when the refused inbox's space has stopped letting
+ * the owner read it.
  *
  * The inbox's space grants every principal `WRITE` in both server-execution
  * postures: the serving loop makes a sender's write where server execution is
@@ -881,5 +882,60 @@ describe("private inbox across runtimes", () => {
     );
     expect((await owner.link(["privateInbox", "piece"])).id).toBe(inbox.id);
     expect(await owner.read(refusalPath)).toBeUndefined();
+  });
+
+  it("replaces a refused inbox the owner can no longer read, and points the refused profile at Home's own", async () => {
+    // The stranger's inbox grants the owner `READ` while a profile is pointed
+    // at it, and then revokes it, so the host refuses the inbox for access.
+    const reader = { reader: owner.identity.did() };
+    await stranger.send("createUnreadableInbox", reader);
+    await harness.settleUntil(async () =>
+      (await owner.read(["unreadableInbox", "piece"])) !== undefined
+    );
+    const unreadable = await owner.link(["unreadableInbox", "piece"]);
+    await owner.send("createUnreadableRefusedProfile");
+    await harness.settle();
+    await owner.send("pointUnreadableRefusedProfile", { index: 0 });
+    const pointer = [
+      "unreadableRefusedHome",
+      "profiles",
+      0,
+      "inbox",
+      "piece",
+    ];
+    await harness.settleUntil(async () =>
+      await pointed(["unreadableRefusedHome", "profiles", 0])
+    );
+    expect((await owner.link(pointer)).id).toBe(unreadable.id);
+    await stranger.send("revokeUnreadableInbox", reader, REPLACE_CLICK);
+    await harness.settle();
+    await expect(owner.read(["offers"], { piece: unreadable })).rejects
+      .toThrow(/unauthorized|lacks READ/);
+
+    expect(await ensureThroughHost(["unreadableRefusedHome"])).toMatchObject({
+      outcome: "refused",
+      reason: "inbox-access-refused",
+    });
+    const refusal = ["unreadableRefusedHome", "privateInboxRefusal", "refusal"];
+    await harness.settleUntil(async () =>
+      (await owner.read([...refusal, "reason"])) !== undefined
+    );
+    expect(await owner.read([...refusal, "reason"])).toBe(
+      "inbox-access-refused",
+    );
+
+    const held = ["unreadableRefusedHome", "privateInbox", "piece"];
+    const refusedBefore = await refusals(owner);
+    await owner.send("replaceUnreadableRefusedInbox", {}, REPLACE_CLICK);
+    await harness.settleUntil(async () =>
+      await refusals(owner) > refusedBefore ||
+      ((await owner.read(held)) !== undefined &&
+        (await stranger.link(pointer)).id === (await owner.link(held)).id)
+    );
+    expect(await refusals(owner)).toBe(refusedBefore);
+    expect((await stranger.link(pointer)).id).toBe(
+      (await owner.link(held)).id,
+    );
+    expect(await owner.read(refusal)).toBeUndefined();
   });
 });
