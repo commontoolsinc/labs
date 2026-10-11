@@ -88,7 +88,7 @@ import {
   applyPatchToDocument,
   PatchApplyError,
 } from "../../../memory/v2/patch.ts";
-import { encodePointer } from "../../../memory/v2/path.ts";
+import { encodePointer, parsePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import type { Cancel } from "../cancel.ts";
 import {
@@ -193,6 +193,7 @@ import {
   getTransactionWriteAttempts,
 } from "./transaction-inspection.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
+import { readValueAtPath } from "./v2-path.ts";
 import {
   createStorageAddressResolver,
   RemoteSessionFactory,
@@ -578,6 +579,25 @@ type PendingVersion =
       op: "patch";
       patches: PatchOp[];
       value: EntityDocument;
+
+      /**
+       * The paths of the layer's splices that a recursive read of the
+       * commit covers, as JSON pointers. Such a splice is shown as the
+       * array its writer computed (`displayedPatches`): a write that moves
+       * the array makes the read stale, so the store refuses the layer, or
+       * elides it where the array already holds the result, and no reader
+       * of the shown array is ever accepted over a different stored one. A
+       * splice the commit read nothing for is applied where it stands,
+       * whatever the array holds, so it is shown that way too.
+       */
+      intended?: ReadonlySet<string>;
+
+      /**
+       * Set once the store accepted the layer: replay its ops as they
+       * stand, since the store applied them where they stood, rather than
+       * as the result their writer computed (`displayedPatches`).
+       */
+      accepted?: true;
     }
     | {
       localSeq: number;
@@ -685,10 +705,46 @@ const pendingVersion = (
   localSeq: number,
   operation:
     | { op: "set"; value: EntityDocument }
-    | { op: "patch"; patches: PatchOp[]; value: EntityDocument }
+    | {
+      op: "patch";
+      patches: PatchOp[];
+      value: EntityDocument;
+      intended?: ReadonlySet<string>;
+    }
     | { op: "delete" },
   baseSeq: number,
 ): PendingVersion => ({ localSeq, baseSeq, ...operation });
+
+/**
+ * The paths of `operation`'s splices that a recursive read among `reads`
+ * covers: a read of the same document whose path is the splice's array or
+ * one of its ancestors. A shape-only read does not count, since a write
+ * that replaces an element in place changes no shape and would be accepted
+ * over the shown array.
+ */
+const intendedSplicePaths = (
+  operation: NativeCommitOperation,
+  reads: ClientCommit["reads"],
+): ReadonlySet<string> | undefined => {
+  if (operation.op !== "patch") return undefined;
+  const scope = normalizeCellScope(operation.scope);
+  const covering = [...reads.confirmed, ...reads.pending].filter((read) =>
+    read.id === operation.id && normalizeCellScope(read.scope) === scope &&
+    read.nonRecursive !== true
+  );
+  if (covering.length === 0) return undefined;
+  const paths = new Set<string>();
+  for (const patch of operation.patches) {
+    if (patch.op !== "splice") continue;
+    const target = parsePointer(patch.path);
+    const covered = covering.some((read) =>
+      read.path.length <= target.length &&
+      read.path.every((segment, index) => segment === target[index])
+    );
+    if (covered) paths.add(patch.path);
+  }
+  return paths.size > 0 ? paths : undefined;
+};
 
 const confirmedVersion = (
   seq: number,
@@ -709,6 +765,38 @@ const transactionValueForVersion = (
   }
   return version.transactionValue;
 };
+
+/**
+ * The ops a pending patch layer is shown by, until its verdict. A `splice`
+ * is positional: the diff emits it against the array the transaction read,
+ * and replayed over an array a frame has since changed it says something
+ * its writer never wrote — where another writer appended the same tail,
+ * the tail appears twice. The layer's `value` is the document the
+ * transaction computed, so at the splice's path it holds the array the
+ * writer meant; the view shows that array in the splice's place, over the
+ * base's version of everything else, for every splice the commit's reads
+ * cover (`intended`). A splice the commit read nothing for replays as it
+ * stands: the store applies it where it stands whatever the array holds,
+ * and a reader of the layer must see what the store will hold, since the
+ * server judges that reader's view by replaying this layer's ops. Every
+ * other op replays as it stands too: the mergeable ones mean "add to
+ * whatever is there", and a foreign write must show through them. A splice
+ * whose path the computed document does not hold is left as it is, for the
+ * apply to refuse.
+ */
+const displayedPatches = (
+  pending: Extract<PendingVersion, { op: "patch" }>,
+): PatchOp[] =>
+  pending.patches.map((patch) => {
+    if (patch.op !== "splice" || pending.intended?.has(patch.path) !== true) {
+      return patch;
+    }
+    const path = parsePointer(patch.path);
+    const intended = readValueAtPath(pending.value, path);
+    return Array.isArray(intended)
+      ? { op: "replace", path: patch.path, value: intended }
+      : patch;
+  });
 
 const applyPendingVersion = (
   base: EntityDocument | undefined,
@@ -732,10 +820,17 @@ const applyPendingVersion = (
       // mirroring the server's mergeable disposition, and the ops can only
       // express this layer's own writes, so a dropped sibling's data is
       // unrepresentable in the result (CT-1872 1a).
+      //
+      // A positional op is the exception until the verdict: a splice is
+      // shown as the array its writer computed (`displayedPatches`). Once
+      // the store has accepted the layer, its ops replay as they stand,
+      // since that is how the store applied them.
       try {
         return applyPatchToDocument(
           base,
-          pending.patches as PatchOp[],
+          pending.accepted === true
+            ? pending.patches
+            : displayedPatches(pending),
         ) as EntityDocument;
       } catch (error) {
         if (!(error instanceof PatchApplyError)) {
@@ -4195,6 +4290,16 @@ export class SpaceReplica
   #frameApplyDepth = 0;
 
   /**
+   * The documents the frame being integrated snapshots before it applies,
+   * and notifies on afterwards: its upserts and removes. A promotion that
+   * changes the view for one of them (`#confirmPending`'s splice case) is
+   * carried by that notification; one for any other document — a parked
+   * accept a marker-only frame applies, or one the frame's entries do not
+   * include — is not, and notifies on its own. Unset outside a frame.
+   */
+  #frameTouchedKeys: ReadonlySet<string> | undefined;
+
+  /**
    * The instances (doc keys) the store read-through has read and found
    * nothing at. No record stands for such an instance — a session's pull
    * that delivered nothing leaves none either, and a transaction's read
@@ -4226,6 +4331,20 @@ export class SpaceReplica
       deleted: boolean;
     }
   >();
+
+  /**
+   * The `toSeq` of the last pushed frame (`MemoryV2Client.isPushedSync`) this
+   * replica applied whole. Every frame before it applied too, so each watched
+   * document holds every change committed at or below it.
+   */
+  #completeThroughSeq = 0;
+
+  /**
+   * Whether a frame failed to apply, or applied with entries quarantined. A
+   * later push carries only what changed after it, so the documents it missed
+   * stay behind and no push makes the replica current again until a reset.
+   */
+  #completeThroughLost = false;
 
   #nextLocalSeq = 1;
 
@@ -5496,6 +5615,44 @@ export class SpaceReplica
     );
   }
 
+  /** ISpaceReplica.completeThroughSeq. */
+  completeThroughSeq(): number | undefined {
+    if (this.#completeThroughLost || this.#completeThroughSeq === 0) {
+      return undefined;
+    }
+    // A server that runs server execution commits its executor's waves
+    // outside the publication turn a push is complete under, and a server
+    // that does not say could be one.
+    if (this.#sessionClient?.serverFlags?.serverExecution !== false) {
+      return undefined;
+    }
+    return this.#completeThroughSeq;
+  }
+
+  /** ISpaceReplica.isConfirmedDocument. */
+  isConfirmedDocument(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    const key = this.#docKeyOf({ id, scope }, identity);
+    const delivered = this.#delivered.get(key);
+    if (delivered === undefined) return false;
+    const record = this.#docs.get(key);
+    if (record === undefined) return true;
+    const { confirmed } = record;
+    if (
+      record.pending.length > 0 || confirmed.localFold === true ||
+      confirmed.localWavePromotion !== undefined
+    ) {
+      return false;
+    }
+    // Past its delivered seq, the confirmed state is an own accepted write
+    // promoted locally, which a push through that seq has since covered.
+    return confirmed.seq <= delivered.seq ||
+      confirmed.seq <= this.#completeThroughSeq;
+  }
+
   /** Whether an optimistic local write for this doc is still pending — not
    *  yet promoted into the confirmed mirror (a parked accept keeps it
    *  pending until its marker arrives; CT-1927). */
@@ -6319,7 +6476,7 @@ export class SpaceReplica
       : undefined;
 
     for (const operation of operations) {
-      this.#applyPending(operation, localSeq, identity);
+      this.#applyPending(operation, localSeq, commit.reads, identity);
     }
 
     if (before !== undefined) {
@@ -6605,6 +6762,8 @@ export class SpaceReplica
     this.#docs.clear();
     this.#watchedIds.clear();
     this.#delivered.clear();
+    this.#completeThroughSeq = 0;
+    this.#completeThroughLost = false;
     this.#resetConflictAdmissionState();
     this.#rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
     this.#cancelQueuedWatchRefresh();
@@ -7019,7 +7178,7 @@ export class SpaceReplica
 
     withCommitTiming(["commitOperations", "applyPending"], () => {
       for (const operation of operations) {
-        this.#applyPending(operation, localSeq);
+        this.#applyPending(operation, localSeq, commit.reads);
       }
     });
 
@@ -8420,8 +8579,15 @@ export class SpaceReplica
     this.#frameApplyDepth += 1;
     try {
       this.#applySessionSyncFrame(sync, type);
+    } catch (error) {
+      this.#completeThroughLost = true;
+      throw error;
     } finally {
       this.#frameApplyDepth -= 1;
+      this.#frameTouchedKeys = undefined;
+    }
+    if (MemoryV2Client.isPushedSync(sync)) {
+      this.#completeThroughSeq = Math.max(this.#completeThroughSeq, sync.toSeq);
     }
     // The frame's crossings name documents in other spaces: their loads
     // are kicked once the frame's own documents are in. Nothing here waits
@@ -8465,6 +8631,7 @@ export class SpaceReplica
     // applies.
     const quarantined = this.#validateArrivedSchemaDocuments(sync);
     if (quarantined.size > 0) {
+      this.#completeThroughLost = true;
       const suspendedPlans = (sync.viewPlans ?? this.#viewPlans).map((
         plan,
       ) => ({ ...plan, eligibleActions: [] }));
@@ -8520,6 +8687,9 @@ export class SpaceReplica
         this.#scopeKeyIdentity(),
       )
       : undefined;
+    this.#frameTouchedKeys = new Set(
+      touched.map((address) => this.#docKeyOf(address)),
+    );
 
     // Docs whose CONFIRMED seq this frame moved FORWARD — the arrival
     // wake's payload (stage C tuning T2). Collected only while an
@@ -9181,10 +9351,12 @@ export class SpaceReplica
   #applyPending(
     operation: NativeCommitOperation,
     localSeq: number,
+    reads: ClientCommit["reads"],
     identity?: ScopeKeyIdentity,
   ): void {
     const { id, scope, ...pending } = operation;
     const record = this.#record(id, scope, identity);
+    const intended = intendedSplicePaths(operation, reads);
     record.pending.push(
       pendingVersion(
         localSeq,
@@ -9199,6 +9371,8 @@ export class SpaceReplica
             ...pending,
             value: cloneIfNecessary(pending.value) as EntityDocument,
           }
+          : pending.op === "patch" && intended !== undefined
+          ? { ...pending, intended }
           : pending,
         record.confirmed.seq,
       ),
@@ -9380,14 +9554,34 @@ export class SpaceReplica
         .filter(([key]) => this.#shadowedForeignSeqs.has(key))
         .map(([, address]) => address)
       : [];
-    const shouldNotifyShadowSubscribers = shadowTouched.length > 0 &&
+    // A splice shown as the array its writer computed (`displayedPatches`)
+    // promotes as the store applied it, which over a moved array is a
+    // different value, so its promotion can change the view where no other
+    // promotion does. A frame that snapshots the document carries the
+    // change in its own notification (`#frameTouchedKeys`); a promotion of
+    // any other document — at the verdict, by a marker-only frame, or by a
+    // frame whose entries do not include it — notifies here, over the same
+    // docs as the shadow flip's.
+    const spliceTouched = [...keys.entries()].filter((
+      [key, { id, scope, scopeKey }],
+    ) =>
+      this.#frameTouchedKeys?.has(key) !== true &&
+      !shadowTouched.some((address) => this.#docKeyOf(address) === key) &&
+      this.#record(id, scope, undefined, scopeKey).pending.some((entry) =>
+        entry.localSeq === localSeq && entry.op === "patch" &&
+        entry.accepted !== true &&
+        entry.patches.some((patch) => patch.op === "splice")
+      )
+    ).map(([, address]) => address);
+    const flipTouched = [...shadowTouched, ...spliceTouched];
+    const shouldNotifyShadowSubscribers = flipTouched.length > 0 &&
       this.#hasNotificationSubscribers();
-    const shouldNotifyShadowSinks = shadowTouched.length > 0 &&
-      this.#hasSinkSubscribers(shadowTouched);
+    const shouldNotifyShadowSinks = flipTouched.length > 0 &&
+      this.#hasSinkSubscribers(flipTouched);
     const shadowBefore = shouldNotifyShadowSubscribers
       ? Differential.checkout(
         this,
-        shadowTouched.map(({ id, scope, scopeKey }) =>
+        flipTouched.map(({ id, scope, scopeKey }) =>
           snapshotState(this, id, scope, scopeKey)
         ),
         this.#scopeKeyIdentity(),
@@ -9406,6 +9600,24 @@ export class SpaceReplica
       }
       const firstPendingIndex = pendingIndexes[0]!;
       const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1]!;
+      // The verdict is in: a splice shown as the array its writer computed
+      // (`displayedPatches`) promotes as the store applied it, which over a
+      // moved array is a different value, so the layers are marked accepted
+      // and the view materialized over them is rebuilt.
+      if (
+        pendingIndexes.some((index) => {
+          const entry = record.pending[index]!;
+          return entry.op === "patch" &&
+            entry.patches.some((patch) => patch.op === "splice");
+        })
+      ) {
+        record.pending = record.pending.map((entry) =>
+          entry.localSeq === localSeq && entry.op === "patch"
+            ? { ...entry, accepted: true }
+            : entry
+        );
+        dropMaterializedSuffix(record, firstPendingIndex);
+      }
       const pending = record.pending[lastPendingIndex]!;
       const previousConfirmed = record.confirmed;
       let promoted: ConfirmedVersion | undefined;
@@ -9506,7 +9718,7 @@ export class SpaceReplica
         }
       }
     } else if (shouldNotifyShadowSinks) {
-      this.#notifySinksForIds(shadowTouched);
+      this.#notifySinksForIds(flipTouched);
     }
     // The wake (see the field doc): fired on the flip regardless of
     // notification subscribers AND regardless of a value diff — an

@@ -1670,7 +1670,13 @@ Mechanics:
   So is a number index signature beside a string one whose value type holds
   a writer policy the string one's does not, naming the first policy its
   values hold (`writerPolicyHeldWithin()`): the pair is lowered as the
-  string one alone, so the policy is lost.
+  string one alone, so the policy is lost. A reading of a type stops at a
+  bound, 100 object types deep or 10,000 types read, which a recursion that
+  instantiates its declaration without end always reaches and the types
+  patterns write do not (`readWriterPolicy()` is `"unread"`). It may miss a
+  policy past the bound, so it fails closed: on the number side it is
+  reported, naming `WriteAuthorizedBy`, and on the string side it does not
+  count as holding one.
   Any other schema views a document whose stored envelope binds its writers
   already, and reports nothing. It reads the policy whole or not at all.
   Where the writer went unread, the policy is marked as read in part

@@ -207,6 +207,59 @@ export default pattern<${input}>((input) => ({ input }));`);
         );
       });
     }
+
+    it("refuses a writer a number index signature holds beside a string one whose values recur through three instantiations", async () => {
+      const result = await transform(
+        `interface Cycle<A, B, C> { value: A; next?: Cycle<B, C, A> }
+type Value = Cycle<1, 2, 3>;
+interface In {
+  [key: string]: Value;
+  [index: number]: WriteAuthorizedBy<Value, typeof setName>;
+}
+export default pattern<In>((input) => ({ input }));`,
+      );
+
+      expect(outcome(result, [inputSchema(result.root)])).toBe("refused");
+    });
+
+    const unprotected: readonly (readonly [string, string, string])[] = [
+      [
+        "a mapped type over a nested payload",
+        "type DeepReadonly<T> = { readonly [K in keyof T]: DeepReadonly<T[K]> };",
+        "DeepReadonly<{ a: { b: { c: string } } }>",
+      ],
+      [
+        "arrays of objects holding arrays",
+        "",
+        "{ rows: { cells: { tags: { name: string }[] }[] }[] }",
+      ],
+      [
+        "a generic whose arguments shrink toward its end, nested more than eight deep",
+        `interface Chain<N extends unknown[]> {
+  value: string;
+  next?: N extends [unknown, ...infer R] ? Chain<R> : null;
+}`,
+        `Chain<[${Array(12).fill(1).join(", ")}]>`,
+      ],
+      [
+        "records of objects holding records",
+        "",
+        "{ a: Record<string, { b: Record<string, { c: Record<string, 1> }> }> }",
+      ],
+    ];
+
+    for (const [shape, declarations, value] of unprotected) {
+      it(`reports nothing for a number index signature beside a string one whose values are ${shape} holding no policy`, async () => {
+        const { diagnostics } = await transform(`${declarations}
+interface In {
+  [key: string]: unknown;
+  [index: number]: ${value};
+}
+export default pattern<In>((input) => ({ input }));`);
+
+        expect(diagnostics.filter(isUnreadWriter)).toEqual([]);
+      });
+    }
   });
 
   describe("a schema the author wrote with `toSchema`", () => {
