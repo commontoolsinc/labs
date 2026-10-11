@@ -1,5 +1,14 @@
 /// <cts-enable />
-import { assert, multiUserTest, pattern, TESTS, Writable } from "commonfabric";
+import {
+  assert,
+  handler,
+  multiUserTest,
+  pattern,
+  type RepresentsCurrentUser,
+  TESTS,
+  Writable,
+  type WriteAuthorizedBy,
+} from "commonfabric";
 import {
   addSelfToLobby,
   commitTrustedLobbyAction,
@@ -21,6 +30,29 @@ const trustedLobbyGesture = {
   action: TRUSTED_LOBBY_ACTION,
 };
 
+/**
+ * A profile labeled with the principal who wrote it, as a real `#profile` is.
+ * The bootstrap role links its subject's profile into a position that names
+ * its writer, and the runtime refuses to link a document that carries no
+ * label there. Each participant writes their own.
+ */
+type TestProfile = RepresentsCurrentUser<
+  WriteAuthorizedBy<LobbyProfile, typeof writeTestProfile>
+>;
+
+/** What `writeTestProfile` is bound to. */
+interface TestProfileWrite {
+  profile: Writable<TestProfile>;
+  value: LobbyProfile;
+}
+
+const writeTestProfile = handler<void, TestProfileWrite>((
+  _,
+  { profile, value },
+) => {
+  profile.set(value as TestProfile);
+});
+
 export interface LobbyMultiUserSetup {
   roster: LobbyRosterCell;
   adminRegistry: LobbyAdminRegistryCell;
@@ -33,12 +65,16 @@ export const setup = pattern<Record<string, never>, LobbyMultiUserSetup>(() => {
   const adminRegistry = Writable.of<LobbyAdminRegistryValue>(
     {} as LobbyAdminRegistryValue,
   );
-  const aliceProfile = Writable.of<LobbyProfile>({ name: "Alice" });
-  const bobProfile = Writable.of<LobbyProfile>({ name: "Bob" });
+  const aliceProfile = Writable.of<TestProfile>();
+  const bobProfile = Writable.of<TestProfile>();
   return { roster, adminRegistry, aliceProfile, bobProfile };
 });
 
 export const alice = pattern<{ setup: LobbyMultiUserSetup }>(({ setup }) => {
+  const writeProfile = writeTestProfile({
+    profile: setup.aliceProfile,
+    value: { name: "Alice" },
+  });
   const addSelf = addSelfToLobby({
     roster: setup.roster,
     viewerProfile: setup.aliceProfile,
@@ -80,6 +116,7 @@ export const alice = pattern<{ setup: LobbyMultiUserSetup }>(({ setup }) => {
 
   return {
     [TESTS]: [
+      { action: writeProfile },
       { action: addSelf },
       { label: "alice-joined" },
       { await: "bob-joined" },
@@ -101,6 +138,10 @@ export const alice = pattern<{ setup: LobbyMultiUserSetup }>(({ setup }) => {
 });
 
 export const bob = pattern<{ setup: LobbyMultiUserSetup }>(({ setup }) => {
+  const writeProfile = writeTestProfile({
+    profile: setup.bobProfile,
+    value: { name: "Bob" },
+  });
   const addSelf = addSelfToLobby({
     roster: setup.roster,
     viewerProfile: setup.bobProfile,
@@ -143,6 +184,7 @@ export const bob = pattern<{ setup: LobbyMultiUserSetup }>(({ setup }) => {
   return {
     [TESTS]: [
       { await: "alice-joined" },
+      { action: writeProfile },
       { action: addSelf },
       { label: "bob-joined" },
       { await: "fallback-closed" },
