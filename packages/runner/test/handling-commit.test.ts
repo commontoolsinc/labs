@@ -4,7 +4,7 @@ import { expect } from "@std/expect";
 
 import type { Cell } from "../src/cell.ts";
 import { sendEvent } from "../src/cell.ts";
-import { handlingCommitSeq } from "../src/handling-commit.ts";
+import { handlingCommittedBy } from "../src/handling-commit.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -75,7 +75,7 @@ describe("handling-commit", () => {
   it("returns the sequence the handling committed its receipt at", async () => {
     const stream = await standUpStream();
     const tx = await sendAndHandle(stream, "evt:handling-commit:first");
-    const seq = await handlingCommitSeq(runtime, tx);
+    const seq = await handlingCommittedBy(runtime, tx);
     await runtime.scheduler.idleWithPendingCommits();
 
     const receipt = tx.handlingReceiptLink!;
@@ -90,7 +90,7 @@ describe("handling-commit", () => {
   it("returns the original handling's sequence for a redelivery refused as receipt-exists", async () => {
     const stream = await standUpStream();
     const first = await sendAndHandle(stream, "evt:handling-commit:repeat");
-    const original = await handlingCommitSeq(runtime, first);
+    const original = await handlingCommittedBy(runtime, first);
     await runtime.scheduler.idleWithPendingCommits();
 
     const repeat = await sendAndHandle(stream, "evt:handling-commit:repeat");
@@ -102,12 +102,31 @@ describe("handling-commit", () => {
         : undefined,
     ).toBe("receipt-exists");
     expect(repeat.committedSeq?.(space)).toBeUndefined();
-    expect(await handlingCommitSeq(runtime, repeat)).toBe(original);
+    expect(await handlingCommittedBy(runtime, repeat)).toBe(original);
+  });
+
+  it("returns the later write for a redelivery once the receipt was written again, and the handling's own commit for the original transaction", async () => {
+    const stream = await standUpStream();
+    const first = await sendAndHandle(stream, "evt:handling-commit:edited");
+    const original = await handlingCommittedBy(runtime, first);
+    await runtime.scheduler.idleWithPendingCommits();
+
+    const edit = runtime.edit();
+    runtime.getCellFromLink(first.handlingReceiptLink!).withTx(edit).set({
+      edited: true,
+    });
+    expect((await edit.commit().settled).error).toBeUndefined();
+    const edited = edit.committedSeq!(space)!;
+
+    const repeat = await sendAndHandle(stream, "evt:handling-commit:edited");
+    expect(original).toBeLessThan(edited);
+    expect(await handlingCommittedBy(runtime, repeat)).toBe(edited);
+    expect(await handlingCommittedBy(runtime, first)).toBe(original);
   });
 
   it("returns undefined for a transaction that handled no event", async () => {
     const tx = runtime.edit();
-    expect(await handlingCommitSeq(runtime, tx)).toBeUndefined();
+    expect(await handlingCommittedBy(runtime, tx)).toBeUndefined();
     tx.abort();
   });
 });

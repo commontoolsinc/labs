@@ -2,26 +2,30 @@ import type { Runtime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
 /**
- * Returns the commit sequence at which the handling of a sent event committed
- * in its receipt's space, given the transaction a sender's commit callback
- * received, or `undefined` when that handling wrote no receipt.
+ * Returns a commit sequence by which the handling of a sent event had
+ * committed in its receipt's space, given the transaction a sender's commit
+ * callback received, or `undefined` when that handling wrote no receipt.
  *
  * The sequence is a position in the space's commit log, comparable with the
  * `since` of any document read from that space and with `committedSeq` on any
- * transaction committed there. The handling's receipt is create-only and is
- * written by the handling's own commit, so the receipt document's revision
- * names that commit wherever it ran: in the sender's own transaction, which
- * already knows its sequence; in the commit an earlier delivery of the same
- * invocation made, which a `receipt-exists` collision addresses; and in the
- * serving run's commit under server execution, where the sender's transaction
- * is a local echo.
+ * transaction committed there. It is exact when the callback's transaction
+ * committed the handling: that transaction's own `committedSeq`. Otherwise —
+ * a `receipt-exists` collision, which addresses an earlier delivery's
+ * handling, or server execution, where the callback receives the sender's
+ * local echo — it is the current revision of the handling's receipt. The
+ * handling's commit created the receipt, so that revision never names an
+ * earlier commit, but a later write to the receipt names a later one: a
+ * handler whose result is reactive launches a pattern whose result cell is
+ * the receipt, and that pattern goes on writing it. The sequence is therefore
+ * a bound for a barrier, at or past which a read reflects the handling, and
+ * not an identity to compare commits by.
  *
- * A receipt is written only with commit preconditions or server execution on
- * (`IExtendedStorageTransaction.handlingReceiptLink`). Call it once the
- * callback has fired: under server execution that is after the served
+ * A receipt is written only with commit preconditions or server execution
+ * enabled (`IExtendedStorageTransaction.handlingReceiptLink`). Call it once
+ * the callback has fired: under server execution that is after the served
  * handling consequenced, and before it the receipt does not exist.
  */
-export async function handlingCommitSeq(
+export async function handlingCommittedBy(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
 ): Promise<number | undefined> {

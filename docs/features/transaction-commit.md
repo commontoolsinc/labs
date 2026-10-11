@@ -108,27 +108,34 @@ completion error on both stages, even when the original commit succeeded.
 
 ## Naming the commit
 
-An accepted commit lands at a position in its space's commit log, the same
-sequence every document revision in that space carries as `since`.
+A commit the store accepts lands at a position in its space's commit log, the
+same sequence every document revision in that space carries as `since`.
 `tx.committedSeq(space)` returns that position once the commit's `verdict` has
-resolved, and `undefined` before it, for a space that refused the commit, and
-for a space the transaction wrote nothing to. A multi-space commit that fails
-partway keeps the positions of the spaces that accepted it.
+resolved. It is `undefined` before then, for a space that refused the commit,
+for a space the transaction wrote nothing to, and for a contribution a wave or
+the speculation overlay accepted without the store committing it: that
+acceptance is the contribution's verdict, and what becomes of the wave is
+decided later. A multi-space commit that fails partway keeps the positions of
+the spaces whose stores accepted it.
 
-A handler's commit is named the same way from the transaction a sender's commit
-callback receives. `handlingCommitSeq(runtime, tx)` returns the position at
-which the handling committed its receipt: the callback's own transaction when
-it committed the handling, the earlier delivery's commit when the transaction
-was refused as `receipt-exists`, and the serving run's commit under server
-execution, where the callback receives the sender's local echo. It returns
-`undefined` when the handling wrote no receipt, which needs commit
-preconditions or server execution.
+The transaction a sender's commit callback receives bounds where the handling
+of its event committed. `handlingCommittedBy(runtime, tx)` returns a position
+at or past the handling's commit: exactly that commit when the callback's own
+transaction committed the handling, and otherwise the current revision of the
+handling's receipt, which the handling's commit created. That covers a
+transaction refused as `receipt-exists`, whose receipt an earlier delivery
+wrote, and server execution, where the callback receives the sender's local
+echo. A later write to the receipt, which a handler with a reactive result
+makes as its launched pattern runs, moves the position later, so a read at or
+past it reflects the handling, but the position does not identify one commit.
+It returns `undefined` when the handling wrote no receipt. A receipt is
+written only with commit preconditions or server execution enabled.
 
 ```ts
 // Shown at module scope.
 import {
   type Cell,
-  handlingCommitSeq,
+  handlingCommittedBy,
   type IExtendedStorageTransaction,
   type Runtime,
   sendEvent,
@@ -139,5 +146,5 @@ declare const stream: Cell<{ title: string }>;
 
 const handled = Promise.withResolvers<IExtendedStorageTransaction>();
 sendEvent(stream, { title: "next" }, (tx) => handled.resolve(tx));
-const seq = await handlingCommitSeq(runtime, await handled.promise);
+const reflected = await handlingCommittedBy(runtime, await handled.promise);
 ```

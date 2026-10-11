@@ -45,7 +45,7 @@ import {
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type Cell, sendEvent } from "../src/cell.ts";
-import { handlingCommitSeq } from "../src/handling-commit.ts";
+import { handlingCommittedBy } from "../src/handling-commit.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
@@ -2626,7 +2626,7 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
-  it("returns the serving commit's sequence from handlingCommitSeq for a served handling, whose echo transaction committed nothing", async () => {
+  it("returns the serving commit's sequence from handlingCommittedBy for a served handling, whose echo transaction committed nothing", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const { result } = await standUp(clientRuntime, DECLARED_RESULT_PATTERN, {
@@ -2648,7 +2648,7 @@ describe("Phase 3 events-down (serving side)", () => {
     expect(tx.committedSeq?.(link.space)).toBeUndefined();
     const writers = commitsWriting(engine, link.id);
     expect(writers.length).toBe(1);
-    expect(await handlingCommitSeq(clientRuntime, tx)).toBe(writers[0].seq);
+    expect(await handlingCommittedBy(clientRuntime, tx)).toBe(writers[0].seq);
     cancelDemand();
   });
 
