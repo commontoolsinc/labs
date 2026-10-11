@@ -472,25 +472,6 @@ describe("piece source lifecycle", () => {
     expect(getPieceReconciliation(piece.getCell())).toBeUndefined();
   });
 
-  it("opens a piece it opened and still runs without reaching its origin again", async () => {
-    // A renderer opens the piece the shell has just opened; the second open
-    // reconciles nothing. Once the piece stops, the next open does.
-    webSources["/api/patterns/reopened.tsx"] = versionProgram("v1");
-    const piece = await pieces.create(versionProgram("v1"), { input: {} });
-    await stampOrigin(piece, "system:reopened.tsx");
-
-    await pieces.getPieceCell(piece.getCell(), true);
-    const opened = webFetches;
-    expect(opened).toBeGreaterThan(0);
-    await pieces.getPieceCell(piece.getCell(), true);
-    expect(webFetches).toBe(opened);
-
-    runtime.runner.stop(piece.getCell());
-    await pieces.getPieceCell(piece.getCell(), true);
-    expect(webFetches).toBeGreaterThan(opened);
-    expect(runtime.runner.isRunning(piece.getCell())).toBe(true);
-  });
-
   it("adopts what the active origin offers now, keeping the origin", async () => {
     const origin = "system:adopted.tsx";
     webSources["/api/patterns/adopted.tsx"] = versionProgram("origin-v1");

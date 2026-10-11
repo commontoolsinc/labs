@@ -22,12 +22,6 @@ describe("PiecesController.getPieceCell", () => {
       // (value-link slot -> result cell) before syncing + starting.
       resolveAsCell: () => piece,
       asSchema: () => piece,
-      getAsNormalizedFullLink: () => ({
-        space: "did:key:test-space",
-        id: "of:piece-id",
-        scope: "space",
-        path: [],
-      }),
     };
     const runtime = {
       userIdentityDID: "did:key:home",
