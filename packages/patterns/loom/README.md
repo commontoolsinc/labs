@@ -4,7 +4,7 @@
 `schemas.tsx` defines its public contract and re-exports the participant
 roster's types from `participants.tsx`, which also holds the roster's one
 writer, `addParticipant`. The shared inputs are `title`, `panels`,
-`presentation`, `participants`, and `chatRoom`; `hiddenPanels` and
+`presentation`, `participants`, `chatRoom`, and `meeting`; `hiddenPanels` and
 `privatePanels` belong to one user, and `viewerState` to one session.
 
 A panel is a `piece`, `document`, or HTTP(S) `url`. Piece and document targets
