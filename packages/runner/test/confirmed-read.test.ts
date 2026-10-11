@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import type { Cell } from "../src/cell.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { readConfirmed } from "../src/confirmed-read.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -252,6 +253,25 @@ describe("confirmed-read", () => {
       readConfirmed(reader, space, (tx) => written.withTx(tx).get()?.n).value,
     )
       .toBe(1);
+  });
+
+  it("closes the transaction it read through, whether the read returns or throws", async () => {
+    await write("closed", 1);
+    const closed = await loaded("closed");
+    const kept: IExtendedStorageTransaction[] = [];
+
+    readConfirmed(reader, space, (tx) => {
+      kept.push(tx);
+      return closed.withTx(tx).get()?.n;
+    });
+    expect(() =>
+      readConfirmed(reader, space, (tx) => {
+        kept.push(tx);
+        throw new Error("read failed");
+      })
+    ).toThrow("read failed");
+
+    expect(kept.map((tx) => tx.status().status)).not.toContain("ready");
   });
 
   it("returns no sequence while its server runs server execution", async () => {

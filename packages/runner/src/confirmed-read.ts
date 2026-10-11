@@ -38,8 +38,8 @@ export type ConfirmedRead<R> = {
  * instant: a value assembled from several cells inside it cannot straddle a
  * commit that a value assembled from separate reads can. It reads through the
  * read-only transaction it is given (`cell.withTx(tx).get()`, or `sample()`),
- * where a write throws, and returns plain data; the transaction is not read
- * through once it returns, so neither is a cell bound to it. Every
+ * where a write throws, and returns plain data; the transaction is closed once
+ * it returns or throws, so neither it nor a cell bound to it reads again. Every
  * read counts, whether or not it would schedule anything. Documents not yet
  * loaded read as absent and leave the read unconfirmed, so a caller loads what
  * it reads first, with `sync()` or `pull()`. A document in another space leaves
@@ -51,14 +51,21 @@ export function readConfirmed<R>(
   read: (tx: IExtendedStorageTransaction) => R,
 ): ConfirmedRead<R> {
   const tx = runtime.readTx();
-  markDurableReadTx(tx);
-  const value = read(tx);
-  const { replica } = runtime.storageManager.open(space);
-  const confirmed = replica.isConfirmedDocument !== undefined &&
-    [...getTransactionReadActivities(tx)].every((activity) =>
-      activity.space === space &&
-      replica.isConfirmedDocument!(activity.id, activity.scope)
-    );
-  const seq = confirmed ? replica.completeThroughSeq?.() : undefined;
-  return seq === undefined ? { value, confirmed } : { value, confirmed, seq };
+  try {
+    markDurableReadTx(tx);
+    const value = read(tx);
+    const { replica } = runtime.storageManager.open(space);
+    const confirmed = replica.isConfirmedDocument !== undefined &&
+      [...getTransactionReadActivities(tx)].every((activity) =>
+        activity.space === space &&
+        replica.isConfirmedDocument!(activity.id, activity.scope)
+      );
+    const seq = confirmed ? replica.completeThroughSeq?.() : undefined;
+    return seq === undefined ? { value, confirmed } : { value, confirmed, seq };
+  } finally {
+    // A read-only transaction refuses abort(); closing it releases the reads
+    // it cached, which a callback that kept it would otherwise hold.
+    tx.clearReadOnly?.();
+    tx.abort();
+  }
 }
