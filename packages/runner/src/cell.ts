@@ -1269,8 +1269,11 @@ interface CauseContainer {
 
 /**
  * What `exportCell()` returns: a cell's metadata, for building a pattern. If
- * the cell has a link, it is included as `external`. `kind` is the cell's kind,
- * which is what tells a stream from a value cell.
+ * the cell has a link, it is included as `external`, naming the cell's space:
+ * the pattern can write it into a document of another space, such as the
+ * argument of an `inSpace()` child, and a link that names no space resolves in
+ * the space of the document holding it. `kind` is the cell's kind, which is
+ * what tells a stream from a value cell.
  */
 export type CellExport = {
   cell: OpaqueCell<any>;
@@ -4049,10 +4052,7 @@ export class CellImpl<T extends FabricValue>
       kind: this.#kind,
       name: this.#causeContainer.cause,
       external: this.#_link.id
-        ? this.getAsWriteRedirectLink({
-          baseSpace: this.#frame.space,
-          includeSchema: true,
-        })
+        ? this.getAsWriteRedirectLink({ includeSchema: true })
         : undefined,
     };
   }
