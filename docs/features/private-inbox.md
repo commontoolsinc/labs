@@ -403,8 +403,9 @@ typed link to the refused inbox, and CFC refuses the commit for want of that
 inbox's label, so nothing changes: no inbox is created, no profile is
 re-pointed, and the refusal stays recorded. The owner sees nothing happen. The
 notice stays as it was, Home shows no error, and the refusal shows only as a
-warning in that runtime's log. A runtime started before the revocation replaces
-it, and so does the serving loop with server execution on.
+warning in that runtime's log. A runtime that loaded the refused inbox's label
+before the revocation replaces it, and so does the serving loop with server
+execution on; a runtime started after the revocation has no way to load it.
 `private-inbox-multi-runtime.test.ts` pins the refusal, as a step marked to
 change once the record keeps the replaced inbox without the typed link.
 
