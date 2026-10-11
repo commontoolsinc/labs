@@ -1214,7 +1214,7 @@ describe("CFRender variants", () => {
         value: createMockElement("div") as unknown as HTMLDivElement,
       };
       element.cell = piece;
-      element.opened = true;
+      element.hostOpened = true;
       await internals._renderCell();
       expect(log.mounted.map((reference) => reference.id)).toEqual([
         piece.ref().id,
