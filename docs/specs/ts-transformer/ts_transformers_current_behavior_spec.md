@@ -1497,13 +1497,30 @@ Capture analysis:
 - captures identifiers/property chains declared outside callback scope
 - excludes imports, module-scoped declarations, function declarations, type
   parameters, JSX tag names, property keys
+- skips syntax that is erased at emit, since no name in it is a runtime value:
+  a type (a function type's parameter, as `next` in
+  `(value as { set: (next: string) => void })`; a type literal's member; a
+  `typeof` query; a type argument), a local interface or type alias, an
+  `implements` clause or an interface's `extends` clause, a class's index
+  signature, and an overload signature or abstract member (`isErasedAtEmit`,
+  `src/ast/erased-syntax.ts`). The expression of a class's `extends` clause and
+  of an instantiation expression (`formatterFor(key)<string>`) is a value and is
+  still walked. A reference whose every declaration is erased is not captured
+  either: a `const enum` has no runtime object, and each `Mode.Alpha` is replaced
+  by the member's value, while a regular `enum` is captured like any other
+  value. A captured name with no binding in scope would otherwise become a
+  required input that nothing supplies (fixture
+  `closures/captures-skip-type-positions`)
 - captures nested callback closures with filtering for outer locals/params
 - builds hierarchical capture trees by root path
 
 Input-bound expression wrappers also capture enclosing function locals used
 inside nested callbacks. Parameters and locals declared within the wrapped
 expression stay inside it, including when the wrapper belongs to a reactive
-collection callback. Module bindings remain lexical references.
+collection callback. Module bindings remain lexical references. Erased syntax is
+skipped by the same rule, so a type literal's member in a cast (`get` in
+`value as { get: () => unknown }`) is not an input, and neither is a
+`const enum`.
 
 A capture's type is inferred from its expression, with literal types widened.
 One case reads the declaration instead. Inside a pattern body, a binding
