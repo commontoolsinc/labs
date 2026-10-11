@@ -92,7 +92,12 @@ settle reaches the deadline, no probe completes, and no cycle proves
 coverage; the seed, whose clients wait on coverage, went from 64 s to 87 s.
 Either piece alone did the same (167 and 128 behind). The change was
 reverted, and the publish and the drain stay inside the cycle, after the
-commit.
+commit. The burst's own lag figure does not separate the two: read at the
+moment the last vote is verified, the watermark sits 315 commits behind the
+head under the worker on the final code and 69 behind on stage 4's, since
+every settle in a burst is cut and the burst's clients do not wait on
+coverage; it says how far behind the loop runs while input lasts, and the
+seed, whose clients do wait, is where stage 4's loss showed.
 
 **What cuts every settle is the scheduler's own work.** The `scheduler
 settle per event` column is `scheduler/execute/settle`, the derivations the
@@ -130,10 +135,10 @@ bodies, the index demanded, against a toolshed started fresh for each run.
 
 | arm | seed loop, stage 1 | stage 2 | stage 4, reverted | stage 3, the final code |
 | --- | --- | --- | --- | --- |
-| main | 72.0 s | 73.1 s | 76.4 s | FINALMAIN |
-| worker | 38.1 s | 48.8 s | 31.8 s, 149 behind | FINALWORKER |
-| main, read-through | — | 60.9 s | 59.0 s | FINALMAINRT |
-| worker, read-through | — | 31.3 s | 32.9 s, 146 behind | FINALWORKERRT |
+| main | 72.0 s | 73.1 s | 76.4 s | 81.4 s |
+| worker | 38.1 s | 48.8 s | 31.8 s, 149 behind | 37.3 s |
+| main, read-through | — | 60.9 s | 59.0 s | 59.5 s |
+| worker, read-through | — | 31.3 s | 32.9 s, 146 behind | 31.1 s |
 
 The seed is a client paced by the server's latency, and under the worker it
 sits near the client's own floor; the stages do not move it, and the spread
