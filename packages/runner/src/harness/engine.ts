@@ -1705,6 +1705,7 @@ export class Engine extends EventTarget {
         identity,
         symbol,
         implementation as HarnessedFunction,
+        value,
       );
       this.#ctRuntime.telemetry.submit({
         type: "harness.implementation.register",
@@ -1884,6 +1885,14 @@ export class Engine extends EventTarget {
     symbol: string,
   ): HarnessedFunction | undefined {
     return this.#executableRegistry.getVerifiedImplementation(identity, symbol);
+  }
+
+  /**
+   * The verified artifact (the built module) an implementation in the index
+   * above was exported as, for reading what that code declares.
+   */
+  getVerifiedArtifact(identity: string, symbol: string): unknown {
+    return this.#executableRegistry.getVerifiedArtifact(identity, symbol);
   }
 
   unsafeTrustHostValue(

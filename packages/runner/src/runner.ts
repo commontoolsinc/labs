@@ -10830,11 +10830,14 @@ export class Runner {
       resolution = resolveNodeInputRequirements(
         identity,
         graphSchema,
+        // The pattern manager's index, else the engine's: the artifact the
+        // implementation that runs was registered with.
         (moduleIdentity, symbol) =>
           this.#runtime.patternManager.artifactFromIdentitySync(
             moduleIdentity,
             symbol,
-          ),
+          ) ??
+            this.#runtime.harness.getVerifiedArtifact(moduleIdentity, symbol),
       );
       // An artifact not indexed yet may be on a later run.
       if (resolution.codeSchemaKnown) resolved.set(code, resolution);

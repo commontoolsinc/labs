@@ -354,6 +354,8 @@ const run = async (
     send: (stream: string) => Promise<unknown>,
     read: () => Promise<Outputs>,
   ) => Promise<void>,
+  // Runs after the pattern compiles and before it starts.
+  beforeStart?: (runtime: Runtime) => void,
 ): Promise<void> => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
@@ -374,6 +376,7 @@ const run = async (
       undefined,
       tx,
     );
+    beforeStart?.(runtime);
     runtime.run(tx, compiled, {}, result);
     runtime.prepareTxForCommit(tx);
     expect((await tx.commit().settled).error).toBeUndefined();
@@ -430,6 +433,45 @@ describe("cfc node input requirements", () => {
       await run(LOCATION_OUTPUTS, async (send, read) => {
         await send("measure");
         expect((await read()).city).toBe("city 49,2");
+      });
+    });
+
+    // The pattern manager's artifact index can lose a module the engine
+    // still runs; the code's schema then comes from the artifact the engine
+    // registered with the implementation, so the requirement still holds.
+    it("holds the code's requirement when only the engine indexes its module", async () => {
+      await run(LOCATION_OUTPUTS, async (send, read) => {
+        await send("measure");
+        const outputs = await read();
+        expect(outputs.city).toBe("city 49,2");
+        expect(outputs.shiftedCity).toBeUndefined();
+        expect(failedAt("/location").length).toBeGreaterThan(0);
+        expect(recorded.some(({ reason }) => reason.includes("not available")))
+          .toBe(false);
+      }, (runtime) => {
+        const manager = runtime.patternManager.accessForTestingOnly;
+        manager.addressableByIdentity.clear();
+        manager.modulesByIdentity.clear();
+      });
+    });
+
+    // Verified code whose schema neither index holds is refused, not run
+    // on the graph's word.
+    it("refuses verified code whose schema no index holds", async () => {
+      await run(LOCATION_OUTPUTS, async (send, read) => {
+        await send("measure");
+        expect((await read()).city).toBeUndefined();
+        expect(
+          recorded.some(({ reason }) =>
+            reason.startsWith("input schema of ") &&
+            reason.endsWith(":toCity is not available")
+          ),
+        ).toBe(true);
+      }, (runtime) => {
+        const manager = runtime.patternManager.accessForTestingOnly;
+        manager.addressableByIdentity.clear();
+        manager.modulesByIdentity.clear();
+        runtime.harness.accessForTestingOnly.executableRegistry.clear();
       });
     });
 
