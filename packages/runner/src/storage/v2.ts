@@ -9272,14 +9272,33 @@ export class SpaceReplica
         .filter(([key]) => this.#shadowedForeignSeqs.has(key))
         .map(([, address]) => address)
       : [];
-    const shouldNotifyShadowSubscribers = shadowTouched.length > 0 &&
+    // A splice shown as the array its writer computed (`displayedPatches`)
+    // promotes as the store applied it, which over a moved array is a
+    // different value, so its promotion can change the view where no other
+    // promotion does. A parked accept promotes inside a frame's
+    // integration, whose differential already carries the change; an
+    // accept applied at its verdict promotes outside any frame, and the
+    // change notification is fired here, over the same docs as the shadow
+    // flip's.
+    const spliceTouched = this.#frameApplyDepth > 0
+      ? []
+      : [...keys.entries()].filter(([key, { id, scope, scopeKey }]) =>
+        !shadowTouched.some((address) => this.#docKeyOf(address) === key) &&
+        this.#record(id, scope, undefined, scopeKey).pending.some((entry) =>
+          entry.localSeq === localSeq && entry.op === "patch" &&
+          entry.accepted !== true &&
+          entry.patches.some((patch) => patch.op === "splice")
+        )
+      ).map(([, address]) => address);
+    const flipTouched = [...shadowTouched, ...spliceTouched];
+    const shouldNotifyShadowSubscribers = flipTouched.length > 0 &&
       this.#hasNotificationSubscribers();
-    const shouldNotifyShadowSinks = shadowTouched.length > 0 &&
-      this.#hasSinkSubscribers(shadowTouched);
+    const shouldNotifyShadowSinks = flipTouched.length > 0 &&
+      this.#hasSinkSubscribers(flipTouched);
     const shadowBefore = shouldNotifyShadowSubscribers
       ? Differential.checkout(
         this,
-        shadowTouched.map(({ id, scope, scopeKey }) =>
+        flipTouched.map(({ id, scope, scopeKey }) =>
           snapshotState(this, id, scope, scopeKey)
         ),
         this.#scopeKeyIdentity(),
@@ -9416,7 +9435,7 @@ export class SpaceReplica
         }
       }
     } else if (shouldNotifyShadowSinks) {
-      this.#notifySinksForIds(shadowTouched);
+      this.#notifySinksForIds(flipTouched);
     }
     // The wake (see the field doc): fired on the flip regardless of
     // notification subscribers AND regardless of a value diff — an

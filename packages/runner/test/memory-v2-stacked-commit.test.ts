@@ -5443,9 +5443,19 @@ describe("memory-v2-stacked-commit", () => {
         await clock.settle();
         expectVisible(harness, { A: { items: ["a", "b", "c"] } });
 
+        const before = harness.notifications.notifications.length;
         responseGate.resolve();
         await expectResultOk(splice);
         expectVisible(harness, { A: { items: ["a", "b", "c", "x"] } });
+        // The promotion changed the view, and a subscriber is told so.
+        const promoted = harness.notifications.notifications.slice(before)
+          .flatMap((notification) =>
+            "changes" in notification ? [...notification.changes] : []
+          )
+          .filter((change) => change.address.id === DOCS.A);
+        expect(promoted.map((change) => change.after)).toContainEqual({
+          value: { items: ["a", "b", "c", "x"] },
+        });
       } finally {
         responseGate.resolve();
         await harness.close();
