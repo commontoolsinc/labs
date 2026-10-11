@@ -2216,6 +2216,9 @@ function schemasResolveEqually(
 ): boolean {
   // A resolved fragment carries its document's definition map. Only the
   // transitive closure of definitions it uses belongs to its contract.
+  // Validation has already checked reference availability. Local targets are
+  // compared in this closure; equal embedded or content-addressed references
+  // name the same document independently of either enclosing root.
   const contract = (schema: JSONSchema, root: JSONSchema) =>
     pruneCfcSchemaDefinitions(cfcSchemaWithInheritedDefs(
       schema,
@@ -2223,30 +2226,7 @@ function schemasResolveEqually(
     ));
   source = contract(source, context.sourceRoot);
   target = contract(target, context.targetRoot);
-  if (!schemaSubtreesEqual(source, target)) return false;
-
-  const refs = new Set<string>();
-  collectSchemaReferences(source, refs, new WeakSet());
-  for (const ref of refs) {
-    const sourceResolved = resolveCfcSchemaRefs(
-      { $ref: ref },
-      context.sourceRoot,
-    );
-    const targetResolved = resolveCfcSchemaRefs(
-      { $ref: ref },
-      context.targetRoot,
-    );
-    if (
-      sourceResolved === undefined || targetResolved === undefined ||
-      !schemaSubtreesEqual(
-        pruneCfcSchemaDefinitions(sourceResolved),
-        pruneCfcSchemaDefinitions(targetResolved),
-      )
-    ) {
-      return false;
-    }
-  }
-  return true;
+  return schemaSubtreesEqual(source, target);
 }
 
 /**
@@ -2378,21 +2358,6 @@ function schemaHasUnsafeMaterializedDefault(
     );
   } finally {
     activeForPath.delete(schema);
-  }
-}
-
-function collectSchemaReferences(
-  value: unknown,
-  refs: Set<string>,
-  seen: WeakSet<object>,
-): void {
-  if (!isObjectOrArray(value) || seen.has(value)) return;
-  seen.add(value);
-  const record = value as Record<string, unknown>;
-  if (typeof record.$ref === "string") refs.add(record.$ref);
-
-  for (const child of subschemaChildren(value)) {
-    collectSchemaReferences(child, refs, seen);
   }
 }
 

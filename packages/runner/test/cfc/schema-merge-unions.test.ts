@@ -43,7 +43,134 @@ const panels = (
   },
 });
 
+const constrainedMember = (
+  moduleIdentity: string,
+  constraint: JSONSchema,
+): JSONSchema => ({
+  anyOf: [{
+    type: "object",
+    properties: { value: constraint, addedBy: { $ref: "#/$defs/Adder" } },
+  }, { type: "undefined" }],
+  $defs: {
+    Adder: {
+      type: "string",
+      ifc: { writeAuthorizedBy: writer(moduleIdentity) },
+    },
+  },
+});
+
 describe("schema-merge-unions", () => {
+  const unorderedConstraints: [string, JSONSchema, JSONSchema][] = [
+    ["required", { required: ["a", "b"] }, { required: ["b", "a"] }],
+    ["type", { type: ["string", "number"] }, { type: ["number", "string"] }],
+    ["enum", { enum: [[1, 2], [2, 1]] }, { enum: [[2, 1], [1, 2]] }],
+    ["dependentRequired", { dependentRequired: { a: ["b", "c"] } }, {
+      dependentRequired: { a: ["c", "b"] },
+    }],
+    ...(["allOf", "anyOf", "oneOf"] as const).map((
+      keyword,
+    ): [string, JSONSchema, JSONSchema] => [
+      keyword,
+      {
+        [keyword]: [{ type: "number", minimum: 0 }, {
+          type: "number",
+          maximum: 10,
+        }],
+      },
+      {
+        [keyword]: [{ type: "number", maximum: 10 }, {
+          type: "number",
+          minimum: 0,
+        }],
+      },
+    ]),
+  ];
+  for (const [keyword, before, after] of unorderedConstraints) {
+    it(`pairs branches whose ${keyword} members are reordered`, () => {
+      const stored = constrainedMember("stored", before);
+      const candidate = constrainedMember("next", after);
+      const merged = mergeCfcSchemaEnvelopes(stored, candidate);
+      expect(droppedStoredClaim(stored, merged)).toBeUndefined();
+      expect(
+        cfcSchemaEntries(merged).map((entry) =>
+          (entry.schema as JSONSchemaObj).ifc?.writeAuthorizedBy
+        ),
+      )
+        .toEqual([writer("stored")]);
+    });
+  }
+
+  for (
+    const [keyword, before, after] of [
+      ["default", { default: [1, 2] }, { default: [2, 1] }],
+      ["enum literal", { enum: [[1, 2]] }, { enum: [[2, 1]] }],
+      [
+        "prefixItems",
+        { prefixItems: [{ type: "string" }, { type: "number" }] },
+        {
+          prefixItems: [{ type: "number" }, { type: "string" }],
+        },
+      ],
+      ["asCell", { asCell: ["cell", "stream"] }, {
+        asCell: ["stream", "cell"],
+      }],
+    ] as const
+  ) {
+    it(`refuses reordered ${keyword} sequences`, () => {
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          constrainedMember("stored", before),
+          constrainedMember("next", after),
+        )
+      )
+        .toThrow(/union branches/);
+    });
+  }
+
+  it("refuses changing oneOf branch multiplicity", () => {
+    const branch = { type: "string" } as const;
+    expect(() =>
+      mergeCfcSchemaEnvelopes(
+        constrainedMember("stored", { oneOf: [branch] }),
+        constrainedMember("next", { oneOf: [branch, branch] }),
+      )
+    ).toThrow(/union branches/);
+  });
+
+  it("refuses an added policy-free branch that overlaps stored values", () => {
+    const schema = (moduleIdentity: string) =>
+      ({
+        anyOf: [{
+          type: "object",
+          properties: { addedBy: { $ref: "#/$defs/Adder" } },
+        }],
+        $defs: {
+          Adder: {
+            type: "string",
+            ifc: { writeAuthorizedBy: writer(moduleIdentity) },
+          },
+        },
+      }) as const;
+    const stored = schema("stored");
+    const candidate = schema("next");
+    const extra = { type: "object" } as const;
+    // The stored-claim guard sees the preserved arm; it does not prove the
+    // additional arm disjoint from values that arm already accepts.
+    expect(
+      droppedStoredClaim(stored, {
+        ...stored,
+        anyOf: [...stored.anyOf, extra],
+      }),
+    ).toBeUndefined();
+    expect(() =>
+      mergeCfcSchemaEnvelopes(stored, {
+        ...candidate,
+        anyOf: [...candidate.anyOf, extra],
+      })
+    )
+      .toThrow(/union branches/);
+  });
+
   for (const keyword of ["anyOf", "oneOf"] as const) {
     it(`retains the stored writer through a reordered ${keyword} and repeated setup`, () => {
       const stored = panels("stored", ["url", "piece"], "admitPanel", keyword);

@@ -732,12 +732,44 @@ const resolveReferenceSide = (
  */
 const unionBranchShape = (schema: JSONSchema): JSONSchema => {
   if (!isObjectNotArray(schema)) return schema;
-  const { ifc: _ifc, $defs: _defs, ...shape } = schema;
-  return mapSubschemas(
-    typeof shape.$ref === "string" ? { ...shape, $ref: "" } : shape,
-    unionBranchShape,
-    { includeUnused: true, visitBooleans: true },
-  );
+  const { ifc: _ifc, $defs: _defs, ...body } = schema;
+  const shape = {
+    ...mapSubschemas(
+      typeof body.$ref === "string" ? { ...body, $ref: "" } : body,
+      unionBranchShape,
+      { includeUnused: true, visitBooleans: true },
+    ) as JSONSchemaObj,
+  };
+  // These keyword arrays are order-independent. Keep multiplicity (oneOf
+  // counts matching branches), and leave sequences and literal values whole.
+  for (
+    const key of [
+      "required",
+      "type",
+      "enum",
+      "allOf",
+      "anyOf",
+      "oneOf",
+    ] as const
+  ) {
+    const members = shape[key];
+    if (Array.isArray(members)) {
+      Object.assign(shape, {
+        [key]: members.toSorted((a, b) =>
+          utf8Compare(hashStringOf(a), hashStringOf(b))
+        ),
+      });
+    }
+  }
+  if (isObjectNotArray(shape.dependentRequired)) {
+    shape.dependentRequired = Object.fromEntries(
+      Object.entries(shape.dependentRequired).map(([key, members]) => [
+        key,
+        Array.isArray(members) ? members.toSorted(utf8Compare) : members,
+      ]),
+    );
+  }
+  return shape;
 };
 
 /** Match policy-bearing union branches only when each has a unique counterpart. */

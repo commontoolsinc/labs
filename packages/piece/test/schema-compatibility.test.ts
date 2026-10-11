@@ -13,6 +13,9 @@ import {
 } from "@commonfabric/data-model/fabric-primitives";
 import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@commonfabric/data-model/for-testing-only";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "@commonfabric/runner/fabric-special-object-brand";
+import { internSchema } from "@commonfabric/data-model-schema";
+import { formatExternalSchemaRef } from "@commonfabric/data-model-schema/schema-refs";
+import { registerSchemaDocument } from "../../runner/src/schema-registry.ts";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
@@ -209,6 +212,32 @@ describe("piece schema compatibility", () => {
     it("returns false when the consumer value contract changes", () => {
       expect(schemasHaveSameContract({ type: "string" }, { type: "number" }))
         .toBe(false);
+    });
+
+    it("compares external contracts independently of enclosing definition scopes", () => {
+      const reference = (fallback: string, register = true): JSONSchema => {
+        const document = {
+          type: "object",
+          properties: { value: { $ref: "#/$defs/value" } },
+          $defs: { value: { type: "string", default: fallback } },
+        } as const;
+        const { taggedHashString } = internSchema(document, true);
+        if (register) registerSchemaDocument(taggedHashString, document);
+        return {
+          type: "array",
+          items: { $ref: formatExternalSchemaRef(taggedHashString) },
+        };
+      };
+      const same = reference("same external default");
+      expect(schemasHaveSameContract(same, same, {
+        sourceRoot: { $defs: { value: { type: "number" } } },
+        targetRoot: { $defs: { value: { type: "boolean" } } },
+      })).toBe(true);
+      expect(
+        schemasHaveSameContract(same, reference("changed external default")),
+      ).toBe(false);
+      const missing = reference("unregistered external contract", false);
+      expect(schemasHaveSameContract(missing, missing)).toBe(false);
     });
   });
 
