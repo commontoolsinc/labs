@@ -47,6 +47,7 @@ import {
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
   isScopeKey,
+  type MemoryProtocolFlags,
   type OperationFieldQuery,
   type OperationFieldSnapshot,
   type PatchOp,
@@ -57,6 +58,7 @@ import {
   type ScopeKeyIdentity,
   type SessionHolding,
   type SessionReadCeiling,
+  type SessionReport,
   type SessionSync,
   type SessionSyncUpsert,
   type SqliteDbRef,
@@ -65,6 +67,7 @@ import {
   type SqliteQueryReader,
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
+  type SyncCrossing,
   toDocumentPath,
   type ViewInterest,
   type ViewPlan,
@@ -72,11 +75,14 @@ import {
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import { validatePresencePublication } from "@commonfabric/memory/v2/presence";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
-import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import { maxOf, minOf } from "@commonfabric/utils/math";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
 
 import {
   applyPatchToDocument,
@@ -108,6 +114,11 @@ import {
   collectExternalSchemaRefHashes,
   schemaMetaRefHashes,
 } from "@commonfabric/data-model-schema/schema-refs";
+import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
+import {
+  deliverSchemaDocumentClosure,
+  linkSchemaRefHashes,
+} from "../schema-doc-delivery.ts";
 import {
   acquireSchemaRegistryLease,
   lookupSchemaDocument,
@@ -708,6 +719,8 @@ const applyPendingVersion = (
     case "delete":
       return undefined;
     case "set":
+      // Deep-frozen at `#applyPending`, so this is an identity pass; the
+      // call stands for a layer minted anywhere else.
       return cloneIfNecessary(pending.value) as EntityDocument;
     case "patch": {
       // Replay the layer's OPS over the base — never combine values. The
@@ -940,56 +953,140 @@ const comparePath = (left: readonly string[], right: readonly string[]) => {
 const localSeqKey = (localSeq: number | number[]): string =>
   Array.isArray(localSeq) ? localSeq.join(",") : String(localSeq);
 
-/**
- * Orders paths segment by segment, a shorter path ahead of one it prefixes.
- * That puts an ancestor directly ahead of every path below it, which is what
- * lets `compactRecursiveReads()` drop the descendants in one pass.
- */
-const compareSegments = (
-  left: readonly string[],
-  right: readonly string[],
-): number => {
-  const limit = Math.min(left.length, right.length);
-  for (let index = 0; index < limit; index++) {
-    if (left[index] !== right[index]) {
-      return left[index] < right[index] ? -1 : 1;
-    }
-  }
-  return left.length - right.length;
+/** A node of a tree of the paths one dependency group's reads name. */
+type ReadPathNode<Read> = {
+  /** The recursive read at this path, if any. */
+  recursive?: Read;
+
+  /** The shallow read at this path, if any. */
+  shallow?: Read;
+
+  /** The nodes one segment below, by segment. */
+  children: Map<string, ReadPathNode<Read>>;
 };
 
-const isPathPrefix = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every((segment, index) => segment === path[index]);
+/** Member counts of frozen containers, which cannot change. */
+const frozenMemberCounts = new WeakMap<ReadonlyRecord, number>();
 
 /**
- * Helper for `compactCommitReads()`, which keeps the reads of one dependency
- * group that no other read of the group covers. A recursive read at a path
- * covers every path below it, so a read under another is dropped. Sorts
- * `reads` in place and returns the survivors in that order.
+ * Helper for `compactDependencyGroup()`, which returns how many members
+ * `container` holds: an array's length, or an object's enumerable own keys.
  */
-const compactRecursiveReads = <Read extends { path: readonly string[] }>(
-  reads: Read[],
-): Read[] => {
-  if (reads.length < 2) return reads;
-  reads.sort((left, right) => compareSegments(left.path, right.path));
-  const kept: Read[] = [];
-  let covering: readonly string[] | undefined;
-  for (const read of reads) {
-    if (covering !== undefined && isPathPrefix(covering, read.path)) continue;
-    kept.push(read);
-    covering = read.path;
+const memberCount = (container: ReadonlyRecord): number => {
+  if (Array.isArray(container)) return container.length;
+  if (!Object.isFrozen(container)) return Object.keys(container).length;
+  let count = frozenMemberCounts.get(container);
+  if (count === undefined) {
+    count = Object.keys(container).length;
+    frozenMemberCounts.set(container, count);
   }
-  return kept;
+  return count;
+};
+
+/**
+ * Helper for `compactCommitReads()`, which appends to `compacted` the reads of
+ * one dependency group that the commit needs. `observed` is the document the
+ * reads observed, or `undefined` where there is none.
+ *
+ * A recursive read covers the reads below it. A path is read in full when a
+ * recursive read names it, or when a read names it and every member its value
+ * holds in `observed` is read in full. The reads in a subtree read in full are
+ * stated as one recursive read at its root, plus one shallow read there when
+ * any of them was shallow; under a recursive ancestor, the shallow read alone.
+ * A shallow and a recursive read of one path are both kept. The recursive read conflicts with every write at,
+ * above, or below the root. The shallow read conflicts with every change to an
+ * ancestor's key set, which is all a shallow read below the root conflicts
+ * with that the recursive read does not. So the two conflict with every write
+ * the reads they replace conflict with, whatever document `observed` is.
+ * `observed` decides only how much is merged, and a document other than the
+ * observed one can only extend the recursive read over members nobody read.
+ *
+ * Without a document no subtree is merged, and only reads a recursive ancestor
+ * covers are dropped.
+ */
+const compactDependencyGroup = <
+  Read extends ConfirmedCommitRead | PendingCommitRead,
+>(
+  reads: readonly Read[],
+  observed: EntityDocument | undefined,
+  compacted: Read[],
+): void => {
+  const root: ReadPathNode<Read> = { children: new Map() };
+  for (const read of reads) {
+    let node = root;
+    for (const segment of read.path) {
+      let child = node.children.get(segment);
+      if (child === undefined) {
+        child = { children: new Map() };
+        node.children.set(segment, child);
+      }
+      node = child;
+    }
+    if (read.nonRecursive === true) {
+      node.shallow ??= read;
+    } else {
+      node.recursive ??= read;
+    }
+  }
+
+  // Appends the reads at and below `node` that the commit needs, and returns
+  // whether they read `value` in full.
+  const compact = (
+    node: ReadPathNode<Read>,
+    value: unknown,
+    recursiveAbove: boolean,
+  ): boolean => {
+    const start = compacted.length;
+    const recursive = node.recursive;
+    const container = isKeyableObjectOrArray(value) ? value : undefined;
+    let membersReadInFull = 0;
+    for (const [segment, child] of node.children) {
+      const isMember = container !== undefined &&
+        Object.prototype.propertyIsEnumerable.call(container, segment);
+      const member = isMember ? container[segment] : undefined;
+      if (
+        compact(child, member, recursiveAbove || recursive !== undefined) &&
+        isMember
+      ) {
+        membersReadInFull++;
+      }
+    }
+    const read = recursive ?? node.shallow;
+    if (read === undefined) return false;
+    const readInFull = recursive !== undefined ||
+      (observed !== undefined &&
+        (container === undefined ||
+          membersReadInFull === memberCount(container)));
+    if (readInFull && observed !== undefined && compacted.length > start) {
+      let shallow = node.shallow;
+      for (let index = start; index < compacted.length; index++) {
+        if (compacted[index].nonRecursive === true) {
+          shallow ??= { ...read, nonRecursive: true };
+        }
+      }
+      compacted.length = start;
+      if (shallow !== undefined) compacted.push(shallow);
+      if (!recursiveAbove) {
+        const statement = { ...read };
+        delete statement.nonRecursive;
+        compacted.push(statement);
+      }
+    } else {
+      if (recursive !== undefined && !recursiveAbove) compacted.push(recursive);
+      if (node.shallow !== undefined) compacted.push(node.shallow);
+    }
+    return readInFull;
+  };
+  compact(root, observed, false);
 };
 
 const compactCommitReads = <
   Read extends ConfirmedCommitRead | PendingCommitRead,
 >(
   reads: Read[],
+  // The document a dependency group's reads observed, where it is known.
+  observedDocument: (read: Read) => EntityDocument | undefined = () =>
+    undefined,
 ): Read[] => {
   const dependencyKeys = new Map<number | number[], string>();
   const dependencyKeyFor = (localSeq: number | number[]): string => {
@@ -1001,14 +1098,7 @@ const compactCommitReads = <
     return key;
   };
 
-  // Grouping reads the input in whatever order it arrives: a recursive read
-  // displaces a shallow one at its path whichever comes first, and two reads
-  // equal in every grouped field are interchangeable, so the order the groups
-  // settle in decides nothing. The sort at the end is the one that orders.
-  const grouped = new Map<string, {
-    recursiveByPath: Map<string, Read>;
-    nonRecursiveByPath: Map<string, Read>;
-  }>();
+  const grouped = new Map<string, Read[]>();
   for (const candidate of reads) {
     // The dependency key carries every admission-relevant field — seq for
     // confirmed reads, the layer set AND basisSeq for pending reads — so
@@ -1022,33 +1112,17 @@ const compactCommitReads = <
       : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${
         dependencyKeyFor(candidate.localSeq)
       }:${candidate.basisSeq}`;
-    let group = grouped.get(dependencyKey);
-    if (!group) {
-      group = {
-        recursiveByPath: new Map(),
-        nonRecursiveByPath: new Map(),
-      };
-      grouped.set(dependencyKey, group);
-    }
-    const pathKey = candidate.path.join("\0");
-    if (candidate.nonRecursive === true) {
-      if (group.recursiveByPath.has(pathKey)) {
-        continue;
-      }
-      group.nonRecursiveByPath.set(pathKey, candidate);
+    const group = grouped.get(dependencyKey);
+    if (group === undefined) {
+      grouped.set(dependencyKey, [candidate]);
     } else {
-      group.nonRecursiveByPath.delete(pathKey);
-      group.recursiveByPath.set(pathKey, candidate);
+      group.push(candidate);
     }
   }
 
   const compacted: Read[] = [];
   for (const group of grouped.values()) {
-    const recursive = compactRecursiveReads([
-      ...group.recursiveByPath.values(),
-    ]);
-    for (const read of recursive) compacted.push(read);
-    for (const read of group.nonRecursiveByPath.values()) compacted.push(read);
+    compactDependencyGroup(group, observedDocument(group[0]), compacted);
   }
 
   return compacted.toSorted((left, right) => {
@@ -1170,6 +1244,17 @@ export class StorageManager implements IStorageManager {
 
   #settings: IRemoteStorageProviderSettings;
   #providers = new Map<MemorySpace, Provider>();
+
+  /**
+   * The kind each space declares, as {@link spaceKind} read it in a session
+   * of its own, for a space whose provider's session opened before the space
+   * had history. A space with history keeps its kind, so an entry never goes
+   * stale.
+   */
+  #spaceKindsReadAfresh = new Map<
+    MemorySpace,
+    MemoryV2Client.DeclaredSpaceKind
+  >();
   #spaceAccessErrors = new Map<MemorySpace, Error>();
   #spaceAccessObservers = new Set<(space: MemorySpace, error: Error) => void>();
   #spaceAccessChangeObservers = new Set<(space: MemorySpace) => void>();
@@ -1181,6 +1266,18 @@ export class StorageManager implements IStorageManager {
    * replica's through this map, so a replica built after the install and
    * a replacement replica both see it. */
   readonly #storeReadThroughs = new Map<MemorySpace, StoreReadThrough>();
+
+  /** The crossing loads kicked, by target and selector (see
+   * `#loadCrossings`): one kick per manager, in flight or landed. */
+  readonly #crossingKicks = new Set<string>();
+
+  /** The crossing loads in flight, by their pending-load key: the address
+   * each names (IStorageManager.pendingCrossingLoadAddresses) and how many
+   * loads of it — one per selector — have yet to settle. */
+  readonly #pendingCrossingLoads = new Map<string, {
+    address: { space: MemorySpace; scope: CellScope; id: URI };
+    count: number;
+  }>();
 
   /**
    * Schema-registry retention lease: held for the manager's open lifetime,
@@ -1548,30 +1645,54 @@ export class StorageManager implements IStorageManager {
    * The space's key pair is generated here from random data. It opens one
    * session, as the space, through the same route every later session for
    * the DID takes, and signs one commit: `acl` as the space's access-control
-   * document, and `root` as its reserved root pattern when one is given. The
-   * commit reads the document at sequence zero, so it lands only on a space
-   * with no history. The memory client resubmits the identical commit after a
-   * lost connection until the server confirms or refuses it. The key is held
-   * by nothing but this call, and is dropped when the call returns.
+   * document, `genesis.root` as its reserved root pattern when one is given
+   * (computed from the space's DID when it is a function), and
+   * `genesis.spaceKind` as its declared kind when one is given. The session
+   * declares the same root and kind, which the server holds the commit to.
+   * The commit reads the document at sequence zero, so it lands only on a
+   * space with no history. The memory client resubmits the identical commit
+   * after a lost connection until the server confirms or refuses it. The key
+   * is held by nothing but this call, and is dropped when the call returns;
+   * on a shared connection its authentication is released too, since a router
+   * counts each principal a connection holds against the connection.
+   *
+   * Under Mode A the ACL this commit writes need not name the space's own
+   * key, so the server revokes the creating session once the commit lands,
+   * and the `session.close` that follows is answered with a denial for a
+   * session that no longer exists. That denial is expected and ignored.
    */
-  async createSpace(acl: ACL, root?: GenesisRoot): Promise<MemorySpace> {
+  async createSpace(
+    acl: ACL,
+    genesis: {
+      root?: GenesisRoot | ((space: MemorySpace) => GenesisRoot);
+      spaceKind?: string;
+    } = {},
+  ): Promise<MemorySpace> {
     const key = await Identity.generate();
     const space = key.did() as MemorySpace;
+    const { spaceKind } = genesis;
+    const root = typeof genesis.root === "function"
+      ? genesis.root(space)
+      : genesis.root;
+    const declarations = {
+      ...(root === undefined ? {} : { genesisRoot: root }),
+      ...(spaceKind === undefined ? {} : { spaceKind }),
+    };
     const aclId = aclDocId(space);
     const { client, session } = await this.#sessionFactory.create(
       space,
       key,
-      {
-        sessionId: crypto.randomUUID(),
-        ...(root === undefined ? {} : { genesisRoot: root }),
-      },
+      { sessionId: crypto.randomUUID(), ...declarations },
     );
     try {
       if (root !== undefined && client.serverFlags?.genesisRoot !== true) {
         throw new Error("Host does not support genesis root reservations");
       }
+      if (spaceKind !== undefined && client.serverFlags?.spaceKind !== true) {
+        throw new Error("Host does not support declared space kinds");
+      }
       await session.transact({
-        ...(root === undefined ? {} : { genesisRoot: root }),
+        ...declarations,
         localSeq: 1,
         reads: {
           confirmed: [{ id: aclId, path: toDocumentPath([]), seq: 0 }],
@@ -1580,7 +1701,19 @@ export class StorageManager implements IStorageManager {
         operations: [{ op: "set", id: aclId, value: { value: { ...acl } } }],
       });
     } finally {
-      await client.close();
+      try {
+        await client.close();
+      } finally {
+        // Best effort: the space exists once its genesis commits. If the
+        // release fails, the key keeps one of the shared connection's
+        // principal places until the connection ends.
+        await client.releasePrincipal?.(space).catch((error) =>
+          logger.warn("create-space-release", () => [
+            `space ${space}: releasing its key failed:`,
+            error,
+          ])
+        );
+      }
     }
     return space;
   }
@@ -1743,7 +1876,45 @@ export class StorageManager implements IStorageManager {
       0;
   }
 
+  /** @inheritDoc */
+  async serverFlags(
+    space: MemorySpace,
+  ): Promise<MemoryProtocolFlags | null | undefined> {
+    return await this.#sessionFactory.serverFlags?.(space);
+  }
+
+  /** @inheritDoc */
+  async spaceKind(space: MemorySpace): Promise<string | undefined> {
+    const declared = await this.#openProvider(space).declaredSpaceKind() ??
+      this.#spaceKindsReadAfresh.get(space);
+    if (declared !== undefined) return declared.kind;
+    // The space's session opened before the space had any history, so it was
+    // told nothing of the kind, and stays open without being told. A session
+    // of its own, opened now, is told the kind as the space stands, and is
+    // closed however the read ends.
+    const { client, session } = await this.#sessionFactory.create(
+      space,
+      this.as,
+      {
+        sessionId: crypto.randomUUID(),
+        ...this.#sessionDescriptorFields(),
+      },
+    );
+    try {
+      const afresh = session.declaredSpaceKind;
+      if (afresh !== undefined) this.#spaceKindsReadAfresh.set(space, afresh);
+      return afresh?.kind;
+    } finally {
+      await client.close();
+    }
+  }
+
   open(space: MemorySpace): IStorageProvider {
+    return this.#openProvider(space);
+  }
+
+  /** Helper for {@link open}, which returns the provider it opens. */
+  #openProvider(space: MemorySpace): Provider {
     // A manager reused after close() starts a new session; retention
     // follows it.
     this.#schemaRegistryLease ??= acquireSchemaRegistryLease();
@@ -1764,9 +1935,9 @@ export class StorageManager implements IStorageManager {
         // Phase 5's producer-side foreign-scoped-read refusal: only a
         // serving manager sets a home space, and only its FOREIGN
         // providers refuse (see Options.servingHomeSpace).
-        refuseForeignScopedReads: this.#servingHomeSpace !== undefined &&
-          this.#servingHomeSpace !== space,
+        refuseForeignScopedReads: this.#refusesForeignScopedReadsIn(space),
         storeReadThrough: () => this.#storeReadThroughs.get(space),
+        loadCrossings: (crossings) => this.#loadCrossings(crossings),
         routeState,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
           ? (routeGeneration, routeSignal) =>
@@ -2325,11 +2496,24 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
+   * Whether this manager's provider for `space` refuses scoped reads: a
+   * serving manager reads no foreign space's scoped instances (see
+   * `Options.servingHomeSpace`).
+   */
+  #refusesForeignScopedReadsIn(space: MemorySpace): boolean {
+    return this.#servingHomeSpace !== undefined &&
+      this.#servingHomeSpace !== space;
+  }
+
+  /**
    * Registers one pending load of `address` and returns its release step,
    * which takes the load's failure if it had one. The release that brings
    * the key's count back to zero settles the key's waiters and, when no
    * failure was recorded, reports the recovery epoch to
-   * `loadRecoveryObserver`.
+   * `loadRecoveryObserver`. A scoped read of a space whose provider refuses
+   * such reads registers nothing, and its release does nothing: the read
+   * returns no data however long it is waited for, so it is not a load in
+   * flight, and nothing parks on it.
    */
   #registerPendingLoad(
     address: {
@@ -2343,6 +2527,7 @@ export class StorageManager implements IStorageManager {
       scopeKey?: ScopeKey;
     },
   ): (failure?: unknown) => void {
+    if (this.refusesReadByConstruction(address)) return () => {};
     const key = entityKey(address, this.scopeKeyIdentity());
     let entry = this.#pendingLoads.get(key);
     if (entry === undefined) {
@@ -2407,6 +2592,14 @@ export class StorageManager implements IStorageManager {
     scopeKey?: ScopeKey;
   }[] {
     return [...this.#pendingLoads.values()].map((entry) => entry.address);
+  }
+
+  /** @inheritDoc */
+  refusesReadByConstruction(
+    address: { space: MemorySpace; scope?: CellScope },
+  ): boolean {
+    return normalizeCellScope(address.scope) !== "space" &&
+      this.#refusesForeignScopedReadsIn(address.space);
   }
 
   pendingLoadGeneration(key: string): number | undefined {
@@ -2503,8 +2696,10 @@ export class StorageManager implements IStorageManager {
     // The runner's explicit-instance read (server-execution v2 stage A):
     // a served per-instance run's load of a scoped doc NAMES that
     // principal's instance — the load registers, travels, and lands per
-    // instance. Own-identity loads (every client, the OFF arm) name
-    // nothing and take exactly the pre-stage-A path.
+    // instance. A load of a foreign space's scoped doc, which a serving
+    // manager refuses by construction, travels but registers nothing
+    // (`#registerPendingLoad()`). Own-identity loads (every client, the
+    // OFF arm) name nothing and take exactly the pre-stage-A path.
     const instance = this.#foreignInstanceKey(scope, options?.scopeKeyIdentity);
     const releaseLoad = this.#registerPendingLoad({
       space,
@@ -2548,12 +2743,94 @@ export class StorageManager implements IStorageManager {
     }
   }
 
+  /** @inheritDoc */
+  followsCrossings(space: MemorySpace): boolean {
+    return this.open(space).replica.crossingsReported?.() === true;
+  }
+
+  /** @inheritDoc */
+  pendingCrossingLoadAddresses(): readonly {
+    space: MemorySpace;
+    scope: CellScope;
+    id: URI;
+  }[] {
+    return [...this.#pendingCrossingLoads.values()].map(
+      (entry) => entry.address,
+    );
+  }
+
+  /**
+   * Kicks the loads a frame's crossings name (ProviderOptions.loadCrossings):
+   * each target from its own space, under the path and schema the server's
+   * walk needed there, registered as a pending load like `syncCell`'s so
+   * the preflight park and `loadsSettled()` see it, and listed by
+   * `pendingCrossingLoadAddresses()` while it is in flight. Each (target,
+   * selector) is kicked once per manager: a crossing's own frame can report
+   * a crossing back, and a kick already in flight or landed ends that chain.
+   * A load that fails hands its kick back, so a frame carrying the crossing
+   * again kicks it again; the target stays absent and the frame that
+   * carried the crossing is unaffected.
+   */
+  #loadCrossings(crossings: readonly SyncCrossing[]): void {
+    for (const crossing of crossings) {
+      const space = crossing.space as MemorySpace;
+      const id = crossing.id as URI;
+      const scope = normalizeCellScope(crossing.scope);
+      // A scoped read of a foreign space is one a serving manager refuses
+      // by construction (ProviderOptions.refuseForeignScopedReads); the
+      // run that reads it is failed at dispatch, so no load is kicked.
+      if (scope !== "space" && this.#refusesForeignScopedReadsIn(space)) {
+        continue;
+      }
+      const key = `${space}\0${scope}\0${id}\0${
+        JSON.stringify(crossing.path)
+      }\0${crossing.schema === undefined ? "" : hashStringOf(crossing.schema)}`;
+      if (this.#crossingKicks.has(key)) continue;
+      this.#crossingKicks.add(key);
+      const address = { space, scope, id };
+      const releaseLoad = this.#registerPendingLoad(address);
+      // One ledger entry per target, however many selectors load it: the
+      // entry stays while any of them is in flight.
+      const ledgerKey = entityKey(address, this.scopeKeyIdentity());
+      const entry = this.#pendingCrossingLoads.get(ledgerKey) ??
+        { address, count: 0 };
+      entry.count++;
+      this.#pendingCrossingLoads.set(ledgerKey, entry);
+      const load = (async () => {
+        let loadFailure: unknown;
+        try {
+          const result = await this.open(space).sync(
+            id,
+            { path: crossing.path, schema: crossing.schema ?? false },
+            crossing.scope,
+          );
+          loadFailure = result.error;
+          if (loadFailure !== undefined) {
+            this.#logSyncLoadFailure(space, id, loadFailure);
+          }
+        } catch (error) {
+          loadFailure = error;
+          this.#logSyncLoadFailure(space, id, error);
+        } finally {
+          if (loadFailure !== undefined) this.#crossingKicks.delete(key);
+          releaseLoad(loadFailure);
+          entry.count--;
+          if (entry.count === 0) this.#pendingCrossingLoads.delete(ledgerKey);
+        }
+      })();
+      this.trackUntilSettled(load);
+    }
+  }
+
   /**
    * The explicit-instance load by address (IStorageManager.syncInstance —
    * server-execution v2 stage A): the transaction layer's kick for a
    * served per-instance run's read of a scoped instance the replica has
    * never seen. Registered like syncCell's load (the preflight park
-   * cross-matches the instance-keyed address) and named on the wire.
+   * cross-matches the instance-keyed address) and named on the wire,
+   * except that a read this manager refuses by construction
+   * (`refusesReadByConstruction()`) registers nothing for a preflight to
+   * park on.
    * Own-identity or space-scope addresses name nothing and take the
    * ordinary root pull; a load that fails hands back the pull-kick
    * reservation so a later read may retry.
@@ -3014,6 +3291,14 @@ type ProviderOptions = {
    * (see IStorageManager.installStoreReadThrough). Absent or resolving
    * to `undefined`: every load goes over the session. */
   storeReadThrough?: () => StoreReadThrough | undefined;
+
+  /**
+   * Kicks the loads a frame's crossings name (`SessionSync.crossings`): the
+   * documents in other spaces the server's walk followed links to, each
+   * under the selector the read needed, registered as pending loads for a
+   * caller to await. Absent: a frame's crossings are not acted on.
+   */
+  loadCrossings?: (crossings: readonly SyncCrossing[]) => void;
 };
 
 type SpaceReplicaOptions = Omit<ProviderOptions, "createSession"> & {
@@ -3205,6 +3490,11 @@ class Provider
     );
   }
 
+  /** See `SpaceReplica.declaredSpaceKind()`. */
+  declaredSpaceKind(): Promise<MemoryV2Client.DeclaredSpaceKind | undefined> {
+    return this.#followReplacement((replica) => replica.declaredSpaceKind());
+  }
+
   operationCodecs(): Promise<readonly string[]> {
     return this.#followReplacement((replica) => replica.operationCodecs());
   }
@@ -3227,6 +3517,15 @@ class Provider
     return this.#followReplacement((replica) =>
       replica.releaseOperationField(operation)
     );
+  }
+
+  /**
+   * Sends `report` on the current replica's session, best-effort (memory-v2
+   * `04-protocol.md` §4.14); a closed provider sends nothing.
+   */
+  sendReport(report: SessionReport): void {
+    if (this.#destroyed) return;
+    void this.replica.sendReport(report);
   }
 
   async joinPresenceRoom(
@@ -3859,6 +4158,11 @@ export class SpaceReplica
    * ProviderOptions.storeReadThrough). */
   readonly #storeReadThrough: () => StoreReadThrough | undefined;
 
+  /** See ProviderOptions.loadCrossings. */
+  readonly #loadCrossings:
+    | ((crossings: readonly SyncCrossing[]) => void)
+    | undefined;
+
   /**
    * Depth of frame integrations in progress (`#applySessionSync()`). A
    * read made while a frame integrates — the differential checkout's
@@ -4104,6 +4408,7 @@ export class SpaceReplica
     this.#eventAppendPacing = options.eventAppendPacing;
     this.#refuseForeignScopedReads = options.refuseForeignScopedReads === true;
     this.#storeReadThrough = options.storeReadThrough ?? (() => undefined);
+    this.#loadCrossings = options.loadCrossings;
     // Eager queue init (LT9; verdict blocker, 2026-08-12): a dead
     // predecessor replica's intents in the manager-shared store must
     // discharge WITHOUT waiting for a fresh fire. The constructor's
@@ -4719,6 +5024,24 @@ export class SpaceReplica
     return (await session.queryOperationField(query)).field;
   }
 
+  /**
+   * What the memory server told this replica's session, when it last opened,
+   * of the kind the space declares in its genesis commit; see
+   * `SpaceSession.declaredSpaceKind`.
+   *
+   * @throws If the session cannot be opened, or if the memory server does not
+   *   advertise `spaceKind`.
+   */
+  async declaredSpaceKind(): Promise<
+    MemoryV2Client.DeclaredSpaceKind | undefined
+  > {
+    const { client, session } = await this.#activeSessionHandle();
+    if (client.serverFlags?.spaceKind !== true) {
+      throw new Error("memory server does not report a space's declared kind");
+    }
+    return session.declaredSpaceKind;
+  }
+
   async operationCodecs(): Promise<readonly string[]> {
     const { client } = await this.#activeSessionHandle();
     if (client.serverFlags?.applyOp !== true) return [];
@@ -4829,6 +5152,16 @@ export class SpaceReplica
   ): Promise<MemoryV2Client.PresenceMembership> {
     const { session } = await this.#activeSessionHandle();
     return session.joinPresenceRoom(room, observer);
+  }
+
+  /** Sends `report` on the replica's active session, best-effort. */
+  async sendReport(report: SessionReport): Promise<void> {
+    try {
+      const { session } = await this.#activeSessionHandle();
+      await session.sendReport(report);
+    } catch {
+      // A session that cannot be reached loses only the diagnostic.
+    }
   }
 
   async #removeOperationWatch(watchId: string): Promise<void> {
@@ -4971,6 +5304,15 @@ export class SpaceReplica
   /** Whether the current connection retains the negotiated view protocol. */
   viewReplicationSupported(): boolean {
     return this.#sessionClient?.serverFlags?.viewScopedReplicationV1 === true;
+  }
+
+  /**
+   * Whether the server this replica's session is on reports the links its
+   * walks follow out of the space (`syncCrossingsV1`), so a sync here loads
+   * what a read through the synced documents reaches in other spaces.
+   */
+  crossingsReported(): boolean {
+    return this.#sessionClient?.serverFlags?.syncCrossingsV1 === true;
   }
 
   /** Waits for session authentication and watch restoration after reconnect. */
@@ -5213,11 +5555,51 @@ export class SpaceReplica
    * resolves as delivered (`EventAppendDuplicateError` — events.md §5's
    * duplicate-submission rule). The returned promise settles with the
    * delivery outcome; rendering never waits on it (the echo is local).
+   * The append carries the schema documents its payload's links reference
+   * and this space does not hold, as a transaction writing those links
+   * would (`#withPayloadSchemaDocuments`).
    */
   enqueueEventAppend(
     append: Omit<QueuedEventAppend, "clientSeq"> & { clientSeq?: number },
   ): Promise<EventAppendOutcome> {
-    return this.#ensureEventAppendQueue().enqueue(append);
+    return this.#ensureEventAppendQueue().enqueue(
+      this.#withPayloadSchemaDocuments(append),
+    );
+  }
+
+  /**
+   * Helper for `enqueueEventAppend()`, which returns `append` carrying the
+   * closure of schema documents behind its payload's link schemas, from the
+   * realm registry, less what this replica has confirmed the server holds.
+   * Gated on `contentAddressedSchemas` as a transaction's link scan is: only
+   * that writer stamps a link schema as a reference. Taken at enqueue, while
+   * the registry is certain to hold what the sender's links name; a document
+   * the server comes to hold meanwhile is installed as a no-op.
+   */
+  #withPayloadSchemaDocuments<T extends Pick<QueuedEventAppend, "payload">>(
+    append: T,
+  ): T {
+    if (!getContentAddressedSchemasConfig() || append.payload === undefined) {
+      return append;
+    }
+    const schemaDocuments: Record<string, JSONSchema> = {};
+    const { missing } = deliverSchemaDocumentClosure(
+      linkSchemaRefHashes(append.payload),
+      (hash) => this.isContentAddressedDocPersisted(hash),
+      (hash, schema) => {
+        schemaDocuments[hash] = schema;
+      },
+    );
+    for (const hash of missing.keys()) {
+      logger.warn("event-append-schema-doc-missing", () => [
+        "An event payload's link names a schema document the registry " +
+        "cannot supply:",
+        `cid:${hash}`,
+      ]);
+    }
+    return Object.keys(schemaDocuments).length === 0
+      ? append
+      : { ...append, schemaDocuments };
   }
 
   async resolveEventAttention(
@@ -5588,9 +5970,12 @@ export class SpaceReplica
     // persistently attempted one foreign scoped read. Refusing the
     // OFFENDING caller's pull keeps the refusal action-scoped, the
     // arc's standing refusal convention. The refusal is typed rather than
-    // a `ConnectionError`: it can never heal in this runtime, so a served
-    // event whose required load meets it terminalizes at once
-    // (`toReplicaLoadFailureError`).
+    // a `ConnectionError`: it can never heal in this runtime. For the same
+    // reason the manager registers no pending load for such a read
+    // (`#registerPendingLoad()`), so a served event's preflight never parks
+    // on one, whenever the refusal lands relative to the preflight. A served
+    // run that reads the document's value is failed at dispatch instead
+    // (`refusesReadByConstruction()`).
     if (this.#refuseForeignScopedReads) {
       for (const [address] of normalizedEntries) {
         const scope = normalizeCellScope(address.scope) ?? "space";
@@ -7751,7 +8136,13 @@ export class SpaceReplica
     // conflict granularity to nonRecursive reads (patchOverlapsNonRecursiveRead),
     // matching how the scheduler reader-dirty index already treats them.
     return {
-      confirmed: compactCommitReads(confirmed),
+      confirmed: compactCommitReads(
+        confirmed,
+        (read) =>
+          this.#docs.get(
+            docKey(read.id, this.instanceKey(read.scope, identity)),
+          )?.confirmed.value,
+      ),
       pending: compactCommitReads(pending),
     };
   }
@@ -7903,14 +8294,9 @@ export class SpaceReplica
       // Link positions — the `schema` metadata member was embedded above.
       // An `$alias`-shaped record in an arriving document is plain data,
       // never a delivery obligation.
-      mapLinkSchemas(doc as FabricValue, (schema) => {
-        for (
-          const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
-        ) {
-          embed(hash, id);
-        }
-        return schema;
-      });
+      for (const hash of linkSchemaRefHashes(doc as FabricValue)) {
+        embed(hash, id);
+      }
     }
     for (const [id, document] of registered) {
       for (const dep of collectExternalSchemaRefHashes(document)) {
@@ -8013,6 +8399,15 @@ export class SpaceReplica
       this.#applySessionSyncFrame(sync, type);
     } finally {
       this.#frameApplyDepth -= 1;
+    }
+    // The frame's crossings name documents in other spaces: their loads
+    // are kicked once the frame's own documents are in. Nothing here waits
+    // for them — this apply can sit inside the one watch refresh in flight,
+    // and a crossing's load can report a crossing back into this space —
+    // so a caller that needs them awaits them through the pending-load
+    // ledger (IStorageManager.pendingCrossingLoadAddresses).
+    if (sync.crossings !== undefined && sync.crossings.length > 0) {
+      this.#loadCrossings?.(sync.crossings);
     }
   }
 
@@ -8768,7 +9163,22 @@ export class SpaceReplica
     const { id, scope, ...pending } = operation;
     const record = this.#record(id, scope, identity);
     record.pending.push(
-      pendingVersion(localSeq, pending, record.confirmed.seq),
+      pendingVersion(
+        localSeq,
+        // A `set` layer's value is the transaction's working root, mutable
+        // where the transaction thawed it. The layer is materialized every
+        // time the document's confirmed version moves beneath it, and each
+        // materialization of a mutable value is a clone of the whole
+        // document; frozen once here, the value is handed back by identity
+        // for as long as the layer stands.
+        pending.op === "set"
+          ? {
+            ...pending,
+            value: cloneIfNecessary(pending.value) as EntityDocument,
+          }
+          : pending,
+        record.confirmed.seq,
+      ),
     );
   }
 
@@ -9337,14 +9747,9 @@ export class SpaceReplica
           }
         }
       } else {
-        mapLinkSchemas(upsert.doc as FabricValue, (schema) => {
-          for (
-            const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
-          ) {
-            hashes.add(hash);
-          }
-          return schema;
-        });
+        for (const hash of linkSchemaRefHashes(upsert.doc as FabricValue)) {
+          hashes.add(hash);
+        }
       }
       return hashes;
     };

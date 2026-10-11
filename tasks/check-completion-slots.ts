@@ -107,7 +107,17 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
     "profile repair-name-protection:expect",
     "the receipt from the owner-reviewed inspection",
   ],
+  [
+    "profile repair-root:expect",
+    "the receipt from the operator-reviewed inspection",
+  ],
   ["piece new:request-key", "an opaque caller retry key"],
+  [
+    "ingest mint:gmail-access-token",
+    "a secret; a candidate list is the wrong place",
+  ],
+  ["ingest mint:gmail-id-token", "the same"],
+  ["ingest mint:target", "a cell reference the caller chooses"],
   ["space invite create:ttl", "an admission lifetime in seconds"],
   ["space invite create:max-uses", "a distinct identity count"],
   ["space invite create:shell", "a caller-selected shell origin"],

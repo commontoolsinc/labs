@@ -1035,4 +1035,58 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "a manager's room link now types the room's `messages`, which the recorded link left open; every stored room link is to a room output whose `messages` the new type admits",
     record: "docs/history/fabrichat-room-link-messages-break.md",
   },
+  {
+    // A room's `about` record names `commitStart` and a reviewed `ChatStart`
+    // on `ChatStartSurface` as its only writer, where it named `commitManager`
+    // with no gesture. The record is written once, as the room is created, so
+    // a room that exists keeps the one it has.
+    pattern: "fabrichat/room.tsx",
+    baselines: [
+      "20261002T164437Z-1xU0r9QuhxWHgK6y",
+      "20261003T224731Z-o9skqwp4KfLbCDBT",
+      "20261005T182129Z-3RSVlUS0NdLuz2VP",
+      "20261005T224806Z-OeD1Mc2I_LQ_d8L_",
+    ],
+    paths: ["argument.about"],
+    reason:
+      "a room's `about` record now requires a reviewed start to write it, a write policy the recorded label, naming a writer with no gesture, differs from",
+    record: "docs/history/fabrichat-start-reviewed-break.md",
+  },
+  {
+    // A manager's index entry gained `revision`, the revision of the room's
+    // entry in the user's catalog, which a request to forget the room names,
+    // so that a choice made since by another client is not overridden, and a
+    // refused outcome gained `code`, which a client acts on. The recorded
+    // outcomes left extra fields open, so a stored outcome admitted either of
+    // any type; the candidate types them. No recorded outcome holds either.
+    pattern: "fabrichat/manager.tsx",
+    baselines: [
+      "20261005T182129Z-yX4jdpH1wLhIowBh",
+      "20261006T233809Z-8LxrZWka1s7az21n",
+      "20261008T155754Z-m9jfHg3UGeF0e9_8",
+      "20261008T210909Z-Kyy64jL0hYC-5p6Q",
+    ],
+    paths: ["argument.requests.*"],
+    reason:
+      "a manager's index entry now types `revision`, and a refused outcome `code`, which the recorded outcomes left open; no stored request outcome holds either",
+    record: "docs/history/fabrichat-index-revision-break.md",
+  },
+  {
+    // A manager's room link gained `roster`, the profiles of those who joined
+    // the room, each a link, from which the manager derives its `people`. The
+    // recorded link left it open, so a stored outcome admitted any `roster`;
+    // the candidate types it. A link is always to a room output, which has no
+    // `roster` or has a list of profile links.
+    pattern: "fabrichat/manager.tsx",
+    baselines: [
+      "20261008T225324Z-Oj3DbCTq-94tEYN3",
+      "20261009T161813Z-r7DggcJdZ7FzrPCR",
+      "20261009T210116Z-99YN5H9jf2UFET6M",
+      "20261010T083035Z-Mp5ZALK-A2rUfm_u",
+    ],
+    paths: ["argument.requests.*"],
+    reason:
+      "a manager's room link now types the room's `roster`, which the recorded link left open; every stored room link is to a room output with no `roster` or with a list of profile links, which the new type admits",
+    record: "docs/history/fabrichat-room-link-roster-break.md",
+  },
 ];

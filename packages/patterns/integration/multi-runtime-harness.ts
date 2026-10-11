@@ -43,12 +43,19 @@ import {
 } from "@commonfabric/data-model/codecs";
 import { type DID, Identity } from "@commonfabric/identity";
 import type { ACL } from "@commonfabric/memory/acl";
-import type { MemoryAclMode } from "@commonfabric/memory/v2/server";
+import type {
+  AdmittedCommitNotice,
+  MemoryAclMode,
+  Server as MemoryServer,
+} from "@commonfabric/memory/v2/server";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import {
   experimentalOptionsFromEnv,
+  getPatternEnvironment,
   type PatternCoverageData,
+  type PatternEnvironment,
+  setPatternEnvironment,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
 import {
@@ -72,10 +79,7 @@ import {
   type WorkerRequest,
   type WorkerResponse,
 } from "./multi-runtime-ipc.ts";
-import {
-  awaitAdmitted,
-  type CommitWatchableServer,
-} from "../../runner/test/support/serving-waits.ts";
+import { awaitAdmitted } from "../../runner/test/support/serving-waits.ts";
 
 import type { initializePiecesController } from "./pieces-controller.ts";
 
@@ -215,6 +219,39 @@ const RPC_TIMEOUT_MS = 120_000;
 const SERVED_SETTLE_QUIESCENCE_BUDGET_MS = 10_000;
 
 /**
+ * The claims harnesses in this process hold on its pattern environment,
+ * oldest first, each with the environment that was in force when it was
+ * made. The environment is the newest claim's; releasing a claim hands what it
+ * found to the claim made after it, or puts it back when there is none.
+ */
+const patternEnvironmentClaims: {
+  claim: symbol;
+  previous: PatternEnvironment;
+}[] = [];
+
+/**
+ * Sets this process's pattern environment to `apiUrl`, and returns what
+ * releases that claim, once however many times it is called. A harness
+ * released while one made after it still holds a claim leaves that one's
+ * environment in force.
+ */
+export function claimPatternEnvironment(apiUrl: URL): () => void {
+  const claim = Symbol("pattern environment claim");
+  patternEnvironmentClaims.push({ claim, previous: getPatternEnvironment() });
+  setPatternEnvironment({ apiUrl });
+  return () => {
+    const index = patternEnvironmentClaims.findIndex((each) =>
+      each.claim === claim
+    );
+    if (index === -1) return;
+    const [released] = patternEnvironmentClaims.splice(index, 1);
+    const next = patternEnvironmentClaims[index];
+    if (next === undefined) setPatternEnvironment(released.previous);
+    else next.previous = released.previous;
+  };
+}
+
+/**
  * The authored patterns tree this repository deploys, served at the same
  * address as the in-process storage server.
  *
@@ -254,6 +291,7 @@ const coverageFile =
 class WorkerClient {
   #worker: Worker;
   #ready = false;
+  #terminated = false;
   #lifetimeLock?: string;
   #nextId = 1;
   #pending = new Map<
@@ -317,6 +355,9 @@ class WorkerClient {
     cmd: string,
     args: Record<string, FabricValue> = {},
   ): Promise<FabricValue> {
+    if (this.#terminated) {
+      return Promise.reject(new Error(`[${this.label}] worker terminated`));
+    }
     const id = this.#nextId++;
     const request: WorkerRequest = {
       id,
@@ -347,8 +388,12 @@ class WorkerClient {
     });
   }
 
-  /** Collects this realm before releasing its runtime and instrumented graph. */
+  /**
+   * Collects this realm before releasing its runtime and instrumented graph.
+   * A terminated realm has neither to give, so disposing one does nothing.
+   */
   async dispose(): Promise<void> {
+    if (this.#terminated) return;
     const collector = patternCoverageCollector();
     const directory = patternCoverageDir();
     if (collector && directory) {
@@ -364,9 +409,10 @@ class WorkerClient {
 
   /**
    * Rejects every call in flight, and terminates the worker, settling once it
-   * has been torn down.
+   * has been torn down. A call made after this is refused at once.
    */
   async terminate(): Promise<void> {
+    this.#terminated = true;
     for (const pending of this.#pending.values()) {
       pending.reject(new Error(`[${this.label}] worker terminated`));
     }
@@ -512,6 +558,18 @@ export class MultiRuntimeSession {
     value: FabricValue,
   ): Promise<FabricValue> {
     return await this.#client.call("createCell", { cause, value });
+  }
+
+  /**
+   * Mint a profile of this session's own, holding `name`, in a space created
+   * for it that admits this session's identity alone, and answer with the
+   * link that reaches it. Its label attests this session's identity with
+   * `represents-principal`, as a Fabric profile's does, so a session the
+   * space refuses can't read whom it attests. The link can be passed back in
+   * a `send` event, as {@link createCell}'s can.
+   */
+  async createOwnProfile(name: string): Promise<FabricValue> {
+    return await this.#client.call("createOwnProfile", { name });
   }
 
   /**
@@ -672,10 +730,28 @@ export class MultiRuntimeSession {
   }
 }
 
+/**
+ * `spec` as a full session spec, with the identity it names or else one derived
+ * from its label.
+ */
+async function withIdentity(
+  spec: string | MultiRuntimeSessionSpec,
+): Promise<MultiRuntimeSessionSpec & { identity: Identity }> {
+  const normalized: MultiRuntimeSessionSpec = typeof spec === "string"
+    ? { label: spec }
+    : spec;
+  const identity = normalized.identity ??
+    await Identity.fromPassphrase(
+      `multi-runtime-harness ${normalized.label}`,
+      { implementation: "noble" },
+    );
+  return { ...normalized, identity };
+}
+
 /** The in-process server a harness hosts, when it hosts one. */
 type HostedServer = {
   /** The memory server, whose admitted commits include the serving loop's. */
-  readonly server: CommitWatchableServer;
+  readonly server: Pick<MemoryServer, "watchAdmittedCommits">;
 
   /** The server's `idle()`, which covers storage and not a serving loop. */
   idle(): Promise<void>;
@@ -690,6 +766,12 @@ export class MultiRuntimeHarness {
   readonly pieceId: string;
   #server?: HostedServer;
   #awaitsServedConsequences: boolean;
+  #releasePatternEnvironment: () => void;
+  #startSession: (
+    spec: string | MultiRuntimeSessionSpec,
+  ) => Promise<MultiRuntimeSession>;
+  /** The labels of the sessions `addSession()` is still starting. */
+  readonly #startingLabels = new Set<string>();
 
   private constructor(
     sessions: MultiRuntimeSession[],
@@ -697,12 +779,18 @@ export class MultiRuntimeHarness {
     pieceId: string,
     server: HostedServer | undefined,
     awaitsServedConsequences: boolean,
+    releasePatternEnvironment: () => void,
+    startSession: (
+      spec: string | MultiRuntimeSessionSpec,
+    ) => Promise<MultiRuntimeSession>,
   ) {
     this.sessions = sessions;
     this.spaceDid = spaceDid;
     this.pieceId = pieceId;
     this.#server = server;
     this.#awaitsServedConsequences = awaitsServedConsequences;
+    this.#releasePatternEnvironment = releasePatternEnvironment;
+    this.#startSession = startSession;
   }
 
   static async create(
@@ -737,23 +825,19 @@ export class MultiRuntimeHarness {
       });
     const targetUrl = options.apiUrl ?? server!.url;
     const apiUrl = targetUrl.href;
+    // A served handler reads the pattern environment of the process its
+    // serving loop runs in, which a toolshed sets to its own address. The
+    // serving loop hosted here runs in this process, so this process's is set
+    // to the address the harness hosts, as a handler run by a session's own
+    // runtime sees it, until the harness is disposed or terminated.
+    const releasePatternEnvironment = serverExecutionOn && server !== undefined
+      ? claimPatternEnvironment(targetUrl)
+      : () => {};
 
     const sessions: MultiRuntimeSession[] = [];
     let bootstrap: WorkerClient | undefined;
     try {
-      const specs = await Promise.all(
-        options.sessions.map(async (spec) => {
-          const normalized: MultiRuntimeSessionSpec = typeof spec === "string"
-            ? { label: spec }
-            : spec;
-          const identity = normalized.identity ??
-            await Identity.fromPassphrase(
-              `multi-runtime-harness ${normalized.label}`,
-              { implementation: "noble" },
-            );
-          return { ...normalized, identity };
-        }),
-      );
+      const specs = await Promise.all(options.sessions.map(withIdentity));
       const owner = specs[0].identity;
       const grants: ACL = {};
       for (const { identity } of specs.slice(1)) {
@@ -769,27 +853,34 @@ export class MultiRuntimeHarness {
             : {}),
         }) as FabricValue;
 
-      for (const spec of specs) {
-        const cfcWriteFloor = spec.cfcWriteFloor ?? options.cfcWriteFloor;
-        const client = new WorkerClient(spec.label);
+      const startSession = async (
+        spec: string | MultiRuntimeSessionSpec,
+      ): Promise<MultiRuntimeSession> => {
+        const started = await withIdentity(spec);
+        const cfcWriteFloor = started.cfcWriteFloor ?? options.cfcWriteFloor;
+        const client = new WorkerClient(started.label);
+        // A worker whose runtime cannot start, as one the access list refuses
+        // cannot, is stopped here, since no session holds it.
         await client.call("init", {
-          identity: spec.identity.keyPair,
+          identity: started.identity.keyPair,
           spaceDid,
-          apiUrl: spec.apiUrl?.href ?? apiUrl,
+          apiUrl: started.apiUrl?.href ?? apiUrl,
           diagnostics: options.diagnostics === true,
           recordRejections: options.recordRejections === true,
-          cfc: cfcFor(spec),
+          cfc: cfcFor(started),
           watchPaths: options.watchPaths as FabricValue,
-          ...(spec.wsDelayMs !== undefined
-            ? { wsDelayMs: spec.wsDelayMs }
+          ...(started.wsDelayMs !== undefined
+            ? { wsDelayMs: started.wsDelayMs }
             : {}),
-          ...(spec.inboundHold === true ? { inboundHold: true } : {}),
+          ...(started.inboundHold === true ? { inboundHold: true } : {}),
           ...(cfcWriteFloor !== undefined ? { cfcWriteFloor } : {}),
+        }).catch(async (error) => {
+          await client.terminate();
+          throw error;
         });
-        sessions.push(
-          new MultiRuntimeSession(spec.label, spec.identity, client),
-        );
-      }
+        return new MultiRuntimeSession(started.label, started.identity, client);
+      };
+      for (const spec of specs) sessions.push(await startSession(spec));
 
       // A throwaway bootstrap worker creates the piece, then every test
       // session opens it BY ID from storage. This mirrors production: each
@@ -830,6 +921,8 @@ export class MultiRuntimeHarness {
         pieceId,
         server,
         server === undefined || serverExecutionOn,
+        releasePatternEnvironment,
+        startSession,
       );
     } catch (error) {
       await bootstrap?.terminate();
@@ -837,6 +930,7 @@ export class MultiRuntimeHarness {
         await session.disposeSession().catch(() => {});
       }
       await server?.close().catch(() => {});
+      releasePatternEnvironment();
       throw error;
     }
   }
@@ -847,6 +941,50 @@ export class MultiRuntimeHarness {
       throw new Error(`No session labeled "${label}"`);
     }
     return session;
+  }
+
+  /**
+   * Starts a session in a runtime of its own and opens the piece in it, as a
+   * client starting after the others does: it holds nothing of the piece and
+   * reads all of it from storage. Its label must be one no session holds or
+   * is starting under. Throws, and starts nothing, when the space's access list
+   * does not admit its identity, as it did when the harness was made or as a
+   * grant since has.
+   */
+  async addSession(
+    spec: string | MultiRuntimeSessionSpec,
+  ): Promise<MultiRuntimeSession> {
+    const label = typeof spec === "string" ? spec : spec.label;
+    if (
+      this.#startingLabels.has(label) ||
+      this.sessions.some((session) => session.label === label)
+    ) {
+      throw new Error(`A session labeled "${label}" already exists`);
+    }
+    this.#startingLabels.add(label);
+    try {
+      const session = await this.#startSession(spec);
+      try {
+        await session.client().call("openPiece", { pieceId: this.pieceId });
+      } catch (error) {
+        await session.disposeSession().catch(() => {});
+        throw error;
+      }
+      this.sessions.push(session);
+      return session;
+    } finally {
+      this.#startingLabels.delete(label);
+    }
+  }
+
+  /**
+   * Disposes the session labeled `label`, as a client that closes, and drops
+   * it from the sessions `settle()` drives.
+   */
+  async closeSession(label: string): Promise<void> {
+    const session = this.session(label);
+    this.sessions.splice(this.sessions.indexOf(session), 1);
+    await session.disposeSession();
   }
 
   /**
@@ -956,6 +1094,33 @@ export class MultiRuntimeHarness {
   }
 
   /**
+   * Runs `during`, and returns every commit the hosted server admitted while
+   * it ran, oldest first: the sessions' own and the serving loop's alike.
+   * Throws on a harness that targets a running toolshed, whose commits this
+   * process does not see.
+   */
+  async admittedCommitsDuring(
+    during: () => Promise<void>,
+  ): Promise<AdmittedCommitNotice[]> {
+    if (this.#server === undefined) {
+      throw new Error(
+        "admittedCommitsDuring() watches the server the harness hosts, and " +
+          "this harness targets a running toolshed",
+      );
+    }
+    const admitted: AdmittedCommitNotice[] = [];
+    const stopWatching = this.#server.server.watchAdmittedCommits((notice) => {
+      admitted.push(notice);
+    });
+    try {
+      await during();
+    } finally {
+      stopWatching();
+    }
+    return admitted;
+  }
+
+  /**
    * Poll until `predicate` resolves truthy, settling between attempts.
    * Use for assertions about state that must cross runtimes.
    */
@@ -986,7 +1151,11 @@ export class MultiRuntimeHarness {
         console.warn(`Failed to dispose session "${session.label}":`, error);
       });
     }
-    await this.#server?.close();
+    try {
+      await this.#server?.close();
+    } finally {
+      this.#releasePatternEnvironment();
+    }
   }
 
   /**
@@ -996,9 +1165,11 @@ export class MultiRuntimeHarness {
    * this one exists so a harness held for the life of a process is still
    * released deterministically rather than left to process teardown. The
    * in-process server is not closed, because closing it is asynchronous and it
-   * has nothing outside this process to release.
+   * has nothing outside this process to release. The pattern environment the
+   * harness set is released, as `dispose()` releases it.
    */
   terminate(): void {
     for (const session of this.sessions) void session.client().terminate();
+    this.#releasePatternEnvironment();
   }
 }

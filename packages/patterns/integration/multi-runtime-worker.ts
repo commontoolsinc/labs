@@ -53,11 +53,16 @@ import {
   reviewedActionProvenance,
 } from "@commonfabric/runner/cfc";
 import { Identity } from "@commonfabric/identity";
-import { ensurePrivateInboxOf } from "@commonfabric/piece/ops";
+import {
+  ensurePrivateInboxOf,
+  type ShareIntake,
+  startShareIntakeOf,
+} from "@commonfabric/piece/ops";
 import {
   commitSnapshotShare,
   prepareSnapshotShare,
 } from "@commonfabric/runner/cfc/share-snapshot";
+import { setCfcImplementationIdentity } from "@commonfabric/runner/cfc/trust-authority";
 import {
   initializePiecesController,
   type PieceController,
@@ -91,6 +96,9 @@ let watchPaths: readonly (readonly (string | number)[])[] = [[]];
  * opened afresh by the next command naming it.
  */
 const addressedResults = new Map<string, Cell<any>>();
+
+/** The share intakes `startShareIntake` started, which `dispose` stops. */
+const shareIntakes: ShareIntake[] = [];
 
 /**
  * Every commit this runtime had refused since the last `clearRejections`,
@@ -404,6 +412,29 @@ function componentBinding(
     ? cellRuntime(props).getCellFromLink(link)
     : prop.resolveAsCell();
 }
+
+/**
+ * The writer `createOwnProfile` writes as, standing in for a profile's own
+ * handlers, which a `represents-principal` claim needs.
+ */
+const OWN_PROFILE_WRITER = "multi-runtime-own-profile";
+
+/**
+ * A profile labeled as representing the principal that writes it, as a Fabric
+ * profile is.
+ */
+const OWN_PROFILE_SCHEMA = {
+  type: "object",
+  properties: { name: { type: "string" } },
+  ifc: {
+    addIntegrity: [{
+      kind: "represents-principal",
+      subject: { __ctCurrentPrincipal: true },
+    }],
+    ownerPrincipal: { __ctCurrentPrincipal: true },
+    writeAuthorizedBy: [OWN_PROFILE_WRITER],
+  },
+} as never;
 
 /** The trusted host gesture used after the test confirms the exact preview. */
 function shareClick() {
@@ -943,6 +974,34 @@ const handlers: Record<
   },
 
   /**
+   * Mint a profile of this session's own, holding `name`, in a space created
+   * for it that admits this session's identity alone, and answer with the
+   * link that reaches it. Its label attests this identity with
+   * `represents-principal`, as a Fabric profile's does, so a session the
+   * space refuses can't read whom it attests.
+   */
+  async createOwnProfile({ name }) {
+    const runtime = controller().runtime;
+    const space = await runtime.createSpace();
+    const tx = runtime.edit();
+    setCfcImplementationIdentity(tx, {
+      kind: "builtin",
+      builtinId: OWN_PROFILE_WRITER,
+    });
+    const profile = runtime.getCell(
+      space,
+      "own profile",
+      OWN_PROFILE_SCHEMA,
+      tx,
+    );
+    profile.set({ name } as never);
+    const { error } = await tx.commit().settled;
+    if (error) throw error;
+    await idle();
+    return profile.getAsLink();
+  },
+
+  /**
    * Inspect the normalized link (id, space, scope) of a cell reached from
    * the piece result by `path`, resolving links along the way. Lets tests
    * assert the storage addressing (e.g. scope) of pattern state.
@@ -994,7 +1053,7 @@ const handlers: Record<
    * Has the host give the Home stand-in reached from the piece result by
    * `path` its private inbox, as `PiecesController.ensurePrivateInbox()` gives
    * the identity's Home its own, and answers what the host found, naming an
-   * adopted or refused inbox by its link.
+   * adopted or refused inbox, and the profile that decided it, by its link.
    */
   async ensurePrivateInbox({ path, piece }) {
     const target = await resultAt(piece);
@@ -1014,13 +1073,85 @@ const handlers: Record<
     const inbox = "inbox" in found
       ? found.inbox.getAsNormalizedFullLink()
       : undefined;
+    const profile = "profile" in found
+      ? found.profile?.getAsNormalizedFullLink()
+      : undefined;
     return {
       outcome: found.outcome,
       ...("reason" in found ? { reason: found.reason } : {}),
       ...(inbox === undefined
         ? {}
         : { inbox: { id: inbox.id, space: inbox.space } }),
+      ...(profile === undefined
+        ? {}
+        : { profile: { id: profile.id, space: profile.space } }),
     };
+  },
+
+  /**
+   * Starts the host's share intake over the Home stand-in reached from the
+   * piece result by `path`, as `PiecesController.startShareIntake()` starts
+   * the identity's own Home's, following it until the session is disposed.
+   * Answers whether it started.
+   */
+  async startShareIntake({ path, piece }) {
+    const target = await resultAt(piece);
+    await target.pull();
+    let cell = target;
+    for (const segment of (path ?? []) as (string | number)[]) {
+      cell = cell.key(segment as never);
+    }
+    await cell.sync();
+    const runtime = controller().runtime;
+    const intake = startShareIntakeOf(
+      runtime,
+      cell.resolveAsCell(),
+      runtime.userIdentityDID,
+    );
+    if (intake !== undefined) shareIntakes.push(intake);
+    return { started: intake !== undefined };
+  },
+
+  /**
+   * Answers what the share intakes `startShareIntake` started last decided
+   * about each row naming `from` and `id`, once each has taken up the changes
+   * it was told of.
+   */
+  async shareIntakeDecisions({ from, id }) {
+    const decisions: string[] = [];
+    for (const intake of shareIntakes) {
+      await intake.idle();
+      for (
+        const decision of intake.accessForTestingOnly.decisionsFor(
+          from as string,
+          id as string,
+        )
+      ) decisions.push(decision);
+    }
+    return { decisions };
+  },
+
+  /**
+   * Links the root of `space` to a fresh document in it, in place of the root
+   * it had, as any member with `WRITE` there can.
+   */
+  async repointSpaceRoot({ space }) {
+    const runtime = controller().runtime;
+    const elsewhere = runtime.getCell<FabricValue>(
+      space as MemorySpace,
+      crypto.randomUUID(),
+    );
+    const { error } = await runtime.editWithRetry((tx) => {
+      elsewhere.withTx(tx).set({ elsewhere: true });
+      runtime.getSpaceCell(space as MemorySpace).withTx(tx).key(
+        "defaultPattern",
+      ).set(elsewhere as never);
+    });
+    if (error) {
+      throw new Error(`repointSpaceRoot failed: ${error.message}`);
+    }
+    await idle();
+    return {};
   },
 
   /** Reads an explicit held address with the same stored-label gate as any Cell. */
@@ -1173,6 +1304,7 @@ const handlers: Record<
   },
 
   async dispose() {
+    for (const intake of shareIntakes.splice(0)) intake.stop();
     resultSinkCancel?.();
     resultSinkCancel = undefined;
     piece = undefined;

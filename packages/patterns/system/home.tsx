@@ -26,12 +26,15 @@ import {
   changeSharedSpaceMembership,
   readSharedSpaceCatalog,
   registerSharedSpace,
+  removeSharedSpace,
   type SharedSpaceCatalog,
   type SharedSpaceCatalogStorage,
   type SharedSpaceMembershipChange,
   type SharedSpaceMembershipResult,
   type SharedSpaceRegistration,
   type SharedSpaceRegistrationResult,
+  type SharedSpaceRemoval,
+  type SharedSpaceRemovalResult,
 } from "./shared-space-catalog.ts";
 import {
   type CreateProfileEvent,
@@ -48,6 +51,8 @@ import {
   type EnsurePrivateInboxEvent,
   pointProfilesAtPrivateInbox,
   type PrivateInboxHolder,
+  type PrivateInboxRefusalHolder,
+  type RetainedPrivateInboxes,
 } from "./private-inbox.tsx";
 
 // Types from favorites-manager.tsx
@@ -115,13 +120,32 @@ export type HomeOutput = {
   // The user's chat manager: the index of the FabriChat rooms they belong to.
   // `wish({ query: "#chatManager" })` resolves to it.
   chatManager: FabriChatManagerOutput;
-  // The user's private inbox, where others deliver offers to them: the one a
-  // profile already pointed at when `ensurePrivateInbox` first ran, if the host
-  // vetted it, or, when no profile advertises an inbox, one it created. Each of
-  // their profiles that points at no inbox is pointed here; one that points at
-  // another inbox keeps it. Absent until `ensurePrivateInbox` runs, and while a
-  // profile advertises an inbox that failed vetting.
+  // The user's private inbox, where others deliver offers to them: the one the
+  // deciding profile points at, if the host vetted it, or, when no profile
+  // advertises an inbox, one it created. The deciding profile is the first, in
+  // the order `#profile` answers in, that points at an inbox. Home keeps the
+  // inbox it holds while that profile points at it, and while no profile
+  // points at an inbox. Each of their profiles that points at no inbox is
+  // pointed here; one that points at another inbox keeps it. Absent until
+  // `ensurePrivateInbox` runs, and while Home holds none and the advertised
+  // inbox failed vetting.
   privateInbox: Writable<PrivateInboxHolder>;
+  // The inboxes `privateInbox` held before, in the order Home gave them up, so
+  // that what senders delivered to them stays readable.
+  retainedPrivateInboxes: Writable<RetainedPrivateInboxes | Default<[]>>;
+  // The host's refusal of the inbox the deciding profile points at, under
+  // `refusal`: why the host refused it, by the host's code; the refused inbox;
+  // and when Home first recorded it. `ensurePrivateInbox` records one only
+  // while that profile is in Home's list and still points at the refused inbox,
+  // which is not the one Home holds. The next ensure clears it when Home adopts
+  // or creates an inbox, when the deciding profile points at the inbox Home
+  // holds, or when no profile points at the refused inbox any longer; nothing
+  // else clears it automatically between ensures, though the owner's own code
+  // can, through `ensurePrivateInbox`. No `refusal` while there is none to
+  // report.
+  privateInboxRefusal: Writable<
+    PrivateInboxRefusalHolder | Default<Record<PropertyKey, never>>
+  >;
   sharedSpaceCatalog: SharedSpaceCatalog;
   registerSharedSpace: Stream<
     SharedSpaceRegistration,
@@ -131,11 +155,22 @@ export type HomeOutput = {
     SharedSpaceMembershipChange,
     SharedSpaceMembershipResult
   >;
+  // Only for an application undoing its own import of shared spaces: removes
+  // one entry no offer receipt names, at the revision the caller observed (see
+  // `removeSharedSpace` for what the caller must do). Home renders no control
+  // for it, and nothing a person invokes calls it: archive is how a person puts
+  // a shared space away.
+  removeSharedSpace: Stream<SharedSpaceRemoval, SharedSpaceRemovalResult>;
   createProfile: Stream<CreateProfileEvent>;
-  // Gives Home a private inbox if it holds none, adopting the one the host
-  // vetted from a profile's pointer, or creating one when no profile points at
-  // an inbox, and points every profile that points at no inbox at it. The host
-  // sends it once per runtime worker, the first time the worker brings up Home.
+  // Gives Home the private inbox the deciding profile advertises: it adopts the
+  // one the host vetted and names, with that profile, when the profile is in
+  // Home's list and still points at it, or creates one when Home holds none
+  // and no profile points at an inbox, and points every profile that points at
+  // no inbox at Home's. It records the host's refusal of the deciding
+  // profile's inbox in `privateInboxRefusal`.
+  // The host sends it the first time a runtime worker brings up Home, and
+  // again at that worker's next bring-up if the ensure failed, so Home adopts
+  // again only then.
   ensurePrivateInbox: Stream<EnsurePrivateInboxEvent>;
   addFavorite: Stream<{
     piece: Writable<{ [NAME]?: string }>;
@@ -280,6 +315,32 @@ const renameSpaceHandler = handler<
   spaces.addUnique(entry);
 });
 
+/**
+ * What the host's refusal code `reason` says about the refused inbox, as a
+ * sentence for the person whose inbox it is, or `undefined` for a code it does
+ * not know. The codes are `InboxAdoptionRefusal`'s, from
+ * `packages/piece/src/ops/private-inbox.ts`.
+ */
+function refusalReasonText(reason: string): string | undefined {
+  switch (reason) {
+    case "inbox-home-space":
+      return "It is in your Home space, where nobody else may deliver.";
+    case "inbox-profile-space":
+      return "It is in the profile's own space, where nobody else may deliver.";
+    case "inbox-access-refused":
+      return "Home was refused access to it.";
+    case "inbox-adoption-acl-mismatch":
+      return "Its space does not make you its owner, or does not let others " +
+        "deliver to it.";
+    case "inbox-offers-invalid":
+      return "It holds no list of offers.";
+    case "inbox-receive-missing":
+      return "It has no way to receive offers.";
+    default:
+      return undefined;
+  }
+}
+
 const homeArgumentSchema = toSchema<Record<string, never>>();
 const homeResultSchema = __cf_data(
   withAgentQueueRunLinkSchema(toSchema<HomeOutput>()),
@@ -327,6 +388,21 @@ const Home = pattern(
     const privateInbox = new Writable<PrivateInboxHolder>({}).for(
       "privateInbox",
     );
+    // The inboxes Home held before, where `ensurePrivateInbox` moves the one
+    // Home holds when it adopts another.
+    const retainedPrivateInboxes = new Writable<RetainedPrivateInboxes>([])
+      .for("retainedPrivateInboxes");
+    // Where `ensurePrivateInbox` records the host's refusal of the inbox the
+    // deciding profile points at.
+    const privateInboxRefusal = new Writable<PrivateInboxRefusalHolder>({})
+      .for("privateInboxRefusal");
+    // The refusal notice reads the refusal's code and time, and never its
+    // `inbox`: the stored link carries the label the refused inbox's owner
+    // gives its offers. The notice renders after everything else, for the
+    // reason the chats panel does, and the screen's header slot shows it
+    // above the tabs.
+    const refusalReason = privateInboxRefusal.key("refusal").key("reason");
+    const refusedAt = privateInboxRefusal.key("refusal").key("refusedAt");
     // Untrusted-write regression surface: this stream is exported so tests can
     // verify that sending it from outside the trusted create surface does NOT
     // create a profile. The actual create UI lives in the profile picker below.
@@ -348,9 +424,15 @@ const Home = pattern(
     // Child components
     const favoritesComponent = FavoritesManager({});
     const agentQueue = AgentQueue({});
-    const chatManager = FabriChatManager({});
+    // Its panel renders after every other panel. A panel inserted ahead of an
+    // existing one changes the arguments a deployed Home's existing children
+    // are offered when they update: the profile picker's update over Home's
+    // vintages is refused for want of `profiles` (`deno task pattern-vintage`).
+    const chatManager = FabriChatManager({ sharedSpaceCatalog: catalog });
     const ensurePrivateInboxStream = ensurePrivateInbox({
       privateInbox,
+      retainedPrivateInboxes,
+      privateInboxRefusal,
       profiles: profiles as any,
       pointProfiles: pointProfilesAtPrivateInbox({
         privateInbox,
@@ -378,6 +460,7 @@ const Home = pattern(
               <cf-tab value="profile">Profile</cf-tab>
               <cf-tab value="self">Self</cf-tab>
               <cf-tab value="agent-runs">Agent runs</cf-tab>
+              <cf-tab value="chats">Chats</cf-tab>
             </cf-tab-list>
             <cf-tab-panel value="agent-runs" id="home-agent-runs">
               {agentQueue}
@@ -477,7 +560,46 @@ const Home = pattern(
                 </cf-vstack>
               </cf-vstack>
             </cf-tab-panel>
+            <cf-tab-panel value="chats" id="home-chats">
+              {chatManager}
+            </cf-tab-panel>
           </cf-tabs>
+
+          <div slot="header">
+            {computed(() => {
+              const at = refusedAt.get();
+              if (typeof at !== "number") return null;
+              const stored = refusalReason.get();
+              const reason = typeof stored === "string" ? stored : "";
+              const explanation = refusalReasonText(reason) ?? "";
+              const code = reason || "none given";
+              // The sandbox formats a date given no zone in UTC and one given
+              // a zone in that zone, while a date's local getters read the
+              // host's zone, so the zone is given here and named in the text.
+              const noticed = new Date(at).toLocaleString("en-US", {
+                timeZone: "UTC",
+                timeZoneName: "short",
+              });
+              return (
+                <div id="home-private-inbox-refusal">
+                  <cf-alert status="warning">
+                    <h4 slot="title">Shares may not reach you</h4>
+                    <cf-vstack slot="description" gap="1">
+                      <span>
+                        One of your profiles points others at an inbox Home
+                        can't use, so what they share with you may not arrive.
+                        {" "}
+                        {explanation}
+                      </span>
+                      <span style={{ fontSize: "12px", color: "#666" }}>
+                        Reason: <code>{code}</code>. First noticed {noticed}.
+                      </span>
+                    </cf-vstack>
+                  </cf-alert>
+                </div>
+              );
+            })}
+          </div>
         </cf-screen>
       ) as VNode,
 
@@ -493,12 +615,15 @@ const Home = pattern(
       agentQueue,
       chatManager,
       privateInbox,
+      retainedPrivateInboxes,
+      privateInboxRefusal,
 
       sharedSpaceCatalog: computed(() => readSharedSpaceCatalog(catalog)),
 
       // Exported handlers
       registerSharedSpace: registerSharedSpace({ catalog }),
       changeSharedSpaceMembership: changeSharedSpaceMembership({ catalog }),
+      removeSharedSpace: removeSharedSpace({ catalog }),
       addFavorite: addFavorite({ favorites }),
       removeFavorite: removeFavorite({ favorites }),
       addJournalEntry: addJournalEntry({ journal }),

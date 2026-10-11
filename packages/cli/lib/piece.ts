@@ -58,7 +58,6 @@ import {
   deepEqual,
   encodeJsonPointer,
   entityIdFrom,
-  experimentalOptionsForDeployedClient,
   formatFabricRef,
   getCellOrThrow,
   getMetaLink,
@@ -69,6 +68,7 @@ import {
   isSlugAddress,
   lookupSchemaDocument,
   mapSubschemas,
+  memoryHostNote,
   type MemorySpace,
   NAME,
   type NormalizedFullLink,
@@ -79,6 +79,7 @@ import {
   Runtime,
   runtimePresets,
   RuntimeProgram,
+  settingsForDeployedClient,
   SpaceNotFoundError,
   UI,
   VNode,
@@ -608,7 +609,8 @@ export interface ConnectionOutput {
 /**
  * Opens a connection to the deployment at `config.apiUrl` and returns the
  * controller over it: a space session, a runtime carrying that deployment's
- * experimental options, and a server proven live before it returns.
+ * experimental options, and a server proven live before it returns. Memory
+ * opens on the memory URL the deployment publishes, where it publishes one.
  *
  * By default the connection authenticates the space session but leaves the
  * space cell unread until an operation addresses it. Piece IDs, slug documents,
@@ -644,14 +646,15 @@ export async function loadPieces(
   // The deployment's own flag posture, with this process's explicit
   // EXPERIMENTAL_* still winning per flag: a cf binary is installed
   // independently of the server it talks to, so left to the environment alone
-  // it drifts (docs/development/EXPERIMENTAL_OPTIONS.md). Fetched alongside
+  // it drifts (docs/development/EXPERIMENTAL_OPTIONS.md). The same document
+  // names the memory URL, where the deployment has one. Fetched alongside
   // the session rather than before it — neither needs the other.
-  const [session, experimental] = await Promise.all([
+  const [session, { experimental, memoryHost }] = await Promise.all([
     timeCliPhase("loadPieces.makeSession", () => makeSession(config)),
     timeCliPhase(
       "loadPieces.serverExperimental",
       () =>
-        experimentalOptionsForDeployedClient({
+        settingsForDeployedClient({
           apiUrl: new URL(config.apiUrl),
           env: Deno.env.get,
         }),
@@ -674,9 +677,10 @@ export async function loadPieces(
       new Runtime({
         ...runtimePresets.remoteClient({
           apiUrl: new URL(config.apiUrl),
+          memoryHost,
           storageManager: StorageManager.open({
             as: session.as,
-            memoryHost: new URL(config.apiUrl),
+            memoryHost,
           }),
           experimental,
           errorHandlers: [
@@ -728,7 +732,10 @@ export async function loadPieces(
     );
     await versionCheck.finish(runtime.serverGitSha, config.apiUrl);
     if (!healthy) {
-      throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
+      throw new Error(
+        `Could not connect to "${config.apiUrl.toString()}".` +
+          memoryHostNote(memoryHost, new URL(config.apiUrl)),
+      );
     }
 
     const deferSpaceCellSync = config.deferSpaceCellSync !== false;
@@ -6048,29 +6055,6 @@ function isVNodeLike(value: unknown): value is VNode {
 }
 
 /**
- * Deploy a custom home pattern from a local file.
- * Automatically targets the home space (user's identity DID).
- */
-export async function setHomePattern(
-  config: Omit<SpaceConfig, "space">,
-  entry: EntryConfig,
-  deps: PieceOperationDependencies = {},
-): Promise<void> {
-  const identity = await (deps.loadIdentity ?? loadIdentity)(config.identity);
-  const homeConfig: SpaceConfig = { ...config, space: identity.did() };
-  const pieces = await (deps.loadPieces ?? loadPieces)(homeConfig);
-  const program = await (deps.getProgramFromFile ?? getProgramFromFile)(
-    pieces,
-    entry,
-  );
-  await pieces.recreateDefaultPattern({
-    customProgram: program,
-    repository: entry.repository,
-  });
-  noteWroteTo(homeConfig.space);
-}
-
-/**
  * Creates a space owned by the configured identity and returns its DID. The
  * space gets a random DID and is born granting its creator alone; it is
  * recorded in the identity's Home space list under `label`.
@@ -6085,17 +6069,4 @@ export async function createSpace(
   const space = await pieces.createSpace(label);
   noteWroteTo(homeConfig.space);
   return space;
-}
-
-/**
- * Initializes an absent Home with the system default; refuses existing Home.
- */
-export async function resetHomePattern(
-  config: Omit<SpaceConfig, "space">,
-): Promise<void> {
-  const identity = await loadIdentity(config.identity);
-  const homeConfig: SpaceConfig = { ...config, space: identity.did() };
-  const pieces = await loadPieces(homeConfig);
-  await pieces.recreateDefaultPattern();
-  noteWroteTo(homeConfig.space);
 }

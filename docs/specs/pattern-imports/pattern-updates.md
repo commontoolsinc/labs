@@ -348,7 +348,10 @@ A refusal is a repair failure, not a silent one. The pointer has already moved
 by the time setup runs, so re-running the same identity refuses identically;
 the boot repair therefore classifies this failure and escalates it to the
 roll-forward backstop — the same route a refused CFC migration takes — rather
-than retrying a version that cannot read its own root.
+than retrying a version that cannot read its own root. A root an `inSpace()`
+call placed at its space's reserved root address is not rolled forward, nor is
+one whose own stored label says it represents a principal, as a profile's
+does: the failure surfaces and the root stays as it is.
 
 During space open,
 `ensureDefaultPattern` performs this transaction before calling `startPiece`,

@@ -1,8 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { CiJobs, Job } from "../ci-jobs-page.ts";
-import { RECENT_DISPLAY, REPOS_PATH } from "../config.ts";
+import { RECENT_DISPLAY } from "../config.ts";
+import { faviconHref } from "../favicon.ts";
 import { type Board, repoPageResponse, repoPagesRoute } from "../repo-page.ts";
+import { REPOS_PATH } from "../repo-page-href.ts";
 import {
   type Run,
   runSource,
@@ -291,6 +293,36 @@ describe("repo-page", () => {
       expect(html).not.toContain("12.0%");
     });
 
+    it("does not link a tile that links to this page back to it", async () => {
+      const view = (status: "good" | "bad") => ({
+        status,
+        value: "90.0%",
+        extra: `<div class="cells"><a class="cell" href="https://github.com/commonfabric/labs/actions/runs/7"></a></div>`,
+        href: "/repos?name=labs",
+        hint: "repository ↗",
+      });
+      for (const status of ["good", "bad"] as const) {
+        const own = await page(
+          board([TRUST], { "labs ci trust": view(status) }),
+          collection(),
+          "?name=labs",
+        );
+        expect(own.html).toContain(`<div class="card ${status}" data-focus-key="labs ci trust">`);
+        expect(own.html).not.toContain(`href="/repos?name=labs"`);
+        // The strip's own links stay.
+        expect(own.html).toContain(`<a class="cell" href="https://github.com/commonfabric/labs/actions/runs/7"></a>`);
+      }
+      // The same link reaches another page, so it stays a link there.
+      const elsewhere = await page(
+        board([tile("labs ci trust", { repo: "commonfabric/loom" })], {
+          "labs ci trust": view("bad"),
+        }),
+        collection(),
+        "?name=loom",
+      );
+      expect(elsewhere.html).toContain(`<div class="card bad" data-focus-key="labs ci trust"><a class="tile-head" href="/repos?name=labs" aria-description="repository ↗" title="repository ↗"><div class="texture"></div>`);
+    });
+
     it("links to its code, pull requests, and actions on GitHub", async () => {
       const { html } = await page(board([]), collection(), "?name=labs");
       expect(html).toContain(`<a href="https://github.com/commonfabric/labs" target="_blank" rel="noopener">commonfabric/labs ↗</a>`);
@@ -374,10 +406,11 @@ describe("repo-page", () => {
       expect(html).toContain("The newest finished run on main passed 30 min ago.");
       // A bar for each run, linked to it.
       expect(html).toContain(`href="https://github.com/commonfabric/labs/actions/runs/11" target="_blank" rel="noopener" tabindex="-1" title="fix(runner): keep labels (#8248) — green · 30m 00s · 1h ago"`);
-      // A run on main is listed by the pull request that landed it.
-      expect(html).toContain(`href="https://github.com/commonfabric/labs/pull/8248" target="_blank" rel="noopener">fix(runner): keep labels (#8248)</a>`);
+      // A run on main is listed by its commit, linked to the run, with its
+      // pull request number linked to the pull request.
+      expect(html).toContain(`<span class="what"><a href="https://github.com/commonfabric/labs/actions/runs/11" target="_blank" rel="noopener">fix(runner): keep labels </a><a class="pr" href="https://github.com/commonfabric/labs/pull/8248" target="_blank" rel="noopener">(#8248)</a></span>`);
       // A pull request's run is listed by its title, and counts as running now.
-      expect(html).toContain(`href="https://github.com/commonfabric/labs/actions/runs/12" target="_blank" rel="noopener">feat: a new page</a>`);
+      expect(html).toContain(`<span class="what"><a href="https://github.com/commonfabric/labs/actions/runs/12" target="_blank" rel="noopener">feat: a new page</a></span>`);
       expect(html).toContain(`<a class="bar run"`);
       expect(html).toContain("<dt>running now</dt><dd>1</dd>");
     });
@@ -451,9 +484,39 @@ describe("repo-page", () => {
         collection(),
         "?name=labs",
       );
-      expect(occurrences(html, `<a class="what"`)).toBe(3);
+      expect(occurrences(html, `<span class="what">`)).toBe(3);
       expect(html).toContain(">change 2</a>");
       expect(html).not.toContain(">change 3</a>");
+    });
+
+    it("stars each charted and listed run whose commit the green branch is or was at, solid only for the commit it is at now", async () => {
+      const runs = [
+        run({ id: 1, head_sha: "1".repeat(40), green: { branch: "main-green", current: true } }),
+        run({ id: 2, head_sha: "2".repeat(40), green: { branch: "main-green", current: false } }),
+        run({ id: 3, head_sha: "3".repeat(40), conclusion: "failure", green: { branch: "main-green", current: false } }),
+        run({ id: 4, head_sha: "4".repeat(40) }),
+      ];
+      const { html } = await page(
+        board([TRUST], {}, new Map([[runSourceKey(LABS_MAIN), { runs }]])),
+        collection(),
+        "?name=labs",
+      );
+      const solid = `<span class="green-star" role="img" aria-label="main-green is at this commit" title="main-green is at this commit">★</span>`;
+      const hollow = `<span class="green-star" role="img" aria-label="main-green was at this commit" title="main-green was at this commit">☆</span>`;
+      // Each marked run has a bar, and the three marked runs are the three
+      // newest, which have a row each as well.
+      expect(occurrences(html, solid)).toBe(2);
+      expect(occurrences(html, hollow)).toBe(4);
+      expect(html).toContain(`<span class="what">${solid}<a href=`);
+      expect(html).toContain(`<span class="what">${hollow}<a href=`);
+      expect(html).toMatch(
+        /<a class="bar green"[^>]* title="[^"]* · main-green is at this commit"><span class="green-star"[^>]*>★<\/span><\/a>/,
+      );
+      expect(html).toMatch(
+        /<a class="bar red"[^>]* title="[^"]* · main-green was at this commit"><span class="green-star"[^>]*>☆<\/span><\/a>/,
+      );
+      // The unmarked run's bar is empty, and says nothing of the branch.
+      expect(html).toMatch(/<a class="bar green"[^>]* title="[^"]* ago"><\/a>/);
     });
 
     it("links a workflow's run in progress, named for a screen reader", async () => {
@@ -577,6 +640,26 @@ describe("repo-page", () => {
       expect(html).toContain(`<header class="hero warn">`);
       expect(html).toContain("</span>Unreadable</p>");
       expect(html).toContain("The workflows of this repository could not be listed.");
+    });
+
+    it("wears its standing as the tab's favicon, and an empty one when it has no verdict", async () => {
+      const iconOf = async (jobs: CiJobs, query = "?name=labs") =>
+        (await page(board([]), jobs, query)).html.match(
+          /<link rel="icon"[^>]*href="([^"]*)"/,
+        )?.[1];
+      expect(await iconOf(collection())).toBe(faviconHref("good"));
+      expect(await iconOf(collection({ jobs: [job({ status: "warn" })] })))
+        .toBe(faviconHref("warn"));
+      expect(
+        await iconOf(collection({
+          jobs: [job(), job({ workflow: "Lint", status: "bad", failing: true })],
+        })),
+      ).toBe(faviconHref("bad"));
+      expect(await iconOf(collection({ jobs: [job({ status: "unknown" })] })))
+        .toBe("data:,");
+      // The index and an unknown name have no standing to show.
+      expect(await iconOf(collection(), "")).toBe("data:,");
+      expect(await iconOf(collection(), "?name=nowhere")).toBe("data:,");
     });
 
     it("escapes what GitHub names", async () => {

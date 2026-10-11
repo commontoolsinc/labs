@@ -24,6 +24,206 @@ historical authorship from the current name, and it does not modify the
 profile's source. Rehearse a repair of real data on a writable space clone using
 the [space clone procedure](../../docs/development/space-clone-rehearsal.md).
 
+## Making existing profiles their space's root
+
+`cf profile repair-root --from-snapshot <dir> --identity <keyfile> --api-url
+<url>`
+is an operator's command. It makes each existing profile whose space has no
+profile as its root into that root, across a whole store, so that a host holding
+only a profile space's DID reaches the profile. What a repaired profile is, and
+what it is not, is under "Profile" in
+[`HOME_SPACE.md`](../../docs/common/conventions/HOME_SPACE.md). A person can
+repair their own profiles without a snapshot, as "A person's own profiles" below
+describes.
+
+Which profiles exist comes from `<dir>`, a snapshot of the store's space
+databases, read offline and never written: every link in each Home's profile
+list. A profile-shaped piece in a space no Home in the snapshot lists is
+reported as `unlisted` and skipped. Name it with `--cell <profile-address>`,
+repeatable, to repair it; `--cell` limits the run to the profiles it names. Take
+the snapshot the way
+[the space clone procedure](../../docs/development/space-clone-rehearsal.md)
+takes one, with `VACUUM INTO`, one file per space.
+
+Each profile is then inspected live, through an ordinary connection as the
+signing identity, which needs no privilege: a profile space grants every
+principal `WRITE`. The command prints JSON with one row per profile, a tally by
+status, and an `inspection` receipt for the whole run:
+
+| Status          | Meaning                                                                                                                                                                                                    | Applying it                  |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `root`          | the space's root already is the profile                                                                                                                                                                    | nothing                      |
+| `unrooted`      | the space has no root                                                                                                                                                                                      | links the profile            |
+| `junk-root`     | the root is one a space-root ensure created (see below): at the ensure's address, running the default app by its stored source, following the system default app or nothing, with nothing registered in it | replaces it with the profile |
+| `occupied`      | any other root                                                                                                                                                                                             | nothing                      |
+| `not-a-profile` | the piece's label names no single owner of its space that it represents                                                                                                                                    | nothing                      |
+| `unlisted`      | no Home in the snapshot lists it                                                                                                                                                                           | nothing                      |
+| `unreadable`    | a space file of the snapshot did not open, or reading it failed; any profiles it holds are missing from the other rows, and `reason` says what failed                                                      | nothing                      |
+| `failed`        | the inspection or the repair threw; `reason` says why                                                                                                                                                      | nothing                      |
+
+Two ensures create the roots reported as `junk-root`. A client's open of a
+profile space creates one only when its signing identity holds `OWNER` there;
+the `WRITE` every principal holds, which is all this command needs, creates
+none. With server execution on, the server creates one in a space that has no
+root and whose genesis reserved none as soon as any session opens it.
+
+That second ensure is why the command refuses a server that runs server
+execution. The inspection's own connection is a session, so against such a
+server an inspection would write a junk root into each unrooted profile space it
+looked at, and would not leave the store as it found it. Before it opens any
+profile's space, the command reads the server's handshake for that space, which
+says whether server execution is on without opening a session, and refuses,
+having opened nothing, when the server reports it on or does not say, exiting
+`4` (see "The report and the exit status" below). A server that predates the
+report does not say. Every run checks, the apply included.
+
+To repair a store, then, serve it with server execution off, with
+`EXPERIMENTAL_SERVER_EXECUTION=false` in the server's environment, and point
+`--api-url` at that server, for the rehearsal below and for the real store
+alike. The command's own check confirms the setting took: a server still running
+server execution is refused before anything is opened. Keep it off from the
+first inspection through the apply.
+
+Review the rows, then repeat the command with `--apply --expect <inspection>`.
+It inspects every profile again first. When that run's receipt is not the one
+given, it applies nothing and refuses, exiting `3` with `inspection-changed`,
+and a fresh inspection is what to run next. Otherwise it links profile by
+profile, each only while its own receipt still holds and while its space's root
+is still the one it inspected, with a junk root still running the default app
+and holding nothing registered. A profile that changed in between, or whose
+inspection failed, is reported as `failed` and left alone. A second run finds a
+repaired profile as `root` and writes nothing.
+
+Rehearse it before running it against a store with real data. The live part of a
+repair reads and writes the profile's own space and nothing else, so a rehearsal
+clones one real profile space, as
+[the space clone procedure](../../docs/development/space-clone-rehearsal.md)
+does, and repairs that profile alone against the clone's server, naming it with
+`--cell` and taking the profile list from the snapshot:
+
+```bash
+deno task cf space clone <profile-space> --from <snapshot>/<profile-space>.sqlite \
+  --to ~/clones/profile-root
+# Serve the clone as the procedure says, with EXPERIMENTAL_SERVER_EXECUTION=false
+# in its environment, then:
+deno task cf profile repair-root --from-snapshot <snapshot> \
+  --cell <listed-address> -i <admin.key> -a http://localhost:8010
+deno task cf profile repair-root --from-snapshot <snapshot> \
+  --cell <listed-address> -i <admin.key> -a http://localhost:8010 \
+  --apply --expect <inspection>
+deno task cf space verify ~/clones/profile-root --expect-migration
+```
+
+Then compare the clone's pristine and working fingerprints entity by entity, as
+"Checking authored content" in that procedure shows. An inspection writes
+nothing. A repair writes the space cell, whose `defaultPattern` now links the
+profile, adding it where the space had none, and one empty content-addressed
+document beside it; any other changed entity means stop.
+
+### A person's own profiles
+
+Without `--from-snapshot`, the command repairs the profiles the identity's own
+Home lists, read live as that identity, which owns them:
+
+```bash
+deno task cf profile repair-root -i <keyfile> -a <url>
+```
+
+It inspects and applies exactly as above, with the same rows, receipt and
+`--apply --expect <inspection>`, and refuses a server that runs server execution
+or does not say, checking the Home's space before it opens the Home. It reports
+no `unlisted` or `unreadable` rows, since no snapshot is read, and `--cell`
+needs `--from-snapshot`.
+
+#### The report and the exit status
+
+Every run that gets as far as reporting prints one JSON object on stdout and
+exits `0`:
+
+```json
+{
+  "repairVersion": 1,
+  "applied": false,
+  "inspection": "<receipt over every row>",
+  "rows": [
+    {
+      "named": { "space": "<profile space DID>", "id": "<listed slot id>" },
+      "home": "<Home space DID>",
+      "status": "unrooted",
+      "action": "link",
+      "profile": { "space": "…", "id": "…", "scope": "…", "path": [] },
+      "owner": "<DID the profile represents>",
+      "inspection": "<receipt over this row>"
+    }
+  ],
+  "summary": { "unrooted": 1 }
+}
+```
+
+`repairVersion` says which repair this is. `applied` is whether the run applied
+a plan. `summary` counts rows by status. A row also carries `root`, the root the
+space cell links, when it links one, and `reason` for `not-a-profile`. A row
+whose status is `unlisted`, `unreadable` or `failed` carries `named`, `home`
+when a Home lists it, `status`, `action` and `reason`, and no receipt of its
+own; `named` then holds only `space` for an `unreadable` row.
+
+A run that refuses writes nothing, prints one JSON object on stdout naming why,
+and exits with the status for that reason:
+
+```json
+{
+  "repairVersion": 1,
+  "refused": {
+    "reason": "server-execution",
+    "message": "<what to do about it>",
+    "space": "<the space whose server refused>"
+  }
+}
+```
+
+| `reason`                   | Exit | Meaning                                                                                                                         |
+| -------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `inspection-changed`       | `3`  | an apply's `--expect` receipt no longer matches a fresh inspection, as when another run applied the same plan first; no `space` |
+| `server-execution`         | `4`  | the server holding `space` runs server execution                                                                                |
+| `server-execution-unknown` | `4`  | the server holding `space` does not say whether it does                                                                         |
+
+Any other failure, such as an unreadable keyfile, an unreachable server, or a
+Home space whose root is not a Home, prints an error on stderr, nothing on
+stdout, and exits `1`.
+
+What an apply does with each status decides who acts on it:
+
+- `root`: nothing to do.
+- `unrooted` and `junk-root`: `--apply` fixes them, with no person needed.
+- `failed`: a run after this one tries again.
+- `occupied` and `not-a-profile`: no run changes them; a person decides whether
+  anything should.
+
+A dry run writes nothing, and neither does an `--apply` that finds every profile
+already `root` or the others left alone.
+
+#### From an install's update step
+
+An install's update step can run the repair once per identity and server:
+
+1. Run it, and read the JSON.
+2. If a row is `unrooted` or `junk-root`, run it again with `--apply` and
+   `--expect <inspection>`, passing the first run's receipt. An exit of `3`
+   means the profiles changed in between, as when another instance of the step
+   applied first; it wrote nothing, and the step starts over at 1.
+3. Record a clean finish, under the identity's DID and the server's URL, with
+   the `repairVersion` the last run reported, only when that run exited `0` and
+   its rows are all `root`, `occupied` or `not-a-profile`. An exit of `4`
+   records nothing: the store is served with server execution on, or by a server
+   that does not say, and the repair waits until the store's operator serves it
+   with server execution off. Nor does a run leaving a row `unrooted`,
+   `junk-root` or `failed`; the next update runs it again.
+4. Run it again whenever the command reports a `repairVersion` higher than the
+   one recorded.
+
+Running it more often than that is harmless: a repaired profile is reported as
+`root`, and a run writes only what it links.
+
 ## Following a piece source
 
 `cf piece follow --cell <piece> <origin>` adopts the origin’s current pattern
@@ -1262,6 +1462,28 @@ home directory. The Fabric lane uses the `context` prompt role, so the default
 `enforce-strict` mode admits only `submit_result`; set
 `CF_HARNESS_CFC_ENFORCEMENT_MODE=enforce-explicit` to use read tools.
 
+A run's sandbox, and a local job's, is the one `cf-harness` selects from the
+environment: `CF_HARNESS_SANDBOX_RUNTIME` names `runsc`, and with none named a
+Mac with Apple silicon and Linux run on their native runtime; every other
+platform names it, with its settings. The native runtime needs its store set up
+(the cfc-vm store on a Mac, `~/.local/share/runsc-cfc` on Linux), though a named
+`runsc` binary, rootfs or policy replaces that piece of it. With no policy
+named, a Mac takes the home's default policy,
+`~/.local/share/runsc-cfc/cfc-policy.json`, where it is there, and the cfc-vm
+store's own otherwise; on Linux that file is the store's own policy, which the
+selection looks for once. On Linux its default network needs `pasta` (passt) and
+`setpriv` (util-linux) on `PATH`, and `unshare` for a root runner, and a refusal
+names the one missing; a named `none` or `host` network needs none of the three.
+A runner that is not root runs the store's `runsc` rootless, and pasta in a user
+namespace even with a `runsc` named by `CF_HARNESS_RUNSC_BINARY`, which runs as
+it is, so it needs a host that allows unprivileged user namespaces; where
+`user.max_user_namespaces` is 0, `kernel.unprivileged_userns_clone` is 0 or
+`kernel.apparmor_restrict_unprivileged_userns` is 1, the refusal names the
+`sudo sysctl -w` that allows them, or running as root. A Mac that is not Apple
+silicon has no native runtime. The runner derives that selection as it starts,
+before either lane serves, and exits with the harness's refusal where the
+harness would refuse its jobs.
+
 What the Fabric lane does, in order:
 
 1. Connects to the home toolshed as the identity, creates the home pattern if
@@ -1329,18 +1551,64 @@ The door is HTTP on the Unix socket, mode 0600, with a bearer token in
 `<socket>.token`, also 0600 and minted at each start: reaching the socket is the
 authority. A caller enqueues
 `{caller, profile, idempotencyKey, task,
-instructions?, context?, resultSchema, tools?, maxModelTurns?}`
+instructions?, context?, resultSchema, tools?, maxModelTurns?, browserHost?}`
 with `POST /jobs`, reads a job with `GET /jobs/<id>` or the newest with
 `GET /jobs?limit=n`, stops one with `POST /jobs/<id>/cancel`, and watches one
 with `GET /jobs/<id>/events?after=<seq>`, a stream of server-sent events that
-ends after the job's terminal state. `GET /health` says which lanes run.
+ends after the job's terminal state. `GET /health` keeps `lanes.local` and
+`lanes.fabric` as booleans and adds `readiness.local` and `readiness.fabric`,
+each `{state, since, reason}`. States are `starting`, `up`, `down`, or
+`refused`; `since` is an ISO timestamp of the last state or reason change.
+`reason` is null for an up lane. Fabric remains `starting` until its first
+successful queue scan; `--local-only` leaves it `down` with that reason, and a
+failed start leaves it `refused` with the error. Observed queue scan or
+record-follow failures mark it `down`; a successful scan marks it `up`. An idle
+queue is healthy: this does not detect a subscription that silently stops
+delivering changes.
+
+Health also lists `routes` as `{method, path}` entries (`:id` is a path
+parameter), the loaded `profileFile`, the resolved SQLite `storePath`, and
+`labsCommit` captured at startup (null when no build or checkout identity is
+available). The browser stream route serves server-sent events. Route
+availability does not imply that every profile permits a browser host.
+
+`cf agent status --local-jobs-socket /path/to/jobs.sock` reads authenticated
+health using the token beside the socket and prints the whole JSON record. It
+never submits a job or probes a browser route. During local initialization,
+authenticated health returns HTTP 503 with the readiness record, which this
+command prints. Other HTTP errors, transport and parsing failures exit with an
+error.
 
 A profile, named in the host's file, is the authority a job runs with: its
-tools, its host Loom files, its model-turn cap, and the prompt-slot role its
-task binds as. A request may name fewer tools and fewer turns, and nothing else.
-A job runs through the same `cf-harness` path as an agent run, with no fabric
-session, and reports a `step` event for each tool its loop calls and a `command`
-event for each command the host ran for it.
+tools, its host Loom files, its model-turn cap, the prompt-slot role its task
+binds as, and whether a job may bring a browser host (`browserHost: true`). A
+request may name fewer tools and fewer turns, and, under a profile that admits
+one, declare a browser host (below); leaving it out declines the browser. It may
+set nothing else. A job runs through the same `cf-harness` path as an agent run,
+with no fabric session. Every tool call, including delegated calls, counts as
+progress, and so does its return; prose and reasoning do not. A `step` carries
+`{turn, tool}`, and the same step again with `returned: true` once the calls of
+that turn have returned and the loop's model has the turn. A `command` records
+each command the host ran for it. Children add
+`child: {profile, childRunId, parentToolCallId, depth}` to either body. The
+harness admits one level of delegation, so depth is `1`. Only a child's
+`browser` tool steps carry `action` (such as `click` or `snapshot`), without the
+operation's arguments or page content. Other child tool steps, such as
+`submit_result`, omit `action`.
+
+The lane coalesces consecutive steps with the same tool, child, browser action
+and `returned`, ignoring turn numbers. Thus N identical browser operations in
+successive turns publish 2N steps, a call and its return each, and the time
+between a step and the next is either the call or the model's turn after it;
+changing action or child publishes a new one. Commands are never coalesced, and
+a command breaks the step's repetition. Volume is bounded by these visible
+transitions plus command receipts, rather than transcript size. The job
+snapshot's `step` names the active child's tool until the parent's
+`delegate_task` result arrives. Among pending siblings the latest activity wins,
+including returns and command receipts; a returning child reveals its sibling's
+last step, and the parent's step resumes when no child remains. Children cannot
+delegate further; nested progress needs lineage in the harness's transcript
+contract before that restriction is widened.
 
 Each `command` event carries `{command, ok, outputs?}`. A refused command also
 carries the outcome's `code` and `hostCode` when present, and `error` from an
@@ -1353,6 +1621,32 @@ configuration may name `jobIdEnvVar`; command discovery and execution then
 receive that job id in the named variable of their cleared host environment. The
 request and model tool arguments cannot select the identity, and concurrent jobs
 have separate bindings.
+
+A caller that can show a browser declares `browserHost: {}` on enqueue, under a
+profile that admits one, and the job browses through it: the lane adds
+`delegate_task` and the `browser` subagent profile to that job alone, as the
+console's `--allow-browser-host` does for a turn. The caller holds
+`GET /jobs/<id>/browser/stream` open, a stream of server-sent
+`request {id,
+operation}`, `withdraw {id}` and `close` events, and answers each
+operation with `POST /jobs/<id>/browser/result {id, result}` (the operations and
+results are cf-harness's `contracts/browser-host.ts`). The semantics are the
+console host's: every operation is answered, one withdrawn while the host holds
+it is acknowledged by its answer before the next is sent, and the job's end says
+`close` and settles anything outstanding as `session-ended`. Unlike the
+console's, the stream is resumable, since the caller is usually a relay: a
+dropped stream leaves the host open, a new attach replaces the old and is sent
+every operation still unanswered and every withdrawal still unacknowledged
+first, and a repeated answer reads as a duplicate. `GET /jobs/<id>` shows the
+host as `browser {state, attached, outstanding, withdrawn}`.
+
+A job ends `completed` with its result as soon as the harness accepts the
+model's `submit_result`; nothing the model does after an accepted result can
+fail it, since the run asks the model for nothing further. A job that ends
+`failed` carries `errorCode`, and `errorDetail` where the run said why: for
+`INVALID_RESULT`, that no structured result was submitted, or the field the
+schema refused and the reason. Both appear in the job snapshot and in its final
+`state` event.
 
 A job the runner was running when it stopped or crashed ends `interrupted`
 (`RUNNER_RESTARTED`) when it next starts, and is never run again: it may already
@@ -2163,11 +2457,22 @@ removes them, and nothing holds them open past that date.
 | `cf cell set-label`      | `cf piece set-label`     |
 | `cf piece call`          | `cf call`                |
 | `cf space recreate-root` | `cf piece recreate-root` |
-| `cf space set-home`      | `cf piece set-home`      |
 
 This is a migration aid rather than a second surface: nothing here teaches the
 right column as an alternative spelling to keep using. `--piece` is a different
 case — a deprecated name for `--cell` that carries no end date and no notice.
+
+### Retired: `cf space set-home`
+
+A Home is created on its user's first open and changed only in place, so a
+command that installs a Home root has no job. `cf space set-home` and its
+`cf piece set-home` mount are retired: both are hidden, and a run of either
+refuses and says what does each half of the work — first open for creation,
+`cf piece setsrc --cell <home-root> ./my-home.tsx` for the source, where the
+root is the link `cf wish '#default' --select @` answers with in the Home space.
+**The spelling stops answering after 2026-10-21**, when a later change removes
+the mounts. See
+[Custom Home pattern](../../docs/common/conventions/HOME_SPACE.md#custom-home-pattern).
 
 ## Evaluating patterns from another tool
 

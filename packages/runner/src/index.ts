@@ -6,13 +6,14 @@ export {
 export { parseExternalSchemaRef } from "@commonfabric/data-model-schema/schema-refs";
 export { lookupSchemaDocument } from "./schema-registry.ts";
 export { mapSubschemas } from "@commonfabric/data-model-schema/schema-walk";
-export { Runtime } from "./runtime.ts";
+export { FOREIGN_HOST_LIMIT, Runtime } from "./runtime.ts";
 export { ensureSESLockdown } from "./sandbox/ses-runtime.ts";
 export {
   fabricAuthorityMatchesSpaceHost,
   type FabricSpaceHostOptions,
   isLoopbackHostname,
   normalizeSpaceHost,
+  readMemoryUrl,
   spaceHostFromFabricAuthority,
   type SpaceHostRefusalReason,
   type SpaceHostRegistration,
@@ -35,12 +36,10 @@ export {
   ADOPT_SERVER_FLAGS_ENV,
   type BrowserWorkerPresetParams,
   type CfcPosture,
-  type DeployedClientExperimentalParams,
   type EnvReader,
   EXPERIMENTAL_ENV_VARS,
   EXPERIMENTAL_FLAG_AUTHORITY,
   type ExperimentalFlagAuthority,
-  experimentalOptionsForDeployedClient,
   experimentalOptionsFromEnv,
   MAX_ENFORCEMENT_CFC_OPTIONS,
   MAX_ENFORCEMENT_SINK_CEILINGS,
@@ -57,6 +56,12 @@ export {
   type UnitTestPresetParams,
   withServerExecutionDefault,
 } from "./runtime-presets.ts";
+export {
+  type DeployedClientParams,
+  type DeployedClientSettings,
+  memoryHostNote,
+  settingsForDeployedClient,
+} from "./deployment-meta.ts";
 export type {
   UnsafeHostTrust,
   UnsafeHostTrustOptions,
@@ -109,6 +114,7 @@ export {
   hasPresenceStorageCapability,
 } from "./storage/interface.ts";
 export { isCfcEnforcementRejection } from "./storage/rejection.ts";
+export { transactionFailureMessage } from "./storage/transaction-errors.ts";
 export type {
   EntityIdListOptions,
   EntityIdListResult,
@@ -216,6 +222,12 @@ export {
   SYSTEM_PATTERN_SOURCE_SCHEME,
   systemPatternSource,
 } from "./pattern-source-scheme.ts";
+export { DocumentLoadError, loadDocument } from "./document-readiness.ts";
+export {
+  orderProfileCandidates,
+  profileCellIsValid,
+  type ProfileOrder,
+} from "./profile-order.ts";
 export {
   classifyPieceOriginString,
   type PieceOriginKind as PieceOriginClassification,
@@ -234,6 +246,7 @@ export {
   getPieceReconciliation,
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
+  inSpaceRootCause,
   isStoredArgumentSchemaRefusal,
   mergeSchemaDefaults,
   patternIdentityKey,
@@ -327,6 +340,7 @@ export {
   WebhookConfigSchema,
 } from "./builder/types.ts";
 export { createNodeFactory } from "./builder/module.ts";
+export { attestedPrincipalsAt } from "./builder/principal-of.ts";
 export { reactive as cell } from "./builder/reactive.ts";
 export {
   CFC_ATOM_TYPE,

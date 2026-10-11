@@ -8,7 +8,7 @@ import { PiecesController } from "@commonfabric/piece/ops";
 import { entityIdFrom, Runtime, slugIdForSpace } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { parseCfHarnessCliArgs } from "../../src/cli.ts";
+import { parseCfHarnessCliArgs } from "../support/on-linux.ts";
 import { PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS } from "../../src/contracts/subagent.ts";
 import {
   parentToolIdsForBacking,
@@ -30,7 +30,7 @@ import {
 
 const sandbox: SandboxRuntime = {
   describe: () => ({
-    kind: "docker-runsc-cfc",
+    kind: "runsc-cfc",
     defaultWorkingDirectory: "/workspace",
     cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
   }),

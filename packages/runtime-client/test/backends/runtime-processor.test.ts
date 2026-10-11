@@ -47,6 +47,7 @@ import {
   type RuntimeFetch,
   runtimePresets,
   type SigilLink,
+  type SpaceHostRegistration,
 } from "@commonfabric/runner";
 import {
   atomsOutsideCeiling,
@@ -145,6 +146,7 @@ class SharedV2StorageManager extends V2Storage.StorageManager {
 const createRuntime = (
   actingPrincipal?: string,
   apiUrl = new URL("http://localhost/"),
+  memoryUrl?: URL,
 ) => {
   const server = newLoopbackServer();
   const storageManager = new SharedV2StorageManager({
@@ -153,6 +155,7 @@ const createRuntime = (
   }, server);
   const runtime = new Runtime({
     apiUrl,
+    ...(memoryUrl === undefined ? {} : { memoryUrl }),
     storageManager,
     ...(actingPrincipal === undefined ? {} : {
       trustSnapshotProvider: () => ({
@@ -4027,11 +4030,16 @@ describe("runtime-processor", () => {
      * `ensurePrivateInbox` is recorded, and a throw from it is a throw from the
      * send itself. That is the one failure of the ensure the host sees: a
      * stream's `send` returns before its handler runs, so a failure inside
-     * Home's handler never reaches the host, and this stand-in has none.
+     * Home's handler never reaches the host, and this stand-in has none. Each
+     * read the inbox ensure makes of Home waits for `inboxReadable`. The share
+     * intake's subscriptions to Home are recorded, and `onSubscribe` runs as
+     * each is made, a throw from it being a throw from the subscription.
      */
     async function homeWorker(
       rows: readonly unknown[] | (() => unknown),
       onEnsurePrivateInbox: () => void = () => {},
+      inboxReadable: Promise<void> = Promise.resolve(),
+      onSubscribe: () => void = () => {},
     ) {
       const signer = await Identity.generate({ implementation: "noble" });
       const storageManager = StorageManager.emulate({ as: signer });
@@ -4046,6 +4054,8 @@ describe("runtime-processor", () => {
         path: [],
       };
       const sent: { stream: string; event: unknown }[] = [];
+      const subscribed: string[] = [];
+      const unsubscribed: string[] = [];
       const home = {
         getAsLink: () => cellRefToSigilLink(homeRef),
         key: (name: string) =>
@@ -4055,7 +4065,19 @@ describe("runtime-processor", () => {
               getRaw: () => ({ $stream: true }),
               // Home's `privateInbox` and `profiles`, as the inbox ensure
               // reads them: no inbox held, and no profile advertising one.
-              asSchema: () => ({ pull: () => Promise.resolve(undefined) }),
+              asSchema: () => ({
+                pull: async () => {
+                  await inboxReadable;
+                  return undefined;
+                },
+                sink: () => {
+                  onSubscribe();
+                  subscribed.push(name);
+                  return () => {
+                    unsubscribed.push(name);
+                  };
+                },
+              }),
               send: (event: unknown): void => {
                 sent.push({ stream: name, event });
                 if (name === "ensurePrivateInbox") onEnsurePrivateInbox();
@@ -4096,6 +4118,10 @@ describe("runtime-processor", () => {
         /** How many events were sent to `ensurePrivateInbox`. */
         privateInboxSends: () =>
           sent.filter(({ stream }) => stream === "ensurePrivateInbox").length,
+        /** The Home fields the share intake has subscribed to, in order. */
+        subscribed,
+        /** The Home fields whose subscriptions the share intake has ended. */
+        unsubscribed,
         siteTable,
         async [Symbol.asyncDispose]() {
           ensure.restore();
@@ -4219,6 +4245,7 @@ describe("runtime-processor", () => {
       await worker.processor.handleEnsureHomePatternRunning({
         type: RequestType.EnsureHomePatternRunning,
       });
+      await worker.processor.accessForTestingOnly.privateInboxEnsured;
       await worker.processor.handleEnsureHomePatternRunning({
         type: RequestType.EnsureHomePatternRunning,
       });
@@ -4226,6 +4253,7 @@ describe("runtime-processor", () => {
         type: RequestType.CreateSpace,
         label: "Fresh",
       });
+      await worker.processor.accessForTestingOnly.privateInboxEnsured;
 
       expect(worker.privateInboxSends()).toBe(1);
       expect(worker.sent).toContainEqual({
@@ -4245,16 +4273,150 @@ describe("runtime-processor", () => {
           type: RequestType.EnsureHomePatternRunning,
         });
         expect(first.cell).toBeDefined();
+        await worker.processor.accessForTestingOnly.privateInboxEnsured;
         expect(worker.privateInboxSends()).toBe(1);
+        expect(worker.processor.accessForTestingOnly.privateInboxEnsured)
+          .toBeUndefined();
 
         await worker.processor.handleEnsureHomePatternRunning({
           type: RequestType.EnsureHomePatternRunning,
         });
+        await worker.processor.accessForTestingOnly.privateInboxEnsured;
         await worker.processor.handleEnsureHomePatternRunning({
           type: RequestType.EnsureHomePatternRunning,
         });
+        await worker.processor.accessForTestingOnly.privateInboxEnsured;
         expect(worker.privateInboxSends()).toBe(2);
         expect(warn.calls.length).toBe(1);
+      } finally {
+        warn.restore();
+      }
+    });
+
+    it("opens Home while the private inbox ensure is still reading", async () => {
+      // A bring-up that waited for the ensure would never return here, since
+      // the ensure's reads wait for a release that comes only after it.
+      const readable = Promise.withResolvers<void>();
+      await using worker = await homeWorker([], () => {}, readable.promise);
+
+      const opened = await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+
+      expect(opened.cell).toBeDefined();
+      expect(worker.privateInboxSends()).toBe(0);
+      const ensured = worker.processor.accessForTestingOnly.privateInboxEnsured;
+      expect(ensured).toBeDefined();
+      readable.resolve();
+      await ensured;
+      expect(worker.privateInboxSends()).toBe(1);
+    });
+
+    it("sends no private inbox event once disposed, though the ensure's reads then return", async () => {
+      const readable = Promise.withResolvers<void>();
+      await using worker = await homeWorker([], () => {}, readable.promise);
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      const ensured = worker.processor.accessForTestingOnly.privateInboxEnsured;
+
+      await worker.processor.dispose();
+      readable.resolve();
+      await ensured;
+
+      expect(worker.privateInboxSends()).toBe(0);
+    });
+
+    it("disposes without waiting for a private inbox ensure still reading, and reports nothing when it then fails", async () => {
+      // A disposal that waited for the ensure would never return here, since
+      // the ensure's reads fail only after it.
+      const readable = Promise.withResolvers<void>();
+      await using worker = await homeWorker([], () => {}, readable.promise);
+      const warn = stub(console, "warn", () => {});
+      try {
+        await worker.processor.handleEnsureHomePatternRunning({
+          type: RequestType.EnsureHomePatternRunning,
+        });
+        const ensured = worker.processor.accessForTestingOnly
+          .privateInboxEnsured;
+
+        await worker.processor.dispose();
+        readable.reject(new Error("runtime disposed"));
+        await ensured;
+
+        expect(warn.calls.length).toBe(0);
+        expect(worker.privateInboxSends()).toBe(0);
+      } finally {
+        warn.restore();
+      }
+    });
+
+    it("starts Home's share intake once per worker, following the inbox Home holds and the ones it retains", async () => {
+      await using worker = await homeWorker([]);
+
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      const started = await worker.processor.accessForTestingOnly.shareIntake;
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+
+      expect(started).toBeDefined();
+      expect(await worker.processor.accessForTestingOnly.shareIntake).toBe(
+        started,
+      );
+      expect(worker.subscribed).toEqual([
+        "privateInbox",
+        "retainedPrivateInboxes",
+      ]);
+    });
+
+    it("stops Home's share intake when disposed", async () => {
+      await using worker = await homeWorker([]);
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      await worker.processor.accessForTestingOnly.shareIntake;
+
+      await worker.processor.dispose();
+
+      expect(worker.unsubscribed).toEqual([
+        "privateInbox",
+        "retainedPrivateInboxes",
+      ]);
+    });
+
+    it("opens Home when starting the share intake throws, and starts it on the next ensure", async () => {
+      let attempts = 0;
+      await using worker = await homeWorker(
+        [],
+        () => {},
+        Promise.resolve(),
+        () => {
+          if (attempts++ === 0) throw new Error("transient subscribe failure");
+        },
+      );
+      const warn = stub(console, "warn", () => {});
+      try {
+        const first = await worker.processor.handleEnsureHomePatternRunning({
+          type: RequestType.EnsureHomePatternRunning,
+        });
+        expect(first.cell).toBeDefined();
+        expect(await worker.processor.accessForTestingOnly.shareIntake)
+          .toBeUndefined();
+        expect(worker.processor.accessForTestingOnly.shareIntake)
+          .toBeUndefined();
+
+        await worker.processor.handleEnsureHomePatternRunning({
+          type: RequestType.EnsureHomePatternRunning,
+        });
+
+        expect(await worker.processor.accessForTestingOnly.shareIntake)
+          .toBeDefined();
+        expect(warn.calls.map(({ args }) => args[0])).toEqual([
+          "[RuntimeProcessor] Starting the share intake:",
+        ]);
       } finally {
         warn.restore();
       }
@@ -4272,10 +4434,16 @@ describe("runtime-processor", () => {
         };
         const rootCell = { getAsLink: () => cellRefToSigilLink(ref) };
         const cc = {
+          getDefaultPattern: () => Promise.resolve(undefined),
           ensureDefaultPattern: () =>
             Promise.resolve({ getCell: () => rootCell }),
         };
+        // The space is the identity's Home, which is the identity's own.
         const processor = buildProcessor({
+          runtime: {
+            userIdentityDID: "did:key:test-space",
+            storageManager: {},
+          },
           cc,
           space: "did:key:test-space",
         });
@@ -4284,7 +4452,7 @@ describe("runtime-processor", () => {
           type: RequestType.GetSpaceRootPattern,
           space: "did:key:test-space",
         });
-        expect(result.piece.cell).toEqual(ref);
+        expect(result.piece?.cell).toEqual(ref);
       });
 
       it("resolves the stored root without starting it when `start` is `false`", async () => {
@@ -4308,6 +4476,7 @@ describe("runtime-processor", () => {
           },
         };
         const processor = buildProcessor({
+          runtime: { storageManager: {} },
           cc,
           space: "did:key:test-space",
         });
@@ -4318,7 +4487,7 @@ describe("runtime-processor", () => {
           start: false,
         });
 
-        expect(result.piece.cell).toEqual(ref);
+        expect(result.piece?.cell).toEqual(ref);
         // Reconciled but not started: a read of what the root exported still
         // heals a stale root, and never boots it.
         expect(calls).toEqual([
@@ -4326,13 +4495,7 @@ describe("runtime-processor", () => {
         ]);
       });
 
-      it("creates the root for a space that has none, even when `start` is `false`", async () => {
-        const ref: CellRef = {
-          id: "of:created-root" as CellRef["id"],
-          space: "did:key:test-space" as CellRef["space"],
-          scope: "space",
-          path: [],
-        };
+      it("returns no piece, and creates no root, for a space that has none when `start` is `false`", async () => {
         const calls: string[] = [];
         const cc = {
           // A space whose root has never existed has nothing stored to read.
@@ -4342,12 +4505,16 @@ describe("runtime-processor", () => {
           },
           ensureDefaultPattern: () => {
             calls.push("ensureDefaultPattern");
-            return Promise.resolve({
-              getCell: () => ({ getAsLink: () => cellRefToSigilLink(ref) }),
-            });
+            return Promise.reject(new Error("must not create the root"));
           },
         };
+        // The space is the identity's Home, so only the read keeps the root
+        // from being created.
         const processor = buildProcessor({
+          runtime: {
+            userIdentityDID: "did:key:test-space",
+            storageManager: {},
+          },
           cc,
           space: "did:key:test-space",
         });
@@ -4358,8 +4525,8 @@ describe("runtime-processor", () => {
           start: false,
         });
 
-        expect(result.piece.cell).toEqual(ref);
-        expect(calls).toEqual(["getDefaultPattern", "ensureDefaultPattern"]);
+        expect(result).toStrictEqual({});
+        expect(calls).toEqual(["getDefaultPattern"]);
       });
     });
   });
@@ -5790,6 +5957,47 @@ describe("runtime-processor", () => {
     });
   });
 
+  describe("awaited cell sends", () => {
+    it("rejects with the reason a throwing handler gave", async () => {
+      const signer = await Identity.fromPassphrase(
+        `awaited-cell-send-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const stream = runtime.getCell(
+          space,
+          `awaited-cell-send-${crypto.randomUUID()}`,
+          { asCell: ["stream"] },
+        );
+        const cancel = runtime.scheduler.addEventHandler(
+          () => {
+            throw new Error("refused by the handler");
+          },
+          stream.getAsNormalizedFullLink(),
+        );
+        try {
+          const processor = buildProcessor({ runtime });
+          await expect(processor.handleCellSend({
+            type: RequestType.CellSend,
+            cell: createCellRef(stream),
+            event: { body: "refused" },
+            awaitHandling: true,
+          })).rejects.toThrow("refused by the handler");
+        } finally {
+          cancel();
+        }
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+  });
+
   describe("direct cell initialization", () => {
     it("rejects malformed initializers and surfaces transaction failures", async () => {
       const { runtime, storageManager } = createRuntime();
@@ -7055,6 +7263,7 @@ describe("runtime-processor", () => {
         { marker() {} } as unknown as Parameters<
           typeof browserWorkerParamsFromInitializationData
         >[2],
+        new URL("http://worker.test/"),
       );
       expect(params.experimental).toEqual({ serverExecution: true });
     });
@@ -7127,6 +7336,7 @@ describe("runtime-processor", () => {
           },
           storageManager,
           telemetry,
+          new URL("http://worker.test/"),
         ),
       );
 
@@ -7164,6 +7374,7 @@ describe("runtime-processor", () => {
               { marker() {} } as unknown as Parameters<
                 typeof browserWorkerParamsFromInitializationData
               >[2],
+              new URL("http://worker.test/"),
             ),
           ))
         ).toThrow(CFC_ENFORCEMENT_MODES.join(", "));
@@ -7186,6 +7397,7 @@ describe("runtime-processor", () => {
           { marker() {} } as unknown as Parameters<
             typeof browserWorkerParamsFromInitializationData
           >[2],
+          new URL("http://worker.test/"),
         ),
       );
       expect(options.cfcEnforcementMode).toBe("enforce-strict");
@@ -7209,6 +7421,7 @@ describe("runtime-processor", () => {
           { marker() {} } as unknown as Parameters<
             typeof browserWorkerParamsFromInitializationData
           >[2],
+          new URL("http://worker.test/"),
         ),
       );
       expect(options.spaceHostMap).toEqual({
@@ -7235,6 +7448,7 @@ describe("runtime-processor", () => {
           },
           storageManager,
           telemetry,
+          new URL("http://worker.test/"),
         );
 
       // On → a real collector the GetPatternCoverage handler can read back.
@@ -7390,11 +7604,13 @@ describe("runtime-processor", () => {
         const registerSpaceHost = runtime.registerSpaceHost.bind(runtime);
         expect(registerSpaceHost(registeredRoute, "http://ipc-host.test/"))
           .toBe(true);
+        const registerSpaceHostDetailed = runtime.registerSpaceHostDetailed
+          .bind(runtime);
         Object.assign(runtime, {
-          registerSpaceHost: (space: string, host: string) => {
+          registerSpaceHostDetailed: (space: string, host: string) => {
             registered.push([space, host]);
             if (registered.length === 3) resolveRegistered();
-            return registerSpaceHost(space as MemorySpace, host);
+            return registerSpaceHostDetailed(space as MemorySpace, host);
           },
         });
         const userDid = runtime.userIdentityDID;
@@ -7473,14 +7689,15 @@ describe("runtime-processor", () => {
         const remoteRegistered = new Promise<void>((resolve) => {
           sawRemote = resolve;
         });
-        const registerSpaceHost = runtime.registerSpaceHost.bind(runtime);
         const loopbackSpace = "did:key:z6Mk-loopback" as MemorySpace;
         const remoteSpace = "did:key:z6Mk-remote" as MemorySpace;
+        const registerSpaceHostDetailed = runtime.registerSpaceHostDetailed
+          .bind(runtime);
         Object.assign(runtime, {
-          registerSpaceHost: (space: string, host: string) => {
+          registerSpaceHostDetailed: (space: string, host: string) => {
             registered.push([space, host]);
             if (space === remoteSpace) sawRemote();
-            return registerSpaceHost(space as MemorySpace, host);
+            return registerSpaceHostDetailed(space as MemorySpace, host);
           },
         });
         const userDid = runtime.userIdentityDID;
@@ -7541,14 +7758,15 @@ describe("runtime-processor", () => {
         const otherRegistered = new Promise<void>((resolve) => {
           sawOther = resolve;
         });
-        const registerSpaceHost = runtime.registerSpaceHost.bind(runtime);
         const movedSpace = "did:key:z6Mk-moved" as MemorySpace;
         const otherSpace = "did:key:z6Mk-other" as MemorySpace;
+        const registerSpaceHostDetailed = runtime.registerSpaceHostDetailed
+          .bind(runtime);
         Object.assign(runtime, {
-          registerSpaceHost: (space: string, host: string) => {
+          registerSpaceHostDetailed: (space: string, host: string) => {
             registered.push([space, host]);
             if (space === otherSpace) sawOther();
-            return registerSpaceHost(space as MemorySpace, host);
+            return registerSpaceHostDetailed(space as MemorySpace, host);
           },
         });
         const userDid = runtime.userIdentityDID;
@@ -7594,12 +7812,13 @@ describe("runtime-processor", () => {
         const loopbackRegistered = new Promise<void>((resolve) => {
           sawLoopback = resolve;
         });
-        const registerSpaceHost = runtime.registerSpaceHost.bind(runtime);
+        const registerSpaceHostDetailed = runtime.registerSpaceHostDetailed
+          .bind(runtime);
         Object.assign(runtime, {
-          registerSpaceHost: (space: string, host: string) => {
+          registerSpaceHostDetailed: (space: string, host: string) => {
             registered.push([space, host]);
             sawLoopback();
-            return registerSpaceHost(space as MemorySpace, host);
+            return registerSpaceHostDetailed(space as MemorySpace, host);
           },
         });
         const userDid = runtime.userIdentityDID;
@@ -7639,35 +7858,359 @@ describe("runtime-processor", () => {
           await processor.dispose();
         }
       });
+
+      /**
+       * A `fetch` serving `/api/meta` for the origins of `answers`: a
+       * document, or a status with none. Any other origin fails to connect.
+       */
+      const metaFetch = (
+        answers: Record<string, Record<string, unknown> | number>,
+      ) => {
+        const reads: string[] = [];
+        const fetch = stub(globalThis, "fetch", (input: RequestInfo | URL) => {
+          const url = new URL(String(input));
+          reads.push(url.href);
+          const answer = answers[url.origin];
+          if (answer === undefined) {
+            return Promise.reject(new TypeError("connection refused"));
+          }
+          return Promise.resolve(
+            typeof answer === "number"
+              ? new Response(null, { status: answer })
+              : new Response(JSON.stringify(answer), {
+                headers: { "content-type": "application/json" },
+              }),
+          );
+        });
+        return { reads, [Symbol.dispose]: () => fetch.restore() };
+      };
+
+      for (const memoryUrl of [undefined, new URL("https://router.test/")]) {
+        it(
+          `registers rows naming the API host and a third host ${
+            memoryUrl === undefined ? "without" : "under"
+          } a memory URL as the runtime decides`,
+          async () => {
+            const { runtime, storageManager } = createRuntime(
+              undefined,
+              new URL("https://app.test/"),
+              memoryUrl,
+            );
+            // Under a memory URL, third.test's own deployment says where it
+            // serves Memory. Without one, nothing is read.
+            using meta = metaFetch({
+              "http://third.test": { memoryUrl: "http://router.third.test" },
+            });
+            const verdicts: Array<[string, SpaceHostRegistration]> = [];
+            const offeredToStorage: Array<[string, string]> = [];
+            let sawThird = () => {};
+            const thirdRegistered = new Promise<void>((resolve) => {
+              sawThird = resolve;
+            });
+            const apiSpace = "did:key:z6Mk-row-api" as MemorySpace;
+            const thirdSpace = "did:key:z6Mk-row-third" as MemorySpace;
+            const registerSpaceHostDetailed = runtime.registerSpaceHostDetailed
+              .bind(runtime);
+            Object.assign(runtime, {
+              registerSpaceHostDetailed: (space: string, host: string) => {
+                const verdict = registerSpaceHostDetailed(
+                  space as MemorySpace,
+                  host,
+                );
+                verdicts.push([space, verdict]);
+                if (space === thirdSpace) sawThird();
+                return verdict;
+              },
+            });
+            const storageRegister = storageManager.registerSpaceHostDetailed
+              .bind(storageManager);
+            Object.assign(storageManager, {
+              registerSpaceHostDetailed: (space: string, host: string) => {
+                offeredToStorage.push([space, host]);
+                return storageRegister(space as MemorySpace, host);
+              },
+            });
+            const warnings: unknown[][] = [];
+            const originalWarn = console.warn;
+            console.warn = (...args: unknown[]) => warnings.push(args);
+            const userDid = runtime.userIdentityDID;
+            const table = runtime.getCell(
+              userDid,
+              siteTableCause(userDid),
+              siteTableSchema,
+            );
+            const tx = runtime.edit();
+            table.withTx(tx).set([
+              // The CLI records each space it creates under its API origin; an
+              // earlier row for that space names a host it has since left.
+              { did: apiSpace, host: "http://was-elsewhere.test/" },
+              { did: apiSpace, host: "https://app.test" },
+              { did: thirdSpace, host: "http://third.test/" },
+            ]);
+            await tx.commit().settled;
+
+            const cc = new PiecesController(
+              { as: cfcSigner, space: userDid },
+              runtime,
+            );
+            const processor = buildProcessor({
+              runtime,
+              cc,
+              space: userDid,
+              identity: cfcSigner,
+            });
+            try {
+              processor.watchSiteTable();
+              await thirdRegistered;
+              expect(verdicts).toEqual([
+                [apiSpace, { accepted: true }],
+                [thirdSpace, { accepted: true }],
+              ]);
+              expect(warnings).toEqual([]);
+              expect(runtime.mappedHostFor(thirdSpace)).toBe(
+                "http://third.test/",
+              );
+              if (memoryUrl === undefined) {
+                expect(meta.reads).toEqual([]);
+                expect(runtime.mappedHostFor(apiSpace)).toBe(
+                  "https://app.test/",
+                );
+                expect(offeredToStorage).toEqual([
+                  [apiSpace, "https://app.test/"],
+                  [thirdSpace, "http://third.test/"],
+                ]);
+              } else {
+                // The API host's row is the default route, and replaces the
+                // earlier row. The third host's row opens that space's
+                // Memory where third.test publishes it, and routes the
+                // space's HTTP work to third.test.
+                expect(meta.reads).toEqual(["http://third.test/api/meta"]);
+                expect(runtime.mappedHostFor(apiSpace)).toBeUndefined();
+                expect(offeredToStorage).toEqual([
+                  [thirdSpace, "http://router.third.test/"],
+                ]);
+              }
+            } finally {
+              console.warn = originalWarn;
+              await processor.dispose();
+            }
+          },
+        );
+      }
+
+      it("under a memory URL, takes rows naming the memory URL as the default route and reads nothing for them", async () => {
+        const { runtime, storageManager } = createRuntime(
+          undefined,
+          new URL("https://app.test/"),
+          new URL("https://router.test/"),
+        );
+        using meta = metaFetch({});
+        const offeredToStorage: string[] = [];
+        Object.assign(storageManager, {
+          registerSpaceHostDetailed: (_space: string, host: string) => {
+            offeredToStorage.push(host);
+            return { accepted: true };
+          },
+        });
+        const routerSpace = "did:key:z6Mk-row-router" as MemorySpace;
+        const verdict = Promise.withResolvers<SpaceHostRegistration>();
+        const registerSpaceHostDetailed = runtime.registerSpaceHostDetailed
+          .bind(runtime);
+        Object.assign(runtime, {
+          registerSpaceHostDetailed: (space: string, host: string) => {
+            const result = registerSpaceHostDetailed(
+              space as MemorySpace,
+              host,
+            );
+            verdict.resolve(result);
+            return result;
+          },
+        });
+        const userDid = runtime.userIdentityDID;
+        const table = runtime.getCell(
+          userDid,
+          siteTableCause(userDid),
+          siteTableSchema,
+        );
+        const tx = runtime.edit();
+        table.withTx(tx).set([
+          { did: routerSpace, host: "https://router.test" },
+        ]);
+        await tx.commit().settled;
+        const cc = new PiecesController(
+          { as: cfcSigner, space: userDid },
+          runtime,
+        );
+        const processor = buildProcessor({
+          runtime,
+          cc,
+          space: userDid,
+          identity: cfcSigner,
+        });
+        try {
+          processor.watchSiteTable();
+          expect(await verdict.promise).toEqual({ accepted: true });
+          expect(meta.reads).toEqual([]);
+          expect(offeredToStorage).toEqual([]);
+          expect(runtime.mappedHostFor(routerSpace)).toBeUndefined();
+          expect(runtime.hostForSpace(routerSpace).href).toBe(
+            "https://app.test/",
+          );
+        } finally {
+          await processor.dispose();
+        }
+      });
+
+      it("leaves rows naming an origin whose memory host cannot be read on no route, warned about once by the runtime", async () => {
+        const { runtime, storageManager } = createRuntime(
+          undefined,
+          new URL("https://app.test/"),
+          new URL("https://router.test/"),
+        );
+        // a.test's meta document cannot be read; b.test publishes none.
+        using meta = metaFetch({
+          "http://a.test": 500,
+          "http://b.test": 404,
+        });
+        const offeredToStorage: Array<[string, string]> = [];
+        Object.assign(storageManager, {
+          registerSpaceHostDetailed: (space: string, host: string) => {
+            offeredToStorage.push([space, host]);
+            return { accepted: true };
+          },
+        });
+        // Resolves once the runtime has given `count` verdicts in all.
+        let decided = 0;
+        const waiters: Array<[number, () => void]> = [];
+        const registerSpaceHostDetailed = runtime.registerSpaceHostDetailed
+          .bind(runtime);
+        Object.assign(runtime, {
+          registerSpaceHostDetailed: (space: string, host: string) => {
+            const verdict = registerSpaceHostDetailed(
+              space as MemorySpace,
+              host,
+            );
+            decided++;
+            for (const [count, resolve] of waiters) {
+              if (decided >= count) resolve();
+            }
+            return verdict;
+          },
+        });
+        const decidedAtLeast = (count: number) =>
+          new Promise<void>((resolve) => {
+            if (decided >= count) resolve();
+            else waiters.push([count, resolve]);
+          });
+        const warnings: unknown[][] = [];
+        const originalWarn = console.warn;
+        console.warn = (...args: unknown[]) => warnings.push(args);
+        const userDid = runtime.userIdentityDID;
+        const table = runtime.getCell(
+          userDid,
+          siteTableCause(userDid),
+          siteTableSchema,
+        );
+        const rows = (hosts: string[]) =>
+          hosts.map((host, i) => ({
+            did: `did:key:z6Mk-routed-${i}` as MemorySpace,
+            host,
+          }));
+        const write = async (value: ReturnType<typeof rows>) => {
+          const tx = runtime.edit();
+          table.withTx(tx).set(value);
+          await tx.commit().settled;
+        };
+        await write(
+          rows(["http://a.test/", "http://a.test/", "http://b.test/"]),
+        );
+        const cc = new PiecesController(
+          { as: cfcSigner, space: userDid },
+          runtime,
+        );
+        const processor = buildProcessor({
+          runtime,
+          cc,
+          space: userDid,
+          identity: cfcSigner,
+        });
+        try {
+          processor.watchSiteTable();
+          await decidedAtLeast(3);
+          // Two spaces on a.test share one read and one warning; b.test's
+          // space opens Memory on b.test.
+          expect(
+            meta.reads.filter((url) => url.startsWith("http://a.test/")).length,
+          ).toBeGreaterThanOrEqual(1);
+          expect(warnings.map((args) => String(args[0]))).toEqual([
+            expect.stringContaining(
+              "Where http://a.test serves Memory could not be learned",
+            ),
+          ]);
+          expect(offeredToStorage).toEqual([
+            ["did:key:z6Mk-routed-2", "http://b.test/"],
+          ]);
+          expect(runtime.mappedHostFor("did:key:z6Mk-routed-0" as MemorySpace))
+            .toBeUndefined();
+          expect(runtime.mappedHostFor("did:key:z6Mk-routed-1" as MemorySpace))
+            .toBeUndefined();
+          expect(runtime.mappedHostFor("did:key:z6Mk-routed-2" as MemorySpace))
+            .toBe("http://b.test/");
+          // The table changing does not read a.test again, nor warn again.
+          const readsSoFar = meta.reads.length;
+          await write(
+            rows([
+              "http://a.test/",
+              "http://a.test/",
+              "http://b.test/",
+              "http://a.test/",
+            ]),
+          );
+          await decidedAtLeast(7);
+          expect(meta.reads.length).toBe(readsSoFar);
+          expect(warnings.length).toBe(1);
+        } finally {
+          console.warn = originalWarn;
+          await processor.dispose();
+        }
+      });
     });
 
     describe("handleRegisterSpaceHost()", () => {
-      it("forwards to the runtime and reports the verdict", () => {
+      it("resolves the hint through the runtime and reports the verdict", async () => {
         const calls: Array<[string, string]> = [];
         const processor = buildProcessor({
           runtime: {
-            registerSpaceHost: (space: string, host: string) => {
+            resolveSpaceHost: (space: string, host: string) => {
               calls.push([space, host]);
-              return host === "http://accepted.test/";
+              return Promise.resolve(
+                host === "http://accepted.test/"
+                  ? { accepted: true }
+                  : { accepted: false, reason: "foreign-host-unread" },
+              );
             },
           },
         });
-        expect(processor.handleRegisterSpaceHost({
-          type: RequestType.RegisterSpaceHost,
-          space: "did:key:z6Mk-ipc-a",
-          host: "http://accepted.test/",
-        })).toEqual({ value: true });
-        expect(processor.handleRegisterSpaceHost({
-          type: RequestType.RegisterSpaceHost,
-          space: "did:key:z6Mk-ipc-b",
-          host: "http://refused.test/",
-        })).toEqual({ value: false });
+        expect(
+          await processor.handleRegisterSpaceHost({
+            type: RequestType.RegisterSpaceHost,
+            space: "did:key:z6Mk-ipc-a",
+            host: "http://accepted.test/",
+          }),
+        ).toEqual({ value: true });
+        expect(
+          await processor.handleRegisterSpaceHost({
+            type: RequestType.RegisterSpaceHost,
+            space: "did:key:z6Mk-ipc-b",
+            host: "http://refused.test/",
+          }),
+        ).toEqual({ value: false });
         expect(calls.length).toBe(2);
       });
     });
 
     describe("handleRegisterSpaceHostDetailed()", () => {
-      it("forwards to the runtime and returns each registration unchanged", () => {
+      it("resolves the hint through the runtime and returns each registration unchanged", async () => {
         const calls: Array<[string, string]> = [];
         const registrations = {
           "http://accepted.test/": { accepted: true },
@@ -7684,16 +8227,24 @@ describe("runtime-processor", () => {
             accepted: false,
             reason: "no-remote-resolution",
           },
+          "http://unread.test/": {
+            accepted: false,
+            reason: "foreign-host-unread",
+          },
+          "http://many.test/": {
+            accepted: false,
+            reason: "foreign-host-limit",
+          },
           "http://plain.test/": { accepted: false, reason: "unspecified" },
         } as const;
         const processor = buildProcessor({
           runtime: {
-            registerSpaceHostDetailed: (
+            resolveSpaceHost: (
               space: string,
               host: keyof typeof registrations,
             ) => {
               calls.push([space, host]);
-              return registrations[host];
+              return Promise.resolve(registrations[host]);
             },
           },
         });
@@ -7702,11 +8253,13 @@ describe("runtime-processor", () => {
             keyof typeof registrations
           >
         ) {
-          expect(processor.handleRegisterSpaceHostDetailed({
-            type: RequestType.RegisterSpaceHostDetailed,
-            space: "did:key:z6Mk-ipc-detailed",
-            host,
-          })).toEqual({ registration: registrations[host] });
+          expect(
+            await processor.handleRegisterSpaceHostDetailed({
+              type: RequestType.RegisterSpaceHostDetailed,
+              space: "did:key:z6Mk-ipc-detailed",
+              host,
+            }),
+          ).toEqual({ registration: registrations[host] });
         }
         expect(calls.map(([, host]) => host)).toEqual(
           Object.keys(registrations),

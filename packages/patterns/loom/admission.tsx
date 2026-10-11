@@ -7,9 +7,12 @@ import {
   type Cfc,
   type CurrentPrincipal,
   currentPrincipal,
+  type DID,
   handler,
   principalsOf,
   type RepresentsCurrentUser,
+  spaceAccess,
+  spaceAccessOf,
   Writable,
   type WriteAuthorizedBy,
 } from "commonfabric";
@@ -99,8 +102,8 @@ function isAdderDid(value: string): boolean {
   return value.length <= 195 && DID_SYNTAX.test(value);
 }
 
-/** Validate a panel before admitting its occurrence to the shared composition. */
-function validatePanel(panel: Panel): void {
+/** Validate a panel before admitting its occurrence to the Loom. */
+export function validatePanel(panel: Panel): void {
   if (panel.kind === "url" && externalUrl(panel.url) === undefined) {
     throw new Error("A URL panel requires an HTTP(S) URL without credentials");
   }
@@ -120,23 +123,6 @@ function containsPiece(
     const value = panel.get();
     return value.kind === "piece" && value.piece.equalLinks(piece);
   });
-}
-
-/** `list` with `panel` inserted at `index`. */
-function withInserted(
-  list: readonly Writable<Panel>[],
-  index: number,
-  panel: Writable<Panel>,
-): Writable<Panel>[] {
-  return [...list.slice(0, index), panel, ...list.slice(index)];
-}
-
-/** Whether `panel` is one of the occurrences in `list`. */
-function containsOccurrence(
-  list: readonly Writable<Panel>[],
-  panel: Writable<Panel>,
-): boolean {
-  return list.some((existing) => existing.equals(panel));
 }
 
 /**
@@ -159,11 +145,59 @@ function adderFields(
 /**
  * Returns the principals attested on `panel`'s `addedBy` field: none for a
  * field no stamp names, and `undefined` when a claim there is in a form a
- * runtime does not mint. Other fields can have their own authors without
- * changing who added the occurrence.
+ * runtime does not mint. The stamp is the one on the field itself: a value
+ * link stored there leads to a document with a label of its own, which says
+ * nothing about who wrote the field. Other fields can have their own authors
+ * without changing who added the occurrence.
  */
-function attestedAdders(panel: Writable<Panel>): string[] | undefined {
-  return principalsOf(panel.key("addedBy"), "authored-by");
+function attestedAdders(panel: Writable<Panel>): DID[] | undefined {
+  return principalsOf(panel.key("addedBy"), "authored-by", {
+    label: "written",
+  });
+}
+
+/**
+ * Throws unless the principal the running event acts for may remove `panel`
+ * for everyone: an occurrence its label attests to that principal alone, one
+ * it attests to nobody, or, for an OWNER of the Loom's space, one it attests
+ * to a principal the Loom's access list no longer admits. `panels` is the
+ * Loom's list, which anchors both access reads in the Loom's space: an
+ * occurrence `addPanel` linked may live in another space, whose list says
+ * nothing about who belongs to the Loom. The adder is read from the runtime's
+ * stamps on the occurrence's own fields, `authored-by` at `addedBy` and
+ * `represents-principal` at `addedByProfile`, where the stamp names whoever
+ * acted under the profile, never the linked profile's owner. An `addedBy`
+ * value no stamp names is its writer's claim, and protects nothing. Nor does
+ * a field whose claims name two principals, or hold one in a form no runtime
+ * mints: a label a runtime did not mint is trusted in neither direction, and
+ * falling open is what keeps such a panel from sticking. The other field's
+ * stamp, when it is well formed, still names the adder.
+ */
+export function assertRemovable(
+  panel: Writable<Panel>,
+  panels: Writable<Writable<Panel>[]>,
+): void {
+  const adders = [
+    ...new Set([
+      ...(attestedAdders(panel) ?? []),
+      ...(principalsOf(panel.key("addedByProfile"), "represents-principal", {
+        label: "written",
+      }) ?? []),
+    ]),
+  ];
+  if (adders.length !== 1) return;
+  const [adder] = adders;
+  const actor = currentPrincipal();
+  if (adder === actor) return;
+  // An owner clears up after a participant who has left: one the Loom's list
+  // grants nothing, as the list stands on this replica. A list not yet read
+  // admits nobody's removal of another's panel.
+  if (
+    spaceAccess(panels) === "OWNER" && spaceAccessOf(panels, adder) === "none"
+  ) return;
+  throw new Error(
+    "Only the principal who added a panel can remove it, unless they have left the Loom and an OWNER removes it",
+  );
 }
 
 /** A copy of `source` that keeps its target and title and takes a new adder. */
@@ -199,7 +233,7 @@ function admitCopy(
   validatePanel(copy);
   const occurrence = new Writable<Panel>();
   occurrence.set(copy);
-  panels.set(withInserted(list, index, occurrence));
+  panels.set(list.toSpliced(index, 0, occurrence));
 }
 
 /**
@@ -213,11 +247,6 @@ function admitCopy(
  * acted. An occurrence this handler creates without `as` records that
  * principal in `addedBy` instead, attested the same way. Nothing in the event
  * names the adder.
- *
- * The body touches the occurrences in `panels` only through helpers. Its
- * state schema is inferred from the uses the body shows, and an occurrence
- * compared with `equals` or moved with `splice` there would be narrowed to a
- * cell whose value the piece registration can no longer read.
  */
 export const admitPanel = handler<
   PanelAdmission,
@@ -241,7 +270,7 @@ export const admitPanel = handler<
     const index = insertionIndex(list, event.before);
     // A panel already present is not admitted again, so there is nothing to
     // validate or record.
-    if (containsOccurrence(list, panel)) return;
+    if (list.some((existing) => existing.equals(panel))) return;
     const value = panel.get();
     validatePanel(value);
     if (event.as !== undefined) {
@@ -272,10 +301,10 @@ export const admitPanel = handler<
         "A panel another principal added, or whose adder its label contests, cannot be linked; add a copy of it with `as` instead",
       );
     }
-    panels.set(withInserted(list, index, panel));
+    panels.set(list.toSpliced(index, 0, panel));
     return;
   }
-  if (!containsOccurrence(list, panel)) {
+  if (!list.some((existing) => existing.equals(panel))) {
     throw new Error("The panel is no longer in this Loom");
   }
   const index = insertionIndex(list, event.before);

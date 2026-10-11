@@ -3,8 +3,13 @@
  * once, independently of the Fabric lane. A job is claimed from the store,
  * run through `runHarnessJob` with no fabric under its profile's authority,
  * and ended in the store; while it runs, the transcript events the harness
- * persists become `step` events (the tool the job is using) and `command`
- * events (each command the host ran for it).
+ * persists become `step` events (the tool the job is using, and then the
+ * same step marked `returned` once the calls of its turn have returned and
+ * its loop's model has the turn) and `command` events (each command the host
+ * ran for it). A job that declared a browser host, under a profile that
+ * admits one, browses through it: the lane holds the job's
+ * {@link LocalJobBrowserHost} from the first attach or the run's start,
+ * whichever is first, until the job ends.
  *
  * Nothing here waits on a timer. The lane looks for work when it starts,
  * when a job is enqueued, and when a job ends.
@@ -21,9 +26,11 @@ import {
   type HarnessJobSpec,
   runHarnessJob,
 } from "../harness-job.ts";
+import { LocalJobBrowserHost } from "./browser-host.ts";
 import type { LocalJobProfile, LocalJobProfiles } from "./profiles.ts";
 import { narrowLocalJobProfile } from "./profiles.ts";
 import {
+  LOCAL_JOB_TERMINAL_STATES,
   type LocalJob,
   type LocalJobStore,
   RUNNER_RESTARTED,
@@ -34,6 +41,12 @@ export const LOCAL_JOB_ERROR_MAX_LENGTH = 500;
 
 /** The error code of a job whose profile the host no longer names. */
 export const PROFILE_UNAVAILABLE = "PROFILE_UNAVAILABLE";
+
+/** The subagent profile a job browses through its host with. */
+export const LOCAL_JOB_BROWSER_SUBAGENT_PROFILE = "browser";
+
+/** The tool that spawns it. */
+export const LOCAL_JOB_DELEGATE_TOOL = "delegate_task";
 
 /** What the lane runs with. */
 export interface LocalJobLaneOptions {
@@ -69,7 +82,9 @@ export interface LocalJobLaneOptions {
  * The spec a job runs as: its request's task, framing and schema, under its
  * profile narrowed to what the request asked for. The task binds as the
  * profile's role, never as anything the request says. Screen context and
- * other plain values the caller sends ride in the system prompt as data.
+ * other plain values the caller sends ride in the system prompt as data. A
+ * profile narrowed to a browser host adds the tool and the subagent profile
+ * the browser runs under, for this job alone.
  *
  * SHORTCUT: context reaches the model inside the system prompt, marked as
  * data rather than instructions, because a batch job has one prompt slot and
@@ -99,7 +114,13 @@ export const localJobSpecOf = (
     commandJobId: job.id,
     taskRole: profile.taskRole,
     resultSchema: request.resultSchema as HarnessJobSpec["resultSchema"],
-    tools: profile.tools,
+    tools: profile.browserHost === true &&
+        !profile.tools.includes(LOCAL_JOB_DELEGATE_TOOL)
+      ? [...profile.tools, LOCAL_JOB_DELEGATE_TOOL]
+      : profile.tools,
+    ...(profile.browserHost === true
+      ? { subagentProfiles: [LOCAL_JOB_BROWSER_SUBAGENT_PROFILE] }
+      : {}),
     maxModelTurns: profile.maxModelTurns,
     ...(framing.length > 0 ? { instructions: framing.join("\n\n") } : {}),
     ...(model !== undefined ? { model } : {}),
@@ -114,21 +135,38 @@ export const localJobSpecOf = (
 
 /**
  * The progress events one transcript event reports: a `step` for each tool
- * the model called, and a `command` for each `run_command` the host ran.
- * A child loop's events report nothing; the job's own loop is what a caller
- * watches.
+ * the model called, and a `command` for each command the host ran, one per
+ * executed call of a `run_command` batch. Children carry their profile, run
+ * id, parent call id and depth. Browser steps also name the action, so a
+ * reader can distinguish clicking from waiting without receiving arguments,
+ * URLs or page content.
  */
 export const localJobEventsOf = (
   event: HarnessTranscriptEvent,
 ): { kind: "step" | "command"; body: Record<string, unknown> }[] => {
-  if (event.subagent !== undefined) return [];
+  const child = event.subagent === undefined ? undefined : {
+    parentToolCallId: event.subagent.parentToolCallId,
+    childRunId: event.subagent.childRunId,
+    profile: event.subagent.profile,
+    // The harness admits one level of delegation: children cannot delegate.
+    // Extend its transcript context before admitting nested child loops.
+    depth: 1,
+  };
   const { message, transcript } = event;
   if (message.role === "assistant") {
     const turn = transcript.filter((entry) => entry.role === "assistant")
       .length;
     return (message.toolCalls ?? []).map((call) => ({
       kind: "step",
-      body: { turn, tool: call.function.name },
+      body: {
+        turn,
+        tool: call.function.name,
+        ...(child !== undefined ? { child } : {}),
+        ...(child !== undefined && call.function.name === "browser" &&
+            typeof argumentsOf(transcript, call.id).action === "string"
+          ? { action: argumentsOf(transcript, call.id).action }
+          : {}),
+      },
     }));
   }
   if (message.role !== "tool" || message.toolName !== "run_command") return [];
@@ -139,10 +177,38 @@ export const localJobEventsOf = (
     return [];
   }
   if (!isObjectNotArray(output)) return [];
-  const { status, outcome, entry } = output as Record<string, unknown>;
+  const asked = argumentsOf(transcript, message.toolCallId);
+  if (output.status !== "batch") {
+    return commandEventsOf(output, asked.command, child);
+  }
+  // A batch answers its calls in order, one result each.
+  const calls = Array.isArray(asked.calls) ? asked.calls : [];
+  const results = Array.isArray(output.results) ? output.results : [];
+  return results.flatMap((result, index) => {
+    const call: unknown = calls[index];
+    return isObjectNotArray(result)
+      ? commandEventsOf(
+        result,
+        isObjectNotArray(call) ? call.command : undefined,
+        child,
+      )
+      : [];
+  });
+};
+
+/**
+ * Helper for events, which reports one call's result: a `command` event when
+ * the host ran it, named by the outcome's id or else the name it was called
+ * by and carrying the child loop it ran in, and nothing otherwise.
+ */
+const commandEventsOf = (
+  result: Readonly<Record<string, unknown>>,
+  asked: unknown,
+  child: Record<string, unknown> | undefined,
+): { kind: "command"; body: Record<string, unknown> }[] => {
+  const { status, outcome, entry } = result;
   if (status !== "executed" || !isObjectNotArray(outcome)) return [];
   const { ok, id, code, hostCode } = outcome as Record<string, unknown>;
-  const asked = argumentsOf(transcript, message.toolCallId).command;
   const command = typeof id === "string" ? id : asked;
   if (typeof command !== "string" || typeof ok !== "boolean") return [];
   const value = isObjectNotArray(entry) &&
@@ -162,6 +228,7 @@ export const localJobEventsOf = (
     body: {
       command,
       ok,
+      ...(child !== undefined ? { child } : {}),
       ...(isObjectNotArray(answered.outputs)
         ? { outputs: answered.outputs }
         : {}),
@@ -199,6 +266,7 @@ const argumentsOf = (
 export class LocalJobLane {
   #options: LocalJobLaneOptions;
   #running = new Map<string, { abort: AbortController; done: Promise<void> }>();
+  #hosts = new Map<string, LocalJobBrowserHost>();
   #stopping = false;
 
   /** Constructs an instance; `start` begins its work. */
@@ -213,8 +281,8 @@ export class LocalJobLane {
   start(): void {
     const recovered = this.#options.store.recover();
     if (recovered.length > 0) {
-      this.#options.report?.(
-        `agent runner: ${recovered.length} local job(s) were cut off and end interrupted (${RUNNER_RESTARTED})`,
+      this.#report(() =>
+        `agent runner: ${recovered.length} local job(s) were cut off and end interrupted (${RUNNER_RESTARTED})`
       );
     }
     this.kick();
@@ -235,7 +303,30 @@ export class LocalJobLane {
   cancel(id: string): LocalJob | undefined {
     const job = this.#options.store.requestCancel(id);
     this.#running.get(id)?.abort.abort();
+    // A queued job ends at once, with no run to close its host.
+    if (job !== undefined && LOCAL_JOB_TERMINAL_STATES.has(job.state)) {
+      this.#closeHost(id);
+    }
     return job;
+  }
+
+  /**
+   * The browser host of job `id`, when the job declared one: the live one
+   * while the job has not ended, and a closed one after, whose stream says
+   * so. `undefined` for an unknown job or one that declared no host.
+   */
+  browserHost(id: string): LocalJobBrowserHost | undefined {
+    const held = this.#hosts.get(id);
+    if (held !== undefined) return held;
+    const job = this.#options.store.get(id);
+    if (job?.request.browserHost === undefined) return undefined;
+    const host = new LocalJobBrowserHost();
+    if (LOCAL_JOB_TERMINAL_STATES.has(job.state)) {
+      host.close();
+      return host;
+    }
+    this.#hosts.set(id, host);
+    return host;
   }
 
   /**
@@ -277,8 +368,32 @@ export class LocalJobLane {
         state: "failed",
         errorCode: PROFILE_UNAVAILABLE,
       });
+      this.#closeHost(job.id);
       return;
     }
+    const browserHost = narrowed.profile.browserHost === true
+      ? this.browserHost(job.id)
+      : undefined;
+    let parentStep: Record<string, unknown> | undefined;
+    const childSteps = new Map<string, Record<string, unknown>>();
+    let lastStep: string | undefined;
+    // A browse publishes transitions: a call, its return, and the next call.
+    // Turn numbers alone are not a visible change. Commands are never reduced.
+    const reportStep = (body: Record<string, unknown>) => {
+      const key = JSON.stringify([
+        body.tool,
+        body.child,
+        body.action,
+        body.returned,
+      ]);
+      if (key === lastStep) return;
+      lastStep = key;
+      store.report(job.id, "step", body);
+    };
+    const reportActive = () => {
+      const active = [...childSteps.values()].at(-1) ?? parentStep;
+      if (active !== undefined) reportStep(active);
+    };
     let result: HarnessJobResult;
     try {
       result = await (this.#options.runJob ?? runHarnessJob)(
@@ -286,10 +401,60 @@ export class LocalJobLane {
         {
           runRoot: join(this.#options.workRoot, job.id),
           signal,
+          ...(browserHost !== undefined ? { browserHost } : {}),
           onEvent: (event) => {
-            for (const { kind, body } of localJobEventsOf(event)) {
-              store.report(job.id, kind, body);
+            const { message } = event;
+            const loop = event.subagent?.parentToolCallId;
+            if (
+              loop === undefined &&
+              message.role === "tool" &&
+              message.toolName === LOCAL_JOB_DELEGATE_TOOL
+            ) {
+              childSteps.delete(message.toolCallId);
             }
+            for (const { kind, body } of localJobEventsOf(event)) {
+              if (kind === "command") {
+                if (event.subagent !== undefined) {
+                  const id = event.subagent.parentToolCallId;
+                  const step = childSteps.get(id);
+                  if (
+                    step !== undefined &&
+                    step !== [...childSteps.values()].at(-1)
+                  ) {
+                    childSteps.delete(id);
+                    childSteps.set(id, step);
+                    // Publish the promoted tool before its landed receipt.
+                    reportStep(step);
+                  }
+                }
+                lastStep = undefined;
+                store.report(job.id, kind, body);
+              } else if (event.subagent !== undefined) {
+                // Children have depth 1; among siblings, latest activity wins.
+                const id = event.subagent.parentToolCallId;
+                childSteps.delete(id);
+                childSteps.set(id, body);
+                reportStep(body);
+              } else {
+                parentStep = body;
+                if (childSteps.size === 0) reportStep(parentStep);
+              }
+            }
+            // The harness reports a turn's tool results once every call of
+            // the turn has returned, so a result hands the loop's model the
+            // turn: the loop's step stays, marked returned, and a child's
+            // return is its latest activity.
+            if (message.role !== "tool") return;
+            const step = loop === undefined ? parentStep : childSteps.get(loop);
+            if (step !== undefined) {
+              const waiting = { ...step, returned: true };
+              if (loop === undefined) parentStep = waiting;
+              else {
+                childSteps.delete(loop);
+                childSteps.set(loop, waiting);
+              }
+            }
+            reportActive();
           },
           ...(this.#options.harnessDeps !== undefined
             ? { harnessDeps: this.#options.harnessDeps }
@@ -300,13 +465,14 @@ export class LocalJobLane {
         },
       );
     } catch (error) {
-      this.#options.report?.(
+      this.#report(() =>
         `agent runner: local job ${job.id} failed: ${
           error instanceof Error ? error.message : String(error)
-        }`,
+        }`
       );
       result = { outcome: "failed", errorCode: "PROVIDER_FAILURE" };
     }
+    this.#closeHost(job.id);
     // A run the lane's own stop aborted stays `running`, to be ended
     // `interrupted` when the runner next starts.
     if (this.#stopping && signal.aborted) return;
@@ -315,10 +481,38 @@ export class LocalJobLane {
       ...(result.outcome === "completed"
         ? { result: result.structuredResult }
         : {}),
-      ...(result.outcome === "failed" ? { errorCode: result.errorCode } : {}),
+      ...(result.outcome === "failed"
+        ? {
+          errorCode: result.errorCode,
+          ...(result.errorDetail !== undefined
+            ? { errorDetail: result.errorDetail }
+            : {}),
+        }
+        : {}),
       ...(result.report !== undefined
         ? { report: { ...result.report } as Record<string, unknown> }
         : {}),
     });
+  }
+
+  /**
+   * Helper that writes the operator-facing line `line` builds, building it only
+   * when there is a log. A run is a detached promise, so a throw from building
+   * or writing the line would reach no caller and would only leave its job
+   * unfinished in the store; the throw goes no further.
+   */
+  #report(line: () => string): void {
+    try {
+      const { report } = this.#options;
+      if (report !== undefined) report(line());
+    } catch {
+      // The operator's log is the only place this could be reported.
+    }
+  }
+
+  /** Helper for a job's end, which closes and drops its browser host. */
+  #closeHost(id: string): void {
+    this.#hosts.get(id)?.close();
+    this.#hosts.delete(id);
   }
 }

@@ -13,6 +13,7 @@ import {
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { DID } from "@commonfabric/identity";
 import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
+import type { NativeUiControl } from "@commonfabric/runner/native-ui";
 import {
   cfcLabelViewsEqual,
   rebaseCfcLabelView,
@@ -48,6 +49,16 @@ import { cellRefToIdentityKey } from "./shared/utils.ts";
 // Logger for schema warnings - disabled by default.
 // Enable via: globalThis.commonfabric.logger["cell-handle"].disabled = false
 const logger = getLogger("cell-handle", { enabled: false });
+
+/** A read's answer, and whether no update to the cell overtook it. */
+interface ReadAnswer<T> {
+  /** What the read found: the value, or the refusal standing for it. */
+  read: CellAnswer<T>;
+  /** The worker's raw answer, which other handles on the cell take. */
+  response: CellValueResponse;
+  /** Whether no update to the cell reached any handle on it meanwhile. */
+  authoritative: boolean;
+}
 
 interface CellOperationQueue {
   tail: Promise<void> | undefined;
@@ -111,6 +122,19 @@ export type CellSubscribeOptions = {
    * value it was given, which the worker may now refuse.
    */
   onRefused: (refusal: CellReadRefusal) => void;
+};
+
+/** How a strict send of an event waits on it. */
+export type CellSendOptions = {
+  /**
+   * Whether to wait for the event's handling as well: the outcome of the run
+   * of the stream's handler, which under server execution is the consequence
+   * the served run recorded. The send then rejects, with the reason, when
+   * that run's commit is refused, as it is for a write whose UI contract the
+   * event does not satisfy, and when the run throws or the event is dropped
+   * or refused admission.
+   */
+  awaitHandling?: boolean;
 };
 
 /**
@@ -350,6 +374,134 @@ export class CellHandle<T = unknown> {
   }
 
   /**
+   * Writes the value `updater` makes of the cell's current one, in the order
+   * of the cell's operations through this runtime client: `updater` runs
+   * once the reads and writes asked for before this call, through any handle
+   * on the same cell and path, have run, and the ones asked for after it
+   * wait for its write. A handle reached through `key()` names another path,
+   * with an order of its own.
+   *
+   * `updater` is handed the value those operations left, what this handle
+   * holds where they left none, or, where it holds nothing yet, what a read
+   * from the worker finds, `undefined` for a cell that holds nothing. A write
+   * another handle made, and that has settled since, counts once its update
+   * reaches this handle. `updater` runs before `update()` returns when
+   * nothing waits and the handle holds a value. Returning the current value
+   * writes nothing.
+   *
+   * What it returns is shown when it runs, unless a write asked for through
+   * this handle after this call shows its own, and is sent as {@link set}
+   * sends a value: a blind last-write-wins overwrite, whose refusal by the
+   * runtime is logged. It is not an atomic read-modify-write: a writer
+   * elsewhere can change the cell between the read and the write, and the
+   * write replaces that change. Appending to a list is {@link push}, which
+   * the worker merges.
+   *
+   * Not the pattern API's `Cell.update()`, which merges a partial value.
+   *
+   * Settles once the worker has taken the write, or once `updater` writes
+   * nothing. Rejects, writing nothing, while this handle's read is refused
+   * ({@link refusal}), when the read it makes is refused, and when `updater`
+   * throws.
+   */
+  update(updater: (current: Readonly<T> | undefined) => T): Promise<void> {
+    this.#requireSchema("update");
+    const refused = this.#writeRefusal();
+    if (refused !== undefined) return Promise.reject(refused);
+    // Taken now, as a write's, so that neither an older read's answer nor this
+    // update's own shows over a write asked for after this call.
+    const writeGeneration = this.#writeGeneration = ++writeClock;
+    const startedAt = writeClock;
+    return this.#enqueueOperation(async (queue) => {
+      let current = this.#base(queue, writeGeneration);
+      if (current === undefined) {
+        const request: CellPullRequest = {
+          type: RequestType.CellPull,
+          cell: this.ref(),
+          awaitDurability: false,
+        };
+        const updateGeneration = this.#updateGeneration;
+        const answer = await this.#ask(queue, request, updateGeneration);
+        const found = this.#takeAnswer(
+          request,
+          answer,
+          writeGeneration,
+          updateGeneration,
+          startedAt,
+        );
+        // A refusal or an update that reached the cell while the read was
+        // on its way is newer than what the read found.
+        current = this.#base(queue, writeGeneration) ?? { value: found };
+      }
+      let next: T;
+      try {
+        next = updater(current.value as Readonly<T> | undefined);
+      } catch (error) {
+        this.#showPassedOver(current.value, writeGeneration);
+        throw error;
+      }
+      if (valuesOrCellsEqual(next, current.value)) {
+        this.#showPassedOver(current.value, writeGeneration);
+        return;
+      }
+      const serialized = this.#serializeWrite(next);
+      const snapshot = applyValue(
+        CellHandle.#serialize(next as ClientCellValue, "sigil"),
+        next,
+        this,
+      ) as T;
+      if (writeGeneration === this.#writeGeneration) {
+        this.#publishWrite(snapshot);
+      }
+      const updateGeneration = this.#updateGeneration;
+      const authoritativeGeneration = queue.authoritativeGeneration;
+      await this.#sendWrite(serialized);
+      if (
+        updateGeneration === this.#updateGeneration &&
+        authoritativeGeneration === queue.authoritativeGeneration
+      ) {
+        queue.value = snapshot;
+        queue.hasValue = true;
+      }
+    });
+  }
+
+  /**
+   * Helper for {@link update}, which finds the value an update in `queue`'s
+   * turn computes from without asking the worker: the one the operations
+   * before it left, or what this handle holds, where no write asked for
+   * since `writeGeneration` replaced it. `undefined` where neither holds one,
+   * and the worker must be asked.
+   *
+   * @throws {CellReadRefusedError} While this handle's read is refused.
+   */
+  #base(
+    queue: CellOperationQueue,
+    writeGeneration: number,
+  ): { value: unknown } | undefined {
+    const refused = this.#writeRefusal();
+    if (refused !== undefined) throw refused;
+    if (queue.hasValue) return { value: queue.value };
+    if (!this.#unread && writeGeneration === this.#writeGeneration) {
+      return { value: this.#value };
+    }
+    return undefined;
+  }
+
+  /**
+   * Helper for {@link update}, which shows `value`, what an update that
+   * writes nothing computed from, where it is the latest this handle has
+   * been asked for: taking the generation, the update kept an older read's
+   * answer from showing it.
+   */
+  #showPassedOver(value: unknown, writeGeneration: number): void {
+    if (writeGeneration !== this.#writeGeneration) return;
+    if (this.#unread || !valuesOrCellsEqual(value, this.#value)) {
+      this.#publishWrite(value as T);
+    }
+  }
+
+  /**
    * Set the cell's value and reject when the runtime refuses the write, or
    * when this handle's read is refused ({@link refusal}).
    */
@@ -481,9 +633,17 @@ export class CellHandle<T = unknown> {
       queues.set(key, queue);
     }
     const previous = queue.tail;
-    const result = previous
-      ? previous.then(() => operation(queue))
-      : operation(queue);
+    // With nothing ahead of it, the operation starts at once, but only after
+    // it holds the queue: an operation asked for while it runs, as a
+    // subscriber its publication reaches may ask for one, waits behind it.
+    let result: Promise<R>;
+    let started: PromiseWithResolvers<R> | undefined;
+    if (previous) {
+      result = previous.then(() => operation(queue));
+    } else {
+      started = Promise.withResolvers<R>();
+      result = started.promise;
+    }
     const tail = result.then(() => {}, () => {});
     queue.tail = tail;
     void tail.then(() => {
@@ -492,6 +652,15 @@ export class CellHandle<T = unknown> {
         if (queues.size === 0) operationQueues.delete(this.#rt);
       }
     });
+    if (started) {
+      try {
+        started.resolve(operation(queue));
+      } catch (error) {
+        // Thrown at once, as before the queue was held; the queue goes on.
+        started.reject(error);
+        throw error;
+      }
+    }
     return result;
   }
 
@@ -607,18 +776,75 @@ export class CellHandle<T = unknown> {
     await this.#enqueueOperation(() => this.#send(serialized));
   }
 
-  /** Send a stream event and reject when the runtime refuses it. */
-  async sendStrict(event: T): Promise<void> {
+  /**
+   * Sends `event` to the stream this handle names, and rejects when the
+   * runtime refuses to take it. Resolving confirms only that the event was
+   * delivered to the runtime, on its way to the stream's handler: a write the
+   * handler makes that the runtime refuses, such as one whose UI contract the
+   * event does not satisfy, does not reject it. `options.awaitHandling` waits
+   * for the handling too, and rejects on its refusal.
+   */
+  async sendStrict(event: T, options?: CellSendOptions): Promise<void> {
     const serialized = CellHandle.serialize(event as ClientCellValue);
-    await this.#enqueueOperation(() => this.#send(serialized, true));
+    await this.#enqueueOperation(() =>
+      this.#send(serialized, true, options?.awaitHandling === true)
+    );
   }
 
-  #send(event: FabricValue, propagateFailure = false): Promise<void> {
+  /**
+   * Sends `event` to the stream this handle names as the action `control`
+   * names, taken on a control the host draws itself, bound to that trusted
+   * surface and action. The runtime stamps the event with `native`
+   * provenance for them, replacing any `provenance` field `event` carries,
+   * and marks it renderer-trusted, so that it satisfies the UI contract of a
+   * write gated on that surface and action, such as a `TrustedActionWrite`,
+   * as a reviewed gesture on the pattern's rendered surface does. It is a
+   * trusted gesture, as that gesture is, so it meets what `grantSpaceAccess()`
+   * and `revokeSpaceAccess()` require of a handler's event. The write, and any
+   * change to an access list, is held to every other check.
+   *
+   * It resolves once the run of the stream's handler has committed, which
+   * under server execution is the consequence the served run recorded, and
+   * rejects with the reason when the runtime refuses the event, when that
+   * run's commit is refused, as it is for a write whose UI contract the event
+   * does not satisfy, and when the run throws or the event is dropped or
+   * refused admission. The surface and action are read once, here.
+   *
+   * This mints trusted events. The host calls it only from the control's
+   * real user-input path, with exactly the values the control displayed and
+   * the surface and action from the control's own definition, never from an
+   * event or a payload; and it keeps it, and the connection carrying it, out
+   * of reach of pattern code, loaded content, automation and agent
+   * interfaces, URL handlers, and restored state.
+   *
+   * @throws If `event` is not a record, or `control` names a blank surface or
+   *   action.
+   */
+  async sendReviewed(event: T, control: NativeUiControl): Promise<void> {
+    const serialized = CellHandle.serialize(event as ClientCellValue);
+    const { surface, action } = control;
+    await this.#enqueueOperation(() =>
+      this.#conn.request<RequestType.CellSendReviewed>({
+        type: RequestType.CellSendReviewed,
+        cell: this.ref(),
+        event: serialized,
+        surface,
+        action,
+      })
+    );
+  }
+
+  #send(
+    event: FabricValue,
+    propagateFailure = false,
+    awaitHandling = false,
+  ): Promise<void> {
     const request = this.#conn.request<RequestType.CellSend>({
       type: RequestType.CellSend,
       cell: this.ref(),
       event,
       ...(propagateFailure && { awaitCommit: true }),
+      ...(awaitHandling && { awaitHandling: true }),
     });
     if (propagateFailure) return request;
     return request.catch((error) => {
@@ -964,19 +1190,51 @@ export class CellHandle<T = unknown> {
     const writeGeneration = this.#writeGeneration;
     const updateGeneration = this.#updateGeneration;
     const startedAt = writeClock;
-    const { read, response, authoritative } = await this.#enqueueOperation(
-      async (queue) => {
-        const authoritativeGeneration = queue.authoritativeGeneration;
-        const response = await this.#conn.request<
-          RequestType.CellGet | RequestType.CellPull
-        >(request);
-        const read = this.#readOf(response);
-        const authoritative = updateGeneration === this.#updateGeneration &&
-          authoritativeGeneration === queue.authoritativeGeneration;
-        if (authoritative) this.#recordInQueue(queue, read);
-        return { read, response, authoritative };
-      },
+    const answer = await this.#enqueueOperation((queue) =>
+      this.#ask(queue, request, updateGeneration)
     );
+    return this.#takeAnswer(
+      request,
+      answer,
+      writeGeneration,
+      updateGeneration,
+      startedAt,
+    );
+  }
+
+  /**
+   * Helper for {@link #read} and {@link update}, which asks the worker with
+   * `request` in the turn `queue` gives it, and records an answer no update
+   * has overtaken as the base the queue's later operations start from.
+   */
+  async #ask(
+    queue: CellOperationQueue,
+    request: CellGetRequest | CellPullRequest,
+    updateGeneration: number,
+  ): Promise<ReadAnswer<T>> {
+    const authoritativeGeneration = queue.authoritativeGeneration;
+    const response = await this.#conn.request<
+      RequestType.CellGet | RequestType.CellPull
+    >(request);
+    const read = this.#readOf(response);
+    const authoritative = updateGeneration === this.#updateGeneration &&
+      authoritativeGeneration === queue.authoritativeGeneration;
+    if (authoritative) this.#recordInQueue(queue, read);
+    return { read, response, authoritative };
+  }
+
+  /**
+   * Helper for {@link #read} and {@link update}, which takes `answer`, the
+   * worker's answer to `request`, as {@link #read} describes: what it finds
+   * reaches subscribers where nothing newer has, and a refusal rejects.
+   */
+  #takeAnswer(
+    request: CellGetRequest | CellPullRequest,
+    { read, response, authoritative }: ReadAnswer<T>,
+    writeGeneration: number,
+    updateGeneration: number,
+    startedAt: number,
+  ): Readonly<T> | undefined {
     const latest = writeGeneration === this.#writeGeneration &&
       updateGeneration === this.#updateGeneration &&
       authoritative;

@@ -40,6 +40,8 @@ dashboard/
   config.ts     port, repo, tunable status thresholds
   palette.ts    THE ONE PLACE status colors and washes are chosen
   status-dot.ts THE ONE PLACE the status dot's shapes are chosen
+  green-star.ts THE ONE PLACE the green branch's star is drawn
+  green-branch.ts the commits each repository's green branch is at and was at
   detail-list.ts  the row list a tile's body is built from
   theme.ts      light/dark surface colors, theme switch markup and browser behavior
   lib.ts        shared helpers (github, memo, escapeHtml, sparkline, strip, …)
@@ -142,6 +144,24 @@ has not arrived yet, it shows the runs from the available snapshot in gray and
 names the pending source. If a later refresh fails, it keeps the last good
 snapshot for that source and shows the combined list in gray with the error.
 
+A repository can have a green branch: a branch its own CI moves to the newest
+commit of main whose tests passed. `GREEN_BRANCHES` in `config.ts` names it by
+repository; loom's is `main-green`. Each fetch of a repository's main snapshot
+also reads the updates of its green branch from GitHub's activity record for the
+repository, which lists every update of a branch, the ones CI makes through the
+API included. The first fetch reads back as far as the snapshot's age cutoff,
+each later one reads only the updates made since, and updates older than the
+cutoff are forgotten. A read that fails is logged and changes nothing, so the
+next one reads what it missed, and the snapshot is unaffected. Each run in the
+snapshot carries what the branch says of its commit. Every view that draws a run
+on main large enough to carry it marks such a commit with a green star: solid
+while the branch is at the commit, and hollow once the branch has moved past it.
+A commit the branch moved past without stopping at gets no star, although the
+branch contains it. The views are the rows of the recent main runs tile, the
+bars of a repository page's main-branch chart and the runs listed under it, and
+the heading of the commit CI Gantt page. The star's tooltip names the branch and
+says whether it is or was at the commit.
+
 Each event connection receives the current tile snapshot before it waits for new
 collections. The browser matches each tile in that snapshot with the tile of the
 same label on the page, leaving unchanged elements, focus, and scroll positions
@@ -206,7 +226,8 @@ regaining the network as well as on its own tick.
 
 A drill-down page can be kept current the same way. A route that declares
 `live: true` serves a page built by `livePage` in `live-page.ts`, which carries
-the client script and keeps everything that changes inside its `<main>` element.
+the client script and keeps everything that changes inside its `<main>` element,
+apart from the tab's favicon.
 The page opens `/events?page=<its path and query>`. On every serving tick the
 server sends a heartbeat down that stream and renders the page again by calling
 the route's handler, and it sends the new markup when that differs from what it
@@ -242,6 +263,15 @@ of the triangle instead of near its apex. The red favicon starts sad and
 becomes a crying face after the dashboard stays red for one continuous hour. The
 server retains the elapsed time across reloads. Returning below red resets it
 once every collector due in the same pass has finished.
+
+A repository's page and the CI jobs page show a status in their favicons the
+same way. A repository's page shows the repository's standing. The CI jobs page
+shows the color of the ci tile's latest collection. A live page takes its
+favicon from each rendering the server sends, so the favicon changes when the
+status does. While the status is gray, and on a live page with no status, the
+favicon is empty. These pages use the green, orange, and red faces. The crying
+face, which measures how long the whole dashboard has stayed red, appears only
+on the dashboard.
 
 After changing `favicon-artwork.ts`, regenerate the embedded PNGs and their
 content-based cache version from the dashboard package directory:
@@ -286,8 +316,48 @@ reads on down the list. The head is kept as deep as the deepest of its readers
 last read, and a reader that has not read for a day stops holding it. Each part
 of the dashboard that reads runs keeps its own `RunLists`, and so do CI
 history and its Gantt, and the benchmarks tile and its drill-down, so that a
-deep reading, such as CI history's after a restart, never holds up a shallower
-one of the same workflow.
+deep reading, such as CI history's the first time it reads a workflow, never
+holds up a shallower one of the same workflow. The publisher's activity, which
+reads a workflow no tile reads, reads through the tile context's.
+
+Each `RunLists` the server reads through keeps its heads in a file in the
+dashboard cache directory, so a restart does not cost a reading from scratch,
+and neither does a deploy when the cache directory is on a volume that outlasts
+it. The tiles that read runs through the shared tile context, the publisher's
+activity among them, share `fabric-wall-run-lists-tiles.json`; the ci tile keeps
+`fabric-wall-run-lists-ci.json`; the benchmarks tile and its drill-down keep
+`fabric-wall-run-lists-benchmarks.json` and
+`fabric-wall-run-lists-benchmarks-drill-down.json`; CI history and its Gantt
+keep `fabric-wall-run-lists-ci-history.json` and
+`fabric-wall-run-lists-ci-gantt.json`; and the commit CI Gantt's collector keeps
+`fabric-wall-run-lists-commit-ci-history.json` and
+`fabric-wall-run-lists-commit-ci-gantt.json`. A file holds, for each workflow,
+the runs of its head, whether they reach the end of the list, the oldest run
+each reader last read and when, and when the top of the list was last read. A
+`RunLists` takes a workflow's head from its file whenever it starts holding one,
+and reads the list as it reads one it holds: from the top until it reaches a run
+in the file, so a run deleted from the top of the list meanwhile is dropped.
+Every held run the reader wants that had not finished is read again by its id
+before the reader is given it, and the reader's filtered lists are read again,
+so a run started again meanwhile is found as it would have been. The file is
+written after every reading, including one that fails. A reading that reads
+further down the list records, as it goes, that its reader read that deep, so
+the runs it read are kept even when it fails, and a CI history walk that GitHub
+breaks off goes on from where it stopped, in the same process or the next. A
+head nobody has read for a day is dropped, so a dashboard that has been down for
+longer reads from scratch.
+
+Processes that share a file lock it while each puts its heads in place of the
+ones the file holds and replaces the file whole. Of two heads of one workflow,
+the one whose top was read last is kept. A head was whole when it was saved, and
+a head taken from the file reads its list from the top until it reaches a run it
+holds, so either one can be restored. Every version of the dashboard reads the
+file the same way, without a version number. A head is cut back above the first
+run that lacks a field the dashboard reads or holds one it cannot use, so the
+runs from there down are read from GitHub again; a head whose own fields cannot
+be used, or that records a time later than the present, is dropped; fields the
+dashboard does not know are ignored and not written back; and a file that cannot
+be read at all is replaced.
 
 GitHub lists runs newest first, and a newer run has the larger id. Runs land at
 the top of the list and can be deleted from anywhere in it between two
@@ -491,7 +561,8 @@ window the same parts follow one another down the page.
 - On the left, for each of its run sources, main before pull requests, a chart
   of its newest runs, as many as the recent main runs tile shows: a bar for
   each run, oldest on the left, as tall as the run took and colored by what it
-  concluded, with the dashboard's diamond over each failure. The charts share
+  concluded, with the dashboard's diamond over each failure and the green
+  branch's star over each commit it is or was at. The charts share
   the panel's height, so a taller window draws taller bars. A dashed line marks
   the median of the runs that passed. The chart's scale reaches the longest run
   but one in ten, and at least 1.7 times that median, so one run that hung does
@@ -501,21 +572,23 @@ window the same parts follow one another down the page.
   the bars, since the workflow's name in the heading links every run of it on
   GitHub. Under the chart, the three newest runs are listed: what each was for,
   what it concluded, how long it ran (linked to the commit's CI Gantt for labs
-  and loom), and when it started. A run on main is named by its commit and
-  links to the pull request that landed it, or to the commit when its message
-  names none; a pull request's run is named by its title and links to the run. A snapshot that has
-  not been read yet, or could not be brought up to date, says so.
+  and loom), and when it started. A run on main is named by its commit, and a
+  pull request's run by its title; either name links to the run, except that a
+  pull request number in it, such as "(#1234)", links to that pull request. A
+  snapshot that has not been read yet, or could not be brought up to date, says
+  so.
 - On the right, what needs attention: every job and tile that is not green,
   gray ones included, worst first, one to a line, each linked where its job or
-  tile links, or a line saying nothing needs attention. Under it, its workflows
-  in columns, worst first and those with no verdict last. Each has how long ago
-  its deciding run started, or, with no verdict, why; a link to the run in
-  progress when there is one; and, as its tooltip, what started that run, what
-  it concluded, and how long it ran.
+  tile links unless that is this page, or a line saying nothing needs
+  attention. Under it, its workflows in columns, worst first and those with no
+  verdict last. Each has how long ago its deciding run started, or, with no
+  verdict, why; a link to the run in progress when there is one; and, as its
+  tooltip, what started that run, what it concluded, and how long it ran.
 - Across the foot, its measures: every tile whose `repo` is this repository, as
   a card at most the width a tile has, in one row, with its label, headline, sub
-  line, and chart, linked where the tile links. A card's headline shrinks with
-  the card, so a narrow one still says it whole.
+  line, and chart, linked where the tile links unless that is this page, with
+  the tile's hint as the link's tooltip. A card's headline shrinks with the
+  card, so a narrow one still says it whole.
 
 A repository card or a measure takes its status's wash and texture, and a
 workflow its wash, only when it is orange or red, so that a page of passing
@@ -549,7 +622,7 @@ to the next; a view supplies everything under it.
 | `extra` | trusted inline HTML under the value (sparkline / strip / list) |
 | `duration` | a span in milliseconds, rendered (via `humanSpan`) in the chart's bottom-left corner |
 | `aside` | trusted inline HTML minor header facet (e.g. an MTD or a "running" badge) |
-| `href` | makes the whole tile a link (an `http…` link opens a new tab) |
+| `href` | makes the whole tile a link (an `http…` link opens a new tab). An anchor cannot hold another, so when `extra` holds links of its own, the whole tile but `extra` is the link, and the links in `extra` go where they point. `value` and `aside` hold no links when there is an `href` |
 | `hint` | tooltip for the top-right `↗` drill arrow and accessible link description, e.g. `"commits ↗"` |
 
 ## Tiles
@@ -561,12 +634,12 @@ installation with the same permissions; see [Credentials](#credentials).
 | tile | source | needs |
 |---|---|---|
 | ci | every job the organization runs outside pull requests, in every repository the token can see that is not archived: for each active workflow, the newest run on that repository's own default branch that passed or failed, however many runs that judged nothing came after it, among the workflow's newest thousand runs of any branch. The headline is `passing` when every one of them passes, the repository's name when a single job is failing, as in `loom failing`, and a count when more than one is, as in `3 failing`. The header carries how many jobs the headline speaks for and how many repositories they came from. The body lists every failing job with its conclusion and how long ago it ran; while the tile is not red it also lists the labs and loom main builds, so the two builds the team watches stay visible, and a red tile lists only its failing jobs. A failure older than `CI_FAILURE_FRESH_HOURS` is orange rather than red: it is still failing and still counted, and it is no longer the thing that just broke. A failure made before the workflow's file last changed does not count at all, since that is what a job someone stopped rather than fixed looks like. A repository whose workflow listing cannot be read is listed too, and turns the tile orange rather than being passed over. The rows carry no links of their own, because the tile itself opens the page below | `GH_TOKEN` (or `GITHUB_TOKEN`) with Actions read across the organization |
-| CI jobs → `/ci` | every job the ci tile read, at full width: the repository and workflow, what started the deciding run (`push`, `schedule`, `workflow_dispatch`, and the rest, as GitHub names them), what that run concluded, how long it took, when it started, and how long ago that was. Every column sorts, once up and once down, on the value behind the cell rather than on what the cell says, so durations and times order as the measurements they are; the page opens worst first and a column of equal values keeps that order beneath it. Workflows with no verdict are listed under the table rather than through it, each with why: no completed run on the default branch, which is what a workflow only a pull request triggers looks like; runs that all judged nothing; or a workflow changed since it failed. So are repositories whose workflow listing could not be read. A workflow with a run in progress on its default branch carries a blue dot after its name, which links to that run, and the summary above the table counts them. Only a run in progress carries one: a queued run, or one waiting for approval, does not. It renders the tile's own last collection rather than asking GitHub again, so opening it costs no requests and shows exactly what the tile shows, running dots included: a run that starts or ends between collections shows at the next one. The page is live: an open copy shows each collection within a serving tick of the tile finishing it, without reloading, and in whatever order the reader sorted it | none |
-| labs ci trust, labs ci duration | GitHub Actions (`deno.yml` in `commonfabric/labs`), via the REST API. Trust reads the runs on main; duration reads the pull request runs | `GH_TOKEN` (or `GITHUB_TOKEN`) |
+| CI jobs → `/ci` | every job the ci tile read, at full width: the repository, linked to its page, and the workflow, what started the deciding run (`push`, `schedule`, `workflow_dispatch`, and the rest, as GitHub names them), what that run concluded, how long it took, when it started, and how long ago that was. Every column sorts, once up and once down, on the value behind the cell rather than on what the cell says, so durations and times order as the measurements they are; the page opens worst first and a column of equal values keeps that order beneath it. Workflows with no verdict are listed under the table rather than through it, each with why: no completed run on the default branch, which is what a workflow only a pull request triggers looks like; runs that all judged nothing; or a workflow changed since it failed. So are repositories whose workflow listing could not be read, each linked to its page and to its actions on GitHub. A workflow with a run in progress on its default branch carries a blue dot after its name, which links to that run, and the summary above the table counts them. Only a run in progress carries one: a queued run, or one waiting for approval, does not. It renders the tile's own last collection rather than asking GitHub again, so opening it costs no requests and shows exactly what the tile shows, running dots included: a run that starts or ends between collections shows at the next one. The page is live: an open copy shows each collection within a serving tick of the tile finishing it, without reloading, and in whatever order the reader sorted it | none |
+| labs ci trust, labs ci duration | GitHub Actions (`deno.yml` in `commonfabric/labs`), via the REST API. Trust reads the runs on main; duration reads the pull request runs. Each trust tile opens its repository's page, and each cell of its strip opens its run | `GH_TOKEN` (or `GITHUB_TOKEN`) |
 | loom ci trust, loom ci duration | the same two tiles for `commonfabric/loom` (`test-fast.yml`) | `GH_TOKEN` (read access to loom); optional `DASHBOARD_LOOM_REPO` |
 | weaver ci trust, weaver ci duration | the same two tiles for `commonfabric/commonfabric-weaver` (`ci.yml`). The duration tile is not a link, because the history views cover only labs and loom | `GH_TOKEN` (read access to weaver); optional `DASHBOARD_WEAVER_REPO` |
-| recent main runs | Labs and Loom main-run snapshots, refreshed independently and merged chronologically whenever either arrives; each row is tagged with its repo | `GH_TOKEN` |
-| commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent main runs | `GH_TOKEN` |
+| recent main runs | Labs and Loom main-run snapshots, refreshed independently and merged chronologically whenever either arrives; each row is tagged with its repo and links to its run, except that a pull request number in its title, such as "(#1234)", links to that pull request, and its arrow links to the pull request that landed the commit, or to the commit when its title names none; a row whose commit the repository's green branch is or was at opens with a star, read from GitHub's activity record for the repository | `GH_TOKEN` |
+| commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent main runs; the commit wears the green branch's star when the branch is or was at it | `GH_TOKEN` |
 | CI duration history → `/bench?view=ci` | labs and loom job, shard-group, and end-to-end workflow duration trends. The labs and loom duration tiles open their repository's view, which charts runs on main rather than the pull request runs the tiles measure | `GH_TOKEN` |
 | CI run Gantt → `/bench?view=gantt` | detailed labs or loom job phases from `scripts/ci-gantt.ts`, backed by the CI history cache | `GH_TOKEN` |
 | flaky tests | how many tests the test-selection publisher measured disagreeing with themselves often enough to keep off pull requests, read from the newest selection manifest. The headline names what it counts, so it reads `25 flaky tests`, or `no flaky tests` when there are none. The line under it says what the count was drawn from: the span of history a flake share is measured over, which the manifest's `FLAKE_WINDOW_DAYS` dial names, and how long ago the publisher measured. The sparkline plots the count across every available manifest. Which tests they are is on the page behind it. Amber from one, red from ten. Gray with a dash when no manifest is available, the newest readable manifest has an empty corpus, or none of the manifests it looked at can be read, naming the shape it found in that last case. Readable history remains visible when the newest object cannot be read | optional `GH_TOKEN` for publisher activity |
@@ -1238,7 +1311,7 @@ it.
 | `PROD_PROXY` | production | optional proxy for reaching tailnet hosts. Use `socks5h://127.0.0.1:1055` with the Tailscale userspace proxy. Also accepts `socks5://`, `http://`, and `https://`; invalid values and URLs containing credentials fail closed instead of fetching directly. Setting it also moves the tailnet name checks onto the proxy, since a dashboard that needs a proxy cannot resolve MagicDNS names itself. The bastion check needs a SOCKS5 proxy to do that, and stays gray over an `http://` or `https://` one. |
 | `COMMON_FABRIC_URL` | production | override the public-site URL (e.g. the `www` host if the apex redirects). |
 | `DASHBOARD_REPO` | CI tiles, github users | which repo the CI tiles read. Its owner is the organization the **github users** tile reads (default `commonfabric/labs`). |
-| `DASHBOARD_CACHE_DIR` | server caches | directory for all persistent dashboard cache files (default: the platform temp directory). |
+| `DASHBOARD_CACHE_DIR` | server caches | directory for all persistent dashboard cache files (default: the platform temp directory), including the `fabric-wall-run-lists-*.json` files that keep the run-list reader's runs across restarts. |
 | `SIGNOZ_UI_URL` | prod errors, dau | browser-facing SigNoz URL for the explorer pop-outs: **prod errors** links to `/logs/logs-explorer` and **dau** to `/traces-explorer` under it. Defaults to `SIGNOZ_URL` when that is a public `https://` URL. An in-cluster `http://` URL, which a browser cannot reach, leaves both tiles with no pop-out at all, so set this whenever the server reaches SigNoz over one. |
 | `PROD_SERVICE` | prod errors, dau | the `service.name` production reports under in SigNoz, which both trace-reading tiles scope to. Defaults to `toolshed-production`. A name outside `[A-Za-z0-9._-]` is ignored, since it lands inside a query expression. |
 | `DAU_EXCLUDE_DIDS` | dau | comma-separated identity DIDs to leave out of the count — the server's own identity, `MEMORY_SERVICE_DIDS`, background services. Until it is set the count is an upper bound. See [dau](#dau) below. |
@@ -1515,8 +1588,8 @@ Notes:
     CI history reads the workflow's runs through the run-list reader, back to
     the first run created a day before the window opens, and takes the
     successful pushes to main from them. For labs that is around a hundred pages
-    the first time after the dashboard starts, and after that only the runs
-    that landed since the last collection. A Gantt of every run, or of every
+    the first time, and after that, across restarts too, only the runs that
+    landed since the last collection. A Gantt of every run, or of every
     main push whatever it concluded, reads the same runs, stopping at 150 runs
     or at the first run created a day before the 45-day window, and charts the
     runs that started inside it.

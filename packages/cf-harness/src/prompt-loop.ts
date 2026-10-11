@@ -226,7 +226,10 @@ import { projectHarnessResearchKitForModel } from "./research/model-projection.t
 import { isBrowserScreenshotOutput } from "./tools/browser.ts";
 import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
-import { loomCommandModelContextObservation } from "./tools/loom-commands.ts";
+import {
+  loomCommandModelContextObservation,
+  runCommandModelView,
+} from "./tools/loom-commands.ts";
 import { loomRetrievalModelContextObservation } from "./tools/loom-retrieval.ts";
 import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
 import {
@@ -260,7 +263,8 @@ import {
   type WebFetchToolOutput,
 } from "./tools/web-fetch.ts";
 
-const DEFAULT_MAX_MODEL_TURNS = 8;
+/** Root model turns a run gets when its host names no budget. */
+export const DEFAULT_MAX_MODEL_TURNS = 32;
 const BASH_CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";
 
 export interface CreateHarnessPromptLoopOptions
@@ -2123,6 +2127,9 @@ interface InvokedToolCallMessages {
   /** The admitted user-facing result before model-bound handle substitution. */
   taskOutcome?: HarnessTaskOutcome;
 
+  /** The call was a `submit_result` whose value the schema accepted. */
+  resultAccepted?: true;
+
   followupMessages?: readonly HarnessTranscriptMessage[];
   cfcModelContextObservations?:
     readonly HarnessCfcModelContextObservationInput[];
@@ -3238,7 +3245,7 @@ export class CfHarnessPromptLoop {
       // it — the acquiring parent, or a child sharing a handed-in runtime —
       // has nothing to run and is not backed.
       acquiredSkillsAvailable: acquiredSkillScriptBacking(
-        this.engine.ownedSandboxConfig ?? this.engine.ownedRunscSandboxConfig,
+        this.engine.ownedRunscSandboxConfig,
         this.engine.getRunState().acquiredSkills?.skills,
       ),
       docsCorpusAvailable: this.engine.docsCorpusAvailable,
@@ -3248,6 +3255,15 @@ export class CfHarnessPromptLoop {
       structuredResultAvailable: this.engine.structuredResultAvailable,
       clientActionsAvailable: this.engine.clientActionsAvailable,
     };
+  }
+
+  /**
+   * Whether the run must still name a piece before it ends: it requires one,
+   * has not browsed, and holds no naming receipt.
+   */
+  #pieceOutputOwed(): boolean {
+    return this.#requirePieceOutput && !this.#browsed &&
+      (this.engine.getRunState().assignedPieces?.length ?? 0) === 0;
   }
 
   #parentToolAllowance(): HarnessParentToolAllowance {
@@ -3915,7 +3931,8 @@ export class CfHarnessPromptLoop {
     for (const message of transcript) {
       await options.onTranscriptEvent?.({ message, transcript });
     }
-    // A normal final answer or an admitted finish_task ends the model loop.
+    // A normal final answer, an admitted finish_task, or an accepted
+    // submit_result ends the model loop.
     let finalAssistantText: string | undefined;
     let taskOutcome: HarnessTaskOutcome = { outcome: "completed" };
     try {
@@ -3975,15 +3992,22 @@ export class CfHarnessPromptLoop {
         modelTurns += 1;
         const finalizing = this.#finalizeOnTurnLimit &&
           modelTurns === maxModelTurns;
-        if (
-          finalizing ||
-          (this.#finalizeOnTurnLimit && modelTurns === maxModelTurns - 2)
-        ) {
+        // Every run is warned two turns out, so a model can wrap up rather
+        // than be cut off; only a finalizing run also gets the last turn's
+        // notice, since only it holds that turn back for the answer.
+        if (finalizing || modelTurns === maxModelTurns - 2) {
           const budgetMessage: HarnessTranscriptMessage = {
             role: "user",
             content: finalizing
-              ? "Host turn budget: provide your final response now. Tools are unavailable. Summarize verified findings with source citations, explicitly identify unread material and uncertainty, and do not claim exhaustive coverage. This notice applies only to this user turn; subsequent user requests have a fresh budget."
-              : "Host turn budget: two root turns remain after this call, with the last reserved for your final response. Prioritize essential source reads and prepare verified findings and remaining gaps. This notice applies only to this user turn; subsequent user requests have a fresh budget.",
+              ? "Host turn budget: provide your final response now. Tools are unavailable. Report what you established and how, name what remains unchecked or uncertain, and do not claim the task is complete if it is not. This notice applies only to this user turn; subsequent user requests have a fresh budget."
+              : this.#finalizeOnTurnLimit
+              ? "Host turn budget: two root turns remain after this call, with the last reserved for your final response. Spend the next on what matters most, and prepare what you established and what remains open. This notice applies only to this user turn; subsequent user requests have a fresh budget."
+              : `Host turn budget: two model turns remain after this call, and the run fails if they end without your final response. Stop gathering and finish.${
+                // A run that returns through `submit_result` ends on the
+                // turn whose submission is accepted.
+                this.#allowedToolIds.has("submit_result")
+                  ? " Call submit_result on the next turn; an accepted result ends the run."
+                  : ""} This notice applies only to this user turn; subsequent user requests have a fresh budget.`,
           };
           turnNotices.add(budgetMessage);
           transcript.push(budgetMessage);
@@ -4086,10 +4110,7 @@ export class CfHarnessPromptLoop {
               "The model returned an empty assistant response with no tool calls",
             );
           }
-          if (
-            !finalizing && this.#requirePieceOutput && !this.#browsed &&
-            (this.engine.getRunState().assignedPieces?.length ?? 0) === 0
-          ) {
+          if (!finalizing && this.#pieceOutputOwed()) {
             const correction: HarnessTranscriptMessage = {
               role: "user",
               content:
@@ -4180,6 +4201,17 @@ export class CfHarnessPromptLoop {
         // Every invocation has settled, and none rejected: a rejection is
         // the turn's failure and was thrown above.
         const invokedToolCalls = await Promise.all(invocations);
+        // An accepted result is the run's return, so the turn that made it
+        // is the run's last: the model is asked for nothing further, and a
+        // turn it would have spent cannot lose the result. The words written
+        // beside the call are the final answer, which may be empty. A run
+        // that still owes a piece keeps going until it names one.
+        if (
+          invokedToolCalls.some((invoked) => invoked.resultAccepted === true) &&
+          !this.#pieceOutputOwed()
+        ) {
+          finalAssistantText = assistantMessage.content;
+        }
         for (const invokedToolCall of invokedToolCalls) {
           const toolMessage = invokedToolCall.toolMessage;
           const outcome = invokedToolCall.taskOutcome;
@@ -5287,9 +5319,12 @@ export class CfHarnessPromptLoop {
         "taskOutcome" in result.output
       ? readHarnessTaskOutcome(result.output.taskOutcome)
       : undefined;
+    const resultAccepted = toolId === "submit_result" &&
+      isObjectNotArray(result.output) && result.output.status === "ok";
     return {
       toolMessage,
       ...(taskOutcome !== undefined ? { taskOutcome } : {}),
+      ...(resultAccepted ? { resultAccepted } : {}),
       ...labeled,
     };
   }
@@ -5601,15 +5636,16 @@ export class CfHarnessPromptLoop {
     if (toolId === "run_command" && isObjectNotArray(output)) {
       // A command's answer is measured like a retrieval row: the model sees
       // the entry, and the answer's label stays on the artifact as the
-      // observation the run's model context accumulates.
-      const { cfc: _cfc, ...publicOutput } = output;
+      // observation the run's model context accumulates — for a batch, each
+      // result's entry and one observation joining their labels.
+      const view = runCommandModelView(output);
       const observation = loomCommandModelContextObservation(
         output,
         resultRef,
         toolCallId,
       );
       return {
-        output: stripInternalToolFields(publicOutput),
+        output: stripInternalToolFields(view.output),
         ...(observation !== undefined
           ? { cfcModelContextObservations: [observation] }
           : {}),
@@ -5617,12 +5653,12 @@ export class CfHarnessPromptLoop {
           createHarnessTranscriptOmissionRuleRecord(
             "artifact-only",
             resultRef,
-            presentFieldPointers(output, ["cfc"]),
+            view.artifactOnlyPointers,
           ),
           createHarnessTranscriptOmissionRuleRecord(
             "model-context-truncation",
             resultRef,
-            output.truncated === true ? ["/entry"] : [],
+            view.truncationPointers,
           ),
         ),
       };
@@ -5890,15 +5926,18 @@ export class CfHarnessPromptLoop {
       runId: childRunId,
       lineage: childLineage,
       // What sandbox a child gets depends on how this run's was made: see
-      // `childSandboxOptions`. Under the direct runsc driver every child builds
-      // a runtime of its own; under Docker a child shares this run's unless it
-      // mounts an acquired skill.
+      // `childSandboxOptions`. Where this engine built its runtime, every
+      // child builds a runtime of its own; where it was handed one, the
+      // child shares it.
       ...childSandboxOptions({
         sandbox: this.engine.sandbox,
-        ownedSandboxConfig: this.engine.ownedSandboxConfig,
         ownedRunscSandboxConfig: this.engine.ownedRunscSandboxConfig,
-        configuredSandbox: this.engine.config.sandbox,
       }, childAcquiredSkill),
+      // Whichever of those it is, the child runs on the runtime this run's
+      // entrypoint selected, and records that it was selected the same way.
+      ...(this.engine.sandboxRuntimeChoice !== undefined
+        ? { sandboxRuntimeChoice: this.engine.sandboxRuntimeChoice }
+        : {}),
       // The parent's own record, narrowed to the one skill. Narrowed rather
       // than rebuilt so the child's record keeps the time the acquisition was
       // written, which is what it is a record of.

@@ -105,7 +105,10 @@ records its own DID:
   on a client, the user whose runtime is resolving the name; on a serving
   runtime, the run's demanding identity. A serving run with no such identity
   resolves no name and creates no space, rather than creating one owned by the
-  service.
+  service. Under server execution a client creates no space at all: its run of
+  a handler is a speculative echo of the serving runtime's, which creates the
+  space. The client resolves a name only through its record, and its echo of a
+  handler naming one that has none withdraws.
 
   An allocation record is one document per name, addressed by a canonical cause
   over the calling space and the name, and immutable once written. A
@@ -119,6 +122,17 @@ records its own DID:
 
 - **A user's Home site table.** Each entry maps a space DID to the origin
   serving it. This table already exists.
+
+  A runtime learns where that origin serves Memory from the origin itself,
+  not from its own deployment. A runtime whose deployment publishes a memory
+  URL (a memory router) reads `/api/meta` on an entry's origin when the origin
+  is neither its API host nor its memory URL, once per origin for the runtime's
+  lifetime and for at most 64 origins, and opens the space's Memory on the
+  `memoryUrl` the origin publishes, or on the origin itself when it publishes
+  none; the space's HTTP work goes to the origin. An origin whose memory host
+  cannot be read leaves its spaces on no route, since the runtime's own router
+  is not where another deployment keeps its spaces. A runtime whose deployment
+  publishes no memory URL opens Memory on the entry's origin, as before.
 
 The allocation record is what makes repeated resolution converge. A handler that
 runs more than once for one logical event reads the record its first run wrote

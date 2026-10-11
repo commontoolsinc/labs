@@ -29,14 +29,16 @@ import {
   minutePrecision,
   shortName,
 } from "./ci-jobs-page.ts";
-import { LOOM_REPO, RECENT_DISPLAY, REPO, REPOS_PATH } from "./config.ts";
-import { landingHref, median, runDurationMs } from "./lib.ts";
+import { LOOM_REPO, RECENT_DISPLAY, REPO } from "./config.ts";
+import { median, pullRequestLinks, runDurationMs } from "./lib.ts";
+import { GREEN_STAR_RULES, greenStar, greenWords } from "./green-star.ts";
 import { type LivePageContent, livePageResponse } from "./live-page.ts";
 import { STATUS_EDGE, STATUS_WASH } from "./palette.ts";
 import { textureRules } from "./render.ts";
+import { repoPageHref, REPOS_PATH } from "./repo-page-href.ts";
 import { statusDotRules } from "./status-dot.ts";
 import { statusLayer } from "./theme.ts";
-import { chartBody, newTab } from "./tile-render.ts";
+import { chartBody, linkedBox, newTab } from "./tile-render.ts";
 import {
   compactSpan,
   escapeHtml,
@@ -90,9 +92,6 @@ const SCALE_PERCENTILE = 0.9;
 /** The least a chart's scale reaches, as a multiple of its passing median. */
 const MEDIAN_HEADROOM = 1.7;
 
-const hrefOf = (name: string): string =>
-  `${REPOS_PATH}?${new URLSearchParams({ name })}`;
-
 const github = (repo: Repository): string =>
   `https://github.com/${escapeHtml(repo.full)}`;
 
@@ -134,7 +133,16 @@ function repositories(board: Board, jobs: CiJobs | undefined): Repository[] {
       false,
     measures: board.tiles.filter((tile) =>
       tile.repo !== undefined && shortName(tile.repo) === name
-    ).map((tile) => ({ tile, view: board.view(tile) })),
+    ).map((tile) => {
+      // A tile that links to this page links nowhere from it.
+      const view = board.view(tile);
+      return {
+        tile,
+        view: view?.href === repoPageHref(name)
+          ? { ...view, href: undefined, hint: undefined }
+          : view,
+      };
+    }),
     runs: ordered.filter((source) => shortName(source.repo) === name).map((
       source,
     ) => ({
@@ -289,6 +297,7 @@ const STATUS_TEXT = (["good", "warn", "bad", "unknown"] as const).map((
 const STYLES = `
   ${tileContentRules(SPARKLINE_HEIGHT)}
   ${statusDotRules(9)}
+  ${GREEN_STAR_RULES}
   ${textureRules(["hero", ...CARDS])}
   ${STATUS_SURFACES}
   ${STATUS_TEXT}
@@ -299,7 +308,7 @@ const STYLES = `
   .switch select:hover{border-color:var(--border-hover);color:var(--text-strong)}
   /* A box that is a link reads as the box it is; a link in prose reads as
      a link. */
-  .owner a,.concern,.bar,.latest .what,.latest .result,.card,.wf a,.repo-card,.names a{color:inherit;text-decoration:none}
+  .owner a,.concern,.bar,.latest .what a,.latest .result,.card,.wf a,.repo-card,.names a{color:inherit;text-decoration:none}
   .latest .took a,.lede a,h2 .meta a{color:var(--accent);text-decoration:none}
   h2{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;font:600 13px/1.3 -apple-system,Segoe UI,Roboto,sans-serif;letter-spacing:0;color:var(--text);margin:18px 0 8px}
   h2 .meta{font-size:11px;font-weight:400;color:var(--text-muted)}
@@ -339,13 +348,17 @@ const STYLES = `
   /* A snapshot's runs: a bar for each, as tall as the run took. */
   .runs section+section{margin-top:18px}
   .chart-frame{max-width:calc(var(--bars) * 24px + 64px);margin-left:auto}
-  .runs-chart{position:relative;height:96px;margin-right:64px;border-bottom:1px solid var(--border-strong)}
+  /* The top margin holds a star over the diamond of a failed run cut square. */
+  .runs-chart{position:relative;height:96px;margin:24px 64px 0 0;border-bottom:1px solid var(--border-strong)}
   .bars{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:flex-end;gap:2px}
   .bar{flex:1 1 0;max-width:22px;min-width:2px;border-radius:4px 4px 0 0;position:relative;background:var(--status-unknown);opacity:.9;transition:opacity .1s}
   .bar:hover{opacity:1;outline:1px solid var(--text-muted);outline-offset:1px}
   .bar.green{background:var(--status-good)}.bar.red{background:var(--status-bad)}.bar.run{background:var(--running);opacity:.6}
   .bar.over{border-radius:0}
   .bar.red::after{content:"";position:absolute;left:50%;top:-10px;width:7px;height:7px;transform:translateX(-50%);background:var(--status-bad);clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)}
+  /* A star stands over its bar, and over the diamond of a failed run. */
+  .bar span.green-star{position:absolute;left:50%;bottom:calc(100% + 2px);transform:translateX(-50%);margin:0;font-size:11px}
+  .bar.red span.green-star{bottom:calc(100% + 12px)}
   .median{position:absolute;left:0;right:0;border-top:1px dashed var(--text-faint);pointer-events:none}
   .median span{position:absolute;left:100%;top:0;transform:translateY(-50%);margin-left:10px;font-size:10px;line-height:1.25;color:var(--text-muted);white-space:nowrap}
   .chart-foot{margin-right:64px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:5px;font-size:10px;color:var(--text-muted)}
@@ -354,8 +367,10 @@ const STYLES = `
   .key.green{background:var(--status-good)}.key.red{background:var(--status-bad)}.key.run{background:var(--running)}
   .latest{list-style:none;margin:8px 0 0;padding:0}
   .latest li{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;align-items:baseline;gap:10px;padding:4px 0;border-top:1px solid var(--divider);font-size:12px}
-  .latest .what{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .latest .what:hover,.latest .took a:hover{color:var(--accent)}
+  .latest .what{color:var(--text);overflow:clip;overflow-clip-margin:3px;text-overflow:ellipsis;white-space:nowrap}
+  .latest .what:has(:focus-visible){white-space:normal}
+  .latest .what .pr{color:var(--accent)}.latest .what .pr:hover{text-decoration:underline}
+  .latest .what a:hover,.latest .took a:hover{color:var(--accent)}
   .latest .result{color:var(--text-muted)}
   .latest .took,.latest time{color:var(--text-muted);font-variant-numeric:tabular-nums;text-align:right}
   .latest time{min-width:40px}
@@ -374,7 +389,7 @@ const STYLES = `
   /* The measures: every tile that reports on the repository alone, in a row. */
   .measures{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
   .card{position:relative;isolation:isolate;overflow:hidden;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:11px 13px;min-width:0}
-  a.card:hover{border-color:var(--border-hover)}
+  a.card:hover,.card:has(>.tile-head:hover){border-color:var(--border-hover)}
   .card .lbl{font-size:10px;margin-bottom:4px}
   /* A card's headline shrinks with the card, so a narrow one still says it
      whole. */
@@ -434,7 +449,7 @@ const SCRIPT = `
 
 function switcher(repos: readonly Repository[], current?: string): string {
   const options = repos.map((repo) =>
-    `<option value="${escapeHtml(hrefOf(repo.name))}"${
+    `<option value="${escapeHtml(repoPageHref(repo.name))}"${
       repo.name === current ? " selected" : ""
     }>${escapeHtml(repo.name)}</option>`
   ).join("");
@@ -583,10 +598,11 @@ const runTitle = (run: Run, source: RunSource): string =>
  * that passed drawn across and named in the gutter to its right. The scale's
  * top is the longest run but one in ten, so a single run that hung does not
  * flatten the rest, and at least MEDIAN_HEADROOM times the median, so the
- * runs around it keep room to differ; a bar past the top is cut square. Each
- * bar links to its run for a pointer, and the keyboard passes over it, since
- * the list under the chart links the newest runs and the section's heading
- * links every run on GitHub.
+ * runs around it keep room to differ; a bar past the top is cut square. A
+ * star stands over a bar whose commit the repository's green branch is or
+ * was at. Each bar links to its run for a pointer, and the keyboard passes
+ * over it, since the list under the chart links the newest runs and the
+ * section's heading links every run on GitHub.
  */
 function runsChart(shown: readonly Run[], source: RunSource, now: number) {
   const took = shown.map((run) => tookMs(run, now) ?? 0);
@@ -601,16 +617,19 @@ function runsChart(shown: readonly Run[], source: RunSource, now: number) {
     .reverse().map(({ run, took }) => {
       const { dot, text } = runOutcome(run);
       const height = Math.max(4, Math.min(100, (took / top) * 100));
-      const title = `${runTitle(run, source)} — ${text} · ${
-        humanDuration(took)
-      } · ${compactSpan(now - Date.parse(run.run_started_at))} ago`;
+      const title = [
+        `${runTitle(run, source)} — ${text}`,
+        humanDuration(took),
+        `${compactSpan(now - Date.parse(run.run_started_at))} ago`,
+        ...(run.green === undefined ? [] : [greenWords(run.green)]),
+      ].join(" · ");
       return `<a class="bar ${dot}${
         took > top ? " over" : ""
       }" style="height:${height.toFixed(1)}%" href="${
         escapeHtml(run.html_url)
       }" target="_blank" rel="noopener" tabindex="-1" title="${
         escapeHtml(title)
-      }"></a>`;
+      }">${greenStar(run.green)}</a>`;
     }).join("");
   const line = middle === undefined ? "" : `<div class="median" style="bottom:${
     ((middle / top) * 100).toFixed(1)
@@ -650,11 +669,6 @@ function latestRow(
 ): string {
   const { dot, text } = runOutcome(run);
   const title = runTitle(run, source);
-  // A run on main links to the change that landed it; a pull request's run
-  // links to the run.
-  const change = source.scope === "main"
-    ? landingHref(title, run.head_sha, source.repo)
-    : run.html_url;
   const took = tookMs(run, now);
   // The commit Gantt charts the labs and loom runs alone.
   const gantt = source.repo === REPO || source.repo === LOOM_REPO
@@ -668,11 +682,9 @@ function latestRow(
       escapeHtml(run.head_sha.slice(0, 7))
     }">${humanDuration(took)}</a>`;
   const started = Date.parse(run.run_started_at);
-  return `<li><span class="dot ${dot}"></span><a class="what" href="${
-    escapeHtml(change)
-  }" target="_blank" rel="noopener">${
-    escapeHtml(title)
-  }</a><a class="result" href="${
+  return `<li><span class="dot ${dot}"></span><span class="what">${
+    greenStar(run.green)
+  }${pullRequestLinks(title, source.repo, run.html_url)}</span><a class="result" href="${
     escapeHtml(run.html_url)
   }" target="_blank" rel="noopener">${
     escapeHtml(text)
@@ -732,20 +744,20 @@ function measureCard({ tile, view }: Repository["measures"][number]): string {
   const hint = view?.href === undefined
     ? ""
     : `<span class="drill" aria-hidden="true">↗</span>`;
-  const inner = `<div class="texture"></div><p class="lbl">${dot(status)} ${
-    escapeHtml(tile.label)
-  }<span class="spacer"></span>${view?.aside ?? ""}${hint}</p><p class="big said-${status}">${
-    view?.value ?? "—"
-  }</p><p class="sub">${
-    escapeHtml(view === undefined ? "not collected yet" : view.sub ?? "")
-  }</p><div class="card-plot">${
-    view === undefined ? "" : chartBody(view)
-  }</div>`;
-  return view?.href === undefined
-    ? `<div class="card ${status}" data-focus-key="${escapeHtml(tile.label)}">${inner}</div>`
-    : `<a class="card ${status}" data-focus-key="${escapeHtml(tile.label)}" href="${
-      escapeHtml(view.href)
-    }"${newTab(view.href)}>${inner}</a>`;
+  return linkedBox(
+    `class="card ${status}" data-focus-key="${escapeHtml(tile.label)}"`,
+    `<p class="lbl">${dot(status)} ${
+      escapeHtml(tile.label)
+    }<span class="spacer"></span>${view?.aside ?? ""}${hint}</p><p class="big said-${status}">${
+      view?.value ?? "—"
+    }</p><p class="sub">${
+      escapeHtml(view === undefined ? "not collected yet" : view.sub ?? "")
+    }</p>`,
+    `<div class="card-plot">${view === undefined ? "" : chartBody(view)}</div>`,
+    view?.href === undefined
+      ? undefined
+      : { href: view.href, hint: view.hint },
+  );
 }
 
 /**
@@ -856,7 +868,7 @@ function repoCard(repo: Repository, now: number): string {
       : `<span class="rc-worst">${escapeHtml(worst.subject)} · ${worst.detail}</span>`
   }`;
   return `<a class="repo-card ${status}" href="${
-    escapeHtml(hrefOf(repo.name))
+    escapeHtml(repoPageHref(repo.name))
   }"><div class="texture"></div><span class="rc-name">${dot(status)}${
     escapeHtml(repo.name)
   }</span>${trouble}<span class="rc-facts">${escapeHtml(facts)}</span></a>`;
@@ -881,7 +893,7 @@ function indexBody(repos: readonly Repository[], now: number): string {
   const names = (members: readonly Repository[], quiet: boolean) =>
     `<div class="names${quiet ? " quiet-names" : ""}">${
       members.map((repo) =>
-        `<a href="${escapeHtml(hrefOf(repo.name))}">${
+        `<a href="${escapeHtml(repoPageHref(repo.name))}">${
           quiet ? "" : dot(standing(repo))
         }${escapeHtml(repo.name)}</a>`
       ).join("")
@@ -919,15 +931,16 @@ export function repoPageResponse(
   const name = url.searchParams.get("name");
   const content = (
     title: string,
-    current: string | undefined,
+    current: Repository | undefined,
     body: string,
   ): LivePageContent => ({
     title: escapeHtml(title),
     heading: `<a href="${REPOS_PATH}">Repositories</a>`,
     styles: STYLES,
-    head: switcher(repos, current),
+    head: switcher(repos, current?.name),
     body,
     script: SCRIPT,
+    status: current && standing(current),
   });
   if (name === null) {
     return livePageResponse(
@@ -950,7 +963,7 @@ export function repoPageResponse(
     );
   }
   return livePageResponse(
-    content(repo.name, repo.name, repositoryBody(repo, jobs, now)),
+    content(repo.name, repo, repositoryBody(repo, jobs, now)),
   );
 }
 

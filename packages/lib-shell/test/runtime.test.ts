@@ -350,44 +350,6 @@ describe("RuntimeInternals", () => {
       }
     });
 
-    it("caches a recreated root as started", async () => {
-      const client = new MockRuntimeClient();
-      const recreated = { id: "recreated-root" };
-      const starts: Array<boolean | undefined> = [];
-      client.getSpaceRootPattern = (
-        space: DID,
-        options?: { start?: boolean },
-      ) => {
-        client.spaceRootCalls.push(space);
-        starts.push(options?.start);
-        return Promise.resolve({ id: "fetched-root" } as never);
-      };
-      (client as unknown as {
-        recreateSpaceRootPattern: (space: DID) => Promise<unknown>;
-      }).recreateSpaceRootPattern = () => Promise.resolve(recreated);
-      const runtime = new RuntimeInternals(client as any);
-      const space = "did:key:z6Mk-root-recreate" as DID;
-
-      try {
-        await runtime.getSpaceRootPattern(space, { start: false });
-        expect(starts).toEqual([false]);
-
-        // Recreating replaces whatever was cached, and what it caches IS
-        // started — so neither kind of caller refetches afterwards.
-        await expect(runtime.recreateSpaceRootPattern(space)).resolves.toBe(
-          recreated,
-        );
-        await expect(runtime.getSpaceRootPattern(space)).resolves.toBe(
-          recreated,
-        );
-        await expect(runtime.getSpaceRootPattern(space, { start: false }))
-          .resolves.toBe(recreated);
-        expect(starts).toEqual([false]);
-      } finally {
-        await runtime.dispose();
-      }
-    });
-
     it("retries a root-pattern lookup after rejection", async () => {
       const client = new MockRuntimeClient();
       const runtime = new RuntimeInternals(client as any);
@@ -399,6 +361,29 @@ describe("RuntimeInternals", () => {
         );
         await expect(runtime.getSpaceRootPattern(space)).rejects.toThrow(
           "no root pattern in mock",
+        );
+        expect(client.spaceRootCalls).toEqual([space, space]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("asks again after a lookup returns no root", async () => {
+      const client = new MockRuntimeClient();
+      const rootPattern = { id: "root-pattern" };
+      const answers = [undefined, rootPattern];
+      client.getSpaceRootPattern = (space: DID) => {
+        client.spaceRootCalls.push(space);
+        return Promise.resolve(answers.shift() as never);
+      };
+      const runtime = new RuntimeInternals(client as any);
+      const space = "did:key:z6Mk-root-absent" as DID;
+
+      try {
+        await expect(runtime.getSpaceRootPattern(space)).resolves
+          .toBeUndefined();
+        await expect(runtime.getSpaceRootPattern(space)).resolves.toBe(
+          rootPattern,
         );
         expect(client.spaceRootCalls).toEqual([space, space]);
       } finally {
@@ -888,6 +873,16 @@ describe("RuntimeInternals", () => {
     });
     expect(options.spaceDid).toBe(session.space);
     expect(options.experimental).toBe(experimental);
+    // A host that names no memory URL sends none, so Memory opens on
+    // `apiUrl`; one that names one has it carried to the worker.
+    expect(options.memoryUrl).toBeUndefined();
+    expect(
+      createRuntimeClientOptions({
+        session,
+        apiUrl: new URL("http://shell.test/"),
+        memoryUrl: new URL("http://router.shell.test/"),
+      }).memoryUrl?.href,
+    ).toBe("http://router.shell.test/");
     // A page that names no outer frame has none, and one that names one has
     // that one.
     expect(options.iframeOuterFrameUrl).toBeUndefined();
@@ -1125,6 +1120,7 @@ describe("RuntimeInternals", () => {
     // create() aborts without a real runtime.
 
     type CapturedInitData = {
+      memoryUrl?: string;
       forwardWorkerConsole?: boolean;
       concurrentWatchRefresh?: boolean;
       awaitHealth?: boolean;
@@ -1236,6 +1232,20 @@ describe("RuntimeInternals", () => {
           initRequests[0].data.trustSnapshot!.actingPrincipal as DID,
         ),
       );
+    });
+
+    it("includes the memory URL in the Initialize request, and none when the host names none", async () => {
+      const routed = refusingWorker();
+      await createAgainst(routed.StubWorker, {
+        memoryUrl: new URL("http://router.shell.test/"),
+      });
+      expect(routed.initRequests[0].data.memoryUrl).toBe(
+        "http://router.shell.test/",
+      );
+
+      const direct = refusingWorker();
+      await createAgainst(direct.StubWorker);
+      expect(direct.initRequests[0].data.memoryUrl).toBeUndefined();
     });
 
     it("terminates the worker it spawned when the worker refuses Initialize", async () => {

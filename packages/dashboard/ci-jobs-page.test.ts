@@ -15,12 +15,14 @@ import {
   type CiJobs,
   CI_JOBS_PATH,
   ciJobsPage,
+  ciJobsStatus,
   type Job,
   followSorting,
   sortTable,
 } from "./ci-jobs-page.ts";
 import { LIVE_PAGE_UPDATE } from "./live-page-client.ts";
 import { livePage, livePageResponse } from "./live-page.ts";
+import { faviconHref } from "./favicon.ts";
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
@@ -60,7 +62,7 @@ function pageHtml(collected: CiJobs | undefined, now: number): string {
 
 // The repository cell of each row, in the order the page put them in.
 function rowRepos(html: string): string[] {
-  return [...html.matchAll(/<td class="repo"[^>]*>.*?<\/span>([^<]*)</g)]
+  return [...html.matchAll(/<td class="repo"[^>]*>.*?<\/span><a [^>]*>([^<]*)</g)]
     .map((match) => match[1]);
 }
 
@@ -265,6 +267,7 @@ Deno.test("ci jobs page: unreadable repositories get their own section", () => {
   );
 
   assertStringIncludes(html, "Repositories that could not be read · 1");
+  assertStringIncludes(html, `<a href="/repos?name=pond">pond</a>`);
   assertStringIncludes(html, `https://github.com/commonfabric/pond/actions`);
 
   const none = pageHtml(collection(), NOW);
@@ -284,8 +287,10 @@ Deno.test("ci jobs page: a repository or workflow name carrying markup is escape
   // name reached the markup unescaped, not that no script tag is present.
   assert(!html.includes("<img"));
   assert(!html.includes("commonfabric/<script>"));
+  assert(!html.includes("<script></a>"));
   assertStringIncludes(html, "&lt;img src=x onerror=&quot;");
-  assertStringIncludes(html, "commonfabric/&lt;script&gt;");
+  assertStringIncludes(html, "commonfabric/&lt;script&gt;/actions");
+  assertStringIncludes(html, `?name=%3Cscript%3E">&lt;script&gt;</a>`);
 });
 
 Deno.test("ci jobs page: a job's status is a shape as well as a color", () => {
@@ -349,7 +354,7 @@ Deno.test("ci jobs page: a job with nothing to measure sorts apart from the meas
   assertStringIncludes(html, `data-sort=""`);
 });
 
-Deno.test("ci jobs page: every row links to what GitHub has on its job", () => {
+Deno.test("ci jobs page: every row links to its repository's page and to what GitHub has on its job", () => {
   const html = pageHtml(
     collection({
       jobs: [
@@ -377,15 +382,31 @@ Deno.test("ci jobs page: every row links to what GitHub has on its job", () => {
     NOW,
   );
 
-  // One link per row, whichever table the row is in, and none missing.
+  // Two links per row, whichever table the row is in, and none missing: the
+  // repository's page in this tab, then GitHub in a new one.
   const rows = [
     ...html.matchAll(/<tr(?: data-served="[^"]*")?><td class="repo"[\s\S]*?<\/tr>/g),
   ]
     .map((match) => match[0]);
   assertEquals(rows.length, 4);
   for (const row of rows) {
-    assertEquals([...row.matchAll(/<a href="/g)].length, 1, row);
+    const links = [...row.matchAll(/<a href="([^"]*)"([^>]*)>/g)];
+    assertEquals(links.length, 2, row);
+    const [page, github] = links;
+    assert(page[1].startsWith("/repos?name="), row);
+    assert(!page[2].includes("target="), row);
+    assert(github[1].startsWith("https://github.com/"), row);
+    assertStringIncludes(github[2], `target="_blank"`);
   }
+  assertEquals(
+    rows.map((row) => row.match(/href="(\/repos[^"]*)"/)?.[1]),
+    [
+      "/repos?name=gvisor",
+      "/repos?name=labs",
+      "/repos?name=pond",
+      "/repos?name=crm",
+    ],
+  );
   for (
     const href of [
       "https://github.com/commonfabric/labs/actions/runs/1",
@@ -405,6 +426,32 @@ Deno.test("ci jobs page: nothing collected yet says so rather than showing an em
 
   assertStringIncludes(html, "has not finished a collection yet");
   assert(!html.includes("<table>"));
+});
+
+Deno.test("ci jobs page: the tab's favicon wears the ci tile's color", () => {
+  const iconOf = (collected: CiJobs | undefined) =>
+    pageHtml(collected, NOW).match(/<link rel="icon"[^>]*href="([^"]*)"/)
+      ?.[1];
+  const failing = job({ workflow: "Lint", status: "bad", failing: true });
+
+  assertEquals(ciJobsStatus(collection()), "good");
+  assertEquals(iconOf(collection()), faviconHref("good"));
+  assertEquals(
+    ciJobsStatus(collection({ unreadableRepos: ["commonfabric/loom"] })),
+    "warn",
+  );
+  assertEquals(ciJobsStatus(collection({ jobs: [job(), failing] })), "bad");
+  assertEquals(
+    iconOf(collection({ jobs: [job(), failing] })),
+    faviconHref("bad"),
+  );
+  // A job with no verdict leaves the color to the others, and with no others
+  // the favicon is empty.
+  const silent = job({ status: "unknown" });
+  assertEquals(ciJobsStatus(collection({ jobs: [silent, failing] })), "bad");
+  assertEquals(ciJobsStatus(collection({ jobs: [silent] })), "unknown");
+  assertEquals(iconOf(collection({ jobs: [silent] })), "data:,");
+  assertEquals(iconOf(undefined), "data:,");
 });
 
 Deno.test("ci jobs page: the response is the page as HTML", async () => {

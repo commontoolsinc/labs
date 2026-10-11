@@ -1140,11 +1140,13 @@ describe("agent runner", () => {
   it("retries a failed scan through the scheduler without a queue write", async () => {
     const result = await submit();
     const own = connect(CLOUD);
+    const readiness: { state: string; reason: string | null }[] = [];
     let calls = 0;
     let wake: (() => void) | undefined;
     const runner = await startRunner(
       () => Promise.resolve({ outcome: "refused" }),
       {
+        readiness: (next) => readiness.push(next),
         runtimeForHost: () => {
           calls++;
           return calls === 2
@@ -1159,8 +1161,52 @@ describe("agent runner", () => {
     );
     await runner.idle();
     expect(recordOf(result).get()?.state).toBe("queued");
+    expect(readiness).toContainEqual({
+      state: "down",
+      reason: "transient queue read",
+    });
     wake!();
     await waitForState(result, "refused");
+    await runner.idle();
+    expect(readiness[readiness.length - 1]).toEqual({
+      state: "up",
+      reason: null,
+    });
+  });
+
+  it("reports a non-Error queue failure as readiness down, then recovers", async () => {
+    const result = await submit();
+    const own = connect(CLOUD);
+    const readiness: { state: string; reason: string | null }[] = [];
+    let calls = 0;
+    let wake: (() => void) | undefined;
+    const runner = await startRunner(
+      () => Promise.resolve({ outcome: "refused" }),
+      {
+        readiness: (next) => readiness.push(next),
+        runtimeForHost: () =>
+          ++calls === 2
+            ? Promise.reject("queue read refused")
+            : Promise.resolve(own),
+        scheduleAt: (_at, scheduled) => {
+          wake = scheduled;
+          return () => {};
+        },
+      },
+    );
+    await runner.idle();
+    expect(readiness).toContainEqual({
+      state: "down",
+      reason: "queue read refused",
+    });
+    expect(recordOf(result).get()?.state).toBe("queued");
+    wake!();
+    await waitForState(result, "refused");
+    await runner.idle();
+    expect(readiness[readiness.length - 1]).toEqual({
+      state: "up",
+      reason: null,
+    });
   });
 
   it("claims the older of two queued records first under a cap of one", async () => {
@@ -1493,6 +1539,13 @@ describe("agent runner", () => {
       options: {
         report?: (message: string) => void;
         omitHarnessArgs?: boolean;
+
+        /**
+         * The platform the harness runs as and the home it finds, for a run
+         * that names no sandbox runtime. Absent, the run names `runsc`, with a
+         * binary and a rootfs nothing runs.
+         */
+        unnamedSandbox?: { platform: typeof Deno.build.os; home: string };
       } = {},
     ) => {
       const sessionRuntime = connect(CLOUD);
@@ -1523,7 +1576,21 @@ describe("agent runner", () => {
           env: {
             CF_HARNESS_MODEL_PROVIDER: "openai-compatible-gateway",
             CF_HARNESS_GATEWAY_AUTH_MODE: "none",
+            // Named, so the run does not take the default of the machine the
+            // suite runs on, which on macOS and Linux is that machine's native
+            // runtime.
+            ...(options.unnamedSandbox !== undefined
+              ? { HOME: options.unnamedSandbox.home }
+              : {
+                CF_HARNESS_SANDBOX_RUNTIME: "runsc",
+                CF_HARNESS_RUNSC_BINARY: "/nonexistent/agent-runner-test/runsc",
+                CF_HARNESS_SANDBOX_ROOTFS:
+                  "/nonexistent/agent-runner-test/rootfs",
+              }),
           },
+          ...(options.unnamedSandbox !== undefined
+            ? { platform: options.unnamedSandbox.platform, arch: "aarch64" }
+            : {}),
           fabricSessionFactory: () => Promise.resolve({ pieces }),
           createPromptLoop: (options) => ({
             runPrompt: (prompt) => {
@@ -1596,6 +1663,41 @@ describe("agent runner", () => {
       expect(
         (seen().argv as { name: string }[]).map((cell) => cell.name),
       ).toEqual(["finished"]);
+    });
+
+    it("reports the harness's refusal, naming the variable alone, for a run on macOS with no native runtime", async () => {
+      const messages: string[] = [];
+      let looped = false;
+      // By the path the file system has for it: a home reached through a
+      // link is refused for that before its store is looked at.
+      const home = await Deno.realPath(workRoot);
+      await startHarnessRunner(() => {
+        looped = true;
+        return Promise.resolve(loopResult("run-unreached"));
+      }, {
+        report: (message) => messages.push(message),
+        unnamedSandbox: { platform: "darwin", home },
+      });
+      const result = await submit();
+
+      const record = await waitForState(result, "failed");
+
+      expect(record.errorCode).toBe("PROVIDER_FAILURE");
+      expect(looped).toBe(false);
+      const refusal = messages.find((message) =>
+        message.includes("No sandbox runtime is named")
+      );
+      // The runner writes the harness's arguments itself, so the way to a
+      // CFC policy it is told is the variable, and no flag.
+      expect(refusal).toContain(
+        `it is not set up at \`${
+          join(home, "Library", "Application Support", "cfc-vm")
+        }\``,
+      );
+      expect(refusal).toContain(
+        "(name one with `CF_HARNESS_RUNSC_CFC_POLICY`)",
+      );
+      expect(refusal).not.toContain("--sandbox");
     });
 
     for (const explicitCeiling of [false, true]) {

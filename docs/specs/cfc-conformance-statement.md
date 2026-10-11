@@ -231,11 +231,30 @@ statement.
 - The hereditary meet is empty until every input carries the certified atom,
   an under-claim stated in `cfc-observation-classes.md` §5 as the fail-safe
   direction.
-- One guard matched on a consumed read releases another writer's value in
-  the same document at the release gate, stated in
-  `cfc-transformed-by-input-witnesses.md` under "What this does not cover" as
-  a release under a witnessed guard; it is not phrased there in taint terms,
-  and whether it under-taints is not established.
+- `atomPropagationClass` classes `ExternalIngest` as provenance where §15.4
+  registers it value-bound, so a verified projection does not carry a scoped
+  form of it: an under-claim of integrity, which §15.1.1 holds sound.
+- The release gates (`verifyInputRequirements` and
+  `verifySinkRequestCeilings` in `cfc/prepare.ts`, `readRefusal` in
+  `packages/html/src/worker/display-fit.ts`) evaluate the value-intrinsic
+  rules at each location an access consumed and the other rules over the
+  join (`evaluateAccessExchange`, and `exchangeEachObservation` in
+  `cfc/access-integrity.ts`), per §5.3, §4.6.3 and §8.10.1.1. An observation
+  that consumed no label, a document with no CFC metadata or a location no
+  entry labels, never enters the join, so a hereditary atom every labeled
+  location carries survives where §3.1.6.2 would empty the join: an
+  over-claim of integrity, an under-taint. A cell's stored label at the
+  display, which `cellLabelRefusal` fits on its root's integrity, is not
+  resolved location by location: a root stamp's evidence can release a clause
+  a child entry carries, an under-taint.
+- Within one location, `labelForEntriesAtPath` in `cfc/prepare.ts` unions
+  integrity across the label components resolving there, where §8.12.8 asks
+  for the class-aware join of §3.1.6.2. Where two components carry integrity
+  that over-claims, an under-taint. Read with every applicable component an
+  input of the join, §8.12.8 drops each per-value claim wherever a component
+  carries none, and against that reading the runtime over-claims wherever any
+  does. Which reading holds is open in
+  [commonfabric/specs#60](https://github.com/commonfabric/specs/pull/60).
 
 ## 5. Position in the §18.6.3 matrix and the auxiliary dials
 
@@ -329,7 +348,11 @@ causes to `ExtendedStorageTransaction.addCfcTriggerReads`, which drops `cid:`
 and document-member paths and invalidates a prepared transaction;
 `forEachFlowObservation` in `cfc/prepare.ts` consumes them as recursive value
 reads, with a shape read of a `length` parent, at prepare-time metadata, which
-is their current labels, whatever the gating dial says. With
+is their current labels, whatever the gating dial says. A trigger at the
+sub-path where a link exposes its recognizable form is the invalidation of a
+link probe, and is read as a shallow read of the slot the probe asked about,
+since that sub-path's segments are not child segments (§4.6.3)
+(`triggerReadAt`). With
 `cfcTriggerReadGating` on, the shipped default, `triggerReadSources` adds them
 to the egress and sink consumed set and to the `requiredIntegrity` input gate
 as well. `cfc-enforcement-matrix.md` §2, item 4, records that multi-hop closure

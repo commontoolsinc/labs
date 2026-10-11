@@ -4,6 +4,7 @@ import type {
   NAME,
   PerSession,
   PerSpace,
+  PerUser,
   Stream,
   UI,
   VNode,
@@ -93,6 +94,33 @@ export interface Presentation {
   focusedPanel?: Writable<Panel>;
 }
 
+/**
+ * A chat room as the Loom links it: its name, and nothing of its conversation,
+ * so a reader of the Loom loads none of the room's messages. A client opens
+ * the room through the link, under its own access.
+ */
+export interface LinkedChatRoom {
+  [NAME]?: string;
+}
+
+/**
+ * Where the Loom keeps its chat room: a link to a room piece in the Loom's own
+ * space, in `room`, absent while the Loom names none.
+ */
+export interface ChatRoomRecord {
+  room?: Writable<LinkedChatRoom>;
+}
+
+/**
+ * The shared chat-room cell; a Loom naming no room holds `{}`. It holds a
+ * record rather than the link itself because a handler's cell for a field
+ * holding a link writes through the link, so replacing the link there would
+ * write into the room it names.
+ */
+export type ChatRoomCell = Writable<
+  ChatRoomRecord | Default<Record<PropertyKey, never>>
+>;
+
 /** Shared state supplied when a Loom is instantiated. */
 export interface LoomInput {
   title?: PerSpace<Writable<string | Default<"Shared Loom">>>;
@@ -101,10 +129,46 @@ export interface LoomInput {
     Writable<Presentation | Default<{ stagedPanels: [] }>>
   >;
   participants?: PerSpace<ParticipantRosterCell>;
+  chatRoom?: PerSpace<ChatRoomCell>;
+  hiddenPanels?: PerUser<Writable<Writable<Panel>[] | Default<[]>>>;
+  privatePanels?: PerUser<Writable<PrivatePanel[] | Default<[]>>>;
+}
+
+/** The room `setChatRoom` names as the Loom's chat. Omission clears it. */
+export interface ChatRoomChoice {
+  room?: Writable<LinkedChatRoom>;
+}
+
+/** A panel and the title it shows in place of its target's; `""` clears it. */
+export interface PanelTitle {
+  panel: Writable<Panel>;
+  titleOverride: string;
+}
+
+/** Where a URL or piece panel points: a URL, or a piece by its complete link. */
+export type PanelTarget =
+  | { kind: "url"; url: string }
+  | { kind: "piece"; piece: Writable<unknown> };
+
+/** A URL or piece panel, and the target `retargetPanel` points it at. */
+export interface PanelRetarget {
+  panel: Writable<Panel>;
+  target: PanelTarget;
 }
 
 /** An occurrence and its optional insertion anchor. Omission appends. */
 export interface PanelPosition {
+  panel: Writable<Panel>;
+  before?: Writable<Panel>;
+}
+
+/**
+ * One of a viewer's private panels: an occurrence in a space other than the
+ * Loom's, and the shared occurrence it shows just ahead of. Without `before`,
+ * or while `before` is not shown to the viewer, it shows after every shared
+ * one.
+ */
+export interface PrivatePanel {
   panel: Writable<Panel>;
   before?: Writable<Panel>;
 }
@@ -158,4 +222,18 @@ export interface LoomOutput {
   setPresentation: Stream<Presentation>;
   participants: ParticipantProfile[];
   addParticipant: Stream<{ profile: ParticipantProfile }>;
+  chatRoom?: Writable<LinkedChatRoom>;
+  setChatRoom: Stream<ChatRoomChoice>;
+  ensureChatRoom: Stream<void>;
+  retitleLoom: Stream<{ title: string }>;
+  retitlePanel: Stream<PanelTitle>;
+  retargetPanel: Stream<PanelRetarget>;
+  hiddenPanels: PerUser<Writable<Writable<Panel>[]>>;
+  privatePanels: PerUser<Writable<PrivatePanel[]>>;
+  viewerPanels: Writable<Panel>[];
+  hidePanel: Stream<{ panel: Writable<Panel> }>;
+  unhidePanel: Stream<{ panel: Writable<Panel> }>;
+  addPrivatePanel: Stream<PanelPosition>;
+  removePrivatePanel: Stream<{ panel: Writable<Panel> }>;
+  movePrivatePanel: Stream<PanelPosition>;
 }

@@ -1,6 +1,7 @@
 import type {
   FabricPlainObject,
   FabricValue,
+  JSONSchema,
   SchemaPathSelector,
 } from "@commonfabric/api";
 import { hashStringOf } from "@commonfabric/data-model";
@@ -1092,6 +1093,14 @@ export type CreatorPlacedGenesisRoot = {
 
 export type ClientCommit = {
   genesisRoot?: GenesisRoot;
+
+  /**
+   * The kind the space declares, sealed with its access list. Admitted only
+   * on a space's genesis commit, as `genesisRoot` is; see
+   * `docs/features/space-kinds.md`.
+   */
+  spaceKind?: string;
+
   localSeq: number;
   reads: {
     confirmed: ConfirmedRead[];
@@ -1124,12 +1133,35 @@ export type SessionOpenResult = {
   resumed?: boolean;
   sync?: SessionSync;
 
+  /** The kind the space's genesis commit declares, when it declares one. */
+  spaceKind?: string;
+
   /** A challenge the connection's next signed request may carry. */
   sessionOpen: SessionOpenAuthMetadata;
 };
 
 export type MemoryProtocolFlags = {
   genesisRoot?: boolean;
+
+  /**
+   * The server seals a kind a space declares in its genesis commit, and
+   * reports it in every `session.open` result. Build-inherent, so a peer of
+   * this version always advertises it. Absent (an older server) parses to
+   * false, and a client then neither declares a kind nor reads one there.
+   */
+  spaceKind?: boolean;
+
+  /**
+   * Whether the server runs patterns itself (server execution): a session
+   * opening a space can then lead the server to write to it, the space's root
+   * ensure among the writes. A server advertises it in every `hello.ok`, true
+   * or false, so a client can learn it before it opens a session anywhere.
+   * Absent from a server that predates the flag, and from a client's own
+   * `hello`, where it means nothing; a client that needs the answer treats
+   * absence as not knowing.
+   */
+  serverExecution?: boolean;
+
   modernCellRep: boolean;
 
   /**
@@ -1149,6 +1181,18 @@ export type MemoryProtocolFlags = {
 
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
+
+  /**
+   * Server capability: a session sync payload carries the links the
+   * server's walk followed out of the space (`SessionSync.crossings`),
+   * each with the target-rooted path and schema the read needed, so the
+   * client loads them from the target space without reading a document
+   * to find them. Absent (an older server) parses to false: the client
+   * then reads each document it synced to find the links itself.
+   * Inherent to the build, so a server of this version always advertises
+   * it.
+   */
+  syncCrossingsV1: boolean;
 
   /** The peer can exchange versioned binary gzip message envelopes. */
   messageCompressionV1: boolean;
@@ -1275,6 +1319,15 @@ export type MemoryProtocolFlags = {
    */
   admissionNotice?: boolean;
 
+  /**
+   * Server capability: the server records the diagnostics a client reports
+   * about its own session with `session.report` (04-protocol.md §4.14).
+   * Build-inherent, so a server of this version always advertises it.
+   * Absent (an older server) parses to false, and a client then keeps its
+   * reports to itself rather than sending a message the server would refuse.
+   */
+  sessionReportV1?: boolean;
+
   /** The peer supports router-scoped binary connection authentication. */
   routedAuthV1?: boolean;
 };
@@ -1284,6 +1337,8 @@ export type MemoryProtocolFlags = {
  */
 export type WireMemoryProtocolFlags = {
   genesisRoot?: boolean;
+  spaceKind?: boolean;
+  serverExecution?: boolean;
   modernCellRep?: boolean;
 
   /** Expression result identity contract required for session admission. */
@@ -1293,6 +1348,7 @@ export type WireMemoryProtocolFlags = {
   applyOp?: boolean;
   operationCodecs?: readonly string[];
   syncSchemaTableV2?: boolean;
+  syncCrossingsV1?: boolean;
   messageCompressionV1?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   sqliteQueryReader?: boolean;
@@ -1308,6 +1364,7 @@ export type WireMemoryProtocolFlags = {
   sessionClose?: boolean;
   connectionAuth?: boolean;
   admissionNotice?: boolean;
+  sessionReportV1?: boolean;
   routedAuthV1?: boolean;
 };
 
@@ -1339,6 +1396,10 @@ export type SessionOpenAuthMetadata = {
 export type SessionDescriptor = {
   /** Assert the immutable custom-root reservation when mounting or resuming. */
   genesisRoot?: GenesisRoot;
+
+  /** Assert the immutable declared kind when mounting or resuming. */
+  spaceKind?: string;
+
   sessionId?: SessionId;
   seenSeq?: number;
   sessionToken?: SessionToken;
@@ -1583,6 +1644,21 @@ export type SessionSyncRemove = {
   scopeKey?: ScopeKey;
 };
 
+/**
+ * A link the server's walk followed out of the space and stopped at: the
+ * document it names in another space, and the target-rooted path and
+ * schema the read needed there, so a client loads from the target space
+ * exactly what the walk would have reached. `path` is the path within the
+ * document's value, and an absent `schema` is a read of the document alone.
+ */
+export type SyncCrossing = {
+  space: string;
+  id: EntityId;
+  scope?: CellScope;
+  path: string[];
+  schema?: JSONSchema;
+};
+
 export type SessionSync = {
   type: "sync";
   fromSeq: number;
@@ -1590,6 +1666,14 @@ export type SessionSync = {
   caughtUpLocalSeq?: number;
   upserts: SessionSyncUpsert[];
   removes: SessionSyncRemove[];
+
+  /**
+   * The links out of the space that the walks behind this frame's watches
+   * followed and this session has not been told of before. A full
+   * replacement of the watch set with no declared holdings tells them all
+   * again. Only on frames from a server advertising `syncCrossingsV1`.
+   */
+  crossings?: SyncCrossing[];
   operationFields?: OperationFieldDelivery[];
 
   /** Complete view eligibility, applied atomically after this frame's documents. */
@@ -2082,6 +2166,80 @@ export type PresenceLeaveRequest = {
   room: string;
 };
 
+/** The document a remote-echo breaker report names. */
+export type EchoBreakerReportDocument = {
+  /** The document's id. */
+  id: string;
+
+  /**
+   * The scope instance the action wrote, resolved: `space`, a principal's
+   * `user:` instance, or a session's `session:` instance. A serving runtime
+   * runs actions for many sessions and reports them all on its own, so the
+   * report names the instance rather than leaving the reporting session to
+   * stand for it.
+   */
+  scopeKey: ScopeKey;
+};
+
+/**
+ * A client's remote-echo breaker tripped: one of its reactive actions kept
+ * rewriting `document`, each time re-triggered by another writer's change to
+ * that same document, and the client is now deferring the action's re-runs
+ * (docs/plans/scheduler-remote-echo-breaker.md).
+ */
+export type EchoBreakerTripReport = {
+  kind: "echo-breaker";
+  event: "trip";
+  document: EchoBreakerReportDocument;
+
+  /** The action's scheduler id, cut to {@link SESSION_REPORT_TEXT_MAX}. */
+  action: string;
+};
+
+/**
+ * A tripped breaker cleared: the action wrote `document` without changing
+ * it (`convergence`), saw no echo for the breaker's quiet reset (`quiet`),
+ * was unregistered (`retired`), or lost its pair to the breaker's bounded
+ * table (`evicted`).
+ */
+export type EchoBreakerClearReport = {
+  kind: "echo-breaker";
+  event: "clear";
+  document: EchoBreakerReportDocument;
+
+  /** The action's scheduler id, cut to {@link SESSION_REPORT_TEXT_MAX}. */
+  action: string;
+
+  reason: "convergence" | "quiet" | "retired" | "evicted";
+
+  /** Echoes the pair saw after it tripped, each of which renewed the
+   * backoff. */
+  renewals: number;
+
+  /** Milliseconds from the trip to the clear. */
+  trippedMs: number;
+};
+
+/** A diagnostic a client reports about its own session (section 4.14). */
+export type SessionReport = EchoBreakerTripReport | EchoBreakerClearReport;
+
+/** The longest string a session report carries in any one field. */
+export const SESSION_REPORT_TEXT_MAX = 512;
+
+/**
+ * Reports a client-side diagnostic to the memory server serving `space`,
+ * which records it against the session (section 4.14). Like presence it is
+ * not a commit, carries no `seq`, and is handled outside the ordered frame
+ * queue.
+ */
+export type SessionReportRequest = {
+  type: "session.report";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  report: SessionReport;
+};
+
 /** A room member's record replaced, pushed to the room's other members. */
 export type PresenceUpsertMessage = {
   type: "presence/upsert";
@@ -2188,7 +2346,8 @@ export type ClientMessage =
   | EventAttentionResolveRequest
   | PresenceJoinRequest
   | PresencePublishRequest
-  | PresenceLeaveRequest;
+  | PresenceLeaveRequest
+  | SessionReportRequest;
 export type ServerMessage =
   | HelloOkMessage
   | ResponseMessage<FabricValue>
@@ -2377,6 +2536,7 @@ export function resetOwnWriteEchoConfig(): void {
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   genesisRoot: true,
+  spaceKind: true,
   modernCellRep: getModernCellRepConfig(),
   stableExpressionResultIds: true,
   commitPreconditions: getCommitPreconditionsConfig(),
@@ -2421,8 +2581,14 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // the notice. A routed connection records no refusal, so it is told
   // nothing whatever both peers advertise.
   admissionNotice: true,
+  // Build-inherent: this build's server records the diagnostics a client
+  // reports about its session.
+  sessionReportV1: true,
   routedAuthV1: false,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
+  // Build-inherent: this build's query walk reports the links it follows
+  // out of a space, and its session frames carry them.
+  syncCrossingsV1: true,
 });
 
 /**
@@ -2452,6 +2618,14 @@ export const parseMemoryProtocolFlags = (
 
   const genesisRoot = value.genesisRoot;
   if (genesisRoot !== undefined && typeof genesisRoot !== "boolean") {
+    return null;
+  }
+  const spaceKind = value.spaceKind;
+  if (spaceKind !== undefined && typeof spaceKind !== "boolean") {
+    return null;
+  }
+  const serverExecution = value.serverExecution;
+  if (serverExecution !== undefined && typeof serverExecution !== "boolean") {
     return null;
   }
   const stableExpressionResultIds = value.stableExpressionResultIds;
@@ -2609,9 +2783,21 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const sessionReportV1 = value.sessionReportV1;
+  if (sessionReportV1 !== undefined && typeof sessionReportV1 !== "boolean") {
+    return null;
+  }
+
+  const syncCrossingsV1 = value.syncCrossingsV1;
+  if (syncCrossingsV1 !== undefined && typeof syncCrossingsV1 !== "boolean") {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     genesisRoot: value.genesisRoot === true,
+    spaceKind: spaceKind === true,
+    ...(serverExecution === undefined ? {} : { serverExecution }),
     stableExpressionResultIds: stableExpressionResultIds === true,
     commitPreconditions: commitPreconditions === true,
     applyOp: applyOp === true,
@@ -2654,6 +2840,12 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older peer) parses to false: a server then sends that
     // client no `session/admissible`.
     admissionNotice: admissionNotice === true,
+    // Absent (an older server) parses to false: a client then sends no
+    // `session.report`.
+    sessionReportV1: sessionReportV1 === true,
+    // Absent (an older server) parses to false: a client then finds the
+    // links out of a space by reading what it synced.
+    syncCrossingsV1: syncCrossingsV1 === true,
     routedAuthV1: value.routedAuthV1 === true,
   };
 };
@@ -2665,6 +2857,10 @@ export const wireMemoryProtocolFlags = (
   flags: MemoryProtocolFlags,
 ): WireMemoryProtocolFlags => ({
   genesisRoot: flags.genesisRoot,
+  spaceKind: flags.spaceKind,
+  ...(flags.serverExecution === undefined
+    ? {}
+    : { serverExecution: flags.serverExecution }),
   modernCellRep: flags.modernCellRep,
   stableExpressionResultIds: flags.stableExpressionResultIds,
   commitPreconditions: flags.commitPreconditions,
@@ -2688,7 +2884,9 @@ export const wireMemoryProtocolFlags = (
   sessionClose: flags.sessionClose,
   connectionAuth: flags.connectionAuth,
   admissionNotice: flags.admissionNotice,
+  sessionReportV1: flags.sessionReportV1,
   routedAuthV1: flags.routedAuthV1,
+  syncCrossingsV1: flags.syncCrossingsV1,
 });
 
 /**

@@ -4,6 +4,7 @@ import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import { ProcessTimeoutError } from "./sandbox/process-runner.ts";
 import type {
   SandboxRuntime,
+  SandboxRuntimeChoice,
   SandboxRuntimeDescription,
   SandboxRuntimeMountDescription,
   SandboxRuntimeMountKind,
@@ -468,7 +469,12 @@ const createCfcCapabilitySnapshot = (
   options: CollectHarnessCapabilitySnapshotOptions,
 ): HarnessCfcCapabilitySnapshot => {
   const mode = options.cfcEnforcementMode ?? "enforce-explicit";
-  const sandboxDescription = sandbox.describe();
+  const sandboxDescription: SandboxRuntimeDescription = {
+    ...sandbox.describe(),
+    ...(options.sandboxRuntimeChoice !== undefined
+      ? { selection: options.sandboxRuntimeChoice }
+      : {}),
+  };
   return {
     enforcementMode: mode,
     absenceBehavior: cfcAbsenceBehaviorForMode(mode),
@@ -500,6 +506,9 @@ export interface CollectHarnessCapabilitySnapshotOptions {
   runManifestPath?: string;
   modelProvider?: HarnessModelProviderId;
   gatewayAuthMode?: "bearer" | "none";
+
+  /** How the run's sandbox runtime was selected, recorded in its description. */
+  sandboxRuntimeChoice?: SandboxRuntimeChoice;
 }
 
 export const collectHarnessCapabilitySnapshot = async (
@@ -508,10 +517,6 @@ export const collectHarnessCapabilitySnapshot = async (
   at = new Date().toISOString(),
   options: CollectHarnessCapabilitySnapshotOptions = {},
 ): Promise<HarnessCapabilitySnapshot> => {
-  // The description is captured once and persisted into the CFC policy
-  // snapshot, so a reading taken later cannot repair it. Take the reading
-  // first, and let the description carry it.
-  await sandbox.probeCfcTransportReadiness?.();
   const cfc = createCfcCapabilitySnapshot(sandbox, options);
   const result = await sandbox.runShell({
     command: CAPABILITY_PROBE_SCRIPT,

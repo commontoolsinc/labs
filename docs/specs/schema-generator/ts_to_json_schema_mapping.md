@@ -406,7 +406,10 @@ types.
 
 Every type with a usable name is hoisted into `$defs` and referenced by
 `{ "$ref": "#/$defs/<Name>" }` at non-root occurrences
-(`src/schema-generator.ts`). The emitted container key is `$defs` —
+(`src/schema-generator.ts`). A reading under the `definesDocument` hint inside
+a schema that views other documents is hoisted as `<Name>:document` (§13), so
+it never shares a definition with the view's reading of the same type. No
+TypeScript name holds a `:`, so no type's name can take it. The emitted container key is `$defs` —
 never `definitions` (0 of 73 expected fixtures contain a `definitions` key; 29
 contain `$defs`, as of this writing); only the *internal* context field is
 still named `definitions` (`interface.ts`), and the README's `definitions`
@@ -436,14 +439,15 @@ these holds:
 - the type is a **generic interface/class instantiation** without an alias name
   (`typeParameters` + `typeArguments` on the reference target).
 
-Apart from `getNamedTypeKey`, the generator gives no name to a type whose
-alias is, or leads through a chain of aliases to, a scope wrapper
-(`scopeOfAliasChain`, §10): `type Rec = PerUser<Inner>` formats inline, as
-`PerUser<Inner>` does, so the scope stays at the top level of the slot's own
-schema. A recursive one around a value still needs a definition; it is
-written under the cycle's synthetic name without its scope, and every
-reference to it carries the scope beside the `$ref` (`{ $ref:
-"#/$defs/AnonymousType_1", scope: "user" }`). One around a cell is a wrapper,
+Apart from `getNamedTypeKey`, the generator gives no name to a type that is a
+scope wrapper, by its alias chain or by its brand (`scopeOfScopeWrapper`,
+§10): `type Rec = PerUser<Inner>` formats inline, as `PerUser<Inner>` does, so
+the scope stays at the top level of the slot's own schema. A recursive one
+around a value still needs a definition; it is written under the cycle's
+synthetic name without its scope, and every reference to it carries the scope
+beside the `$ref` (`{ $ref: "#/$defs/AnonymousType_1", scope: "user" }`), the
+schema's root among them where the root is promoted to a reference to its
+definition. One around a cell is a wrapper,
 and a wrapper is never a cycle's entry: the cycle is found at the cell's
 value, as for `Cell<T>`, and each reference is the capped handle inline
 (`{ $ref: "#/$defs/AnonymousType_1", asCell: [{ kind: "cell", scope: "user"
@@ -552,11 +556,15 @@ A wrapper (`Default`, a cell, a scope wrapper around a cell) is not a cycle's
 entry, because TypeScript reuses one type object for identical wrapper
 instantiations at different positions, which would otherwise create false
 cycles; the cycle is found at the wrapper's value instead (fixtures
-`nested-default-aliases`, `default-array-recursive`). Nor is `never`, which
-holds no type and so is never met inside itself. A wrapper the checker reduces
-to `never` has `never` for its own type and for its payload's:
-`PerUser<never>` is `never & brand`, which is `never`, and its payload is read
-as the value it wraps (§10), not as its recursion.
+`nested-default-aliases`, `default-array-recursive`). Nor is `never`, `null`
+or `undefined`, none of which holds a type, or `unknown` or `any`, which hold
+any, and so none is met inside itself. A wrapper the checker reduces to one has
+it for its own type and for its payload's: `PerUser<never>` is
+`never & brand`, which is `never`, and `PerUser<null>` is `null`, which
+`Scoped` keeps outside the brand; its payload is read as the value it wraps
+(§10), not as its recursion. So does a scope wrapper read from its node alone,
+which is read at `unknown`, around `unknown`: `PerUser<unknown[]>` read that
+way is `{ type: "array", items: { type: "unknown" }, scope: "user" }`.
 
 **Dead computation (observed implementation note):** every run performs a full
 DFS cycle pre-pass (`getCycles`, using `safe*` wrappers that
@@ -910,7 +918,9 @@ Default paths of §7:
     is an alternative of its own, in the order written. Its members are
     otherwise read by their types: `boolean` stands for `true` and `false`,
     `Default<T, V>`'s place in a union is §7's, and a scope wrapper's is
-    §10's.
+    §10's, whichever way its node is read: beside only `null` or `undefined`
+    the union is itself the wrapper, and beside any other value its scope
+    lands in a branch and throws.
 - The checker can also collapse several written CFC alternatives into a
   single semantic member. Each remains an alternative of its own, including
   `Confidential<A, [PolicyOf<typeof readers>]> |
@@ -950,17 +960,77 @@ Default paths of §7:
 
 ## 10. Scope Wrappers
 
-`PerSpace` / `PerUser` / `PerSession` / `PerAny` (api: optional
-`SCOPE_BRAND`-typed intersections, `packages/api/index.ts`) lower to a
-`scope` key with values `"space" | "user" | "session" | "any"`
-(`SCOPE_WRAPPER_SCOPES`, `common-fabric-formatter.ts`). Detection is by
-node name or aliasSymbol name, and otherwise by following the aliasSymbol's
-declaration down a chain of aliases, each the whole body of the one before, to
-a scope wrapper (`scopeOfAliasChain`). The checker reports the outermost alias
-as a type's aliasSymbol, so `type Rec = PerUser<Inner>` reads as `Rec`, and
-only the chain finds the wrapper. The chain ends at a wrapper's name, so
-`Scoped<T, S>`, the type the four are declared with, is not read as one
-written directly. The payload of a wrapper found that way is
+`PerSpace` / `PerUser` / `PerSession` / `PerAny` (api: `Scoped<T, S>`, `T`
+intersected with an optional `SCOPE_BRAND`-typed member for each of its members
+other than `null` and `undefined`, which it holds as they are,
+`packages/api/index.ts`) lower to a `scope` key with values
+`"space" | "user" | "session" | "any"` (`SCOPE_WRAPPER_SCOPES`,
+`common-fabric-formatter.ts`). The type keeps the alias it is reached by,
+`PerUser<…>` or an author's own, as `Box<T>` in `type Box<T> = PerUser<…>`, so
+`PerUser<T | null>` is read as any scope wrapper is, with `null` among its
+payload's alternatives. Detection is by node name or aliasSymbol name, by
+following the aliasSymbol's declaration down a chain of aliases, each the whole
+body of the one before, to a scope wrapper (`scopeOfAliasChain`), and
+otherwise by the brand the type carries (`getScopeBrand`,
+`src/typescript/scope-brand.ts`): for a type the checker narrowed or built with
+no alias, as assignment narrows `PerUser<boolean> | null` to the brand over
+`false` and `true`, and for a union written beside a wrapper, as
+`PerUser<A> | null`. A member of such a union that a scope wrapper's alias names
+is read by that alias, its scope from the wrapper's name and its payload as the
+argument written for it, so a generic `PerUser<T> | null`, whose brand is a
+deferred type, is read as `PerUser<T | null>` is. That deferred brand is the
+conditional `ScopeTag<T, S>`, named by its alias, so a generic wrapper no
+alias names, as the intersection `PerUser<T> & PerUser<T>`, is read by it:
+`<T extends string>` → `{ type: "string", scope: "user" }`. The brand with
+nothing beside it (no other property, index signature or call signature, which
+a mapped type over a wrapper, as `Readonly<PerSpace<Record<string, A>>>`, holds
+beside the brand), as `PerUser<unknown>` resolves to once the checker drops
+`unknown` from its intersection, is the wrapper around `unknown`:
+`{ type: "unknown", scope: "user" }`, as a node naming the wrapper reads it.
+`PerUser<{}>` resolves to the same type, as `PerUser<NonNullable<unknown>>`
+does, so read by its type alone, as a record's values are, it is the wrapper
+around `unknown` too, which a read takes for a reference
+(`docs/specs/json_schema.md`, "Non-standard `type` values"); a node naming it,
+written in place or as an alias's declaration, reads `{}` as any `{}` is read:
+`{ type: "object", properties: {}, scope: "user" }`. The scope is the same
+either way. The payload of a wrapper
+read by its brand is its branded members with the brand taken off, each
+alternative a member intersected with the brand read as that member
+(`scopePayloadType`, `GenerationContext.scopeBrandRead`). A payload the
+checker cannot intersect again without the brand, as `A & B` in
+`PerUser<A & B>`, is the wrapper's own type, and is read in place rather than
+as a type met again inside itself: by `CommonFabricFormatter` where it claims
+the type for more than the brand, as for the labels of a policy in the payload,
+`PerUser<Confidential<T, […]>>` or `PerUser<Confidential<A & B, […]>>`, whose
+CFC parts pass over the brand (`cfcCarriedParts`), and otherwise by the
+formatters after it (`formatStructure`). Such a payload that is a cell, as
+`Cell<A> & Cell<B>`, is read as the cell. Where a union of one scope's
+wrappers beside `null` or `undefined` is written as one, `PerUser<A> | null`,
+at the position or as the body of the alias the type is reached by, followed
+down a chain of aliases, each the whole body of the one before, under the
+arguments each reference writes (`scopeOfWrittenScopedUnion`), the payload's
+type is read at
+the members written for it: the payload written in each wrapper, and each
+`null` or `undefined` (`GenerationContext.scopePayloadNodes`), as the members
+of `A | null` written in `PerUser<A | null>` are. So what only the syntax says,
+the binding `PolicyOf<typeof rules>` names in
+`type Box<T> = PerUser<Confidential<T, [PolicyOf<typeof rules>]>> | null`,
+is kept, for a holder's values read by type too, and the two spellings read
+alike. Each member is read through parentheses, aliases without type
+parameters, and a union written in it, so `PerUser<A> | Nil` with
+`type Nil = null`, and `(PerUser<A> | null) | undefined`, read as written out,
+and a `never` member, which adds nothing to the union, is left out.
+A union written for a scope wrapper whose members do not read so, as
+`Maybe<PerUser<A>>` with `type Maybe<T> = T | null` writes one, where the member
+is a parameter bound apart from the union, **throws** (``A scope wrapper
+beside `null` or `undefined` is read from the union written around it``): its
+type alone would lose what only the syntax names. A member's `?` takes the
+`undefined` written beside a wrapper out of the type the member is read at, as
+in `handle?: Box<A>` with `type Box<T> = PerUser<T> | undefined`; the wrapper
+alone is then read at the member written for it, under the bindings it is
+written with, and a cell there throws as a cell beside `undefined` does. The
+node-based analyzer hands such a union to the same reading. The
+payload of a wrapper found by name is
 the wrapper's first argument as the last alias along the chain writes it, read
 with each generic alias's parameters bound to the arguments written for them,
 the same walk that lowers a CFC alias reached through aliases (§11):
@@ -979,9 +1049,38 @@ non-empty `asCell`, the scope merges into the **first** entry, turning a
 string entry into the object form (`applyScopeToAsCellEntry`) —
 `PerUser<Cell<string>>` → `{ asCell: [{ kind: "cell", scope: "user" }], type:
 "string" }`; otherwise a bare sibling key — `PerUser<string>` →
-`{ type: "string", scope: "user" }`. A nested scope **without an intervening
+`{ type: "string", scope: "user" }`. A payload that only references a cell's
+definition, as a labelled cell's alias is hoisted, is the cell written in
+place, with the cap on its first entry and the labels the references declare:
+`PerUser<Handle>` with `type Handle = Confidential<Writable<T>, […]>` reads as
+`PerUser<Confidential<Writable<T>, […]>>`, and the definition stays as it is
+for the references that hold no scope. A wrapper around a cell **throws** beside
+anything, `null` and `undefined` included, written outside it or inside, or in
+an alias the payload names, whose union is hoisted into a definition the
+payload references (`PerUser<Maybe>` with `type Maybe = Writable<T> | null`),
+the cell in it hoisted too where its own alias is, as a labelled cell's is
+(`A scope wrapper around a cell cannot hold anything beside the cell`). Beside
+`null`, `undefined` or a value, the cell would be an `anyOf` branch, where the
+cap on following its handle sits apart from the slot's scope, which the write
+path reads; beside another cell, as in `PerSpace<Cell<T> | Cell<U>>`, a read's
+value projection resolves no handle out of the union, so no read can show the
+cap holding. A cell whose value may be `null` holds it inside
+(`PerSpace<Cell<T | null>>` → `{ anyOf: [{ … }, { type: "null" }], asCell:
+[{ kind: "cell", scope: "space" }] }`), and a handle that may be missing is an
+optional property, which keeps the cell alone (`handle?: PerSpace<Cell<T>>` →
+`{ …, asCell: [{ kind: "cell", scope: "space" }] }`). The union is read as
+written, so `handle?: PerSpace<Cell<T>> | undefined` throws as well, including
+where the type it is read at has lost that `undefined`, as `Required` takes it
+out. Tested end to end in the runtime:
+`packages/runner/test/ascell-scope-cap.test.ts`. A nested scope **without an intervening
 cell boundary throws** (`Nested scope wrappers require a cell boundary between
-scopes.`; tested, scope-wrappers.test.ts). With a cell boundary
+scopes.`; tested, scope-wrappers.test.ts), and so does a type carrying two
+scopes' brands on one value, as an inferred `PerUser<PerSession<T>>` resolves
+to, except in a schema that declares no scope, which reads such a value as its
+payload. Around a cell, the outer wrapper's scope would replace the cap the inner
+one puts on the handle, so `PerSession<PerUser<Cell<T>>>` throws too, written
+out or through an alias. Two brands of one scope fold into one, so a wrapper
+nested in one of its own scope is that wrapper alone. With a cell boundary
 both survive: `PerUser<Cell<PerSession<string>>>` → `{ asCell: [{ kind:
 "cell", scope: "user" }], scope: "session", type: "string" }` (fixture
 `scoped-wrappers`).
@@ -998,7 +1097,10 @@ scope-wrappers.test.ts, and end-to-end in ts-transformers
 `never-payload-schema.test.ts`). Where no node names the wrapper, `never`
 carries no alias or brand to find it by, so an alias of one
 (`type Rec = PerUser<never>`), a record's values, and a tuple's elements lower
-as `never` does, to `false`.
+as `never` does, to `false`. A wrapper around `null` or `undefined` alone is
+that type, which `Scoped` keeps outside the brand, and likewise keeps its scope
+only where a node names the wrapper: `PerUser<null>` → `{ type: "null",
+scope: "user" }`, and an inferred one lowers as `null` does.
 
 The payload is read from the node when a node names the wrapper, so that
 structure only the node carries reaches the schema. The wrapper type's own
@@ -1020,17 +1122,22 @@ declared value. Tested: scope-wrappers.test.ts, and
 end-to-end in ts-transformers `aliased-binding-declared-type.test.ts` and
 `scoped-interface-schema.test.ts` (local, exported, and imported interfaces).
 
-A scope wrapper **as a union member throws** (`A scope wrapper cannot be a
-member of a union.`; tested, scope-wrappers.test.ts). The runtime reads a
+A scope wrapper **as a union member beside another value throws** (`A scope
+wrapper cannot be a member of a union.`; tested, scope-wrappers.test.ts), as
+in `PerUser<string> | number`. The runtime reads a
 slot's scope from that slot's own schema — its top level, or the definition a
 `$ref` there names (`ContextualFlowControl.getSchemaScopeCap`) — and from no
 compound branch, so a declaration that lands in an
 `anyOf` branch is invisible to the write path: no narrowing redirect is
 written, the value lands on the shared space row, and every principal reads
 the same instance. Write the union inside the wrapper
-(`PerUser<string | undefined>` → `{ type: ["string", "undefined"], scope:
-"user" }`) or make the property optional (`draft?: PerUser<string>` →
-`{ type: "string", scope: "user" }`) — both keep the scope at the top level.
+(`PerUser<string | number>`) to keep the scope at the top level. Beside
+`null` or `undefined` alone, a wrapper is read as the wrapper around them, as
+`Scoped` holds them, and scopes the whole slot as that does: `PerUser<string> | undefined` and `PerUser<string | undefined>` →
+`{ type: ["string", "undefined"], scope: "user" }`, and `PerUser<boolean> |
+null` → `{ anyOf: [{ type: "boolean" }, { type: "null" }], scope: "user" }`.
+An optional property keeps the scope at the top level too
+(`draft?: PerUser<string>` → `{ type: "string", scope: "user" }`).
 
 Two detection points enforce this, because a wrapper around a cell loses its
 scope before the schema is built. `formatWrapperUnion`
@@ -1040,6 +1147,14 @@ wrapper is still visible; `assertScopeDeclarationsAreReachable`
 reached an `anyOf`/`oneOf`/`allOf` branch by any route. A scope nested deeper
 — on a property of an object that is itself a union member — is that
 property's own top-level declaration and is accepted.
+
+Generated with `declaresNoScope` (`SchemaGenerationOptions`), a schema
+declares no scope at all: each scope wrapper is read as its payload, with no
+`scope` and no cap on a cell's `asCell` entry, a recursive one's references
+included, and neither detection point above has a scope to refuse. The
+transformer generates a lift's result this way where its type is one no
+author wrote (ts-transformers behavior spec §10.4), since the runtime stores a
+lift's result at the narrowest scope its callback reads.
 
 ## 11. CFC Alias Lowering (`ifc` Metadata)
 
@@ -1109,11 +1224,12 @@ Mechanics:
   alias for `typeof writer` passed through another alias's parameter: its type
   does not stand in for the written binding. A parameter bound only to a type,
   with no argument node, remains a type-only read rather than an authored
-  indirect binding and is not reported by this check. A payload that is itself a
-  CFC alias therefore lowers as it would if written on its own: a generic alias
-  keeps its argument (`Integrity<Sec<string>, I>` is a string), a nested
-  `WriteAuthorizedBy` keeps its `typeof` binding, and a nested label keeps its
-  `AnyOf` clauses. A named type in the payload stays a `$ref` to its
+  indirect binding and is not reported by this check, except in a schema that
+  defines a document (the writer no syntax names, below). A payload that is
+  itself a CFC alias therefore lowers as it would if written on its own: a
+  generic alias keeps its argument (`Integrity<Sec<string>, I>` is a string), a
+  nested `WriteAuthorizedBy` keeps its `typeof` binding, and a nested label
+  keeps its `AnyOf` clauses. A named type in the payload stays a `$ref` to its
   definition.
 - A label lands on the part of a value its policy was written around. Each
   carrier records that payload beside its metadata (`CfcStamp<T, M>`,
@@ -1187,7 +1303,8 @@ Mechanics:
   spell it, provided every value in it reads. A writer binding, which only a
   `typeof` node names, does not, and a policy read in part could claim what
   its author never wrote together, such as an `ownerPrincipal` without its
-  `writeAuthorizedBy`. Then the value is its payload alone. The `null` the
+  `writeAuthorizedBy`. Then the value is its payload alone, and in a schema
+  that defines a document its writer is reported (below). The `null` the
   checker dropped is in the schema neither way. One member is read as itself.
   A payload that is itself an intersection leaves several, and only the
   payload each carrier records says which of them its policy was written
@@ -1287,10 +1404,12 @@ Mechanics:
   Non-generic tuples and literal index signatures also retain authored writer
   queries. Recursive definitions keep each writer's query origin even when
   handlers have identical types. An indexed access or conditional member that
-  leaves a writer carrier without binding syntax reports
-  `cfc-write-authorized-by:unread`; compilation cannot silently discard the
-  restriction. Pattern input and explicit output schemas are pinned by
-  ts-transformers `test/generic-writer-policy.test.ts`; runner
+  leaves a writer carrier without binding syntax, in a schema that defines a
+  document, reports `cfc-write-authorized-by:unread` and explains the
+  unsupported operator, so compilation cannot silently discard the
+  restriction; a view reads the policy whole or not at all, as for any writer
+  no syntax names (below). Pattern input and explicit output schemas are
+  pinned by ts-transformers `test/generic-writer-policy.test.ts`; runner
   `test/generic-writer-policy.test.ts` pins authorized and refused writes,
   including stored reloads.
 - The payload is read from the declaration of the last alias along the chain,
@@ -1516,7 +1635,13 @@ Mechanics:
   the legacy fallback (backslashes → `/`, first path segment stripped by
   `normalizeWriterIdentityFile`). The transformer also handles the direct-root
   `toSchema<WriteAuthorizedBy<T, typeof b>>` form specially so the wrapper's
-  value schema remains the root while the same identity marker is attached.
+  value schema remains the root while the same identity marker is attached:
+  it mints the claim and hands the generator the payload's node with
+  `rootWriterSupplied` (§14). The generator counts that writer as read at the
+  root: it reports no root writer, nullable payloads included, whose policy
+  the checker reduces to a type with no alias name, and keeps the principal
+  claims beside it. A second writer policy the root's type carries is still
+  reported.
   The writer identity is update-volatile in the piece compat checker in two
   ways, and `assertPatternSchemasBackwardCompatible` normalizes both out of the
   `ifc` comparison. The content-addressed hash (`moduleIdentity`, and the
@@ -1533,6 +1658,31 @@ Mechanics:
   package emits none of those keywords, so nothing it produces exercises that
   today. The checker sees schemas from elsewhere as well, and holds them to the
   same reading.
+- A writer read where no syntax names it leaves the schema without its write
+  claim: a declaration parameter bound to an argument with no node, a generic
+  member's indexed access or conditional type that leaves the carrier without
+  binding syntax (§4.1), or a carrier's metadata read from a type alone (bare,
+  or folded into an object as a member). In a schema that defines a document
+  (`definesDocument`, §14) that would be a document stored with no write
+  restriction, writable by any writer, so each is the
+  `cfc-write-authorized-by:unread` error, naming the policy
+  (`WriteAuthorizedBy`, or `WritePolicyAnyOf` for a carrier holding a set).
+  So is a number index signature beside a string one whose value type holds
+  a writer policy the string one's does not: the pair is lowered as the
+  string one alone, so the policy is lost.
+  Any other schema views a document whose stored envelope binds its writers
+  already, and reports nothing. It reads the policy whole or not at all.
+  Where the writer went unread, the policy is marked as read in part
+  (`#withPolicyReadWhole()`), and settled once the schema is generated
+  (`settlePoliciesReadInPart()` in `ifc-labels.ts`). If the writer arrived
+  since, as a label the value's declaration states merged in beside the part
+  read (§13's `narrowedFrom`), the policy is whole and stays where formatting
+  put it. Otherwise the principal claims the runtime enforces only beside a
+  writer, an `ownerPrincipal` and `integrity` or `addIntegrity` atoms naming
+  the current principal, are left out with it, since either alone refuses
+  every write against it, its own writer's included. A claim whose type holds
+  no writer stays as written. A writer the type no longer carries at all, as a mapped type the
+  generator does not follow can drop it, is not reported either way.
 - `SchemaGeneratorTransformer.resolvePolicyOfMarkers` replaces a valid policy
   marker with the compiled module identity, exported symbol, and policy digest.
   If it cannot match a compiler-verified exported `exchangeRules()` binding,
@@ -1597,7 +1747,8 @@ producing alias in this package as of this writing.
 
 Hint shape (`src/interface.ts`): `SchemaHints` is `WeakMap<ts.Node,
 SchemaHint>`, where `SchemaHint` is `{ items?: unknown; cfcUiContract?:
-UiContractHint; narrowedFrom?: NarrowedFrom; spelledBy?: ts.TypeNode }`,
+UiContractHint; narrowedFrom?: NarrowedFrom; spelledBy?: ts.TypeNode;
+definesDocument?: true }`,
 `UiContractHint` is
 `{ helper: "UiAction" | "UiPromptSlot" | "UiDisclosure"; action?; surface?;
 role?; kind?; trustedPattern?; requiredEventIntegrity? }`, and `NarrowedFrom`
@@ -1605,19 +1756,19 @@ is `{ type: ts.Type; typeNode?: ts.TypeNode }`. Every member is read-only: the
 generator only reads hints, and copies the `requiredEventIntegrity` list on the
 way into the emitted schema. A node holds a hint of each kind, recorded apart
 from the others. The producer writes `items` and `cfcUiContract` to the node
-and its original (`cross-stage-state.ts`), and `narrowedFrom` and `spelledBy`
-to the node alone. A `cfcUiContract` lookup tries the node and
+and its original (`cross-stage-state.ts`), and `narrowedFrom`, `spelledBy` and
+`definesDocument` to the node alone. A `cfcUiContract` lookup tries the node and
 `ts.getOriginalNode(node)` (`src/ui-contract.ts`, called from
 `schema-generator.ts` and `object-formatter.ts`); an `items` lookup reads the
 current hint node (`common-fabric-formatter.ts`); a `narrowedFrom` lookup reads
 the node, and the node inside its parentheses (`schema-generator.ts`); a
-`spelledBy` lookup reads the node (`formatChildType` in
+`spelledBy` or `definesDocument` lookup reads the node (`formatChildType` in
 `schema-generator.ts`).
 
 - **`items: false`** — array-typed wrapper contents collapse to
-  `items: { type: "unknown", …element wrapper markers }` for property-only
-  access patterns (e.g. `.length`), preserving the outer wrapper without
-  materializing item schemas. Element capability is recovered from the element
+  `items: { type: "unknown", …element wrapper markers }`, preserving the outer
+  wrapper without materializing item schemas. The transformer records it on a
+  handler state property whose elements the body uses only for identity. Element capability is recovered from the element
   node or type; for expanded `Default<[]> | Item[]` unions it is recovered by
   descending the synthetic union **node** to the single real array member,
   since the resolved type cannot express it (CT-1639 Gap B)
@@ -1639,14 +1790,18 @@ the node, and the node inside its parentheses (`schema-generator.ts`); a
   (`applyNodeSchemaHints` in `schema-generator.ts`, `withIfcLabels` and
   `declaredIfcLabels` in `ifc-labels.ts`). The value is formatted apart from
   the position, in definitions of its own, with nothing reported, and only for
-  its labels: a type no CFC wrapper holds, other than a union or an
-  intersection, reads as `{}` (`GenerationContext.labelsOnly`). A cell has
+  its labels: a type no CFC wrapper holds, other than a union, an
+  intersection, `null` or `undefined`, reads as `{}`
+  (`GenerationContext.labelsOnly`). A cell has
   the labels of its value, read at the value's own node where its wrapper is
   written out. A value that may be `undefined` or `null` has the labels of its
   one other member, and where the node's schema is such a union whose value
   member declares labels of its own and the union none, they are combined into
   that member's, where formatting put the part of them it could read
-  (`labeledValueMember` in `ifc-labels.ts`). A node
+  (`labeledValueMember` in `ifc-labels.ts`). Where no member node is paired
+  through the value's node, as a reference to a generic alias whose body is
+  the union, the value is formatted whole at that node and has the labels
+  formatting attaches to its value member, unless that member is a cell. A node
   narrowed from any other union stands for any of its members, so it has the
   union's labels, every member's confidentiality, and each other label every
   member declares alike (`joinMemberIfcLabels`). A member is spelled by the
@@ -1684,6 +1839,14 @@ the node, and the node inside its parentheses (`schema-generator.ts`); a
     each written alternative and its policy bindings.
   - Where the annotation spells neither, the node is read as any print is,
     by the type at hand.
+- **`definesDocument`** marks a node whose value is data its schema's
+  document holds itself rather than a view of another document, as a fresh
+  value a pattern's inferred result returns is. The node and everything under
+  it are read as `definesDocument` would read them (§14), whatever the schema
+  around them is. A named type read there is stored under a definition of its
+  own, `<Name>:document` (§5), apart from the view's reading of the same type:
+  the view leaves out a writer it cannot read, which this reading reports, so
+  neither definition can stand for the other.
 
   The node's own hints still apply.
 
@@ -1695,7 +1858,11 @@ supports `onDiagnostic` for recoverable generation problems (§7),
 `isDefaultLibrarySourceFile` for the program's own word on whether a
 declaration file is the default library's (the transformer supplies
 `program.isSourceFileDefaultLibrary`; without it, file names decide —
-`src/typescript/default-library.ts`), and `widenLiterals`.
+`src/typescript/default-library.ts`), `definesDocument` for a schema a
+document's stored policy envelope is made from, in which a writer no syntax
+names is an error (§11), `rootWriterSupplied` for a schema whose root policy's
+writer claim the caller supplies, handing the generator only the payload's
+node (§11), and `widenLiterals`.
 The effects of `widenLiterals` are:
 (1) single literal types emit bare base types instead of one-value enums
 (`primitive-formatter.ts`; bigint literals → `{ type: "integer" }`);
@@ -1724,7 +1891,9 @@ Everything that throws, with source (test-pinned unless noted):
 | `DeepDefault` without object target/default | `DeepDefault must be unioned with an object type …` | `union-formatter.ts` |
 | `DeepDefault` unknown key | `DeepDefault key "…" does not exist on the target object type.` | `union-formatter.ts` |
 | Nested scope wrappers | `Nested scope wrappers require a cell boundary between scopes.` | `common-fabric-formatter.ts` |
-| Scope wrapper as a union member | `A scope wrapper cannot be a member of a union.` | `common-fabric-formatter.ts`, `scope-placement.ts` |
+| Scope wrapper as a union member beside a value other than `null` or `undefined` | `A scope wrapper cannot be a member of a union.` | `common-fabric-formatter.ts`, `scope-placement.ts` |
+| Scope wrapper around a cell beside anything, `null` and `undefined` included | `A scope wrapper around a cell cannot hold anything beside the cell` | `common-fabric-formatter.ts` |
+| Scope wrapper beside `null` or `undefined` in a written union whose members do not read as wrappers or `null` or `undefined` | ``A scope wrapper beside `null` or `undefined` is read from the union written around it`` | `common-fabric-formatter.ts` |
 | An `ifc` key other than `confidentiality` declared differently by nested wrappers, or by a `$ref` and its definition | ``One value declares `ifc.<key>` twice, as … and as ….`` | `ifc-labels.ts` |
 | Circular type alias (wrapper chain) | `Circular type alias detected: A -> B -> …` | `type-utils.ts` |
 | Circular type alias (union alias) | `Circular type alias detected: <name>` | `union-formatter.ts` |

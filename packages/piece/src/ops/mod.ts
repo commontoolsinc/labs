@@ -84,6 +84,13 @@ export {
   type PrivateInboxEnsure,
 } from "./private-inbox.ts";
 export {
+  LOOM_OFFER_KIND,
+  type OfferDecision,
+  type OfferRefusal,
+  ShareIntake,
+  startShareIntakeOf,
+} from "./share-intake.ts";
+export {
   type PatternCompatibilityReport,
   type PatternUpdateReceipt,
   PieceController,
@@ -143,3 +150,11 @@ export {
   type ProfileNameProtectionInspection,
   repairProfileNameProtection,
 } from "./profile-name-protection.ts";
+
+export {
+  inspectProfileSpaceRoot,
+  listedProfiles,
+  type ProfileSpaceRootInspection,
+  type ProfileSpaceRootStatus,
+  repairProfileSpaceRoot,
+} from "./profile-space-root.ts";

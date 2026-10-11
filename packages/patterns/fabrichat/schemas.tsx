@@ -13,10 +13,13 @@
  */
 import {
   type Cell,
+  type DID,
   equals,
   FabricDurationNsec,
   FabricEpochNsec,
+  isWellFormedDID,
 } from "commonfabric";
+import type { ProfileInbox } from "../system/profile-home.tsx";
 
 //
 // Reviewed surfaces
@@ -63,6 +66,28 @@ export const CHAT_START_SURFACE = "ChatStartSurface";
 
 /** The reviewed action starting a conversation is, on `CHAT_START_SURFACE`. */
 export const CHAT_START_ACTION = "ChatStart";
+
+/** The reviewed surface a member is added to a room from. */
+export const CHAT_ADD_MEMBER_SURFACE = "ChatAddMemberSurface";
+
+/** The reviewed action adding a member is, on `CHAT_ADD_MEMBER_SURFACE`. */
+export const CHAT_ADD_MEMBER_ACTION = "ChatAddMember";
+
+//
+// Principals
+//
+
+/** A `did:key` whose key is base58btc multibase, as every principal's is. */
+const DID_KEY = /^did:key:z[1-9A-HJ-NP-Za-km-z]+$/;
+
+/**
+ * Whether `value` is a DID a principal can have: well formed, and, for a
+ * `did:key`, a base58btc key, so that a key a period or other punctuation
+ * follows is refused.
+ */
+export const isPrincipalDID = (value: unknown): value is DID =>
+  isWellFormedDID(value) &&
+  (!value.startsWith("did:key:") || DID_KEY.test(value));
 
 //
 // Times
@@ -115,6 +140,25 @@ export interface ChatProfile {
 
 /** A live link to a person's profile. */
 export type ProfileCell = Cell<ChatProfile>;
+
+/**
+ * The part of a person's profile a manager reads: what a room reads, and
+ * where to offer the person a room. Only a manager reads the inbox pointer,
+ * so the inbox's shape is part of no room's contract.
+ */
+export interface ChatManagerProfile extends ChatProfile {
+  /**
+   * Where the person's offers are delivered, as the profile types its pointer:
+   * a link naming nothing of the inbox but its name. An inbox labels its
+   * offers confidential to its owner, and a run reading the pointer as a link
+   * to more of the inbox, or untyped, takes that label on, which then refuses
+   * its sends.
+   */
+  inbox?: ProfileInbox;
+}
+
+/** A live link to a person's profile, as a manager reads it. */
+export type ManagerProfileCell = Cell<ChatManagerProfile>;
 
 //
 // Room records
@@ -359,10 +403,12 @@ export const reactionTalliesOf = (
  * and the link's schema is part of every manager handler's declared reads.
  *
  * So the link carries what the room's space shares with every member and
- * costs little to read: what the room says about itself, and how many
- * messages it holds and when the newest was sent, which the room derives from
- * its messages alone. It leaves out the rest of the room's data face. A
- * room's `canSend` is decided per reader, from their own profile, and its
+ * costs little to read: what the room says about itself, how many messages it
+ * holds and when the newest was sent, which the room derives from its
+ * messages alone, and its roster, which the room stores. It leaves out the
+ * rest of the room's data face. Its `participants` lists every author beside
+ * those the roster holds, so deriving it reads every message. A room's
+ * `canSend` is decided per reader, from their own profile, and its
  * `messages.windows` are each session's own, so both reach documents of a
  * member's own, as the room's rendering does. Its `messages.latest` is
  * shared, but holds up to `maxWindowCount` messages and their reactions, which
@@ -383,6 +429,12 @@ export interface ChatRoomLink {
     /** The newest message's `sentAt`; absent while there are none. */
     newestAt?: FabricEpochNsec;
   };
+
+  /**
+   * The profiles of those who joined the room, in the order they joined, as a
+   * manager reads them: each a link, whose profile is read only through it.
+   */
+  roster?: ManagerProfileCell[];
 }
 
 /** One room in a user's chat manager. */
@@ -396,8 +448,15 @@ export interface ChatIndexEntry {
   /** A direct room's other member, by principal. */
   counterpart?: string;
 
-  /** When this user created or accepted it. */
+  /** When this user's catalog admitted it. */
   since: FabricEpochNsec;
+
+  /**
+   * The revision of the room's entry in the user's catalog, as listed, which a
+   * request to forget the room names; absent where the entry is not one the
+   * catalog keeps revisions of.
+   */
+  revision?: string;
 }
 
 /** The outcome of a manager request. */
@@ -417,9 +476,56 @@ export type ChatRequestOutcome =
     /** The request was refused. */
     status: "refused";
 
-    /** Why. */
+    /** Why, for a person to read. */
     reason: string;
+
+    /**
+     * Which refusal it is, for a client to act on, where a client has one to
+     * take; absent for the others.
+     */
+    code?: ChatRefusalCode;
   };
+
+/**
+ * A refusal a client can act on, which stays the same whatever its `reason`
+ * says. `space-own-chat`: `accept` named a social space's own chat, which a
+ * user's chats don't list, since the catalog lists rooms by their own spaces.
+ */
+export type ChatRefusalCode = "space-own-chat";
+
+/** The outcome of an add to a room's space, by its `requestId`. */
+export type AddMemberOutcome =
+  | {
+    /** The person was admitted, or held the access already. */
+    status: "done";
+  }
+  | {
+    /** The add was refused, and nothing was granted. */
+    status: "refused";
+
+    /** Why, for a person to read. */
+    reason: string;
+
+    /**
+     * Which refusal it is, for a client to act on, where a client has one to
+     * take; absent for the others.
+     */
+    code?: AddMemberRefusalCode;
+  };
+
+/**
+ * A refusal of an add a client can act on, which stays the same whatever its
+ * `reason` says. `direct-room`: the room is a direct room, whose space keeps
+ * its two members.
+ */
+export type AddMemberRefusalCode = "direct-room";
+
+/**
+ * The `kind` of a room's own space, as the space declares it, and as an offer
+ * of the room to a member's share inbox and a user's shared-space catalog name
+ * it.
+ */
+export const CHAT_ROOM_OFFER_KIND = "fabrichat-room";
 
 /** A notice a manager's request produced, for a client to deliver. */
 export interface ChatManagerNotice {

@@ -969,10 +969,6 @@ function onlyOn(
 const ROOT_DIRECTORY_COMMANDS: readonly string[] = [
   "check",
   "piece new",
-  // Both mounts of `set-home`: the superseded one keeps completing its own
-  // flags for a caller who has not migrated, it is only never suggested.
-  "piece set-home",
-  "space set-home",
   "piece setsrc",
   "piece survey",
   "test",
@@ -1095,6 +1091,8 @@ const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
   plan: () => Promise.resolve(directive({ kind: "files" })),
   // `cf inspect --dir` is an extra directory to search for space DBs.
   dir: () => Promise.resolve(directive({ kind: "dirs" })),
+  // `cf profile repair-root --from-snapshot` is a directory of space DBs.
+  "from-snapshot": () => Promise.resolve(directive({ kind: "dirs" })),
   // `cf inspect html --out` and `cf check --output` write a file.
   out: () => Promise.resolve(directive({ kind: "files" })),
   output: () => Promise.resolve(directive({ kind: "files" })),
@@ -1190,8 +1188,6 @@ const ARGUMENT_PROVIDERS: Readonly<
   "exec:mountedFile": () => Promise.resolve(directive({ kind: "files" })),
   "id did:keypath": () =>
     Promise.resolve(directive({ kind: "files", glob: "*.key" })),
-  "piece set-home:main": patternFiles,
-  "space set-home:main": patternFiles,
   "piece getsrc:outpath": () => Promise.resolve(directive({ kind: "files" })),
   "deps update:file": () => Promise.resolve(directive({ kind: "files" })),
   "fuse mount:mountpoint": () => Promise.resolve(directive({ kind: "dirs" })),

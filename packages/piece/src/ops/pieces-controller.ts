@@ -21,6 +21,7 @@ import { setLLMUrl } from "@commonfabric/llm";
 import type { CfcPosture } from "@commonfabric/runner";
 import {
   applyPieceSourceTransition,
+  attestedPrincipalsAt,
   type Cell,
   cellRuntime,
   Console as RuntimeConsole,
@@ -31,7 +32,6 @@ import {
   type EntityIdListResult,
   type EnvReader,
   type ExperimentalOptions,
-  experimentalOptionsForDeployedClient,
   getEntityId,
   getMetaLink,
   getPatternIdentityRef,
@@ -39,12 +39,14 @@ import {
   getPatternSource,
   getPieceSourceSnapshot,
   idStringForEntityAddress,
+  inSpaceRootCause,
   isCell,
   isLink,
   isStoredArgumentSchemaRefusal,
   isStream,
   type JSONSchema,
   KeepAsCell,
+  memoryHostNote,
   type MemorySpace,
   type Module,
   type ModuleByteCache,
@@ -64,6 +66,7 @@ import {
   sendEvent,
   setPatternRepository,
   setPatternSource,
+  settingsForDeployedClient,
   type SpaceCellContents,
   SpaceNotFoundError,
 } from "@commonfabric/runner";
@@ -114,6 +117,7 @@ import {
 } from "./piece-input-path.ts";
 import { reconcilePieceSource } from "./piece-origin.ts";
 import { ensurePrivateInboxOf } from "./private-inbox.ts";
+import { type ShareIntake, startShareIntakeOf } from "./share-intake.ts";
 import { compileProgram } from "./utils.ts";
 export {
   DEFAULT_APP_PATTERN_SOURCE,
@@ -258,6 +262,10 @@ export class PiecesController<T = unknown> {
    * authorization error. A connection that does not complete takes its socket
    * and its replica down with it.
    *
+   * Memory opens on the memory URL the deployment publishes on its meta
+   * document, where it publishes one (`settingsForDeployedClient`), and on
+   * `apiUrl` otherwise. The health check does not ask the memory host.
+   *
    * A pattern that reaches the LLM reaches this deployment's service.
    */
   static async initialize(
@@ -302,7 +310,7 @@ export class PiecesController<T = unknown> {
       /**
        * The experimental posture the controller's runtime runs under. Absent,
        * it is the deployment's own, with this process's explicit
-       * `EXPERIMENTAL_*` winning per flag (`experimentalOptionsForDeployedClient`).
+       * `EXPERIMENTAL_*` winning per flag (`settingsForDeployedClient`).
        * A caller that had to know the posture before opening the session — a
        * host that decides something on it, a test that states the arm it
        * exercises — passes what it resolved, so the runtime runs the posture
@@ -360,9 +368,16 @@ export class PiecesController<T = unknown> {
       identity,
       spaceDid: isDID(space) ? space : await legacySpaceDid(space),
     });
+    // The deployment's meta document names the memory URL Memory opens on,
+    // where it has one, so it is read even when the caller states the flags.
+    const deployment = await settingsForDeployedClient({
+      apiUrl: api,
+      env: readEnv,
+    });
+    const memoryHost = deployment.memoryHost;
     const storageManager = StorageManager.open({
       as: session.as,
-      memoryHost: api,
+      memoryHost,
     });
     // Shared first-party posture for client runtimes against a deployed API
     // (CT-1814); the CFC pin this site previously restated lives in the
@@ -380,12 +395,9 @@ export class PiecesController<T = unknown> {
     try {
       runtime = new Runtime(runtimePresets.remoteClient({
         apiUrl: api,
+        memoryHost,
         storageManager,
-        experimental: experimental ??
-          await experimentalOptionsForDeployedClient({
-            apiUrl: api,
-            env: readEnv,
-          }),
+        experimental: experimental ?? deployment.experimental,
         moduleByteCache,
         patternCoverage,
         ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
@@ -406,7 +418,10 @@ export class PiecesController<T = unknown> {
         }),
       }));
       if (!await runtime.healthCheck()) {
-        throw new Error(`Could not connect to "${api.toString()}".`);
+        throw new Error(
+          `Could not connect to "${api.toString()}".` +
+            memoryHostNote(memoryHost, api),
+        );
       }
       const pieces = new PiecesController(session, runtime, {
         deferSpaceCellSync,
@@ -495,14 +510,56 @@ export class PiecesController<T = unknown> {
   /**
    * Link the default pattern cell to the space cell.
    * This should be called after the default pattern is created.
+   *
+   * Refuses to replace an identity Home's root: a Home that already holds one
+   * is changed only in place, as {@link #refuseHomeRoot} says. Linking the
+   * first root of a Home that holds none is what first open does.
+   *
+   * With `options.replacing`, the link is made only while the space's root is
+   * still the one a caller inspected: the cell given, or none at all when it
+   * is `null`, compared by the link the space cell stores. With
+   * `options.stillReplaceable` as well, the root linked now must also pass
+   * that test, which reads it through the linking transaction. Both checks
+   * are read in that transaction, so a root another writer links or changes
+   * meanwhile fails the call rather than being replaced.
+   *
    * @param defaultPatternCell - The cell representing the default pattern
+   * @throws Error when `options.replacing` no longer names the space's root,
+   *   and when the root it names no longer passes `options.stillReplaceable`.
    */
   async linkDefaultPattern(
     defaultPatternCell: Cell<any>,
+    options: {
+      replacing?: Cell<unknown> | null;
+      stillReplaceable?: (root: Cell<unknown>) => boolean;
+    } = {},
   ): Promise<void> {
     const { error } = await this.runtime.editWithRetry((tx) => {
       const spaceCellWithTx = this.#spaceCell.withTx(tx);
-      spaceCellWithTx.key("defaultPattern").set(defaultPatternCell.withTx(tx));
+      const slot = spaceCellWithTx.key("defaultPattern");
+      if (options.replacing !== undefined) {
+        const current = slot.get() as Cell<unknown> | undefined;
+        const unchanged = options.replacing === null
+          ? slot.getRaw() === undefined
+          : current !== undefined && current.equalLinks(options.replacing);
+        if (!unchanged) {
+          throw new Error("The space's root changed since it was inspected");
+        }
+        if (
+          current !== undefined &&
+          options.stillReplaceable?.(current.withTx(tx)) === false
+        ) {
+          throw new Error(
+            "The space's root is still the one inspected, but no longer passes the check it was inspected under",
+          );
+        }
+      }
+      // Read in the transaction, as the stored pointer: a retry reruns this
+      // against fresh state, and a target that cannot load is still a root.
+      if (slot.getRaw() !== undefined) {
+        this.#refuseHomeRoot("replace");
+      }
+      slot.set(defaultPatternCell.withTx(tx));
     });
     if (error) {
       throw new Error(
@@ -516,8 +573,12 @@ export class PiecesController<T = unknown> {
   /**
    * Clears the defaultPattern link from the space cell.
    * Used when the default pattern is being deleted.
+   *
+   * Refuses an identity Home: its root is the record of the account data it
+   * owns, and nothing that drops that pointer is an account operation.
    */
   async unlinkDefaultPattern(): Promise<void> {
+    this.#refuseHomeRoot("unlink");
     const { error } = await this.runtime.editWithRetry((tx) => {
       const spaceCellWithTx = this.#spaceCell.withTx(tx);
       spaceCellWithTx.key("defaultPattern").set(undefined);
@@ -573,10 +634,12 @@ export class PiecesController<T = unknown> {
       // listings, `cf piece ls`, FUSE, the shell's list cells all resolve the
       // root HERE. Opening it already reconciled it against its origin, so a
       // start that still failed is not out of date; the one remaining rescue
-      // is for a root that records no origin at all and whose stored pattern
-      // this runtime cannot load. Roll that one forward to the space's
-      // official system root and retry the start ONCE. Every other failure
-      // rethrows untouched.
+      // is for a root that records no origin at all, that its creator's
+      // pattern did not place (no `inSpace()` call placed it, and its own
+      // label says it represents no principal), and whose stored pattern this
+      // runtime cannot load. Roll that one forward to the space's official
+      // system root and retry the start ONCE. Every other failure rethrows
+      // untouched.
       if (!start) throw error;
       let healed: Cell<NameSchema>;
       try {
@@ -632,7 +695,8 @@ export class PiecesController<T = unknown> {
    * runnable pattern, and rolling it forward changes no source. A root
    * following anything else has an owner's choice behind it, and replacing its
    * source with the system default would discard that choice rather than
-   * repair anything.
+   * repair anything. So does a root its creator's pattern placed
+   * ({@link #keepsCreatorsPattern}), origin or none.
    *
    * A by-identity load probe is the evidence this rests on, and with CFC
    * enforcement disabled that probe reports every artifact outside the
@@ -640,9 +704,48 @@ export class PiecesController<T = unknown> {
    */
   #rootNeedsRollForward(root: Cell<NameSchema>): boolean {
     if (this.runtime.cfcEnforcementMode === "disabled") return false;
+    if (this.#keepsCreatorsPattern(root)) return false;
     const origin = getPatternSource(root);
     return origin === undefined ||
       origin === deriveSystemPatternSource(this.#space, this.runtime);
+  }
+
+  /**
+   * Whether `root` was placed by its creator's pattern, which the space's
+   * system root is no replacement for: a root an `inSpace()` call placed
+   * ({@link #isInSpaceRoot}), and a root its own stored label says
+   * represents a principal, as a profile's does wherever the profile sits.
+   * The label read is of the root's own document, so a claim a link inside
+   * it carries in from another document does not count, and nothing is
+   * loaded or run to read it.
+   */
+  #keepsCreatorsPattern(root: Cell<NameSchema>): boolean {
+    if (this.#isInSpaceRoot(root)) return true;
+    const tx = this.runtime.edit();
+    try {
+      return (attestedPrincipalsAt(
+        tx,
+        root.getAsNormalizedFullLink(),
+        "represents-principal",
+      )?.length ?? 0) > 0;
+    } finally {
+      tx.abort();
+    }
+  }
+
+  /**
+   * Whether `root` is at the address the space's genesis commit reserves for
+   * the root an `inSpace(..., { root: true })` call places. Such a root was
+   * placed by its creator's pattern, so the space's system root is no
+   * replacement for it. It reads the address, not the space's genesis
+   * reservation, which no client can read: a writer who places a root at that
+   * address in a space that reserved none makes it fail closed, as a root
+   * following any other origin already does.
+   */
+  #isInSpaceRoot(root: Cell<NameSchema>): boolean {
+    return root.equalLinks(
+      this.runtime.getCell(this.#space, inSpaceRootCause(this.#space)),
+    );
   }
 
   /** The root's `pieceRegistry` export, addressed but not yet synced. */
@@ -1454,6 +1557,9 @@ export class PiecesController<T = unknown> {
         .key("defaultPattern");
       const linked = defaultPatternCell.get();
       if (linked && piece.resolveAsCell().equals(linked.resolveAsCell())) {
+        // Removing a Home's own root from its registry would drop the root
+        // pointer with it; that is the unlink the Home refuses.
+        this.#refuseHomeRoot("unlink");
         defaultPatternCell.set(undefined);
       }
       return true;
@@ -2033,8 +2139,33 @@ export class PiecesController<T = unknown> {
   }
 
   /**
+   * The refusal every root-replacing operation on an identity Home shares.
+   *
+   * A Home is created once, on its user's first open
+   * ({@link ensureDefaultPattern}), and changes only by an in-place source
+   * update, which retains the account data its root owns: profiles,
+   * favorites, navigation, the shared-space catalog and the inbox pointer.
+   * There is no path that drops or replaces that root, absent or present,
+   * loadable or not. A Home that will not load is repaired in place; a
+   * destructive recovery, should one ever be needed, is a separate contract
+   * (docs/common/conventions/HOME_SPACE.md, "A Home that will not load").
+   * `linkDefaultPattern` shares it once a Home holds a root; before that it is
+   * the creation step itself. `remove` shares it for a Home's own root, which
+   * a registry may list, since dropping the registry entry drops the pointer.
+   */
+  #refuseHomeRoot(verb: "recreate" | "replace" | "unlink"): void {
+    if (this.getSpace() !== this.runtime.userIdentityDID) return;
+    throw new Error(
+      `Cannot ${verb} an identity Home root. A Home is created on its ` +
+        "user's first open and changed only by an in-place source update, " +
+        "which preserves the account data it owns.",
+    );
+  }
+
+  /**
    * Creates a fresh default pattern, replacing a non-Home space's root.
-   * An existing identity Home must be updated in place to retain account data.
+   *
+   * Never an identity Home, absent or present: see {@link #refuseHomeRoot}.
    *
    * @param options.customProgram - A pre-compiled program to use instead of the default URL-based pattern
    * @returns The newly created default pattern piece
@@ -2050,63 +2181,39 @@ export class PiecesController<T = unknown> {
       );
     }
 
-    // Determine which pattern to use based on space type
-    const isHomeSpace = this.getSpace() === this.runtime.userIdentityDID;
-
-    // A Home space comes into being on its user's first open. Any other space
-    // is created on purpose, and one that was not is not conjured by opening,
-    // so this is settled before anything touches the space.
-    if (!isHomeSpace && !(await this.runtime.spaceExists(this.getSpace()))) {
+    // Settled before anything touches the space: a Home is never recreated,
+    // and a space that was not created on purpose is not conjured here.
+    this.#refuseHomeRoot("recreate");
+    if (!(await this.runtime.spaceExists(this.getSpace()))) {
       throw new SpaceNotFoundError(this.getSpace(), this.#spaceName);
     }
 
     const spaceCellContents = this.getSpaceCellContents();
     await spaceCellContents.sync();
-    const protectHome = (cell: Cell<SpaceCellContents>) => {
-      if (isHomeSpace && cell.key("defaultPattern").getRaw() !== undefined) {
-        throw new Error(
-          "Cannot replace an existing Home root. Update its source in place " +
-            "to preserve account data.",
-        );
-      }
-    };
-    protectHome(spaceCellContents);
-    if (!isHomeSpace) {
-      const defaultPatternRef = spaceCellContents.key("defaultPattern").get();
-      if (defaultPatternRef) this.runtime.runner.stop(defaultPatternRef);
-      await this.unlinkDefaultPattern();
-    }
+    const defaultPatternRef = spaceCellContents.key("defaultPattern").get();
+    if (defaultPatternRef) this.runtime.runner.stop(defaultPatternRef);
+    await this.unlinkDefaultPattern();
 
     let patternConfig: { name: string; source: string; cause: string };
     let pattern;
 
     if (options?.customProgram) {
       patternConfig = {
-        name: isHomeSpace ? "Home" : "DefaultPieceList",
+        name: "DefaultPieceList",
         source: "custom",
-        cause: isHomeSpace
-          ? `home-pattern-${Date.now()}`
-          : `space-root-${Date.now()}`,
+        cause: `space-root-${Date.now()}`,
       };
       pattern = await this.runtime.patternManager.compilePattern(
         options.customProgram,
         { space: this.getSpace() },
       );
     } else {
-      if (isHomeSpace) {
-        patternConfig = {
-          name: "Home",
-          source: HOME_PATTERN_SOURCE,
-          cause: `home-pattern-${Date.now()}`,
-        };
-      } else {
-        const customUrl = await this.#getDefaultAppUrlFromHome();
-        patternConfig = {
-          name: "DefaultPieceList",
-          source: customUrl || DEFAULT_APP_PATTERN_SOURCE,
-          cause: `space-root-${Date.now()}`,
-        };
-      }
+      const customUrl = await this.#getDefaultAppUrlFromHome();
+      patternConfig = {
+        name: "DefaultPieceList",
+        source: customUrl || DEFAULT_APP_PATTERN_SOURCE,
+        cause: `space-root-${Date.now()}`,
+      };
 
       const patternUrl = patternSourceUrl(
         patternConfig.source,
@@ -2127,8 +2234,6 @@ export class PiecesController<T = unknown> {
     let pieceCell: Cell<NameSchema>;
 
     const { error } = await this.runtime.editWithRetry((tx) => {
-      // First-open initializers may have installed Home during compilation.
-      protectHome(spaceCellContents.withTx(tx));
       // Create piece cell within this transaction
       pieceCell = this.runtime.getCell<NameSchema>(
         this.getSpace(),
@@ -2232,26 +2337,59 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * Gives the identity's Home its private inbox, if it holds none, and has it
-   * point each of the identity's profiles that points at no inbox at it, by
+   * Gives the identity's Home the private inbox its profiles advertise, and has
+   * it point each of the identity's profiles that points at no inbox at it, by
    * sending Home's `ensurePrivateInbox` as `ensurePrivateInboxOf()` does: Home
-   * adopts the inbox a profile advertises when it passes vetting, creates one
-   * when no profile advertises one, and otherwise holds none, with the refusal
-   * logged. Sending it again creates and re-points nothing. A Home pattern
-   * without that stream is left as it is. This controller must be over the
-   * identity's Home space.
+   * keeps an inbox it holds while the deciding profile, the first in `#profile`
+   * order that points at an inbox, advertises it or no profile advertises any,
+   * and otherwise adopts the deciding profile's inbox when it passes vetting,
+   * retaining the one it held. It creates one when it holds none and
+   * no profile advertises one, and otherwise keeps what it holds or holds
+   * none, with the refusal logged and sent for Home to record in its
+   * `privateInboxRefusal`. Sending it again creates, re-points and retains
+   * nothing. A Home pattern without that stream is left as it is. This
+   * controller must be over the identity's Home space.
    *
    * Resolves once the event is sent, which is before Home's handler runs, so
-   * it rejects only when Home cannot be brought up, or vetting or the send
-   * itself throws; a failure inside the handler is not reported here.
+   * it rejects only when Home cannot be brought up, when reading Home's or its
+   * profiles' pointers or loading the inbox documents they name fails, when a
+   * profile ordered ahead of the deciding one cannot be read, or when vetting
+   * or the send itself throws; a failure inside the handler is not reported
+   * here. Once `signal` aborts, or the runtime begins disposal, it sends
+   * nothing.
    */
-  async ensurePrivateInbox(): Promise<void> {
+  async ensurePrivateInbox(signal?: AbortSignal): Promise<void> {
     this.#assertHomeSpace("ensure a private inbox");
     const home = (await this.ensureDefaultPattern()).getCell();
     await ensurePrivateInboxOf(
       this.runtime,
       home,
       this.runtime.userIdentityDID,
+      signal,
+    );
+  }
+
+  /**
+   * Starts the identity's share intake: it follows the offers in the private
+   * inboxes Home holds and retains, and registers each offer that passes
+   * vetting in Home's shared-space catalog, as `ShareIntake` describes, until
+   * it is stopped or `signal` aborts. Returns `undefined`, starting nothing,
+   * for a Home pattern without a `registerSharedSpace` stream. This controller
+   * must be over the identity's Home space.
+   *
+   * Resolves once the intake is following Home, which is before it has taken
+   * up any offer. Rejects when Home cannot be brought up.
+   */
+  async startShareIntake(
+    signal?: AbortSignal,
+  ): Promise<ShareIntake | undefined> {
+    this.#assertHomeSpace("start a share intake");
+    const home = (await this.ensureDefaultPattern()).getCell();
+    return startShareIntakeOf(
+      this.runtime,
+      home,
+      this.runtime.userIdentityDID,
+      signal,
     );
   }
 
@@ -2484,6 +2622,9 @@ export class PiecesController<T = unknown> {
         // for its kind. One that follows an origin keeps what its owner chose:
         // opening it already tried that origin, and replacing its source with
         // the system default would discard the choice rather than repair it.
+        // One its creator's pattern placed, an `inSpace()` root or one whose
+        // label says it represents a principal, keeps that pattern the same
+        // way, and fails closed.
         if (!this.#rootNeedsRollForward(rootToStart)) throw startError;
         return new PieceController<NameSchema>(
           this,
@@ -2564,6 +2705,20 @@ export class PiecesController<T = unknown> {
             () => [
               "startEnsuredDefaultPattern: setup repair failed for an " +
               "unrelated reason; surfacing the original start error",
+              `${ref.identity}#${ref.symbol}`,
+              repairError,
+            ],
+          );
+          throw startError;
+        }
+        if (this.#keepsCreatorsPattern(rootToStart)) {
+          // The system root is no replacement for a root its creator's pattern
+          // placed, so this one fails closed like any other refused repair.
+          pieceUpdateLogger.warn(
+            "cold-start-setup-repair-creators-root",
+            () => [
+              "startEnsuredDefaultPattern: setup repair rejected for a root " +
+              "its creator's pattern placed; surfacing the original start error",
               `${ref.identity}#${ref.symbol}`,
               repairError,
             ],

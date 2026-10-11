@@ -85,18 +85,13 @@ export {
   NAME_SEPARATOR,
   parseSkipList,
   readNameMaps,
+  readRegistrations,
   repositoryPathOf,
   repositoryRootOf,
   serializeSkipList,
   SKIP_LIST_VARIABLE,
 } from "./registration.ts";
 export type { NameMap, RegistrationCapture, SkipList } from "./registration.ts";
-export {
-  BEGAN_PREFIX,
-  BEGAN_SUFFIX,
-  markUnitsBegan,
-  unitsBegan,
-} from "./began.ts";
 export {
   preloadArgument,
   preloadModulePath,
@@ -167,7 +162,6 @@ export type {
   Manifest,
   ManifestEntry,
   PreviousSuiteHealth,
-  ProcessFit,
   ScoreInputs,
   SuiteFit,
   SuiteHealth,

@@ -24,10 +24,18 @@ a room to anyone its space doesn't admit.
   way. It is what keeps one person's conversation from splitting.
 - **The conversations a container shows** are the adapters the container holds,
   each linking to a placement of one room, plus the container's own chat when it
-  is a shared space that has one.
-- **The people a client offers** when starting a conversation from a shared
+  is a social space that has one. A client that wants a `loom` root's own chat
+  sends the root's `ensureChatRoom`, which creates the room unless the root
+  names one, and reads it from `chatRoom`. A client MUST NOT create that room
+  itself: a piece created at the top level of the space is registered through
+  the root's `addPiece`, which shows it as a panel.
+- **The people a client offers** when starting a conversation from a social
   space are that space's participants, as claims, until it offers a member set
-  (see [shared spaces](README.md#shared-spaces)).
+  (see [social spaces](README.md#social-spaces)). When starting a group from
+  the person's chats, they are the manager's `people`, the profiles of those
+  the person shares a room with, by the principal each attests. A client names
+  each person picked there by profile, in `createGroup`'s `profiles`, so the
+  manager offers them the room.
 - **A notice** says the person has been admitted to a room. Its claim of who
   sent it is unauthenticated. Before sending `accept` for a direct room, a
   client MUST read the principal the room's `about.record` is labeled
@@ -38,6 +46,12 @@ a room to anyone its space doesn't admit.
   created the room from the same label. Whether to add the room to their list is
   the person's decision, so a client SHOULD accept only after showing them who
   created the room, and what it is.
+- **An offer** of a room needs nothing from a client. The person's host vets
+  it, registers the room in their Home's catalog, and accepts it on their
+  behalf, with `keepArchived`, so the room is in their `rooms`, and a direct
+  room is in their `direct` unless that already holds a room with its creator.
+  Either way their later `openDirect` with the creator finds the room `direct`
+  holds (see [`ChatManagerOutput`](ChatManagerOutput.md#offers)).
 
 ## Showing a room
 
@@ -66,7 +80,12 @@ A client that draws natively MUST:
   never by display name.
 - **Show members from the room's space.** A room's `participants` are its
   space's participants, as claims, plus its authors. None of them is proof that
-  someone can read the room.
+  someone can read the room. To name each of them, and to tell which one is the
+  reader, as when titling a direct room with the other person's name, a client
+  reads the room's `participantEntries`, which pairs each participant's profile
+  with the principal it attests. It is best effort and derived for each reader:
+  an entry whose profile the reader can't read holds no principal, and it is
+  not an access list.
 - **Offer any single emoji as a reaction** (see
   [`ChatReaction`](ChatReaction.md)), and show any that others have used, even
   ones the client wouldn't offer itself.
@@ -108,6 +127,20 @@ gesture on the reviewed surface its policy names:
 | add a reaction | room | `sendReaction` | `ChatReactSurface` |
 | remove a reaction | room | `deleteReaction` | `ChatReactSurface` |
 | start a conversation | manager | `openDirect`, `createGroup` | `ChatStartSurface` |
+| add a member | room | `addMember` | `ChatAddMemberSurface` |
+
+A client that draws natively sends `addMember` through
+[the sanctioned issuing path](#the-sanctioned-issuing-path) on
+`ChatAddMemberSurface`, as it sends the acts above. It finds the stream in
+`[VIEWS]`, beside `canAdd`, which says whether the reader may add anyone, false
+in a direct room, and `addRequests`, where each add's outcome is recorded under
+its `requestId` (see
+[`ChatRoomOutput`](ChatRoomOutput.md#addmemberrequestid-string-target--value-string-)).
+To leave the people already in the room out of its add control, it reads the
+room's `participantPrincipals`, the principals the room's `participantEntries`
+hold. It is a best-effort set to leave out, not an access list: someone who
+has been added but has never joined isn't among them, and neither is a
+participant whose profile the reader can't read.
 
 A client sends to the room's own streams, never through a placement or an
 adapter.
@@ -184,21 +217,29 @@ MUST behave as a trustworthy renderer:
 A client that can't meet all six MUST NOT issue trusted gestures. It can still
 read and show conversations, and it can host the room's `[UI]` for writing.
 
-### Prerequisite: a sanctioned issuing path
+### The sanctioned issuing path
 
-A native client needs a sanctioned way to hand the runtime a gesture it vouches
-for. The host embedding record already names this as the right posture: "a
-sanctioned headless issuance path, **not** a weakening of the in-runtime
-surface-origin defense". No such path exists yet. The runtime client's generic
-`cell:send` doesn't mark an event, and the in-repository precedents that do mark
-one (`packages/cli/lib/trusted-action-event.ts`, the pattern test runner's
-`trustedUi` steps) are not for embedding hosts. The path this design needs:
+A native client hands the runtime a gesture it vouches for through the
+sanctioned issuing path that [host
+embedding](../../features/host-embedding.md#10-native-reviewed-controls), §10,
+describes. A host running the runtime in its own process binds each control to
+its stream with `bindNativeUiControl()` from `@commonfabric/runner/native-ui`,
+naming the surface and action from the table above once, when it binds the
+control. The function that returns sends the control's payload with `native`
+provenance for that surface and action, carrying the renderer-trust mark. A
+host whose runtime runs in a worker sends the same act with
+`CellHandle.sendReviewed(event, { surface, action })`, which waits for the
+handler's run, and rejects with the reason when its write is refused. Either
+way, the runtime checks the surface and action against the write's policy as
+it checks a rendered gesture's provenance, and the mark reaches a served
+handler the way a rendered gesture's does. The generic `cell:send` marks
+nothing, and pattern code can reach neither path.
 
-- It is available only to the host, never to pattern code that the runtime runs.
-- It takes the surface and action with the event, and the runtime checks them
-  against the write's policy as it checks a rendered gesture's provenance.
-- It carries the mark to wherever the handler runs, as `rendererTrusted` already
-  does between runtimes.
+A native reviewed act counts wherever a trusted gesture does ([host
+embedding](../../features/host-embedding.md#11-policy-record-native-reviewed-acts-count-as-trusted-gestures),
+§11), a change to a space's access list included. So adding a member works the
+same way: `addMember` admits someone with `grantSpaceAccess()`, which admits a
+native reviewed act as it admits a gesture on the room's rendered add control.
 
 ## Delivering notices
 

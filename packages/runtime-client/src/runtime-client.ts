@@ -86,6 +86,7 @@ import {
 import { assertNoKeyMaterial } from "./shared/key-material.ts";
 import {
   type EveryFieldOf,
+  normalizeMemoryUrl,
   normalizeOrigin,
   normalizeSpaceHostMap,
 } from "./shared/security-context.ts";
@@ -109,9 +110,16 @@ export interface RuntimeClientPageSettings {
 
 export interface RuntimeClientOptions
   extends
-    Omit<InitializationData, "apiUrl" | "identity">,
+    Omit<InitializationData, "apiUrl" | "memoryUrl" | "identity">,
     RuntimeClientPageSettings {
   apiUrl: URL;
+
+  /**
+   * The default storage host, where it is not `apiUrl`
+   * ({@link InitializationData.memoryUrl}).
+   */
+  memoryUrl?: URL;
+
   identity: Identity;
 }
 
@@ -138,11 +146,14 @@ export interface RuntimeClientOptions
 export interface RuntimeAttachOptions extends
   Omit<
     RuntimeSecurityContext,
-    "apiUrl" | "spaceHostMap" | "identity"
+    "apiUrl" | "memoryUrl" | "spaceHostMap" | "identity"
   >,
   RuntimeClientPageSettings {
   /** The backend this client believes the runtime reads from. */
   apiUrl: URL;
+
+  /** The default storage host this client believes the runtime opens. */
+  memoryUrl?: URL;
 
   /** The per-space hosts this client believes the runtime resolves against. */
   spaceHostMap?: Record<string, string>;
@@ -185,6 +196,7 @@ export function attachOptionsFrom(
 ): RuntimeAttachOptions {
   return {
     apiUrl: options.apiUrl,
+    memoryUrl: options.memoryUrl,
     spaceHostMap: options.spaceHostMap,
     identity: options.identity.did(),
     spaceDid: options.spaceDid,
@@ -829,6 +841,10 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       // that agreeing on a backend does not depend on agreeing on how to spell
       // one.
       apiUrl: normalizeOrigin(options.apiUrl.toString()),
+      memoryUrl: normalizeMemoryUrl(
+        options.memoryUrl?.toString(),
+        options.apiUrl.toString(),
+      ),
       spaceHostMap: normalizeSpaceHostMap(options.spaceHostMap),
       spaceDid: options.spaceDid,
       experimental: options.experimental,
@@ -865,6 +881,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     // it. `initialize()` checks the values.
     const data = {
       apiUrl: options.apiUrl.toString(),
+      memoryUrl: options.memoryUrl?.toString(),
       spaceHostMap: options.spaceHostMap,
       identity: options.identity.keyPair,
       spaceDid: options.spaceDid,
@@ -1040,17 +1057,21 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   // connection.
 
   /**
-   * The space's root pattern.
+   * The space's root pattern, or `undefined` when the space has none.
    *
    * `start` defaults to true, which is what a view that renders the root
    * needs. Pass false to read what the root exported without running it —
    * far cheaper on a space whose root reaches a large piece, and enough for
    * a caller that only wants an exported sub-page or listing.
+   *
+   * Opening a space with `start` true creates its root when it has none and
+   * this runtime's identity owns the space. Reading with `start` false never
+   * creates one, and neither does any other principal's open.
    */
   async getSpaceRootPattern(
     space: DID,
     options: { start?: boolean } = {},
-  ): Promise<PieceHandle<NameSchema>> {
+  ): Promise<PieceHandle<NameSchema> | undefined> {
     const response = await this.#conn.request<
       RequestType.GetSpaceRootPattern
     >({
@@ -1058,6 +1079,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       space,
       ...(options.start === undefined ? {} : { start: options.start }),
     });
+    if (response.piece === undefined) return undefined;
     return new PieceHandle<NameSchema>(this, response.piece);
   }
 
@@ -1073,18 +1095,6 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       ...(label === undefined ? {} : { label }),
     });
     return response.space;
-  }
-
-  async recreateSpaceRootPattern(
-    space: DID,
-  ): Promise<PieceHandle<NameSchema>> {
-    const response = await this.#conn.request<
-      RequestType.RecreateSpaceRootPattern
-    >({
-      type: RequestType.RecreateSpaceRootPattern,
-      space,
-    });
-    return new PieceHandle<NameSchema>(this, response.piece);
   }
 
   async getPiece<T = unknown>(
@@ -1367,8 +1377,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * return the reason along with a refusal. `known-different-host` carries the
    * host the space is routed to. `default-route-in-use` is about this session alone:
    * the space issued a stateful operation through the default host, and a
-   * runtime created later can still take the hint. Callers must not mount the
-   * space under this hint unless `accepted` is true.
+   * runtime created later can still take the hint. Under a memory URL a hint
+   * naming another deployment's origin is decided once the runtime has read
+   * where that deployment serves Memory, which this request waits for;
+   * `foreign-host-unread` says that could not be learned, and holds for the
+   * runtime's lifetime. Callers must not mount the space under this hint
+   * unless `accepted` is true.
    */
   async registerSpaceHostDetailed(
     space: DID,

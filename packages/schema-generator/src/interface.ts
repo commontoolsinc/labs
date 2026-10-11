@@ -54,6 +54,13 @@ export interface SchemaHint {
    * spells as the structural type of the value it names.
    */
   readonly spelledBy?: ts.TypeNode;
+  /**
+   * Whether the value the node describes is data its schema's document holds
+   * itself rather than a view of another document, as a fresh value a
+   * pattern's inferred result returns is. It is read as defining a document
+   * (`SchemaGenerationOptions.definesDocument`).
+   */
+  readonly definesDocument?: true;
 }
 
 export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
@@ -78,6 +85,14 @@ export interface SchemaGenerationDiagnostic {
 /** Options that affect schema generation without changing the authored type. */
 export interface SchemaGenerationOptions {
   readonly widenLiterals?: boolean;
+
+  /**
+   * Generate a schema that declares no scope: each scope wrapper is read as
+   * its payload, with no `scope` and no cap on a cell's `asCell` entry. A
+   * lift's result whose type its author did not write is generated this way,
+   * since the runtime stores it at the narrowest scope its callback reads.
+   */
+  readonly declaresNoScope?: boolean;
 
   /**
    * Receives each diagnostic, a warning or an error; without a callback the
@@ -111,6 +126,30 @@ export interface SchemaGenerationOptions {
    * the caller built.
    */
   readonly printedFrom?: (node: ts.TypeNode) => ts.Type | undefined;
+
+  /**
+   * Whether the schema defines a document: it is the schema a document's
+   * stored policy envelope is made from, as a pattern's argument schema or a
+   * created cell's is. A writer policy whose writer the generator cannot read
+   * there is an error (`cfc-write-authorized-by:unread`), since the document
+   * would store no write restriction and admit every writer. Any other schema
+   * views a document whose stored envelope binds its writers already, and a
+   * writer it cannot read leaves only that view without the claim, and
+   * without the principal claims the runtime enforces only beside a writer.
+   * A writer the type no longer carries, as a mapped type the generator does
+   * not follow can lose it, is not reported either way.
+   */
+  readonly definesDocument?: boolean;
+
+  /**
+   * Whether the caller supplies the writer claim of the policy at the root
+   * of the schema, as the transformer does for a direct-root
+   * `WriteAuthorizedBy` it lowers itself, handing the generator only the
+   * policy's payload. The generator then counts that one writer as read at
+   * the root: it reports no root writer as unread, and keeps the root's
+   * principal claims. A second writer policy at the root is still reported.
+   */
+  readonly rootWriterSupplied?: boolean;
 }
 
 /**
@@ -191,6 +230,9 @@ export interface GenerationContext {
   /** Widen literal types to base types during schema generation */
   widenLiterals?: boolean;
 
+  /** The schema declares no scope (`SchemaGenerationOptions.declaresNoScope`). */
+  declaresNoScope?: boolean;
+
   /** Receives recoverable schema-generation problems. */
   onDiagnostic?: (diagnostic: SchemaGenerationDiagnostic) => void;
 
@@ -204,6 +246,27 @@ export interface GenerationContext {
 
   /** The type a printed node stands for (`SchemaGenerationOptions`). */
   printedFrom?: (node: ts.TypeNode) => ts.Type | undefined;
+
+  /**
+   * Whether the schema being generated defines a document
+   * (`SchemaGenerationOptions.definesDocument`).
+   */
+  definesDocument?: boolean;
+
+  /**
+   * Whether this reading defines a document inside a schema that views
+   * others: data a pattern's inferred result holds itself
+   * (`SchemaHint.definesDocument`). The named types it reads are stored apart
+   * from the view's, since a view leaves out a writer it cannot read, which
+   * this reading reports.
+   */
+  documentWithinView?: boolean;
+
+  /**
+   * The root type node of a schema whose root policy's writer the caller
+   * supplies (`SchemaGenerationOptions.rootWriterSupplied`).
+   */
+  rootWriterSuppliedAt?: ts.TypeNode;
 
   /** Schema hints for overriding default behavior (keyed by TypeNode) */
   schemaHints?: SchemaHints;
@@ -222,8 +285,10 @@ export interface GenerationContext {
 
   /**
    * Reads only the CFC labels a type attaches at its top: a type that no CFC
-   * wrapper holds, other than a union or an intersection, whose members can
-   * carry labels to it, is read as accepting anything, and not formatted.
+   * wrapper holds is read as accepting anything, and not formatted, except a
+   * union or an intersection, whose members can carry labels to it, and
+   * `null` and `undefined`, which tell a value that may be missing apart from
+   * its value member.
    */
   labelsOnly?: boolean;
 
@@ -234,6 +299,27 @@ export interface GenerationContext {
    * node, it is not passed on to a child.
    */
   carriersRead?: ts.Type;
+
+  /**
+   * Types whose scope brand the scope wrapper reading them has taken off, read
+   * here as its payload: the type the brand was read from, the payload type
+   * itself (`scopePayloadType()`) where it is distinct, and each member of it
+   * as a union.
+   */
+  scopeBrandRead?: ReadonlySet<ts.Type>;
+
+  /**
+   * The members written for `payload`, the payload of a union of scope
+   * wrappers beside `null` or `undefined` written as one, `PerUser<A> | null`:
+   * the payload written in each wrapper, and each `null` or `undefined`, as
+   * the members of `A | null` written in `PerUser<A | null>` are. The union
+   * formatter reads `payload` at these nodes, as it reads a union at the
+   * union node written for it.
+   */
+  scopePayloadNodes?: {
+    readonly payload: ts.Type;
+    readonly nodes: readonly ts.TypeNode[];
+  };
 
   /**
    * Type parameters read as their arguments, for a node read from the

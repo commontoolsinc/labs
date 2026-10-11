@@ -1,7 +1,9 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromFileUrl, join, resolve, toFileUrl } from "@std/path";
+import { PatternIndexClient } from "@commonfabric/pattern-index/client";
 import { Identity } from "@commonfabric/identity";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
   consoleDataDirectories,
@@ -14,24 +16,37 @@ import {
   createConsoleHealth,
   createConsoleInteractiveServiceOptions,
   parseConsoleArgs,
+} from "../../console/server.ts";
+import {
+  LINUX_HOME,
   resolveConsoleConfig,
   startConsoleServer,
-} from "../../console/server.ts";
+} from "../support/on-linux.ts";
 import { ConsoleHealth, type ConsoleHealthRow } from "../../console/health.ts";
 import {
   harnessSessionChatPolicy,
   harnessSessionEngineOptions,
 } from "../../src/session-assembly.ts";
 import { CfHarnessEngine } from "../../src/engine.ts";
+import { writeRunRootFixture } from "./run-root-fixture.ts";
+import { createHarnessRunState } from "../../src/run-state.ts";
 import {
   bashToolDescriptor,
   bashToolDescriptorForRuntime,
 } from "../../src/tools/bash.ts";
 import type { ProcessRunner } from "../../src/sandbox/process-runner.ts";
-import { defaultDarwinRootfs } from "../../src/sandbox/runsc.ts";
+import {
+  darwinCfcVmRootfs,
+  defaultDarwinCfcVmStore,
+  linuxRunscRootfs,
+  linuxRunscStore,
+} from "../../src/sandbox/runsc.ts";
 import type { ConsoleSessionListing } from "../../console/sessions.ts";
 import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
-import { PatternIndexClient } from "../../src/pattern-index/client.ts";
+import {
+  createHarnessHandleTable,
+  mintReferentHandle,
+} from "../../src/handle-table.ts";
 import { MAX_HARNESS_PATTERN_REFS } from "../../src/pattern-refs.ts";
 import {
   type HarnessInteractiveChatEventListener,
@@ -61,6 +76,7 @@ import {
   HARNESS_SUPPORTED_CLIENT_FEATURES,
   harnessClientProtocolEcho,
 } from "../../src/contracts/client-command.ts";
+import { INERT_RUNSC } from "../support/inert-runsc.ts";
 
 /**
  * A loop that answers the task it was given and nothing else. The console
@@ -746,66 +762,24 @@ describe("console/server", () => {
       expect(description.kind).toBe("runsc-cfc");
       expect(description.sessions).toBe(true);
       expect(description.cfc?.image).toBe("/store/images/kitchensink");
-      expect(description.cfc?.runtimeName).toBeUndefined();
       expect(description.cfc?.invocationContextTransport).toBe("fd");
       // A console turn enforces, and no enforcing run can use a session, so
-      // the model is offered bash without one, as it is on Docker.
+      // the model is offered bash without one.
       expect(run.cfcEnforcementMode).toBe("enforce-strict");
       expect(bashToolDescriptorForRuntime(description, run)).toEqual(
         bashToolDescriptor,
       );
     });
 
-    for (
-      const [name, env] of [
-        ["names no runtime", {}],
-        ["names `docker`", { CF_HARNESS_SANDBOX_RUNTIME: "docker" }],
-      ] as const
-    ) {
-      it(`builds the Docker driver, with its sidecar transports, when the environment ${name}`, async () => {
-        const { description, run } = await turnSandbox(env);
+    it("builds the direct runsc driver from the Linux store when the environment names no runtime", async () => {
+      const store = join(LINUX_HOME, ".local", "share", "runsc-cfc");
 
-        expect(description).toEqual({
-          kind: "docker-runsc-cfc",
-          defaultWorkingDirectory: "/workspace",
-          cfc: {
-            runtimeRequested: true,
-            runtimeName: "runsc-cfc",
-            image:
-              "us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest",
-            workspaceMountPath: "/workspace",
-            mounts: [{
-              kind: "workspace",
-              hostPath: "/console/.cf-harness-console/workspace",
-              sandboxPath: "/workspace",
-              readOnly: false,
-            }],
-            networkMode: "bridge",
-            extraDockerArgsCount: 0,
-            invocationContextTransport: "sidecar",
-            invocationContextTransportReadiness: "unverified",
-            invocationContextConfiguredPath:
-              "/console/.cf-harness-console/cfc/invocation-context",
-          },
-        });
-        expect(bashToolDescriptorForRuntime(description, run)).toEqual(
-          bashToolDescriptor,
-        );
-      });
-    }
+      const { description } = await turnSandbox({});
 
-    it("sites the Docker driver's sidecar directories only for a console on Docker", async () => {
-      const docker = await resolveConsoleConfig(ARGS, {}, "/console");
-      const runsc = await resolveConsoleConfig(ARGS, RUNSC_ENV, "/console");
-
-      expect([docker.cfcResultDir, docker.cfcInvocationContextDir]).toEqual([
-        "/console/.cf-harness-console/cfc/results",
-        "/console/.cf-harness-console/cfc/invocation-context",
-      ]);
-      expect([runsc.cfcResultDir, runsc.cfcInvocationContextDir]).toEqual([
-        undefined,
-        undefined,
-      ]);
+      expect(description.kind).toBe("runsc-cfc");
+      expect(description.cfc?.image).toBe(
+        join(store, "images", "kitchensink"),
+      );
     });
 
     it("throws the shared derivation's refusal for a runtime it does not know", async () => {
@@ -815,7 +789,7 @@ describe("console/server", () => {
           { CF_HARNESS_SANDBOX_RUNTIME: "podman" },
           "/console",
         ),
-      ).rejects.toThrow("sandbox runtime must be one of docker, runsc");
+      ).rejects.toThrow("sandbox runtime must be runsc");
     });
 
     for (
@@ -856,8 +830,12 @@ describe("console/server", () => {
     });
 
     it("observes the driver's own default rootfs for a runsc console that names none", async () => {
-      // On macOS the driver finds the rootfs under the process's `HOME`; on
-      // any other platform a rootfs must be named, and the turn is refused.
+      // On macOS the driver finds the rootfs in the store under the `HOME` of
+      // the environment the console runs in, where no `CFC_VM_HOME` names
+      // another, and on Linux in the Linux store under that `HOME`; on any
+      // other platform a rootfs must be named, and the turn is refused.
+      // `/Users/console` has no link on the way, as macOS's `/home` does, so
+      // its spelling is the path the driver resolves.
       const [, runtime, rootfs] = await (async () => {
         const health = createConsoleHealth(
           await resolveConsoleConfig(ARGS, {
@@ -867,9 +845,8 @@ describe("console/server", () => {
           }, "/console"),
           undefined,
           undefined,
-          {},
+          { HOME: "/Users/console" },
           undefined,
-          () => Promise.reject(new Error("Docker is not asked")),
         );
         await health.refresh();
         return health.snapshot().rows.filter((row) =>
@@ -877,8 +854,12 @@ describe("console/server", () => {
         );
       })();
 
-      if (Deno.build.os === "darwin") {
-        const expected = defaultDarwinRootfs(Deno.env.get("HOME")!);
+      const expected = Deno.build.os === "darwin"
+        ? darwinCfcVmRootfs(defaultDarwinCfcVmStore("/Users/console"))
+        : Deno.build.os === "linux"
+        ? linuxRunscRootfs(linuxRunscStore("/Users/console"))
+        : undefined;
+      if (expected !== undefined) {
         expect(rootfs.detail).toBe(expected);
         expect(runtime.detail).toContain(`rootfs ${expected}`);
       } else {
@@ -908,7 +889,6 @@ describe("console/server", () => {
           undefined,
           {},
           undefined,
-          () => Promise.reject(new Error("Docker is not asked")),
         );
         await health.refresh();
         const runtime = health.snapshot().rows.find((row) =>
@@ -925,23 +905,17 @@ describe("console/server", () => {
       }
     });
 
-    it("observes the runsc configuration, and asks Docker nothing, for a console on the runsc runtime", async () => {
-      let dockerReads = 0;
+    it("observes the runsc configuration for a console on the runsc runtime", async () => {
       const health = createConsoleHealth(
         await resolveConsoleConfig(ARGS, RUNSC_ENV, "/console"),
         undefined,
         undefined,
         {},
         undefined,
-        () => {
-          dockerReads += 1;
-          return Promise.resolve({ runtimes: { "runsc-cfc": {} } });
-        },
       );
 
       await health.refresh();
 
-      expect(dockerReads).toBe(0);
       expect(
         health.snapshot().rows.filter((row) => row.group === "sandbox").map((
           { id, state, value },
@@ -967,7 +941,6 @@ describe("console/server", () => {
           undefined,
           { CFC_VM_HOME: store },
           undefined,
-          () => Promise.reject(new Error("Docker is not asked")),
         );
 
         await health.refresh();
@@ -984,35 +957,6 @@ describe("console/server", () => {
         } else {
           expect(vm).toBeUndefined();
         }
-      } finally {
-        await Deno.remove(store, { recursive: true });
-      }
-    });
-
-    it("adds no VM row for a console on Docker, whatever store the environment names", async () => {
-      // Settings a runsc console would resolve, so that only the runtime kind
-      // stands between this console and a VM row.
-      const store = await Deno.makeTempDir({ prefix: "cf-vm-store-" });
-      try {
-        await Deno.writeTextFile(join(store, "config.json"), "{}");
-        const runsc = await resolveConsoleConfig(ARGS, {
-          ...RUNSC_ENV,
-          CF_HARNESS_SANDBOX_ROOTFS: join(store, "images", "kitchensink"),
-        }, "/console");
-        const health = createConsoleHealth(
-          { ...runsc, sandboxRuntimeKind: "docker" },
-          undefined,
-          undefined,
-          { CFC_VM_HOME: store },
-          undefined,
-          () => Promise.resolve({ runtimes: { "runsc-cfc": {} } }),
-        );
-
-        await health.refresh();
-
-        expect(health.snapshot().rows.map((row) => row.id)).not.toContain(
-          "sandbox.vm",
-        );
       } finally {
         await Deno.remove(store, { recursive: true });
       }
@@ -1104,21 +1048,6 @@ describe("console/server", () => {
         });
       });
 
-      it("returns no VM probe for a console on Docker, on macOS or not", async () => {
-        await withStore(async (store) => {
-          const onDocker = {
-            ...await runscConsole(store),
-            sandboxRuntimeKind: "docker" as const,
-          };
-
-          expect(
-            consoleVmHealthProbes(onDocker, { CFC_VM_HOME: store }, {
-              platform: "darwin",
-            }),
-          ).toEqual([]);
-        });
-      });
-
       it("returns no VM probe off macOS", async () => {
         await withStore(async (store) => {
           expect(
@@ -1134,6 +1063,8 @@ describe("console/server", () => {
 
     /** The runsc selection with no CFC policy named, and none under `HOME`. */
     const RUNSC_NO_POLICY_ENV = {
+      // A home with no policy under it, so none is found by default.
+      HOME: "/nowhere",
       CF_HARNESS_SANDBOX_RUNTIME: "runsc",
       CF_HARNESS_SANDBOX_ROOTFS: "/store/images/kitchensink",
       CF_HARNESS_RUNSC_BINARY: "/store/bin/runsc",
@@ -1149,7 +1080,6 @@ describe("console/server", () => {
         undefined,
         {},
         undefined,
-        () => Promise.reject(new Error("Docker is not asked")),
       );
       await health.refresh();
       return health.snapshot().rows.find((row) => row.id === "sandbox.runtime");
@@ -1192,47 +1122,6 @@ describe("console/server", () => {
       expect(row?.reason).toContain("untracked");
     });
 
-    it("observes the Docker runtime table for a console on Docker", async () => {
-      let dockerReads = 0;
-      const health = createConsoleHealth(
-        await resolveConsoleConfig(ARGS, {}, "/console"),
-        undefined,
-        undefined,
-        {},
-        undefined,
-        () => {
-          dockerReads += 1;
-          return Promise.resolve({ runtimes: { "runsc-cfc": {} } });
-        },
-      );
-
-      await health.refresh();
-
-      expect(dockerReads).toBe(1);
-      expect(
-        health.snapshot().rows.filter((row) => row.group === "sandbox").map((
-          { id, state, value },
-        ) => ({ id, state, value })),
-      ).toEqual([
-        { id: "config.sandbox", state: "ok", value: "docker" },
-        { id: "sandbox.docker", state: "ok", value: "responding" },
-        {
-          id: "sandbox.runtime",
-          state: "ok",
-          value: "runsc-cfc registered",
-        },
-      ]);
-    });
-
-    it("returns the sidecar directories as its banner for a console on Docker", async () => {
-      expect(
-        consoleSandboxBanner(await resolveConsoleConfig(ARGS, {}, "/console")),
-      ).toEqual([
-        "  results:    /console/.cf-harness-console/cfc/results",
-        "  contexts:   /console/.cf-harness-console/cfc/invocation-context",
-      ]);
-    });
-
     it("returns a banner saying every turn is refused for a runsc console with no CFC policy", async () => {
       const config = await resolveConsoleConfig(
         ARGS,
@@ -1258,25 +1147,15 @@ describe("console/server", () => {
           await resolveConsoleConfig(ARGS, RUNSC_ENV, "/console"),
         ),
       ).toEqual([
-        "  sandbox:    runsc, the direct driver (no Docker)",
+        "  sandbox:    runsc, the direct driver; named by CF_HARNESS_SANDBOX_RUNTIME",
         "  runsc:      /store/bin/runsc",
         "  rootfs:     /store/images/kitchensink",
         "  policy:     /store/policy.json",
       ]);
     });
 
-    it("returns the sidecar directories among those created only for a console on Docker", async () => {
+    it("returns the workspace and the artifact root as the directories it creates", async () => {
       // Strict: `toEqual` would pass a list carrying an `undefined` entry.
-      expect(
-        consoleDataDirectories(
-          await resolveConsoleConfig(ARGS, {}, "/console"),
-        ),
-      ).toStrictEqual([
-        "/console/.cf-harness-console/workspace",
-        "/console/.cf-harness-console/runs",
-        "/console/.cf-harness-console/cfc/results",
-        "/console/.cf-harness-console/cfc/invocation-context",
-      ]);
       expect(
         consoleDataDirectories(
           await resolveConsoleConfig(ARGS, RUNSC_ENV, "/console"),
@@ -1284,36 +1163,6 @@ describe("console/server", () => {
       ).toStrictEqual([
         "/console/.cf-harness-console/workspace",
         "/console/.cf-harness-console/runs",
-      ]);
-    });
-
-    it("returns a startup banner naming the sidecar directories for a console on Docker", async () => {
-      const banner = consoleStartupBanner(
-        await resolveConsoleConfig(
-          [
-            ...ARGS,
-            "--pattern-index-url",
-            "https://index.test/api",
-            "--skills-registry-url",
-            "https://skills.test",
-          ],
-          {},
-          "/console",
-        ),
-      );
-
-      expect(banner.slice(0, 5)).toEqual([
-        "\n  cf-harness console: http://127.0.0.1:8100",
-        "  space:      console-test",
-        "  fabric:     http://localhost:8000",
-        "  index:      https://index.test/api",
-        "  skills:     https://skills.test",
-      ]);
-      expect(banner.slice(-4)).toEqual([
-        "  results:    /console/.cf-harness-console/cfc/results",
-        "  contexts:   /console/.cf-harness-console/cfc/invocation-context",
-        "  workspace:  /console/.cf-harness-console/workspace",
-        "  artifacts:  /console/.cf-harness-console/runs\n",
       ]);
     });
 
@@ -1326,15 +1175,47 @@ describe("console/server", () => {
         "  index:      (not configured)",
         "  skills:     (not configured)",
       ]);
-      expect(banner.slice(-6)).toEqual([
-        "  sandbox:    runsc, the direct driver (no Docker)",
+      expect(banner.slice(-7)).toEqual([
+        "  sandbox:    runsc, the direct driver; named by CF_HARNESS_SANDBOX_RUNTIME",
         "  runsc:      /store/bin/runsc",
         "  rootfs:     /store/images/kitchensink",
         "  policy:     /store/policy.json",
         "  workspace:  /console/.cf-harness-console/workspace",
-        "  artifacts:  /console/.cf-harness-console/runs\n",
+        "  artifacts:  /console/.cf-harness-console/runs",
+        "  agent runs: /console/.cf-harness/agent-runs\n",
       ]);
       expect(banner.some((line) => line.startsWith("  results:"))).toBe(false);
+    });
+
+    it("reads the agent runner's runs from CF_HARNESS_HOME unless told another root, or none", async () => {
+      const agentRunsRoot = async (
+        args: readonly string[],
+        env: Record<string, string>,
+      ) =>
+        // A named runtime keeps this test independent of the host's store.
+        (await resolveConsoleConfig(
+          [...ARGS, ...args],
+          { ...RUNSC_ENV, ...env },
+          "/console",
+        )).agentRunsRoot;
+      expect(await agentRunsRoot([], { HOME: "/home/a" })).toBe(
+        "/home/a/.cf-harness/agent-runs",
+      );
+      expect(await agentRunsRoot([], { CF_HARNESS_HOME: "/harness" })).toBe(
+        "/harness/agent-runs",
+      );
+      expect(
+        await agentRunsRoot([], {
+          CF_HARNESS_CONSOLE_AGENT_RUNS_ROOT: "runs-elsewhere",
+        }),
+      ).toBe("/console/runs-elsewhere");
+      expect(
+        await agentRunsRoot(["--agent-runs-root", "/flag"], {
+          CF_HARNESS_CONSOLE_AGENT_RUNS_ROOT: "/env",
+        }),
+      ).toBe("/flag");
+      expect(await agentRunsRoot(["--agent-runs-root", "none"], {}))
+        .toBeUndefined();
     });
 
     it("reports the runsc runtime's rows, and no Docker row, for a console on the runsc runtime", async () => {
@@ -2989,6 +2870,7 @@ describe("console/server", () => {
         (onEvent) =>
           new HarnessInteractiveChatService({
             basePromptLoopOptions: {
+              ...INERT_RUNSC,
               patternIndexClientFactory: () =>
                 Promise.resolve(
                   new PatternIndexClient({
@@ -3838,6 +3720,246 @@ describe("console/server", () => {
       expect((await response.json()).error).toBe(
         "pattern index recordEvent failed (404)",
       );
+    });
+  });
+
+  describe("GET /api/runs with the agent runner's work root", () => {
+    it("serves the selected job's family, handles, artifacts and parent and child tool outputs", async () => {
+      const base = await Deno.makeTempDir();
+      try {
+        const fixture = await writeRunRootFixture(base);
+        const reading = new ConsoleServer(
+          {
+            ...await config(),
+            artifactRoot: fixture.roots.console,
+            agentRunsRoot: fixture.roots.agentRuns,
+          },
+          (onEvent) =>
+            new HarnessInteractiveChatService({
+              createPromptLoop: answeringLoop,
+              now: advancingClock(),
+              onEvent,
+            }),
+        );
+        const json = async (path: string) => {
+          const response = await reading.handle(getRequest(path));
+          expect(response.status).toBe(200);
+          return await response.json();
+        };
+        const listed = await json("/api/runs");
+        expect(
+          listed.runs.filter((run: { runId: string }) => run.runId === "asked")
+            .map((
+              run: { source: string; title: string },
+            ) => [run.source, run.title]),
+        ).toEqual([["ask", "selected parent"]]);
+        const detail = await json("/api/runs/asked");
+        expect(detail.summary.title).toBe("selected parent");
+        expect(
+          detail.handles.find((handle: { token: string }) =>
+            handle.token === fixture.token
+          ).ref,
+        ).toBe("/of:fid1:selected");
+        const flow = await json("/api/runs/asked/flow");
+        expect(
+          flow.turns[0].nodes.flatMap((node: { children: unknown[] }) =>
+            node.children
+          ).map((node: { runId: string }) => node.runId),
+        ).toEqual([fixture.child]);
+        expect(flow.turns[0].text).toBe("selected parent");
+        expect(
+          flow.turns[0].nodes.flatMap((node: { reads: { ref: string }[] }) =>
+            node.reads
+          ).map((cell: { ref: string }) => cell.ref),
+        ).toEqual(["/of:fid1:selected"]);
+        expect(
+          flow.turns[0].nodes.flatMap((node: { children: unknown[] }) =>
+            node.children
+          ).flatMap((node: { reads: { ref: string }[] }) => node.reads).map((
+            cell: { ref: string },
+          ) => cell.ref),
+        ).toEqual(["/of:fid1:selected"]);
+        const graph = await json("/api/runs/asked/graph");
+        expect(
+          graph.nodes.filter((node: { kind: string }) =>
+            node.kind === "pattern"
+          ).map((node: { patternId: string }) => node.patternId),
+        ).toEqual(["selected-parent", "selected-child"]);
+        expect(
+          graph.nodes.filter((node: { kind: string }) => node.kind === "cell")
+            .map((node: { address: string }) => node.address),
+        ).toEqual(["/of:fid1:selected"]);
+        expect(await json("/api/runs/asked/artifacts/transcript.json")).toEqual(
+          detail.transcript,
+        );
+        for (const runId of ["asked", fixture.child]) {
+          expect(
+            await json(`/api/runs/${runId}/tool-outputs/${fixture.outputName}`),
+          ).toEqual({ marker: "selected", runId });
+        }
+      } finally {
+        await Deno.remove(base, { recursive: true });
+      }
+    });
+
+    it("lists an /ask job's run and serves its detail, flow, graph and files", async () => {
+      const base = await Deno.makeTempDir();
+      try {
+        const agentRuns = join(base, "agent-runs");
+        const runDir = join(agentRuns, "local", "job-1", "artifacts", "asked");
+        await Deno.mkdir(runDir, { recursive: true });
+        await Deno.writeTextFile(
+          join(runDir, "run-state.json"),
+          JSON.stringify(createHarnessRunState({
+            runId: "asked",
+            cfcEnforcementMode: "observe",
+            currentDir: "/workspace",
+            now: "2026-01-01T00:00:00.000Z",
+          })),
+        );
+        await Deno.writeTextFile(join(runDir, "transcript.json"), "[]");
+        const reading = new ConsoleServer(
+          {
+            ...await config(),
+            artifactRoot: join(base, "console-runs"),
+            agentRunsRoot: agentRuns,
+          },
+          (onEvent) =>
+            new HarnessInteractiveChatService({
+              createPromptLoop: answeringLoop,
+              now: advancingClock(),
+              onEvent,
+            }),
+        );
+        const listed = await reading.handle(getRequest("/api/runs"));
+        expect(
+          (await listed.json()).runs.map((
+            run: { runId: string; source: string },
+          ) => [run.runId, run.source]),
+        ).toEqual([["asked", "ask"]]);
+        for (
+          const path of [
+            "/api/runs/asked",
+            "/api/runs/asked/flow",
+            "/api/runs/asked/graph",
+            "/api/runs/asked/artifacts/run-state.json",
+          ]
+        ) {
+          const response = await reading.handle(getRequest(path));
+          expect([path, response.status]).toEqual([path, 200]);
+          await response.body?.cancel();
+        }
+        const escaped = await reading.handle(
+          getRequest(`/api/runs/${encodeURIComponent("../asked")}`),
+        );
+        expect(escaped.status).toBe(404);
+        await escaped.body?.cancel();
+      } finally {
+        await Deno.remove(base, { recursive: true });
+      }
+    });
+  });
+
+  describe("GET /api/runs/<runId>", () => {
+    /**
+     * A run holding two strings a browsing child returned, one labeled for
+     * `owner` and one for someone else, read by a server whose fabric session
+     * signs with the key at `keyPath`.
+     */
+    const runDetailFrom = async (
+      keyPath: string,
+      root: string,
+      owner: string,
+    ) => {
+      const referent = (value: string, subject: string) => ({
+        kind: "return" as const,
+        source: "delegate_task:child",
+        value,
+        label: { confidentiality: [cfcAtom.user(subject)] },
+        labelSource: "child" as const,
+      });
+      const mine = await mintReferentHandle(
+        createHarnessHandleTable("run-1"),
+        referent("my note", owner),
+      );
+      const theirs = await mintReferentHandle(
+        mine.table,
+        referent("their note", "did:key:zOther"),
+      );
+      await Deno.mkdir(join(root, "run-1"), { recursive: true });
+      await Deno.writeTextFile(
+        join(root, "run-1", "run-state.json"),
+        JSON.stringify({
+          ...createHarnessRunState({
+            runId: "run-1",
+            cfcEnforcementMode: "enforce-strict",
+            currentDir: "/workspace",
+            now: "2026-01-01T00:00:00.000Z",
+          }),
+          handleTable: theirs.table,
+        }),
+      );
+      await Deno.writeTextFile(join(root, "run-1", "transcript.json"), "[]");
+      const configured = await config();
+      const owned = new ConsoleServer(
+        {
+          ...configured,
+          artifactRoot: root,
+          fabricSession: {
+            ...configured.fabricSession,
+            identityKeyPath: keyPath,
+          },
+        },
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: answeringLoop,
+            now: advancingClock(),
+            onEvent,
+          }),
+      );
+      const response = await owned.handle(getRequest("/api/runs/run-1"));
+      return {
+        detail: await response.json(),
+        mine: mine.token,
+        theirs: theirs.token,
+      };
+    };
+
+    it("returns the strings that fit the display of the identity the console signs as", async () => {
+      const root = await Deno.makeTempDir();
+      try {
+        const keyPath = join(root, "owner.pkcs8");
+        const key = await Identity.generatePkcs8();
+        await Deno.writeFile(keyPath, key);
+        const owner = (await Identity.fromPkcs8(key)).did();
+
+        const { detail, mine, theirs } = await runDetailFrom(
+          keyPath,
+          root,
+          owner,
+        );
+
+        expect(detail.revealed).toEqual({ [mine]: "my note" });
+        expect(detail.hidden).toEqual([theirs]);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
+    it("returns no strings when the console cannot read its identity", async () => {
+      const root = await Deno.makeTempDir();
+      try {
+        const { detail, mine, theirs } = await runDetailFrom(
+          join(root, "missing.pkcs8"),
+          root,
+          signer.did(),
+        );
+
+        expect(detail.revealed).toEqual({});
+        expect(detail.hidden).toEqual([mine, theirs]);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
     });
   });
 
