@@ -13866,12 +13866,19 @@ export class Runner {
     const recorded = convertibleJsFromFabricValue(
       resultCell.getMetaRaw("internal", { meta: ignoreReadForScheduling }),
     );
-    const children: Cell<any>[] = [];
+    // Each candidate child, once per document. A module changes which
+    // document a cause names only through its target space, a space-root
+    // reservation and its scope, so most modules name the same one, and what
+    // carry-over reads of it is its own metadata, whatever schema it is
+    // synced under.
+    const children = new Map<string, Cell<any>>();
+    const addChild = (child: Cell<any>) =>
+      children.set(documentKey(child.getAsNormalizedFullLink()), child);
     if (Array.isArray(recorded)) {
       for (const { module } of subPatternNodes(pattern)) {
         for (const entry of recorded as InternalCellDescriptor[]) {
           if (!isPositionalPartialCause(entry.partialCause)) continue;
-          children.push(
+          addChild(
             this.#childAtPartialCause(
               undefined,
               resultCell,
@@ -13889,7 +13896,7 @@ export class Runner {
           deepEqual(candidate.partialCause, descriptor.partialCause)
         );
         if (node === undefined) continue;
-        children.push(
+        addChild(
           this.#childAtPartialCause(
             undefined,
             resultCell,
@@ -13899,7 +13906,7 @@ export class Runner {
         );
       }
     }
-    await Promise.all(children.map((child) => child.sync()));
+    await Promise.all([...children.values()].map((child) => child.sync()));
     const { carried } = this.#planInstanceCarryOver(resultCell, pattern);
     const key = this.#getDocKey(resultCell);
     if (carried.size > 0) {
