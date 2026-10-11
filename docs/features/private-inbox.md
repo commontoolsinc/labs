@@ -282,7 +282,8 @@ at the refused inbox any longer, by the comparison the check uses. So once no
 profile points at the refused inbox, whether its pointers moved to another inbox
 or to none, the next ensure clears the record, or records in its place a refusal
 it names. Like every other ensure, that runs only at a runtime worker's bring-up
-of Home.
+of Home. Apart from the ensure, the record is cleared when the owner replaces
+the refused inbox, as "Replacing a refused inbox" says.
 
 The record is a field of Home's result, `privateInboxRefusal`, so `cf` and an
 agent each read it as they read any other field of Home, at Home's root, the

@@ -536,8 +536,10 @@ export type EnsurePrivateInboxEvent = {
  * the inbox Home holds. The record is cleared when Home adopts or creates an
  * inbox, when the profile the event names is in Home's list and points at the
  * inbox Home holds, and, on an event recording no refusal, when no profile in
- * Home's list points at the refused inbox. A repeat of the recorded refusal, of
- * the same inbox for the same reason, keeps the time it was first recorded.
+ * Home's list points at the refused inbox. `replaceRefusedPrivateInbox` clears
+ * it too, when the owner replaces the refused inbox. A repeat of the recorded
+ * refusal, of the same inbox for the same reason, keeps the time it was first
+ * recorded.
  *
  * The check is list membership and the profile's pointer, not order: which
  * profile decides is the host's alone. So an event the owner's own code sends,

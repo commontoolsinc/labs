@@ -17,7 +17,8 @@ export function refusalReasonText(reason: string): string | undefined {
     case "inbox-home-space":
       return "It is in your Home space, where nobody else may deliver.";
     case "inbox-profile-space":
-      return "It is in the profile's own space, where nobody else may deliver.";
+      return "It is in the profile's own space, and an inbox needs a space " +
+        "of its own.";
     case "inbox-access-refused":
       return "Home was refused access to it.";
     case "inbox-adoption-acl-mismatch":
