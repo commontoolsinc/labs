@@ -87,7 +87,7 @@ import {
   applyPatchToDocument,
   PatchApplyError,
 } from "../../../memory/v2/patch.ts";
-import { encodePointer } from "../../../memory/v2/path.ts";
+import { encodePointer, parsePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import type { Cancel } from "../cancel.ts";
 import {
@@ -192,6 +192,7 @@ import {
   getTransactionWriteAttempts,
 } from "./transaction-inspection.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
+import { readValueAtPath } from "./v2-path.ts";
 import {
   createStorageAddressResolver,
   RemoteSessionFactory,
@@ -577,6 +578,13 @@ type PendingVersion =
       op: "patch";
       patches: PatchOp[];
       value: EntityDocument;
+
+      /**
+       * Set once the store accepted the layer: replay its ops as they
+       * stand, since the store applied them where they stood, rather than
+       * as the result their writer computed (`displayedPatches`).
+       */
+      accepted?: true;
     }
     | {
       localSeq: number;
@@ -709,6 +717,31 @@ const transactionValueForVersion = (
   return version.transactionValue;
 };
 
+/**
+ * The ops a pending patch layer is shown by, until its verdict. A `splice`
+ * is positional: the diff emits it against the array the transaction read,
+ * and replayed over an array a frame has since changed it says something
+ * its writer never wrote — where another writer appended the same tail,
+ * the tail appears twice. The layer's `value` is the document the
+ * transaction computed, so at the splice's path it holds the array the
+ * writer meant; the view shows that array in the splice's place, over the
+ * base's version of everything else. Every other op replays as it stands:
+ * the mergeable ones mean "add to whatever is there", and a foreign write
+ * must show through them. A splice whose path the computed document does
+ * not hold is left as it is, for the apply to refuse.
+ */
+const displayedPatches = (
+  pending: Extract<PendingVersion, { op: "patch" }>,
+): PatchOp[] =>
+  pending.patches.map((patch) => {
+    if (patch.op !== "splice") return patch;
+    const path = parsePointer(patch.path);
+    const intended = readValueAtPath(pending.value, path);
+    return Array.isArray(intended)
+      ? { op: "replace", path: patch.path, value: intended }
+      : patch;
+  });
+
 const applyPendingVersion = (
   base: EntityDocument | undefined,
   pending: PendingVersion,
@@ -731,10 +764,17 @@ const applyPendingVersion = (
       // mirroring the server's mergeable disposition, and the ops can only
       // express this layer's own writes, so a dropped sibling's data is
       // unrepresentable in the result (CT-1872 1a).
+      //
+      // A positional op is the exception until the verdict: a splice is
+      // shown as the array its writer computed (`displayedPatches`). Once
+      // the store has accepted the layer, its ops replay as they stand,
+      // since that is how the store applied them.
       try {
         return applyPatchToDocument(
           base,
-          pending.patches as PatchOp[],
+          pending.accepted === true
+            ? pending.patches
+            : displayedPatches(pending),
         ) as EntityDocument;
       } catch (error) {
         if (!(error instanceof PatchApplyError)) {
@@ -9258,6 +9298,24 @@ export class SpaceReplica
       }
       const firstPendingIndex = pendingIndexes[0]!;
       const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1]!;
+      // The verdict is in: a splice shown as the array its writer computed
+      // (`displayedPatches`) promotes as the store applied it, which over a
+      // moved array is a different value, so the layers are marked accepted
+      // and the view materialized over them is rebuilt.
+      if (
+        pendingIndexes.some((index) => {
+          const entry = record.pending[index]!;
+          return entry.op === "patch" &&
+            entry.patches.some((patch) => patch.op === "splice");
+        })
+      ) {
+        record.pending = record.pending.map((entry) =>
+          entry.localSeq === localSeq && entry.op === "patch"
+            ? { ...entry, accepted: true }
+            : entry
+        );
+        dropMaterializedSuffix(record, firstPendingIndex);
+      }
       const pending = record.pending[lastPendingIndex]!;
       const previousConfirmed = record.confirmed;
       let promoted: ConfirmedVersion | undefined;

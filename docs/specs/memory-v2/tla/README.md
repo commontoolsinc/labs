@@ -64,17 +64,19 @@ Repaired result certifies the rule, not the whole pipeline:
 - **Canonical dependency arrays.** `Build` records the layers of the
   CURRENT stack — under channel delivery that set can be sparse relative
   to session history (processed rejections are gone from `pend`), but it
-  always names every layer the view sat on, so the model's session-wide
-  scan exclusion coincides with the shipped declared-set exclusion on
-  every reachable state. What the model therefore does NOT exercise is
-  the declared-set scan's VALIDATION role (§3.6.3): a buggy client
-  omitting a live layer whose write is durably integrated. That
-  enforcement is checked by the engine unit tests
+  always names every layer the view sat on. The pending-read scan
+  excludes the reader's own layers the read NAMES, the shipped
+  declared-set form (§3.6.3); because every build names its full stack,
+  that set is the reader's whole session on every reachable state, and
+  the counts in the table are the same under either form. What the model
+  therefore does NOT exercise is the declared-set scan's VALIDATION role:
+  a buggy client omitting a live layer whose write is durably integrated.
+  That enforcement is checked by the engine unit tests
   (`packages/memory/test/v2-sparse-pending-dependencies.test.ts`) and the
-  differential harness's sparse mutation; a `SkipLayers` build choice
-  paired with a named-set `InvalidatedBy` — a violation witness under
-  session-wide exclusion, a pass under named-set — is the natural
-  refinement if omission ever becomes more than a hardening concern.
+  differential harness's sparse mutation; a `SkipLayers` build choice —
+  a violation witness under session-wide exclusion, a pass under the
+  declared-set form the model now scans with — is the natural refinement
+  if omission ever becomes more than a hardening concern.
 
 ## Running
 

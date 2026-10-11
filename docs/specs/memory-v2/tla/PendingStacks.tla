@@ -202,13 +202,19 @@ ScanBasis(s, r) ==
 
 (* A write at log index i invalidates read r of session s when it touches
    the read path inside the scan interval -- except that the "confirmed"
-   basis mode excludes the reader's own resolved session stack from the
-   pending-read scan (the CT-1910 repair). *)
+   basis mode excludes from the pending-read scan the reader's own layers
+   the read's dependency array names (the CT-1910 repair, in its shipped
+   declared-set form; 03-commit-model.md section 3.6.3).  Build records the
+   full stack, so on every reachable state the named layers are every own
+   layer in the interval and the exclusion is the reader's whole session;
+   the declared-set form is what a build that omitted a layer would be
+   held to. *)
 InvalidatedBy(s, r, i, k) ==
   /\ i > ScanBasis(s, r)
   /\ i < k
   /\ r.path \in log[i].writes
-  /\ ((BasisMode = "confirmed" /\ r.kind = "pending") => log[i].sess # s)
+  /\ ((BasisMode = "confirmed" /\ r.kind = "pending")
+        => ~(log[i].sess = s /\ log[i].lseq \in r.deps))
 
 HasConflict(s, c, k) ==
   \E r \in c.reads : \E i \in DOMAIN log : InvalidatedBy(s, r, i, k)

@@ -102,6 +102,21 @@ Read(entity, path):
   3. Otherwise read from confirmed state
 ```
 
+A pending write is read as the ops of its commit replayed over the
+confirmed state beneath it, which is how the server folds them on accept.
+One op is the exception until the verdict. A `splice` is positional: the
+diff emits it against the array the transaction read, and replayed over an
+array a frame has since changed it says something its writer never wrote —
+where another writer appended the same tail, the tail reads twice, a list
+the store never holds. The client reads a pending `splice` as the array its
+transaction computed, which the pending write carries, in the splice's
+place over the confirmed state's version of everything else. The verdict
+is the server's as ever: a refusal drops the write, and an accept folds the
+ops as they stand, since that is how the store applied them, which over a
+moved array is a different value from the one read meanwhile. Mergeable
+ops are not positional and are never substituted: an `append` means "add
+to whatever is there", and a concurrent write must read through it.
+
 ### 3.3.4 Single-Snapshot Rule
 
 A commit's read set MUST describe one coherent client view: confirmed bases
