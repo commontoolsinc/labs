@@ -301,16 +301,21 @@ with a sentence saying what the code means when it is one of the host's codes,
 `refusedAt`, in UTC, with the zone named. Home's sentences are in
 `packages/patterns/system/private-inbox-refusal-text.ts`, and
 `private-inbox-refusal-text.test.ts` beside it fails while one of the host's
-codes has none. The pattern sandbox formats a date given no zone in UTC and one
-given a zone in that zone, while a date's local getters read the host's zone, so
-the notice gives UTC explicitly. It reads the record's `reason` and `refusedAt`
-and nothing else, so it never reads through the record's link to the refused
-inbox, and nothing the refused inbox's owner labels reaches Home's rendering. A
-code Home doesn't know is shown as given, and an empty one as `none given`. The
-notice carries a "Use a new inbox" button, as "Replacing a refused inbox" says,
-and says that a loom daemon running as another identity than the owner's stops
-receiving loom shares once the owner uses it. The notice goes when the record is
-cleared. `packages/patterns/system/home.test.tsx` tests it.
+codes has none. The sentence for `inbox-adoption-acl-mismatch` names the likely
+case, a loom daemon of the owner's running as another identity, for which loom
+shares still arrive at the daemon. The pattern sandbox formats a date given no
+zone in UTC and one given a zone in that zone, while a date's local getters read
+the host's zone, so the notice gives UTC explicitly. It reads the record's
+`reason` and `refusedAt` and nothing else, so it never reads through the
+record's link to the refused inbox, and nothing the refused inbox's owner labels
+reaches Home's rendering. A code Home doesn't know is shown as given, and an
+empty one as `none given`. The notice carries a "Use a new inbox" button, as
+"Replacing a refused inbox" says, and says that a loom daemon running as another
+identity than the owner's stops receiving loom shares once the owner uses it.
+The notice goes when the record is cleared.
+`packages/patterns/system/home.test.tsx` tests it, and
+`home-refusal-notice.test.tsx` beside it, with the refused inbox created by
+another user, checks that no user's label is stored on the notice's sentence.
 
 A Home of a vintage whose ensure takes no refusal is sent the same event. Event
 schemas are open, so its handler is delivered the fields it declares, `adopt`
