@@ -1,5 +1,5 @@
 import { css, html } from "lit";
-import { property } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import type { ColorIntent, ComponentSize } from "../theme-context.ts";
 
@@ -273,7 +273,8 @@ export class CFChip extends BaseElement {
         line-height: 1;
       }
 
-      :host:not(:has([slot="icon"])) .chip-icon {
+      /* An empty icon slot would still take a gap before the label. */
+      .chip-icon.empty {
         display: none;
       }
 
@@ -348,6 +349,10 @@ export class CFChip extends BaseElement {
   @property({ type: String, reflect: true })
   accessor size: ComponentSize = "sm";
 
+  /** Whether any element is assigned to the icon slot. */
+  @state()
+  private accessor _hasIcon = false;
+
   private _handleRemove(e: Event): void {
     e.stopPropagation();
     this.emit("cf-remove");
@@ -356,6 +361,12 @@ export class CFChip extends BaseElement {
   private _handleClick(): void {
     if (this.interactive) {
       this.emit("cf-click");
+    }
+  }
+
+  private _handleIconSlotChange(e: Event): void {
+    if (e.target instanceof HTMLSlotElement) {
+      this._hasIcon = e.target.assignedElements().length > 0;
     }
   }
 
@@ -376,7 +387,11 @@ export class CFChip extends BaseElement {
               part="action"
               aria-labelledby="chip-label"
             >
-              <slot name="icon" class="chip-icon"></slot>
+              <slot
+                name="icon"
+                class="chip-icon ${this._hasIcon ? "" : "empty"}"
+                @slotchange="${this._handleIconSlotChange}"
+              ></slot>
               <span id="chip-label" class="chip-label">
                 <slot>${this.label}</slot>
               </span>
@@ -384,7 +399,11 @@ export class CFChip extends BaseElement {
           `
           : html`
             <span class="chip-content">
-              <slot name="icon" class="chip-icon"></slot>
+              <slot
+                name="icon"
+                class="chip-icon ${this._hasIcon ? "" : "empty"}"
+                @slotchange="${this._handleIconSlotChange}"
+              ></slot>
               <span id="chip-label" class="chip-label">
                 <slot>${this.label}</slot>
               </span>
