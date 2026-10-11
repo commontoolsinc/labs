@@ -56,7 +56,7 @@ serving runtime's own loads, 743 watch adds at a 24 ms median, 39.6 s in all.
 Five voters, five options, the burst measured from the first send to every
 session settled. The serving side's line is one burst's loop cost as the
 benchmark now prints it: how many waves the burst took, how many of its
-settles the 100 ms deadline cut, and the median of each phase.
+settles the 100 ms deadline cut, and the average of each phase.
 
 | arm and stage | burst, avg | waves (cut) | cycle | settle | commit | demand | publish | scheduler settle per event |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -80,7 +80,7 @@ That is the one change in the table that moved the burst, from 13.4 s to
 
 **Stages 3 and 4 moved the cycle, not the burst, and stage 4 cost
 coverage.** Taking the server's idle out of the settle and the publish and
-drain off the path brought a worker cycle's median from 258 ms to 195 ms.
+drain off the path brought a worker cycle's average from 258 ms to 195 ms.
 The wave count rose with it, from 38 to 48: a cycle that ends sooner starts
 the next one sooner, and every settle still ends at the deadline. The burst
 stayed where it was. Stage 4 also left the watermark behind: 69 commits
@@ -105,7 +105,7 @@ scheduler runs after each vote's handler: 150 to 300 ms per vote, against a
 7 ms handler and a 100 ms deadline. Over a burst the loop's realm ran about
 1,900 action runs and 650 scheduler passes for 25 votes, 2.3 ms an action and
 11 to 14 ms a pass, of which the re-subscription of each action's reads alone
-was 2,600 calls. The client arm serves the same 25 votes in 408 ms across ten
+was 2,600 calls. The client arm serves the same 25 votes in 408 ms across five
 runtimes. The order of magnitude is in what a vote re-derives on the serving
 side, not in how the loop waits for it or commits it.
 
@@ -182,7 +182,7 @@ Vote burst: `CF_LUNCH_POLL_VOTERS=5 CF_LUNCH_POLL_OPTIONS=5 deno bench -A
 the one the benchmark prints to stderr before its measured iterations, from
 the loop realm's stats and timing rows read before and after one burst; under
 the worker those rows are the loop's alone, on the main thread the scheduler
-rows count the ten voters' runtimes as well, which is why the main-thread
+rows count the five voters' runtimes as well, which is why the main-thread
 rows in the table are the loop's phases only. The stage 2 worker run without
 the read-through, both stage 3 runs and both stage 4 runs shared the box with
 a workspace type check or a test suite, which is where the spread between

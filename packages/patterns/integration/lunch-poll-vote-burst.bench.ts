@@ -235,7 +235,7 @@ console.error(
  * wave's phases cost, from the loop's own counters and timing rows, read
  * before and after the burst. The rows are the loop's realm's, so under the
  * worker they are the loop's alone, while on this thread the scheduler rows
- * count the ten voters' runs as well. Nothing on the OFF arm, which serves
+ * count the voters' runs as well. Nothing on the OFF arm, which serves
  * nothing.
  */
 async function loopCost(run: () => Promise<void>): Promise<string> {
