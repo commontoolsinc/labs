@@ -455,9 +455,14 @@ commit under the enforcing modes. What each observation carries:
   from an ancestor, a declared store policy or a derived entry; a segment of a
   reference's own path that is not there, a path past a scalar, and a missing
   document carry none;
-- an empty container whose members carry a requirement is the absence of any
-  member, observed the same way, so a seed the code requires evidence on is
-  written with that evidence;
+- a requirement on a collection's members (a `*` path) applies to the reads
+  of its members (§8.10.3 checks a requirement against the reads at its
+  path); enumerating the collection reads its shape (§4.6.3), a read of the
+  collection itself, governed by the collection's own labels and
+  requirements. So where the collection, or a container or document on the
+  way to it, is empty or absent, the member requirement consumes nothing, in
+  a stored document and in the binding alike, whichever path led there; a
+  member that is there is held to it;
 - a `default` that a schema other than the code's own would supply at an
   absent path (one a reference carries, or the graph's) and that the code's
   schema would not supply the same way carries none;
@@ -468,7 +473,13 @@ For verified code the requirements are those of the schema bound to the code
 identity that ran, together with the graph's own, which may add requirements
 and cannot remove one: the one point under a `SPEC-PENDING` marker
 (commonfabric/specs#62). A verified identity whose artifact is not indexed is
-refused, terminally for that run. The identity is the function's verified
+refused, terminally for that run. The artifact is looked up in the pattern
+manager's index, then in the engine's, which records the artifact each
+verified implementation was exported as, so code the engine runs after the
+pattern manager's index lost its module keeps its requirements. The check
+reads stored labels, so a transaction that has already written a document
+the check reads is refused (its labels may not be derived yet); a write to
+another document leaves the check as it was. The identity is the function's verified
 provenance, recorded when its module is evaluated, so a function two factories
 share carries the identity, and the requirements, of the factory it was first
 registered under.
@@ -508,11 +519,6 @@ the log and the reach can go.
 - A `requiredIntegrity` inside an `anyOf` or `oneOf` branch is applied
   whichever branch the value takes, an over-taint; §4.2.1.1 keeps such
   declarations outside the normalized profile.
-- A requirement on the members of a collection that a node's binding
-  supplies no members for (an empty or absent list in an event) consumes
-  nothing, while an empty collection read from a stored document is observed
-  with the container's own evidence; an under-taint confined to a binding
-  that hands the code no member.
 - Bare string atoms that patterns mint through `addIntegrity` ("lobby-admin"
   and the like) can be minted by any non-builtin code, so a floor or an input
   requirement on one is no authority check. Admin rosters are guarded by their
@@ -520,7 +526,7 @@ the log and the reach can go.
   integrity"; §8.15.5), and the code that reads a roster declares no
   requirement on it (only a declared requirement creates one, §8.10.3).
 - A piece still running the source it was deployed with keeps the input
-  requirements its old schemas declared, so its nodes refuse an unstamped or
-  empty roster under this check until its source updates: an over-taint.
+  requirements its old schemas declared, so its nodes refuse a roster that
+  holds an unstamped entry until its source updates: an over-taint.
 - The cycle check keys on each reference's target, so a chain that passes one
   target twice on different walks is refused, an over-taint.

@@ -28,8 +28,11 @@ code is refused. This plan applies that answer to the code a rule endorses:
 
 Every output carrying the code's `TransformedBy` then came from inputs that met
 its declarations, whatever the code was fed. A rule that guards on the identity
-alone inherits that guarantee: existing rules gain it unchanged, and new rules
-need no new evidence form.
+alone inherits that guarantee for exactly the inputs the code declares a
+requirement on: an input the code declares nothing on is not checked, so the
+protection reaches a sensitive input only once the endorsed code declares it.
+Within that, existing rules gain the guarantee unchanged, and new rules need no
+new evidence form.
 
 ## What the specification says
 
