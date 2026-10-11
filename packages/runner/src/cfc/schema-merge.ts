@@ -801,6 +801,7 @@ const mergeSchemaNode = (
   logicalPath: readonly string[] = [],
   options: MergeCfcSchemaEnvelopeOptions = {},
   references?: MergeReferences,
+  withinUnionBranch = false,
 ): JSONSchema => {
   let left = asSchemaObject(existing, path);
   let right = asSchemaObject(candidate, path);
@@ -897,6 +898,7 @@ const mergeSchemaNode = (
         [...logicalPath, key],
         options,
         childReferences,
+        withinUnionBranch,
       )
       : (rightClaim ?? leftClaim)!;
   }
@@ -913,6 +915,7 @@ const mergeSchemaNode = (
       [...logicalPath, "*"],
       options,
       childReferences,
+      withinUnionBranch,
     );
   } else if (right.additionalProperties !== undefined) {
     mergedAdditionalProperties = right.additionalProperties;
@@ -927,6 +930,7 @@ const mergeSchemaNode = (
       [...logicalPath, "*"],
       options,
       childReferences,
+      withinUnionBranch,
     );
   } else if (right.items !== undefined) {
     mergedItems = right.items;
@@ -966,6 +970,7 @@ const mergeSchemaNode = (
             [...logicalPath, String(index)],
             options,
             childReferences,
+            withinUnionBranch,
           )
           : (rightSlot ?? leftSlot)!,
       );
@@ -1003,7 +1008,7 @@ const mergeSchemaNode = (
       rightBranches,
       path,
     );
-    unions[keyword] = rightBranches.map((branch, index) =>
+    const reconciled = rightBranches.map((branch, index) =>
       mergeSchemaNode(
         counterparts[index],
         branch,
@@ -1011,8 +1016,22 @@ const mergeSchemaNode = (
         logicalPath,
         options,
         childReferences,
+        true,
       )
     );
+    // A stored union is reconciled again with every later writer's schema,
+    // which spells its branches as the candidate does. A branch whose merge
+    // changed that spelling (a reference stored as the inline body that
+    // merged both sides) would pair with no later writer's branch, and the
+    // position could never be written again. Such a union is left to the
+    // candidate, whose stored claims the claim-preservation check then holds.
+    if (
+      reconciled.some((branch, index) =>
+        hashStringOf(unionBranchShape(branch)) !==
+          hashStringOf(unionBranchShape(rightBranches[index]))
+      )
+    ) continue;
+    unions[keyword] = reconciled;
     assertNoDivergentIfcBranches({ [keyword]: unions[keyword] }, path);
   }
   // `$defs` is settled by `mergeCfcSchemaEnvelopes()` at the root, where both
@@ -1043,11 +1062,18 @@ const mergeSchemaNode = (
     ...(required !== undefined ? { required } : {}),
     ...(mergedDefault !== undefined ? { default: mergedDefault } : {}),
   };
-  // A reconciled body equal to either referenced body keeps that reference.
-  // Shared policy definitions then stay shared inside union branches too.
+  // Within a reconciled union branch, a body equal to either referenced body
+  // keeps that reference, so shared policy definitions stay shared and the
+  // branch keeps the spelling later writers pair with. Elsewhere a resolved
+  // reference stays inline: the writer-claim walks (`cfcSchemaEntries`,
+  // `writerClaimedPositions`) end a recursion where they meet the same schema
+  // object again, so restoring a recursive reference would end them one
+  // level sooner and leave a claimed position unmarked.
   // IFC siblings stay expanded: resolveKeepingBodyClaims() restores body
   // claims that the sibling masks during ordinary reference resolution.
-  if (left !== originalLeft || right !== originalRight) {
+  if (
+    withinUnionBranch && (left !== originalLeft || right !== originalRight)
+  ) {
     const { $defs: _leftDefs, ...leftBody } = left;
     const { $defs: _rightDefs, ...rightBody } = right;
     const { $defs: _mergedDefs, ...mergedBody } = merged;

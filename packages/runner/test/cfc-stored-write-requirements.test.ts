@@ -1316,6 +1316,52 @@ describe("stored write requirements", () => {
       });
     }
 
+    it("lets the position's writer write after a rewrite that would drop its claim is refused", async () => {
+      // A refusal leaves the stored union as it was, so the position's own
+      // writer still pairs with it; only other writers are refused.
+      const runtime = start();
+      const value = await seedHolder(runtime, "writable-after", () => ({
+        profiles: [],
+        other: "o",
+      }));
+      expect(
+        refusalOf(
+          await rewriteUnderNextRelease(
+            runtime,
+            "writable-after",
+            value,
+            false,
+            "none",
+          ),
+        ),
+      ).toContain("drops the stored writeAuthorizedBy at /profile/avatar");
+      const writeAvatarAs = async (moduleIdentity: string) => {
+        const tx = runtime.edit();
+        setCfcTrustSnapshot(tx, {
+          id: `trust-${space}`,
+          actingPrincipal: space,
+        });
+        setCfcImplementationIdentity(tx, {
+          kind: "verified",
+          moduleIdentity,
+          sourceFile: "/profile.tsx",
+          bindingPath: ["setAvatar"],
+        });
+        runtime.getCell(
+          space,
+          "writable-after",
+          holderSchema(moduleIdentity),
+          tx,
+        )
+          .key("profile").set({ avatar: "x" } as never);
+        return await tx.commit().settled;
+      };
+      expect((await writeAvatarAs("release-1")).error).toBeUndefined();
+      expect(refusalOf(await writeAvatarAs("release-2"))).toContain(
+        "writeAuthorizedBy",
+      );
+    });
+
     it("keeps the claims beneath an inline profile", async () => {
       const runtime = start();
       const value = await seedHolder(runtime, "inline-profile", (profile) => ({

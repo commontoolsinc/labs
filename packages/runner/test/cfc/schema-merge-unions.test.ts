@@ -277,7 +277,11 @@ describe("schema-merge-unions", () => {
     expect(merged.anyOf).toEqual([{ type: "boolean" }]);
   });
 
-  it("refuses a union merge that would produce unsupported inline policies", () => {
+  it("leaves a union to the candidate when merging a branch would respell its reference, and reports the dropped claim", () => {
+    // Stored stamps and the candidate's `minLength` merge into an inline
+    // `Adder` that neither definition spells, so the branch would pair with
+    // no later writer's. The candidate's union stands, and the stored stamp
+    // it drops is what the commit refuses.
     const candidate = panels("successor") as JSONSchemaObj;
     const strengthened = {
       ...candidate,
@@ -285,8 +289,48 @@ describe("schema-merge-unions", () => {
         Adder: { ...candidate.$defs!.Adder as JSONSchemaObj, minLength: 1 },
       },
     };
-    expect(() => mergeCfcSchemaEnvelopes(panels("stored"), strengthened))
-      .toThrow(/ifc inside divergent anyOf/);
+    const stored = panels("stored");
+    const merged = mergeCfcSchemaEnvelopes(stored, strengthened);
+    expect(droppedStoredClaim(stored, merged)).toContain(
+      "drops the stored writeAuthorizedBy at /panels/*/addedBy",
+    );
+  });
+
+  it("keeps a stored union pairable with a later writer after a merge that would inline a referenced branch", () => {
+    // A branch merged from a stored claim and a candidate field equals
+    // neither referenced body. Stored inline, it would pair with no later
+    // writer's `$ref` branch, and every later write there would be refused.
+    const holder = (moduleIdentity: string, withBio: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        profile: {
+          anyOf: [{ type: "undefined" }, { $ref: "#/$defs/Profile" }],
+        },
+      },
+      $defs: {
+        Profile: {
+          type: "object",
+          properties: {
+            avatar: {
+              type: "string",
+              ifc: { writeAuthorizedBy: writer(moduleIdentity, "setAvatar") },
+            },
+            ...(withBio && { bio: { type: "string" } }),
+          },
+        },
+      },
+    });
+    const stored = holder("release-1", false);
+    const merged = mergeCfcSchemaEnvelopes(stored, holder("release-2", true));
+    expect(droppedStoredClaim(stored, merged)).toContain(
+      "drops the stored writeAuthorizedBy at /profile/avatar",
+    );
+    const branch = (
+      (merged as JSONSchemaObj).properties!.profile as JSONSchemaObj
+    ).anyOf![1] as JSONSchemaObj;
+    expect(typeof branch.$ref).toBe("string");
+    expect(() => mergeCfcSchemaEnvelopes(merged, holder("release-1", false)))
+      .not.toThrow();
   });
 
   it("keeps body claims when an IFC sibling overlays a reference", () => {
