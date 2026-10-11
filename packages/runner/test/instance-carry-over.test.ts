@@ -136,6 +136,19 @@ const DEPLOYED_WITH_NAMED_ADDED = parentProgram([
   "  return { views: [a, n], aCount: a.count, nCount: n.count };",
 ].join("\n"));
 
+// `NAMED_TWO` with an unrelated sibling `s` inserted ahead of both.
+const NAMED_TWO_WITH_SIBLING = parentProgram([
+  "  const s = Other({ label: 's' });",
+  "  const a = Counter({ label: 'a' });",
+  "  const b = Counter({ label: 'b' });",
+  "  return {",
+  "    views: [s, a, b],",
+  "    aCount: a.count,",
+  "    bCount: b.count,",
+  "    sCount: s.count,",
+  "  };",
+].join("\n"));
+
 // The parent as deployed with an `Other` child ahead of two `Counter`
 // children.
 const DEPLOYED_THREE = parentProgram([
@@ -653,6 +666,41 @@ describe("instance-carry-over", () => {
       it("keeps its child's state when a named sibling is inserted ahead of it", async () => {
         const cell = await deployedParent("bound-later-named-sibling", {
           named: DEPLOYED,
+        });
+
+        const result = await update(cell, NAMED_WITH_SIBLING);
+
+        expect({ aCount: result.aCount, sCount: result.sCount }).toEqual({
+          aCount: 7,
+          sCount: 0,
+        });
+      });
+
+      it("keeps each child's state when two children of one pattern are bound to `const`s with a named sibling inserted ahead of them", async () => {
+        const cell = await deployedParent("bound-later-two-named-sibling", {
+          deployed: DEPLOYED_TWO,
+          named: DEPLOYED_TWO,
+          counts: { aCount: 7, bCount: 9 },
+        });
+
+        const result = await update(cell, NAMED_TWO_WITH_SIBLING);
+
+        expect({
+          aCount: result.aCount,
+          bCount: result.bCount,
+          sCount: result.sCount,
+        }).toEqual({ aCount: 7, bCount: 9, sCount: 0 });
+      });
+
+      it("keeps its child's state by its pattern identity when a named sibling is inserted ahead of it, where the parent's previous pattern does not load", async () => {
+        // With no previous pattern to match it by order, the instance takes
+        // the one positional child of its own pattern identity.
+
+        const cell = await deployedParent("bound-later-previous-unloadable", {
+          named: DEPLOYED,
+        });
+        await writeMeta(cell, {
+          patternSetupIdentity: { identity: "unloadable", symbol: "default" },
         });
 
         const result = await update(cell, NAMED_WITH_SIBLING);

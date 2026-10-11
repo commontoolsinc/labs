@@ -937,6 +937,11 @@ function isPositionalPartialCause(partialCause: unknown): boolean {
     Object.keys(partialCause).length === 1;
 }
 
+/** The number in the positional partial cause `partialCause`. */
+function generatedNumber(partialCause: unknown): number {
+  return (partialCause as { $generated: number }).$generated;
+}
+
 /** The sub-pattern nodes of `pattern`, each with its child's partial cause. */
 function subPatternNodes(
   pattern: Pattern,
@@ -13425,7 +13430,9 @@ export class Runner {
    * instance's positional cause. That cause is the one the pattern the parent
    * last set up, which `patternSetupIdentity` names, gives the same name;
    * this is exact wherever that pattern is loaded in this runtime and names
-   * the instance. Otherwise an instance carries over the one child, among the
+   * the instance. An instance that pattern, loaded, does not name is matched
+   * to its positional children by order within each pattern identity.
+   * Without that pattern, an instance carries over the one child, among the
    * positional spots the parent's manifest records, that runs the instance's
    * own child pattern identity and that no positional node of `pattern` sets
    * up at its own spot; failing that, the child at its own positional
@@ -13468,8 +13475,8 @@ export class Runner {
         continue;
       }
       // An instance the previous pattern does not name is new, or was
-      // positional there: what it carries over, it finds by identity or at
-      // its own positional spot.
+      // positional there: it is matched by order to that pattern's
+      // positional children.
       if (
         previous !== undefined &&
         !previous.derivedInternalCells?.some((candidate) =>
@@ -13516,12 +13523,67 @@ export class Runner {
         claimed.add(documentKey(child.getAsNormalizedFullLink()));
       }
     }
-    // Without the previous pattern, or where it does not name the instance,
-    // an instance carries over the one child, among the positional spots the
-    // parent's manifest records, whose pattern identity is the instance's own
-    // child pattern identity. A child two instances would each take goes to
-    // neither.
-    const picks = [...unmatched, ...unnamedBefore].map((entry) => ({
+    // An instance the previous pattern does not name takes the child that
+    // matches it by order: the i-th of `pattern`'s instances of a pattern
+    // identity, positional nodes and these instances together in the order
+    // the builder numbered them, takes the child at the i-th positional spot
+    // the previous pattern sets up under that identity.
+    if (previous !== undefined && unnamedBefore.length > 0) {
+      const spotsBefore = this.#positionalSpotsByIdentity(previous);
+      const numbered: {
+        key: string;
+        number: number;
+        entry?: (typeof unnamedBefore)[number];
+      }[] = [];
+      for (const node of nodes) {
+        if (!isPositionalPartialCause(node.partialCause)) continue;
+        const key = this.#patternIdentityKey(node.module);
+        if (key === undefined) continue;
+        numbered.push({ key, number: generatedNumber(node.partialCause) });
+      }
+      for (const entry of unnamedBefore) {
+        const key = this.#patternIdentityKey(entry.module);
+        if (key === undefined) continue;
+        numbered.push({
+          key,
+          number: generatedNumber(entry.descriptor.legacyPartialCause),
+          entry,
+        });
+      }
+      numbered.sort((a, b) => a.number - b.number);
+      const counts = new Map<string, number>();
+      for (const { key, entry } of numbered) {
+        const index = counts.get(key) ?? 0;
+        counts.set(key, index + 1);
+        if (entry === undefined) continue;
+        const spot = spotsBefore.get(key)?.[index];
+        // No spot, or no child set up at it, makes the instance new.
+        if (spot === undefined) continue;
+        const child = this.#childAtPartialCause(
+          tx,
+          parent,
+          spot.module,
+          spot.partialCause,
+        );
+        if (getPatternIdentityRef(child) === undefined) continue;
+        const link = child.getAsNormalizedFullLink();
+        if (claimed.has(documentKey(link))) {
+          uncarried.push({
+            name: entry.name,
+            legacyPartialCause: spot.partialCause,
+            atSpot: { id: link.id, kept: true },
+          });
+          continue;
+        }
+        claimed.add(documentKey(link));
+        carried.set(entry.name, link);
+      }
+    }
+    // Without the previous pattern, an instance carries over the one child,
+    // among the positional spots the parent's manifest records, whose pattern
+    // identity is the instance's own child pattern identity. A child two
+    // instances would each take goes to neither.
+    const picks = unmatched.map((entry) => ({
       entry,
       child: this.#soleRecordedChild(
         tx,
@@ -13544,15 +13606,12 @@ export class Runner {
       }
       claimed.add(documentKey(child));
       carried.set(pick.entry.name, child);
-      for (const list of [unmatched, unnamedBefore]) {
-        if (list.includes(pick.entry)) list.splice(list.indexOf(pick.entry), 1);
-      }
+      unmatched.splice(unmatched.indexOf(pick.entry), 1);
     }
     // What is left takes the child at its own positional spot, which is where
     // the child runs with no instance names, unless the parent shows the
     // children have moved spots.
-    for (const entry of [...unmatched, ...unnamedBefore]) {
-      const { name, module, descriptor } = entry;
+    for (const { name, module, descriptor } of unmatched) {
       const left = this.#childAtPartialCause(
         tx,
         parent,
@@ -13575,13 +13634,6 @@ export class Runner {
       ) {
         claimed.add(documentKey(link));
         carried.set(name, link);
-        continue;
-      }
-      // A new instance with nothing at its spot is simply new.
-      if (
-        unnamedBefore.includes(entry) &&
-        getPatternIdentityRef(left) === undefined
-      ) {
         continue;
       }
       uncarried.push({
@@ -13644,6 +13696,44 @@ export class Runner {
     return getPatternIdentityRef(child) === undefined
       ? undefined
       : child.getAsNormalizedFullLink();
+  }
+
+  /**
+   * The positional spots of `pattern`'s sub-pattern nodes, in the order the
+   * builder numbered them, by the key `#patternIdentityKey()` gives each
+   * node's child pattern.
+   */
+  #positionalSpotsByIdentity(
+    pattern: Pattern,
+  ): Map<string, { module: Module; partialCause: JSONValue }[]> {
+    const spots = new Map<
+      string,
+      { module: Module; partialCause: JSONValue }[]
+    >();
+    const nodes = subPatternNodes(pattern)
+      .filter(({ partialCause }) => isPositionalPartialCause(partialCause))
+      .sort((a, b) =>
+        generatedNumber(a.partialCause) - generatedNumber(b.partialCause)
+      );
+    for (const { module, partialCause } of nodes) {
+      const key = this.#patternIdentityKey(module);
+      if (key === undefined) continue;
+      const list = spots.get(key) ?? [];
+      list.push({ module, partialCause });
+      spots.set(key, list);
+    }
+    return spots;
+  }
+
+  /**
+   * A key naming the pattern identity of the child of `module`, or
+   * `undefined` where its pattern has none in this runtime.
+   */
+  #patternIdentityKey(module: Module): string | undefined {
+    const ref = this.#runtime.patternManager.getArtifactEntryRef(
+      module.implementation as Pattern,
+    );
+    return ref === undefined ? undefined : `${ref.identity}\0${ref.symbol}`;
   }
 
   /**
