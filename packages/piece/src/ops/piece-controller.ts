@@ -288,19 +288,21 @@ function writePathCrossesLink(
 }
 
 /**
- * The first Cell `materialized` holds at a proper prefix of `path`, and that
- * prefix: the handle a write at `path` lands behind.
+ * The first Cell `materialized` holds at a proper prefix of `path` longer than
+ * `after` segments, and that prefix: the next handle a write at `path` lands
+ * behind.
  */
 function handleOnWritePath(
   materialized: unknown,
   path: readonly (string | number)[],
+  after: number,
 ): { cell: Cell<unknown>; path: readonly (string | number)[] } | undefined {
   let current = materialized;
   for (let depth = 0; depth < path.length - 1; depth++) {
     current = isObjectOrArray(current)
       ? (current as Record<PropertyKey, unknown>)[path[depth]]
       : undefined;
-    if (isCell(current)) {
+    if (depth >= after && isCell(current)) {
       return { cell: current, path: path.slice(0, depth + 1) };
     }
   }
@@ -3478,23 +3480,23 @@ class PiecePropIo implements PieceCellIo {
         const storedRoot = materializeForValidation(targetCell, schema, tx);
         let openedRoot = storedRoot;
         for (
-          let crossed = handleOnWritePath(openedRoot, writePath);
+          let crossed = handleOnWritePath(openedRoot, writePath, 0);
           crossed !== undefined;
-          crossed = handleOnWritePath(openedRoot, writePath)
+          crossed = handleOnWritePath(
+            openedRoot,
+            writePath,
+            crossed.path.length,
+          )
         ) {
-          const held = materializeHandleForValidation(
-            crossed.cell,
-            schema,
-            crossed.path,
-            tx,
-          );
-          // A handle that opens to another handle holds no value a path can
-          // continue into, and the write path stops being judged there.
-          if (isCell(held)) break;
           openedRoot = replaceMaterializedValueAtPath(
             openedRoot,
             crossed.path,
-            held,
+            materializeHandleForValidation(
+              crossed.cell,
+              schema,
+              crossed.path,
+              tx,
+            ),
           );
         }
         const stageAt = (candidate: unknown) =>
