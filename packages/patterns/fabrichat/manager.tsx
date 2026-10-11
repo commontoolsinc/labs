@@ -1097,7 +1097,7 @@ export interface FabriChatManagerOutput {
   [UI]: VNode;
 
   /** Every room this user belongs to and hasn't forgotten, newest first. */
-  rooms: ChatIndexEntry[];
+  rooms: PerSession<ChatIndexEntry[]>;
 
   /**
    * The user's shared-space catalog, as stored, from which `rooms` is drawn. A
@@ -1120,7 +1120,7 @@ export interface FabriChatManagerOutput {
    * each one's profile attests, the profiles attesting it, each once, in the
    * order the rooms, newest first, list them.
    */
-  people: Record<string, ManagerProfileCell[]>;
+  people: PerSession<Record<string, ManagerProfileCell[]>>;
 
   /** Finds or creates the direct room with a person. */
   openDirect: Stream<ManagerStreamEvent>;

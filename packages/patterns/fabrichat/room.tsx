@@ -598,13 +598,13 @@ export interface ChatRoomView {
    * attests none or the label can't be read where the list is derived. Like
    * `participants`, it is not proof of access.
    */
-  participantEntries: ParticipantEntry[];
+  participantEntries: PerSession<ParticipantEntry[]>;
 
   /**
    * The principals `participantEntries` holds, each once, in the order of
    * `participants`.
    */
-  participantPrincipals: string[];
+  participantPrincipals: PerSession<string[]>;
 
   /**
    * Adds a profile to those who joined the room, once. Any participant may add
