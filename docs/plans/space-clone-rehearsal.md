@@ -80,10 +80,12 @@ exists to buy.
 
 **What would survive a re-key.** Entity ids are content-addressed from
 `{source, cause}` and do **not** include the space DID (`createRef` in
-`packages/runner/src/create-ref.ts`), so the document graph is space-agnostic.
-Same-space links elide the `space` field entirely when it matches the base
-(the `base` elision in `packages/runner/src/link-utils.ts`). On those two dimensions a re-key
-is a no-op.
+`packages/runner/src/create-ref.ts`), so a re-key leaves every id as it is.
+Links are another matter. Only a link written relative to a base document
+elides a `space` that matches the base's (the `base` elision in
+`packages/runner/src/link-utils.ts`); the links a pattern binds into a child's
+argument name their space outright, so a re-key would have to rewrite each of
+them.
 
 **What would break.**
 
