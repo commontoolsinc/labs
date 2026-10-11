@@ -223,6 +223,32 @@ Deno.test("a click toggles an unbound checkbox", async () => {
   ]);
 });
 
+Deno.test("two clicks in one task leave an unbound checkbox unchecked", async () => {
+  using page = await mounted();
+  const changes = changesOf(page.control);
+  page.control.click();
+  page.control.click();
+  expect(await shown(page.control)).toEqual(UNCHECKED);
+  expect(changes).toEqual([
+    { checked: true, indeterminate: false },
+    { checked: false, indeterminate: false },
+  ]);
+});
+
+Deno.test("a click on an indeterminate checkbox bound to a cell reports it settled", async () => {
+  using page = await mounted();
+  const cell = createMockCellHandle(false);
+  page.control.checked = cell;
+  page.control.indeterminate = true;
+  await page.control.updateComplete;
+  const changes = changesOf(page.control);
+  page.control.click();
+  expect(writesSent(cell).map((write) => write.value)).toEqual([true]);
+  expect(page.control.indeterminate).toBe(false);
+  expect(changes.length).toBeGreaterThan(0);
+  expect(changes.every((change) => !change.indeterminate)).toBe(true);
+});
+
 Deno.test("a click on an indeterminate unbound checkbox checks it", async () => {
   using page = await mounted();
   page.control.indeterminate = true;

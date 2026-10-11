@@ -1,5 +1,5 @@
 import { booleanSchema } from "@commonfabric/runner/schemas";
-import { type CellHandle } from "@commonfabric/runtime-client";
+import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 
@@ -339,19 +339,21 @@ export class CFCheckbox extends BaseElement {
         this.indeterminate = false;
       }
 
-      // Toggle checked state. In a form, the toggle is buffered until the
-      // form submits. Outside one, the cell controller computes it from what
-      // a bound cell holds, asking the worker first where it has read
-      // nothing, and its onChange fires cf-change; a plain boolean is the
-      // checkbox's own property, which it flips itself.
+      // In a form, the toggle is buffered until the form submits.
       if (this._formField.inFormContext) {
         this.setChecked(!this.getChecked());
-      } else if (this._checkedCellController.hasCell()) {
+      } else if (isCellHandle(this.checked)) {
+        // A bound cell's toggle is computed from what the cell holds, asking
+        // the worker first where it has read nothing, and the controller's
+        // onChange fires cf-change.
         void this._checkedCellController.toggle().then(() =>
           this._updateAriaAttributes()
         );
       } else {
-        this.checked = !this.getChecked();
+        // A plain boolean is the checkbox's own property, which it flips
+        // itself. It is read from the property, not the controller, which
+        // catches up with it only on the next update.
+        this.checked = !this.checked;
         this.emit("cf-change", {
           checked: this.checked,
           indeterminate: this.indeterminate,
