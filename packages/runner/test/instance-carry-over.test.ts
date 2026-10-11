@@ -3,7 +3,11 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  EmulatedStorageManager,
+  newLoopbackServer,
+  StorageManager,
+} from "@commonfabric/runner/storage/cache.deno";
 import type { Cell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import {
@@ -172,6 +176,49 @@ const DEPLOYED_TWO_NEWER_COUNTER = parentProgram(
     "  return { views: [a, b], aCount: a.count, bCount: b.count };",
   ].join("\n"),
   `${COUNTER}// A newer version.\n`,
+);
+
+// `COUNTER` with a node of its own, which the start's pre-sync plans on
+// whichever child it binds an instance to.
+const COUNTER_WITH_NODE = [
+  "import { computed, pattern, Writable } from 'commonfabric';",
+  "export const Counter = pattern<",
+  "  { label: string },",
+  "  { count: Writable<number>; shown: string }",
+  ">(({ label }) => {",
+  "  const count = new Writable<number>(0).for('count');",
+  "  const shown = computed(() => `${label}: ${count.get()}`);",
+  "  return { count, shown };",
+  "});",
+  "",
+].join("\n");
+
+// `DEPLOYED` with `COUNTER_WITH_NODE` as its child.
+const DEPLOYED_NODE_CHILD = parentProgram(
+  [
+    "  const [a] = [Counter({ label: 'a' })];",
+    "  return { views: [a], aCount: a.count };",
+  ].join("\n"),
+  COUNTER_WITH_NODE,
+);
+
+// `NAMED_WITH_SIBLING` with `COUNTER_WITH_NODE` as `a`'s pattern.
+const NAMED_WITH_SIBLING_NODE_CHILD = parentProgram(
+  [
+    "  const s = Other({ label: 's' });",
+    "  const a = Counter({ label: 'a' });",
+    "  return { views: [s, a], aCount: a.count, sCount: s.count };",
+  ].join("\n"),
+  COUNTER_WITH_NODE,
+);
+
+// `NAMED` under a newer version of `COUNTER_WITH_NODE`.
+const NAMED_NEWER_NODE_CHILD = parentProgram(
+  [
+    "  const a = Counter({ label: 'a' });",
+    "  return { views: [a], aCount: a.count };",
+  ].join("\n"),
+  `${COUNTER_WITH_NODE}// A newer version.\n`,
 );
 
 // The parent as deployed with a `Counter` child `a` ahead of an `Other` child
@@ -1162,6 +1209,102 @@ describe("instance-carry-over", () => {
       await expect(update(cell, POSITIONAL_SIBLING_OF_NAMED)).rejects.toThrow(
         /refusing to set up .*#Other for a positional spot over the child of .*#Counter that instance "a" carries/,
       );
+    });
+  });
+
+  describe("a named instance, in a runtime whose storage holds none of its parent's children", () => {
+    // Each runtime here sits on a storage manager of its own over one memory
+    // server, so it holds only what it has synced from that server.
+
+    let server: ReturnType<typeof newLoopbackServer>;
+    let managers: EmulatedStorageManager[];
+    let made: Runtime[];
+
+    // A runtime on a storage manager of its own over `server`.
+    const runtimeOnServer = (): Runtime => {
+      const manager = EmulatedStorageManager.connectTo(server, { as: signer });
+      managers.push(manager);
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: manager,
+      });
+      made.push(runtime);
+      return runtime;
+    };
+
+    // `rt` stands in for the runtime the enclosing hooks made until the case
+    // ends, so the shared helpers act on the server's runtimes.
+    beforeEach(() => {
+      server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
+      managers = [];
+      made = [];
+      replaced.push(rt);
+      rt = runtimeOnServer();
+    });
+    afterEach(async () => {
+      for (const runtime of made) {
+        await runtime.dispose({ closeStorage: false });
+      }
+      for (const manager of managers) await manager.close();
+      await server.close();
+      rt = replaced.pop()!;
+    });
+
+    /**
+     * A runtime on storage of its own over the same server, in place of `rt`,
+     * and the parent `name` as it reads it.
+     */
+    const coldRuntime = async (
+      name: string,
+    ): Promise<Cell<Record<string, unknown>>> => {
+      await rt.patternManager.flushCompileCacheWrites();
+      await rt.storageManager.synced();
+      rt = runtimeOnServer();
+      const cell = rt.getCell<Record<string, unknown>>(space, name);
+      await cell.sync();
+      return cell;
+    };
+
+    // The pieces the start's pre-sync plans nodes on, from here on in `rt`.
+    const presyncedPieces = (): Set<string> => {
+      const pieces = new Set<string>();
+      rt.runner.accessForTestingOnly.presyncPlanRecorder = (piece) =>
+        pieces.add(piece);
+      return pieces;
+    };
+
+    it("is bound by the start's pre-sync to the positional child order matching carries over", async () => {
+      await deployedParent("cold-order", {
+        deployed: DEPLOYED_NODE_CHILD,
+        named: DEPLOYED_NODE_CHILD,
+      });
+      const cell = await coldRuntime("cold-order");
+      const carried = positionalChild(cell, 0).getAsNormalizedFullLink().id;
+      const presynced = presyncedPieces();
+
+      const result = await update(cell, NAMED_WITH_SIBLING_NODE_CHILD);
+
+      expect({
+        presynced: presynced.has(carried),
+        aCount: result.aCount,
+      }).toEqual({ presynced: true, aCount: 7 });
+    });
+
+    it("is bound by the start's pre-sync to the child at its own positional spot when its own source changed", async () => {
+      await deployedParent("cold-own-spot", {
+        deployed: DEPLOYED_NODE_CHILD,
+        named: DEPLOYED_NODE_CHILD,
+      });
+      const cell = await coldRuntime("cold-own-spot");
+      const carried = positionalChild(cell, 0).getAsNormalizedFullLink().id;
+      const presynced = presyncedPieces();
+
+      const result = await update(cell, NAMED_NEWER_NODE_CHILD);
+
+      expect({
+        presynced: presynced.has(carried),
+        aCount: result.aCount,
+      }).toEqual({ presynced: true, aCount: 7 });
     });
   });
 });

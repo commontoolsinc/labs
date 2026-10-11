@@ -13829,9 +13829,10 @@ export class Runner {
   /**
    * Makes what `#planInstanceCarryOver()` reads on `resultCell` local before
    * setup reads it synchronously, and keeps the plan for the pre-sync's node
-   * binding: the pattern the parent last set up, loaded by its identity, or,
-   * where that does not load, the children at every positional spot the
-   * parent's manifest records.
+   * binding: the pattern the parent last set up, loaded by its identity, the
+   * children at the positional causes that pattern gives the instances it
+   * names, and the children at every positional spot the parent's manifest
+   * records, which order matching and the steps after it read.
    */
   async #prepareInstanceCarryOver(
     resultCell: Cell<any>,
@@ -13865,8 +13866,8 @@ export class Runner {
     const recorded = convertibleJsFromFabricValue(
       resultCell.getMetaRaw("internal", { meta: ignoreReadForScheduling }),
     );
-    if (previous === undefined && Array.isArray(recorded)) {
-      const children: Cell<any>[] = [];
+    const children: Cell<any>[] = [];
+    if (Array.isArray(recorded)) {
       for (const { module } of subPatternNodes(pattern)) {
         for (const entry of recorded as InternalCellDescriptor[]) {
           if (!isPositionalPartialCause(entry.partialCause)) continue;
@@ -13880,9 +13881,8 @@ export class Runner {
           );
         }
       }
-      await Promise.all(children.map((child) => child.sync()));
-    } else if (previous !== undefined) {
-      const children: Cell<any>[] = [];
+    }
+    if (previous !== undefined) {
       for (const descriptor of previous.derivedInternalCells ?? []) {
         if (descriptor.legacyPartialCause === undefined) continue;
         const node = subPatternNodes(previous).find((candidate) =>
@@ -13898,8 +13898,8 @@ export class Runner {
           ),
         );
       }
-      await Promise.all(children.map((child) => child.sync()));
     }
+    await Promise.all(children.map((child) => child.sync()));
     const { carried } = this.#planInstanceCarryOver(resultCell, pattern);
     const key = this.#getDocKey(resultCell);
     if (carried.size > 0) {
