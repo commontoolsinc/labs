@@ -293,6 +293,7 @@ export default pattern(() => {
       refusalNoticeIn(home[UI]),
       "First noticed 10/9/2026, 12:00:00 PM UTC.",
     ) &&
+    hasText(refusalNoticeIn(home[UI]), "loom shares still reach that daemon") &&
     hasText(refusalNoticeIn(home[UI]), "stops receiving loom shares") &&
     refusalNoticeInHeaderSlot(home[UI]) &&
     offersReplacementIn(home[UI], home.replaceRefusedPrivateInbox)

@@ -22,7 +22,8 @@ export function refusalReasonText(reason: string): string | undefined {
       return "Home was refused access to it.";
     case "inbox-adoption-acl-mismatch":
       return "Its space does not make you its owner, or does not let others " +
-        "deliver to it.";
+        "deliver to it. A loom daemon of yours running as another identity " +
+        "is one way this happens, and loom shares still reach that daemon.";
     case "inbox-offers-invalid":
       return "It holds no list of offers.";
     case "inbox-receive-missing":
