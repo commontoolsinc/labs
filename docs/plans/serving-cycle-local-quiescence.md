@@ -109,13 +109,18 @@ deadline as the multi-user latency bound; the OFF arm and clients.
    worker: the demand pass's median fell from 63 ms to 60 ms, and to 31 ms
    with the store read-through on, so the pass's cost was the loads it
    issues more than the rows it reads.
-3. [ ] **Local quiescence under read-through.** The settle's probe over the
+3. [x] **Local quiescence under read-through.** The settle's probe over the
    feed and the scheduler for the home space, the frame barrier kept for
-   foreign sessions, the spec paragraph amended. Expected: settles end on
-   quiescence rather than the deadline, `wavesBudgetExhausted` falls toward
-   the share of cycles with real cascades, and the seed's cycle count falls.
-4. [ ] **Pipelined post-commit.** The publish and the outbox drain off the
-   cycle's critical path.
+   foreign sessions, the spec paragraph amended. Measured on the vote burst
+   under the worker with the read-through on: the settle's server-idle wait
+   went from a port round trip per probe to none, and the burst's wave count
+   and deadline count did not move (40 waves, 40 at the deadline, from 38
+   and 36), because what keeps a settle from quiescing is the scheduler's
+   own post-event work, 150 to 300 ms per vote, not a wait on the server.
+4. [x] **Pipelined post-commit.** The publish and the outbox drain off the
+   cycle's critical path. Measured as above: the cycle's median fell from
+   259 ms to 195 ms, with the publish's 32 to 62 ms and the outbox drain no
+   longer inside it.
 5. [ ] **Cadence and the number.** The coalescing knob, measured on the vote
    burst and the seed under both postures against the client arm: the
    burst's wave count and settled time are the target, a watch add near its
