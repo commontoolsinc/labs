@@ -130,6 +130,10 @@ export function hasVariantValue(value: unknown, key: string): boolean {
  *   (default "full"). Renders the piece's matching variant key ([CHIP_UI] /
  *   [TILE_UI]) when exported, otherwise the per-variant platform default. The
  *   full [UI] is the universal floor, so every piece renders at every variant.
+ * @property {boolean} opened - Set by a host that has already opened the piece
+ *   it binds, as the shell has the piece it navigated to: the render then does
+ *   not open it again. Otherwise showing the piece opens it, as navigating to
+ *   it does.
  *
  * @slot - Shown only while there is no `cell`, which is where a view puts the
  *   access placeholder while a space the cell is read from is out of reach.
@@ -309,10 +313,12 @@ export class CFRender extends BaseElement {
     cell: { attribute: false },
     // Reflected so the host can size itself per variant (chip is inline).
     variant: { type: String, reflect: true },
+    opened: { type: Boolean },
   };
 
   declare cell: CellHandle | undefined;
   declare variant: UIVariant | undefined;
+  declare opened: boolean | undefined;
 
   /** Lit ref to the container, which stays stable across re-renders. */
   private _containerRef: Ref<HTMLDivElement> = createRef();
@@ -571,7 +577,7 @@ export class CFRender extends BaseElement {
     piece: CellHandle,
     generation: number,
   ): () => void {
-    this.#openDisplayed(piece);
+    if (this.opened !== true) this.#openDisplayed(piece);
     return render(
       container,
       cell as CellHandle<VNode>,

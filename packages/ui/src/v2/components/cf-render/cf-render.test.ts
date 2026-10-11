@@ -1184,6 +1184,48 @@ describe("CFRender variants", () => {
     }
   });
 
+  it("opens nothing for a host that has already opened the piece", async () => {
+    // The shell opens the piece it navigates to, then shows it here.
+    const mockDocument = installMockDocument();
+    const element = new CFRender();
+    try {
+      const { cell: piece, log } = createRenderableCellHandle<unknown>(
+        undefined,
+        { id: "of:fid1:piece-abcdef" as CellRef["id"] },
+      );
+      Object.assign(piece, { resolveAsCell: () => Promise.resolve(piece) });
+      Object.assign(piece.runtime(), { signal: new AbortController().signal });
+      const opened: unknown[][] = [];
+      Object.assign(piece.runtime(), {
+        getPiece: (...args: unknown[]) => {
+          opened.push(args);
+          return Promise.resolve(null);
+        },
+      });
+      const internals = element as unknown as Internals & {
+        _watchLinkTarget(
+          cell: CellHandle,
+          resolved: CellHandle,
+        ): Promise<CellHandle | undefined>;
+      };
+      internals._watchLinkTarget = (_cell, resolved) =>
+        Promise.resolve(resolved);
+      internals._containerRef = {
+        value: createMockElement("div") as unknown as HTMLDivElement,
+      };
+      element.cell = piece;
+      element.opened = true;
+      await internals._renderCell();
+      expect(log.mounted.map((reference) => reference.id)).toEqual([
+        piece.ref().id,
+      ]);
+      expect(opened).toEqual([]);
+    } finally {
+      element.disconnectedCallback();
+      mockDocument.restore();
+    }
+  });
+
   it("opens the piece its default tile shows", () => {
     const mockDocument = installMockDocument();
     const create = mockDocument.document.createElement;

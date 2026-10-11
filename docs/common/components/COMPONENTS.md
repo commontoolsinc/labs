@@ -421,7 +421,9 @@ the policy placeholder in the same places. The exceptions:
 Showing a piece bound to `cf-render` (full, its exported tile or chip, or the
 default tile) opens it the way navigating to it does, so a view computed for
 the viewer renders, and the piece keeps running after the display goes, as an
-opened one does. The default chip only names the piece and opens nothing.
+opened one does. The default chip only names the piece and opens nothing, and
+a host that has already opened the piece sets `opened`, as the shell does for
+the piece it navigated to, so it is not opened twice.
 
 `cf-picker` shows each of its `$items` through a `cf-render` of its own, so
 each item passes the same gates as a piece bound to `cf-render`, with the same

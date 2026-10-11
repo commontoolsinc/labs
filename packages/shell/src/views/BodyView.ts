@@ -324,7 +324,7 @@ export class XBodyView extends BaseView {
       : this.activePattern
       ? html`
         <cf-piece slot="main" .pieceId="${this.activePattern.id()}">
-          <cf-render .cell="${this.activeCell}"></cf-render>
+          <cf-render .cell="${this.activeCell}" .opened="${true}"></cf-render>
         </cf-piece>
       `
       : this.spaceHasNoRoot
