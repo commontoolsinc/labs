@@ -4,42 +4,78 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
+import type { PatternFactory } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
-/** Where the child a handler creates is placed. */
+/** Where the child the parent creates is placed. */
 type Placement = { target: MemorySpace } | "parent's space";
 
-/** Which cell of the parent the handler hands to the child. */
+/** Which cell of the parent is handed to the child. */
 type Handed = "input" | "derived";
 
-/** A parent and the child its handler creates. */
+/** What creates the child, and where the handed cell goes in its argument. */
+type Shape = {
+  /**
+   * What creates the child: the parent's handler, when sent an event, or a
+   * `lift()` in the parent's body. Defaults to `handler`.
+   */
+  creator?: "handler" | "lift";
+
+  /**
+   * Where the handed cell goes: as `topic` in the child's argument, nested
+   * one object deeper as `wrap.topic`, or as the whole argument. Defaults to
+   * `topic`.
+   */
+  position?: "topic" | "nested" | "whole";
+};
+
+/** A parent and the child it creates. */
 type Family = {
   /** The parent, whose argument holds `topic`. */
   parent: Cell<unknown>;
 
-  /** The child the parent's handler creates. */
+  /** The child the parent creates, whose result holds `topic`. */
   child: Cell<{ topic: string }>;
 };
 
 /**
- * Runs, in `home`, a parent whose argument holds `topic`, and sends its
- * handler an event. The handler creates a child, placed by `placement`, and
- * hands it the cell `handed` names: the parent's own input, or a cell the
- * parent derives from it.
+ * Runs, in `home`, a parent whose argument holds `topic`. The parent creates a
+ * child, placed by `placement` and shaped as the last argument says, and hands
+ * it the cell `handed` names: the parent's own input, or a cell the parent
+ * derives from it. When a handler creates the child, this sends it an event.
  */
 async function createChild(
   runtime: Runtime,
   home: MemorySpace,
   placement: Placement,
   handed: Handed,
+  { creator = "handler", position = "topic" }: Shape = {},
 ): Promise<Family> {
   const { handler, lift, pattern } = createTrustedBuilder(runtime)
     .commonfabric;
+  const place = <T, R>(factory: PatternFactory<T, R>) =>
+    placement === "parent's space"
+      ? factory
+      : factory.inSpace(placement.target);
   const Child = pattern<{ topic: string }>(({ topic }) => ({ topic }));
+  const Wrapped = pattern<{ wrap: { topic: string } }>(({ wrap }) => ({
+    topic: wrap.topic,
+  }));
+  const Whole = pattern<string>((topic) => ({ topic }));
+  const spawn = (topic: Cell<string>) => {
+    switch (position) {
+      case "topic":
+        return place(Child)({ topic });
+      case "nested":
+        return place(Wrapped)({ wrap: { topic } });
+      case "whole":
+        return place(Whole)(topic);
+    }
+  };
   const create = handler<
     Record<string, never>,
     { topic: Cell<string>; room: Cell<unknown> }
@@ -54,20 +90,25 @@ async function createChild(
       required: ["topic", "room"],
     },
     (_event, { topic, room }) => {
-      const factory = placement === "parent's space"
-        ? Child
-        : Child.inSpace(placement.target);
-      room.set(factory({ topic }));
+      room.set(spawn(topic));
+    },
+  );
+  const make = lift(
+    ({ topic }: { topic: Cell<string> }) => spawn(topic),
+    {
+      type: "object",
+      properties: { topic: { type: "string", asCell: ["cell"] } },
+      required: ["topic"],
     },
   );
   const shout = lift((topic: string) => `${topic}!`);
   const Parent = pattern<{ topic: string; room: Cell<unknown> }>(
-    ({ topic, room }) => ({
-      create: create({
-        topic: handed === "input" ? topic : shout(topic),
-        room,
-      }),
-    }),
+    ({ topic, room }) => {
+      const given = handed === "input" ? topic : shout(topic);
+      return creator === "handler"
+        ? { create: create({ topic: given, room }) }
+        : { child: make({ topic: given }) };
+    },
     {
       type: "object",
       properties: {
@@ -90,13 +131,16 @@ async function createChild(
   expect((await tx.commit().settled).error).toBeUndefined();
   await runtime.idle();
   await result.pull();
-  result.key("create").send({});
-  await runtime.idle();
+  if (creator === "handler") {
+    result.key("create").send({});
+    await runtime.idle();
+  }
   await runtime.storageManager.synced();
-  await room.pull();
+  const holder = creator === "handler" ? room : result.key("child");
+  await holder.pull();
   return {
     parent: result,
-    child: room.resolveAsCell() as Cell<{ topic: string }>,
+    child: holder.resolveAsCell() as Cell<{ topic: string }>,
   };
 }
 
@@ -128,11 +172,11 @@ async function withRuntime(
 }
 
 describe("inspace-input-links", () => {
-  // A handler running in one space creates a child with `inSpace()` in
-  // another, and hands it a cell of the handler's own space as an argument.
-  // The stored link is what the assertions on it read: `parseLink()` fills a
-  // link's missing space from the document holding it, so a link that names
-  // no space reads as one into the child's space.
+  // A handler or a `lift()` running in one space creates a child with
+  // `inSpace()` in another, and hands it a cell of its own space as an
+  // argument. The stored link is what the assertions on it read:
+  // `parseLink()` fills a link's missing space from the document holding it,
+  // so a link that names no space reads as one into the child's space.
 
   describe("a child in another space", () => {
     it("stores, in its argument, a link into the space of the parent's input", async () => {
@@ -189,6 +233,48 @@ describe("inspace-input-links", () => {
           "derived",
         );
         expect(await child.key("topic").pull()).toBe("lunch!");
+      });
+    });
+
+    it("reads the parent's input handed as its whole argument", async () => {
+      await withRuntime(async (runtime, home, other) => {
+        const { child } = await createChild(
+          runtime,
+          home,
+          { target: other },
+          "input",
+          { position: "whole" },
+        );
+        expect(child.space).toBe(other);
+        expect(await child.key("topic").pull()).toBe("lunch");
+      });
+    });
+
+    it("reads the parent's input nested in its argument", async () => {
+      await withRuntime(async (runtime, home, other) => {
+        const { child } = await createChild(
+          runtime,
+          home,
+          { target: other },
+          "input",
+          { position: "nested" },
+        );
+        expect(child.space).toBe(other);
+        expect(await child.key("topic").pull()).toBe("lunch");
+      });
+    });
+
+    it("reads the parent's input when a `lift()` creates it", async () => {
+      await withRuntime(async (runtime, home, other) => {
+        const { child } = await createChild(
+          runtime,
+          home,
+          { target: other },
+          "input",
+          { creator: "lift" },
+        );
+        expect(child.space).toBe(other);
+        expect(await child.key("topic").pull()).toBe("lunch");
       });
     });
   });
