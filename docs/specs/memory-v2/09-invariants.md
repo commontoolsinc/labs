@@ -97,6 +97,18 @@ regression witness, alongside the legacy-shape engine test in
 model. The residual deviation retires when clients that omit `basisSeq`
 fall below the support floor.
 
+What a client SHOWS for a pending layer is bound by this invariant too,
+because a later commit's observation is whatever view it read. A positional
+`splice` shown as the array its writer computed (`03-commit-model.md`
+§3.3.3) is sound only where the commit read the array, since that read is
+what gets the layer refused once the array moves. Shown for a layer that
+read nothing, a reader over it observes a list the server, replaying the
+layer's ops, never reconstructs, and is accepted having missed the foreign
+write the substitution hid. The TLA+ model's `ViewMode` dial states this:
+`PendingStacks_ChannelIntended.cfg` is the witness, violating
+`ReadCoherence` within seconds, and the `*IntendedRead.cfg` configs certify
+the read-conditioned form.
+
 A second deviation is deliberate: an **identity commit**
 (`03-commit-model.md` §3.6.1), which leaves every document it writes as the
 space already holds it, is accepted without a staleness check. Its

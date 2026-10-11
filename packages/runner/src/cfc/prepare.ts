@@ -12021,7 +12021,10 @@ export function* prepareBoundaryCommitSteps(
       // space is the owner's: §3.6.4 makes that principal its sole owner,
       // and the space's id is that principal. A person-audience clause is
       // not one of these: `User(alice)` is honored by the reader check
-      // whoever holds the bytes, so it needs no replica set to agree.
+      // whoever holds the bytes, so it needs no replica set to agree. An
+      // owner that crossed a space boundary arrives as its `{digestOf}`
+      // commitment, which answers this equality question the same way
+      // (§4.6.4.1).
       const namesAnotherSpace = (alternative: unknown): boolean => {
         if (!isObjectOrArray(alternative)) return false;
         const atom = alternative as {
@@ -12031,7 +12034,7 @@ export function* prepareBoundaryCommitSteps(
         };
         if (atom.type === CFC_ATOM_TYPE.Space) return atom.id !== space;
         if (atom.type === CFC_ATOM_TYPE.PersonalSpace) {
-          return atom.owner !== space;
+          return !commitmentAwareEquals(atom.owner as FabricValue, space);
         }
         return false;
       };

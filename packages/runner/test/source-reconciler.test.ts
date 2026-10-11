@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { spy } from "@std/testing/mock";
+import { spy, stub } from "@std/testing/mock";
 import { expect } from "@std/expect";
 
 import { defer, type Deferred } from "@commonfabric/utils/defer";
@@ -29,6 +29,7 @@ import {
 } from "../src/index.ts";
 import { PatternsRoute } from "../src/harness/patterns-route.deno.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import type { MemorySpace } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("piece source reconciliation");
 const PARENT_PATH = "/api/patterns/system/reconcile-parent.tsx";
@@ -436,6 +437,152 @@ describe("piece source reconciliation", () => {
       expect((await piece.pull())?.marker).toBe("v2");
     });
 
+    describe("when the space's memory session is replaced", () => {
+      /** Captures the observer the reconciler subscribes when the runtime is
+       * constructed, so a test can report a replacement itself. */
+      function captureSessionReplaced(): (space: MemorySpace) => void {
+        let observer: ((space: MemorySpace) => void) | undefined;
+        storageManager.subscribeSpaceSessionReplaced = (subscribed) => {
+          observer = subscribed;
+          return () => {
+            observer = undefined;
+          };
+        };
+        return (space) => observer?.(space);
+      }
+
+      /** A running piece following the tracked pattern's system origin, current
+       * at v1, with the route's advertised source switchable to v2. */
+      async function followingPiece(record?: (url: URL) => void) {
+        const v1Identity = await identityFor(source("v1"));
+        const v2Identity = await identityFor(source("v2"));
+        let served = "v1";
+        const piece = await preparePiece(
+          servingFetch(
+            () => served === "v1" ? v1Identity : v2Identity,
+            () => source(served),
+            record,
+          ),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        expect(await runtime.start(piece)).toBe(true);
+        expect(await reconcile(piece)).toBe("current");
+        return { piece, v1Identity, v2Identity, redeploy: () => served = "v2" };
+      }
+
+      async function settle() {
+        await runtime.sourceReconciler.idle();
+        await runtime.idle();
+        await runtime.runner.idlePointerMaintenance();
+      }
+
+      it("adopts the source the restarted host serves", async () => {
+        const replace = captureSessionReplaced();
+        const { piece, v2Identity, redeploy } = await followingPiece();
+
+        redeploy();
+        replace(piece.space);
+        await settle();
+
+        expect(getPatternIdentityRef(piece)).toEqual({
+          identity: v2Identity,
+          symbol: SYMBOL,
+        });
+        expect((await piece.pull())?.marker).toBe("v2");
+      });
+
+      it("leaves the piece on its source for a replacement in another space", async () => {
+        const replace = captureSessionReplaced();
+        const { piece, v1Identity, redeploy } = await followingPiece();
+        const other = await Identity.fromPassphrase("another reconciled space");
+
+        redeploy();
+        replace(other.did());
+        await settle();
+
+        expect(getPatternIdentityRef(piece)).toEqual({
+          identity: v1Identity,
+          symbol: SYMBOL,
+        });
+      });
+
+      it("revalidates an unchanged piece once per replacement", async () => {
+        const replace = captureSessionReplaced();
+        const requests: string[] = [];
+        const { piece } = await followingPiece((url) => {
+          if (url.searchParams.has("identity")) requests.push(url.href);
+        });
+        requests.length = 0;
+
+        replace(piece.space);
+        await settle();
+
+        expect(requests).toHaveLength(1);
+      });
+
+      it("leaves a piece stopped while its legacy origin migrated on its source", async () => {
+        const replace = captureSessionReplaced();
+        const v1Identity = await identityFor(source("v1"));
+        const v2Identity = await identityFor(source("v2"));
+        let served = "v1";
+        const piece = await preparePiece(
+          servingFetch(
+            () => served === "v1" ? v1Identity : v2Identity,
+            () => source(served),
+          ),
+        );
+        await stampSource(piece, PARENT_PATH);
+        expect(await runtime.start(piece)).toBe(true);
+
+        const entered = defer<void>();
+        const release = defer<void>();
+        const read = runtime.patternManager.getPatternSourceProgramByIdentity
+          .bind(runtime.patternManager);
+        const held = stub(
+          runtime.patternManager,
+          "getPatternSourceProgramByIdentity",
+          async (...args) => {
+            entered.resolve();
+            await release.promise;
+            return await read(...args);
+          },
+        );
+        try {
+          const reconciled = reconcile(piece);
+          await entered.promise;
+          runtime.runner.stop(piece);
+          release.resolve();
+          await reconciled;
+        } finally {
+          held.restore();
+        }
+
+        served = "v2";
+        replace(piece.space);
+        await settle();
+
+        expect(getPatternIdentityRef(piece)).toEqual({
+          identity: v1Identity,
+          symbol: SYMBOL,
+        });
+      });
+
+      it("leaves the piece on its source once it stopped following", async () => {
+        const replace = captureSessionReplaced();
+        const { piece, v1Identity, redeploy } = await followingPiece();
+
+        runtime.sourceReconciler.unwatch(piece);
+        redeploy();
+        replace(piece.space);
+        await settle();
+
+        expect(getPatternIdentityRef(piece)).toEqual({
+          identity: v1Identity,
+          symbol: SYMBOL,
+        });
+      });
+    });
+
     it("treats a pattern index that errors as an artifact that will not load", async () => {
       // Asking whether the running pattern still loads is a question that can
       // fail rather than answer. A failure is read as "it will not load",
@@ -742,6 +889,56 @@ describe("piece source reconciliation", () => {
         outcome: "unreachable",
         origin: PARENT_SOURCE,
         detail: "connection refused",
+      });
+    });
+
+    it("records why the write that adopts the origin's source did not commit", async () => {
+      // The origin answered and its source compiled, so a record saying only
+      // that it could not be reached would point a reader at the network. The
+      // commit's own reason is what says where the update stopped.
+      const demanding = sourceWithRequiredInput("v2");
+      const demandingIdentity = await identityFor(demanding);
+      const piece = await preparePiece(
+        servingFetch(() => demandingIdentity, () => demanding),
+      );
+      await stampSource(piece, PARENT_SOURCE);
+
+      expect(await reconcile(piece)).toBe("unavailable");
+
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "unreachable",
+        origin: PARENT_SOURCE,
+        offered: { identity: demandingIdentity, symbol: SYMBOL },
+      });
+      expect(getPieceReconciliation(piece)?.detail).toContain(
+        "updated arguments do not match the candidate schema",
+      );
+    });
+
+    it("records that the piece changed while its write was being prepared", async () => {
+      // A stored argument that moves between the snapshot and the commit
+      // declines the write, which the store never sees.
+      const v2Identity = await identityFor(source("v2"));
+      const piece = await preparePiece(
+        servingFetch(() => v2Identity, () => source("v2")),
+      );
+      await stampSource(piece, PARENT_SOURCE);
+      const moved = stub(
+        runtime,
+        "syncStoredSetupArgument",
+        () => Promise.resolve(() => false),
+      );
+      try {
+        expect(await reconcile(piece)).toBe("unavailable");
+      } finally {
+        moved.restore();
+      }
+
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "unreachable",
+        origin: PARENT_SOURCE,
+        offered: { identity: v2Identity, symbol: SYMBOL },
+        detail: "the piece changed while its write was being prepared",
       });
     });
 
