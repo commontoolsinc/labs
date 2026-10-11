@@ -584,10 +584,11 @@ export class CFRender extends BaseElement {
    * piece with (`getPiece` with `runIt`): the worker reconciles its source and
    * starts it, or leaves both to the view where the space replicates views.
    * Not awaited, as the render does not wait on a start. Only a piece opens:
-   * a cell at a path inside a document is left alone, and a document that is
-   * not a piece rejects the start ("no pattern identity"), as does a piece
-   * whose program fails to load; both only reach the debug log, since a
-   * display of plain data is common and the render shows what it can.
+   * a cell at a path inside a document is left alone. A document at its root
+   * that is not a piece rejects the start ("no pattern identity"), as does a
+   * piece whose program fails to load; the worker reports the failed request,
+   * and here it only reaches the debug log, since the render shows what it
+   * can either way.
    */
   #openDisplayed(piece: CellHandle): void {
     if (piece.ref().path.length > 0) return;
