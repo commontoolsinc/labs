@@ -315,7 +315,9 @@ identity than the owner's stops receiving loom shares once the owner uses it.
 The notice goes when the record is cleared.
 `packages/patterns/system/home.test.tsx` tests it, and
 `home-refusal-notice.test.tsx` beside it, with the refused inbox created by
-another user, checks that no user's label is stored on the notice's sentence.
+another user, checks that `inspectConfLabel` reports no user's label on the
+notice's sentence, where it reports one once the notice reads the refused
+inbox's offers.
 
 A Home of a vintage whose ensure takes no refusal is sent the same event. Event
 schemas are open, so its handler is delivered the fields it declares, `adopt`

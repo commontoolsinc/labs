@@ -3,8 +3,9 @@
  * refused inbox, each user in a runtime of their own: the stranger creates an
  * inbox, whose offers carry the stranger's confidentiality label, and the
  * owner's Home records a refusal of it and shows the owner the refusal's code
- * and time. No user's label is stored on the notice's sentence, as it would be
- * if the notice read the refused inbox through the record's link.
+ * and time. `inspectConfLabel` reports no user's label on the notice's
+ * sentence, which it does report once the notice reads the refused inbox's
+ * offers.
  */
 import {
   action,
@@ -90,8 +91,9 @@ export const owner = pattern<{ setup: Setup }>(({ setup }) => {
   const explanationLabel = inspectConfLabel(explanation, "", {
     atomType: "https://commonfabric.org/cfc/atom/User",
   });
-  // The explanation is the sentence for the refusal's code, and no label naming
-  // a user, the stranger's included, is stored on it.
+  // The explanation is the sentence for the refusal's code, and
+  // `inspectConfLabel` reports no user's label on it. `notAvailable` is also
+  // what a path reaching nothing gives, so the sentence is checked too.
   const explanation_carries_no_users_label = assert(() =>
     explanation === refusalReasonText("inbox-adoption-acl-mismatch") &&
     explanationLabel.status === "notAvailable"
