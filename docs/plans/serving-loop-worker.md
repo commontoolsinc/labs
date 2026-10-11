@@ -228,10 +228,14 @@ and the flag below selects between the two.
    test, where a runtime one space refuses reads a list the loop derives
    across it, fails the same way on some runs. A lane running the ON arm under
    the worker is a question for stage 6, with the default.
-5. [ ] **Measure.** The vote probe and the Topics seed under the worker against
+5. [x] **Measure.** The vote probe and the Topics seed under the worker against
    the in-process loop on the same box: client watch-add latency, the
    per-vote and per-topic client cost, and the serving loop's own wave
    timings, which should not move.
+   [The 2026-10-11 record](../history/development/performance/2026-10-11-serving-loop-in-a-worker.md)
+   holds the numbers, and the wave basis race the measurement exposed, which
+   the ordering section above now covers.
 6. [ ] **Spec and default.** `serving-loop.md` §1's component diagram names the
-   worker; after a soak the worker becomes the default and the in-process
-   path goes, with the flag.
+   worker (done); after a soak, and once stage 4's open exception is closed,
+   the worker becomes the default and the in-process path goes, with the
+   flag.
