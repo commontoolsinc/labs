@@ -1028,6 +1028,7 @@
             },
             "description": "The people this user's rooms list, other than this user: by the principal\neach one's profile attests, the profiles attesting it, each once, in the\norder the rooms, newest first, list them.",
             "properties": {},
+            "scope": "session",
             "type": "object"
           },
           "requests": {
@@ -1043,6 +1044,7 @@
             "items": {
               "$ref": "#/$defs/ChatIndexEntry"
             },
+            "scope": "session",
             "type": "array"
           },
           "sharedSpaceCatalog": {
@@ -1129,6 +1131,7 @@
             },
             "description": "The people this user's rooms list, other than this user: by the principal\neach one's profile attests, the profiles attesting it, each once, in the\norder the rooms, newest first, list them.",
             "properties": {},
+            "scope": "session",
             "type": "object"
           },
           "requests": {
@@ -1144,6 +1147,7 @@
             "items": {
               "$ref": "#/$defs/ChatIndexEntry"
             },
+            "scope": "session",
             "type": "array"
           },
           "sharedSpaceCatalog": {
