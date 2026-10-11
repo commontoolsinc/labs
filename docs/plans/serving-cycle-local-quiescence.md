@@ -114,9 +114,10 @@ deadline as the multi-user latency bound; the OFF arm and clients.
    foreign sessions, the spec paragraph amended. Measured on the vote burst
    under the worker with the read-through on: the settle's server-idle wait
    went from a port round trip per probe to none, and the burst's wave count
-   and deadline count did not move (40 waves, 40 at the deadline, from 38
-   and 36), because what keeps a settle from quiescing is the scheduler's
-   own post-event work, 150 to 300 ms per vote, not a wait on the server.
+   and deadline count rose a little (40 waves, 40 at the deadline, from 38
+   and 36): every settle still ends at the deadline, because what keeps a
+   settle from quiescing is the scheduler's own post-event work, 150 to
+   300 ms per vote, not a wait on the server.
 4. [x] **Pipelined post-commit.** The publish and the outbox drain off the
    cycle's critical path. Measured as above: the cycle's median fell from
    259 ms to 195 ms, with the publish's 32 to 62 ms and the outbox drain no

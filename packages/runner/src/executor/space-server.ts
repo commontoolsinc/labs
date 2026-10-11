@@ -6967,9 +6967,19 @@ export class SpaceServer implements TransactionSealDestination {
     this.#parkRequested = true;
     this.#structureLoadAbort.abort();
     // The post-commit work in flight reads the runtime and writes through
-    // the outbox; both go below, so it finishes first. Work not yet
+    // the outbox; both go below, so it finishes first, under the same
+    // bound as the dispose below: a publish or a drain that never answers
+    // must not hold the lease and `whenParked` with it. Work not yet
     // started sees the tenure ended and skips.
-    await this.#postCommit;
+    await awaitDisposeTimeboxed(this.#postCommit, {
+      policy: this.#options.policy,
+      stats: this.#options.stats,
+      space: this.#options.space,
+      overrun: (timeoutMs) =>
+        `space ${this.#options.space}: the post-commit work overran ` +
+        `${timeoutMs}ms during park (${reason}); abandoning it and ` +
+        "completing the park",
+    });
     if (wasActive) {
       this.#options.stats.activeSpaces = Math.max(
         0,
@@ -7105,10 +7115,12 @@ export class SpaceServer implements TransactionSealDestination {
     // tenure, one whose open wave was just abandoned holds runs its
     // scheduler counts as done whose writes never committed, and one with
     // effects unsettled holds work only a fresh runtime recovers; each is
-    // disposed rather than offered on.
+    // disposed rather than offered on, as is one whose post-commit work
+    // failed, since that failure would have parked the space as failing had
+    // the next cycle run, and a successor then starts from a fresh runtime.
     if (
       !(offerRuntime && detached && wave === undefined && effectsSettled &&
-        this.#offerRuntime())
+        this.#postCommitFailure === undefined && this.#offerRuntime())
     ) {
       try {
         await this.#disposeRuntimeTimeboxed(reason);

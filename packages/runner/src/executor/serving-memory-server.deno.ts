@@ -172,10 +172,12 @@ const policyFromEnvironment = (
     resolved = { ...resolved, storeReadThrough: true };
   }
   if (resolved?.flushDeadlineMs === undefined) {
-    const deadline = Number(Deno.env.get("SERVER_EXECUTION_FLUSH_DEADLINE_MS"));
-    if (Number.isFinite(deadline) && deadline > 0) {
-      resolved = { ...resolved, flushDeadlineMs: deadline };
-    }
+    // A positive decimal integer, as the toolshed bootstrap reads it; a
+    // fraction, an exponent or a prefix would select a cadence the toolshed
+    // refuses.
+    const raw = Deno.env.get("SERVER_EXECUTION_FLUSH_DEADLINE_MS") ?? "";
+    const deadline = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : 0;
+    if (deadline > 0) resolved = { ...resolved, flushDeadlineMs: deadline };
   }
   return resolved;
 };
