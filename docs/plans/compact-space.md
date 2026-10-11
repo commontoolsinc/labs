@@ -311,7 +311,9 @@ Each is something a reader relies on today, with the code that relies on it.
   marker carrying a hash of what it held, whether or not a surviving row
   still points at the commit: nothing reads a payload beyond replay
   detection and the pending-read layer replay, which the window serves, and
-  the genesis receipt, which is exempt below. A resubmission then mismatches
+  the genesis receipt, which is exempt below, and a compaction commit's own
+  payload, a run's record rather than a client's write, which is exempt
+  too. A resubmission then mismatches
   the stored bytes and is refused as a replay mismatch, which the client
   surfaces as a terminal error for a write that in fact landed, and never
   mutates state. `origin-committed` preconditions, `commitClassOfSeq` and the commit
@@ -485,7 +487,7 @@ cf space compact <store.sqlite> [selection] [cut] [--dry-run] [--json]
 | `--before-seq <n>` | Rows with `seq < n` are candidates; the first row at or above `n` becomes the base. | the head: everything behind it |
 | `--before <timestamp>` | The same, with `n` taken as the newest commit created before the timestamp (`commit.created_at`, UTC). | — |
 | `--keep-last <n>` | Keep the newest `n` revisions per instance, the oldest of them rewritten as the base. | 0 |
-| `--keep-payloads <duration>` | Commit rows created within this window of the newest commit keep their `original`; every older row's payload is hollowed except seq 1's and those an `op_*` row references, whether or not a surviving revision points at the commit (I6). The window bounds how far back a resubmission is answered faithfully rather than refused; it bounds no safety property. | `24h` |
+| `--keep-payloads <duration>` | Commit rows created within this window of the newest client commit (a compaction commit does not move it) keep their `original`; every older row's payload is hollowed except seq 1's and those an `op_*` row references, whether or not a surviving revision points at the commit (I6). The window bounds how far back a resubmission is answered faithfully rather than refused; it bounds no safety property. | `24h` |
 | `--dry-run` | Compute and report; write nothing. | off |
 | `--json` | The report as JSON, per the `cf` JSON contract. | off |
 
@@ -704,7 +706,21 @@ it.
 ```
 
 `lastCommitSeq` is the newest seq any hollowed or deleted row had; a reader
-that wants history older than it knows to ask for the archive. The member is
+that wants history older than it knows to ask for the archive. Each run
+appends its own entry to `runs`, with what it actually truncated and
+hollowed, so a resumed run and the run it resumed are both on record.
+
+**A space with no ACL document gets no marker.** The Topics space is one:
+its 2026-10-09 snapshot holds no `of:did:…` row at all, because the space
+predates ACL genesis, and the server treats a populated space without an
+ACL document as open to authenticated principals. An ACL document whose
+`value` is not an ACL fails closed, so writing a marker-only document where
+none existed would lock the space's members out. The tool therefore writes
+the audit revision only where an ACL document exists, reports `absent`
+otherwise, and leaves the compaction commit — a `system` commit under the
+`compaction:` session with the run's plan as its payload — as the run's one
+record in such a store. A tombstoned ACL document is left as it is for the
+same reason: a `set` would recreate it. The member is
 a sibling of `value` rather than inside it because `value` is the ACL, with
 its own schema and its own admission, and because the state inspector
 classifies an entity by its top-level paths and can learn one more. The
@@ -995,9 +1011,10 @@ until the engine can tell compacted history from absence.
    `(seq, op_index)` that considers only snapshots below that seq, tested on
    a multi-operation commit with and without a snapshot at it. Run on the
    2026-10-09 snapshot; its numbers are in the cost section above.
-4. **The write path.** The compaction commit with its per-run identity and
-   its ACL-document marker, materialize, truncate, hollow (commit 1 exempt),
-   `VACUUM INTO`, `--verify --against`. Tests: every head reads back identical
+4. **The write path** — in review. The compaction commit with its per-run
+   identity and its ACL-document marker, materialize, truncate, hollow
+   (commit 1, the `op_*`-referenced commits and every compaction commit
+   exempt), `VACUUM INTO`, `--verify --against`. Tests: every head reads back identical
    through both the engine and the inspector's replay, with the ACL document
    checked as step 3 states; a confirmed read below the cut conflicts; all
    four protocol cases of §3, in every variant, against the tool's own

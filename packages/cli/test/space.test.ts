@@ -151,7 +151,7 @@ describe("cf space compact", () => {
     close(engine);
   }
 
-  it("plans a compaction without writing, and refuses to run without --dry-run", async () => {
+  it("plans a compaction without writing, and refuses options it cannot read", async () => {
     const root = await Deno.makeTempDir({ prefix: "cf-space-compact-" });
     try {
       const store = `${root}/space.sqlite`;
@@ -173,10 +173,6 @@ describe("cf space compact", () => {
       expect(report.largest[0].id).toBe("computed:x");
       expect((await Deno.stat(store)).mtime?.getTime()).toBe(before);
 
-      const refused = await cf(`space compact ${store} --documents computed:`);
-      expect(refused.code).not.toBe(0);
-      expect(text(refused.stderr)).toContain("--dry-run");
-
       const nothing = await cf(`space compact ${store} --dry-run`);
       expect(nothing.code).not.toBe(0);
       expect(text(nothing.stderr)).toContain("--documents");
@@ -186,6 +182,100 @@ describe("cf space compact", () => {
       );
       expect(iso.code).not.toBe(0);
       expect(text(iso.stderr)).toContain("YYYY-MM-DD HH:MM:SS");
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("compacts a copy, verifies the result against the backup, and refuses what it must", async () => {
+    const root = await Deno.makeTempDir({ prefix: "cf-space-compact-run-" });
+    try {
+      const backup = `${root}/space.pre-compaction.sqlite`;
+      const work = `${root}/space.work.sqlite`;
+      const result = `${root}/space.compacted.sqlite`;
+      await engineStore(backup);
+      await Deno.copyFile(backup, work);
+
+      // The plain run prints the plan, then its own summary.
+      const plain = `${root}/plain.sqlite`;
+      await Deno.copyFile(backup, plain);
+      const printed = await cf(
+        `space compact ${plain} --documents computed: --out ${root}/plain.compacted.sqlite`,
+      );
+      expect(printed.code).toBe(0);
+      const output = text(printed.stdout);
+      expect(output).toContain("instances  1 matched, 1 lose rows");
+      expect(output).toContain(
+        "instances  1 compacted, 1 boundaries materialized",
+      );
+      expect(output).toContain("result     ");
+
+      const ran = await cf(
+        `space compact ${work} --documents computed: --out ${result} --json`,
+      );
+      expect(ran.code).toBe(0);
+      const run = JSON.parse(ran.stdout.join("\n"));
+      expect(run.instancesCompacted).toBe(1);
+      expect(run.materialized).toBe(1);
+      expect(run.rowsDeleted).toBe(12);
+      expect(run.acl).toEqual({ status: "absent" });
+      expect(run.out).toBe(result);
+      expect((await Deno.stat(result)).size).toBeGreaterThan(0);
+      // The source was rewritten in place; the backup was not touched.
+      const resultDb = new Database(result, { readonly: true });
+      expect(
+        resultDb.prepare(
+          `SELECT count(*) AS n FROM revision WHERE id = 'computed:x'`,
+        )
+          .get<{ n: number }>()!.n,
+      ).toBe(1);
+      resultDb.close();
+      const backupDb = new Database(backup, { readonly: true });
+      expect(
+        backupDb.prepare(
+          `SELECT count(*) AS n FROM revision WHERE id = 'computed:x'`,
+        )
+          .get<{ n: number }>()!.n,
+      ).toBe(13);
+      backupDb.close();
+
+      const verified = await cf(
+        `space compact ${result} --verify --against ${backup}`,
+      );
+      expect(verified.code).toBe(0);
+      expect(text(verified.stdout)).toContain("OK —");
+      const sampled = await cf(
+        `space compact ${result} --verify --against ${backup} --verify-sample 1 --json`,
+      );
+      expect(sampled.code).toBe(0);
+      expect(JSON.parse(sampled.stdout.join("\n")).ok).toBe(true);
+
+      // A result that is not a compaction of the backup fails the
+      // verification as a result, with the report on stdout.
+      const notCompacted = await cf(
+        `space compact ${backup} --verify --against ${backup}`,
+      );
+      expect(notCompacted.code).toBe(1);
+      expect(text(notCompacted.stdout)).toContain(
+        "FAIL compaction commit recorded",
+      );
+
+      const noAgainst = await cf(`space compact ${result} --verify`);
+      expect(noAgainst.code).not.toBe(0);
+      expect(text(noAgainst.stderr)).toContain("--against");
+
+      // The result is never overwritten, and a served store is never compacted.
+      const again = await cf(
+        `space compact ${work} --documents computed: --out ${result}`,
+      );
+      expect(again.code).not.toBe(0);
+      expect(text(again.stderr)).toContain("never overwritten");
+      const served = await cf(
+        `space compact ${work} --documents computed: --out ${root}/other.sqlite`,
+        { env: { DB_PATH: `${root}/live.sqlite` } },
+      );
+      expect(served.code).not.toBe(0);
+      expect(text(served.stderr)).toContain("a local server serves");
     } finally {
       await Deno.remove(root, { recursive: true });
     }

@@ -1078,35 +1078,78 @@ what `cf inspect value-at --seq` and `diff --from` take, so the piece can be
 read at exactly the commit that applied the update, or diffed against what has
 landed since.
 
-## Planning a compaction
+## Compacting a space store
 
-`cf space compact <store.sqlite> --documents <prefix> --dry-run` reports what
-compacting a space store's history would remove, and writes nothing. It is the
-dry run of [the compaction plan](../../docs/plans/compact-space.md); the write
-path is that plan's stage 4 and does not exist yet, so the command refuses to
-run without `--dry-run`.
+`cf space compact <store.sqlite> --documents <prefix> [--out <path>]` compacts a
+space store's revision history and writes the result as a fresh file. It is
+[the compaction plan](../../docs/plans/compact-space.md)'s tool, the one
+`cf space` command that rewrites a store's rows rather than copying or restoring
+a file, and it runs offline against a copy of a backup, never against a file a
+server has open: the operator stops the owning instance, takes the backup,
+compacts a copy of it, verifies the result against the backup, and installs it,
+in the order that plan's §4 gives. `--dry-run` prints the report below and
+writes nothing; `--verify` checks a result.
 
 It takes the store's file path rather than a space name, for the reason the
 [staging copy procedure](../../docs/development/staging-space-copy.md) gives:
-the directory's neighbors are the authority on where a space's file is. The file
-is opened read-only. `--documents` names the instances by id prefix (`of:`,
-`computed:` or `cid:`), and may repeat; the ACL document is never selected.
-`--scope` restricts the selection to `space`, `user` or `session` instances;
-repeated or nested prefixes count as one selection. The cut is the head of every
-selected instance unless `--before-seq`, `--before <YYYY-MM-DD HH:MM:SS>` (UTC,
-in the store's own format and no other) or `--keep-last <n>` bounds it, and a
-row survives if any bound keeps it. `--keep-payloads <duration>` (default `24h`)
-is the window within which commits keep their payload; outside it a commit's
-payload is hollowed unless its seq is 1 or an `op_*` row references it, whether
-or not a surviving revision still points at the commit.
+the directory's neighbors are the authority on where a space's file is.
+`--documents` names the instances by id prefix (`of:`, `computed:` or `cid:`),
+and may repeat; the ACL document is never selected. `--scope` restricts the
+selection to `space`, `user` or `session` instances; repeated or nested prefixes
+count as one selection. The cut is the head of every selected instance unless
+`--before-seq`, `--before <YYYY-MM-DD HH:MM:SS>` (UTC, in the store's own format
+and no other) or `--keep-last <n>` bounds it, and a row survives if any bound
+keeps it. `--keep-payloads <duration>` (default `24h`) is the window, measured
+from the newest client commit, within which commits keep their payload; outside
+it a commit's payload is replaced by a marker carrying a hash of what it held,
+unless its seq is 1, an `op_*` row references it, or it is a compaction commit,
+whether or not a surviving revision still points at the commit.
 
-The report counts the instances matched and truncated, the boundaries that
-become a `set`, the revision and snapshot rows and bytes that would go, the
+A run plans first, read-only, and prints the plan; refuses a store the plan says
+it must not write — one missing a table the server would create on opening it,
+one with a second branch, one with foreign-key violations, one with a non-empty
+`-wal` or `-journal` beside it, or one under a directory a local server serves;
+then opens the store through the engine with an exclusive lock and, in order:
+inserts the compaction commit at the next seq, a `system` commit under the
+`compaction:<run id>` session with the plan as its payload; compacts each
+selected instance in its own transaction — the oldest row the cut keeps becomes
+the base, rewritten as a `set` holding the engine's reconstruction at exactly
+that row if it was a patch, and attributed to the compaction commit whatever its
+op, with the rows and snapshots behind it deleted; hollows the payloads outside
+the window in seq-ranged batches; writes the audit revision on the space's ACL
+document, a whole-document `set` of the document as it stands with a
+`compaction` member beside `value`, when the store has one; checks the foreign
+keys and the file's integrity; and writes the result with `VACUUM INTO` to
+`--out`, `<store>.compacted.sqlite` beside the source by default, never
+overwriting. A run interrupted anywhere leaves a store every reader can use, and
+running it again resumes it under a second compaction commit. The run's own
+summary follows the plan on stdout; progress goes to stderr; `--json` emits the
+summary as one document.
+
+`cf space compact <result.sqlite> --verify --against <backup.sqlite>` checks a
+result against the store it was compacted from, read-only on both, and exits
+nonzero when a check fails: the file's integrity and foreign keys; the
+compaction commit's presence and the branch head at it; every head but the ACL
+document's at its original address and joined to a row, with op changes only
+from `patch` to `set`; every row not attributed to a compaction commit
+byte-identical to the backup's, every attributed row a boundary at a backup
+row's address, every deleted row below a boundary and above no surviving row,
+and no snapshot at or below a boundary; every document reconstructed on both
+files through the inspector's replay — a second implementation of the engine's
+rule — and compared, with the ACL document's `value` unchanged and `compaction`
+the only member that differs; the content fingerprint; the hollowed payloads
+only where the rules allow, their hashes matching the backup's bytes, every
+commit row surviving; the single run's counts against its plan; and commit 1's
+payload byte-identical. `--verify-sample <n>` reconstructs every n-th document
+only and skips the fingerprint, for a quick pass during rehearsal.
+
+The dry-run report counts the instances matched and truncated, the boundaries
+that become a `set`, the revision and snapshot rows and bytes that would go, the
 commit payloads the run would hollow split by whether the commit still owns a
 head, the ten instances contributing the most rows, the seq the compaction
 commit would take, and the preconditions a run checks, foreign-key integrity
 among them. The payload accounting reads every commit's payload and is the slow
-part of the run. `--json` emits the same report as JSON.
+part of the plan. `--json` emits the same report as JSON.
 
 ## Creating a space
 
