@@ -1292,10 +1292,15 @@ export class SchemaGenerator {
       options?.printedFrom,
     );
     if (readInPlace) {
+      // A print whose annotation names a value binding is read as that
+      // annotation spells it, as a member's is (`formatChildType()`).
+      const spelledBy = typeNode && schemaHints?.get(typeNode)?.spelledBy;
+      const spelling = spelledBy &&
+        this.#spelling(readInPlace, spelledBy, checker);
       return this.#generateSchemaInternal(
         readInPlace,
         checker,
-        undefined,
+        spelling,
         typeRegistry,
         options,
         schemaHints,
@@ -1354,6 +1359,11 @@ export class SchemaGenerator {
       ...(schemaHints && { schemaHints }),
     };
     context = this.#withGenericBindings(type, context);
+    // A print read as the annotation that spells it keeps the print's own
+    // hints, as a member does (`formatChildType()`).
+    const hintContext = typeNode && hintsNode
+      ? { ...context, typeNode: hintsNode }
+      : context;
 
     // Auto-detect: Should we use node-based or type-based analysis?
     let schema: MutableJSONSchema;
@@ -1365,13 +1375,13 @@ export class SchemaGenerator {
         checker,
         context,
       );
-      schema = this.#applyNodeSchemaHints(schema, context);
+      schema = this.#applyNodeSchemaHints(schema, hintContext);
       // Build final schema with $schema and $defs
       result = this.#buildFinalSchemaForSynthetic(schema, context);
     } else {
       // Use type-based analysis (normal path)
       schema = this.#formatType(type, context, true);
-      schema = this.#applyNodeSchemaHints(schema, context);
+      schema = this.#applyNodeSchemaHints(schema, hintContext);
 
       // Attach root-level description from JSDoc if available
       schema = this.#attachRootDescription(schema, type, context);
