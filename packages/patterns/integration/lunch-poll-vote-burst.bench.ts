@@ -3,11 +3,13 @@
  *
  * Ten voters each cast a vote on each of ten lunch options, every one of the
  * hundred fired before any of them settles, and the measurement runs until
- * every one of the ten clients has the whole result. That is the quantity a
- * person actually waits on at lunchtime, and it is the one no other benchmark
- * in the repository can see: every other bench file drives a single runtime
- * against its own private storage server, where a second writer does not exist
- * and a write conflict is unreachable by construction.
+ * every one of the ten clients holds the whole result in its own vote list,
+ * read at its runtime's quiescence: the moment each client's view is settled,
+ * whichever arm served it. That is the quantity a person actually waits on at
+ * lunchtime, and it is the one no other benchmark in the repository can see:
+ * every other bench file drives a single runtime against its own private
+ * storage server, where a second writer does not exist and a write conflict is
+ * unreachable by construction.
  *
  * What it is sensitive to. A vote is a keyed write — `castVote` addresses one
  * vote by `(voter profile entity, option)` and adds it with `addUnique`, so a
@@ -20,17 +22,16 @@
  * in how long it takes and how much is thrown away getting there.
  *
  * Reading the series. One number per iteration: hundred votes dispatched, then
- * settled. On an Apple M5 Max the keyed write settles a burst in about 400ms
- * having thrown nothing away, and the same burst over a whole-list write took
- * 7 to 15 seconds and cost 430 rejected commits and 558 rolled-back writes —
- * and dropped two votes for the length of one burst on the way.
+ * every client's list current. The keyed write throws nothing away, and the
+ * same burst over a whole-list write cost 430 rejected commits and 558
+ * rolled-back writes and dropped two votes for the length of one burst on the
+ * way, at a time an order of magnitude longer.
  * `packages/patterns/integration/lunch-poll-keyed-votes.test.ts` is the
  * assertion half of the same property, requiring that a burst roll back no
  * write at all rather than timing one.
  *
- * Sample count is the weak point, and it is inherent. An iteration takes about
- * 450ms on an Apple M5 Max and 2.6 seconds on a four-core CI host, so a run
- * collects eleven or twelve samples either way. The 75th percentile the
+ * Sample count is the weak point, and it is inherent. An iteration takes
+ * seconds on a four-core CI host, so a run collects about a dozen samples. The 75th percentile the
  * dashboard trend reads discards only the slowest quarter of those, so a runner
  * that stalls twice moves this line without any code changing. Read it for the
  * shape of a move across several windows, not for one window against the last.
@@ -126,29 +127,54 @@ expect(await voters[0].read(["userCount"])).toBe(VOTERS);
 
 const votes = voters.length * options.length;
 
-/** Fire every vote before any of them settles, then settle all of them. */
+/** The vote each voter casts for each option in `round`. */
+function colorOf(index: number, position: number, round: number): string {
+  return COLORS[(index + position + round) % COLORS.length];
+}
+
+/** The tally every session's vote list holds once `round`'s votes are in. */
+function tallyOf(round: number): Record<string, number> {
+  const tally: Record<string, number> = {};
+  voters.forEach((_, index) => {
+    options.forEach((option, position) => {
+      const group = `${option}\0${colorOf(index, position, round)}`;
+      tally[group] = (tally[group] ?? 0) + 1;
+    });
+  });
+  return tally;
+}
+
+/**
+ * Fire every vote before any of them settles, then wait until every
+ * session's own vote list holds the round's tally at quiescence: the moment
+ * each client's view is settled, on the OFF arm through the others' pushed
+ * votes and its own derivations, on the ON arm through the served
+ * consequences and their delivery. That is the burst's measured end.
+ */
 async function burst(round: number): Promise<void> {
   await Promise.all(
     voters.flatMap((voter, index) =>
       options.map((option, position) =>
         voter.send(
           "castVote",
-          {
-            optionId: option,
-            voteType: COLORS[(index + position + round) % COLORS.length],
-          },
+          { optionId: option, voteType: colorOf(index, position, round) },
           undefined,
           { idle: false },
         )
       )
     ),
   );
-  // A measured burst ends only after its served consequences arrive. The
-  // harness's budgeted settle can return while those consequences are pending.
-  await Promise.all(voters.map(async (voter) => {
-    await voter.idle();
-    await voter.awaitEventConsequences();
-  }));
+  const tally = tallyOf(round);
+  await Promise.all(
+    voters.map((voter) =>
+      voter.waitForTally(["votes"], ["optionId", "voteType"], tally)
+    ),
+  );
+}
+
+/** What a burst leaves pending outside its measured end, before a check. */
+async function afterBurst(): Promise<void> {
+  await Promise.all(voters.map((voter) => voter.awaitEventConsequences()));
   await harness.settle();
 }
 
@@ -156,9 +182,8 @@ async function burst(round: number): Promise<void> {
 async function verifyBurst(round: number): Promise<void> {
   const expected = options.map((_, position) =>
     COLORS.map((color) =>
-      voters.filter((_, index) =>
-        COLORS[(index + position + round) % COLORS.length] === color
-      ).length
+      voters.filter((_, index) => colorOf(index, position, round) === color)
+        .length
     )
   );
   await Promise.all(voters.map(async (voter) => {
@@ -211,8 +236,10 @@ async function reverts(sessions: readonly MultiRuntimeSession[]) {
 // Warm-up: every session materializes the vote list and its own keyed vote
 // entities, so no measured iteration pays a first-write cost.
 await burst(0);
+await afterBurst();
 await verifyBurst(0);
 await burst(1);
+await afterBurst();
 await verifyBurst(1);
 
 // Contention accounting, over one burst that no measurement covers. What a
@@ -220,6 +247,7 @@ await verifyBurst(1);
 // beside the wall-clock the benchmark reports.
 const before = await reverts(voters);
 await burst(2);
+await afterBurst();
 await verifyBurst(2);
 const after = await reverts(voters);
 console.error(
@@ -310,6 +338,7 @@ console.error(
   `[lunch-poll vote burst] one burst on the serving side: ${await loopCost(
     async () => {
       await burst(3);
+      await afterBurst();
       await verifyBurst(3);
     },
   )}`,
@@ -330,6 +359,7 @@ Deno.bench({
     b.start();
     await burst(current);
     b.end();
+    await afterBurst();
     await verifyBurst(current);
   },
 });

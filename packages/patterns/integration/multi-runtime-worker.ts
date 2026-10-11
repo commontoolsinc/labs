@@ -17,6 +17,7 @@ import {
   AgentRunRecordSchema,
 } from "@commonfabric/runner/agent-run";
 import { patternCoverageCollector } from "@commonfabric/integration/pattern-coverage";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import {
   debugVDOMSchema,
   rendererVDOMSchema,
@@ -875,6 +876,41 @@ const handlers: Record<
     if (boundedReads) cell.get();
     if (boundedReads) await cell.pull();
     return convertCellsToLinks(cell.get(), { doNotConvertCellResults: true });
+  },
+
+  /**
+   * Resolve once the list the piece result holds at `path`, grouped by the
+   * values each element holds at `keys`, counts exactly `expected` members per
+   * group, where `expected` maps a group's key values joined by `"\0"` to a
+   * count. Read at this runtime's quiescence and woken by the cell's own
+   * changes, so it ends when this replica's view of the list is current, not
+   * when a message says so. An element held as a cell is read through it.
+   */
+  async waitForTally({ path, piece, keys, expected }) {
+    const target = await resultAt(piece);
+    let cell = target;
+    for (const segment of (path ?? []) as (string | number)[]) {
+      cell = cell.key(segment as never);
+    }
+    const names = keys as string[];
+    const wanted = expected as Record<string, number>;
+    const groups = Object.keys(wanted);
+    await waitForCellValue<unknown>(controller().runtime, cell, (value) => {
+      if (!Array.isArray(value)) return false;
+      const counts: Record<string, number> = {};
+      for (const element of value) {
+        const row = (typeof (element as { get?: unknown })?.get === "function"
+          ? (element as { get(): unknown }).get()
+          : element) as Record<string, unknown> | undefined;
+        const group = names.map((name) =>
+          String(row?.[name])
+        ).join("\0");
+        counts[group] = (counts[group] ?? 0) + 1;
+      }
+      return Object.keys(counts).length === groups.length &&
+        groups.every((group) => counts[group] === wanted[group]);
+    }, { stuckLabel: `waitForTally at ${JSON.stringify(path)}` });
+    return {};
   },
 
   /**

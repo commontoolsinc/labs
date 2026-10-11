@@ -659,6 +659,27 @@ export class MultiRuntimeSession {
   }
 
   /**
+   * Resolve once this replica's list at `path`, grouped by the values each
+   * element holds at `keys`, counts exactly `expected` members per group:
+   * `expected` maps a group's key values joined by `"\0"` to a count. Read at
+   * this runtime's quiescence and woken by the list's own changes, so it is
+   * the moment this session's view of the list is current, on either arm.
+   */
+  async waitForTally(
+    path: (string | number)[],
+    keys: string[],
+    expected: Record<string, number>,
+    opts: { piece?: PieceAddress } = {},
+  ): Promise<void> {
+    await this.#client.call("waitForTally", {
+      path,
+      keys,
+      expected,
+      piece: opts.piece,
+    });
+  }
+
+  /**
    * How many events this session fired whose consequence has yet to arrive
    * back here, or `null` on the OFF arm, which does not track them.
    */
