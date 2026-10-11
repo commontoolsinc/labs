@@ -46,9 +46,9 @@ type CfcStamp<T, Meta> = {
   readonly of?: T;
 };
 
-type CfcTag<T, Meta, Stamp = CfcStamp<T, Meta>> = T extends unknown
+type CfcTag<T, Meta, Stamp = CfcStamp<T, Meta>> = [T] extends [unknown]
   ? { readonly __ct_cfc__?: Stamp } | Extract<T, null | undefined>
-  : never;
+  : { readonly __ct_cfc__?: Stamp } | Extract<T, null | undefined>;
 
 type Cfc<T, Meta> = T & CfcTag<T, Meta>;
 ```
@@ -59,13 +59,18 @@ metadata. TypeScript merges the carrier into whatever the value is merged
 into, and the recorded payload is what tells the schema generator which part
 of the merged value the policy names (mapping spec §11).
 
-The tag distributes over `T`'s members and leaves `null` and `undefined` beside
-the stamp, since an intersection with the stamp alone would reduce them to
-`never`. So `Confidential<string | null, L>` is `(string & carrier) | null`,
-holds `null`, and keeps the alias name a reader of its type finds the
-declaration by. While `T` holds a type parameter the tag stays one deferred
-type, so a generic `Cfc<T, Meta>` is one intersection, whose members are read
-through it. Every member's stamp records the whole payload `T`.
+The tag leaves `null` and `undefined` beside the stamp, since an intersection
+with the stamp alone would reduce them to `never`, and the intersection
+distributes over `T`'s members. So `Confidential<string | null, L>` is
+`(string & carrier) | null`, holds `null`, and keeps the alias name a reader of
+its type finds the declaration by. While `T` holds a type parameter the tag is
+a conditional the checker defers, so `Cfc<T, Meta>` around a bare type
+parameter is one intersection, whose members are read through it; around
+`T | null` it is a union, as around any other union. The conditional checks
+`[T]`, and both its branches are the same type, so a value of the payload's
+type is assignable to `Cfc<T, Meta>` while `T` is a type parameter, as it is
+once `T` is known: `function label<T>(value: T): Confidential<T, L>` may
+return `value`. Every member's stamp records the whole payload `T`.
 
 ### Path-Bearing Helpers
 

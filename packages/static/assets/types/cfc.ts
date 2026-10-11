@@ -11,10 +11,16 @@
 // To verify it is up to date, run:
 //   deno task check-cfc-types
 
-type CfcTag<T, Meta, Stamp = CfcStamp<T, Meta>> = T extends unknown ? {
+type CfcTag<T, Meta, Stamp = CfcStamp<T, Meta>> = [
+  T,
+] extends [
+  unknown,
+] ? {
     readonly __ct_cfc__?: Stamp;
   } | Extract<T, null | undefined>
-  : never;
+  : {
+    readonly __ct_cfc__?: Stamp;
+  } | Extract<T, null | undefined>;
 export type Cfc<T, Meta> = T & CfcTag<T, Meta>;
 export type CfcStamp<T, Meta> = {
   readonly meta?: Meta;

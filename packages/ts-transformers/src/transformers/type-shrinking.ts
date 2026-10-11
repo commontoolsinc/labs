@@ -10,6 +10,7 @@ import { getDefaultMarkerPayload } from "@commonfabric/schema-generator/default-
 import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
 import {
   getScopeBrand,
+  isScopeBrandMember,
   SCOPE_WRAPPER_FOR_SCOPE,
   scopeForWrapperName,
 } from "@commonfabric/schema-generator/scope-brand";
@@ -375,13 +376,29 @@ function choosePreferredShrinkCandidate(
     : nodeDriven;
 }
 
-function typeIncludesUndefined(type: ts.Type): boolean {
+function typeIncludesUndefined(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
   if ((type.flags & ts.TypeFlags.Undefined) !== 0) {
     return true;
   }
   if ((type.flags & ts.TypeFlags.Union) !== 0) {
     const union = type as ts.UnionType;
-    return union.types.some((member) => typeIncludesUndefined(member));
+    return union.types.some((member) => typeIncludesUndefined(member, checker));
+  }
+  // `PerUser<T | undefined>` holds `undefined` beside its brand, and while
+  // `T` is a type parameter the brand is the deferred `ScopeTag`, so that
+  // member is `undefined` intersected with it, which is `undefined` once the
+  // tag resolves.
+  if (type.isIntersection()) {
+    return type.types.some((member) =>
+      (member.flags & ts.TypeFlags.Undefined) !== 0
+    ) &&
+      type.types.every((member) =>
+        (member.flags & ts.TypeFlags.Undefined) !== 0 ||
+        isScopeBrandMember(member, checker)
+      );
   }
   return false;
 }
@@ -1212,7 +1229,7 @@ function shrinkTypeToNode(
         sourceFile;
       propType = checker.getTypeOfSymbolAtLocation(prop, declaration);
       isOptional = !!(prop.flags & ts.SymbolFlags.Optional) ||
-        (propType ? typeIncludesUndefined(propType) : false);
+        (propType ? typeIncludesUndefined(propType, checker) : false);
     } else {
       // Numeric/unknown-key accesses can be represented via index signatures
       // rather than named properties. Use the index type when available.

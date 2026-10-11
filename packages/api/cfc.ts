@@ -11,14 +11,18 @@ import { deepFreeze } from "@commonfabric/data-model";
 /**
  * The carrier `Cfc` intersects `T` with: the policy's stamp, beside the `null`
  * and `undefined` `T` holds, which an intersection with the stamp alone would
- * reduce to `never`. It distributes over `T`'s members, so the intersection
- * keeps them, and while `T` holds a type parameter it stays one deferred type,
- * which leaves `Cfc<T, Meta>` one intersection rather than a union of them.
- * The stamp records the whole payload, `T`, on every member.
+ * reduce to `never`. The intersection distributes over `T`'s members, so
+ * `string | null` keeps its `null`. While `T` holds a type parameter the tag is
+ * a conditional the checker defers, so `Cfc<T, Meta>` around a bare type
+ * parameter is one intersection; around `T | null` it is a union, as around
+ * any other union. The conditional checks `[T]`, and both its branches are the
+ * same type, so a value of the payload's type is assignable to the deferred
+ * tag, and to `Cfc<T, Meta>`, as it is once `T` is known. The stamp records
+ * the whole payload, `T`, on every member.
  */
-type CfcTag<T, Meta, Stamp = CfcStamp<T, Meta>> = T extends unknown
+type CfcTag<T, Meta, Stamp = CfcStamp<T, Meta>> = [T] extends [unknown]
   ? { readonly __ct_cfc__?: Stamp } | Extract<T, null | undefined>
-  : never;
+  : { readonly __ct_cfc__?: Stamp } | Extract<T, null | undefined>;
 
 /**
  * `T` under the policy `Meta`: `T` carrying the policy's stamp, except for
