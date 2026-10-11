@@ -12,36 +12,40 @@
  * `Runner.#maybeReuseRunningSetup`, which a registered piece reaches when it is
  * run again with an argument. They pin the route a changed pattern takes as
  * well, the restage in `Runner.#applySetupState`, which a nested piece reaches
- * when its code changed: the stored slots survive it, a slot holding nothing
- * takes its default, and a stored slot the new code's input type refuses stops
- * the setup rather than being replaced.
+ * when its code changed: the stored slots survive it, and a slot holding
+ * nothing takes its default, as does a stored slot the new code's input type
+ * refuses, with a warning.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { getLogger } from "@commonfabric/utils/logger";
 
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import { STORED_ARGUMENT_SCHEMA_REFUSAL } from "../src/stored-argument-refusal.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 const signer = await Identity.fromPassphrase("piece argument replay");
 const space = signer.did();
 
-// `kept` is the piece's own state: seeded from its schema default at the first
-// setup and grown by `add` after that. `supplied` is what a caller passes in.
+// `kept` and `label` are the piece's own state: each seeded from its schema
+// default at the first setup, and changed by `add` and `relabel` after that.
+// `supplied` is what a caller passes in.
 const CHILD_SOURCE = [
   "import { Default, handler, pattern, Stream, Writable } from 'commonfabric';",
   "",
   "export interface Arguments {",
   "  supplied?: string | Default<'seed'>;",
   "  kept?: string[] | Default<[]>;",
+  "  label?: string | Default<'unlabeled'>;",
   "}",
   "",
   "export interface Surface {",
   "  add: Stream<{ text: string }>;",
+  "  relabel: Stream<{ text: string }>;",
   "  kept: readonly string[];",
+  "  label: string;",
   "}",
   "",
   "const add = handler<{ text: string }, { kept: Writable<string[]> }>(",
@@ -50,15 +54,23 @@ const CHILD_SOURCE = [
   "  },",
   ");",
   "",
-  "export default pattern<Arguments, Surface>(({ kept }) => ({",
+  "const relabel = handler<{ text: string }, { label: Writable<string> }>(",
+  "  ({ text }, { label }) => {",
+  "    label.set(text);",
+  "  },",
+  ");",
+  "",
+  "export default pattern<Arguments, Surface>(({ kept, label }) => ({",
   "  add: add({ kept }),",
+  "  relabel: relabel({ label }),",
   "  kept,",
+  "  label,",
   "}));",
   "",
 ].join("\n");
 
 // The parent's expression names `supplied` alone, so the nested piece's `kept`
-// is state no caller passes down. Its `add` stream and `kept` reading are
+// and `label` are state no caller passes down. Its streams and readings are
 // re-exported so a test drives and reads the nested piece through the root.
 const PARENT_SOURCE = [
   "import { pattern } from 'commonfabric';",
@@ -66,7 +78,12 @@ const PARENT_SOURCE = [
   "",
   "export default pattern<Arguments, Surface>(({ supplied }) => {",
   "  const child = Child({ supplied });",
-  "  return { add: child.add, kept: child.kept };",
+  "  return {",
+  "    add: child.add,",
+  "    relabel: child.relabel,",
+  "    kept: child.kept,",
+  "    label: child.label,",
+  "  };",
   "});",
   "",
 ].join("\n");
@@ -98,7 +115,8 @@ const withRuntime = async (
 
 /**
  * Run `program` at `cause` with `supplied` alone, then grow the piece's `kept`
- * to `["one", "two"]` through its `add` stream.
+ * to `["one", "two"]` through its `add` stream, and set its `label` to `mine`
+ * through its `relabel` stream.
  */
 const startedPiece = async (
   runtime: Runtime,
@@ -126,8 +144,12 @@ const startedPiece = async (
       .send({ text });
     await runtime.idle();
   }
+  (cell.key("relabel") as unknown as { send: (event: unknown) => void })
+    .send({ text: "mine" });
+  await runtime.idle();
   await cell.pull();
   expect(cell.key("kept").get()).toEqual(["one", "two"]);
+  expect(cell.key("label").get()).toBe("mine");
   return { cell, pattern };
 };
 
@@ -169,6 +191,38 @@ const runChanged = async (
   await running.pull();
   await runtime.idle();
   await cell.pull();
+};
+
+/**
+ * The message of each warning the runner's logger emits under `key` while
+ * `fn` runs, resolving each lazy message the way the logger itself does. The
+ * capture is at the logger rather than at the console, which `LOG_TO_STDERR`
+ * would route around.
+ */
+const warningsDuring = async (
+  key: string,
+  fn: () => Promise<void>,
+): Promise<string[]> => {
+  const logger = getLogger("runner");
+  const original = logger.warn;
+  const warnings: string[] = [];
+  logger.warn = (warnedKey, ...messages) => {
+    if (warnedKey === key) {
+      warnings.push(
+        messages.flatMap((message) => {
+          const resolved = typeof message === "function" ? message() : message;
+          return Array.isArray(resolved) ? resolved : [resolved];
+        }).join(" "),
+      );
+    }
+    original.call(logger, warnedKey, ...messages);
+  };
+  try {
+    await fn();
+  } finally {
+    logger.warn = original;
+  }
+  return warnings;
 };
 
 describe("piece argument replay", () => {
@@ -240,12 +294,12 @@ describe("piece argument replay", () => {
             "  kept: readonly string[];\n  note: string;\n",
           )
           .replace(
-            "(({ kept }) => ({",
-            "(({ kept, note }) => ({\n  note,",
+            "(({ kept, label }) => ({",
+            "(({ kept, label, note }) => ({\n  note,",
           );
         const parent = PARENT_SOURCE.replace(
-          "{ add: child.add, kept: child.kept }",
-          "{ add: child.add, kept: child.kept, note: child.note }",
+          "    label: child.label,\n",
+          "    label: child.label,\n    note: child.note,\n",
         );
         expect(child).not.toBe(CHILD_SOURCE);
         expect(child).toContain("({\n  note,");
@@ -258,55 +312,74 @@ describe("piece argument replay", () => {
       });
     });
 
-    it("throws when the changed code's input type refuses a stored value, and leaves the value stored", async () => {
-      await withRuntime(async (runtime) => {
-        const { cell } = await startedPiece(
-          runtime,
-          parentProgram,
-          "child-input-narrowed",
-        );
-        runtime.runner.stop(cell);
+    describe("to an input type that refuses a stored value", () => {
+      // `kept` holds a list, and the changed code's input takes a number,
+      // while `label` keeps a type that accepts what it holds. The parent's
+      // own argument stops declaring `kept`, so the nested piece's argument is
+      // the only one the change reaches.
 
-        // `kept` holds a list, and the changed code's input takes a number.
-        // The parent's own argument stops declaring `kept`, so the nested
-        // piece's argument is the only one the change can refuse.
-        const child = CHILD_SOURCE
-          .replace(
-            "kept?: string[] | Default<[]>;",
-            "kept?: number | Default<0>;",
-          )
-          .replace("kept: readonly string[];", "kept: number;")
-          .replace("kept: Writable<string[]>", "kept: Writable<number>")
-          .replace("kept.push(text);", "kept.set(text.length);");
-        const parent = PARENT_SOURCE
-          .replace(
-            "import Child, { type Arguments, type Surface }",
-            "import Child, { type Surface }",
-          )
-          .replace(
-            "pattern<Arguments, Surface>",
-            "pattern<{ supplied?: string }, Surface>",
+      const narrowedChild = CHILD_SOURCE
+        .replace(
+          "kept?: string[] | Default<[]>;",
+          "kept?: number | Default<0>;",
+        )
+        .replace("kept: readonly string[];", "kept: number;")
+        .replace("kept: Writable<string[]>", "kept: Writable<number>")
+        .replace("kept.push(text);", "kept.set(text.length);");
+      const narrowedParent = PARENT_SOURCE
+        .replace(
+          "import Child, { type Arguments, type Surface }",
+          "import Child, { type Surface }",
+        )
+        .replace(
+          "pattern<Arguments, Surface>",
+          "pattern<{ supplied?: string }, Surface>",
+        );
+
+      it("sets the refused slot to its default, and keeps the stored slots the type accepts", async () => {
+        await withRuntime(async (runtime) => {
+          const { cell } = await startedPiece(
+            runtime,
+            parentProgram,
+            "child-input-narrowed",
           );
-        expect(child).toContain("kept.set(text.length);");
-        expect(parent).toContain("pattern<{ supplied?: string }, Surface>");
-        const tx = runtime.edit();
-        const pattern = await compiledParent(
-          runtime,
-          changedFiles(child, parent),
-          tx,
-        );
+          expect(narrowedChild).toContain("kept.set(text.length);");
+          expect(narrowedParent).toContain("pattern<{ supplied?: string }");
 
-        expect(() => runtime.run(tx, pattern, undefined, cell)).toThrow(
-          STORED_ARGUMENT_SCHEMA_REFUSAL,
-        );
-        tx.abort();
+          await runChanged(
+            runtime,
+            cell,
+            changedFiles(narrowedChild, narrowedParent),
+          );
 
-        // The refused setup committed nothing, so the piece starts on its
-        // stored pattern with its stored state.
-        expect(await runtime.start(cell)).toBe(true);
-        await runtime.idle();
-        await cell.pull();
-        expect(cell.key("kept").get()).toEqual(["one", "two"]);
+          expect(cell.key("kept").get()).toBe(0);
+          expect(cell.key("label").get()).toBe("mine");
+        });
+      });
+
+      it("warns of the refused slot alone, naming the pattern, the slot and the mismatch", async () => {
+        await withRuntime(async (runtime) => {
+          const { cell } = await startedPiece(
+            runtime,
+            parentProgram,
+            "child-input-narrowed-warning",
+          );
+
+          const warnings = await warningsDuring(
+            "setup-stored-slot-dropped",
+            () =>
+              runChanged(
+                runtime,
+                cell,
+                changedFiles(narrowedChild, narrowedParent),
+              ),
+          );
+
+          expect(warnings.length).toBe(1);
+          expect(warnings[0]).toContain("/child.tsx");
+          expect(warnings[0]).toContain("its stored `kept`");
+          expect(warnings[0]).toContain("does not match type number");
+        });
       });
     });
   });

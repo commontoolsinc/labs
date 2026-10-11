@@ -344,6 +344,16 @@ document, and "not yet synced" is not "invalid"), and a root carrying no
 completion marker at all, which gets one unvalidated setup because absence
 cannot be distinguished from a pending apply.
 
+A nested piece is set up again the same way when its code changes, over its
+existing argument document, with the argument its parent's expression supplies
+written over the slots that document holds. The slots the parent does not
+supply are the nested piece's own state, and they are carried over, except
+that a stored slot the new argument schema refuses is dropped, with a warning
+naming the pattern, the piece, the slot and the mismatch, and its default fills
+it where it has one. A stored slot the new schema refuses therefore does not
+stop the parent from starting. A slot the parent supplied once and supplies no
+longer keeps the value it last held.
+
 A refusal is a repair failure, not a silent one. The pointer has already moved
 by the time setup runs, so re-running the same identity refuses identically;
 the boot repair therefore classifies this failure and escalates it to the

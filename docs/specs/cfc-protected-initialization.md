@@ -227,7 +227,9 @@ again. A sub-piece whose code changed is set up again the same way, over the
 argument document it already has, with the argument its parent supplies. In
 both, the slots the caller does not name are carried over from the stored
 document with the bytes they hold, and the runtime records each such slot as a
-replay. The record permits nothing but leaving those bytes as they are.
+replay. The record permits nothing but leaving those bytes as they are. A slot
+the changed code's argument schema refuses is not carried over, and receives
+no record.
 
 Preparation defers a protected field's writer requirement when the field lies
 at or under a recorded replay slot and no write the transaction recorded

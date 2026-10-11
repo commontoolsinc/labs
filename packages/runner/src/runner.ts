@@ -16,6 +16,7 @@ import { type ACL, aclDocId } from "@commonfabric/memory/acl";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 
 import {
   requireLocalReadCondition,
@@ -24,7 +25,10 @@ import {
   validateLocalReadBasis,
 } from "./storage/local-read-policy.ts";
 import { STORED_ARGUMENT_SCHEMA_REFUSAL } from "./stored-argument-refusal.ts";
-import { storedArgumentValidationIssue } from "./stored-argument-validation.ts";
+import {
+  storedArgumentSlotIssues,
+  storedArgumentValidationIssue,
+} from "./stored-argument-validation.ts";
 import { viewNodeId } from "./view-replication.ts";
 
 export {
@@ -3454,20 +3458,75 @@ export class Runner {
 
   /**
    * The argument to write for a piece whose argument document already exists,
-   * built from `argument` over the slots that document holds. The stored read
-   * goes through `tx`, so the write it shapes sits in the same conflict set.
+   * built from `argument` over the slots that document holds, less the slots
+   * named in `leaveOut`. The stored read goes through `tx`, so the write it
+   * shapes sits in the same conflict set.
    */
   #argumentOverStoredSlots<T>(
     tx: IExtendedStorageTransaction,
     argumentLink: NormalizedFullLink,
     argument: T,
+    leaveOut: ReadonlySet<string> = new Set(),
   ): T {
     if (argument === undefined) return argument;
-    const stored = this.#runtime
+    const raw = this.#runtime
       .getCellFromLink(argumentLink, undefined, tx)
       .getRaw({ meta: ignoreReadForScheduling });
+    const stored = leaveOut.size > 0 && isObjectNotArray(raw)
+      ? Object.fromEntries(
+        Object.entries(raw).filter(([slot]) => !leaveOut.has(slot)),
+      )
+      : raw;
     recordReplayedArgumentSlots(tx, argumentLink, argument, stored);
     return foldStoredArgumentSlots(argument, stored);
+  }
+
+  /**
+   * The slots of `stored`, a piece's stored argument, that a setup of
+   * `pattern` carries over under the supplied `argument`, and that `pattern`'s
+   * argument schema refuses. The setup leaves each of them out, so its default
+   * fills it where it has one, and each is logged as a warning naming the
+   * pattern, the piece, the slot and the mismatch.
+   */
+  #carriedSlotsRefusedBy(
+    tx: IExtendedStorageTransaction,
+    argumentLink: NormalizedFullLink,
+    pattern: Pattern,
+    entryRef: { identity: string; symbol: string } | undefined,
+    resultCell: Cell<unknown>,
+    argument: unknown,
+    stored: unknown,
+    defaults: FabricValue,
+  ): ReadonlySet<string> {
+    const folded = foldStoredArgumentSlots(argument, stored);
+    if (
+      folded === argument || !isObjectNotArray(argument) ||
+      !isObjectNotArray(stored)
+    ) {
+      return new Set();
+    }
+    const issues = storedArgumentSlotIssues(
+      this.#runtime.getCellFromLink(argumentLink, undefined, tx),
+      pattern.argumentSchema,
+      defaults,
+      tx,
+      Object.keys(stored).filter((slot) => !Object.hasOwn(argument, slot)),
+    );
+    const source = getPatternSourcePath(pattern) ??
+      describePatternOrModule(pattern);
+    const identity = entryRef === undefined
+      ? "keyless"
+      : `${entryRef.identity}#${entryRef.symbol}`;
+    for (const [slot, issue] of issues) {
+      logger.warn("setup-stored-slot-dropped", () => [
+        `Setting up ${backtickQuote(source)} (${identity}) on piece ` +
+        `${backtickQuote(resultCell.getAsNormalizedFullLink().id)} ` +
+        `dropped its stored ${backtickQuote(slot)}, which the pattern's ` +
+        `argument schema refuses: ${issue}. The slot takes its default, if ` +
+        "it has one.",
+      ]);
+    }
+    return new Set(issues.keys());
   }
 
   /**
@@ -3614,8 +3673,11 @@ export class Runner {
         // holds, as on the same-pattern branch above: a nested piece whose
         // code changed is set up again with the argument its parent's
         // expression carries, and its own state lives in the slots that
-        // expression leaves out. A default fills only a slot holding nothing,
-        // and the setup projects only what the caller supplied.
+        // expression leaves out. A stored slot the new argument schema
+        // refuses is left out, so a stored slot that no longer fits does not
+        // stop the parent setting the piece up. A default fills only a slot
+        // holding nothing, the refused ones included, and the setup projects
+        // only what the caller supplied.
         if (argument !== undefined) {
           suppliedProjection = mergeSchemaDefaults<T>(
             argument,
@@ -3626,7 +3688,21 @@ export class Runner {
         nextArgument = mergeSchemaDefaults<T>(
           argument === undefined
             ? previousArgument
-            : this.#argumentOverStoredSlots(tx, argumentLink, argument),
+            : this.#argumentOverStoredSlots(
+              tx,
+              argumentLink,
+              argument,
+              this.#carriedSlotsRefusedBy(
+                tx,
+                argumentLink,
+                pattern,
+                entryRef,
+                resultCell,
+                argument,
+                previousArgument,
+                defaults,
+              ),
+            ),
           defaults as Partial<T>,
           pattern.argumentSchema,
         );
