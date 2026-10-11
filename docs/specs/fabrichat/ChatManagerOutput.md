@@ -329,11 +329,10 @@ outcome back as the add's `delivery`.
   grants nobody anything.
 - **Outcome:** `done` with `delivery`, `offered` or `noticed`, and no entry;
   or `refused` if this user's catalog doesn't list the room, this user isn't an
-  OWNER of the room's space, the link isn't to a group room, as its
-  creator's record would say,
-  `requestId` is longer than an offer's `id` may be, `profile` attests no
-  principal or names someone other than `member`, `member` is not a
-  principal's DID, or it is this user.
+  OWNER of the room's space, the link isn't to a group room, as its creator's
+  record would say, `requestId` is longer than an offer's `id` may be,
+  `profile` attests no principal or names someone other than `member`,
+  `member` is not a principal's DID, or it is this user.
   `offered` means sent, not received.
 
 ### `accept(requestId: string, room: Cell<ChatRoomOutput>, counterpart?: string, keepArchived?: boolean)`
