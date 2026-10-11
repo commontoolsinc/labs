@@ -1151,6 +1151,27 @@ const handlers: Record<
   },
 
   /**
+   * Links the root of this session's home space to the result of the piece at
+   * `piece`, or of the session's own piece when absent, so that the piece
+   * stands in for the identity's Home: a home target such as `#chatManager`
+   * resolves to its fields.
+   */
+  async linkHomeRoot({ piece }) {
+    const runtime = controller().runtime;
+    const target = await resultAt(piece);
+    const { error } = await runtime.editWithRetry((tx) => {
+      runtime.getHomeSpaceCell(tx).withTx(tx).key("defaultPattern").set(
+        target as never,
+      );
+    });
+    if (error) {
+      throw new Error(`linkHomeRoot failed: ${error.message}`);
+    }
+    await idle();
+    return {};
+  },
+
+  /**
    * Links the root of `space` to a fresh document in it, in place of the root
    * it had, as any member with `WRITE` there can.
    */
