@@ -4271,7 +4271,7 @@ export const connect = Client.connect;
 // Node's MessageChannel replaces the web one as soon as anything in the
 // process loads node compatibility, and its ports deliver inside a microtask
 // cascade rather than on a turn of their own.
-export const loopback = (server: Server): Transport => {
+export const loopback = (server: Pick<Server, "connect">): Transport => {
   let receiver = (_payload: string) => {};
   let closed = false;
   const queue: string[] = [];

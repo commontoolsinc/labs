@@ -10,7 +10,7 @@
 
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
-import type { Server as MemoryServer } from "@commonfabric/memory/v2/server";
+import type { LoopbackMemoryServer } from "./host-memory-server.ts";
 import type { SpaceHostRegistration } from "../space-host.ts";
 import {
   type Options,
@@ -22,12 +22,12 @@ import { createSignedSessionOpenAuth } from "../storage/v2-remote-session.ts";
 class LoopbackSessionFactory implements SessionFactory {
   readonly supportsAclBootstrap = true;
 
-  readonly #getServer: () => MemoryServer;
+  readonly #getServer: () => LoopbackMemoryServer;
 
   readonly #onServerFrame?: (frame: string) => void;
 
   constructor(
-    getServer: () => MemoryServer,
+    getServer: () => LoopbackMemoryServer,
     onServerFrame?: (frame: string) => void,
   ) {
     this.#getServer = getServer;
@@ -98,7 +98,7 @@ class LoopbackSessionFactory implements SessionFactory {
  */
 export class LoopbackStorageManager extends StorageManager {
   static connect(
-    server: MemoryServer,
+    server: LoopbackMemoryServer,
     options: Omit<Options, "memoryHost" | "spaceHostMap">,
     /** DIAGNOSTIC (tests): each frame the server sends to this manager's
      * sessions, reported once the session has taken it. A session's own

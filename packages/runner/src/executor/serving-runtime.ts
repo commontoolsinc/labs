@@ -6,7 +6,6 @@
  * builds its host with it serves its spaces the way a deployment does.
  */
 
-import type { Server as MemoryServer } from "@commonfabric/memory/v2/server";
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import {
   type ExperimentalOptions,
@@ -14,6 +13,7 @@ import {
   Runtime,
   type RuntimeFetch,
 } from "../runtime.ts";
+import type { LoopbackMemoryServer } from "./host-memory-server.ts";
 import type { ExecutorHostOptions } from "./host.ts";
 import { LoopbackStorageManager } from "./loopback-storage.ts";
 
@@ -30,7 +30,7 @@ export const SERVING_RUNTIME_EXPERIMENTAL = {
 /** What {@link servingRuntimeFactory} builds each serving runtime from. */
 export type ServingRuntimeFactoryOptions = {
   /** The co-hosted memory server the loopback storage plane connects to. */
-  server: MemoryServer;
+  server: LoopbackMemoryServer;
 
   /** Signs the serving sessions' `session.open`; the host's service identity. */
   identity: Signer;

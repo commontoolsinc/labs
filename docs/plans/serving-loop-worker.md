@@ -110,10 +110,10 @@ and the flag below selects between the two.
 
 ## Stages
 
-1. [ ] **The serving plane as an interface.** The host and the space server
-   take a `ServingPlane` in place of the memory server: the methods listed
+1. [x] **The serving plane as an interface.** The host and the space server
+   take a `HostMemoryServer` in place of the memory server: the methods listed
    above, the engine opener, and the wave commit sink factory. The in-process
-   implementation wraps `Server` and behaves as today. No behavior changes;
+   server satisfies it as it is and behaves as today. No behavior changes;
    the existing executor tests pass unchanged.
 2. [ ] **The port protocol.** A worker-side `ServingPlane` over a `MessagePort`
    and the main-thread bridge that serves it: request and reply framing with

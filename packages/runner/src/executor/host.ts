@@ -23,10 +23,7 @@
 // spaces activate on their first session, event, warm request, or
 // session-implying authored admission.
 
-import {
-  type AdmittedCommitNotice,
-  type Server as MemoryServer,
-} from "@commonfabric/memory/v2/server";
+import type { AdmittedCommitNotice } from "@commonfabric/memory/v2/server";
 import { acquireServerExecutionEnabler } from "@commonfabric/memory/v2";
 import {
   type Engine,
@@ -36,6 +33,7 @@ import {
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime } from "../runtime.ts";
 import type { MemorySpace } from "../storage/interface.ts";
+import type { HostMemoryServer } from "./host-memory-server.ts";
 import {
   type ParkedRuntimeHandle,
   ParkedServingRuntime,
@@ -104,7 +102,7 @@ const failureParkBackoffDelayMs = (
 };
 
 export type ExecutorHostOptions = {
-  server: MemoryServer;
+  server: HostMemoryServer;
 
   /** The service identity (DID) DR1 holders are minted from — also the
    * loopback sessions' principal (the read-row admission matches it,

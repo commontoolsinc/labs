@@ -7,7 +7,6 @@ import type {
   ViewPlan,
   ViewQuery,
 } from "@commonfabric/memory/v2";
-import type { Server } from "@commonfabric/memory/v2/server";
 import { getLogger } from "@commonfabric/utils/logger";
 import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 
@@ -35,6 +34,7 @@ import {
   ViewDependencyGraph,
   type ViewExecutionNode,
 } from "../view-replication.ts";
+import type { HostMemoryServer } from "./host-memory-server.ts";
 import { ViewReadCache } from "./view-read-cache.ts";
 
 const logger = getLogger("view-replication");
@@ -75,7 +75,7 @@ export class ViewPlanPublisher {
   /** Selects actual reads under each viewing identity and publishes complete roots. */
   async publish(
     runtime: Runtime,
-    server: Server,
+    server: HostMemoryServer,
     space: MemorySpace,
   ): Promise<void> {
     if (this.#runtime !== runtime) {
@@ -84,7 +84,7 @@ export class ViewPlanPublisher {
       runtime.storageManager.subscribe(this.#subscription);
     }
     const live = new Set<string>();
-    const interests = server.viewInterestsForSpace(space);
+    const interests = await server.viewInterestsForSpace(space);
     runtime.scheduler.setViewConsumers(
       space,
       interests.map((interest) => ({

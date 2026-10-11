@@ -44,6 +44,7 @@ import {
   eventAttentionEntryKey,
   eventAttentionIndexKey,
   identityOfScopeKey,
+  type Operation,
   resolveScopeKey,
   type ScopeKey,
   scopeKeyApplicableTo,
@@ -60,11 +61,9 @@ import {
 import * as Engine from "@commonfabric/memory/v2/engine";
 import { readGenesisRoot } from "@commonfabric/memory/v2/genesis-root";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
-import {
-  type AdmittedCommitNotice,
-  type Server as MemoryServer,
-} from "@commonfabric/memory/v2/server";
+import type { AdmittedCommitNotice } from "@commonfabric/memory/v2/server";
 
+import type { HostMemoryServer } from "./host-memory-server.ts";
 import type {
   ParkedRuntimeHandle,
   ParkedServingRuntime,
@@ -329,7 +328,7 @@ export type RuntimeFactoryContext = {
 
 export type SpaceServerOptions = {
   space: MemorySpace;
-  server: MemoryServer;
+  server: HostMemoryServer;
   engine: Engine.Engine;
 
   /** The service identity (DID) the DR1 holder is minted from — also the
@@ -1423,6 +1422,8 @@ export class SpaceServer implements TransactionSealDestination {
     const demandRootCounters = runtime.scheduler.demandRootCounters;
     this.#lastFoldedDemandEnters = demandRootCounters.enters;
     this.#lastFoldedDemandLeaves = demandRootCounters.leaves;
+    const attachSqliteDbs = this.#options.server.attachWaveCommitSqliteDbs
+      ?.bind(this.#options.server);
     const sink = new EngineWaveCommitSink({
       engineFor: (s) => s === space ? engine : this.#foreignEngineFor(s),
       sessionId: this.#holder,
@@ -1430,14 +1431,21 @@ export class SpaceServer implements TransactionSealDestination {
       // The stage-G sqlite discharge: folded sqlite ops in wave batches
       // attach their cell-db file(s) through the memory server's own
       // machinery (same validations as the transact path), keyed by the
-      // accumulator's per-run scope keys.
-      sqliteAttachmentsFor: (s, operations, scopeKeyByOpIndex) =>
-        this.#options.server.attachWaveCommitSqliteDbs(
-          s === space ? engine : this.#foreignEngineFor(s),
-          s,
-          operations,
-          scopeKeyByOpIndex,
-        ),
+      // accumulator's per-run scope keys. A server that cannot attach them
+      // from here leaves the sink to refuse such a batch.
+      ...(attachSqliteDbs === undefined ? {} : {
+        sqliteAttachmentsFor: (
+          s: MemorySpace,
+          operations: readonly Operation[],
+          scopeKeyByOpIndex: ReadonlyMap<number, string>,
+        ) =>
+          attachSqliteDbs(
+            s === space ? engine : this.#foreignEngineFor(s),
+            s,
+            operations,
+            scopeKeyByOpIndex,
+          ),
+      }),
       // A lapse the renewal drivers have not reached yet shows first as the
       // memory server refusing a derived commit (serving-loop.md §2).
       onHomeRefused: () => {
@@ -4890,7 +4898,7 @@ export class SpaceServer implements TransactionSealDestination {
     // note landing after this point is invisible to `demand` and must
     // re-latch a fresh pass (below, in the loadPass `.finally`).
     this.#passDemandNoteGen = this.#demandNoteGeneration;
-    const demand = this.#options.server.demandForSpace(
+    const demand = await this.#options.server.demandForSpace(
       this.#options.space,
       // The serving session's own watches are its graph's reads, not
       // client demand.
