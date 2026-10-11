@@ -551,11 +551,17 @@ describe("cfc node input requirements", () => {
       });
     });
 
-    // An absent gate is read and found absent: a shape observation of where
-    // it is missing from, labeled as that position is.
-    it("refuses a gate found absent from a document the owner did not write", async () => {
-      await run(GATE_OUTPUTS, async (_send, read) => {
-        expect((await read()).bareRun).toBeUndefined();
+    // A requirement binds the values the code reads (§8.10.3). An absent
+    // gate is a shape read of its container (§4.6.3), not a value, so it
+    // consumes no requirement, whoever wrote the container or chose the
+    // path: the code runs on the absence.
+    it("runs on a gate found absent, whoever wrote or chose its container", async () => {
+      await run(GATE_OUTPUTS, async (send, read) => {
+        expect((await read()).bareRun).toBe("hidden");
+        await send("saveSettings");
+        expect((await read()).settingsFixRun).toBe("hidden");
+        await send("openGate");
+        expect((await read()).inventedRun).toBe("hidden");
       });
     });
 
@@ -563,25 +569,6 @@ describe("cfc node input requirements", () => {
       await run(SETTINGS_OUTPUTS, async (send, read) => {
         await send("saveSettings");
         expect((await read()).settingsRun).toBe("hidden");
-      });
-    });
-
-    // The absence is observed with the evidence the container holds about
-    // its own value, never a label inherited from an ancestor: a wiring that
-    // points into a stamped document at a path it chose is refused.
-    it("refuses a gate found absent where the wiring chose the container", async () => {
-      await run(GATE_OUTPUTS, async (send, read) => {
-        await send("saveSettings");
-        expect((await read()).settingsFixRun).toBeUndefined();
-      });
-    });
-
-    // A reference's own path that leads nowhere is the reference's choice,
-    // not an absence the owner's container vouches for.
-    it("refuses a gate reached through a path the reference invented", async () => {
-      await run(GATE_OUTPUTS, async (send, read) => {
-        await send("openGate");
-        expect((await read()).inventedRun).toBeUndefined();
       });
     });
 
@@ -598,17 +585,15 @@ describe("cfc node input requirements", () => {
       });
     });
 
-    // Nor can other code launder an absence by deleting the owner's gate:
-    // the container's evidence is then the deleter's.
-    it("refuses a gate other code deleted from the owner's settings", async () => {
+    // A gate other code deleted is absent, and the code runs on its absence;
+    // who may delete it is the settings' write authority, not this check.
+    it("runs on a gate other code deleted from the owner's settings", async () => {
       await run(SETTINGS_OUTPUTS, async (send, read) => {
         await send("saveSettingsWithGate");
         expect((await read()).settingsRun).toBe("near 52");
-        const before = failedAt("/gate").length;
         expect(await send("dropGate")).toBeUndefined();
-        // Refused: the result keeps the run before the deletion.
-        expect((await read()).settingsRun).toBe("near 52");
-        expect(failedAt("/gate").length).toBeGreaterThan(before);
+        expect((await read()).settingsRun).toBe("hidden");
+        expect(failedAt("/gate").length).toBe(0);
       });
     });
 
@@ -840,17 +825,20 @@ describe("cfc node input requirements", () => {
     const reason = (refused: readonly unknown[]) =>
       (refused[0] as CfcNodeInputRefusal | undefined)?.reason;
 
-    it("refuses a gate found absent where no label vouches for it", async () => {
-      await withDocument((refusals, link) => {
+    // An absence consumes no requirement (§8.10.3, §4.6.3): a gate missing
+    // from an unlabeled document, from a missing document, or left out of the
+    // wiring. A gate that is there without the evidence is refused.
+    it("requires nothing of a gate found absent, and refuses one present", async () => {
+      await withDocument(async (refusals, link, write) => {
+        expect(refusals({ gate: link() })).toEqual([]);
+        expect(refusals({})).toEqual([]);
+        await write({});
+        expect(refusals({ gate: link() })).toEqual([]);
+        await write({ gate: { always: true } });
         expect(reason(refusals({ gate: link() }))).toBe(
           "input requiredIntegrity failed at /gate of code",
         );
-      });
-    });
-
-    it("refuses a gate the wiring left out", async () => {
-      await withDocument((refusals) => {
-        expect(reason(refusals({}))).toBe(
+        expect(reason(refusals({ gate: { always: true } }))).toBe(
           "input requiredIntegrity failed at /gate of code",
         );
       });
@@ -861,7 +849,9 @@ describe("cfc node input requirements", () => {
     // elsewhere (an event's delivery, say) leaves the check as it was.
     it("refuses a check that reads a document its transaction wrote", async () => {
       await withDocument(async (refusals, link, write, base) => {
-        await write({});
+        // A gate present without the evidence, so a check that runs refuses
+        // it at /gate.
+        await write({ gate: { always: true } });
         expect(
           reason(
             refusals(
@@ -885,8 +875,7 @@ describe("cfc node input requirements", () => {
 
     // A requirement on a collection's members, where a reference's own path
     // or a missing document leads to no collection at all: no member is
-    // there to hold to it. The same absence under a requirement on the
-    // position itself is still refused.
+    // there to hold to it, as no value is for a requirement on the position.
     it("requires nothing of the members of a collection a reference finds absent", async () => {
       await withDocument(async (refusals, link, write) => {
         await write({});
@@ -901,9 +890,7 @@ describe("cfc node input requirements", () => {
             members,
           ),
         ).toEqual([]);
-        expect(reason(refusals({ gate: link(undefined, ["nowhere"]) }))).toBe(
-          "input requiredIntegrity failed at /gate of code",
-        );
+        expect(refusals({ gate: link(undefined, ["nowhere"]) })).toEqual([]);
         // A schema not the code's that would fill the absent collection
         // hands the code members no one vouched for.
         const filled = { default: ["open"] };

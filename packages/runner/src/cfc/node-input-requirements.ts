@@ -29,30 +29,19 @@
  *   here.
  * - A value written in the node's binding itself (a literal in the wiring,
  *   including a handler's `$event` payload) carries no evidence, so it never
- *   satisfies a `requiredIntegrity`; a path the binding leaves out carries
- *   none either.
- * - A requirement on the members of a collection (a `*` path) applies to
- *   reads of its members (§8.10.3 checks a requirement against the reads at
- *   its path). Enumerating the collection reads its shape (§4.6.3), which is
- *   a read of the collection itself, governed by the collection's own labels
- *   and requirements, not its members'. So where the collection, or a
- *   container or document on the way to it, is empty or absent (whether the
- *   declared path or a reference's own path led there), the member
- *   requirement consumes nothing, in a stored document and in the binding
- *   alike; a member that is there is held to it. A schema other than the
- *   code's that would fill the absent collection with a default is the
- *   wiring's choice of members, and carries no evidence, as below.
- * - A path read and found absent from a container is a `shape` observation
- *   (§4.6.3) carrying the integrity minted for the container's own current
- *   value (`ownEvidenceAt`): never a label it inherits from an ancestor, a
- *   declared store policy or a derived entry, so neither a reference into a
- *   stamped document nor a deletion by other code can borrow its writer's
- *   stamp for an absence. A segment of a reference's own path that is not
- *   there, a walk past a scalar, and a missing document carry no evidence. If
- *   a schema other than the code's own would fill an absence with a `default`
- *   the code's schema does not declare (one a reference carries, or the
- *   graph's), the code would be handed the value that schema chose, which
- *   carries no evidence either.
+ *   satisfies a `requiredIntegrity`.
+ * - A requirement binds the values the code reads (§8.10.3 checks it against
+ *   the consumed reads at its path, and has nothing to check on an empty
+ *   consumed set). A path found absent, a key missing from a container, an
+ *   empty or absent collection whose members carry the requirement, a
+ *   document with no value, whether the declared path, a reference's own path
+ *   or the wiring led there, is a `shape` read of the container (§4.6.3), not
+ *   a value at the path, and consumes no requirement on it. Absence still
+ *   taints by confidentiality and membership as §4.6.3 has it; that is not
+ *   checked here. Where a schema other than the code's own (one a reference
+ *   carries, or the graph's) would fill the absence with a `default` the
+ *   code's schema does not declare, the code would be handed the value that
+ *   schema chose, which carries no evidence, and is refused.
  * - A cycle of references, or a chain longer than the runtime resolves,
  *   carries no evidence. The cycle check is keyed on each reference's target,
  *   so a chain that passes one target twice on different walks is refused
@@ -83,7 +72,6 @@ import { cfcIntegritySatisfiesFloorCoherently } from "./observation.ts";
 import {
   cfcFloorTrustContext,
   consumedIntegrityAt,
-  ownEvidenceAt,
   referenceIntegrityAt,
 } from "./prepare.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
@@ -411,16 +399,11 @@ const reachThroughInput = (
     observations.push(through);
   };
 
-  // `container` holds no value at the rest of the walk: a `shape`
-  // observation with the container's own evidence, unless a schema not the
+  // Nothing at the rest of the walk: a `shape` read of the container, which
+  // consumes no requirement on the missing path, unless a schema not the
   // code's would hand the code a default there.
-  const absentFrom = (
-    container: NormalizedFullLink,
-    defaulting: boolean,
-    through: readonly CfcAtom[],
-  ) => {
+  const absent = (defaulting: boolean, through: readonly CfcAtom[]) => {
     if (defaulting) noEvidence(through);
-    else observations.push(union(through, ownEvidenceAt(tx, container)));
   };
 
   const at = (location: NormalizedFullLink, key: string) => ({
@@ -501,18 +484,7 @@ const reachThroughInput = (
     const child: unknown = Object.hasOwn(value, segment)
       ? Reflect.get(value, segment)
       : undefined;
-    if (child === undefined) {
-      // An absent container on the way to a collection's members, wherever
-      // the path to it came from: no member to hold to the requirement,
-      // unless a schema not the code's would hand the code members there.
-      if (remaining.includes("*")) {
-        return defaulting ? noEvidence(through) : undefined;
-      }
-      // A segment of a reference's own path that is not there is the
-      // reference's choice, not an absence its container vouches for.
-      if (fixed > 0) return noEvidence(through);
-      return absentFrom(location, defaulting, through);
-    }
+    if (child === undefined) return absent(defaulting, through);
     inDocument(
       at(location, segment),
       child,
@@ -561,13 +533,8 @@ const reachThroughInput = (
     const root = { ...link, path: [] };
     documents.add(documentKey(root));
     const value: unknown = tx.readValueOrThrow(root, { meta });
-    // A document with no value at all is no container to be absent from,
-    // and holds no member of a collection the requirement is on.
-    if (value === undefined) {
-      return walk.includes("*") && !carriesDefault
-        ? undefined
-        : noEvidence(through);
-    }
+    // A document with no value at all holds nothing at the path.
+    if (value === undefined) return absent(carriesDefault, through);
     inDocument(
       root,
       value,
@@ -601,25 +568,19 @@ const reachThroughInput = (
       if (link === undefined) return noEvidence([]);
       return follow(link, rest, graphDefaults, [], []);
     }
+    // A path the wiring leaves out is absent, as in a stored document.
+    if (value === undefined) return absent(graphDefaults, []);
     if (rest.length === 0) return heldAtPath(value);
     const [segment, ...remaining] = rest;
-    // Absent or empty on the way to a collection's members, as in a stored
-    // document: no member to hold to the requirement. Otherwise the wiring
-    // leaving a path out is the wiring's choice, and carries no evidence.
-    if (value === undefined && rest.includes("*")) {
-      return graphDefaults ? noEvidence([]) : undefined;
-    }
     if (!isPlainContainer(value)) return noEvidence([]);
     if (segment === "*") {
       for (const child of Object.values(value)) inBinding(child, remaining);
       return;
     }
-    if (!Object.hasOwn(value, segment)) {
-      return remaining.includes("*") && !graphDefaults
-        ? undefined
-        : noEvidence([]);
-    }
-    inBinding(Reflect.get(value, segment), remaining);
+    inBinding(
+      Object.hasOwn(value, segment) ? Reflect.get(value, segment) : undefined,
+      remaining,
+    );
   };
 
   inBinding(binding, path);

@@ -448,24 +448,24 @@ commit under the enforcing modes. What each observation carries:
   builtin-only atom is gated by its author;
 - a value written in the binding itself, a handler's `$event` payload
   included, carries no evidence;
-- a path read and found absent is a `shape` observation (§4.6.3) carrying the
-  evidence its container holds about its own current value (`ownEvidenceAt`
-  in `cfc/prepare.ts`: the integrity minted at exactly the container's path,
-  which another writer's write below it withdraws), never a label inherited
-  from an ancestor, a declared store policy or a derived entry; a segment of a
-  reference's own path that is not there, a path past a scalar, and a missing
-  document carry none;
-- a requirement on a collection's members (a `*` path) applies to the reads
-  of its members (§8.10.3 checks a requirement against the reads at its
-  path); enumerating the collection reads its shape (§4.6.3), a read of the
-  collection itself, governed by the collection's own labels and
-  requirements. So where the collection, or a container or document on the
-  way to it, is empty or absent, the member requirement consumes nothing, in
-  a stored document and in the binding alike, whichever path led there; a
-  member that is there is held to it;
+- a requirement binds the values the code reads, and an absence is not one: a
+  path found absent, a key missing from a container, an empty or absent
+  collection whose members carry the requirement, or a document with no
+  value, whether the declared path, a reference's own path or the wiring led
+  there, is a `shape` read of the container (§4.6.3) and consumes no
+  requirement on the missing path. This follows the specification's own
+  reference and the runtime's other floors: §8.10.3's `verifyInputRequirements`
+  checks only when the consumed set is non-empty ("A valid declaration has no
+  value checks to perform on an empty consumed set"); the trusted agent's
+  tool-input floor gates injected values, not omissions
+  (`builtins/llm-dialog.ts`); the stored write floor governs values, not
+  absence; and §10's `to_city()` concerns a value other code nudged, not an
+  omitted one. §4.6.3's absent-slot probes taint by confidentiality and
+  membership, which stand and are not checked here;
 - a `default` that a schema other than the code's own would supply at an
   absent path (one a reference carries, or the graph's) and that the code's
-  schema would not supply the same way carries none;
+  schema would not supply the same way is a value no one vouched for, and is
+  refused;
 - every leaf of a reached value is an observation, an unlabeled one carrying
   no integrity.
 
@@ -510,12 +510,15 @@ the log and the reach can go.
   input schema declares `requiredIntegrity`.
 - Choosing which stamped value to bind is not ruled out: a binding may point
   an input at any value carrying the required evidence, an older one or one
-  from another item included. The same holds of absence: a binding may point
-  at any container that carries the evidence and lacks the path, so code that
-  reads an absent input as permission (an empty roster as "everyone is an
-  admin", say) relies on the container being the one it expects. Binding two
-  inputs to one item is what instance-bound integrity (`scope.valueRef`,
-  §4.5.1, §8.10.4) is for.
+  from another item included. Binding two inputs to one item is what
+  instance-bound integrity (`scope.valueRef`, §4.5.1, §8.10.4) is for.
+- Absence as the permissive branch, flagged for a ruling: an absence consumes
+  no requirement, so code that treats a missing floored input as the
+  permissive choice (an empty roster as "everyone is an admin", a missing gate
+  as "open") can be steered by omitting it, or by pointing the binding at a
+  container that lacks it. The mitigation is the pattern's: make the
+  restrictive choice the default for an absent input, and guard a stored
+  field's removal with its write authority.
 - A `requiredIntegrity` inside an `anyOf` or `oneOf` branch is applied
   whichever branch the value takes, an over-taint; §4.2.1.1 keeps such
   declarations outside the normalized profile.

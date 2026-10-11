@@ -6876,37 +6876,6 @@ export const referenceIntegrityAt = (
   return labelForEntriesAtPath(entries, path)?.integrity ?? [];
 };
 
-/**
- * The evidence a container at `address` carries about its own current value:
- * the integrity minted for the value now at exactly its path, which a write
- * below it by another writer withdraws. Never a label inherited from an
- * ancestor, never a declared store policy, which outlives the value it was
- * declared over, and never a derived entry, whose hereditary atoms a write
- * below the path does not clear. A path found absent from the container is observed with
- * this evidence (§4.6.3's `shape`): the writer of the container's current
- * value is who left the path out.
- */
-export const ownEvidenceAt = (
-  tx: IExtendedStorageTransaction,
-  address: NormalizedFullLink,
-): readonly CfcAtom[] => {
-  const scope = normalizeCellScope(address.scope);
-  const metadata = storedMetadataFor(
-    tx,
-    address.space,
-    address.id,
-    scope,
-    "application/json",
-  );
-  if (metadata === undefined) return [];
-  const path = canonicalizeLogicalPath(address.path);
-  const at = pathKey(path);
-  const entries = metadata.labelMap.entries.filter((entry) =>
-    pathKey(entry.path) === at && entry.origin === MINTED_ORIGIN
-  ).map(asWitnessEvidence);
-  return labelForEntriesAtPath(entries, path)?.integrity ?? [];
-};
-
 const verifyInputRequirements = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,

@@ -75,11 +75,11 @@ Under [the correspondence procedure](../development/cfc-spec-correspondence.md):
 `cfc/node-input-requirements.ts` holds the check; the runner calls it before a
 lift's, a computed node's or a handler's code runs, and the boundary pass
 turns each failure into a reason. The module comment states what each
-observation carries: a reference supplies its target's integrity and its slot
-confidentiality only; a value in the wiring carries no evidence; a path read
-and found absent carries only the evidence its container holds about its own
-current value; a default a schema other than the code's would supply carries
-none.
+observation carries: a reference supplies its target's integrity and its own
+(§8.2.4); a value in the wiring carries no evidence; an absence is a read of
+its container's shape, not a value, and consumes no requirement; a default a
+schema other than the code's would supply at an absence carries no evidence
+and is refused.
 
 ### A rule over two inputs
 
