@@ -1184,7 +1184,7 @@ describe("CFRender variants", () => {
     }
   });
 
-  it("opens the piece its default tile shows", async () => {
+  it("opens the piece its default tile shows", () => {
     const mockDocument = installMockDocument();
     const create = mockDocument.document.createElement;
     mockDocument.document.createElement = (tagName) =>
