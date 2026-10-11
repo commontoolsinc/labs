@@ -1249,8 +1249,10 @@ export class SpaceServer implements TransactionSealDestination {
   #eventVisibilityFloor: number | undefined;
 
   /**
-   * The batch head whose frames a completed settle barrier has applied to
-   * the serving replica, carried across cycles until W covers it. The
+   * The batch head whose input a completed settle barrier has applied to
+   * the serving replica — its frames, or under the store read-through
+   * posture the records the drain re-read into the replica, which makes
+   * the drain the barrier — carried across cycles until W covers it. The
    * settle's PREFIX COVERAGE (serving-loop.md §3) rests on it: input that
    * keeps arriving keeps the scheduler busy at every exit probe, so a
    * settle can reach the flush deadline without observing quiescence even
@@ -6106,11 +6108,17 @@ export class SpaceServer implements TransactionSealDestination {
    */
   async #serveWave(runtime: Runtime): Promise<void> {
     const { batchHead } = this.#drainFeed(runtime);
-    // A record the drain holds back stops this batch short of it. An
-    // exhausted cycle's proof is clamped to this batch head in any case;
-    // lowering the carried head too keeps it naming only frames that have
-    // been applied.
-    if (this.#barrierHead !== undefined) {
+    // Under the store read-through posture the drain is the barrier: it
+    // integrated every record it consumed into the replica before returning,
+    // so every input at or below the batch head has been applied here, with
+    // no frame to wait for. Otherwise a record the drain holds back stops
+    // this batch short of it. An exhausted cycle's proof is clamped to this
+    // batch head in any case; lowering the carried head too keeps it naming
+    // only frames that have been applied.
+    const readThrough = this.#options.policy?.storeReadThrough === true;
+    if (readThrough) {
+      this.#barrierHead = batchHead;
+    } else if (this.#barrierHead !== undefined) {
       this.#barrierHead = Math.min(this.#barrierHead, batchHead);
     }
     // The event drain stays a fully-awaited, single-flight step AHEAD
@@ -6240,16 +6248,26 @@ export class SpaceServer implements TransactionSealDestination {
             // SENT before this pass can declare quiescence — without
             // it, a wave could advance W past an authored commit whose
             // demanded derivation never ran (the frame was still in
-            // the flush queue).
-            const serverIdleStart = performance.now();
-            await this.#options.server.idle();
-            probeRow(serverIdleStart, "settle-server-idle");
+            // the flush queue). Under the store read-through posture the
+            // home space's dirtiness arrived with the drain, which
+            // re-read each record's writes into the replica, and the
+            // session carries no frame for the space; the server's idle
+            // is then every other client's work, and the settle does not
+            // wait on it.
+            if (!readThrough) {
+              const serverIdleStart = performance.now();
+              await this.#options.server.idle();
+              probeRow(serverIdleStart, "settle-server-idle");
+            }
             // The INPUT barrier, not the durability barrier: sealed
             // commits settle at the wave commit BELOW, so the full
             // synced() would deadlock here (see
             // StorageManager.inputSynced). It also waits for the
             // loopback transport to hand over every frame the drain
             // above sent, which it does one frame per event-loop turn.
+            // Kept under the read-through too: a foreign space's provider
+            // still reads over its session, and this is where its
+            // in-flight pulls and handed-over frames are waited for.
             const barrierStart = performance.now();
             await runtime.storageManager.inputSynced?.();
             probeRow(barrierStart, "settle-input-barrier");

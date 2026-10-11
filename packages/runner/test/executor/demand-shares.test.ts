@@ -97,6 +97,20 @@ describe("demand-shares", () => {
     expect(r.asked).toEqual([["a", "c"], ["gone"]]);
   });
 
+  it("re-reads a share that changed while its principal was excluded once a pass includes it", async () => {
+    const cache = new DemandShareCache();
+    const r = reader({ a: share("a"), svc: share("svc") });
+    const sessions = live(["a", "did:key:alice"], ["svc", "did:key:service"]);
+    await cache.sharesFor(space, sessions, undefined, r.read);
+
+    cache.noteChanged(space, "svc");
+    await cache.sharesFor(space, sessions, "did:key:service", r.read);
+    const included = await cache.sharesFor(space, sessions, undefined, r.read);
+
+    expect(included.map((s) => s.sessionId)).toEqual(["a", "svc"]);
+    expect(r.asked).toEqual([["a", "svc"], ["svc"]]);
+  });
+
   it("reads a forgotten session's share again when it is live", async () => {
     const cache = new DemandShareCache();
     const r = reader({ a: share("a") });

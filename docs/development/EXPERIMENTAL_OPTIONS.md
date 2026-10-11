@@ -1641,8 +1641,8 @@ the per-epic implementation notes).
   server (`packages/runner/src/executor/serving-memory-server.deno.ts`) reads
   the same variable for a policy that leaves the field unset, which is how a
   lane runs its tests under the posture. Only the literal `true` turns
-  it on; `false` and unset leave it off, and anything else warns and leaves it
-  off. Meaningful only with the serving loop running
+  it on; `false` and unset leave it off, and anything else leaves it off,
+  with a warning from the toolshed bootstrap and none from the test server. Meaningful only with the serving loop running
   ([`serverExecution`](#serverexecution) on).
 - **Added by.** Bernhard Seefeld, in the store read-through change.
 - **Purpose.** The serving runtime reads its HOME space straight from the
@@ -1653,8 +1653,12 @@ the per-epic implementation notes).
   re-read the documents the replica holds. The memory server then never walks
   a selector's schema closure for the serving session, and the loopback
   transport carries no frames for it. Writes and foreign-space reads stay on
-  the session. [`serving-loop.md`](../specs/server-side-execution/serving-loop.md)
-  §1 plane (a) states the posture and what it does not do.
+  the session. The serving loop's settle is then local: the feed's drain is
+  the barrier that applied the home space's input, so a settle waits on
+  neither the memory server's `idle()` nor a home-space frame before it
+  declares a wave quiescent. [`serving-loop.md`](../specs/server-side-execution/serving-loop.md)
+  §1 plane (a) states the posture and what it does not do, and its §3
+  prefix-coverage paragraph the barrier each posture gives the settle.
 - **Current default and planned end state.** Off by default. The read-through
   follows session delivery's rules in its own form: another principal's
   instance is read only under a live tenure of the space's lease (a read that

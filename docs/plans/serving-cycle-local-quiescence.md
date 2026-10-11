@@ -65,12 +65,12 @@ scheduler was last observed idle. `serving-loop.md` §3's prefix-coverage
 paragraph describes the frame barrier as the mechanism and is amended to name
 either; the rule it states, which sequence W may cover, does not change.
 
-**Demand crosses as deltas.** `demandChanged` carries the changed session's
-rows (its full current demand, or its removal), the space server keeps the
-mirror it already compares against, and `demandForSpace` and
-`viewInterestsForSpace` become reads of that mirror on both arms. The server
-is the one producer, so the mirror is exact; an observer installed late
-replays every session's rows once, as the session mirror does today.
+**Demand crosses as deltas.** `demandChanged` names the changed session, the
+worker keeps each live session's share and re-reads only the sessions named
+since its last pass, in one request, and `demandForSpace` is answered from
+those shares; the in-process arm reads the server directly, as a lookup. The
+view interests keep crossing as a request per publish, which the pipelined
+post-commit work below takes off the cycle's critical path.
 
 **Post-commit work pipelines.** After `commitWave` returns, the loop awaits
 only what the next settle depends on: the foreign warm notices, the sealed

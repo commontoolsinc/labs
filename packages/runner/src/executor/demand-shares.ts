@@ -97,8 +97,17 @@ export class DemandShareCache {
         if (!returned.has(sessionId)) shares.delete(sessionId);
       }
     }
+    // A share this pass did not refresh — an excluded principal's — stays
+    // stale for the pass that includes it.
+    const refreshed = new Set(missing);
+    const remaining = new Set<string>();
+    for (const sessionId of shares.keys()) {
+      if (refreshed.has(sessionId)) continue;
+      if (allStale || stale?.has(sessionId)) remaining.add(sessionId);
+    }
     this.#allStale.delete(space);
-    this.#stale.delete(space);
+    if (remaining.size === 0) this.#stale.delete(space);
+    else this.#stale.set(space, remaining);
     const result: SessionDemand[] = [];
     for (const sessionId of wanted) {
       const share = shares.get(sessionId);

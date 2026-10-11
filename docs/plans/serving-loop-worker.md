@@ -98,7 +98,8 @@ tells it of `noteExecutorCommit` and `noteLeaseReacquired` without waiting. The
 demand set crosses as shares per session, read once and kept on the worker
 (`DemandShareCache`) until the server's `demandChanged` names that session
 again, so a demand pass hands the space server's mirror the objects it compared
-last time and asks the server only for the sessions whose demand moved.
+last time and asks the server only for the sessions whose shares are stale or
+not yet cached.
 
 **Lifecycle verbs run in the worker, from a descriptor.** A verb reaches the
 host today as closures over a `PiecesController`. The route sends the verb's

@@ -551,15 +551,23 @@ index re-marks the truncated dirty frontier (§3b, §6) and memo hits
 suppress effect re-fires.
 
 PREFIX COVERAGE — how an exhausted cycle still moves W: input arriving
-while a settle runs lands through the settle's own frame barrier, so under
+while a settle runs lands through the settle's own input barrier, so under
 sustained input every exit probe can find the scheduler busy with the
 NEWER input and the settle reaches T_flush without observing quiescence,
 although the batch it drained was long done. The loop therefore records a
-batch head H once a settle's frame barrier has completed with every frame
+batch head H once a settle's input barrier has completed with every input
 at or below H applied — the moment at which an idle scheduler would have
 ended the settle — and carries H across cycles until W covers it,
 lowering it to a later cycle's batch head when that drain holds a record
-back. Any later moment at which the scheduler is idle, the
+back. The barrier is the one the posture gives the home space: with its
+reads on the session, it is the settle's frame barrier, which drains the
+co-hosted server's refresh queue and waits for the loopback transport to
+hand every frame over; under the store read-through posture (§1 plane
+(a)) it is the drain itself, which re-reads each record's writes into the
+replica as it consumes the record, so H is the batch head at the drain,
+and the settle waits on neither the server's idle nor a home-space frame.
+A foreign space's session still delivers that space's writes as frames,
+and the settle keeps waiting for the frames it has handed over. Any later moment at which the scheduler is idle, the
 demanded-structure load the settle awaits has completed, and no re-armed
 root is pending proves H covered: everything the scheduler ran after the
 barrier, it ran to completion. The proof is clamped by the shadow floor,

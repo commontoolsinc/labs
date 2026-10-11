@@ -261,10 +261,17 @@ async function loopCost(run: () => Promise<void>): Promise<string> {
         : [name.split("/")[0], name];
       return timing[group]?.[key] ?? { count: 0, totalTime: 0 };
     };
+    const all: Record<string, { count: number; totalTime: number }> = {};
+    for (const [group, keys] of Object.entries(timing)) {
+      for (const [key, value] of Object.entries(keys)) {
+        all[`${group}:${key}`] = value;
+      }
+    }
     return {
       waves: stats?.waves ?? 0,
       exhausted: stats?.wavesBudgetExhausted ?? 0,
       rows: Object.fromEntries(rows.map((name) => [name, row(name)])),
+      all,
     };
   };
   const before = await snapshot();
@@ -278,9 +285,22 @@ async function loopCost(run: () => Promise<void>): Promise<string> {
       count === 0 ? 0 : (total / count).toFixed(1)
     } ms`;
   });
+  // The twelve rows that grew the most over the burst, whatever they are,
+  // so a cost the list above does not name still shows.
+  const grown = Object.entries(after.all).map(([name, row]) => {
+    const earlier = before.all[name] ?? { count: 0, totalTime: 0 };
+    return {
+      name,
+      count: row.count - earlier.count,
+      total: row.totalTime - earlier.totalTime,
+    };
+  }).filter((row) => row.count > 0).sort((a, b) => b.total - a.total)
+    .slice(0, 12).map((row) =>
+      `${row.name} ${row.count} x ${(row.total / row.count).toFixed(1)} ms`
+    );
   return `${after.waves - before.waves} waves (${
     after.exhausted - before.exhausted
-  } at the deadline); ${phases.join(", ")}`;
+  } at the deadline); ${phases.join(", ")}; top rows: ${grown.join(", ")}`;
 }
 
 console.error(
