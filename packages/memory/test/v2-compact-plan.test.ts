@@ -145,6 +145,7 @@ describe("planCompaction", () => {
         genesisPresent: true,
         foreignKeyViolations: 0,
         opTableRows: 0,
+        missingTables: [],
       });
       expect(report.compactionCommit.seq).toBe(
         db.prepare(`SELECT MAX(seq) + 1 AS seq FROM "commit"`).get<

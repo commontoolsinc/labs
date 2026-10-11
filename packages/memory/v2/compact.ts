@@ -78,6 +78,10 @@ export type CompactionReport = {
     /** Rows `PRAGMA foreign_key_check` reports; any means the store is not
      * one the run will write. */
     foreignKeyViolations: number;
+    /** Tables the store lacks, from before a migration the server would run
+     * on opening it. A check that reads one of them was not made, and a
+     * store missing any is not one the run will write. */
+    missingTables: string[];
   };
   instances: {
     matched: number;
@@ -243,9 +247,9 @@ export const planCompaction = (
   const keepLast = cut.keepLast ?? 0;
 
   // A store the current server has opened carries every table below; one it
-  // has not — a snapshot from before a migration — may lack some, and reads
-  // as if they were empty rather than failing the dry run on a table it was
-  // never going to touch.
+  // has not — a snapshot from before a migration — may lack some. The dry run
+  // still reads what is there, and names what is not, so the report says
+  // which checks it could not make rather than passing them.
   const tableExists = (table: string): boolean =>
     db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`)
       .get(table) !== undefined;
@@ -271,6 +275,9 @@ export const planCompaction = (
   ];
   const opTableRows = opTables.reduce((sum, table) => sum + countOf(table), 0);
   const hasSnapshots = tableExists("snapshot");
+  const missingTables = ["branch", "snapshot", ...opTables].filter((table) =>
+    !tableExists(table)
+  );
 
   const instances = {
     matched: 0,
@@ -424,6 +431,7 @@ export const planCompaction = (
       genesisPresent,
       opTableRows,
       foreignKeyViolations,
+      missingTables,
     },
     instances,
     revisions,
@@ -516,8 +524,14 @@ export const formatCompactionReport = (report: CompactionReport): string => {
     `commit     seq ${report.compactionCommit.seq} as ${report.compactionCommit.sessionId}` +
       ` local_seq ${report.compactionCommit.localSeq}`,
   );
+  const missing = new Set(preconditions.missingTables);
+  const missingOps = preconditions.missingTables.filter((table) =>
+    table.startsWith("op_")
+  );
   const checks = [
-    preconditions.singleBranch
+    missing.has("branch")
+      ? "branch table ABSENT (not checked)"
+      : preconditions.singleBranch
       ? "one branch"
       : `REFUSED: branches ${preconditions.branches.join(", ")}`,
     preconditions.genesisPresent ? "genesis present" : "REFUSED: no commit 1",
@@ -526,7 +540,13 @@ export const formatCompactionReport = (report: CompactionReport): string => {
       : `REFUSED: ${
         n(preconditions.foreignKeyViolations)
       } foreign-key violation(s)`,
-    `op_* rows ${n(preconditions.opTableRows)}`,
+    missingOps.length > 0
+      ? `op_* tables ABSENT (${missingOps.join(", ")})`
+      : `op_* rows ${n(preconditions.opTableRows)}`,
+    ...(missing.has("snapshot") ? ["snapshot table ABSENT"] : []),
+    ...(missing.size > 0
+      ? ["REFUSED: a store missing tables is not one a run will write"]
+      : []),
   ];
   lines.push(`checks     ${checks.join("; ")}`);
   if (report.largest.length > 0) {

@@ -1092,13 +1092,13 @@ the directory's neighbors are the authority on where a space's file is. The file
 is opened read-only. `--documents` names the instances by id prefix (`of:`,
 `computed:` or `cid:`), and may repeat; the ACL document is never selected.
 `--scope` restricts the selection to `space`, `user` or `session` instances;
-repeated or nested prefixes count as one selection. The cut is the head of
-every selected instance unless `--before-seq`, `--before <YYYY-MM-DD HH:MM:SS>`
-(UTC, in the store's own format and no other) or `--keep-last <n>` bounds it,
-and a row survives if any bound keeps it. `--keep-payloads <duration>`
-(default `24h`) is the window within which commits keep their payload; outside
-it a commit's payload is hollowed unless its seq is 1 or an `op_*` row
-references it, whether or not a surviving revision still points at the commit.
+repeated or nested prefixes count as one selection. The cut is the head of every
+selected instance unless `--before-seq`, `--before <YYYY-MM-DD HH:MM:SS>` (UTC,
+in the store's own format and no other) or `--keep-last <n>` bounds it, and a
+row survives if any bound keeps it. `--keep-payloads <duration>` (default `24h`)
+is the window within which commits keep their payload; outside it a commit's
+payload is hollowed unless its seq is 1 or an `op_*` row references it, whether
+or not a surviving revision still points at the commit.
 
 The report counts the instances matched and truncated, the boundaries that
 become a `set`, the revision and snapshot rows and bytes that would go, the

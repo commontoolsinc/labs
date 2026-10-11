@@ -248,6 +248,21 @@ INSERT INTO head (branch, id, seq, op_index) VALUES ('', 'computed:x', 3, 0);
       });
       expect(report.revisions.rowsDeleted).toBe(2);
       expect(report.preconditions.opTableRows).toBe(0);
+      // What the store lacks is named, not passed: the write path refuses
+      // such a store, and the report says so.
+      expect(report.preconditions.missingTables).toEqual([
+        "branch",
+        "op_field_epoch",
+        "op_submission",
+        "op_integrated",
+        "op_checkpoint",
+      ]);
+      const plain = await cf(
+        `space compact ${store} --documents computed: --dry-run`,
+      );
+      expect(plain.code).toBe(0);
+      expect(plain.stdout.join("\n")).toContain("ABSENT");
+      expect(plain.stdout.join("\n")).toContain("REFUSED");
     } finally {
       await Deno.remove(root, { recursive: true });
     }
