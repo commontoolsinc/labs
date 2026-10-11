@@ -463,7 +463,10 @@ commit under the enforcing modes. What each observation carries:
   `verifyInputRequirements` has nothing to check on an empty consumed set;
   and §10's `to_city()` concerns a value other code nudged, not an omitted
   one. §4.6.3's absent-slot probes taint by confidentiality and membership,
-  which stand and are not checked here;
+  which stand and are not checked here. The deciding site carries a
+  `SPEC-PENDING` marker naming the ruling request. Against the behavior before
+  this check (no node input check at all) it only refuses more and stores
+  nothing new, so it runs at the default with no dial;
 - a `default` that a schema other than the code's own would supply at an
   absent path (one a reference carries, or the graph's) and that the code's
   schema would not supply the same way is a value no one vouched for, and is

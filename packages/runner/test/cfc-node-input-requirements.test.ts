@@ -748,10 +748,11 @@ describe("cfc node input requirements", () => {
     const resolutionWith = (
       graphSchema?: JSONSchema,
       path: readonly string[] = ["gate"],
+      codeSchema?: JSONSchema,
     ): NodeInputResolution => ({
       requirements: [{ path, requiredIntegrity: ["owner-gate"] }],
       codeSchemaKnown: true,
-      codeSchema: undefined,
+      codeSchema,
       graphSchema,
     });
     const withDocument = async (
@@ -762,6 +763,7 @@ describe("cfc node input requirements", () => {
           // Writes in the checking transaction before the check.
           writeFirst?: (tx: IExtendedStorageTransaction) => void,
           path?: readonly string[],
+          codeSchema?: JSONSchema,
         ) => readonly unknown[],
         link: (schema?: unknown, path?: string[]) => unknown,
         // Writes `value` as the whole document `id` (the gate's by default).
@@ -801,6 +803,7 @@ describe("cfc node input requirements", () => {
           graphSchema?: JSONSchema,
           writeFirst?: (tx: IExtendedStorageTransaction) => void,
           path?: readonly string[],
+          codeSchema?: JSONSchema,
         ) => {
           const tx = runtime.edit();
           try {
@@ -810,7 +813,7 @@ describe("cfc node input requirements", () => {
               "code",
               binding,
               base,
-              resolutionWith(graphSchema, path),
+              resolutionWith(graphSchema, path, codeSchema),
               internalVerifierRead,
             );
           } finally {
@@ -936,6 +939,40 @@ describe("cfc node input requirements", () => {
         expect(reason(refusals({ gate: { p: absentSibling, q: one } }))).toBe(
           "input requiredIntegrity failed at /gate of code",
         );
+      });
+    });
+
+    // A reference inside the value at the declared path is compared with
+    // the code's schema at the reference's own position: a default its
+    // schema would supply there is the wiring's even when the code declares
+    // the same value one level up.
+    it("compares a nested reference's default at the reference's position", async () => {
+      await withDocument(async (refusals, link, write, base) => {
+        const shut = { always: false };
+        await write({
+          gate: {
+            ref: {
+              "/": {
+                "link@1": {
+                  id: "of:nowhere",
+                  space: base.space,
+                  path: [],
+                  schema: { default: shut },
+                },
+              },
+            },
+          },
+        });
+        const code: JSONSchema = { properties: { gate: { default: shut } } };
+        expect(
+          refusals(
+            { gate: link(undefined, ["gate"]) },
+            undefined,
+            undefined,
+            undefined,
+            code,
+          ).length,
+        ).toBe(1);
       });
     });
 

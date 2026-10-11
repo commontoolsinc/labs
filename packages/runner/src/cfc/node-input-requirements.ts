@@ -403,6 +403,7 @@ const reachThroughInput = (
   // consumes no requirement on the missing path, unless a schema not the
   // code's would hand the code a default there.
   const absent = (defaulting: boolean, through: readonly CfcAtom[]) => {
+    // SPEC-PENDING https://github.com/commonfabric/specs/pull/65
     if (defaulting) noEvidence(through);
   };
 
@@ -422,7 +423,8 @@ const reachThroughInput = (
 
   // A value read from a stored document at `location`, with `rest` of the
   // declared path still to walk; the first `fixed` segments of `rest` are a
-  // reference's own path rather than the declared path's.
+  // reference's own path rather than the declared path's. `codeAt` is the
+  // position in the code's schema the walk ends at.
   const inDocument = (
     location: NormalizedFullLink,
     value: unknown,
@@ -431,6 +433,7 @@ const reachThroughInput = (
     defaulting: boolean,
     chain: readonly string[],
     through: readonly CfcAtom[],
+    codeAt: readonly string[],
   ): void => {
     if (isPrimitiveCellLink(value)) {
       const link = parseLink(value, location);
@@ -442,6 +445,7 @@ const reachThroughInput = (
         chain,
         throughSlot(location, through),
         rest.slice(0, fixed),
+        codeAt,
       );
     }
     if (rest.length === 0) {
@@ -456,7 +460,17 @@ const reachThroughInput = (
         const link = parseLink(valuesAt(value, reference)[0], slot);
         if (link === undefined) noEvidence(through);
         else {
-          follow(link, [], defaulting, chain, throughSlot(slot, through));
+          // The reference sits below the walk's end, so the code's schema
+          // is read at the same depth as the link's.
+          follow(
+            link,
+            [],
+            defaulting,
+            chain,
+            throughSlot(slot, through),
+            [],
+            [...codeAt, ...reference],
+          );
         }
       }
       return;
@@ -477,6 +491,7 @@ const reachThroughInput = (
           defaulting,
           chain,
           through,
+          codeAt,
         );
       }
       return;
@@ -493,6 +508,7 @@ const reachThroughInput = (
       defaulting,
       chain,
       through,
+      codeAt,
     );
   };
 
@@ -507,13 +523,14 @@ const reachThroughInput = (
     chain: readonly string[],
     through: readonly CfcAtom[],
     before: readonly string[] = [],
+    codeAt: readonly string[] = path,
   ): void => {
     const own = [...link.path, ...before];
     const walk = [...own, ...rest];
     // The link's schema describes its target; a default it would supply at
-    // the declared path that the code's schema would not is the wiring's.
+    // the walk's end that the code's schema would not is the wiring's.
     const carriesDefault = defaulting ||
-      foreignDefaultAt(link.schema, [...before, ...rest], codeSchema, path);
+      foreignDefaultAt(link.schema, [...before, ...rest], codeSchema, codeAt);
     const target = addressKey({
       ...link,
       scope: normalizeCellScope(link.scope),
@@ -525,7 +542,7 @@ const reachThroughInput = (
     }
     // The same target, whole walk (a reference's unwalked path included),
     // default exposure and reference integrity observe the same values.
-    const key = JSON.stringify([target, walk, carriesDefault, through]);
+    const key = JSON.stringify([target, walk, carriesDefault, through, codeAt]);
     if (followed.has(key)) return;
     followed.add(key);
     // The verifier's own read (§8.10.1, §18.6.2): marked by `meta`, so it
@@ -543,20 +560,24 @@ const reachThroughInput = (
       carriesDefault,
       [...chain, target],
       through,
+      codeAt,
     );
   };
 
   // A value the binding holds at the declared path: its references are
   // followed (the binding's own slots are plumbing and add nothing), and
   // every other value in it is the wiring's own.
-  const heldAtPath = (value: unknown): void => {
+  // `codeAt` is the position in the code's schema the value sits at.
+  const heldAtPath = (value: unknown, codeAt: readonly string[]): void => {
     if (isCellLink(value)) {
       const link = parseLink(value, base);
       if (link === undefined) return noEvidence([]);
-      return follow(link, [], graphDefaults, [], []);
+      return follow(link, [], graphDefaults, [], [], [], codeAt);
     }
     if (isPlainContainer(value) && Object.keys(value).length > 0) {
-      for (const child of Object.values(value)) heldAtPath(child);
+      for (const [key, child] of Object.entries(value)) {
+        heldAtPath(child, [...codeAt, key]);
+      }
       return;
     }
     noEvidence([]);
@@ -570,7 +591,7 @@ const reachThroughInput = (
     }
     // A path the wiring leaves out is absent, as in a stored document.
     if (value === undefined) return absent(graphDefaults, []);
-    if (rest.length === 0) return heldAtPath(value);
+    if (rest.length === 0) return heldAtPath(value, path);
     const [segment, ...remaining] = rest;
     if (!isPlainContainer(value)) return noEvidence([]);
     if (segment === "*") {
