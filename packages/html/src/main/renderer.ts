@@ -102,9 +102,11 @@ export class VDomRenderer {
    * @param cellRef - The cell reference to render
    * @returns A cancel function to stop rendering
    */
+  /** `options.runsPiece`: see `RenderOptions.runsPiece`. */
   async render(
     container: HTMLElement,
     cellRef: CellRef,
+    options?: { runsPiece?: boolean },
   ): Promise<() => Promise<void>> {
     if (this.#disposed) {
       // The connection was disposed before this render began (its teardown ran
@@ -127,7 +129,7 @@ export class VDomRenderer {
     const mountId = this.#mountId;
     logger.timeStart("mount", String(mountId));
     try {
-      const response = await this.#session.mount(mountId, cellRef);
+      const response = await this.#session.mount(mountId, cellRef, options);
       const elapsed = logger.timeEnd("mount", String(mountId));
       if (this.#disposed) return async () => {};
       this.#rootNodeId = response.rootId;

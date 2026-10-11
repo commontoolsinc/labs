@@ -430,6 +430,14 @@ type StartAttempt = {
   // instead of running a second resolution pipeline. Assigned by start() once
   // the pipeline promise exists.
   settled?: Promise<boolean>;
+  // Whether a caller of start() asked for the result to have a lifetime of
+  // its own. Joining callers share one attempt but not one ownership: any of
+  // them asking makes the attempt claim. False for a start that only asks the
+  // result to run, as rendering it does.
+  claims?: boolean;
+  // Set once the attempt has decided: the target it left running, if any. A
+  // claiming caller that joins after the decision claims that target itself.
+  decided?: { running?: `${MemorySpace}/${ScopeKey}/${URI}` };
   // The pattern keys this attempt has read inherited authority for. The walk
   // runs again from the top after the read, and must not read again for a
   // grant the durable metadata does not carry.
@@ -4081,39 +4089,53 @@ export class Runner {
    * different docs whose links resolve to the same piece do not join either;
    * they run separate resolutions and converge at the registration guard
    * before instantiation.
+   *
+   * `claims: false` asks only that the result run, as rendering it does: the
+   * start leaves an enclosing pattern's ownership of a running child as it
+   * is, and a result it starts stays releasable by a pattern that later
+   * instantiates it. The returned promise then reports whether the result is
+   * running. Ownership is per caller: a joining caller that claims makes the
+   * shared attempt claim.
    */
-  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
+  start<T = any>(
+    resultCell: Cell<T>,
+    options: { claims?: boolean } = {},
+  ): Promise<boolean> {
+    const claims = options.claims ?? true;
     const startKey = this.#getDocKey(resultCell);
     const inFlight = this.#inFlightStartsByDoc.get(startKey);
     if (
       inFlight?.settled !== undefined && this.#isStartAttemptCurrent(inFlight)
     ) {
+      if (claims) this.#claimStartAttempt(inFlight);
       return inFlight.settled;
     }
     const attempt: StartAttempt = {
       lifecycleEpoch: this.#lifecycleEpoch,
       generationsByDoc: new Map(),
       preResolutionStopKeys: new Set(),
+      claims,
     };
     this.#activeStartAttempts.add(attempt);
     this.#trackStartAttempt(attempt, startKey);
     try {
       const settled = this.#doStart(resultCell, new Set(), attempt)
         .then((started) => {
-          // This start gives the result a lifetime of its own, so an enclosing
-          // pattern releasing it later leaves it running. An attempt whose
-          // target a stop superseded claims nothing: the registration under
-          // the key belongs to whatever replaced it, and a stop that won the
-          // race leaves no registration at all. Both cases report that this
-          // start is not running. The check is scoped to the target: a stop of
-          // an intermediate link doc after the target's registration installed
-          // does not touch that registration, so it neither voids the claim
-          // nor the report.
+          // A claiming start gives the result a lifetime of its own, so an
+          // enclosing pattern releasing it later leaves it running. An attempt
+          // whose target a stop superseded claims nothing: the registration
+          // under the key belongs to whatever replaced it, and a stop that won
+          // the race leaves no registration at all. Both cases report that
+          // this start is not running. The check is scoped to the target: a
+          // stop of an intermediate link doc after the target's registration
+          // installed does not touch that registration, so it neither voids
+          // the claim nor the report.
           const target = attempt.targetKey;
           const stillRunning = started && target !== undefined &&
             this.#isStartAttemptCurrentFor(attempt, target) &&
             this.#cancels.has(target);
-          if (stillRunning) {
+          attempt.decided = { running: stillRunning ? target : undefined };
+          if (stillRunning && attempt.claims) {
             this.#independentlyStartedResults.add(target);
           }
           return stillRunning;
@@ -4127,6 +4149,22 @@ export class Runner {
     } catch (error) {
       this.#finishStartAttempt(attempt);
       return Promise.reject(error);
+    }
+  }
+
+  /**
+   * Makes a joined start attempt claim its result: before the attempt decides,
+   * by marking it; after, by claiming the target it left running, while that
+   * target still runs.
+   */
+  #claimStartAttempt(attempt: StartAttempt): void {
+    if (attempt.decided === undefined) {
+      attempt.claims = true;
+      return;
+    }
+    const running = attempt.decided.running;
+    if (running !== undefined && this.#cancels.has(running)) {
+      this.#independentlyStartedResults.add(running);
     }
   }
 

@@ -99,7 +99,9 @@ Regression guards: `test/worker-reconciler-cfc-prop-ceiling.test.ts`.
 
 `cf-render` shows what its `cell` binding names only through renders of its
 own, each mounted from the cell's reference under the root ceiling, the way the
-shell mounts a piece opened by its address. What reaches the page through it
+shell mounts a piece opened by its address. A render that displays the piece
+asks the worker to run it, as opening it does (`runsPiece`); starting it adds
+values to render and changes no gate. What reaches the page through it
 passes the same confidentiality gates as opening the piece, the blocked
 placeholder included, with the exceptions listed below. Such a binding is a
 nested render root. The component read contract

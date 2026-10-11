@@ -28,6 +28,14 @@ export interface RenderOptions {
 
   /** Optional error handler */
   onError?: (error: Error) => void;
+
+  /**
+   * The render displays the piece `view` belongs to, as opening that piece
+   * directly does, so the piece runs: it is started if it is not running,
+   * without taking it from a pattern that owns it. Leave unset for a render
+   * that only reads, such as a chip naming a piece.
+   */
+  runsPiece?: boolean;
 }
 
 /**
@@ -77,7 +85,7 @@ export const render = (
   let disposed = false;
 
   renderer
-    .render(parent, cellRef)
+    .render(parent, cellRef, { runsPiece: options.runsPiece })
     .catch((error) => {
       // Swallow errors caused by teardown: this render being cancelled, or the
       // connection being disposed (which cancels an in-flight mount).

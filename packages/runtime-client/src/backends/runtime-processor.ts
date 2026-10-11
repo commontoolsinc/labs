@@ -408,6 +408,8 @@ function spaceAclResponse(
   };
 }
 
+const displayLogger = getLogger("runtime-client.display");
+
 // Split-timing for the CFC label IPC path. Counts/timing are readable via
 // getLoggerCounts(); enabled silently so the hot path pays only the timestamp.
 const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
@@ -4094,7 +4096,12 @@ export class RuntimeProcessor {
       if (active) cancelRender = reconciler.mount(cell);
       return { rootId: reconciler.getRootNodeId() };
     };
-    if (!this.#runtime.viewScopedReplicationRequested) return render();
+    if (!this.#runtime.viewScopedReplicationRequested) {
+      // In view-scoped replication the mount above is itself the demand that
+      // a visible root run; here a display has to ask (`runsPiece`).
+      if (request.runsPiece === true) this.#runDisplayedPiece(rawCell);
+      return render();
+    }
     return this.#runtime.viewReplication.mount(
       rawCell,
       key,
@@ -4109,6 +4116,36 @@ export class RuntimeProcessor {
       if (this.#vdomMounts.get(key) === mount) this.#vdomMounts.delete(key);
       throw error;
     });
+  }
+
+  /**
+   * Starts the piece a mount displays, as opening it directly does
+   * (`VDomMountRequest.runsPiece`), without taking it from a pattern that
+   * owns it (`claims: false`). The piece is the document the mounted cell
+   * addresses, so a variant like `piece[TILE_UI]` starts `piece`, not the
+   * document its value links to; a document that holds a link, as a pinned
+   * reference does, is followed by the start itself. A document that is not
+   * a piece is left alone. Not awaited: the render does not wait on a start,
+   * and `Runtime.settled()` covers it.
+   */
+  #runDisplayedPiece(mounted: Cell<unknown>): void {
+    const piece = this.#runtime.getCellFromLink({
+      ...mounted.getAsNormalizedFullLink(),
+      path: [],
+    });
+    const start = this.#runtime.start(piece, { claims: false }).catch((
+      error: unknown,
+    ) => {
+      if (
+        error instanceof Error &&
+        error.message.includes("no pattern identity")
+      ) return;
+      displayLogger.warn("display-start", () => [
+        "Starting a displayed piece failed",
+        error,
+      ]);
+    });
+    this.#runtime.trackAsyncWork(start);
   }
 
   /**

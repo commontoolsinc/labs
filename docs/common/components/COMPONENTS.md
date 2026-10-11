@@ -400,7 +400,11 @@ See [composition](../patterns/composition.md) for more on pattern composition.
 
 A piece bound to `cf-render` with `$cell` passes the same confidentiality gates
 as when it is opened by its address, so what the viewer may not see renders as
-the policy placeholder in the same places. The exceptions:
+the policy placeholder in the same places. It also runs as it does when opened:
+showing the piece (full, its exported tile or chip, or the default tile) starts
+it in the viewer's runtime if it is not running, without taking it from a
+pattern that owns it, so a view computed for the viewer renders. The default
+chip only names the piece and starts nothing. The exceptions:
 
 - A piece whose own document the viewer may not see shows nothing at all, where
   opening it shows the placeholder.

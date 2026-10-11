@@ -4732,8 +4732,12 @@ export class Runtime {
     );
   }
 
-  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
-    return this.runner.start(resultCell);
+  /** See `Runner.start()`, including `claims: false`. */
+  start<T = any>(
+    resultCell: Cell<T>,
+    options?: { claims?: boolean },
+  ): Promise<boolean> {
+    return this.runner.start(resultCell, options);
   }
 
   /**

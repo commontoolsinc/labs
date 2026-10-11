@@ -356,7 +356,6 @@ export class CFRender extends BaseElement {
 
   @state()
   private accessor _hasRendered = false;
-  private _startPromise?: Promise<boolean>;
 
   //
   // Debug helpers
@@ -488,8 +487,6 @@ export class CFRender extends BaseElement {
       // Pieces passed through patterns (e.g. piece-grid) arrive as LINKS, not
       // the root piece cell. Resolve every variant to the target piece so full
       // nested rendering and its piece menu address the same entity.
-      await this._startPromise;
-      if (cancelled()) return;
       const resolved = await cell.resolveAsCell();
       if (cancelled()) return;
       const currentTarget = await this._watchLinkTarget(cell, resolved);
@@ -560,7 +557,11 @@ export class CFRender extends BaseElement {
 
   /**
    * Mounts `cell` into `container` as the root of a render of its own, which
-   * decides under the viewer's render policy what reaches the page.
+   * decides under the viewer's render policy what reaches the page. Every
+   * caller displays the piece itself (full, an exported variant, the default
+   * tile), so the piece runs, as opening it directly makes it run
+   * (`runsPiece`); the default chip, which only names the piece, renders
+   * through `createNameChip()` instead.
    */
   private _mount(
     container: HTMLElement,
@@ -570,7 +571,7 @@ export class CFRender extends BaseElement {
     return render(
       container,
       cell as CellHandle<VNode>,
-      this.#renderErrorOptions(generation),
+      { ...this.#renderErrorOptions(generation), runsPiece: true },
     );
   }
 

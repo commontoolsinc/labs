@@ -107,6 +107,64 @@ describe("child run ownership", () => {
     runtime.runner.stop(child);
   });
 
+  // A display only asks that what it shows run: rendering a pattern's child
+  // must not take the child from the pattern, which stops it with itself.
+  async function runningNestedChild(cause: string) {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Child = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const Parent = pattern<{ value: number }>(({ value }) => ({
+      child: Child({ value }),
+    }));
+    const tx = runtime.edit();
+    const parent = runtime.getCell<{ child: { doubled: number } }>(
+      space,
+      cause,
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, Parent, { value: 3 }, parent);
+    expect((await tx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    expect(await result.pull()).toEqual({ child: { doubled: 6 } });
+    const child = result.key("child").resolveAsCell() as Cell<
+      { doubled: number }
+    >;
+    return { parent, child };
+  }
+
+  it("leaves a nested child to its parent when a start does not claim it", async () => {
+    const { parent, child } = await runningNestedChild(
+      "unclaimed nested child parent",
+    );
+
+    const displayStart = runtime.start(child, { claims: false });
+    await expect(displayStart).resolves.toBe(true);
+    runtime.runner.stop(parent);
+    await runtime.idle();
+
+    expect(runtime.runner.cancels.has(key(child))).toBe(false);
+  });
+
+  it("claims a nested child when a claiming start joins one that does not", async () => {
+    const { parent, child } = await runningNestedChild(
+      "joined claiming start parent",
+    );
+
+    // The second start joins the first one's attempt before it decides.
+    const displayStart = runtime.start(child, { claims: false });
+    const directStart = runtime.start(child);
+    await expect(displayStart).resolves.toBe(true);
+    await expect(directStart).resolves.toBe(true);
+    // Only the claim keeps the child once its parent stops.
+    runtime.runner.stop(parent);
+    await runtime.idle();
+
+    expect(runtime.runner.cancels.has(key(child))).toBe(true);
+    runtime.runner.stop(child);
+  });
+
   it("keeps a directly started map child after its parent stops", async () => {
     const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
     const op = pattern(({ element }: { element: number }) =>

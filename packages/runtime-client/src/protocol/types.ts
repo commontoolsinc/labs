@@ -3259,6 +3259,14 @@ export type VDomMountRequest = BaseRequest & {
 
   /** The cell to render as VDOM */
   cell: CellRef;
+
+  /**
+   * The mount displays the piece `cell` belongs to, so that piece runs, as
+   * opening the piece directly makes it run: the worker starts it if it is
+   * not running, without taking it from a pattern that owns it. Absent for a
+   * mount that only reads, such as a chip naming a piece.
+   */
+  runsPiece?: boolean;
 };
 
 /**
