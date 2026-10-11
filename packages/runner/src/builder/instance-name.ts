@@ -40,13 +40,14 @@ export function nameInstance<T>(value: T, name: string): T {
 
 /**
  * Makes `nameInstance()` name nothing, so that a test can leave the state a
- * runtime without instance names leaves, and returns a function that undoes
- * it.
+ * runtime without instance names leaves, and returns a function that puts
+ * back what was in effect before.
  */
 export function stopNamingInstancesForTesting(): () => void {
+  const previous = namingInstances;
   namingInstances = false;
   return () => {
-    namingInstances = true;
+    namingInstances = previous;
   };
 }
 
