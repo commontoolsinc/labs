@@ -97,7 +97,7 @@ describe("instance-name", () => {
       ]);
     });
 
-    it("names an instance given the name it gives a stream root, and leaves the stream root at its positional cause", () => {
+    it("names an instance that shares its name with a stream root, and leaves the stream root at its positional cause", () => {
       const Child = child();
       const parent = pattern<{ x: number }>(({ x }) => {
         const s = nameInstance(stream<number>(), "a");
