@@ -127,25 +127,25 @@ export type ChatAdminBootstrapRole = AddIntegrity<
   readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
 >;
 
-export type ChatEveryoneAdminFlag =
-  | RequiresIntegrity<
-    AddIntegrity<
-      TrustedActionWrite<
-        true,
-        typeof commitTrustedAdminToggle,
-        typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
-        typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
-      >,
-      readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+/**
+ * Whether everyone in the chat is an admin. One claim on the flag as a whole
+ * (§4.2.1.1: no IFC obligation may depend on which `anyOf` branch a value
+ * takes): only the reviewed toggle, from its trusted surface, may write it,
+ * and what it writes carries the admin mint and must carry it. Setting `true`
+ * is gated exactly as before; `false` is now gated the same way.
+ */
+export type ChatEveryoneAdminFlag = RequiresIntegrity<
+  AddIntegrity<
+    TrustedActionWrite<
+      boolean,
+      typeof commitTrustedAdminToggle,
+      typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+      typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
     >,
     readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
-  >
-  | TrustedActionWrite<
-    false,
-    typeof commitTrustedAdminToggle,
-    typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
-    typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
-  >;
+  >,
+  readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+>;
 
 export interface ChatAdminRegistryStoredValue {
   readonly admins?: ChatAdminList;
@@ -202,22 +202,15 @@ export type ChatAdminListView = AddIntegrity<
   readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
 >;
 
-export type ChatEveryoneAdminFlagView =
-  | AddIntegrity<
-    TrustedActionWrite<
-      true,
-      typeof commitTrustedAdminToggle,
-      typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
-      typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
-    >,
-    readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
-  >
-  | TrustedActionWrite<
-    false,
+export type ChatEveryoneAdminFlagView = AddIntegrity<
+  TrustedActionWrite<
+    boolean,
     typeof commitTrustedAdminToggle,
     typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
     typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
-  >;
+  >,
+  readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+>;
 
 export interface ChatAdminRegistryViewStoredValue {
   readonly admins?: ChatAdminListView;
@@ -776,7 +769,7 @@ export const commitTrustedAdminToggle = handler<
     nextPolicy.everyoneIsAdmin !== undefined
   ) {
     const currentRegistry = adminRegistry.get() as
-      | ChatAdminRegistryStoredValue
+      | ChatAdminRegistryViewStoredValue
       | undefined;
     adminRegistry.set({
       ...(currentRegistry?.admins !== undefined

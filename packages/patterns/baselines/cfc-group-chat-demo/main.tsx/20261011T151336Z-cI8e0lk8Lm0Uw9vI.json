@@ -28,7 +28,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/cfc-group-chat-demo/trusted.tsx",
-              "moduleIdentity": "IWRKIi7v7MbsiLaurzTLkc0KdejmeEUHy7KnG0L0jjI",
+              "moduleIdentity": "RvEUpo4CInBVZ24z6lNw3rRysaOn9A3w8Qv7MMiLKOA",
               "path": [
                 "commitTrustedAdminToggle"
               ]
@@ -92,64 +92,32 @@
         "type": "object"
       },
       "ChatEveryoneAdminFlag": {
-        "anyOf": [
-          {
-            "enum": [
-              true
+        "ifc": {
+          "addIntegrity": [
+            "group-chat-admin"
+          ],
+          "requiredIntegrity": [
+            "group-chat-admin"
+          ],
+          "uiContract": {
+            "action": "TrustedGroupChatSetAdmin",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedGroupChatAdminSurface"
             ],
-            "ifc": {
-              "addIntegrity": [
-                "group-chat-admin"
-              ],
-              "requiredIntegrity": [
-                "group-chat-admin"
-              ],
-              "uiContract": {
-                "action": "TrustedGroupChatSetAdmin",
-                "helper": "UiAction",
-                "requiredEventIntegrity": [
-                  "TrustedGroupChatAdminSurface"
-                ],
-                "trustedPattern": "TrustedGroupChatAdminSurface"
-              },
-              "writeAuthorizedBy": {
-                "__ctWriterIdentityOf": {
-                  "file": "/packages/patterns/cfc-group-chat-demo/trusted.tsx",
-                  "moduleIdentity": "IWRKIi7v7MbsiLaurzTLkc0KdejmeEUHy7KnG0L0jjI",
-                  "path": [
-                    "commitTrustedAdminToggle"
-                  ]
-                }
-              }
-            },
-            "type": "boolean"
+            "trustedPattern": "TrustedGroupChatAdminSurface"
           },
-          {
-            "enum": [
-              false
-            ],
-            "ifc": {
-              "uiContract": {
-                "action": "TrustedGroupChatSetAdmin",
-                "helper": "UiAction",
-                "requiredEventIntegrity": [
-                  "TrustedGroupChatAdminSurface"
-                ],
-                "trustedPattern": "TrustedGroupChatAdminSurface"
-              },
-              "writeAuthorizedBy": {
-                "__ctWriterIdentityOf": {
-                  "file": "/packages/patterns/cfc-group-chat-demo/trusted.tsx",
-                  "moduleIdentity": "IWRKIi7v7MbsiLaurzTLkc0KdejmeEUHy7KnG0L0jjI",
-                  "path": [
-                    "commitTrustedAdminToggle"
-                  ]
-                }
-              }
-            },
-            "type": "boolean"
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc-group-chat-demo/trusted.tsx",
+              "moduleIdentity": "RvEUpo4CInBVZ24z6lNw3rRysaOn9A3w8Qv7MMiLKOA",
+              "path": [
+                "commitTrustedAdminToggle"
+              ]
+            }
           }
-        ]
+        },
+        "type": "boolean"
       },
       "ChatProfile": {
         "properties": {
@@ -288,7 +256,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/cfc-group-chat-demo/trusted.tsx",
-              "moduleIdentity": "IWRKIi7v7MbsiLaurzTLkc0KdejmeEUHy7KnG0L0jjI",
+              "moduleIdentity": "RvEUpo4CInBVZ24z6lNw3rRysaOn9A3w8Qv7MMiLKOA",
               "path": [
                 "commitTrustedRoomAdd"
               ]
@@ -355,7 +323,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/cfc-group-chat-demo/trusted.tsx",
-              "moduleIdentity": "IWRKIi7v7MbsiLaurzTLkc0KdejmeEUHy7KnG0L0jjI",
+              "moduleIdentity": "RvEUpo4CInBVZ24z6lNw3rRysaOn9A3w8Qv7MMiLKOA",
               "path": [
                 "commitTrustedMessageSend"
               ]
@@ -481,7 +449,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/cfc-group-chat-demo/trusted.tsx",
-              "moduleIdentity": "IWRKIi7v7MbsiLaurzTLkc0KdejmeEUHy7KnG0L0jjI",
+              "moduleIdentity": "RvEUpo4CInBVZ24z6lNw3rRysaOn9A3w8Qv7MMiLKOA",
               "path": [
                 "commitTrustedAdminToggle"
               ]
@@ -542,64 +510,32 @@
         "type": "object"
       },
       "ChatEveryoneAdminFlag": {
-        "anyOf": [
-          {
-            "enum": [
-              true
+        "ifc": {
+          "addIntegrity": [
+            "group-chat-admin"
+          ],
+          "requiredIntegrity": [
+            "group-chat-admin"
+          ],
+          "uiContract": {
+            "action": "TrustedGroupChatSetAdmin",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedGroupChatAdminSurface"
             ],
-            "ifc": {
-              "addIntegrity": [
-                "group-chat-admin"
-              ],
-              "requiredIntegrity": [
-                "group-chat-admin"
-              ],
-              "uiContract": {
-                "action": "TrustedGroupChatSetAdmin",
-                "helper": "UiAction",
-                "requiredEventIntegrity": [
-                  "TrustedGroupChatAdminSurface"
-                ],
-                "trustedPattern": "TrustedGroupChatAdminSurface"
-              },
-              "writeAuthorizedBy": {
-                "__ctWriterIdentityOf": {
-                  "file": "/packages/patterns/cfc-group-chat-demo/trusted.tsx",
-                  "moduleIdentity": "IWRKIi7v7MbsiLaurzTLkc0KdejmeEUHy7KnG0L0jjI",
-                  "path": [
-                    "commitTrustedAdminToggle"
-                  ]
-                }
-              }
-            },
-            "type": "boolean"
+            "trustedPattern": "TrustedGroupChatAdminSurface"
           },
-          {
-            "enum": [
-              false
-            ],
-            "ifc": {
-              "uiContract": {
-                "action": "TrustedGroupChatSetAdmin",
-                "helper": "UiAction",
-                "requiredEventIntegrity": [
-                  "TrustedGroupChatAdminSurface"
-                ],
-                "trustedPattern": "TrustedGroupChatAdminSurface"
-              },
-              "writeAuthorizedBy": {
-                "__ctWriterIdentityOf": {
-                  "file": "/packages/patterns/cfc-group-chat-demo/trusted.tsx",
-                  "moduleIdentity": "IWRKIi7v7MbsiLaurzTLkc0KdejmeEUHy7KnG0L0jjI",
-                  "path": [
-                    "commitTrustedAdminToggle"
-                  ]
-                }
-              }
-            },
-            "type": "boolean"
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc-group-chat-demo/trusted.tsx",
+              "moduleIdentity": "RvEUpo4CInBVZ24z6lNw3rRysaOn9A3w8Qv7MMiLKOA",
+              "path": [
+                "commitTrustedAdminToggle"
+              ]
+            }
           }
-        ]
+        },
+        "type": "boolean"
       },
       "ChatProfile": {
         "properties": {
@@ -732,7 +668,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/cfc-group-chat-demo/trusted.tsx",
-              "moduleIdentity": "IWRKIi7v7MbsiLaurzTLkc0KdejmeEUHy7KnG0L0jjI",
+              "moduleIdentity": "RvEUpo4CInBVZ24z6lNw3rRysaOn9A3w8Qv7MMiLKOA",
               "path": [
                 "commitTrustedRoomAdd"
               ]
@@ -853,7 +789,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/cfc-group-chat-demo/trusted.tsx",
-              "moduleIdentity": "IWRKIi7v7MbsiLaurzTLkc0KdejmeEUHy7KnG0L0jjI",
+              "moduleIdentity": "RvEUpo4CInBVZ24z6lNw3rRysaOn9A3w8Qv7MMiLKOA",
               "path": [
                 "commitTrustedMessageSend"
               ]
