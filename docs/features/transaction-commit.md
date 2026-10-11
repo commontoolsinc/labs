@@ -68,17 +68,20 @@ when recorded reads show a pending local write; other failures propagate.
 
 None of these reads tells confirmed state from what the replica holds locally.
 `readConfirmed(runtime, space, read)` runs `read` synchronously in one
-transaction that reads past any speculation overlay, so every document it
-consumes is read at one instant, and reports whether each of those documents
-is confirmed: watched and delivered, with no pending local write and no value
-the replica made up locally. When they all are, it also returns the commit
-sequence the read is complete through: the `toSeq` of the last server push the
-replica applied whole, so that every commit at or below it that touched a
-document the read consumed is reflected in what it read. A read assembled
-from separate pulls has no such sequence, since one pull can see a commit that
-an earlier one missed. The sequence is withheld under server execution, where a
-co-hosted executor's wave commits can reach a push's stamped head before their
-changes reach the push.
+read-only transaction that reads past any speculation overlay, so every
+document it consumes is read at one instant, and reports whether each of those
+documents is confirmed: watched and delivered, with no pending local write and
+no value the replica made up locally. Every read counts, a `sample()` as much
+as a `get()`. When they all are confirmed and the replica can say, it also
+returns the commit sequence the read is complete through: the `toSeq` of the
+last server push the replica applied whole, so that every commit at or below it
+that touched a document the read consumed is reflected in what it read. A read
+assembled from separate pulls has no such sequence, since one pull can see a
+commit that an earlier one missed. The replica cannot say before its first
+push, after a frame it failed to apply or applied with entries quarantined, and
+while its server runs server execution or does not say whether it does, since
+a co-hosted executor's wave commits can reach a push's stamped head before
+their changes reach the push.
 
 Observe `receipt.verdict` when the next step requires knowing the commit's
 fate. Use `receipt.settled` when a retry needs the repaired read basis, when a

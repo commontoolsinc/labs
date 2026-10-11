@@ -1,10 +1,10 @@
 import type { Runtime } from "./runtime.ts";
-import { txToReactivityLog } from "./scheduler/reactivity.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "./storage/interface.ts";
 import { markDurableReadTx } from "./storage/reactivity-log.ts";
+import { getTransactionReadActivities } from "./storage/transaction-inspection.ts";
 
 /** What {@link readConfirmed} returns. */
 export type ConfirmedRead<R> = {
@@ -21,9 +21,10 @@ export type ConfirmedRead<R> = {
   /**
    * When `confirmed`, the commit sequence through which the read is complete:
    * every commit at or below it that touched a document `read` consumed is
-   * reflected in `value`. Absent when the replica cannot say, and under
-   * server execution, whose wave commits can reach a push's stamped head
-   * before their changes reach the push.
+   * reflected in `value`. Absent whenever the replica cannot say
+   * (`ISpaceReplica.completeThroughSeq`): before its first push, after a
+   * frame it failed to apply, and while its server runs server execution or
+   * does not say whether it does.
    */
   seq?: number;
 };
@@ -36,33 +37,28 @@ export type ConfirmedRead<R> = {
  * `read` runs synchronously, so every document it consumes is read at one
  * instant: a value assembled from several cells inside it cannot straddle a
  * commit that a value assembled from separate reads can. It reads through the
- * transaction it is given (`cell.withTx(tx).get()`) and returns plain data;
- * the transaction is aborted once it returns, so a cell bound to it is not
- * read again afterwards. Documents not yet loaded read as absent and leave the
- * read unconfirmed, so a caller loads what it reads first, with `sync()` or
- * `pull()`. A document in another space leaves the read unconfirmed.
+ * read-only transaction it is given (`cell.withTx(tx).get()`, or `sample()`),
+ * where a write throws, and returns plain data; the transaction is not read
+ * through once it returns, so neither is a cell bound to it. Every
+ * read counts, whether or not it would schedule anything. Documents not yet
+ * loaded read as absent and leave the read unconfirmed, so a caller loads what
+ * it reads first, with `sync()` or `pull()`. A document in another space leaves
+ * the read unconfirmed.
  */
 export function readConfirmed<R>(
   runtime: Runtime,
   space: MemorySpace,
   read: (tx: IExtendedStorageTransaction) => R,
 ): ConfirmedRead<R> {
-  const tx = runtime.edit();
+  const tx = runtime.readTx();
   markDurableReadTx(tx);
-  try {
-    const value = read(tx);
-    const { replica } = runtime.storageManager.open(space);
-    const log = txToReactivityLog(tx);
-    const confirmed = replica.isConfirmedDocument !== undefined &&
-      [...log.reads, ...log.shallowReads].every((address) =>
-        address.space === space &&
-        replica.isConfirmedDocument!(address.id, address.scope)
-      );
-    const seq = confirmed && runtime.experimental.serverExecution !== true
-      ? replica.completeThroughSeq?.()
-      : undefined;
-    return seq === undefined ? { value, confirmed } : { value, confirmed, seq };
-  } finally {
-    tx.abort();
-  }
+  const value = read(tx);
+  const { replica } = runtime.storageManager.open(space);
+  const confirmed = replica.isConfirmedDocument !== undefined &&
+    [...getTransactionReadActivities(tx)].every((activity) =>
+      activity.space === space &&
+      replica.isConfirmedDocument!(activity.id, activity.scope)
+    );
+  const seq = confirmed ? replica.completeThroughSeq?.() : undefined;
+  return seq === undefined ? { value, confirmed } : { value, confirmed, seq };
 }

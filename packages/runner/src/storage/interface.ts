@@ -3295,11 +3295,12 @@ export interface ISpaceReplica extends ISpace {
   /**
    * The commit sequence through which every document this replica watches
    * holds every change, or `undefined` when it cannot say: before the first
-   * server push applies, and after a frame failed to apply or was applied
-   * with entries quarantined, until the replica resets. A document a watch
-   * mutation delivered may hold a later state than this sequence. The bound
-   * is the server's publication turn, which commits that bypass it can
-   * break (a co-hosted executor's wave commits, under server execution).
+   * server push applies; after a frame failed to apply or was applied with
+   * entries quarantined, until the replica resets; and while the session's
+   * server runs server execution or does not say whether it does, since its
+   * executor commits waves outside the publication turn a push is complete
+   * under. A document a watch mutation delivered may hold a later state than
+   * this sequence.
    */
   completeThroughSeq?(): number | undefined;
 

@@ -5512,9 +5512,16 @@ export class SpaceReplica
 
   /** ISpaceReplica.completeThroughSeq. */
   completeThroughSeq(): number | undefined {
-    return this.#completeThroughLost || this.#completeThroughSeq === 0
-      ? undefined
-      : this.#completeThroughSeq;
+    if (this.#completeThroughLost || this.#completeThroughSeq === 0) {
+      return undefined;
+    }
+    // A server that runs server execution commits its executor's waves
+    // outside the publication turn a push is complete under, and a server
+    // that does not say could be one.
+    if (this.#sessionClient?.serverFlags?.serverExecution !== false) {
+      return undefined;
+    }
+    return this.#completeThroughSeq;
   }
 
   /** ISpaceReplica.isConfirmedDocument. */

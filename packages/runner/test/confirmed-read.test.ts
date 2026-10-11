@@ -222,6 +222,55 @@ describe("confirmed-read", () => {
     expect(read.seq).toBeGreaterThanOrEqual(seq);
   });
 
+  it("returns an unconfirmed read of a document it sampled without loading", async () => {
+    await write("anchor", 1);
+    const anchor = await loaded("anchor");
+    const delivered = arrival(anchor, 2);
+    await write("anchor", 2);
+    await delivered;
+    const unloaded = reader.getCell<Note>(space, "sampled", noteSchema);
+
+    const read = readConfirmed(
+      reader,
+      space,
+      (tx) => unloaded.withTx(tx).sample()?.n,
+    );
+    expect(read).toEqual({ value: undefined, confirmed: false });
+  });
+
+  it("throws for a write inside the read", async () => {
+    await write("written", 1);
+    const written = await loaded("written");
+
+    expect(() =>
+      readConfirmed(reader, space, (tx) => {
+        written.withTx(tx).set({ n: 999 });
+        return written.withTx(tx).get()?.n;
+      })
+    ).toThrow();
+    expect(
+      readConfirmed(reader, space, (tx) => written.withTx(tx).get()?.n).value,
+    )
+      .toBe(1);
+  });
+
+  it("returns no sequence while its server runs server execution", async () => {
+    // Set before either session opens, so the server's hello says so.
+    server.setServerExecutionObserver({});
+    await write("served", 1);
+    const served = await loaded("served");
+    const delivered = arrival(served, 2);
+    await write("served", 2);
+    await delivered;
+
+    const read = readConfirmed(
+      reader,
+      space,
+      (tx) => served.withTx(tx).get()?.n,
+    );
+    expect(read).toEqual({ value: 2, confirmed: true });
+  });
+
   it("returns an unconfirmed read of a document it has not loaded", () => {
     const unloaded = reader.getCell<Note>(space, "unloaded", noteSchema);
 
