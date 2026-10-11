@@ -284,6 +284,30 @@ readiness gate waits for the dependency's drop, so the retry rebuilds
 against the repaired base rather than against the dead layer that doomed
 it.
 
+A frame can prove a confirmed read stale before any verdict. A document's seq
+is that of the commit that wrote it, so a frame that moves a document past
+the seq a confirmed read declared delivers a later write of that document,
+and a recursive read of the whole document overlaps every write: §3.6.1
+refuses the commit, unless the identity exemption accepts it with its writes
+elided. The frame says nothing about which paths its commits wrote, so a
+narrower or shape-only read is left for the server to judge. The client MAY
+then leave the commit's layers out of its view until the verdict, and with
+them the layers of every commit whose pending reads sit on it, since the
+server refuses a commit whose dependency it refused. What the layers would
+show is the write replayed over a base its writer never read — a tail
+`splice` of an element the frame already carries shows that element twice —
+and the verdict stays the server's: a refusal drops the layers as any refusal
+does, and an accept promotes them as the store applied them. A commit built
+while a layer is left out names it in no dependency array, since the view
+the commit read did not sit on it; its confirmed read then declares the
+frame's seq, and the server refuses it should the left-out layer land with a
+write after all. What the client must rule out is the frame carrying the
+commit's own accepted write, which moves the document too: the frame that
+follows an own accept carries `caughtUpLocalSeq` at or above that commit
+(04-protocol.md §4.11.2), so a commit above the frame's marker — or above the
+last marker seen, when the frame carries none — has no write in it. A pull is
+under no such obligation and proves nothing.
+
 Completeness is relative to the VIEW, not to the session's commit history,
 so the array may be non-contiguous in the session's `localSeq` space. A
 layer the client removed from its overlay before the read view was built — a

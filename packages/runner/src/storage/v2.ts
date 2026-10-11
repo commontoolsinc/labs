@@ -37,6 +37,7 @@ import {
   type ClientCommit,
   type CommitClass,
   type CommitPrecondition,
+  type ConfirmedRead,
   DEFAULT_BRANCH,
   type DocumentPath,
   type EntityDocument,
@@ -558,6 +559,16 @@ type PendingVersion =
     acceptedSeq?: number;
 
     /**
+     * Set once a frame has shown the store will refuse this layer's commit
+     * as a stale read: a document it read whole has since taken another
+     * writer's commit (`#doomCommit`). The layer is left out of the view
+     * until its verdict. A refusal drops it like any other; an accept, which
+     * the identity exemption of 03-commit-model.md §3.6.1 can still give,
+     * promotes it as the store applied it (`#confirmPending`).
+     */
+    doomed?: true;
+
+    /**
      * Seq of the confirmed version this entry was layered on. While the
      * confirmed seq still equals it, the entry sits directly on the value its
      * writer read.
@@ -687,6 +698,12 @@ const pendingVersion = (
   baseSeq: number,
 ): PendingVersion => ({ localSeq, baseSeq, ...operation });
 
+/** `entry` back in the view: the same layer without its `doomed` mark. */
+const withoutDoom = (entry: PendingVersion): PendingVersion => {
+  const { doomed: _doomed, ...rest } = entry;
+  return rest;
+};
+
 const confirmedVersion = (
   seq: number,
   value: EntityDocument | undefined,
@@ -712,6 +729,9 @@ const applyPendingVersion = (
   pending: PendingVersion,
   logContext: PendingPatchLogContext,
 ): EntityDocument | undefined => {
+  if (pending.doomed === true) {
+    return base;
+  }
   switch (pending.op) {
     case "delete":
       return undefined;
@@ -3808,9 +3828,15 @@ class StorageTransactionRejectionError extends Error {
  * the dependants can be rejected locally instead of waiting for the server's
  * inevitable "pending dependency not resolved" (CT-1872 1b).
  *
- * Commits with NO pending reads are deliberately never registered: a
- * zero-read mergeable/blind commit is DESIGNED to survive a parent drop (the
- * server materializes its spine via createMissing — CT-1872 1a), and the
+ * A commit whose confirmed reads include one of a whole document is tracked
+ * too, so a frame that moves that document past the read can take the
+ * commit's layers out of the view ahead of the store's refusal
+ * (`#doomStaleReads`); its dependency set is empty, so no drop ever
+ * cascades onto it.
+ *
+ * Commits with neither are deliberately never registered: a zero-read
+ * mergeable/blind commit is DESIGNED to survive a parent drop (the server
+ * materializes its spine via createMissing — CT-1872 1a), and the
  * scheduler-observation batch wrapper carries no reads at all. Cascading
  * either would break intended semantics.
  */
@@ -3870,6 +3896,22 @@ type InFlightCommit = {
  * user-scoped read) keys by the scope NAME, exactly as before.
  */
 const docKey = (id: URI, instance: string): string => `${instance}\0${id}`;
+
+/**
+ * Whether a confirmed read is stale as soon as any later commit writes its
+ * document, so that the document's confirmed seq alone decides §3.6.1 of
+ * 03-commit-model.md for it. A recursive read of the whole document, or of
+ * its `value` member, where every cell write lands, overlaps every such
+ * write. A read of a narrower path or a shape-only read overlaps only some
+ * writes, and a frame does not say which paths its commits wrote, so the
+ * store decides those.
+ */
+const readIsOfWholeDocument = (
+  read: Pick<ConfirmedCommitRead, "path" | "nonRecursive">,
+): boolean =>
+  read.nonRecursive !== true &&
+  (read.path.length === 0 ||
+    (read.path.length === 1 && read.path[0] === "value"));
 
 /** A local address the replica keys: the scope name plus, where the
  * caller knows it, the explicit instance key. */
@@ -6881,10 +6923,13 @@ export class SpaceReplica
 
   /**
    * Register a commit in `#inFlightCommits` so a dropped dependency can
-   * reject it locally. Returns undefined — no registration — when the commit
-   * has no pending reads: with nothing read from another commit's optimistic
-   * state there is no dependency to cascade on, and this is the natural
-   * exemption for zero-read/mergeable/blind commits and the
+   * reject it locally, and a frame that moves a document it read whole can
+   * take its layers out of the view. Returns undefined — no registration —
+   * when the commit has neither pending reads nor a whole-document confirmed
+   * read: with nothing read from another commit's optimistic state there is
+   * no dependency to cascade on, and with no whole-document read no frame
+   * can prove it stale. This is
+   * the natural exemption for zero-read/mergeable/blind commits and the
    * scheduler-observation batch wrapper (all DESIGNED to survive a parent
    * drop; see the InFlightCommit doc).
    */
@@ -6896,7 +6941,9 @@ export class SpaceReplica
     options: { alwaysRegister?: boolean; identity?: ScopeKeyIdentity } = {},
   ): InFlightCommit | undefined {
     if (
-      commit.reads.pending.length === 0 && options.alwaysRegister !== true
+      commit.reads.pending.length === 0 &&
+      !commit.reads.confirmed.some(readIsOfWholeDocument) &&
+      options.alwaysRegister !== true
     ) {
       return undefined;
     }
@@ -7884,6 +7931,9 @@ export class SpaceReplica
           ...new Set(
             record?.pending
               .filter((version) => version.localSeq < localSeq)
+              // A doomed layer is already out of the view this read saw,
+              // and the store will never resolve it.
+              .filter((version) => version.doomed !== true)
               .filter((version) =>
                 !excludeSpeculativeLayers ||
                 !this.#speculativeLocalSeqs.has(version.localSeq)
@@ -8469,6 +8519,11 @@ export class SpaceReplica
 
     if (sync.viewPlans !== undefined) this.#publishViewPlans(sync.viewPlans);
 
+    // Doomed layers leave the view BEFORE the differential compare, so the
+    // notification below carries the frame's value where a doomed layer
+    // stood rather than that layer replayed over a base it never read.
+    this.#doomStaleReads(sync, type);
+
     // Parked accepts apply BEFORE the differential compare: when the frame
     // authoritatively covers a doc the session itself wrote (mixed
     // provenance), the integrated base already CONTAINS the parked write,
@@ -8836,6 +8891,100 @@ export class SpaceReplica
   }
 
   /**
+   * A whole-document confirmed read of `entry`'s commit whose document the
+   * replica now holds at a later seq, if any. A document's confirmed seq is
+   * that of the commit that wrote it, so a seq past the read's is a later
+   * write of the document, and a whole-document read overlaps every write
+   * (03-commit-model.md §3.6.1). A confirmed read names no own layer, so the
+   * later write is another writer's — or this commit's own, which the caller
+   * rules out.
+   */
+  #staleWholeDocumentRead(entry: InFlightCommit): ConfirmedRead | undefined {
+    for (const read of entry.commit.reads.confirmed) {
+      if (!readIsOfWholeDocument(read)) continue;
+      const record = this.#docs.get(
+        docKey(read.id as URI, this.instanceKey(read.scope, entry.identity)),
+      );
+      if (record !== undefined && record.confirmed.seq > read.seq) {
+        return read;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Takes the layers of `entry`'s commit out of the view until its verdict,
+   * and with them the layers of every in-flight commit whose pending reads
+   * sit on this one, since the store refuses a commit whose dependency it
+   * refused. The verdict stays the store's: a refusal drops the layers as
+   * any refusal does, and an accept promotes them as the store applied
+   * them. The view alone moves early, because what the layers would show
+   * is the write replayed over a base its writer never read.
+   */
+  #doomCommit(entry: InFlightCommit): void {
+    if (entry.settled || entry.localRejectionValue !== undefined) {
+      return;
+    }
+    let hidden = false;
+    for (const record of this.#docs.values()) {
+      if (
+        !record.pending.some((layer) =>
+          layer.localSeq === entry.localSeq && layer.doomed !== true
+        )
+      ) {
+        continue;
+      }
+      record.pending = record.pending.map((layer) =>
+        layer.localSeq === entry.localSeq ? { ...layer, doomed: true } : layer
+      );
+      record.materialized = undefined;
+      hidden = true;
+    }
+    if (!hidden) return;
+    logger.debug("commit-doomed", () => [
+      "pending layers left out of the view: a whole-document read is stale",
+      { localSeq: entry.localSeq, operations: entry.operations.length },
+    ]);
+    for (const dependant of [...this.#inFlightCommits.values()]) {
+      if (dependant.dependencies.has(entry.localSeq)) {
+        this.#doomCommit(dependant);
+      }
+    }
+  }
+
+  /**
+   * Dooms every in-flight commit a fan-out frame has just proved stale: one
+   * with a whole-document confirmed read of a document the frame moved past
+   * the read. A frame may carry a commit's own accepted write, which moves
+   * the document too, so a commit is judged only when the frame cannot:
+   * the frame built after an own accept carries `caughtUpLocalSeq` at or
+   * above that commit (04-protocol.md §4.11.2), so a commit above the
+   * frame's marker, or above the last marker seen when the frame carries
+   * none, has no write in it. A pull answers one watch from the store as it
+   * stands, under no such obligation, so it judges nothing.
+   */
+  #doomStaleReads(sync: SessionSync, type: "pull" | "integrate"): void {
+    if (type !== "integrate") return;
+    const covered = Math.max(
+      this.#caughtUpLocalSeq,
+      sync.caughtUpLocalSeq ?? 0,
+    );
+    for (const entry of [...this.#inFlightCommits.values()]) {
+      if (
+        entry.localSeq <= covered ||
+        this.#ackedSeqsByLocalSeq.has(entry.localSeq) ||
+        entry.settled ||
+        entry.localRejectionValue !== undefined
+      ) {
+        continue;
+      }
+      if (this.#staleWholeDocumentRead(entry) !== undefined) {
+        this.#doomCommit(entry);
+      }
+    }
+  }
+
+  /**
    * CT-1872 1b: when a commit's optimistic writes are dropped, every
    * in-flight commit whose pending reads name that localSeq is provably
    * doomed — the dropped commit will never gain a commit row in the
@@ -8843,7 +8992,7 @@ export class SpaceReplica
    * "pending dependency not resolved" only after a full round trip (a window
    * of up to 30s+ per commit). Fabricate that rejection locally instead.
    *
-   * Commits with no pending reads never enter `#inFlightCommits`, so
+   * A commit with no pending reads has an empty dependency set, so
    * zero-read mergeable/blind commits are structurally exempt — they are
    * DESIGNED to survive a parent drop (the server materializes their spine
    * via createMissing). Resolving the promises here queues the victims'
@@ -9194,6 +9343,17 @@ export class SpaceReplica
       }
       const firstPendingIndex = pendingIndexes[0]!;
       const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1]!;
+      // The verdict is in: a layer left out of the view while its read was
+      // stale (`#doomCommit`) promotes with the rest, as the store applied
+      // it, which the identity exemption makes possible.
+      if (pendingIndexes.some((index) => record.pending[index]!.doomed)) {
+        record.pending = record.pending.map((entry) =>
+          entry.localSeq === localSeq && entry.doomed === true
+            ? withoutDoom(entry)
+            : entry
+        );
+        dropMaterializedSuffix(record, firstPendingIndex);
+      }
       const pending = record.pending[lastPendingIndex]!;
       const previousConfirmed = record.confirmed;
       let promoted: ConfirmedVersion | undefined;

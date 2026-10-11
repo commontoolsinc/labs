@@ -242,14 +242,17 @@ rejected contributor) remains unverifiable, as recorded in §3.5.
 
 Checked by: the TLA+ model (both recording modes, under atomic and
 delayed-delivery configs) for recording completeness and sparse-omission
-reachability — its `Build` always names the view's full layer set, so the
-declared-set scan's VALIDATION half (a buggy omission of a durably
-integrated layer) is outside its reach and is checked instead by the
+reachability. Its scan excludes the own layers a read names, the
+declared-set form, and its `Build` names every layer the view sat on; a
+layer the view does not sit on — one a frame proved stale and the client
+left out (`DoomMode = "frame"`) — is omitted, and the `PendingStacks_*Frame.cfg`
+configs check that the declared-set scan refuses the build should that
+layer land with a write after all. A BUGGY omission of a layer the view
+did sit on is outside the model's reach and is checked instead by the
 engine unit tests (`packages/memory/test/v2-sparse-pending-dependencies.test.ts`),
 the differential harness's sparse mutation, and stacked-commit unit
 tests (`packages/runner/test/memory-v2-stacked-commit.test.ts`); see the
-TLA README's "Canonical dependency arrays" note for the coincidence
-argument and the `SkipLayers` refinement that would bring it in scope.
+TLA README's "Canonical dependency arrays" note.
 
 ### INV-4 — Cascade totality
 
@@ -335,6 +338,18 @@ loss and replay — the scalar-downgrade hold and reconnect races remain
 covered only by example-based tests (reconnect-race,
 pending-commit-durability); extending the channel with loss and re-send is
 the remaining refinement.
+
+A layer a frame proved stale (`03-commit-model.md` §3.5) is left out of the
+client's view, not dropped: it stays on the stack for the server's verdict,
+a refusal drops it as any refusal does, and an accept promotes it. That is
+what keeps the rule on this invariant's safe side — the identity exemption
+can accept a stale write with nothing to show for it, and a commit stacked
+on such a layer can then be accepted with writes — and the model's
+`DoomMode = "frame"` configs (`PendingStacks_*Frame.cfg`) check it:
+`AcceptedVersusDropped` is untouched by a hide, `HiddenNeverWrote` holds a
+layer hidden for its own stale read to a verdict of refused or elided, and
+`VisibleNamesVisible` holds the cascade to hiding every layer that names a
+hidden one.
 
 ### INV-7 — Committed writes are never silently dropped
 
@@ -692,10 +707,12 @@ scanning, cascade scope, or retry behavior:
    including any whole-system preconditions it newly relies on — and guard
    those preconditions (assertion + generator test, as
    `assertNoIndexedArrayStructuralOps` does for INV-2).
-3. If the change touches pending-stack recording, resolution ordering, or
-   staleness bases, run the corresponding TLA+ configs (see
+3. If the change touches pending-stack recording, resolution ordering,
+   staleness bases, or what a client shows for a layer between its commit
+   and its verdict, run the corresponding TLA+ configs (see
    `docs/specs/memory-v2/tla/README.md`) — add a mode to the model if the
-   change introduces a new recording/basis shape. The same holds on the
+   change introduces a new recording/basis shape or a new such client rule
+   (`DoomMode` is the one for the latter). The same holds on the
    delivery side: a change to the reconnect diff base, the holdings
    declaration, or removal semantics runs the `SessionDelivery` configs,
    and a new base or declaration shape becomes a `Mode` variant there.

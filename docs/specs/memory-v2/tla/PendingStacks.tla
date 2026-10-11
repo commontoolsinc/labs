@@ -90,6 +90,23 @@
 (*                   a seq and resolves its localSeq but appends nothing   *)
 (*                   to any path's content.  The proof runs only on a      *)
 (*                   staleness refusal; a dead dependency still refuses.   *)
+(*                                                                         *)
+(*   DoomMode - what the client does with a pending layer whose confirmed  *)
+(*     read a frame has just proved stale (03-commit-model.md section      *)
+(*     3.5):                                                               *)
+(*       "verdict"   nothing until the verdict: the layer stays in the     *)
+(*                   view and in every build's dependency array.           *)
+(*       "frame"     Integrate marks the layer hidden, and with it every   *)
+(*                   layer whose dependency array names it: a hidden       *)
+(*                   layer is out of the view a build sees, so no later    *)
+(*                   read observes it or names it, while the server still  *)
+(*                   decides it and Deliver and Integrate still remove it. *)
+(*                   The implementation can prove staleness only for a     *)
+(*                   read of the whole document, since a frame does not    *)
+(*                   say which paths its commits wrote; the model hides on *)
+(*                   path overlap, which is the same rule over a superset  *)
+(*                   of the reads, so what it certifies covers the         *)
+(*                   implementation's narrower choice.                     *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences, FiniteSets
 
@@ -101,12 +118,14 @@ CONSTANTS
   DepMode,      \* "fullstack" | "filtered"
   BasisMode,    \* "maxdep" | "confirmed"
   DeliveryMode, \* "atomic" | "channel"
-  IdentityMode  \* "none" | "elide"
+  IdentityMode, \* "none" | "elide"
+  DoomMode      \* "verdict" | "frame"
 
 ASSUME DepMode \in {"fullstack", "filtered"}
 ASSUME BasisMode \in {"maxdep", "confirmed"}
 ASSUME DeliveryMode \in {"atomic", "channel"}
 ASSUME IdentityMode \in {"none", "elide"}
+ASSUME DoomMode \in {"verdict", "frame"}
 ASSUME Values # {}
 ASSUME MaxTotal \in Nat \ {0}
 
@@ -114,7 +133,11 @@ VARIABLES
   log,        \* accepted commit log; seq n is log[n]
   pend,       \* per session: the pending stack (layers the client's view
               \* still sits on: undecided, decided-but-unprocessed, and
-              \* accepted-not-yet-integrated commits, in localSeq order)
+              \* accepted-not-yet-integrated commits, in localSeq order).
+              \* Each carries hid: "no", or under DoomMode "frame" "stale"
+              \* (a frame proved its confirmed read stale) or "cascade"
+              \* (its dependency array names a hidden layer); a hidden
+              \* layer is on the stack but out of the view.
   res,        \* per session, per localSeq: SERVER verdict [st, seq]
               \* st \in {"none", "acc", "rej"}; seq is 0 unless st = "acc"
   known,      \* per session, per localSeq: the fate the client has
@@ -148,9 +171,13 @@ Min(S) == CHOOSE x \in S : \A y \in S : x <= y
 (***************************************************************************)
 
 StackIdx(s) == DOMAIN pend[s]
-StackLseqs(s) == {pend[s][j].lseq : j \in StackIdx(s)}
+(* The layers a build sees: a hidden layer stands on the stack, decided by
+   the server and removed by Deliver or Integrate like any other, but no
+   view sits on it, so no read observes it or names it. *)
+VisibleIdx(s) == {j \in StackIdx(s) : pend[s][j].hid = "no"}
+StackLseqs(s) == {pend[s][j].lseq : j \in VisibleIdx(s)}
 LayersWriting(s, p) ==
-  {pend[s][j].lseq : j \in {i \in StackIdx(s) : p \in pend[s][i].writes}}
+  {pend[s][j].lseq : j \in {i \in VisibleIdx(s) : p \in pend[s][i].writes}}
 ObsConfirmed(s, p) == {i \in 1..csn[s] : p \in log[i].writes}
 
 (* The read record a client produces for path p: kind, recorded dependency
@@ -180,7 +207,8 @@ Build(s, R, W, v) ==
   /\ LET c == [lseq |-> nextLocal[s],
                writes |-> W,
                val |-> v,
-               reads |-> {ReadRecord(s, p) : p \in R}]
+               reads |-> {ReadRecord(s, p) : p \in R},
+               hid |-> "no"]
      IN pend' = [pend EXCEPT ![s] = Append(@, c)]
   /\ nextLocal' = [nextLocal EXCEPT ![s] = @ + 1]
   /\ built' = built + 1
@@ -202,13 +230,19 @@ ScanBasis(s, r) ==
 
 (* A write at log index i invalidates read r of session s when it touches
    the read path inside the scan interval -- except that the "confirmed"
-   basis mode excludes the reader's own resolved session stack from the
-   pending-read scan (the CT-1910 repair). *)
+   basis mode excludes from the pending-read scan the reader's own layers
+   the read's dependency array names (the CT-1910 repair, in its shipped
+   declared-set form; 03-commit-model.md section 3.6.3).  Under DoomMode
+   "verdict" every own layer in the interval is named, since Build records
+   the full stack, so the exclusion is the reader's whole session; under
+   "frame" a build after a hide omits the hidden layer, and an own write
+   that layer lands after all is then a conflict like a foreign one. *)
 InvalidatedBy(s, r, i, k) ==
   /\ i > ScanBasis(s, r)
   /\ i < k
   /\ r.path \in log[i].writes
-  /\ ((BasisMode = "confirmed" /\ r.kind = "pending") => log[i].sess # s)
+  /\ ((BasisMode = "confirmed" /\ r.kind = "pending")
+        => ~(log[i].sess = s /\ log[i].lseq \in r.deps))
 
 HasConflict(s, c, k) ==
   \E r \in c.reads : \E i \in DOMAIN log : InvalidatedBy(s, r, i, k)
@@ -368,16 +402,43 @@ Deliver(s) ==
 (* 4.11 server obligation that a commit's transact response is sent        *)
 (* before any frame whose marker covers it: the covering frame cannot      *)
 (* arrive ahead of the verdict.                                            *)
+(*                                                                         *)
+(* Under DoomMode "frame" the integrated entry also proves stale every     *)
+(* other visible layer with a confirmed read of a path it wrote: that      *)
+(* read's basis is below the entry's seq, so section 3.6.1 refuses the     *)
+(* commit unless the identity exemption elides it.  Such a layer is marked *)
+(* "stale", and every layer whose dependency array reaches it (Doomed)     *)
+(* "cascade"; both leave the view, and nothing else changes - the server   *)
+(* still decides them, and their verdicts are processed as any other.      *)
+(* The implementation's marker guard, which keeps a frame from judging a   *)
+(* commit whose own accepted write it may carry, is the own-entry guard    *)
+(* above: an own entry integrates only once its accept is processed, and   *)
+(* then it is removed rather than judged.                                  *)
 (***************************************************************************)
+
+StaleUnder(stack, e) ==
+  {stack[j].lseq : j \in {i \in DOMAIN stack :
+     /\ stack[i].hid = "no"
+     /\ \E r \in stack[i].reads :
+          r.kind = "confirmed" /\ r.path \in e.writes}}
+
+Hide(stack, stale, cascade) ==
+  [j \in DOMAIN stack |->
+     IF stack[j].lseq \in stale THEN [stack[j] EXCEPT !.hid = "stale"]
+     ELSE IF stack[j].lseq \in cascade
+          THEN [stack[j] EXCEPT !.hid = "cascade"]
+     ELSE stack[j]]
 
 Integrate(s) ==
   /\ csn[s] < Len(log)
   /\ LET e == log[csn[s] + 1]
+         kept == IF e.sess = s
+                 THEN SelectSeq(pend[s], LAMBDA x : x.lseq # e.lseq)
+                 ELSE pend[s]
+         stale == IF DoomMode = "frame" THEN StaleUnder(kept, e) ELSE {}
+         cascade == Doomed(s, stale) \ stale
      IN /\ (e.sess = s) => (known[s][e.lseq] = "acc")
-        /\ pend' = IF e.sess = s
-                   THEN [pend EXCEPT ![s] =
-                           SelectSeq(@, LAMBDA x : x.lseq # e.lseq)]
-                   ELSE pend
+        /\ pend' = [pend EXCEPT ![s] = Hide(kept, stale, cascade)]
   /\ csn' = [csn EXCEPT ![s] = @ + 1]
   /\ UNCHANGED <<log, res, known, localrej, nextLocal, built>>
 
@@ -487,6 +548,27 @@ AcceptedVersusDropped ==
   \A s \in Sessions : \A l \in LSeqs :
     l \in localrej[s] => res[s][l].st # "acc"
 
+(* A layer a frame proved stale is never accepted with writes: the server
+   refuses it, or elides it as an identity.  Checked while the layer is on
+   the stack, where every accept is first visible (an own entry leaves the
+   stack only at Integrate, after its accept is processed).  A "cascade"
+   layer is held to nothing: its dependency may be elided, and the server
+   then judges the layer on its own reads, which can pass - which is why a
+   hidden layer is left out of the view and not rejected locally. *)
+HiddenNeverWrote ==
+  \A s \in Sessions : \A j \in StackIdx(s) :
+    LET l == pend[s][j].lseq
+    IN (pend[s][j].hid = "stale" /\ res[s][l].st = "acc")
+         => log[res[s][l].seq].writes = {}
+
+(* A visible layer names no hidden layer: a build after a hide sits on the
+   visible stack alone, and a cascade hides every dependant of a hidden
+   layer, so the two never disagree about what a view contained. *)
+VisibleNamesVisible ==
+  \A s \in Sessions : \A j \in VisibleIdx(s) :
+    \A r \in pend[s][j].reads : \A d \in r.deps :
+      \A i \in StackIdx(s) : pend[s][i].lseq = d => pend[s][i].hid = "no"
+
 TypeOK ==
   /\ built \in 0..MaxTotal
   /\ Len(log) <= built
@@ -494,5 +576,7 @@ TypeOK ==
   /\ \A s \in Sessions : \A l \in LSeqs :
        known[s][l] \in {"none", "acc", "rej"}
   /\ \A s \in Sessions : localrej[s] \subseteq LSeqs
+  /\ \A s \in Sessions : \A j \in StackIdx(s) :
+       pend[s][j].hid \in {"no", "stale", "cascade"}
 
 =============================================================================

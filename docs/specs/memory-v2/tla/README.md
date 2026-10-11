@@ -33,6 +33,9 @@ state graphs exactly the ones the earlier runs certified, to the digit.
 | `PendingStacks_Identity.cfg` | `fullstack` | `confirmed` | `atomic`, `IdentityMode = "elide"`, `Values = {"a", "b"}` | **All invariants hold** — `ContentCoherence`, `ElidedUnchanged`, `CascadeTotality`, `MonotonicResolution` — at 304,439,185 distinct states, `MaxTotal = 4`, ~14 min. Certifies the identity-commit acceptance of §3.6.1: a commit refused for staleness and proved to change no path's content, judged from the content its reader saw (its confirmed basis plus the values its own named layers wrote), is accepted with its writes elided, and no commit that wrote anything is ever admitted on an observation whose content differs from durable history — including a commit built on top of an elided layer. |
 | `PendingStacks_IdentityWriterForm.cfg` | `fullstack` | `confirmed` | `atomic`, `IdentityMode = "elide"`, `Values = {"a", "b"}` | **ReadCoherenceOfWrites violated** at depth 8, within seconds — the same run as the row above held to the writer-set form of INV-1 over the commits that wrote something. The trace: a foreign commit writes `p1 = a`; the reader's own stale `p1 = a` is elided at the next seq; the reader integrates the foreign write, keeps its elided layer on the stack, and its next commit observes `p1` through that layer — contributors `{1, 2}` where durable history holds `{1}`, the same content either way. Kept as the witness that the content form is the statement under elision, not a weakening. |
 | `PendingStacks_ChannelIdentity.cfg` | `fullstack` | `confirmed` | `channel`, `IdentityMode = "elide"`, `Values = {"a", "b"}` | **All invariants hold**, `AcceptedVersusDropped` included, at 169,592,041 distinct states, `MaxTotal = 4` with single-path writes (`WriteChoices <- SingletonWrites`, the Filtered5 bound), ~9 min. The identity acceptance composed with delayed delivery: an elided layer's accept is processed by `Deliver`, stands on the stack through the parking window, and is named by builds there without a durable write behind it. With multi-path writes this config passes 680M distinct states in half an hour without finishing, which is why the bound is narrowed rather than the depth. |
+| `PendingStacks_Frame.cfg` | `fullstack` | `confirmed` | `atomic`, `DoomMode = "frame"` | **All invariants hold**, `HiddenNeverWrote` and `VisibleNamesVisible` included, at 14,504,005 distinct states, `MaxTotal = 4`, ~90s — the Repaired count, since a hide relabels a layer the server was about to refuse without opening a state the verdict would not reach. Negative control: an invariant forbidding any hidden layer is violated at depth 5 within a second, so the mode is exercised. |
+| `PendingStacks_ChannelFrame.cfg` | `fullstack` | `confirmed` | `channel`, `DoomMode = "frame"` | **All invariants hold**, `AcceptedVersusDropped` included, at 40,056,229 distinct states, `MaxTotal = 4`, ~8 min under load. The hide composed with delayed delivery: a hidden layer stands on the stack through the parking window, its verdict is processed by `Deliver` as any other, and a build in that window sits on the visible stack alone, so its array is sparse where the hidden layer stood. With one value and no elision a hidden layer never lands, so the session-wide scan exclusion passes here too. |
+| `PendingStacks_ChannelIdentityFrame.cfg` | `fullstack` | `confirmed` | `channel`, `IdentityMode = "elide"`, `Values = {"a", "b"}`, `DoomMode = "frame"` | **All invariants hold**, `HiddenNeverWrote` and `AcceptedVersusDropped` included, at 169,759,177 distinct states, `MaxTotal = 4` with single-path writes, ~27 min under load. The hide under the identity exemption: a layer hidden for its own stale read is only ever refused or elided, and a cascade-hidden layer whose dependency was elided can land with a write, after which the next build's declared-set scan refuses the build that never named it. Control: the session-wide scan exclusion also passes at this bound, with the same count, so the difference between the two forms is not witnessed here — the shortest trace that separates them needs a hidden dependency elided, its dependant accepted with a write, and a build after both, which is more commits than `MaxTotal = 4` allows. The declared-set form is kept because it is the shipped one. |
 
 Read the violation together with the catalog: the maxdep counterexample is an
 INV-1 failure through the staleness basis, orthogonal to dependency
@@ -61,20 +64,26 @@ Repaired result certifies the rule, not the whole pipeline:
   versus admitted commits separately, with FIFO as a checked invariant
   rather than a structural given, is the natural refinement if this area
   churns.
-- **Canonical dependency arrays.** `Build` records the layers of the
-  CURRENT stack — under channel delivery that set can be sparse relative
-  to session history (processed rejections are gone from `pend`), but it
-  always names every layer the view sat on, so the model's session-wide
-  scan exclusion coincides with the shipped declared-set exclusion on
-  every reachable state. What the model therefore does NOT exercise is
-  the declared-set scan's VALIDATION role (§3.6.3): a buggy client
-  omitting a live layer whose write is durably integrated. That
+- **Canonical dependency arrays.** `Build` records the visible layers of
+  the CURRENT stack — under channel delivery that set can be sparse
+  relative to session history (processed rejections are gone from
+  `pend`), and under `DoomMode = "frame"` it omits the hidden layers — and
+  it always names every layer the view sat on. The pending-read scan
+  excludes the reader's own layers the read NAMES, the shipped declared-set
+  form (§3.6.3). Under `DoomMode = "verdict"` that set is the reader's
+  whole session on every reachable state, which is why the counts of the
+  rows that predate the dial are unchanged to the digit. Under `"frame"`
+  the two can part: a hidden layer the server accepts after all — a
+  cascade victim whose dependency was elided — is an own write the next
+  build did not name, and the declared-set scan refuses that build as it
+  would a foreign write, where a session-wide exclusion would accept it.
+  Within `MaxTotal = 4` that history is not reachable, and the two forms
+  pass with the same counts; the model carries the shipped form so a
+  deeper bound checks the right rule. What the model still does NOT
+  exercise is a buggy client omitting a live, visible layer; that
   enforcement is checked by the engine unit tests
   (`packages/memory/test/v2-sparse-pending-dependencies.test.ts`) and the
-  differential harness's sparse mutation; a `SkipLayers` build choice
-  paired with a named-set `InvalidatedBy` — a violation witness under
-  session-wide exclusion, a pass under named-set — is the natural
-  refinement if omission ever becomes more than a hardening concern.
+  differential harness's sparse mutation.
 
 ## Running
 
@@ -132,7 +141,12 @@ or missed contributor directly.
   (channel mode: the client processes the next verdict in submission
   order — for a rejection, the drop and transitive cascade), and
   `Integrate` (client advances its confirmed view one log entry; own
-  accepted entries promote here, gated on the processed verdict).
+  accepted entries promote here, gated on the processed verdict; under
+  `DoomMode = "frame"` the entry also hides every other visible layer with
+  a confirmed read of a path it wrote, and every layer whose dependency
+  array reaches one — a hidden layer stays on the stack for the server to
+  decide and for `Deliver` and `Integrate` to remove, but no build's view
+  sits on it, so no read observes it or names it).
 - **The master invariant** `ReadCoherence` is observational, not mechanical:
   every accepted commit's recorded observation of a path — its confirmed
   contributors plus its pending-layer contributors mapped through resolution
@@ -187,6 +201,26 @@ or missed contributor directly.
   collapsed to its final effect. The replay of an arbitrary sequence, and
   what a patch can do to a document beyond adding a value, is the engine
   unit tests' and the differential harness's to check.
+- **The frame-time doom is a mode.** `DoomMode = "frame"` is the client
+  rule of §3.5 that a frame can prove a confirmed read stale: `Integrate`
+  hides the layer, and transitively every layer whose dependency array
+  names it, and a hidden layer is out of every later build's view while
+  the server still decides it. The model hides on path overlap, which it
+  knows at `Integrate` because the log entry carries its writes; the
+  implementation can prove staleness only for a read of the whole
+  document, since a frame does not say which paths its commits wrote, so
+  it hides a subset of what the model hides on the same justification,
+  and the certification covers that narrower choice. The own-entry guard
+  on `Integrate` stands in for the implementation's marker guard: an own
+  entry integrates only once its accept is processed, and is then removed
+  rather than judged. `HiddenNeverWrote` is the prediction's accuracy — a
+  layer hidden for its own stale read is never accepted with writes,
+  only refused or elided — and `VisibleNamesVisible` is the cascade's
+  completeness — no visible layer names a hidden one. A cascade victim is
+  held to neither: its dependency may be elided, and the server then
+  judges it on its own reads, which can pass. That is why a hidden layer
+  leaves the view and is not rejected locally: the verdict stays the
+  server's, a refusal drops the layer, and an accept promotes it.
 - **Verdict delivery is a mode.** `atomic` fuses the server's verdict with
   the client's mirrored cascade in one action — the original abstraction,
   kept so the historical configs certify the same state graphs (the
@@ -286,9 +320,10 @@ outside both models.
 ## Changing the models
 
 Per the change discipline in `09-invariants.md`: if a change introduces a new
-dependency-recording shape, staleness basis, or acceptance rule, add it as a
-`DepMode` / `BasisMode` / `IdentityMode` variant plus a config, and record
-the expected/observed result in the table above. The delivery model has the same obligation on its own axes:
+dependency-recording shape, staleness basis, acceptance rule, or client rule
+for a layer's standing between its commit and its verdict, add it as a
+`DepMode` / `BasisMode` / `IdentityMode` / `DoomMode` variant plus a config,
+and record the expected/observed result in the table above. The delivery model has the same obligation on its own axes:
 a change to the reconnect diff base, to what a declaration may claim or how
 the server reads one, or to removal semantics (union shrink, the zero-watch
 reconcile, uncovered-document retraction) is a reason to rerun all three
