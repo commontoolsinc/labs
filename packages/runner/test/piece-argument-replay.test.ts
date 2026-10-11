@@ -268,6 +268,8 @@ describe("piece argument replay", () => {
         runtime.runner.stop(cell);
 
         // `kept` holds a list, and the changed code's input takes a number.
+        // The parent's own argument stops declaring `kept`, so the nested
+        // piece's argument is the only one the change can refuse.
         const child = CHILD_SOURCE
           .replace(
             "kept?: string[] | Default<[]>;",
@@ -276,9 +278,23 @@ describe("piece argument replay", () => {
           .replace("kept: readonly string[];", "kept: number;")
           .replace("kept: Writable<string[]>", "kept: Writable<number>")
           .replace("kept.push(text);", "kept.set(text.length);");
+        const parent = PARENT_SOURCE
+          .replace(
+            "import Child, { type Arguments, type Surface }",
+            "import Child, { type Surface }",
+          )
+          .replace(
+            "pattern<Arguments, Surface>",
+            "pattern<{ supplied?: string }, Surface>",
+          );
         expect(child).toContain("kept.set(text.length);");
+        expect(parent).toContain("pattern<{ supplied?: string }, Surface>");
         const tx = runtime.edit();
-        const pattern = await compiledParent(runtime, changedFiles(child), tx);
+        const pattern = await compiledParent(
+          runtime,
+          changedFiles(child, parent),
+          tx,
+        );
 
         expect(() => runtime.run(tx, pattern, undefined, cell)).toThrow(
           STORED_ARGUMENT_SCHEMA_REFUSAL,
