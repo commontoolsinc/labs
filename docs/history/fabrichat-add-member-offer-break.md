@@ -2,7 +2,7 @@
 status: historical
 created: 2026-10-11
 archived: 2026-10-11
-reason: "Record of the deliberate contract break taken when the FabriChat manager gained `offerRoom` and its request outcomes a `delivery` and a `shared-inbox` refusal code, which the pattern-update gate reads as a narrowing of the manager's and Home's recorded `requests`, and of what a Home rolled forward in place sees."
+reason: "Record of the deliberate contract break taken when the FabriChat manager gained `offerRoom` and its request outcomes a `delivery` and a `shared-inbox` refusal code, which the pattern-update gate reads as a narrowing of the manager's and Home's recorded `requests`, and of what a Home rolled forward in place sees, the manager's stored records emptied by any roll to changed manager code among it."
 ---
 
 # FabriChat: a room's add is offered through the adder's manager
@@ -76,14 +76,25 @@ data kept across a restart onto the newer source:
   `offerRoom` of a room its catalog lists, naming a member it shares no room
   with, recorded `{ "status": "done", "delivery": "noticed" }`, and queued the
   notice.
-- The roll leaves the manager's stored records empty. A `requests` outcome
-  stored before the roll read `{}` after it, though the record is the same
-  document. That is not particular to this change: rolling a Home from
+- A roll to changed manager code leaves the manager's stored records empty,
+  and keeps Home's own. This change's roll left `requests` empty, though it
+  is the same document. A Home seeded with a profile, its private inbox, one
+  refused request, and a direct room with a counterpart who has no profile,
+  which the manager records in `requests` and `direct`, lists in Home's
+  shared-space catalog, and queues a notice for, was rolled three ways: from
   `ee09b094e6` to `49c8d65016`, the change `fabrichat-view-scopes-break.md`
-  records, empties `requests` the same way, and so does rolling from
-  `49c8d65016` to a manager differing from it by any one of this change's
-  parts alone, or by an added input, or by an added internal cell. Rolling to
-  a Home differing only in a comment in `home.tsx` keeps it.
+  records, and from `49c8d65016` to it plus `delivery` alone, and to it plus
+  an added manager input with a `Default`. Each gave the same results:
+  - the manager's `requests` read `{}` after the roll, its `direct` `{}`, and
+    its `outgoingNotices` `[]`, the last now a link to a different document;
+  - Home's shared-space catalog kept the room's entry, `privateInbox` kept its
+    inbox, and `profiles` kept the profile, each unchanged;
+  - the manager's `rooms` still listed the room, from the catalog, but without
+    its counterpart, which only `direct` held;
+  - an `openDirect` with the same counterpart after the roll created a second
+    direct room, in a space of its own, which `direct` then held, and the
+    catalog then listed both rooms.
+- Rolling to a Home differing only in a comment in `home.tsx` kept `requests`.
 - The room's views read the manager's verdict per user, from the reader's own
   manager. With server execution off and on, `fabrichat-add-offer` across
   runtimes shows the adder reading `offered` through the room, and another
