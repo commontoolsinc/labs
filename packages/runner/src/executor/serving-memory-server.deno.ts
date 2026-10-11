@@ -126,7 +126,7 @@ export type ServingMemoryServerOptions =
      * left unset, as a toolshed's bootstrap does: `storeReadThrough` takes
      * `true` when `SERVER_EXECUTION_STORE_READ_THROUGH` is the literal
      * `true`, and `flushDeadlineMs` takes `SERVER_EXECUTION_FLUSH_DEADLINE_MS`
-     * when that is a positive number.
+     * when that is a positive decimal integer.
      */
     worker?: boolean;
   }
@@ -157,7 +157,7 @@ const runsInWorker = (options: ServingMemoryServerOptions): boolean =>
  * environment as the toolshed bootstrap takes it: the store read-through
  * from `SERVER_EXECUTION_STORE_READ_THROUGH`, on for the literal `true`,
  * and the flush deadline from `SERVER_EXECUTION_FLUSH_DEADLINE_MS`, a
- * positive number of milliseconds. A lane sets the first to run every test
+ * positive decimal integer of milliseconds. A lane sets the first to run every test
  * that leaves it unset under the posture; a benchmark sets the second to
  * measure a cadence.
  */

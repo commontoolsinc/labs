@@ -533,12 +533,6 @@ mid-wave belong to the NEXT wave — natural double-buffering, no timers):
     - consequenceOf: every eventId drained this wave
     - watermark doc := n
   hand external effects to the outbox (post-commit; see §5)
-  // The view-plan publish and the outbox's durable-append drain follow
-  // the commit off the cycle's critical path: queued one wave's after
-  // another's, run alongside the next cycle, which waits on neither,
-  // and finished before the tenure's runtime is disposed. A failure in
-  // either is thrown by the next cycle, which parks the space as a
-  // failing cycle does.
 
 on wave budget exhaustion — EITHER trigger (deadline RULED, owner
 2026-08-04): (a) a cascade that will not quiesce within the

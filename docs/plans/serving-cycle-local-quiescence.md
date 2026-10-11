@@ -77,7 +77,9 @@ only what the next settle depends on: the foreign warm notices, the sealed
 contributions' settlement and the delivery reconciliation. The view-plan
 publish and the outbox drain start and run alongside the next cycle, each
 single-flighted so a slow one is joined rather than duplicated, and a failure
-in either is reported where it is reported today.
+in either is reported where it is reported today. (Stage 4 below records
+what this measured: the next settle depends on both after all, through the
+loads and the commits they issue, and the change was reverted.)
 
 **The cadence becomes a policy, measured.** With the settle local, a wave
 closes when the scheduler is idle or at the deadline, and a cycle is one
@@ -118,10 +120,17 @@ deadline as the multi-user latency bound; the OFF arm and clients.
    and 36): every settle still ends at the deadline, because what keeps a
    settle from quiescing is the scheduler's own post-event work, 150 to
    300 ms per vote, not a wait on the server.
-4. [x] **Pipelined post-commit.** The publish and the outbox drain off the
-   cycle's critical path. Measured as above: the cycle's median fell from
-   259 ms to 195 ms, with the publish's 32 to 62 ms and the outbox drain no
-   longer inside it.
+4. [x] **Pipelined post-commit.** Built, measured, and reverted. With the
+   publish and the outbox drain queued behind the commit and run alongside
+   the next cycle, a worker cycle's median fell from 259 ms to 195 ms and
+   the burst did not move (11.8 s from 11.6 s), while the 30-topic seed
+   under the worker went from 64 s to 87 s and ended with the watermark 149
+   commits behind the head instead of one: the loads the publish kicks and
+   the appends the drain commits land while the next settle runs, so the
+   settle's input barrier waits on the loop's own post-commit work, every
+   settle reaches the deadline, no probe completes, and no cycle proves
+   coverage. Either piece alone did the same (167 and 128 behind). The
+   publish and the drain stay inside the cycle, after the commit.
 5. [ ] **Cadence and the number.** The coalescing knob, measured on the vote
    burst and the seed under both postures against the client arm: the
    burst's wave count and settled time are the target, a watch add near its

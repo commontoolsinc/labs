@@ -271,8 +271,6 @@ async function loopCost(run: () => Promise<void>): Promise<string> {
       waves: stats?.waves ?? 0,
       exhausted: stats?.wavesBudgetExhausted ?? 0,
       lag: stats?.watermarkLag ?? 0,
-      advances: (stats?.exhaustedAdvances ?? 0) +
-        (stats?.settleAdvances.count ?? 0),
       rows: Object.fromEntries(rows.map((name) => [name, row(name)])),
       all,
     };
@@ -303,9 +301,9 @@ async function loopCost(run: () => Promise<void>): Promise<string> {
     );
   return `${after.waves - before.waves} waves (${
     after.exhausted - before.exhausted
-  } at the deadline), watermark ${after.lag} behind after ${
-    after.advances - before.advances
-  } advances; ${phases.join(", ")}; top rows: ${grown.join(", ")}`;
+  } at the deadline), watermark ${after.lag} behind; ${
+    phases.join(", ")
+  }; top rows: ${grown.join(", ")}`;
 }
 
 console.error(

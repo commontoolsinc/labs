@@ -693,20 +693,6 @@ export class SpaceServer implements TransactionSealDestination {
   #viewPlanPublisher = new ViewPlanPublisher();
   #disposeRuntime: (() => Promise<void>) | undefined;
 
-  /**
-   * The post-commit work the cycle does not wait for: the view-plan
-   * publish and the outbox drain, chained so each wave's runs after the
-   * one before it and alongside the next cycle. The park waits for the
-   * chain before the runtime goes.
-   */
-  #postCommit: Promise<void> = Promise.resolve();
-
-  /**
-   * The error the post-commit chain stopped on, thrown by the next cycle
-   * so the loop's own catch parks the space as a failing cycle does.
-   */
-  #postCommitFailure: { error: unknown } | undefined;
-
   /** The fenced runtime this tenure handed over when it parked idle. */
   #retainedAs: ParkedServingRuntime | undefined;
 
@@ -6121,11 +6107,6 @@ export class SpaceServer implements TransactionSealDestination {
    * writes, the watermark doc write, and `derivedThrough`.
    */
   async #serveWave(runtime: Runtime): Promise<void> {
-    const failed = this.#postCommitFailure;
-    if (failed !== undefined) {
-      this.#postCommitFailure = undefined;
-      throw failed.error;
-    }
     const { batchHead } = this.#drainFeed(runtime);
     // Under the store read-through posture the drain is the barrier: it
     // integrated every record it consumed into the replica before returning,
@@ -6485,7 +6466,8 @@ export class SpaceServer implements TransactionSealDestination {
       // The owed re-drain rides quiet cycles too (round-2 thread 9): a
       // transport-failed delivery must retry on the NEXT loop cycle,
       // not wait for a new input wave or a re-activation.
-      this.#pipelinePostCommit(runtime, false);
+      await this.#publishViewPlan(runtime);
+      await this.#drainOutboxAppends(false);
       return;
     }
 
@@ -6830,44 +6812,17 @@ export class SpaceServer implements TransactionSealDestination {
       }
     }
 
-    // The view-plan publish and the durable append rows' drain (FP1)
-    // follow the commit off the cycle's critical path: nothing the next
-    // settle reads waits on either. The drain runs after a wave that
-    // landed appends, and after any earlier drain left rows behind (a
+    if (outcome.aborted === undefined) await this.#publishViewPlan(runtime);
+
+    // Drain the durable append rows (FP1): after a wave that landed
+    // appends, and after any earlier drain left rows behind (a
     // transport-failed delivery on a long-lived active space must not
     // wait for the next appends-carrying wave or a re-activation —
     // quiet cycles re-drain too, see the early return above).
     // Co-hosted delivery is an engine commit, not a network await.
-    this.#pipelinePostCommit(
-      runtime,
+    await this.#drainOutboxAppends(
       closing.hasOutboundAppends && outcome.seq !== undefined,
-      outcome.aborted === undefined,
     );
-  }
-
-  /**
-   * Helper for `#serveWave()`, which queues a wave's post-commit work on
-   * `#postCommit`: the view-plan publish, when the wave committed, and the
-   * outbox drain. The chain runs one wave's work after another's, so a
-   * slow publish is waited for rather than run twice, and alongside the
-   * next cycle, which does not wait for it. Work queued for a tenure that
-   * has ended is skipped; a failure is kept for the next cycle to throw.
-   */
-  #pipelinePostCommit(
-    runtime: Runtime,
-    hasNewAppends: boolean,
-    publish = true,
-  ): void {
-    this.#postCommit = this.#postCommit.then(async () => {
-      if (!this.#active || this.#runtime !== runtime) return;
-      try {
-        if (publish) await this.#publishViewPlan(runtime);
-        await this.#drainOutboxAppends(hasNewAppends);
-      } catch (error) {
-        this.#postCommitFailure ??= { error };
-        this.#feedArrived?.resolve();
-      }
-    });
   }
 
   /** The FP1 drain step, shared by the post-commit path and the
@@ -6966,20 +6921,6 @@ export class SpaceServer implements TransactionSealDestination {
     this.#active = false;
     this.#parkRequested = true;
     this.#structureLoadAbort.abort();
-    // The post-commit work in flight reads the runtime and writes through
-    // the outbox; both go below, so it finishes first, under the same
-    // bound as the dispose below: a publish or a drain that never answers
-    // must not hold the lease and `whenParked` with it. Work not yet
-    // started sees the tenure ended and skips.
-    await awaitDisposeTimeboxed(this.#postCommit, {
-      policy: this.#options.policy,
-      stats: this.#options.stats,
-      space: this.#options.space,
-      overrun: (timeoutMs) =>
-        `space ${this.#options.space}: the post-commit work overran ` +
-        `${timeoutMs}ms during park (${reason}); abandoning it and ` +
-        "completing the park",
-    });
     if (wasActive) {
       this.#options.stats.activeSpaces = Math.max(
         0,
@@ -7115,12 +7056,10 @@ export class SpaceServer implements TransactionSealDestination {
     // tenure, one whose open wave was just abandoned holds runs its
     // scheduler counts as done whose writes never committed, and one with
     // effects unsettled holds work only a fresh runtime recovers; each is
-    // disposed rather than offered on, as is one whose post-commit work
-    // failed, since that failure would have parked the space as failing had
-    // the next cycle run, and a successor then starts from a fresh runtime.
+    // disposed rather than offered on.
     if (
       !(offerRuntime && detached && wave === undefined && effectsSettled &&
-        this.#postCommitFailure === undefined && this.#offerRuntime())
+        this.#offerRuntime())
     ) {
       try {
         await this.#disposeRuntimeTimeboxed(reason);

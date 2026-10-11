@@ -104,9 +104,7 @@ Selection and producer certificates have separate dependencies on registration
 metadata and the values they fingerprint. A changed execution snapshot also
 refreshes selection, including producer currency and errors. Quiet cycles reuse
 both results. Invalidation remains active while a view is disconnected and while
-its plan publication is awaiting completion. The serving loop publishes after
-each wave commits, alongside the cycle that follows rather than ahead of it,
-one wave's publication after the previous wave's.
+its plan publication is awaiting completion.
 
 Each plan builds an entity index over its identity-specific execution snapshot.
 Producer traversal checks exact path and shallow-read overlap within matching
