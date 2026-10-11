@@ -391,9 +391,21 @@ pointer.
 The replacement never clears a profile's pointer, only replaces one, so it
 doesn't depend on how a cleared pointer reads.
 
+One case the replacement can't handle: the refused inbox is one the owner could
+read when the profile was pointed at it, and its space has since revoked the
+owner's `READ`. With server execution off, a runtime of the owner's that never
+read that inbox can't replace it. `privateInboxReplacement` keeps a typed link
+to the refused inbox, and CFC refuses the commit for want of that inbox's label,
+so nothing changes: no inbox is created, no profile is re-pointed, and the
+refusal stays recorded. The owner sees nothing happen. The notice stays as it
+was, Home shows no error, and the refusal shows only as a warning in that
+runtime's log. A runtime that read the inbox before its access was revoked
+replaces it.
+
 Replacing, refusing a send no click marks, re-pointing only the profiles that
-pointed at the refused inbox, and replacing Home's own inbox without touching
-its offers are tested by
+pointed at the refused inbox, replacing an inbox whose space has revoked the
+owner's `READ`, and replacing Home's own inbox without touching its offers are
+tested by
 `packages/patterns/integration/private-inbox-multi-runtime.test.ts`, with server
 execution on and off, and by `packages/patterns/system/private-inbox.test.tsx`.
 
