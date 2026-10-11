@@ -395,9 +395,29 @@ const Home = pattern(
     // `inbox`: the stored link carries the label the refused inbox's owner
     // gives its offers. The notice renders after everything else, for the
     // reason the chats panel does, and the screen's header slot shows it
-    // above the tabs.
+    // above the tabs. Only its text is computed: its markup, button included,
+    // is static, and `refused` decides whether it shows.
     const refusalReason = privateInboxRefusal.key("refusal").key("reason");
     const refusedAt = privateInboxRefusal.key("refusal").key("refusedAt");
+    const refused = computed(() => typeof refusedAt.get() === "number");
+    const refusalNoticeText = computed(() => {
+      const stored = refusalReason.get();
+      const reason = typeof stored === "string" ? stored : "";
+      const at = refusedAt.get();
+      return {
+        explanation: refusalReasonText(reason) ?? "",
+        code: reason || "none given",
+        // The sandbox formats a date given no zone in UTC and one given a
+        // zone in that zone, while a date's local getters read the host's
+        // zone, so the zone is given here and named in the text.
+        noticed: typeof at === "number"
+          ? new Date(at).toLocaleString("en-US", {
+            timeZone: "UTC",
+            timeZoneName: "short",
+          })
+          : "",
+      };
+    });
     // Untrusted-write regression surface: this stream is exported so tests can
     // verify that sending it from outside the trusted create surface does NOT
     // create a profile. The actual create UI lives in the profile picker below.
@@ -571,21 +591,8 @@ const Home = pattern(
           </cf-tabs>
 
           <div slot="header">
-            {computed(() => {
-              const at = refusedAt.get();
-              if (typeof at !== "number") return null;
-              const stored = refusalReason.get();
-              const reason = typeof stored === "string" ? stored : "";
-              const explanation = refusalReasonText(reason) ?? "";
-              const code = reason || "none given";
-              // The sandbox formats a date given no zone in UTC and one given
-              // a zone in that zone, while a date's local getters read the
-              // host's zone, so the zone is given here and named in the text.
-              const noticed = new Date(at).toLocaleString("en-US", {
-                timeZone: "UTC",
-                timeZoneName: "short",
-              });
-              return (
+            {refused
+              ? (
                 <div
                   id="home-private-inbox-refusal"
                   data-ui-pattern={TRUSTED_PRIVATE_INBOX_REFUSAL_SURFACE}
@@ -598,10 +605,13 @@ const Home = pattern(
                         One of your profiles points others at an inbox Home
                         can't use, so what they share with you may not arrive.
                         {" "}
-                        {explanation}
+                        {refusalNoticeText.explanation}
                       </span>
                       <span style={{ fontSize: "12px", color: "#666" }}>
-                        Reason: <code>{code}</code>. First noticed {noticed}.
+                        Reason:{" "}
+                        <code>{refusalNoticeText.code}</code>. First noticed
+                        {" "}
+                        {refusalNoticeText.noticed}.
                       </span>
                       <span style={{ fontSize: "12px", color: "#666" }}>
                         Using a new inbox points the profiles that point at the
@@ -622,8 +632,8 @@ const Home = pattern(
                     </cf-vstack>
                   </cf-alert>
                 </div>
-              );
-            })}
+              )
+              : null}
           </div>
         </cf-screen>
       ) as VNode,

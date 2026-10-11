@@ -2,8 +2,10 @@ import {
   action,
   assert,
   type Cell,
+  equals,
   NAME,
   pattern,
+  type Stream,
   TESTS,
   UI,
   Writable,
@@ -66,18 +68,21 @@ const REFUSAL_SENTENCES: readonly (readonly [string, string])[] = [
 
 /**
  * Whether the rendering `ui` shows the button that replaces the refused inbox,
- * marked as the action it is, inside the notice marked as its trusted surface.
+ * marked as the action it is and sending `replace`, inside the notice marked as
+ * its trusted surface.
  */
-function offersReplacementIn(ui: unknown): boolean {
+function offersReplacementIn(ui: unknown, replace: Stream<void>): boolean {
   const notice = refusalNoticeIn(ui);
+  const button = findNodeById(notice, "home-private-inbox-replace");
+  const onClick = propValue(button, "onClick");
   return propValue(notice, "data-ui-pattern") ===
       TRUSTED_PRIVATE_INBOX_REFUSAL_SURFACE &&
     propValue(notice, "data-ui-event-integrity") ===
       TRUSTED_PRIVATE_INBOX_REFUSAL_SURFACE &&
-    propValue(
-        findNodeById(notice, "home-private-inbox-replace"),
-        "data-ui-action",
-      ) === TRUSTED_REPLACE_REFUSED_INBOX_ACTION &&
+    propValue(button, "data-ui-action") ===
+      TRUSTED_REPLACE_REFUSED_INBOX_ACTION &&
+    typeof onClick === "object" && onClick !== null &&
+    equals(onClick, replace) &&
     hasText(notice, "Use a new inbox");
 }
 
@@ -290,7 +295,7 @@ export default pattern(() => {
     ) &&
     hasText(refusalNoticeIn(home[UI]), "stops receiving loom shares") &&
     refusalNoticeInHeaderSlot(home[UI]) &&
-    offersReplacementIn(home[UI])
+    offersReplacementIn(home[UI], home.replaceRefusedPrivateInbox)
   );
   // Each code the host sends shows its own sentence, and a record with an empty
   // code says that none was given.
