@@ -247,7 +247,10 @@ export default pattern(() => {
       expect(created.registration.error).toBeUndefined();
       expect(created.registration).toMatchObject({ status: "handled" });
       const repeated = ok(await processInstantiate(deps, bob.did(), request));
-      expect(repeated).toEqual(created);
+      // Each request times its own steps; the receipt itself is durable.
+      const { timings: _createdTimings, ...createdReceipt } = created;
+      const { timings: _repeatedTimings, ...repeatedReceipt } = repeated;
+      expect(repeatedReceipt).toEqual(createdReceipt);
       expect((await owner.getRegisteredPieces()).map((piece) => piece.id))
         .toEqual([created.pieceId]);
       // The requesting writer, neither the space's owner nor the process.
@@ -557,6 +560,39 @@ export default pattern(() => {
     const retry = ok(await processInstantiate(deps, alice.did(), input));
     expect(retry.pieceId).toBe(first.pieceId);
     expect(retry.requestKey).toBe("creation-retry");
+  });
+
+  it("returns the time each served step took and marks the request span with it", async () => {
+    const attributes = new Map<string, unknown>();
+    const requestSpan: NonNullable<LifecycleDeps["requestSpan"]> = {
+      setAttribute(key, value) {
+        attributes.set(key, value);
+        return this;
+      },
+    };
+    const created = ok(
+      await processInstantiate({ ...deps, requestSpan }, alice.did(), {
+        space,
+        program: PROGRAM,
+        requestKey: "timed-creation",
+        register: false,
+      }),
+    );
+    expect(created.timings.map((timing) => timing.phase)).toEqual([
+      "instantiate.authorize",
+      "instantiate.session",
+      "instantiate.queue",
+      "instantiate.run",
+      "instantiate.commit",
+      "instantiate.confirm",
+    ]);
+    for (const { ms } of created.timings) {
+      expect(Number.isInteger(ms) && ms >= 0).toBe(true);
+    }
+    expect(attributes.get("cf.request_key")).toBe("timed-creation");
+    expect(attributes.get("cf.lifecycle.instantiate.run_ms")).toBe(
+      created.timings.find((timing) => timing.phase === "instantiate.run")?.ms,
+    );
   });
 
   it("instantiates for an owner and for a writer, and uploads the pattern they share", async () => {

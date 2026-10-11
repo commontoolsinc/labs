@@ -7,6 +7,8 @@
 // this module holds the transport's half and is tested against a real
 // memory server and serving host.
 
+import type { AttributeValue } from "@opentelemetry/api";
+
 import { createSession, type Identity } from "@commonfabric/identity";
 import type { DID, MemorySpace } from "@commonfabric/memory/interface";
 import {
@@ -72,7 +74,29 @@ export interface LifecycleDeps {
     warn: (obj: unknown, msg: string) => void;
     info: (obj: unknown, msg: string) => void;
   };
+
+  /**
+   * The request's trace span, marked with the creation key and the duration
+   * of each timed step; absent where nothing traces the request.
+   */
+  requestSpan?: RequestSpan;
 }
+
+/** The part of a trace span a lifecycle request marks. */
+export interface RequestSpan {
+  setAttribute(key: string, value: AttributeValue): unknown;
+}
+
+/** One timed step of a lifecycle request, in elapsed milliseconds. */
+export interface LifecyclePhaseTiming {
+  phase: string;
+  ms: number;
+}
+
+/** An `instantiate` receipt with the steps the serving side timed. */
+export type InstantiateReceipt = ServedInstantiateReceipt & {
+  timings: LifecyclePhaseTiming[];
+};
 
 /** A refusal's stable name on the wire. */
 export type LifecycleErrorCode =
@@ -132,9 +156,34 @@ function wireSource(source: WireSource): ServedPatternSource | undefined {
 }
 
 /**
+ * A lap timer over one served verb: each call records, under the verb's
+ * name, the time since the previous call or since the timer started.
+ */
+function verbTimer(
+  verbName: string,
+  timings: LifecyclePhaseTiming[] | undefined,
+): (phase: string) => void {
+  let since = performance.now();
+  return (phase) => {
+    const now = performance.now();
+    timings?.push({
+      phase: `${verbName}.${phase}`,
+      ms: Math.round(now - since),
+    });
+    since = now;
+  };
+}
+
+/**
  * Authorize the caller and run one verb on the space's serving runtime.
  * `run` receives a piece controller over that runtime; `confirm` is the
  * verb's durability read, which the loop runs after the wave commit.
+ *
+ * `timings` collects the verb's steps in the order they happened: the
+ * writer check (`authorize`), the serving side's session (`session`), the
+ * wait for a cycle of the serving loop to take the verb (`queue`), the
+ * verb itself (`run`), the wave commit after it (`commit`), and the
+ * durability read (`confirm`). A step that never finished is left out.
  */
 async function runServedVerb<T>(
   deps: LifecycleDeps,
@@ -146,6 +195,7 @@ async function runServedVerb<T>(
     confirm: LifecycleVerb<T>["confirm"];
     demandRoots?: LifecycleVerb<T>["demandRoots"];
   },
+  timings?: LifecyclePhaseTiming[],
 ): Promise<LifecycleResult<T>> {
   const host = deps.host();
   if (host === undefined) {
@@ -156,11 +206,13 @@ async function runServedVerb<T>(
         "verbs cannot run on it (EXPERIMENTAL_SERVER_EXECUTION).",
     );
   }
+  const lap = verbTimer(verb.name, timings);
   const authority = await authorizeSpaceWriter(
     deps.authority,
     space,
     callerDid,
   );
+  lap("authorize");
   if (!authority.ok) {
     deps.logger?.warn(
       { space, caller: callerDid, detail: authority.logDetail },
@@ -172,18 +224,38 @@ async function runServedVerb<T>(
     identity: deps.serviceIdentity,
     spaceDid: space as DID,
   });
+  lap("session");
+  const confirm = verb.confirm;
   try {
     const receipt = await host.runLifecycleVerb<T>(space as MemorySpace, {
       name: verb.name,
-      run: (runtime: Runtime) =>
-        verb.run(
-          new PiecesController(session, runtime, { deferSpaceCellSync: true }),
-        ),
-      ...(verb.confirm === undefined ? {} : { confirm: verb.confirm }),
+      run: async (runtime: Runtime) => {
+        lap("queue");
+        try {
+          return await verb.run(
+            new PiecesController(session, runtime, {
+              deferSpaceCellSync: true,
+            }),
+          );
+        } finally {
+          lap("run");
+        }
+      },
+      ...(confirm === undefined ? {} : {
+        confirm: async (runtime: Runtime, receipt: T) => {
+          lap("commit");
+          try {
+            await confirm(runtime, receipt);
+          } finally {
+            lap("confirm");
+          }
+        },
+      }),
       ...(verb.demandRoots === undefined
         ? {}
         : { demandRoots: verb.demandRoots }),
     });
+    if (confirm === undefined) lap("commit");
     return { status: 200, body: receipt };
   } catch (error) {
     if (error instanceof ServedLifecycleRefusal) {
@@ -216,26 +288,70 @@ export function processUpload(
   });
 }
 
+/** What the `instantiate` verb takes from its request. */
+type InstantiateInput = WireSource & {
+  space: string;
+  argument?: Record<string, unknown>;
+  repository?: string;
+  slug?: string;
+  force?: boolean;
+  register?: boolean;
+  start?: boolean;
+  requestKey?: string;
+};
+
 /**
  * The `instantiate` verb: create a piece from the request's pattern, named
  * and registered as asked, and — unless `start` is `false` — name its root
  * as the loop's demand so the cycle after the creation's commit derives
  * it. A piece created without that demand runs when something first
  * demands it, the served meaning of a setup-only creation.
+ *
+ * The receipt carries `timings`, the steps of each served verb the
+ * creation ran (`instantiate`, then `registration-prepare` and
+ * `registration-finish` when it registers) together with
+ * `registration.delivery`, the wait for the registration event to take
+ * effect. The request span, when there is one, is marked with the same
+ * durations and with the request key.
  */
 export async function processInstantiate(
   deps: LifecycleDeps,
   callerDid: string,
-  input: WireSource & {
-    space: string;
-    argument?: Record<string, unknown>;
-    repository?: string;
-    slug?: string;
-    force?: boolean;
-    register?: boolean;
-    start?: boolean;
-    requestKey?: string;
-  },
+  input: InstantiateInput,
+): Promise<LifecycleResult<InstantiateReceipt>> {
+  const timings: LifecyclePhaseTiming[] = [];
+  const result = await instantiate(deps, callerDid, input, timings);
+  annotateRequestSpan(deps.requestSpan, input.requestKey, timings);
+  return result.status === 200
+    ? { status: 200, body: { ...result.body, timings } }
+    : result;
+}
+
+/**
+ * Marks a request's span with its creation key and each timed step, so a
+ * slow creation a caller reports by its key can be found among the traces.
+ */
+function annotateRequestSpan(
+  span: LifecycleDeps["requestSpan"],
+  requestKey: string | undefined,
+  timings: readonly LifecyclePhaseTiming[],
+): void {
+  if (span === undefined) return;
+  if (requestKey !== undefined) span.setAttribute("cf.request_key", requestKey);
+  for (const { phase, ms } of timings) {
+    span.setAttribute(`cf.lifecycle.${phase}_ms`, ms);
+  }
+}
+
+/**
+ * The `instantiate` verb's creation and registration, timing each served
+ * step into `timings`.
+ */
+async function instantiate(
+  deps: LifecycleDeps,
+  callerDid: string,
+  input: InstantiateInput,
+  timings: LifecyclePhaseTiming[],
 ): Promise<LifecycleResult<ServedInstantiateReceipt>> {
   const source = wireSource(input);
   if (source === undefined) {
@@ -277,6 +393,7 @@ export async function processInstantiate(
         ? {}
         : { demandRoots: (receipt) => [pieceRootDocId(receipt.pieceId)] }),
     },
+    timings,
   );
   if (result.status !== 200) return result;
   if (
@@ -317,10 +434,12 @@ export async function processInstantiate(
           callerDid,
         ),
     },
+    timings,
   );
   if (prepared.status !== 200) {
     return incomplete(result.body, "preparation", prepared.body.code);
   }
+  const delivering = performance.now();
   const outcome = prepared.body.delivery === undefined
     ? {}
     : await observeRegistrationDelivery(
@@ -328,6 +447,12 @@ export async function processInstantiate(
       callerDid,
       prepared.body.delivery,
     );
+  if (prepared.body.delivery !== undefined) {
+    timings.push({
+      phase: "registration.delivery",
+      ms: Math.round(performance.now() - delivering),
+    });
+  }
   const finished = await runServedVerb<ServedInstantiateReceipt>(
     deps,
     callerDid,
@@ -344,6 +469,7 @@ export async function processInstantiate(
           callerDid,
         ),
     },
+    timings,
   );
   return finished.status === 200
     ? finished
