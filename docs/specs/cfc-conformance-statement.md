@@ -453,15 +453,17 @@ commit under the enforcing modes. What each observation carries:
   collection whose members carry the requirement, or a document with no
   value, whether the declared path, a reference's own path or the wiring led
   there, is a `shape` read of the container (§4.6.3) and consumes no
-  requirement on the missing path. This follows the specification's own
-  reference and the runtime's other floors: §8.10.3's `verifyInputRequirements`
-  checks only when the consumed set is non-empty ("A valid declaration has no
-  value checks to perform on an empty consumed set"); the trusted agent's
-  tool-input floor gates injected values, not omissions
-  (`builtins/llm-dialog.ts`); the stored write floor governs values, not
-  absence; and §10's `to_city()` concerns a value other code nudged, not an
-  omitted one. §4.6.3's absent-slot probes taint by confidentiality and
-  membership, which stand and are not checked here;
+  requirement on the missing path. This is a divergence, admitting more than
+  a strict reading of §8.10.3, which resolves every logged read overlapping a
+  requirement's path to an observation and checks it, an absent key's
+  `shape` read included. It is taken by decision, flagged for a ruling, and
+  consistent with the runtime's other floors: the trusted agent's tool-input
+  floor gates injected values, not omissions (`builtins/llm-dialog.ts`); the
+  stored write floor governs values, not absence; §8.10.3's reference
+  `verifyInputRequirements` has nothing to check on an empty consumed set;
+  and §10's `to_city()` concerns a value other code nudged, not an omitted
+  one. §4.6.3's absent-slot probes taint by confidentiality and membership,
+  which stand and are not checked here;
 - a `default` that a schema other than the code's own would supply at an
   absent path (one a reference carries, or the graph's) and that the code's
   schema would not supply the same way is a value no one vouched for, and is

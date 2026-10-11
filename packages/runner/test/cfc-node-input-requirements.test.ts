@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
 
+import type { URI } from "@commonfabric/memory/interface";
 import type { JSONSchema } from "../src/builder/types.ts";
 import {
   foreignDefaultAt,
@@ -763,7 +764,8 @@ describe("cfc node input requirements", () => {
           path?: readonly string[],
         ) => readonly unknown[],
         link: (schema?: unknown, path?: string[]) => unknown,
-        write: (value: unknown) => Promise<void>,
+        // Writes `value` as the whole document `id` (the gate's by default).
+        write: (value: unknown, id?: URI) => Promise<void>,
         base: NormalizedFullLink,
       ) => Promise<void> | void,
     ) => {
@@ -789,9 +791,9 @@ describe("cfc node input requirements", () => {
         });
         // Written and committed in a transaction of its own, so the check
         // runs in one that has written nothing.
-        const write = async (value: unknown) => {
+        const write = async (value: unknown, id: URI = base.id) => {
           const tx = runtime.edit();
-          tx.writeValueOrThrow({ ...base, path: [] }, value as never);
+          tx.writeValueOrThrow({ ...base, id, path: [] }, value as never);
           await tx.commit().settled;
         };
         const refusals = (
@@ -910,6 +912,30 @@ describe("cfc node input requirements", () => {
           refusals({}, { properties: { gate: filled } }, undefined, members)
             .length,
         ).toBe(1);
+      });
+    });
+
+    // Two references that pass the same link partway along their own paths
+    // walk on to different places, so each is followed: a reference to an
+    // absent sibling does not hide a present value the other reaches.
+    it("follows each reference that passes one link partway along its path", async () => {
+      await withDocument(async (refusals, link, write, base) => {
+        await write({ b: { always: true } }, "of:through");
+        await write({
+          s: {
+            "/": {
+              "link@1": { id: "of:through", space: base.space, path: [] },
+            },
+          },
+        });
+        const one = link(undefined, ["s", "b"]);
+        const absentSibling = link(undefined, ["s", "a"]);
+        expect(reason(refusals({ gate: { q: one } }))).toBe(
+          "input requiredIntegrity failed at /gate of code",
+        );
+        expect(reason(refusals({ gate: { p: absentSibling, q: one } }))).toBe(
+          "input requiredIntegrity failed at /gate of code",
+        );
       });
     });
 

@@ -523,9 +523,9 @@ const reachThroughInput = (
     ) {
       return noEvidence(through);
     }
-    // The same target, walk, default exposure and reference integrity
-    // observe the same values.
-    const key = JSON.stringify([target, rest, carriesDefault, through]);
+    // The same target, whole walk (a reference's unwalked path included),
+    // default exposure and reference integrity observe the same values.
+    const key = JSON.stringify([target, walk, carriesDefault, through]);
     if (followed.has(key)) return;
     followed.add(key);
     // The verifier's own read (§8.10.1, §18.6.2): marked by `meta`, so it
