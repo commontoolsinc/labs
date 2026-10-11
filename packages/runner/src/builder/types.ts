@@ -284,8 +284,8 @@ export type DerivedInternalCellDescriptor = {
 
   /**
    * For a named sub-pattern instance, the positional `{ $generated: N }` cause
-   * its root takes where instance names are not given. A child a parent set
-   * up under that cause is found again under the instance's own cause. See
+   * its root would take without its name. A child a parent set up under that
+   * cause is found again under the instance's own cause. See
    * `docs/specs/computed-cell-identity.md`.
    */
   legacyPartialCause?: JSONValue;

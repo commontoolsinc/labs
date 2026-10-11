@@ -4,11 +4,13 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 
 import {
+  instanceNameOfPartialCause,
   instancePartialCause,
   nameInstance,
 } from "../../src/builder/instance-name.ts";
 import { lift } from "../../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../../src/builder/pattern.ts";
+import { stream } from "../../src/builder/reactive.ts";
 import type { Frame, Pattern } from "../../src/builder/types.ts";
 import { Runtime } from "../../src/runtime.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
@@ -78,9 +80,6 @@ describe("instance-name", () => {
     });
 
     it("names neither of two instances given one name", () => {
-      // No authored source is known to bind two instances of one pattern
-      // body to one name, so this calls the builder's helper directly.
-
       const Child = child();
       const parent = pattern<{ x: number }>(({ x }) => {
         const a = nameInstance(Child({ x }), "a");
@@ -98,6 +97,29 @@ describe("instance-name", () => {
       ]);
     });
 
+    it("names an instance that shares its name with a stream root, and leaves the stream root at its positional cause", () => {
+      const Child = child();
+      const parent = pattern<{ x: number }>(({ x }) => {
+        const s = nameInstance(stream<number>(), "a");
+        const a = nameInstance(Child({ x }), "a");
+        return { views: [s, a] };
+      });
+
+      expect({
+        instances: instanceCauses(parent).map(({ partialCause }) =>
+          partialCause
+        ),
+        streams: parent.derivedInternalCells
+          ?.map(({ partialCause }) => partialCause)
+          .filter((partialCause) =>
+            (partialCause as { $kind?: string }).$kind === "stream"
+          ),
+      }).toEqual({
+        instances: [instancePartialCause("a")],
+        streams: [{ $generated: expect.any(Number), $kind: "stream" }],
+      });
+    });
+
     it("leaves an instance named by a result key under that key", () => {
       const Child = child();
       const parent = pattern<{ x: number }>(({ x }) => {
@@ -105,9 +127,41 @@ describe("instance-name", () => {
         return { shown: a };
       });
 
-      expect(instanceCauses(parent)).toEqual([
+      expect(instanceCauses(parent)).toStrictEqual([
         { partialCause: "shown", legacyPartialCause: undefined },
       ]);
+    });
+
+    it("leaves an instance it does not name at its positional cause", () => {
+      const Child = child();
+      const parent = pattern<{ x: number }>(({ x }) => {
+        const a = Child({ x });
+        return { views: [a] };
+      });
+
+      expect(instanceCauses(parent)).toStrictEqual([
+        { partialCause: { $generated: 0 }, legacyPartialCause: undefined },
+      ]);
+    });
+
+    it("returns a value that is not a cell as it is", () => {
+      const value = { x: 1 };
+
+      expect(nameInstance(value, "a")).toBe(value);
+    });
+  });
+
+  describe("instanceNameOfPartialCause()", () => {
+    it("returns the name an instance's partial cause carries", () => {
+      expect(instanceNameOfPartialCause(instancePartialCause("a"))).toBe("a");
+    });
+
+    it("returns `undefined` for a positional cause, a name under another key, and a cause with a key added", () => {
+      expect([
+        instanceNameOfPartialCause({ $generated: 0 }),
+        instanceNameOfPartialCause({ $generated: "other", name: "a" }),
+        instanceNameOfPartialCause({ ...instancePartialCause("a"), x: 1 }),
+      ]).toStrictEqual([undefined, undefined, undefined]);
     });
   });
 });

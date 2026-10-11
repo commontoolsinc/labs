@@ -22,10 +22,12 @@ interface ChatRoomOutput {
   roster: Cell<ChatProfile>[];
 
   /** Each participant's profile, with the principal it attests. */
-  participantEntries: { profile: Cell<ChatProfile>; principal?: string }[];
+  participantEntries: PerSession<
+    { profile: Cell<ChatProfile>; principal?: string }[]
+  >;
 
   /** The principals `participantEntries` holds, once each. */
-  participantPrincipals: string[];
+  participantPrincipals: PerSession<string[]>;
 
   /** Adds a profile to those who joined the room, once. */
   addParticipant: Stream<{ profile: Cell<ChatProfile> }>;

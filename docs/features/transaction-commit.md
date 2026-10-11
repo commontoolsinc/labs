@@ -66,6 +66,23 @@ This fallback is runtime-wide: unrelated pending work can delay a first-use
 default, including iframe bootstrap. Read failures defer to this barrier only
 when recorded reads show a pending local write; other failures propagate.
 
+None of these reads tells confirmed state from what the replica holds locally.
+`readConfirmed(runtime, space, read)` runs `read` synchronously in one
+read-only transaction that reads past any speculation overlay, so every
+document it consumes is read at one instant, and reports whether each of those
+documents is confirmed: watched and delivered, with no pending local write and
+no value the replica made up locally. Every read counts, a `sample()` as much
+as a `get()`. When they all are confirmed and the replica can say, it also
+returns the commit sequence the read is complete through: the `toSeq` of the
+last server push the replica applied whole, so that every commit at or below it
+that touched a document the read consumed is reflected in what it read. A read
+assembled from separate pulls has no such sequence, since one pull can see a
+commit that an earlier one missed. The replica cannot say before its first
+push, after a frame it failed to apply or applied with entries quarantined, and
+while its server runs server execution or does not say whether it does, since
+a co-hosted executor's wave commits can reach a push's stamped head before
+their changes reach the push.
+
 Observe `receipt.verdict` when the next step requires knowing the commit's
 fate. Use `receipt.settled` when a retry needs the repaired read basis, when a
 read needs the covered subscription view, or when the caller needs inline
@@ -105,3 +122,46 @@ wait for coverage or rejection repair. The default keeps the coverage hold.
 Each receipt belongs to its own invocation. Starting a second commit on a
 transaction that is already pending or complete returns that invocation's
 completion error on both stages, even when the original commit succeeded.
+
+## Naming the commit
+
+A commit the store accepts lands at a position in its space's commit log, the
+same sequence every document revision in that space carries as `since`.
+`tx.committedSeq(space)` returns that position once the commit's `verdict` has
+resolved. It is `undefined` before then, for a space that refused the commit,
+for a space the transaction wrote nothing to, and for a contribution a wave or
+the speculation overlay accepted without the store committing it: that
+acceptance is the contribution's verdict, and what becomes of the wave is
+decided later. A multi-space commit that fails partway keeps the positions of
+the spaces whose stores accepted it.
+
+The transaction a sender's commit callback receives bounds where the handling
+of its event committed. `handlingCommittedBy(runtime, tx)` returns a position
+at or past the handling's commit: exactly that commit when the callback's own
+transaction committed the handling, and otherwise the current revision of the
+handling's receipt, which the handling's commit created. That covers a
+transaction refused as `receipt-exists`, whose receipt an earlier delivery
+wrote, and server execution, where the callback receives the sender's local
+echo. A later write to the receipt, which a handler with a reactive result
+makes as its launched pattern runs, moves the position later, so a read at or
+past it reflects the handling, but the position does not identify one commit.
+It returns `undefined` when the handling wrote no receipt. A receipt is
+written only with commit preconditions or server execution enabled.
+
+```ts
+// Shown at module scope.
+import {
+  type Cell,
+  handlingCommittedBy,
+  type IExtendedStorageTransaction,
+  type Runtime,
+  sendEvent,
+} from "@commonfabric/runner";
+
+declare const runtime: Runtime;
+declare const stream: Cell<{ title: string }>;
+
+const handled = Promise.withResolvers<IExtendedStorageTransaction>();
+sendEvent(stream, { title: "next" }, (tx) => handled.resolve(tx));
+const reflected = await handlingCommittedBy(runtime, await handled.promise);
+```
