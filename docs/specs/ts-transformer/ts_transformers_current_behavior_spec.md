@@ -2475,8 +2475,13 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   as the structural type of the value it names, from which schema generation
   could not tell the binding. The leaf records the annotation as its `spelledBy`
   schema hint, and a print of the same type that a later pass rebuilds it into
-  keeps the hint; schema generation reads the node as the annotation spells the
-  type at hand (the schema-generator mapping spec's §13). A value captured whole
+  keeps the hint. A leaf that keeps its declaration's own node instead, as a
+  scope wrapper's does (`getPreservedTypeForBindingElement`), records no hint,
+  and a print a later pass rebuilds it into, of the whole value that node
+  spells, takes that node as its hint where the node names a value binding
+  (`carryNarrowing` in `transformers/type-shrinking.ts`). Schema generation
+  reads the node as the annotation spells the type at hand (the
+  schema-generator mapping spec's §13). A value captured whole
   thus keeps a label that names a binding, as a part of it does
   (`buildTypeElementsFromCaptureTree` in `ast/type-building.ts`;
   `carryNarrowing` in `transformers/type-shrinking.ts`;

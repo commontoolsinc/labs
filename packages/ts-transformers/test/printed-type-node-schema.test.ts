@@ -2693,6 +2693,21 @@ export default pattern<{ value: Secret }>(({ value }) => {
       ).toMatchObject({ ifc: { confidentiality: [policy] } });
     });
 
+    it("reads the policy of a scoped value captured whole once", async () => {
+      expect(
+        await captured({
+          "/main.tsx":
+            `import { computed, pattern, type Confidential, type PerUser } from "commonfabric";
+import { type PolicyOf } from "commonfabric/cfc";
+import { rules } from "./rules.ts";
+interface Secret { a: string; b: string; }
+export default pattern<{ secret: PerUser<Confidential<Secret, [PolicyOf<typeof rules>]>> }>(
+  ({ secret }) => ({ out: computed(() => ({ whole: secret })) }),
+);`,
+        }, "secret"),
+      ).toMatchObject({ ifc: { confidentiality: [policy] }, scope: "user" });
+    });
+
     it("reads the policy of a value an alias of a nullable union names", async () => {
       expect(
         await captured({

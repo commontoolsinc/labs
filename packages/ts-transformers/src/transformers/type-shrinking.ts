@@ -14,11 +14,13 @@ import {
   scopeForWrapperName,
 } from "@commonfabric/schema-generator/scope-brand";
 import {
+  denotesSameType,
   entityNameRight,
   readAuthoredTypeNode,
   readMemberAnnotation,
   unwrapTypeParentheses,
 } from "@commonfabric/schema-generator/type-node";
+import { namesValueBinding } from "@commonfabric/schema-generator/value-annotation";
 import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import {
   createRegisteredTypeLiteral,
@@ -1709,6 +1711,7 @@ function carryNarrowing(
   base: ts.TypeNode,
   result: ts.TypeNode | undefined,
   state: CrossStageState | undefined,
+  checker: ts.TypeChecker | undefined,
 ): void {
   if (!result || !state || result === base) return;
   const from = unwrapTypeParentheses(base);
@@ -1721,9 +1724,18 @@ function carryNarrowing(
   const printed = state.printedFrom(to);
   if (spelledBy && printed && printed === state.printedFrom(from)) {
     state.recordSchemaHint(to, { spelledBy });
+  } else if (
+    printed && checker && value?.typeNode &&
+    denotesSameType(value.type, printed) &&
+    namesValueBinding(value.typeNode, checker)
+  ) {
+    // A print of the whole value a node stands for is read as the node that
+    // spells the value, where that node names a value binding, as a print of
+    // a capture's value is (`SchemaHint.spelledBy`).
+    state.recordSchemaHint(to, { spelledBy: value.typeNode });
   }
   const carry = (fromPart: ts.TypeNode, toPart: ts.TypeNode | undefined) =>
-    carryNarrowing(fromPart, toPart, state);
+    carryNarrowing(fromPart, toPart, state, checker);
   if (ts.isTypeLiteralNode(from) && ts.isTypeLiteralNode(to)) {
     for (const member of to.members) {
       const name = ts.isPropertySignature(member) && member.type &&
@@ -4901,7 +4913,7 @@ export function applyShrinkAndWrap(
         context?.state,
         fullShapePaths,
       );
-      carryNarrowing(shrinkBaseTypeNode, typeDriven, context?.state);
+      carryNarrowing(shrinkBaseTypeNode, typeDriven, context?.state, checker);
       const nodeDriven = buildShrunkTypeNodeFromTypeNode(
         shrinkBaseTypeNode,
         retainedPaths,
@@ -4947,7 +4959,7 @@ export function applyShrinkAndWrap(
           fullShapePaths,
         )
         : undefined;
-      carryNarrowing(shrinkBaseTypeNode, typeDriven, context?.state);
+      carryNarrowing(shrinkBaseTypeNode, typeDriven, context?.state, checker);
       shrunk = choosePreferredShrinkCandidate(
         "node",
         nodeDriven,
@@ -4965,7 +4977,7 @@ export function applyShrinkAndWrap(
   // Each pass below rebuilds the node it is handed, so each part of what it
   // returns narrows what the part it rebuilt narrowed.
   const carried = (from: ts.TypeNode, to: ts.TypeNode): ts.TypeNode => {
-    carryNarrowing(from, to, context?.state);
+    carryNarrowing(from, to, context?.state, checker);
     return to;
   };
   if (!identityOnlyRoot && identityPaths.length > 0) {
