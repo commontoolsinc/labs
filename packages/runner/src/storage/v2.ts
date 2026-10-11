@@ -580,6 +580,18 @@ type PendingVersion =
       value: EntityDocument;
 
       /**
+       * The paths of the layer's splices that a recursive read of the
+       * commit covers, as JSON pointers. Such a splice is shown as the
+       * array its writer computed (`displayedPatches`): a write that moves
+       * the array makes the read stale, so the store refuses the layer, or
+       * elides it where the array already holds the result, and no reader
+       * of the shown array is ever accepted over a different stored one. A
+       * splice the commit read nothing for is applied where it stands,
+       * whatever the array holds, so it is shown that way too.
+       */
+      intended?: ReadonlySet<string>;
+
+      /**
        * Set once the store accepted the layer: replay its ops as they
        * stand, since the store applied them where they stood, rather than
        * as the result their writer computed (`displayedPatches`).
@@ -692,10 +704,46 @@ const pendingVersion = (
   localSeq: number,
   operation:
     | { op: "set"; value: EntityDocument }
-    | { op: "patch"; patches: PatchOp[]; value: EntityDocument }
+    | {
+      op: "patch";
+      patches: PatchOp[];
+      value: EntityDocument;
+      intended?: ReadonlySet<string>;
+    }
     | { op: "delete" },
   baseSeq: number,
 ): PendingVersion => ({ localSeq, baseSeq, ...operation });
+
+/**
+ * The paths of `operation`'s splices that a recursive read among `reads`
+ * covers: a read of the same document whose path is the splice's array or
+ * one of its ancestors. A shape-only read does not count, since a write
+ * that replaces an element in place changes no shape and would be accepted
+ * over the shown array.
+ */
+const intendedSplicePaths = (
+  operation: NativeCommitOperation,
+  reads: ClientCommit["reads"],
+): ReadonlySet<string> | undefined => {
+  if (operation.op !== "patch") return undefined;
+  const scope = normalizeCellScope(operation.scope);
+  const covering = [...reads.confirmed, ...reads.pending].filter((read) =>
+    read.id === operation.id && normalizeCellScope(read.scope) === scope &&
+    read.nonRecursive !== true
+  );
+  if (covering.length === 0) return undefined;
+  const paths = new Set<string>();
+  for (const patch of operation.patches) {
+    if (patch.op !== "splice") continue;
+    const target = parsePointer(patch.path);
+    const covered = covering.some((read) =>
+      read.path.length <= target.length &&
+      read.path.every((segment, index) => segment === target[index])
+    );
+    if (covered) paths.add(patch.path);
+  }
+  return paths.size > 0 ? paths : undefined;
+};
 
 const confirmedVersion = (
   seq: number,
@@ -725,16 +773,23 @@ const transactionValueForVersion = (
  * the tail appears twice. The layer's `value` is the document the
  * transaction computed, so at the splice's path it holds the array the
  * writer meant; the view shows that array in the splice's place, over the
- * base's version of everything else. Every other op replays as it stands:
- * the mergeable ones mean "add to whatever is there", and a foreign write
- * must show through them. A splice whose path the computed document does
- * not hold is left as it is, for the apply to refuse.
+ * base's version of everything else, for every splice the commit's reads
+ * cover (`intended`). A splice the commit read nothing for replays as it
+ * stands: the store applies it where it stands whatever the array holds,
+ * and a reader of the layer must see what the store will hold, since the
+ * server judges that reader's view by replaying this layer's ops. Every
+ * other op replays as it stands too: the mergeable ones mean "add to
+ * whatever is there", and a foreign write must show through them. A splice
+ * whose path the computed document does not hold is left as it is, for the
+ * apply to refuse.
  */
 const displayedPatches = (
   pending: Extract<PendingVersion, { op: "patch" }>,
 ): PatchOp[] =>
   pending.patches.map((patch) => {
-    if (patch.op !== "splice") return patch;
+    if (patch.op !== "splice" || pending.intended?.has(patch.path) !== true) {
+      return patch;
+    }
     const path = parsePointer(patch.path);
     const intended = readValueAtPath(pending.value, path);
     return Array.isArray(intended)
@@ -6230,7 +6285,7 @@ export class SpaceReplica
       : undefined;
 
     for (const operation of operations) {
-      this.#applyPending(operation, localSeq, identity);
+      this.#applyPending(operation, localSeq, commit.reads, identity);
     }
 
     if (before !== undefined) {
@@ -6930,7 +6985,7 @@ export class SpaceReplica
 
     withCommitTiming(["commitOperations", "applyPending"], () => {
       for (const operation of operations) {
-        this.#applyPending(operation, localSeq);
+        this.#applyPending(operation, localSeq, commit.reads);
       }
     });
 
@@ -9087,10 +9142,12 @@ export class SpaceReplica
   #applyPending(
     operation: NativeCommitOperation,
     localSeq: number,
+    reads: ClientCommit["reads"],
     identity?: ScopeKeyIdentity,
   ): void {
     const { id, scope, ...pending } = operation;
     const record = this.#record(id, scope, identity);
+    const intended = intendedSplicePaths(operation, reads);
     record.pending.push(
       pendingVersion(
         localSeq,
@@ -9105,6 +9162,8 @@ export class SpaceReplica
             ...pending,
             value: cloneIfNecessary(pending.value) as EntityDocument,
           }
+          : pending.op === "patch" && intended !== undefined
+          ? { ...pending, intended }
           : pending,
         record.confirmed.seq,
       ),

@@ -5312,12 +5312,18 @@ describe("memory-v2-stacked-commit", () => {
     // old length, carrying the document it computed. When a frame moves the
     // confirmed list under the pending splice, the view shows the list the
     // writer computed rather than the splice replayed over the moved list,
-    // and an accept promotes what the store applied.
+    // where the commit read the list; a splice the commit read nothing for
+    // replays where it stands, as the store will apply it. An accept
+    // promotes what the store applied.
 
     const growTo = (
       harness: Harness,
       after: RootValue,
       tail: string[],
+      // The commit's read of the document, recursive and at its current
+      // confirmed seq, which a write that moves the list makes stale.
+      // Left out, the splice is a blind write.
+      reads: "read" | "blind" = "read",
     ) =>
       harness.replica.commitNative(
         {
@@ -5335,7 +5341,7 @@ describe("memory-v2-stacked-commit", () => {
             value: { value: after },
           }],
         },
-        undefined,
+        reads === "read" ? sourceFromReads([{ id: DOCS.A }]) : undefined,
         { resolveAt: "verdict" },
       );
 
@@ -5412,9 +5418,10 @@ describe("memory-v2-stacked-commit", () => {
     });
 
     it("promotes what the store applied when the verdict accepts over the moved list", async () => {
-      // A write that read no value (a blind UI write) is accepted over the
-      // moved array: the store applies the splice where it stands, and the
-      // replica's confirmed value must be the store's.
+      // The store refuses a read-bearing splice whose list moved, unless it
+      // elides it as an identity; the scripted verdict accepts it anyway,
+      // standing for a verdict that applies the splice where it stands, and
+      // the replica's confirmed value must then be the store's.
       const harness = await createHarness();
       const responseGate = Promise.withResolvers<void>();
       try {
@@ -5422,6 +5429,7 @@ describe("memory-v2-stacked-commit", () => {
         await watch(harness);
         harness.model.setOutcome(2, {
           kind: "accept",
+          skipReadValidation: true,
           responseGate: responseGate.promise,
           remoteInterleave: {
             label: "foreign",
@@ -5479,6 +5487,7 @@ describe("memory-v2-stacked-commit", () => {
         );
         harness.model.setOutcome(2, {
           kind: "accept",
+          skipReadValidation: true,
           responseGate: responseGate.promise,
           remoteInterleave: {
             label: "foreign",
@@ -5522,6 +5531,54 @@ describe("memory-v2-stacked-commit", () => {
         expect(promoted.map((change) => change.after)).toContainEqual({
           value: { items: ["a", "b", "c", "x"] },
         });
+      } finally {
+        responseGate.resolve();
+        await harness.close();
+      }
+    });
+
+    it("replays a splice its commit read nothing for where the moved list stands", async () => {
+      // No read means nothing a moved list can make stale: the store applies
+      // the splice where it stands, so the view does too, and a reader of
+      // the layer sees what the store will hold.
+      const harness = await createHarness();
+      const responseGate = Promise.withResolvers<void>();
+      try {
+        await seedAccepted(harness, DOCS.A, { items: ["a", "b"] });
+        await watch(harness);
+        harness.model.setOutcome(2, {
+          kind: "accept",
+          responseGate: responseGate.promise,
+          remoteInterleave: {
+            label: "foreign",
+            operations: [{
+              op: "set",
+              id: DOCS.A,
+              value: { items: ["a", "b", "x"] },
+            }],
+          },
+        });
+        const splice = growTo(
+          harness,
+          { items: ["a", "b", "c"] },
+          ["c"],
+          "blind",
+        );
+        expectVisible(harness, { A: { items: ["a", "b", "c"] } });
+
+        harness.pushSync({
+          upserts: [{
+            id: DOCS.A,
+            seq: currentSeq(harness, DOCS.A) + 1,
+            value: { items: ["a", "b", "x"] },
+          }],
+        });
+        await clock.settle();
+        expectVisible(harness, { A: { items: ["a", "b", "c", "x"] } });
+
+        responseGate.resolve();
+        await expectResultOk(splice);
+        expectVisible(harness, { A: { items: ["a", "b", "c", "x"] } });
       } finally {
         responseGate.resolve();
         await harness.close();

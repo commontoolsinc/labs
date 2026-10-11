@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { toMemorySpaceAddress } from "../src/link-types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
@@ -167,6 +168,59 @@ describe("memory-v2-pending-splice-intended-array", () => {
         Array.isArray(value) && value.includes("x") && value.includes("e3")
       ),
     ).toEqual([]);
+  });
+
+  it("replays a splice its commit read nothing for where it stands, so a reader of it commits what the store will hold", async () => {
+    // A blind write of one element carries no read of the array, so the
+    // store applies its splice wherever the array then stands. The view
+    // replays it the same way: a transaction that reads the list through
+    // the pending layer and commits its length is accepted against the
+    // layer's durable contribution, and the two must agree.
+    const doc = "intended-blind";
+    const a = connect();
+    const b = connect();
+    await seed(a, doc, ["e1", "e2"]);
+    const { list, cancel } = await watched(b, doc);
+    const count = b.runtime.getCell<number>(space, "intended-blind-count", {
+      type: "number",
+    });
+    await count.sync();
+    await flush();
+
+    heldIds.add(list.getAsNormalizedFullLink().id);
+    const blind = b.runtime.edit();
+    const address = toMemorySpaceAddress(list.getAsNormalizedFullLink());
+    blind.writeOrThrow({ ...address, path: ["value", "2"] }, "e3");
+    const blindVerdict = blind.commit({ holdSyncedUntilCovered: false })
+      .verdict;
+    await held.promise;
+
+    heldIds.clear();
+    expect((await append(a, doc, "x")).error).toBeUndefined();
+    await flush();
+    expect(list.get()).toEqual(["e1", "e2", "e3", "x"]);
+
+    const dependent = b.runtime.edit();
+    const observed = b.runtime.getCell<string[]>(
+      space,
+      doc,
+      listSchema,
+      dependent,
+    )
+      .get();
+    count.withTx(dependent).set(observed.length);
+    const dependentVerdict = dependent.commit({ holdSyncedUntilCovered: false })
+      .verdict;
+
+    release.resolve();
+    expect((await blindVerdict).error).toBeUndefined();
+    expect((await dependentVerdict).error).toBeUndefined();
+    await flush();
+    await b.storage.synced();
+    cancel();
+
+    expect(list.get()).toEqual(["e1", "e2", "e3", "x"]);
+    expect(count.get()).toBe(4);
   });
 
   it("shows a stacked pair as the second computed it, then the store's list", async () => {

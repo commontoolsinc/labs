@@ -108,14 +108,23 @@ One op is the exception until the verdict. A `splice` is positional: the
 diff emits it against the array the transaction read, and replayed over an
 array a frame has since changed it says something its writer never wrote —
 where another writer appended the same tail, the tail reads twice, a list
-the store never holds. The client reads a pending `splice` as the array its
-transaction computed, which the pending write carries, in the splice's
-place over the confirmed state's version of everything else. The verdict
-is the server's as ever: a refusal drops the write, and an accept folds the
-ops as they stand, since that is how the store applied them, which over a
-moved array is a different value from the one read meanwhile. Mergeable
-ops are not positional and are never substituted: an `append` means "add
-to whatever is there", and a concurrent write must read through it.
+the store never holds. Where the commit carries a
+recursive read covering the array, the client reads a pending `splice` as
+the array its transaction computed, which the pending write carries, in the
+splice's place over the confirmed state's version of everything else. The
+read is what makes that sound: a write that moves the array makes the read
+stale, so the server refuses the commit, or elides it where the array
+already holds the result, and a commit built over the shown array is
+refused with it — no reader of the shown array is ever accepted against a
+different stored one. A `splice` the commit read nothing for is read as
+its ops replayed, because the server applies it where it stands whatever
+the array holds, and the server judges a reader's view by replaying the
+layers it names (§3.6.1): a reader shown the computed array would be
+accepted having observed a list the store never holds. The verdict is the
+server's as ever: a refusal drops the write, and an accept folds the ops as
+they stand, since that is how the store applied them. Mergeable ops are not
+positional and are never substituted: an `append` means "add to whatever is
+there", and a concurrent write must read through it.
 
 ### 3.3.4 Single-Snapshot Rule
 
