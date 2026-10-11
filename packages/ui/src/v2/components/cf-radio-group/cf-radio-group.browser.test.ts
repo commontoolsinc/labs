@@ -13,6 +13,10 @@ import {
   betweenButtons,
 } from "../../test-utils/tab-order.ts";
 import { CFRadio } from "../cf-radio/index.ts";
+import {
+  createMockCellHandle,
+  writesSent,
+} from "../../test-utils/mock-cell-handle.ts";
 import { CFRadioGroup } from "./index.ts";
 
 /** What a mounted group holds, beyond its place between the buttons. */
@@ -29,7 +33,7 @@ type Group = BetweenButtons<CFRadioGroup> & {
  * disabled.
  */
 async function mounted(
-  options: { value?: string; disabled?: string[] } = {},
+  options: { value?: unknown; disabled?: string[] } = {},
 ): Promise<Group> {
   const group = new CFRadioGroup();
   if (options.value !== undefined) group.value = options.value;
@@ -103,7 +107,7 @@ Deno.test("ArrowDown moves focus and selection to the next enabled radio, passin
   expect(page.changes).toEqual(["c", "a"]);
 });
 
-Deno.test("ArrowRight selects the next radio of a group bound to no value, and Tab then enters on it", async () => {
+Deno.test("ArrowRight selects the next radio of a group holding no value, and Tab then enters on it", async () => {
   using page = await mounted();
   await pressKey("Tab");
   expect(document.activeElement).toBe(page.radio.a);
@@ -166,4 +170,33 @@ Deno.test("the arrow keys move on from the focused radio of a group inside a sha
   expect(page.radio.c.checked).toBe(true);
   expect(page.radio.a.checked).toBe(false);
   expect(page.changes).toEqual(["c"]);
+});
+
+Deno.test("Tab passes over a radio disabled after the group rendered, and enters on it again once it is enabled", async () => {
+  using page = await mounted({ value: "b" });
+  page.radio.b.disabled = true;
+  await settled(page.control, page.radio);
+  await pressKey("Tab");
+  expect(document.activeElement).toBe(page.radio.a);
+  page.radio.b.disabled = false;
+  await settled(page.control, page.radio);
+  page.before.focus();
+  await pressKey("Tab");
+  expect(document.activeElement).toBe(page.radio.b);
+});
+
+Deno.test("ArrowDown in a group bound to a cell writes the next radio's value to the cell, and Tab then enters on it", async () => {
+  const cell = createMockCellHandle<unknown>("a");
+  using page = await mounted({ value: cell });
+  await pressKey("Tab");
+  expect(document.activeElement).toBe(page.radio.a);
+  await pressKey("ArrowDown");
+  await settled(page.control, page.radio);
+  expect(writesSent(cell).map((write) => write.value)).toEqual(["b"]);
+  expect(page.control.value).toBe(cell);
+  expect(page.radio.b.checked).toBe(true);
+  expect(page.radio.a.checked).toBe(false);
+  page.before.focus();
+  await pressKey("Tab");
+  expect(document.activeElement).toBe(page.radio.b);
 });

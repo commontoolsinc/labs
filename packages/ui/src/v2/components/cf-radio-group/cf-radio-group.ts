@@ -105,7 +105,7 @@ export class CFRadioGroup extends BaseElement {
   /** Cell controller for value binding */
   private _cellController = createCellController<unknown>(this, {
     timing: { strategy: "immediate" }, // Radio changes should be immediate
-    onChange: (newValue, oldValue) => this.changed(newValue, oldValue),
+    onChange: (newValue, oldValue) => this.selectionChanged(newValue, oldValue),
   });
 
   static override properties = {
@@ -335,9 +335,9 @@ export class CFRadioGroup extends BaseElement {
   }
 
   /**
-   * Leaves the radios one Tab stop, so that Tab enters the group and a second
-   * Tab leaves it: the checked radio, or the first enabled radio while none is
-   * checked. The arrow keys reach the others.
+   * Makes one radio the group's Tab stop, the checked radio if it is enabled
+   * and otherwise the first enabled radio, and takes the others out of the Tab
+   * order, where the arrow keys reach them.
    */
   private updateTabStops = (): void => {
     const radios = Array.from(this.getRadios()).filter((radio) =>
@@ -430,12 +430,16 @@ export class CFRadioGroup extends BaseElement {
     }
     const oldValue = this.getCurrentValue();
     this.value = value;
+    // selectionChanged() reads the controller now, before willUpdate binds it.
     this._cellController.bind(value);
-    this.changed(value, oldValue);
+    this.selectionChanged(value, oldValue);
   }
 
-  /** Checks the slotted radio holding the selection, and announces it. */
-  private changed(value: unknown, oldValue: unknown): void {
+  /**
+   * Checks the slotted radio holding the selection, if any, and announces the
+   * selection.
+   */
+  private selectionChanged(value: unknown, oldValue: unknown): void {
     this.updateRadioSelection();
     this.emit("cf-change", { value, oldValue, items: this.items });
     this.emit("change", { value, oldValue, items: this.items });
