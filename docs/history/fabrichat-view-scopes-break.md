@@ -35,12 +35,19 @@ pattern-update proof reports `scope changed` at the field's path:
   23 baselines.
 
 The proof reports at most one issue per role, so a baseline that has both of
-a pattern's fields reports only one of them. The entries name both.
+a pattern's fields reports only one of them. An entry names both fields only
+for the baselines that have both, and names one for the baselines that have
+one.
 
-Seven baselines already carried an accepted break of their own: the manager's
-`argument.requests.*` breaks and Home's default-profile slot break. Their
-findings now also blame the scope change, so each of those entries names the
-new path beside its own and cites this record for it.
+Eleven baselines already carried an accepted break of their own: nine of the
+manager's, under its three `argument.requests.*` breaks, and two of Home's,
+under its default-profile slot break. The manager's findings now blame the
+scope change beside their own paths, so each of those three entries names
+`result.$VIEWS.chats.rooms` beside its own path and cites this record for it.
+The two Home findings now blame the scope change where they blamed
+`result.defaultProfile`, so those two baselines move to an entry of this
+record's that names both paths, and the slot break's entry keeps its other
+three baselines.
 
 ## Why this could not be done compatibly
 

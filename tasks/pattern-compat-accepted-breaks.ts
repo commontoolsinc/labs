@@ -984,23 +984,13 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // cell and so the picker could not re-point it. The slot is a fresh cell;
     // the cell the default was kept in stays, as `legacyDefaultProfile`, and
     // is the default until one is chosen in the slot.
-    //
-    // Two of these baselines also report the scope the manager's `rooms`
-    // now declares under home's `chatManager`, which
-    // `fabrichat-view-scopes-break.md` records, so the entry names that
-    // path beside its own.
     pattern: "system/home.tsx",
     baselines: [
       "20261001T190916Z-5k9_Adl37zMhsNgG",
       "20261001T210138Z-P3RELdPaFKfIXROk",
-      "20261002T164437Z-Ppiw9bONPOzUfI_d",
       "20261003T000427Z-oEfsHL584h6qI8sa",
-      "20261003T003223Z-fDj2SHhwNCXbd-O3",
     ],
-    paths: [
-      "result.defaultProfile",
-      "result.chatManager.$VIEWS.chats.rooms",
-    ],
+    paths: ["result.defaultProfile"],
     reason:
       "home's default profile moves under `profile` in a fresh slot cell so the picker can re-point it, and a default chosen before stays the default until one is chosen in the slot",
     record: "docs/history/home-default-profile-slot-break.md",
@@ -1119,13 +1109,28 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     record: "docs/history/fabrichat-room-link-roster-break.md",
   },
   {
-    // The room's `participantEntries` and `participantPrincipals` declare the
-    // per-session scope the computeds deriving them already had. The proof
-    // reports one issue per role, so each baseline names one of the two.
+    // The room's `participantPrincipals` declares the per-session scope the
+    // computed deriving it already had. These baselines predate
+    // `participantEntries`.
     pattern: "fabrichat/room.tsx",
     baselines: [
       "20261009T204342Z-CDs_MQ1XE2LCiH4u",
       "20261009T224608Z-kbmYR940TBNMF_bI",
+    ],
+    paths: [
+      "result.$VIEWS.room.participantPrincipals",
+    ],
+    reason:
+      "a room's participant principals declare the per-session scope they are derived in; nothing is stored at that path for a reader to refuse",
+    record: "docs/history/fabrichat-view-scopes-break.md",
+  },
+  {
+    // The room's `participantEntries` and `participantPrincipals` declare the
+    // per-session scope the computeds deriving them already had. The proof
+    // reports one issue per role, so each of these baselines reports one of
+    // the two.
+    pattern: "fabrichat/room.tsx",
+    baselines: [
       "20261009T232213Z--scSLE7mEm1_Fn1A",
       "20261010T060935Z-zf5A0zVmTHpJWJf1",
       "20261010T142754Z-6o6cHELOFbTiS6Hv",
@@ -1141,8 +1146,9 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
   },
   {
     // The manager's `rooms` and `people` declare the per-session scope the
-    // computeds deriving them already had. The baselines the entries above
-    // name report `rooms` beside their own paths.
+    // computeds deriving them already had. This is the one baseline that has
+    // `people`; the baselines the entries above name report `rooms` beside
+    // their own paths.
     pattern: "fabrichat/manager.tsx",
     baselines: [
       "20261011T013628Z-pqvm47igo4Famzxe",
@@ -1157,9 +1163,8 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
   },
   {
     // Home types its `chatManager` as the manager's output, so the scope the
-    // manager's `rooms` and `people` declare reaches home's contract too. The
-    // two baselines the default-profile slot entry names stay with it. Home is
-    // a required pattern, so this entry carries the ruling that lets it name
+    // manager's `rooms` declares reaches home's contract too. Home is a
+    // required pattern, so this entry carries the ruling that lets it name
     // one.
     pattern: "system/home.tsx",
     baselines: [
@@ -1183,6 +1188,25 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20261009T161814Z-Oyyi7wIUz7AJ5r33",
       "20261009T210117Z-3GKaIZwG8Yel9N7f",
       "20261010T055011Z-kPOS_bsln0EOlG9e",
+    ],
+    paths: [
+      "result.chatManager.$VIEWS.chats.rooms",
+    ],
+    reason:
+      "home's chat manager's rooms declare the per-session scope they are derived in; a home rolled forward still delivers them, and nothing is stored at that path for a reader to refuse",
+    record: "docs/history/fabrichat-view-scopes-break.md",
+    requiredPatternOverride: {
+      rulingBy: "Dan",
+      on: "2026-10-10",
+      reason:
+        'choosing to declare the scope once the measurements were in: "it looks like (b) is more correct to me", then "(a) sounds good"',
+    },
+  },
+  {
+    // The same ruling, against the one home baseline whose manager has
+    // `people`, which declares its scope beside `rooms`.
+    pattern: "system/home.tsx",
+    baselines: [
       "20261011T013629Z-onNetb9BZoDKytX7",
     ],
     paths: [
@@ -1191,6 +1215,32 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     ],
     reason:
       "home's chat manager's rooms and people declare the per-session scope they are derived in; a home rolled forward still delivers them, and nothing is stored at either path for a reader to refuse",
+    record: "docs/history/fabrichat-view-scopes-break.md",
+    requiredPatternOverride: {
+      rulingBy: "Dan",
+      on: "2026-10-10",
+      reason:
+        'choosing to declare the scope once the measurements were in: "it looks like (b) is more correct to me", then "(a) sounds good"',
+    },
+  },
+  {
+    // Two baselines of the default-profile slot break, whose proof now blames
+    // the scope the manager's `rooms` declares under home's `chatManager`
+    // where it blamed `result.defaultProfile`: the proof reports one issue per
+    // role. The entry names both paths. `home-default-profile-slot-break.md`
+    // records the first, with the ruling its own entry carries, and this
+    // record the second.
+    pattern: "system/home.tsx",
+    baselines: [
+      "20261002T164437Z-Ppiw9bONPOzUfI_d",
+      "20261003T003223Z-fDj2SHhwNCXbd-O3",
+    ],
+    paths: [
+      "result.defaultProfile",
+      "result.chatManager.$VIEWS.chats.rooms",
+    ],
+    reason:
+      "home's chat manager's rooms declare the per-session scope they are derived in, and its default profile moved under a slot cell as the slot break records; a home rolled forward still delivers both",
     record: "docs/history/fabrichat-view-scopes-break.md",
     requiredPatternOverride: {
       rulingBy: "Dan",

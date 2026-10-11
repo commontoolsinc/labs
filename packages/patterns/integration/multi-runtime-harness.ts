@@ -534,9 +534,9 @@ export class MultiRuntimeSession {
   /**
    * Read a value from the piece result through `schema`, a reader's own
    * schema, rather than through the result schema: as a client that demands
-   * the fields it draws reads them. The result above `path` is not pulled
-   * first, so the value is the one `schema` shapes. Links and `piece` are as
-   * for {@link read}.
+   * the fields it draws reads them. The walk starts from the result's raw
+   * link, and the result above `path` is not pulled first, so the value is
+   * the one `schema` alone shapes. Links and `piece` are as for {@link read}.
    */
   async readAs(
     path: (string | number)[],

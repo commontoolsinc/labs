@@ -880,12 +880,14 @@ const handlers: Record<
 
   /**
    * Read the value of the cell reached from the piece result by `path`,
-   * through `schema` rather than the result schema. Nothing above `path` is
-   * pulled, so no value cached there shapes what `schema` reads; links are
-   * converted as `read` converts them.
+   * through `schema` alone. The walk starts from the result's raw link, with
+   * no result schema, and nothing above `path` is pulled, so neither shapes
+   * what `schema` reads; links are converted as `read` converts them.
    */
   async readAs({ path, schema, piece }) {
-    let cell = await resultAt(piece);
+    const { schema: _resultSchema, ...link } = (await resultAt(piece))
+      .getAsNormalizedFullLink();
+    let cell = controller().runtime.getCellFromLink(link);
     for (const segment of path as (string | number)[]) {
       cell = cell.key(segment as never);
     }
