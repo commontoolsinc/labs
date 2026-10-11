@@ -627,6 +627,15 @@ export interface WaveCommitRejection {
 }
 
 /**
+ * A served access-list change together with the list of changes its
+ * `change` function applies, so that a host whose memory server is on
+ * another thread can send the list and rebuild the function there.
+ */
+export type ListedServedAclChange = ServedAclChange & {
+  readonly changes: readonly SpaceAccessChange[];
+};
+
+/**
  * Where the wave commit step commits to. Stage F implements this on the
  * loopback plane (serving-loop.md §1 plane (a)) with the derived-class
  * admission of protocol.md §2; tests implement it directly against an
@@ -2726,7 +2735,7 @@ export class WaveAccumulator
     context: WaveRunContext,
     space: MemorySpace,
     changes: readonly SpaceAccessChange[],
-  ): ServedAclChange | undefined {
+  ): ListedServedAclChange | undefined {
     const carriage = delegatedCarriageOf(context);
     const { eventId, streamEntry } = context;
     if (
@@ -2750,6 +2759,7 @@ export class WaveAccumulator
       },
       change: (stored) =>
         applyAccessListChanges(space, validateStoredAcl(stored), changes),
+      changes,
     };
   }
 

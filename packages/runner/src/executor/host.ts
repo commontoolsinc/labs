@@ -90,7 +90,13 @@ const DEFAULT_FAILURE_PARK_BACKOFF_MAX_MS = 30_000;
 const DEFAULT_PARKED_RUNTIME_RETENTION_MS = 10 * 60_000;
 const DEFAULT_MAX_PARKED_RUNTIMES = 8;
 
-const failureParkBackoffDelayMs = (
+/**
+ * How long the host waits before rebuilding a space after its `streak`th
+ * consecutive failure: `failureParkBackoffBaseMs` doubled per failure, up to
+ * `failureParkBackoffMaxMs`, both from `policy` or the defaults above. The
+ * serving worker's launcher paces a worker's restarts by the same shape.
+ */
+export const failureParkBackoffDelayMs = (
   streak: number,
   policy: SpaceServerPolicy | undefined,
 ): number => {

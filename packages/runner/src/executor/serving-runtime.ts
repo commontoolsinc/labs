@@ -13,9 +13,11 @@ import {
   Runtime,
   type RuntimeFetch,
 } from "../runtime.ts";
-import type { LoopbackMemoryServer } from "./host-memory-server.ts";
 import type { ExecutorHostOptions } from "./host.ts";
-import { LoopbackStorageManager } from "./loopback-storage.ts";
+import {
+  type LoopbackPlane,
+  LoopbackStorageManager,
+} from "./loopback-storage.ts";
 
 /**
  * The flags a serving runtime runs regardless of the flags it is otherwise
@@ -29,8 +31,11 @@ export const SERVING_RUNTIME_EXPERIMENTAL = {
 
 /** What {@link servingRuntimeFactory} builds each serving runtime from. */
 export type ServingRuntimeFactoryOptions = {
-  /** The co-hosted memory server the loopback storage plane connects to. */
-  server: LoopbackMemoryServer;
+  /**
+   * The co-hosted memory server the loopback storage plane connects to, or
+   * the transports that reach it from another thread.
+   */
+  server: LoopbackPlane;
 
   /** Signs the serving sessions' `session.open`; the host's service identity. */
   identity: Signer;

@@ -19,25 +19,36 @@ import {
 } from "../storage/v2.ts";
 import { createSignedSessionOpenAuth } from "../storage/v2-remote-session.ts";
 
+/**
+ * Where a loopback session connects: the memory server reached in-process,
+ * or a factory of transports that reach it another way, such as a port to
+ * the thread that holds it.
+ */
+export type LoopbackPlane =
+  | LoopbackMemoryServer
+  | { createTransport(): MemoryClient.Transport };
+
 class LoopbackSessionFactory implements SessionFactory {
   readonly supportsAclBootstrap = true;
 
-  readonly #getServer: () => LoopbackMemoryServer;
+  readonly #plane: LoopbackPlane;
 
   readonly #onServerFrame?: (frame: string) => void;
 
   constructor(
-    getServer: () => LoopbackMemoryServer,
+    plane: LoopbackPlane,
     onServerFrame?: (frame: string) => void,
   ) {
-    this.#getServer = getServer;
+    this.#plane = plane;
     this.#onServerFrame = onServerFrame;
   }
 
   /** The loopback transport, with each server frame reported AFTER the
    * session has taken it. */
   #transport(): MemoryClient.Transport {
-    const inner = MemoryClient.loopback(this.#getServer());
+    const inner = "createTransport" in this.#plane
+      ? this.#plane.createTransport()
+      : MemoryClient.loopback(this.#plane);
     const report = this.#onServerFrame;
     if (report === undefined) return inner;
     return {
@@ -98,7 +109,7 @@ class LoopbackSessionFactory implements SessionFactory {
  */
 export class LoopbackStorageManager extends StorageManager {
   static connect(
-    server: LoopbackMemoryServer,
+    plane: LoopbackPlane,
     options: Omit<Options, "memoryHost" | "spaceHostMap">,
     /** DIAGNOSTIC (tests): each frame the server sends to this manager's
      * sessions, reported once the session has taken it. A session's own
@@ -113,7 +124,7 @@ export class LoopbackStorageManager extends StorageManager {
         // storage address against this.
         memoryHost: new URL("memory://loopback"),
       },
-      new LoopbackSessionFactory(() => server, onServerFrame),
+      new LoopbackSessionFactory(plane, onServerFrame),
     );
   }
 

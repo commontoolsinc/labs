@@ -32,12 +32,18 @@ read-through posture, documents, all through `Engine.*` on an engine object.
 Every one of those is a SQLite query, and the engine's decoded-document cache
 is keyed by revision identity, so a second connection to the same WAL-mode
 file reads every committed revision and can serve nothing stale. The worker
-opens one engine per space it serves, read-through included, at the URL
-`resolveSpaceStoreUrl` gives for the server's store. The lease rows the loop
-writes (`execution-lease.ts`, through the same engine object) are the one
-write that stays on the worker's connection: small, serialized by SQLite's
-lock with the engine's 5 s busy timeout, and read by the main thread's
-admission from SQLite each time.
+opens one engine per space it serves, read-through included, at the file the
+main thread names once it has opened the space itself, so the server's own
+engine map holds every space the worker serves, which its synchronous lease
+scan reads. A store that is not a file cannot be shared this way, so the
+worker needs a file store. Three writes stay on the worker's connection, each
+small and serialized by SQLite's lock with the engine's 5 s busy timeout: the
+lease rows the loop writes (`execution-lease.ts`), which the main thread's
+admission reads from SQLite each time; the outbox's retirement of a delivered
+row; and the outbox's failure notice for an append the target refused, a
+derived commit of the loop's own that the server does not fan out whichever
+thread writes it. The owner a space's access list names is read the same way,
+through `resolveSpaceOwnerOf` on the worker's engine.
 
 **Wave commits cross to the main thread.** `EngineWaveCommitSink` applies a
 wave's one derived commit inside the engine transaction that also writes its
@@ -46,9 +52,14 @@ databases through the memory server, and reports the commit to the server
 (`noteExecutorCommit`) for dirtiness and fan-out. The store keeps one writer
 with one view of its own commits: the worker sends the `WaveSpaceCommit` (data
 throughout: operations, preconditions, confirmed reads, annotations, basis
-rows, consequence ids, delegated carriage, outbox appends) and the main thread
-applies it with the sink it already has, returning the result. The
-served-ACL-change commit crosses the same way.
+rows, consequence ids, delegated carriage, outbox appends) in the memory
+boundary's encoding, and the main thread applies it through a sink of its own
+per session, returning the result. The counter that keys the session's commits
+stays with the worker, because the outbox's own writes draw from the same
+counter under the same session: each commit crosses with the number the worker
+minted for it, and the main thread's sink is handed that number. The
+served-ACL-change commit crosses the same way, as the list of changes it
+applies; the main thread rebuilds the function from the list.
 
 **The serving runtime's storage plane crosses as frames.** The serving
 runtime's `StorageManager` connects to the memory server through
@@ -59,15 +70,21 @@ runtime's `StorageManager` connects to the memory server through
 back. The protocol, the signed `session.open`, and the service principal are
 unchanged, which is what keeps the read-row admission's holder matching intact.
 
-**The server's observer crosses as events, its queries as requests.** The
-main thread installs the `ServerExecutionObserver` and forwards `commitAdmitted`,
-`sessionOpened` and `demandChanged` to the worker. The worker asks the main
-thread for `hasLiveSessionsForSpace`, `hasLiveSessionFor`, `sessionReadCeiling`,
-`demandForSpace`, `idle`, `flushSessions`, and `noteLeaseReacquired`. The
-demand mirror compares rows, so a `SessionDemand` that arrives as a fresh
-object costs a row comparison where an identical object cost nothing; a
-generation number per session can restore that later if the comparison shows
-in the demand pass's time.
+**The server's observer crosses as events, its queries as requests.** The main
+thread installs the `ServerExecutionObserver` and forwards `commitAdmitted`,
+`sessionOpened`, `demandChanged` and `sessionChanged` to the worker. The last is
+the session registry's own lifecycle, an open, a detach with its expiry, or a
+removal, replayed in full when the observer is installed; the worker keeps a
+mirror from it and answers the three questions the loop asks without waiting,
+`hasLiveSessionsForSpace`, `hasLiveSessionFor` and `sessionReadCeiling`, as the
+registry would. The worker asks the main thread for `demandForSpace`,
+`viewInterestsForSpace`, `setViewSelection`, `foreignWriteAuthorityFor`,
+`checkServedAclChange`, `commitDelegatedAppend`, `idle` and `flushSessions`, and
+tells it of `noteExecutorCommit` and `noteLeaseReacquired` without waiting. The
+demand mirror compares rows, so a `SessionDemand` that arrives as a fresh object
+costs a row comparison where an identical object cost nothing; a generation
+number per session can restore that later if the comparison shows in the demand
+pass's time.
 
 **Lifecycle verbs run in the worker, from a descriptor.** A verb reaches the
 host today as closures over a `PiecesController`. The route sends the verb's
@@ -76,9 +93,18 @@ functions in `@commonfabric/piece`'s served lifecycle. The receipt comes back
 as data.
 
 **Stats cross on every cycle.** The worker posts the host's `ServingLoopStats`
-at the end of each wave cycle and on request; the main thread registers a
-stats provider that returns the latest copy, so `/api/health/stats` keeps its
-shape.
+at the end of each wave cycle, at each activation and park, and on request;
+the main thread registers a stats provider that returns the latest copy, so
+`/api/health/stats` keeps its shape.
+
+**The lease holder's process component is minted per worker start.** The
+holder a space's lease and derived commits name is the service identity plus
+a component the process mints once. With the loop in a worker, the main
+thread mints the component as it starts each worker and both realms adopt it
+(`adoptProcessInstanceId`): the server's synchronous lease scan then matches
+the rows the worker writes, and a worker started in place of one that died
+carries a fresh component, so its commits never meet its predecessor's under
+the engine's replay keying, which keys on the holder and the counter.
 
 **The runtime's other needs are already remote.** Pattern sources come from
 `/api/patterns` over HTTP, which the main thread answers; the compiled-module
@@ -91,7 +117,11 @@ inherits the process's permissions, FFI for SQLite included.
 The port is one ordered channel each way. A frame the server sent before
 answering an `idle()` request arrives at the worker's transport before the
 answer, which is what the settle loop's frame-delivery coupling relies on; the
-same holds for a `commitAdmitted` event that follows a wave commit's result.
+same holds for a `commitAdmitted` event that follows a wave commit's result,
+and for the session event that precedes the `sessionOpened` it describes. A
+message posted to a worker before its listener exists is dropped, so the
+worker's entry posts a ready notice first and the main thread sends nothing,
+the host's options included, until it has arrived.
 
 A worker that dies takes every serving runtime with it. The main thread's
 bridge treats its exit as a park of every space with the failure-park backoff
@@ -115,12 +145,15 @@ and the flag below selects between the two.
    above, the engine opener, and the wave commit sink factory. The in-process
    server satisfies it as it is and behaves as today. No behavior changes;
    the existing executor tests pass unchanged.
-2. [ ] **The port protocol.** A worker-side `ServingPlane` over a `MessagePort`
-   and the main-thread bridge that serves it: request and reply framing with
-   ids, observer events, loopback frame multiplexing by transport id, wave
-   commits applied through a main-thread sink, stats relay. A unit test runs
-   a host in a Worker against a file-backed serving memory server and settles
-   an authored commit through it.
+2. [x] **The port protocol.** A worker-side `ServingPlane`
+   (`serving-port-plane.ts`) over a port and the main-thread
+   `ServingPortBridge` (`serving-port-bridge.ts`) that serves it, on the
+   framing `serving-port-protocol.ts` defines: requests and replies with ids,
+   observer events, loopback frames multiplexed by transport id, wave commits
+   applied through a main-thread sink, stats relay. `serving-worker.ts` is the
+   worker entry and `ServingWorker` (`serving-worker-host.ts`) starts one and
+   replaces one that dies. A unit test runs a host in a Worker against a
+   file-backed memory server and settles an authored commit through it.
 3. [ ] **Toolshed wiring under `SERVER_EXECUTION_WORKER`.** The bootstrap
    starts the worker and the bridge when the variable is `true`, in-process
    otherwise; lifecycle verbs go through descriptors on both paths; the

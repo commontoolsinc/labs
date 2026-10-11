@@ -38,6 +38,7 @@ import {
   type PresenceRemoveMessage,
   type PresenceUpsertMessage,
   type ResponseMessage,
+  type ServerMessage,
   SESSION_REPORT_TEXT_MAX,
   type SessionAdmissibleMessage,
   type SessionEffectMessage,
@@ -70,7 +71,6 @@ import {
   PresenceError,
   validatePresencePublication,
 } from "./presence.ts";
-import type { Server } from "./server.ts";
 import { parseSessionReport } from "./session-reports.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
@@ -4271,7 +4271,14 @@ export const connect = Client.connect;
 // Node's MessageChannel replaces the web one as soon as anything in the
 // process loads node compatibility, and its ports deliver inside a microtask
 // cascade rather than on a turn of their own.
-export const loopback = (server: Pick<Server, "connect">): Transport => {
+export const loopback = (
+  server: {
+    connect(send: (message: ServerMessage) => void): {
+      receive(payload: string): Promise<void>;
+      close(): void;
+    };
+  },
+): Transport => {
   let receiver = (_payload: string) => {};
   let closed = false;
   const queue: string[] = [];

@@ -1,0 +1,427 @@
+// The wire between a serving loop in a worker and the memory server on the
+// thread that owns the store: the messages each side sends, and the endpoint
+// both sides build on, which frames requests with ids and settles their
+// replies. `serving-port-plane.ts` is the worker side; `serving-port-bridge.ts`
+// the main-thread side. Everything that crosses is data a structured clone
+// keeps, except a wave batch and a delegated append, whose values are the
+// memory boundary's and cross as its encoding.
+
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
+import type {
+  SessionViewHandle,
+  SessionViewInterest,
+} from "@commonfabric/memory/v2";
+import { ProtocolError } from "@commonfabric/memory/v2";
+import type {
+  AdmittedCommitNotice,
+  DemandChangeReason,
+  ServedAclChange,
+  ServedAclChangeVerdict,
+  Server,
+  SessionDemand,
+  SessionLifecycleEvent,
+} from "@commonfabric/memory/v2/server";
+import type { SpaceAccessChange } from "../builder/types.ts";
+import type { ExperimentalOptions } from "../runtime.ts";
+import type { MemorySpace, Result } from "../storage/interface.ts";
+import type { SpaceServerPolicy } from "./space-server.ts";
+import type { ServingLoopStats } from "./stats.ts";
+import type { WaveCommitRejection } from "./wave.ts";
+
+/**
+ * What either end posts to and listens on: a `MessagePort`, a `Worker` from
+ * its creator's side, or a worker's own global scope.
+ */
+export type PortLike = {
+  postMessage(message: unknown): void;
+  addEventListener(
+    type: "message",
+    listener: (event: MessageEvent) => void,
+  ): void;
+  removeEventListener(
+    type: "message",
+    listener: (event: MessageEvent) => void,
+  ): void;
+  start?(): void;
+};
+
+/**
+ * A served access-list change as it crosses the port: the function that
+ * applies it replaced by the list of changes it applies, from which the other
+ * side rebuilds the function.
+ */
+export type ServedAclChangeData = Omit<ServedAclChange, "change"> & {
+  readonly changes: readonly SpaceAccessChange[];
+};
+
+/** The entry `Server.commitDelegatedAppend()` takes. */
+export type DelegatedAppendEntry = Parameters<
+  Server["commitDelegatedAppend"]
+>[0];
+
+/** The selection `Server.setViewSelection()` takes. */
+export type ViewSelection = Parameters<Server["setViewSelection"]>[2];
+
+/**
+ * A pattern-lifecycle verb named for the worker to build: the verb's name
+ * and the request it serves. The worker's host owns the table of names.
+ */
+export type LifecycleVerbDescriptor = {
+  readonly name: string;
+  readonly request: unknown;
+};
+
+/** What the worker's entry module needs to build its host. */
+export type ServingWorkerInit = {
+  /** The service identity's key pair, encoded for the realm crossing. */
+  readonly serviceKeyPair: RealmEncodedValue;
+
+  /** The lease holder's process component this worker start adopts. */
+  readonly processInstanceId: string;
+
+  /** The serving runtimes' patterns and compile base. */
+  readonly apiUrl: string;
+  readonly policy: SpaceServerPolicy | undefined;
+  readonly ensureSpaceRoots: boolean | undefined;
+  readonly experimental: ExperimentalOptions | undefined;
+};
+
+/** What the worker asks of the thread that holds the memory server. */
+export type PlaneRequests = {
+  /**
+   * Opens the space's store on the server's side and names its file, so the
+   * worker opens a connection of its own to the same file.
+   */
+  "space.open": { params: { space: string }; result: { url: string } };
+  "server.idle": { params: null; result: void };
+  "server.flushSessions": {
+    params: { spaces: string[] | undefined };
+    result: void;
+  };
+  "server.demandForSpace": {
+    params: { space: string; excludePrincipal: string | undefined };
+    result: SessionDemand[];
+  };
+  "server.viewInterestsForSpace": {
+    params: { space: string; excludePrincipal: string | undefined };
+    result: SessionViewInterest[];
+  };
+  "server.setViewSelection": {
+    params: {
+      space: string;
+      handle: SessionViewHandle;
+      selection: ViewSelection;
+    };
+    result: boolean;
+  };
+  "server.foreignWriteAuthorityFor": {
+    params: { space: string; principal: string | undefined };
+    result: Awaited<ReturnType<Server["foreignWriteAuthorityFor"]>>;
+  };
+  "server.checkServedAclChange": {
+    params: { change: ServedAclChangeData };
+    result: ServedAclChangeVerdict;
+  };
+  "server.commitServedAclChange": {
+    params: {
+      change: ServedAclChangeData;
+      sessionId: string;
+      localSeq: number;
+    };
+    result: ServedAclChangeVerdict;
+  };
+  /** `entry` is a {@link DelegatedAppendEntry} in the memory boundary's encoding. */
+  "server.commitDelegatedAppend": {
+    params: { entry: string };
+    result: Awaited<ReturnType<Server["commitDelegatedAppend"]>>;
+  };
+  /**
+   * Commits one wave batch (a `WaveSpaceCommit` in the memory boundary's
+   * encoding) under the worker's counter value, through the sink the server's
+   * thread keeps for `sessionId`. `homeRefused` reports that applying a home
+   * batch threw, which the worker's sink turns into its own refusal hook.
+   */
+  "sink.commitWave": {
+    params: { sessionId: string; localSeq: number; batch: string };
+    result: {
+      result: Result<{ seq: number }, WaveCommitRejection>;
+      homeRefused: boolean;
+    };
+  };
+  "sink.commitSpaceAccessChange": {
+    params: {
+      sessionId: string;
+      localSeq: number;
+      change: ServedAclChangeData;
+    };
+    result: Result<{ seq?: number }, WaveCommitRejection>;
+  };
+  "loopback.open": { params: { transport: number }; result: void };
+  "loopback.send": {
+    params: { transport: number; payload: string };
+    result: void;
+  };
+};
+
+/** What the worker tells the server's thread without waiting on an answer. */
+export type PlaneNotices = {
+  /**
+   * The worker entry's listener is installed. A message posted to a worker
+   * before that is dropped, so the server's thread sends nothing earlier.
+   */
+  "worker.ready": null;
+  "server.noteExecutorCommit": { notice: AdmittedCommitNotice };
+  "server.noteLeaseReacquired": {
+    notice: { space: string; principal: string };
+  };
+  "loopback.close": { transport: number };
+  "host.stats": { stats: ServingLoopStats };
+  "host.activationSettled": {
+    space: MemorySpace;
+    outcome: "active" | "refused" | "failed";
+  };
+  "host.spaceParked": { space: MemorySpace; reason: string };
+};
+
+/** What the server's thread asks of the worker. */
+export type BridgeRequests = {
+  /** The worker entry's first request, answered once its host serves. */
+  "worker.init": {
+    params: ServingWorkerInit;
+    result: { lifetimeLock: string | undefined };
+  };
+  "host.stats": { params: null; result: ServingLoopStats };
+  "host.runLifecycleVerb": {
+    params: { space: MemorySpace; verb: LifecycleVerbDescriptor };
+    result: unknown;
+  };
+  "host.close": { params: null; result: void };
+};
+
+/** What the server's thread tells the worker without waiting on an answer. */
+export type BridgeNotices = {
+  "observer.commitAdmitted": { notice: AdmittedCommitNotice };
+  "observer.sessionOpened": { space: string };
+  "observer.demandChanged": {
+    space: string;
+    reason: DemandChangeReason | undefined;
+    principal: string | undefined;
+  };
+  "observer.sessionChanged": { event: SessionLifecycleEvent };
+  "loopback.frame": { transport: number; frame: string };
+};
+
+/** The shape of one request's parameters and answer. */
+type RequestShape = { params: unknown; result: unknown };
+type RequestMap = Record<string, RequestShape>;
+type NoticeMap = Record<string, unknown>;
+
+/** An error as it crosses the port. */
+type PortFault = {
+  readonly name: string;
+  readonly message: string;
+  readonly stack: string | undefined;
+};
+
+type Envelope =
+  | {
+    readonly t: "req";
+    readonly id: number;
+    readonly method: string;
+    readonly params: unknown;
+  }
+  | { readonly t: "ok"; readonly id: number; readonly result: unknown }
+  | { readonly t: "err"; readonly id: number; readonly fault: PortFault }
+  | { readonly t: "note"; readonly method: string; readonly params: unknown };
+
+const faultOf = (error: unknown): PortFault =>
+  error instanceof Error
+    ? { name: error.name, message: error.message, stack: error.stack }
+    : { name: "Error", message: String(error), stack: undefined };
+
+/**
+ * The error a fault stands for on this side. A `ProtocolError` keeps its
+ * class, because the outbox tells a deterministic refusal from a transport
+ * failure by it; every other error keeps its name and message.
+ */
+const errorOf = (fault: PortFault): Error => {
+  const error = fault.name === "ProtocolError"
+    ? new ProtocolError(fault.message)
+    : Object.assign(new Error(fault.message), { name: fault.name });
+  if (fault.stack !== undefined) error.stack = fault.stack;
+  return error;
+};
+
+/**
+ * One end of the port: sends requests and notices of the `Out` maps and
+ * answers those of the `In` maps. A request handler is called as its message
+ * arrives, before the next message is read, so two requests posted in order
+ * start in that order; its answer is posted when it settles. A notice handler
+ * that throws, or an answer that cannot be posted, is reported to `onFault`.
+ */
+export class PortEndpoint<
+  OutRequests extends RequestMap,
+  OutNotices extends NoticeMap,
+  InRequests extends RequestMap,
+  InNotices extends NoticeMap,
+> {
+  readonly #port: PortLike;
+  readonly #onFault: (error: Error) => void;
+  readonly #requestHandlers = new Map<string, (params: unknown) => unknown>();
+  readonly #noticeHandlers = new Map<string, (params: unknown) => void>();
+  readonly #pending = new Map<number, {
+    resolve: (value: unknown) => void;
+    reject: (error: Error) => void;
+  }>();
+  readonly #listener: (event: MessageEvent) => void;
+  #nextId = 1;
+  #closed: Error | undefined;
+
+  constructor(port: PortLike, onFault: (error: Error) => void) {
+    this.#port = port;
+    this.#onFault = onFault;
+    this.#listener = (event) => this.#receive(event.data as Envelope);
+    port.addEventListener("message", this.#listener);
+    port.start?.();
+  }
+
+  /** Whether `close()` has run. */
+  get closed(): boolean {
+    return this.#closed !== undefined;
+  }
+
+  /**
+   * Sends one request and settles with its answer, or rejects with the error
+   * the other side's handler threw, or with the reason this end was closed.
+   */
+  request<Method extends keyof OutRequests & string>(
+    method: Method,
+    params: OutRequests[Method]["params"],
+  ): Promise<OutRequests[Method]["result"]> {
+    if (this.#closed !== undefined) return Promise.reject(this.#closed);
+    const id = this.#nextId++;
+    const { promise, resolve, reject } = Promise.withResolvers<unknown>();
+    this.#pending.set(id, { resolve, reject });
+    this.#post({ t: "req", id, method, params });
+    return promise as Promise<OutRequests[Method]["result"]>;
+  }
+
+  /** Sends one notice; one sent after `close()` goes nowhere. */
+  notify<Method extends keyof OutNotices & string>(
+    method: Method,
+    params: OutNotices[Method],
+  ): void {
+    if (this.#closed !== undefined) return;
+    this.#post({ t: "note", method, params });
+  }
+
+  /** Installs the handler for `method`, replacing one installed before. */
+  onRequest<Method extends keyof InRequests & string>(
+    method: Method,
+    handler: (
+      params: InRequests[Method]["params"],
+    ) => InRequests[Method]["result"] | Promise<InRequests[Method]["result"]>,
+  ): void {
+    this.#requestHandlers.set(
+      method,
+      handler as (params: unknown) => unknown,
+    );
+  }
+
+  /** Installs the handler for `method`, replacing one installed before. */
+  onNotice<Method extends keyof InNotices & string>(
+    method: Method,
+    handler: (params: InNotices[Method]) => void,
+  ): void {
+    this.#noticeHandlers.set(method, handler as (params: unknown) => void);
+  }
+
+  /**
+   * Stops listening and rejects every request still waiting with `reason`.
+   * Messages the other side posts afterwards are dropped.
+   */
+  close(reason: Error = new Error("the port endpoint is closed")): void {
+    if (this.#closed !== undefined) return;
+    this.#closed = reason;
+    this.#port.removeEventListener("message", this.#listener);
+    const pending = [...this.#pending.values()];
+    this.#pending.clear();
+    for (const { reject } of pending) reject(reason);
+  }
+
+  #post(envelope: Envelope): void {
+    try {
+      this.#port.postMessage(envelope);
+    } catch (error) {
+      this.#onFault(
+        new Error(
+          `posting a ${envelope.t} message on the serving port failed`,
+          { cause: error },
+        ),
+      );
+    }
+  }
+
+  #receive(envelope: Envelope): void {
+    switch (envelope.t) {
+      case "req":
+        this.#answer(envelope);
+        return;
+      case "note": {
+        const handler = this.#noticeHandlers.get(envelope.method);
+        if (handler === undefined) {
+          this.#onFault(
+            new Error(`no handler for the notice "${envelope.method}"`),
+          );
+          return;
+        }
+        try {
+          handler(envelope.params);
+        } catch (error) {
+          this.#onFault(
+            new Error(`the handler for the notice "${envelope.method}" threw`, {
+              cause: error,
+            }),
+          );
+        }
+        return;
+      }
+      case "ok":
+      case "err": {
+        const pending = this.#pending.get(envelope.id);
+        if (pending === undefined) return;
+        this.#pending.delete(envelope.id);
+        if (envelope.t === "ok") pending.resolve(envelope.result);
+        else pending.reject(errorOf(envelope.fault));
+        return;
+      }
+    }
+  }
+
+  /** Helper for `#receive()`, which runs a request's handler and posts its answer. */
+  #answer(request: Extract<Envelope, { t: "req" }>): void {
+    const handler = this.#requestHandlers.get(request.method);
+    const { id } = request;
+    if (handler === undefined) {
+      this.#post({
+        t: "err",
+        id,
+        fault: faultOf(
+          new Error(`no handler for the request "${request.method}"`),
+        ),
+      });
+      return;
+    }
+    let outcome: unknown;
+    try {
+      outcome = handler(request.params);
+    } catch (error) {
+      this.#post({ t: "err", id, fault: faultOf(error) });
+      return;
+    }
+    Promise.resolve(outcome).then(
+      (result) => this.#post({ t: "ok", id, result }),
+      (error) => this.#post({ t: "err", id, fault: faultOf(error) }),
+    );
+  }
+}

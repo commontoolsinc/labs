@@ -113,6 +113,32 @@ export type SessionState = {
   actingPrincipal?: string;
 };
 
+/**
+ * A change to the sessions a {@link SessionRegistry} holds, as its observer
+ * sees it. `opened` reports a session opened or resumed, with what the open
+ * declared; `detached` reports its connection gone, and when the registry
+ * forgets the session unless a resume comes first; `removed` reports it gone.
+ */
+export type SessionLifecycleEvent =
+  | {
+    readonly kind: "opened";
+    readonly space: string;
+    readonly sessionId: string;
+    readonly principal?: string;
+    readonly readCeiling?: SessionReadCeiling;
+  }
+  | {
+    readonly kind: "detached";
+    readonly space: string;
+    readonly sessionId: string;
+    readonly expiresAt: number;
+  }
+  | {
+    readonly kind: "removed";
+    readonly space: string;
+    readonly sessionId: string;
+  };
+
 type OpenSessionState = {
   sessionId: string;
   sessionToken: SessionToken;
@@ -134,9 +160,21 @@ const revokedError = (message: string): Error =>
 const nextSessionToken = (): SessionToken =>
   crypto.randomUUID() as SessionToken;
 
+/** The `opened` event describing `session` as it stands. */
+const openedEvent = (session: SessionState): SessionLifecycleEvent => ({
+  kind: "opened",
+  space: session.space,
+  sessionId: session.id,
+  ...(session.principal === undefined ? {} : { principal: session.principal }),
+  ...(session.readCeiling === undefined
+    ? {}
+    : { readCeiling: session.readCeiling }),
+});
+
 export class SessionRegistry {
   readonly #ttlMs: number;
   #sessions = new Map<string, SessionState>();
+  #observer: ((event: SessionLifecycleEvent) => void) | undefined;
 
   constructor(options: { ttlMs?: number } = {}) {
     this.#ttlMs = options.ttlMs ?? 30_000;
@@ -146,8 +184,47 @@ export class SessionRegistry {
     for (const [key, session] of this.#sessions) {
       if (session.expiresAt !== null && session.expiresAt <= now) {
         this.#sessions.delete(key);
+        this.#observer?.({
+          kind: "removed",
+          space: session.space,
+          sessionId: session.id,
+        });
       }
     }
+  }
+
+  /**
+   * Installs the one observer of this registry's changes, replacing any
+   * installed before; `undefined` removes it. It is called as each change
+   * is made, with the registry already reflecting it, and a detached
+   * session that lapses is reported when a read prunes it.
+   */
+  setObserver(
+    observer: ((event: SessionLifecycleEvent) => void) | undefined,
+  ): void {
+    this.#observer = observer;
+  }
+
+  /**
+   * The events that would bring an observer installed now up to date: an
+   * `opened` for every session held, followed by a `detached` for each one
+   * whose connection is gone.
+   */
+  snapshot(): SessionLifecycleEvent[] {
+    this.#prune();
+    const events: SessionLifecycleEvent[] = [];
+    for (const session of this.#sessions.values()) {
+      events.push(openedEvent(session));
+      if (session.expiresAt !== null) {
+        events.push({
+          kind: "detached",
+          space: session.space,
+          sessionId: session.id,
+          expiresAt: session.expiresAt,
+        });
+      }
+    }
+    return events;
   }
 
   open(
@@ -243,6 +320,7 @@ export class SessionRegistry {
       // marker carries none (fail-closed toward less authority).
       ...(actingPrincipal !== undefined ? { actingPrincipal } : {}),
     });
+    this.#observer?.(openedEvent(this.#sessions.get(key)!));
     return {
       sessionId,
       sessionToken,
@@ -309,7 +387,9 @@ export class SessionRegistry {
 
   /** Remove a session outright (e.g. its principal lost access). */
   remove(space: string, sessionId: string): void {
-    this.#sessions.delete(sessionKey(space, sessionId));
+    if (this.#sessions.delete(sessionKey(space, sessionId))) {
+      this.#observer?.({ kind: "removed", space, sessionId });
+    }
   }
 
   updateSeenSeq(
@@ -350,6 +430,12 @@ export class SessionRegistry {
     if (session?.ownerConnectionId === ownerConnectionId) {
       session.ownerConnectionId = null;
       session.expiresAt = Date.now() + this.#ttlMs;
+      this.#observer?.({
+        kind: "detached",
+        space,
+        sessionId,
+        expiresAt: session.expiresAt,
+      });
     }
   }
 }

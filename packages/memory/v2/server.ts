@@ -194,7 +194,11 @@ import {
   trackedIdsFromEntries,
 } from "./server-sync.ts";
 import { authorizationError } from "./session-open-auth.ts";
-import { SessionRegistry, type SessionState } from "./session-registry.ts";
+import {
+  type SessionLifecycleEvent,
+  SessionRegistry,
+  type SessionState,
+} from "./session-registry.ts";
 import { isSpaceKind } from "./space-kind.ts";
 import {
   columnOriginUnavailableReason,
@@ -220,7 +224,10 @@ import {
   viewWatches,
 } from "./view-interest.ts";
 
-export { SessionRegistry } from "./session-registry.ts";
+export {
+  type SessionLifecycleEvent,
+  SessionRegistry,
+} from "./session-registry.ts";
 
 /**
  * A space DID pinned tightly enough to name a store. `isDID`
@@ -660,6 +667,43 @@ type AclState =
   | { kind: "invalid" }
   | { kind: "valid"; acl: Record<string, Capability | undefined> };
 
+/** The access list `engine` stores for `space`, classified. */
+const readAclState = (engine: Engine.Engine, space: string): AclState => {
+  const state = Engine.readState(engine, { id: aclDocId(space) });
+  if (state === null) return { kind: "missing" };
+  // A retracted ACL is not equivalent to a never-created ACL: treating the
+  // tombstone as public would turn deletion into an authorization bypass.
+  if (state.document === null) return { kind: "invalid" };
+  const acl = state.document.value;
+  if (!isACL(acl)) return { kind: "invalid" };
+  const byPrincipal = acl as Record<string, Capability | undefined>;
+  if (!hasConcreteOwner(byPrincipal)) return { kind: "invalid" };
+  return { kind: "valid", acl: byPrincipal };
+};
+
+/**
+ * The owner of `space` as the access list `engine` stores resolves it: the
+ * space itself when its list names it `OWNER`, else the first other concrete
+ * `OWNER` in sorted order, and `undefined` for a space whose list is missing
+ * or invalid. {@link Server.resolveSpaceOwner} answers with this, and a
+ * serving loop holding its own connection to the store reads it directly.
+ */
+export const resolveSpaceOwnerOf = (
+  engine: Engine.Engine,
+  space: string,
+): string | undefined => {
+  const state = readAclState(engine, space);
+  if (state.kind !== "valid") return undefined;
+  if (state.acl[space] === "OWNER") return space;
+  const owners = Object.entries(state.acl)
+    .filter(([principal, capability]) =>
+      principal !== ANYONE_USER && capability === "OWNER"
+    )
+    .map(([principal]) => principal)
+    .sort();
+  return owners[0];
+};
+
 const commitTouchesAclDoc = (
   operations: readonly Operation[],
   space: string,
@@ -946,6 +990,15 @@ export type ServerExecutionObserver = {
     reason?: DemandChangeReason,
     principal?: string,
   ) => void;
+
+  /**
+   * A session opened, resumed, detached or removed on this server, as
+   * {@link SessionLifecycleEvent} describes it. Installing an observer that
+   * has this replays every session the server then holds, so a host that
+   * mirrors the sessions starts from the whole set. For an open, it fires
+   * before `sessionOpened` does.
+   */
+  sessionChanged?: (event: SessionLifecycleEvent) => void;
 };
 
 /** (d′): why `demandChanged` fired — `watch` (the pre-existing
@@ -2620,6 +2673,7 @@ export class Server {
     },
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
+    this.#sessions.setObserver((event) => this.#notifySessionChanged(event));
     this.#store = options.store;
     this.#operationCodecs = options.operationCodecs ??
       createDefaultOperationCodecRegistry();
@@ -2862,16 +2916,7 @@ export class Server {
     engine: Engine.Engine,
     space: string,
   ): string | undefined {
-    const state = this.#aclState(engine, space);
-    if (state.kind !== "valid") return undefined;
-    if (state.acl[space] === "OWNER") return space;
-    const owners = Object.entries(state.acl)
-      .filter(([principal, capability]) =>
-        principal !== ANYONE_USER && capability === "OWNER"
-      )
-      .map(([principal]) => principal)
-      .sort();
-    return owners[0];
+    return resolveSpaceOwnerOf(engine, space);
   }
 
   /**
@@ -2902,16 +2947,7 @@ export class Server {
   }
 
   #aclState(engine: Engine.Engine, space: string): AclState {
-    const state = Engine.readState(engine, { id: aclDocId(space) });
-    if (state === null) return { kind: "missing" };
-    // A retracted ACL is not equivalent to a never-created ACL: treating the
-    // tombstone as public would turn deletion into an authorization bypass.
-    if (state.document === null) return { kind: "invalid" };
-    const acl = state.document.value;
-    if (!isACL(acl)) return { kind: "invalid" };
-    const byPrincipal = acl as Record<string, Capability | undefined>;
-    if (!hasConcreteOwner(byPrincipal)) return { kind: "invalid" };
-    return { kind: "valid", acl: byPrincipal };
+    return readAclState(engine, space);
   }
 
   #resolveCapability(
@@ -8727,6 +8763,11 @@ export class Server {
     observer: ServerExecutionObserver | undefined,
   ): void {
     this.#serverExecutionObserver = observer;
+    if (observer?.sessionChanged !== undefined) {
+      for (const event of this.#sessions.snapshot()) {
+        this.#notifySessionChanged(event);
+      }
+    }
   }
 
   /**
@@ -8774,6 +8815,19 @@ export class Server {
           error,
         );
       }
+    }
+  }
+
+  #notifySessionChanged(event: SessionLifecycleEvent): void {
+    const observer = this.#serverExecutionObserver;
+    if (observer?.sessionChanged === undefined) return;
+    try {
+      observer.sessionChanged(event);
+    } catch (error) {
+      console.warn(
+        "memory v2: server-execution observer threw on sessionChanged",
+        error,
+      );
     }
   }
 

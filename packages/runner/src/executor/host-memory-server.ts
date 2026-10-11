@@ -4,6 +4,7 @@
 // not at hand (a worker of the same process) behind an implementation that
 // carries each member across. The in-process server satisfies it as it is.
 
+import type { ServerMessage } from "@commonfabric/memory/v2";
 import type { Server } from "@commonfabric/memory/v2/server";
 
 /**
@@ -59,5 +60,22 @@ export type HostMemoryServer = ServerMembers & {
   attachWaveCommitSqliteDbs?: Server["attachWaveCommitSqliteDbs"];
 };
 
-/** What the serving runtime's loopback storage plane needs of the server. */
-export type LoopbackMemoryServer = Pick<Server, "connect">;
+/**
+ * One connection the loopback storage plane holds to the memory server, as
+ * `Server.connect()` hands one out.
+ */
+export type LoopbackConnection = {
+  /** Hands one client frame to the server; settles once the server took it. */
+  receive(payload: string): Promise<void>;
+  close(): void;
+};
+
+/**
+ * What the serving runtime's loopback storage plane needs of the memory
+ * server: a connection per session client, which delivers the server's
+ * messages to `send`. The in-process server is one; an implementation that
+ * carries the frames to the server's thread is another.
+ */
+export type LoopbackMemoryServer = {
+  connect(send: (message: ServerMessage) => void): LoopbackConnection;
+};
