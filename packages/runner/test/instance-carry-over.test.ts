@@ -635,6 +635,21 @@ describe("instance-carry-over", () => {
         expect(result.aCount).toBe(7);
       });
 
+      it("keeps each child's state when two children of one pattern are bound to `const`s", async () => {
+        const cell = await deployedParent("bound-later-two", {
+          deployed: DEPLOYED_TWO,
+          named: DEPLOYED_TWO,
+          counts: { aCount: 7, bCount: 9 },
+        });
+
+        const result = await update(cell, NAMED_TWO);
+
+        expect({ aCount: result.aCount, bCount: result.bCount }).toEqual({
+          aCount: 7,
+          bCount: 9,
+        });
+      });
+
       it("keeps its child's state when a named sibling is inserted ahead of it", async () => {
         const cell = await deployedParent("bound-later-named-sibling", {
           named: DEPLOYED,
