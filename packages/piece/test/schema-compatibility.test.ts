@@ -2,7 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
 import { validateSchemaValue } from "@commonfabric/runner/cfc";
-import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
+import type {
+  FabricPrimitiveSchemaType,
+  JSONSchemaObj,
+} from "@commonfabric/api";
 import type { FabricPrimitive } from "@commonfabric/data-model";
 import {
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
@@ -10,6 +13,9 @@ import {
 } from "@commonfabric/data-model/fabric-primitives";
 import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@commonfabric/data-model/for-testing-only";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "@commonfabric/runner/fabric-special-object-brand";
+import { internSchema } from "@commonfabric/data-model-schema";
+import { formatExternalSchemaRef } from "@commonfabric/data-model-schema/schema-refs";
+import { registerSchemaDocument } from "../../runner/src/schema-registry.ts";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
@@ -170,9 +176,68 @@ describe("piece schema compatibility", () => {
       expect(schemasHaveSameContract(reference, reference)).toBe(false);
     });
 
+    it("ignores unrelated definitions while retaining a recursive contract's reachable defaults", () => {
+      const root = (fallback = "Donut"): JSONSchemaObj => ({
+        $defs: {
+          row: {
+            type: "object",
+            properties: {
+              title: { $ref: "#/$defs/text" },
+              children: { type: "array", items: { $ref: "#/$defs/row" } },
+            },
+          },
+          text: { type: "string", default: fallback },
+          unrelated: { type: "number" },
+        },
+      });
+      const reference = { $ref: "#/$defs/row" } as const;
+      const addedDefinition = {
+        ...root(),
+        $defs: {
+          ...root().$defs,
+          unrelated: { type: "string" },
+          meeting: { type: "object", default: {} },
+        },
+      } as const;
+      expect(schemasHaveSameContract(reference, reference, {
+        sourceRoot: root(),
+        targetRoot: addedDefinition,
+      })).toBe(true);
+      expect(schemasHaveSameContract(reference, reference, {
+        sourceRoot: addedDefinition,
+        targetRoot: root("Glaze"),
+      })).toBe(false);
+    });
+
     it("returns false when the consumer value contract changes", () => {
       expect(schemasHaveSameContract({ type: "string" }, { type: "number" }))
         .toBe(false);
+    });
+
+    it("compares external contracts independently of enclosing definition scopes", () => {
+      const reference = (fallback: string, register = true): JSONSchema => {
+        const document = {
+          type: "object",
+          properties: { value: { $ref: "#/$defs/value" } },
+          $defs: { value: { type: "string", default: fallback } },
+        } as const;
+        const { taggedHashString } = internSchema(document, true);
+        if (register) registerSchemaDocument(taggedHashString, document);
+        return {
+          type: "array",
+          items: { $ref: formatExternalSchemaRef(taggedHashString) },
+        };
+      };
+      const same = reference("same external default");
+      expect(schemasHaveSameContract(same, same, {
+        sourceRoot: { $defs: { value: { type: "number" } } },
+        targetRoot: { $defs: { value: { type: "boolean" } } },
+      })).toBe(true);
+      expect(
+        schemasHaveSameContract(same, reference("changed external default")),
+      ).toBe(false);
+      const missing = reference("unregistered external contract", false);
+      expect(schemasHaveSameContract(missing, missing)).toBe(false);
     });
   });
 
