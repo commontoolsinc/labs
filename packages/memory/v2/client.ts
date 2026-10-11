@@ -159,6 +159,27 @@ export type Transport = {
   delivered?(): Promise<void>;
 };
 
+/**
+ * The frames this process received as a server's `session/effect` push. A
+ * server sends one per fan-out turn, carrying every change since its last
+ * turn to the documents the session watches, so a session that has applied
+ * every frame before one is current through that frame's `toSeq`. Watch
+ * mutation replies, restore syncs and the client's own caught-up markers are
+ * not pushes: a watch mutation reply covers only the roots it added.
+ */
+const pushedSyncs = new WeakSet<SessionSync>();
+
+/**
+ * Returns whether `sync` arrived as a server's `session/effect` push, and so
+ * is current through its `toSeq` for a session that applied every frame
+ * before it. The guarantee is the server's publication turn: a commit that
+ * bypasses that turn can reach the head a push is stamped with before its
+ * changes reach the push.
+ */
+export function isPushedSync(sync: SessionSync): boolean {
+  return pushedSyncs.has(sync);
+}
+
 export type ConnectOptions = {
   transport: Transport;
   signal?: AbortSignal;
@@ -2968,6 +2989,7 @@ export class SpaceSession {
     if (this.#closed) {
       return;
     }
+    pushedSyncs.add(effect);
     this.#noteResult(effect.toSeq);
     this.#noteOperationWatchCursors(effect);
     if (this.#watchView === null) {

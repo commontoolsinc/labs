@@ -3282,6 +3282,30 @@ export interface ISpaceReplica extends ISpace {
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined;
 
+  /**
+   * The commit sequence through which every document this replica watches
+   * holds every change, or `undefined` when it cannot say: before the first
+   * server push applies, and after a frame failed to apply or was applied
+   * with entries quarantined, until the replica resets. A document a watch
+   * mutation delivered may hold a later state than this sequence. The bound
+   * is the server's publication turn, which commits that bypass it can
+   * break (a co-hosted executor's wave commits, under server execution).
+   */
+  completeThroughSeq?(): number | undefined;
+
+  /**
+   * Whether the replica's state for the document is confirmed: the document
+   * is watched and delivered, no local write to it is pending, and its value
+   * is neither a refused write folded locally nor an own write promoted past
+   * what a push has covered. An absent document a push delivered is
+   * confirmed.
+   */
+  isConfirmedDocument?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean;
+
   commitNative?(
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
