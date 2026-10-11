@@ -79,7 +79,8 @@ export interface GcpClient {
 
   /**
    * Waits out the window in which a just-created service account is not
-   * yet visible to the other services that name it. Tests pass a no-op.
+   * yet visible to the services that name it, IAM's own key creation among
+   * them. Tests pass a no-op.
    */
   awaitVisibility?: () => Promise<void>;
 }
@@ -242,8 +243,8 @@ export async function ensurePersonFolder(
 }
 
 /**
- * Whether a response is a service the account has not propagated to yet,
- * which answers a request that names it as though it did not exist.
+ * Whether a response comes from a service the account has not propagated
+ * to yet, which answers a request that names it as though it did not exist.
  */
 export function isAccountNotVisible(
   status: number,
@@ -283,7 +284,9 @@ export async function mintKey(
   );
   if (before.status !== 200) {
     throw new Error(
-      `listing the keys of ${email} failed: HTTP ${before.status}`,
+      `listing the keys of ${email} failed: HTTP ${before.status} ${
+        toLongQuotedDebugString(before.json)
+      }`,
     );
   }
   const superseded = ((before.json as { keys?: { name?: string }[] })
