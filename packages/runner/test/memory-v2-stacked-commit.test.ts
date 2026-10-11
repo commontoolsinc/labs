@@ -5462,6 +5462,72 @@ describe("memory-v2-stacked-commit", () => {
       }
     });
 
+    it("tells subscribers the store's list when a marker-only frame promotes the parked accept", async () => {
+      // On a marker-capable server the accept is parked until a frame's
+      // `caughtUpLocalSeq` covers it. The frame that carries the marker may
+      // carry no entries at all, so nothing but the promotion itself can say
+      // the view changed.
+      const harness = await markerHarness();
+      const responseGate = Promise.withResolvers<void>();
+      try {
+        await seedAccepted(harness, DOCS.A, { items: ["a", "b"] });
+        await watch(harness);
+        harness.pushSync({ caughtUpLocalSeq: 1 });
+        await waitForCondition(
+          () => !hasPendingOverlay(harness, DOCS.A),
+          "seed promotion at its marker",
+        );
+        harness.model.setOutcome(2, {
+          kind: "accept",
+          responseGate: responseGate.promise,
+          remoteInterleave: {
+            label: "foreign",
+            operations: [{
+              op: "set",
+              id: DOCS.A,
+              value: { items: ["a", "b", "x"] },
+            }],
+          },
+        });
+        const splice = growTo(harness, { items: ["a", "b", "c"] }, ["c"]);
+        harness.pushSync({
+          upserts: [{
+            id: DOCS.A,
+            seq: currentSeq(harness, DOCS.A) + 1,
+            value: { items: ["a", "b", "x"] },
+          }],
+        });
+        await clock.settle();
+        expectVisible(harness, { A: { items: ["a", "b", "c"] } });
+
+        responseGate.resolve();
+        await expectResultOk(splice);
+        // The verdict is in and the application parked: the view still
+        // shows the list the writer computed.
+        expect(hasPendingOverlay(harness, DOCS.A)).toBe(true);
+        expectVisible(harness, { A: { items: ["a", "b", "c"] } });
+
+        const before = harness.notifications.notifications.length;
+        harness.pushSync({ caughtUpLocalSeq: 2 });
+        await waitForCondition(
+          () => !hasPendingOverlay(harness, DOCS.A),
+          "parked promotion at the marker",
+        );
+        expectVisible(harness, { A: { items: ["a", "b", "c", "x"] } });
+        const promoted = harness.notifications.notifications.slice(before)
+          .flatMap((notification) =>
+            "changes" in notification ? [...notification.changes] : []
+          )
+          .filter((change) => change.address.id === DOCS.A);
+        expect(promoted.map((change) => change.after)).toContainEqual({
+          value: { items: ["a", "b", "c", "x"] },
+        });
+      } finally {
+        responseGate.resolve();
+        await harness.close();
+      }
+    });
+
     it("keeps the splice's list over a frame that changed another field", async () => {
       const harness = await createHarness();
       const responseGate = Promise.withResolvers<void>();

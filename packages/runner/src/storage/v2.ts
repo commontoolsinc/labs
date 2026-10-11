@@ -4108,6 +4108,16 @@ export class SpaceReplica
   #frameApplyDepth = 0;
 
   /**
+   * The documents the frame being integrated snapshots before it applies,
+   * and notifies on afterwards: its upserts and removes. A promotion that
+   * changes the view for one of them (`#confirmPending`'s splice case) is
+   * carried by that notification; one for any other document — a parked
+   * accept a marker-only frame applies, or one the frame's entries do not
+   * include — is not, and notifies on its own. Unset outside a frame.
+   */
+  #frameTouchedKeys: ReadonlySet<string> | undefined;
+
+  /**
    * The instances (doc keys) the store read-through has read and found
    * nothing at. No record stands for such an instance — a session's pull
    * that delivered nothing leaves none either, and a transaction's read
@@ -8323,6 +8333,7 @@ export class SpaceReplica
       this.#applySessionSyncFrame(sync, type);
     } finally {
       this.#frameApplyDepth -= 1;
+      this.#frameTouchedKeys = undefined;
     }
   }
 
@@ -8412,6 +8423,9 @@ export class SpaceReplica
         this.#scopeKeyIdentity(),
       )
       : undefined;
+    this.#frameTouchedKeys = new Set(
+      touched.map((address) => this.#docKeyOf(address)),
+    );
 
     // Docs whose CONFIRMED seq this frame moved FORWARD — the arrival
     // wake's payload (stage C tuning T2). Collected only while an
@@ -9275,21 +9289,22 @@ export class SpaceReplica
     // A splice shown as the array its writer computed (`displayedPatches`)
     // promotes as the store applied it, which over a moved array is a
     // different value, so its promotion can change the view where no other
-    // promotion does. A parked accept promotes inside a frame's
-    // integration, whose differential already carries the change; an
-    // accept applied at its verdict promotes outside any frame, and the
-    // change notification is fired here, over the same docs as the shadow
-    // flip's.
-    const spliceTouched = this.#frameApplyDepth > 0
-      ? []
-      : [...keys.entries()].filter(([key, { id, scope, scopeKey }]) =>
-        !shadowTouched.some((address) => this.#docKeyOf(address) === key) &&
-        this.#record(id, scope, undefined, scopeKey).pending.some((entry) =>
-          entry.localSeq === localSeq && entry.op === "patch" &&
-          entry.accepted !== true &&
-          entry.patches.some((patch) => patch.op === "splice")
-        )
-      ).map(([, address]) => address);
+    // promotion does. A frame that snapshots the document carries the
+    // change in its own notification (`#frameTouchedKeys`); a promotion of
+    // any other document — at the verdict, by a marker-only frame, or by a
+    // frame whose entries do not include it — notifies here, over the same
+    // docs as the shadow flip's.
+    const spliceTouched = [...keys.entries()].filter((
+      [key, { id, scope, scopeKey }],
+    ) =>
+      this.#frameTouchedKeys?.has(key) !== true &&
+      !shadowTouched.some((address) => this.#docKeyOf(address) === key) &&
+      this.#record(id, scope, undefined, scopeKey).pending.some((entry) =>
+        entry.localSeq === localSeq && entry.op === "patch" &&
+        entry.accepted !== true &&
+        entry.patches.some((patch) => patch.op === "splice")
+      )
+    ).map(([, address]) => address);
     const flipTouched = [...shadowTouched, ...spliceTouched];
     const shouldNotifyShadowSubscribers = flipTouched.length > 0 &&
       this.#hasNotificationSubscribers();
