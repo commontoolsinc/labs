@@ -1,6 +1,8 @@
 /** A space default pattern whose ordered panel occurrences own composition. */
+
 import {
   computed,
+  type Default,
   handler,
   ifElse,
   NAME,
@@ -21,10 +23,12 @@ import {
   validatePanel,
 } from "./admission.tsx";
 import type {
+  BindMeetingRequest,
   ChatRoomCell,
   ChatRoomChoice,
   LoomInput,
   LoomOutput,
+  MeetingAssociationCell,
   Panel,
   PanelAdmission,
   PanelPosition,
@@ -248,6 +252,59 @@ const ensureChatRoom = handler<void, { chatRoom: ChatRoomCell }>(
     chatRoom.set({ room: FabriChatRoom({}) });
   },
 );
+
+/**
+ * Binds an empty Loom to one meeting key and confirms a same-key replay.
+ * A different key or unrecognized stored value leaves the association intact.
+ * The read participates in the handler transaction, so competing bindings
+ * retry against the association that committed first.
+ */
+const bindMeeting = handler<
+  BindMeetingRequest,
+  {
+    meeting: MeetingAssociationCell;
+    storedFields: Writable<
+      Record<string, unknown> | Default<Record<PropertyKey, never>>
+    >;
+  }
+>(({ key, reply }, { meeting, storedFields }) => {
+  if (
+    typeof key !== "string" || key.length !== 64 || !/^[0-9a-f]{64}$/.test(key)
+  ) {
+    reply?.set({ status: "invalid-key" });
+    return;
+  }
+  // The untyped field projection retains a malformed `key` that the typed
+  // view would omit, so malformed state cannot look like an empty record.
+  const current = storedFields.get();
+  if (
+    typeof current !== "object" || current === null || Array.isArray(current)
+  ) {
+    reply?.set({ status: "invalid-state" });
+    return;
+  }
+  if ("key" in current) {
+    const storedKey = meeting.get()?.key;
+    if (
+      typeof storedKey !== "string" || storedKey.length !== 64 ||
+      !/^[0-9a-f]{64}$/.test(storedKey)
+    ) {
+      reply?.set({ status: "invalid-state" });
+      return;
+    }
+    reply?.set({
+      status: storedKey === key ? "already-bound" : "conflict",
+      key: storedKey,
+    });
+    return;
+  }
+  if (Object.keys(current).length !== 0) {
+    reply?.set({ status: "invalid-state" });
+    return;
+  }
+  meeting.set({ key });
+  reply?.set({ status: "bound", key });
+});
 
 /** Sets the Loom's title, which is also its name. */
 const retitleLoom = handler<{ title: string }, { title: Writable<string> }>(
@@ -550,6 +607,7 @@ export default pattern<LoomInput, LoomOutput>(
       presentation,
       participants,
       chatRoom,
+      meeting,
       hiddenPanels,
       privatePanels,
     },
@@ -738,6 +796,8 @@ export default pattern<LoomInput, LoomOutput>(
       chatRoom: room,
       setChatRoom: setChatRoom({ chatRoom }),
       ensureChatRoom: ensureChatRoom({ chatRoom }),
+      meeting,
+      bindMeeting: bindMeeting({ meeting, storedFields: meeting }),
       retitleLoom: retitleLoom({ title }),
       retitlePanel: retitlePanel({ panels }),
       retargetPanel: retargetPanel({ panels }),
