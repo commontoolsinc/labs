@@ -680,7 +680,8 @@ type PendingCommitRead = {
   nonRecursive?: boolean;
 };
 
-const diagProfileDocs = new Set<string>();
+const diagProfileDocs = new Set<string>(["of:fid1:ZMY71NvvdxSa4P4gzUxayLk5IpsVSSPCMhg_YYB2-oE"]);
+const diagLocalSeqs = new Set<number>();
 
 const pendingVersion = (
   localSeq: number,
@@ -2529,11 +2530,9 @@ export class StorageManager implements IStorageManager {
     }
     entry.count++;
     this.#pendingLoads.set(key, entry);
-    console.warn(`[diag-load] reg ${key} gen=${entry.generation} count=${entry.count}`);
     return (failure?: unknown) => {
       entry.failure ??= failure;
       entry.count--;
-      console.warn(`[diag-load] rel ${key} gen=${entry.generation} count=${entry.count} failure=${failure === undefined ? "none" : String((failure as { name?: string })?.name ?? failure)}`);
       if (entry.count > 0) return;
       this.#pendingLoads.delete(key);
       if (entry.failure === undefined) {
@@ -6494,9 +6493,7 @@ export class SpaceReplica
     const refreshStart = performance.now();
     const diagId = Math.random().toString(36).slice(2, 8);
     try {
-      console.warn(`[diag-refresh] ${diagId} start ${this.#space} type=${type}`);
       let { session } = await this.#activeSessionHandle();
-      console.warn(`[diag-refresh] ${diagId} session ${this.#space}`);
       // Per-session (no global): mirror the storage setting onto the session so
       // its watch-mutation family (set + add) uses the ordered-issue concurrent
       // path. Idempotent; cheap to re-assert each refresh. Optional-chained so
@@ -6576,11 +6573,8 @@ export class SpaceReplica
       const watchAddStart = performance.now();
       let mutation: MemoryV2Client.WatchMutationResult;
       try {
-        console.warn(`[diag-refresh] ${diagId} watchAdd ${this.#space} n=${watches.length} ids=${watches.map((w) => w.id.slice(0, 60)).join(",")}`);
         mutation = await session.watchAddSync(watches);
-        console.warn(`[diag-refresh] ${diagId} watchAdded ${this.#space}`);
       } catch (error) {
-        console.warn(`[diag-refresh] ${diagId} watchAdd-threw ${this.#space} ${String(error)}`);
         // An ACL verdict can terminate the session while this request is in
         // flight, and the request may be the only load the space sees, so its
         // failure is what consumes the remount. The request is made once more
@@ -7497,7 +7491,7 @@ export class SpaceReplica
     // Mark the layer dead for that window so no new commit is minted and sent
     // against it; the promise settles once the drop and its revert are done.
     const dropped = Promise.withResolvers<void>();
-    if (true) {
+    if (diagLocalSeqs.has(localSeq)) {
       console.warn(`[diag-prof] reject ${this.#space.slice(-6)} local=${localSeq} ${rejection.name}: ${String(rejection.message).slice(0, 200)}`);
     }
     this.#rejectedPendingLayers.set(localSeq, dropped.promise);
@@ -8399,7 +8393,7 @@ export class SpaceReplica
         undefined,
         upsert.scopeKey,
       );
-      if (true) {
+      if (diagProfileDocs.has(upsert.id as string)) {
         const v = (upsert.doc as { value?: { defaultPattern?: { profiles?: unknown[] }; profiles?: unknown[] } } | undefined)?.value;
         const l = Array.isArray(v) ? v : (v?.defaultPattern?.profiles ?? v?.profiles);
         console.warn(`[diag-prof] frame ${this.#space.slice(-6)} ${String(upsert.id)} seq=${upsert.seq} confSeqBefore=${record.confirmed.seq} len=${Array.isArray(l) ? l.length : "none"} deleted=${upsert.deleted === true} pending=${record.pending.map((e) => e.localSeq).join("/")} type=${type}`);
@@ -9059,8 +9053,8 @@ export class SpaceReplica
       const paths = pending.op === "patch"
         ? pending.patches.map((p) => `${p.op}:${p.path}`)
         : [pending.op];
-      if (true) {
-        diagProfileDocs.add(id);
+      if (diagProfileDocs.has(id)) {
+        diagLocalSeqs.add(localSeq);
         const lenOf = (doc: unknown) => {
           const v = (doc as { value?: { defaultPattern?: { profiles?: unknown[] }; profiles?: unknown[] } } | undefined)?.value;
           const l = Array.isArray(v) ? v : (v?.defaultPattern?.profiles ?? v?.profiles);
@@ -9241,7 +9235,7 @@ export class SpaceReplica
     // The accept is being applied (immediately at verdict, or promoted
     // off the parked set): release any read-barrier waiter (whenApplied).
     this.#resolveAppliedWaiter(localSeq);
-    if (true) {
+    if (diagLocalSeqs.has(localSeq)) {
       console.warn(`[diag-prof] accept ${this.#space.slice(-6)} local=${localSeq} seq=${applied.seq} class=${coverClass}`);
     }
     const keys = new Map(
