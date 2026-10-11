@@ -332,8 +332,10 @@ describe("the marker for a writer-claimed position that holds nothing", () => {
   });
 
   it("is minted at a union every branch of which carries the claim, the group chat's admin flag", async () => {
-    // `ChatEveryoneAdminFlag` (cfc-group-chat-demo/trusted.tsx): a union of
-    // a `true` and a `false` branch, both the toggle handler's, on an input
+    // The branch form `ChatEveryoneAdminFlag` (cfc-group-chat-demo/trusted.tsx)
+    // took before it was normalized to one claim, and that stored chats still
+    // carry: a union of a `true` and a `false` branch, both the toggle
+    // handler's, on an input
     // with no default. No value written there escapes the claim, so the
     // position is marked; a member's bare-link `set(true)` after the writer
     // set the admins would otherwise make every member an admin.

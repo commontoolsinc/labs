@@ -439,9 +439,13 @@ predicate the write gate uses). Each failure is recorded on the transaction
 (`recordCfcNodeInputRefusal`) and becomes a prepare reason, so it refuses the
 commit under the enforcing modes. What each observation carries:
 
-- a reference supplies its target's integrity, and its slot contributes
-  confidentiality only (§8.2.4): entries at a reference slot, and link-carried
-  entries copied from a target (§8.2.5), are left out of integrity;
+- a reference supplies its target's integrity and the reference's own
+  together (§8.2.4, `I_T ∪ I_R_applicable`); link-carried entries copied onto
+  the reference from its target (§8.2.5) are never counted. The reference's
+  own integrity is every non-link entry at or above its slot
+  (`referenceIntegrityAt` in `cfc/prepare.ts`), with no further applicability
+  filter; a bare atom there is within the self-mint residual below, and a
+  builtin-only atom is gated by its author;
 - a value written in the binding itself, a handler's `$event` payload
   included, carries no evidence;
 - a path read and found absent is a `shape` observation (§4.6.3) carrying the
