@@ -6,7 +6,9 @@ import {
   generateWordSearch,
   normalizeWord,
   parseWordList,
+  placementBetween,
   placementCells,
+  placementKey,
   type WordSearch,
   type WordSearchOptions,
 } from "./generator.ts";
@@ -289,5 +291,31 @@ describe("generateWordSearch", () => {
     expect(() => generateWordSearch(options({ cols: 7.5 }))).toThrow(
       RangeError,
     );
+  });
+});
+
+describe("placementBetween", () => {
+  const ws = generateWordSearch(options({ seed: 4 }));
+
+  it("finds a word by its two ends, in either order", () => {
+    for (const p of ws.placements) {
+      const cells = placementCells(p, ws.cols);
+      const [first, last] = [cells[0], cells[cells.length - 1]];
+      expect(placementBetween(ws, first, last)).toBe(p);
+      expect(placementBetween(ws, last, first)).toBe(p);
+    }
+  });
+
+  it("finds nothing for two cells that are not one word's ends", () => {
+    for (const p of ws.placements) {
+      const cells = placementCells(p, ws.cols);
+      expect(placementBetween(ws, cells[0], cells[1])).toBeUndefined();
+      expect(placementBetween(ws, cells[0], cells[0])).toBeUndefined();
+    }
+  });
+
+  it("keys a placement by where it runs as well as its word", () => {
+    const [p] = ws.placements;
+    expect(placementKey(p)).not.toBe(placementKey({ ...p, row: p.row + 1 }));
   });
 });
