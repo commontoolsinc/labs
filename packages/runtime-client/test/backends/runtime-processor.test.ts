@@ -4443,11 +4443,43 @@ describe("runtime-processor", () => {
     });
 
     describe("starting Home's root", () => {
-      // The housekeeping's first step, the adoption, is set as the
-      // housekeeping starts, so whether it is set as the request returns says
-      // whether the request started any. What follows the adoption runs after
+      // The housekeeping's first step, the adoption, is held as the
+      // housekeeping starts, so a case that the request started it reads that
+      // as soon as the request returns. What follows the adoption runs after
       // the request has returned, so a case about it waits for the event it
       // is about.
+
+      /**
+       * Stands in for the three steps of the housekeeping, recording each
+       * call, so that a case can say none was started even of a step that
+       * fails at once.
+       */
+      function stubHousekeeping() {
+        const steps = [
+          stub(
+            PiecesController.prototype,
+            "adoptLegacySpaces",
+            () => Promise.resolve(),
+          ),
+          stub(
+            PiecesController.prototype,
+            "ensurePrivateInbox",
+            () => Promise.resolve(),
+          ),
+          stub(
+            PiecesController.prototype,
+            "startShareIntake",
+            () => Promise.resolve(undefined),
+          ),
+        ];
+        return {
+          /** How many times each step was started, in order. */
+          starts: () => steps.map(({ calls }) => calls.length),
+          [Symbol.dispose]() {
+            for (const step of steps) step.restore();
+          },
+        };
+      }
 
       it("adopts Home's legacy rows, has Home ensure the private inbox, and starts the share intake", async () => {
         const ensureSent = Promise.withResolvers<void>();
@@ -4562,6 +4594,7 @@ describe("runtime-processor", () => {
 
       it("starts no housekeeping when the root is read with `start` `false`", async () => {
         await using worker = await homeWorker([{ name: "team-lunch" }]);
+        using housekeeping = stubHousekeeping();
 
         const root = await worker.processor.handleGetSpaceRootPattern({
           type: RequestType.GetSpaceRootPattern,
@@ -4570,16 +4603,12 @@ describe("runtime-processor", () => {
         });
 
         expect(root.piece).toBeDefined();
-        expect(worker.processor.accessForTestingOnly.legacySpacesAdopted)
-          .toBeUndefined();
-        expect(worker.processor.accessForTestingOnly.privateInboxEnsured)
-          .toBeUndefined();
-        expect(worker.processor.accessForTestingOnly.shareIntake)
-          .toBeUndefined();
+        expect(housekeeping.starts()).toEqual([0, 0, 0]);
       });
 
       it("starts no housekeeping when the root started is another space's", async () => {
         await using worker = await homeWorker([{ name: "team-lunch" }]);
+        using housekeeping = stubHousekeeping();
         const other = await Identity.generate({ implementation: "noble" });
 
         const root = await worker.processor.handleGetSpaceRootPattern({
@@ -4588,12 +4617,7 @@ describe("runtime-processor", () => {
         });
 
         expect(root.piece).toBeDefined();
-        expect(worker.processor.accessForTestingOnly.legacySpacesAdopted)
-          .toBeUndefined();
-        expect(worker.processor.accessForTestingOnly.privateInboxEnsured)
-          .toBeUndefined();
-        expect(worker.processor.accessForTestingOnly.shareIntake)
-          .toBeUndefined();
+        expect(housekeeping.starts()).toEqual([0, 0, 0]);
       });
     });
   });
