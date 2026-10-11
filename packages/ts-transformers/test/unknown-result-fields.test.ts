@@ -341,8 +341,13 @@ export default pattern<{ n: number }>(() => ({ out: op(), items: [op()] }));`),
 
     it("reports nothing for a field of an input whose type is a generic type with its arguments written", async () => {
       expect(
-        await reportedPaths(`interface Box<T> { value: T }
-export default pattern<Box<unknown>>((input) => ({ value: input.value }));`),
+        await reportedPaths(`import type { Default } from "commonfabric";
+interface Box<T> { value: T }
+interface Shelf<T> { notes: T[]; bag: Record<string, T>; one: T }
+const Whole = pattern<Box<unknown>>((input) => ({ value: input.value }));
+export default pattern<{ box: Box<unknown>; shelf: Default<Shelf<unknown>> }>(
+  ({ box, shelf }) => ({ value: box.value, shelf, whole: Whole }),
+);`),
       ).toEqual([]);
     });
 
@@ -606,15 +611,25 @@ export default pattern(() => {
       expect(
         await reportedPaths(`function op(): unknown { return 1; }
 const defaults = { ref: op() };
+class Box<T> { constructor(public ref: T) {} }
+const sample = new Box(op());
 const Whole = pattern<typeof defaults>((input) => ({ v: input.ref }));
+const Boxed = pattern<{ inner: typeof sample }>((input) => ({
+  v: input.inner.ref,
+}));
+const Instance = pattern<typeof sample>((input) => ({ v: input.ref }));
 const Destructured = pattern<typeof defaults>(({ ref }) => ({ v: ref }));
 const Nested = pattern<{ inner: typeof defaults }>(({ inner }) => ({
   v: inner.ref,
 }));
 export default pattern<{ ref: unknown; inner: { ref: unknown } }>(
-  ({ ref, inner }) => ({ v: ref, w: inner.ref, whole: { Whole, Destructured, Nested } }),
+  ({ ref, inner }) => ({
+    v: ref,
+    w: inner.ref,
+    whole: { Whole, Destructured, Nested, Boxed, Instance },
+  }),
 );`),
-      ).toEqual([["v"], ["v"], ["v"]]);
+      ).toEqual([["v"], ["v"], ["v"], ["v"], ["v"]]);
     });
 
     it("reports nothing for another pattern's result or a typed `wish()`", async () => {
@@ -1257,6 +1272,275 @@ export default pattern(() => ({
         "linked.first",
         "derived.held",
         "spread.ref",
+      ]]);
+    });
+
+    it("reads a call's type parameters from the arguments that supply them, however a parameter receives one", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function makeNote(): Note<unknown> { return { ref: 1 }; }
+function wrap<T>(v: T): Note<T> { return { ref: v }; }
+function pick<T>(this: void, x: T) { return x; }
+function field<T>({ value }: { value: T }) { return value; }
+function first<T>(...values: T[]) { return values[0]; }
+function copied<T>(value: T, copy = value) { return copy; }
+function passed<T>(value: T) { return value; }
+function each<T>(items: readonly T[], visit: (item: T) => void) {
+  void visit;
+  return items[0];
+}
+function held<T>(x: T | null) { return { value: x! }; }
+function keyed<T>(bag: { [key: string]: T }) { return bag.a; }
+function pair<T>(label: string, value: T) { return label ? value : value; }
+function opened<T>(note: Note<T>) { return { inner: note.ref }; }
+class Holder<T> { constructor(public held: T) {} }
+function unheld<T>(holder: Holder<T>) { return holder.held; }
+function tupled<T>(...pair: [string, T]) { return pair[1]; }
+interface List<T> { value: T; next?: List<T> }
+function head<T>(list: List<T>) { return list.value; }
+function nullable<T>(items: (T | null)[]) { return items[0]!; }
+function listed<T>(items: Array<T>) { return items[0]; }
+type Pair<T> = { left: T; right: number };
+function left<T>(pair: Pair<T>) { return pair.left; }
+function run<T>(options: { make: () => T }) { return options.make(); }
+function filled<T>(partial: Partial<T>) { return partial as T; }
+const args: [Note<unknown>] = [makeNote()];
+const list = [makeNote()];
+const labels: [string] = ["x"];
+export default pattern(() => ({
+  pick: pick(makeNote()),
+  field: field({ value: makeNote() }),
+  first: first(makeNote()),
+  copied: copied(makeNote()),
+  spread: passed(...args),
+  each: each([makeNote()], () => {}),
+  held: held(makeNote()),
+  keyed: keyed({ a: makeNote() }),
+  pair: pair(...labels, makeNote()),
+  opened: opened(makeNote()),
+  unheld: unheld(new Holder(makeNote())),
+  spreadList: passed(...list),
+  tupled: tupled("x", makeNote()),
+  head: head({ value: makeNote() }),
+  nullable: nullable([makeNote()]),
+  listed: listed([makeNote()]),
+  left: left({ left: makeNote(), right: 1 }),
+  run: run({ make: makeNote }),
+  pickInferred: pick(wrap(op())),
+  fieldInferred: field({ value: wrap(op()) }),
+  firstInferred: first(wrap(op())),
+  copiedInferred: copied(wrap(op())),
+  eachInferred: each([wrap(op())], () => {}),
+  keyedInferred: keyed({ a: wrap(op()) }),
+  pairInferred: pair(...labels, wrap(op())),
+  openedInferred: opened(wrap(op())),
+  unheldInferred: unheld(new Holder(wrap(op()))),
+  tupledInferred: tupled("x", wrap(op())),
+  headInferred: head({ value: wrap(op()) }),
+  runInferred: run({ make: () => wrap(op()) }),
+  filledInferred: filled({ ref: op() }),
+}));`),
+      ).toEqual([[
+        "pickInferred.ref",
+        "fieldInferred.ref",
+        "firstInferred.ref",
+        "copiedInferred.ref",
+        "eachInferred.ref",
+        "keyedInferred.ref",
+        "pairInferred.ref",
+        "openedInferred.inner",
+        "unheldInferred.ref",
+        "tupledInferred.ref",
+        "headInferred.ref",
+        "runInferred.ref",
+        "filledInferred.ref",
+      ]]);
+    });
+
+    it("reports a parameter's default that is undeclared where the parameter takes it, and nothing for a written type parameter default no argument supplies", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function made(x = { ref: op() }) { return x; }
+function wrapped(x = { ref: op() }) { return { inner: x }; }
+function typed<T = Note<unknown>>(x?: T) { return x as T; }
+export default pattern(() => ({
+  passed: made(undefined),
+  omitted: made(),
+  wrapped: wrapped(undefined),
+  typed: typed(),
+}));`),
+      ).toEqual([["passed.ref", "omitted.ref", "wrapped.inner.ref"]]);
+    });
+
+    it("takes a class's type parameter default where no argument a construction passes can supply it, through a spread or an inherited constructor", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function makeNote(): Note<unknown> { return { ref: 1 }; }
+class Named<T = unknown> {
+  ref!: T;
+  constructor(public name: string) {}
+}
+class Optional<T = unknown> {
+  constructor(public ref: T = undefined as T) {}
+}
+class Supplied<T = unknown> {
+  constructor(public name: string, public ref: T) {}
+}
+class Inherited<U> extends Supplied<U> {}
+class Plain {
+  constructor(public label: string) {}
+}
+function tagged<B extends new (...args: any[]) => object>(Base: B) {
+  return class extends Base {};
+}
+class Mixed<T = Note<unknown>> extends tagged(Plain) {
+  extra!: T;
+}
+const name: [string] = ["x"];
+const none: [] = [];
+const both: [string, unknown] = ["x", op()];
+export default pattern(() => ({
+  named: new Named(...name),
+  optional: new Optional(...none),
+  supplied: new Supplied(...both),
+  inherited: new Inherited("y", op()),
+  inheritedDeclared: new Inherited("z", makeNote()),
+  mixed: new Mixed("w"),
+}));`),
+      ).toEqual([["supplied.ref", "inherited.ref"]]);
+    });
+
+    it("reads a member by each key a key's literal type names", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function makeNote(): Note<unknown> { return { ref: 1 }; }
+function wrap<T>(v: T): Note<T> { return { ref: v }; }
+const a = "a";
+export default pattern<{ flag: boolean }>(({ flag }) => ({
+  result: computed(() => {
+    const p = { a: makeNote(), b: wrap(op()) };
+    const key = flag ? a : "b" as const;
+    const one = p[a];
+    const either = p[key];
+    return { one, either };
+  }),
+}));`),
+      ).toEqual([["result.either.ref"]]);
+    });
+
+    it("reads a method's class or interface type parameters from the value it is called on", async () => {
+      expect(
+        await reportedPaths(`function op(): unknown { return 1; }
+interface Note<T> { ref: T }
+function makeNote(): Note<unknown> { return { ref: 1 }; }
+function wrap<T>(v: T): Note<T> { return { ref: v }; }
+class Store<T> {
+  constructor(public value: T) {}
+  get() { return this.value; }
+}
+interface Repo<T> { read(): T }
+function repo(): Repo<Note<unknown>> { return { read: () => makeNote() }; }
+export default pattern(() => {
+  const store = new Store(makeNote());
+  const typed: Store<Note<unknown>> = new Store(makeNote());
+  return {
+    stored: store.get(),
+    typed: typed.get(),
+    read: repo().read(),
+    storedInferred: new Store(wrap(op())).get(),
+  };
+});`),
+      ).toEqual([["storedInferred.ref"]]);
+    });
+
+    it("reports a field of a generic instance whose type argument was inferred, however a written type reaches it", async () => {
+      expect(
+        await reportedPaths(`import type { Default } from "commonfabric";
+function op(): unknown { return 1; }
+class Box<T> { constructor(public ref: T) {} }
+const sample = new Box(op());
+const written = new Box<unknown>(1);
+const loose: unknown = 1;
+const literal = { ref: op() };
+function make() { return new Box(op()); }
+function again(): ReturnType<typeof make> { return make(); }
+interface Holder { inner: typeof sample; n: number }
+function holder(): Holder { return { inner: sample, n: 1 }; }
+interface Picked extends Pick<typeof sample, "ref"> { n: number }
+interface Field { x: typeof loose }
+type Renamed<T> = { [K in keyof T as \`x_\${string & K}\`]: T[K] };
+const tree: { kids: (typeof tree)[] } = { kids: [] };
+const listed = [sample];
+interface Bag { [key: string]: typeof sample }
+interface Note<T> { ref: T }
+function wrap<T>(v: T): Note<T> { return { ref: v }; }
+const lifted = lift<number, typeof sample>(() => sample);
+class Loaded { ref = op(); }
+function keep() { return written; }
+export default pattern(() => ({
+  result: computed(() => {
+    const held: typeof sample = sample;
+    const picked: Pick<Holder, "inner"> = { inner: sample };
+    const extended: Picked = { ref: 1, n: 1 };
+    const kept: typeof written = written;
+    const field: Field = { x: 1 };
+    const renamed: Renamed<typeof literal> = { x_ref: 1 };
+    const indexed: { r: (typeof sample)["ref"] } = { r: 1 };
+    const recorded: Record<string, typeof sample> = { a: sample };
+    const bag: Bag = { a: sample };
+    const parts: [
+      first: typeof sample,
+      second?: typeof sample,
+      ...rest: (typeof sample)[],
+    ] = [sample];
+    const loose: [
+      typeof written,
+      (typeof sample)?,
+      ...(typeof written)[],
+    ] = [written];
+    const element: { e: (typeof listed)[number] } = { e: sample };
+    const awaited: Awaited<typeof sample> = sample;
+    const awaitedKept: Awaited<ReturnType<typeof keep>> = keep();
+    const awaitedClass: Awaited<Loaded> = new Loaded();
+    const defaulted: Default<Loaded> = new Loaded();
+    const awaitedList: Awaited<{ list: unknown[] }> = { list: [] };
+    const awaitedBag: Awaited<{ bag: Record<string, unknown> }> = { bag: {} };
+    return {
+      held, picked, extended, kept, field, renamed, indexed, recorded, tree,
+      bag, parts, loose, element, awaited, awaitedKept, defaulted, awaitedClass, awaitedList, awaitedBag,
+      cast: sample as typeof sample,
+      member: holder().inner.ref,
+    };
+  }),
+  again: again(),
+  annotated: computed((): typeof sample => sample),
+  explicit: wrap<typeof sample>(sample),
+  lifted: lifted(1),
+}));`),
+      ).toEqual([[
+        "result.held.ref",
+        "result.picked.inner.ref",
+        "result.extended.ref",
+        "result.renamed.x_ref",
+        "result.indexed.r",
+        "result.recorded.*.ref",
+        "result.bag.*.ref",
+        "result.parts[].ref",
+        "result.loose[].ref",
+        "result.element.e.ref",
+        "result.awaited.ref",
+        "result.defaulted.ref",
+        "result.awaitedClass.ref",
+        "result.cast.ref",
+        "result.member",
+        "again.ref",
+        "annotated.ref",
+        "explicit.ref.ref",
+        "lifted.ref",
       ]]);
     });
 

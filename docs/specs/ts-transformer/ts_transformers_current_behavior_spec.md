@@ -865,45 +865,62 @@ not known, and declares nothing. So these are declared:
   as much as any other type
 - a field of a type written out: in a local's or a parameter's annotation, a
   cast other than `as const`, a call's type argument, or the return type of a
-  callback or a signature, where that return type names no type parameter; a
-  callback whose return type names one is read from its body. A field declares
-  what its own declaration writes. A field whose declaration writes no type, as
-  an object literal's members and a class field with an initializer, declares
-  what the type of its initializer declares, read by provenance below, and
-  otherwise only what its inferred type's written parts do, however the written
-  type reaches it: through `typeof`, `ReturnType<…>`, an alias of either, or a
-  method's `this`. A type that holds itself, or that instantiates its own
-  declaration more than three deep, as `Nest<T[]>` inside `Nest<T>` does, is
-  read as declared where it repeats
+  callback or a signature; a callback whose return type names a type parameter
+  is read from its body. A written type is read from the nodes that write it.
+  A field declares what its own declaration writes. A type parameter it names
+  stands for what the reading binds it to: a type argument written out, the
+  arguments a call or a construction infers it from, or, where none can, its
+  written default; one nothing binds declares nothing. `typeof x` reads `x`'s
+  type by provenance, below, and `ReturnType<typeof f>` reads what `f` returns.
+  The mapped types that keep a type's parts, as `Partial<…>`, `Readonly<…>` and
+  `Pick<…>` do, or that give every key one type, as `Record<…>` does, are read
+  by their structure. Any other computed type, as a conditional one, is read
+  through the type it denotes, as written only where it names no type
+  parameter and no `typeof`, and otherwise by the rule for an inferred type. A
+  field whose declaration writes no type, as an object literal's members and a
+  class field with an initializer, declares what the type of its initializer
+  declares, read by provenance below, and otherwise only what its inferred
+  type's written parts do. A type that holds itself, or that instantiates its
+  own declaration more than three deep, as `Nest<T[]>` inside `Nest<T>` does,
+  is read as declared where it repeats
 - what a member's own declaration writes for it, read by the rule for a type
   written out, when that declaration writes its type without naming a type
   parameter
-- what a class instance's field declares by its declaration's written type, as a
-  property, a parameter property, or a getter's return type; a type naming a
-  type parameter counts only when every parameter it names is fixed in writing,
-  by the construction's type arguments, by its default where no argument the
-  construction passes can infer it, which a spread argument or an inherited
-  constructor may, or by the `extends` clause above, whichever fixes it,
-  followed through a constructor's aliases and class expressions, and a default
-  counts only when every parameter it names is fixed so. A field whose type is
-  inferred, from its initializer or through a parameter nothing writes, declares
-  what its initializer's type does by provenance, and otherwise only what its
-  type's written parts do
+- what a class instance's field declares by its declaration's written type, as
+  a property, a parameter property, or a getter's return type, with the class's
+  type parameters bound for the construction: to its written type arguments,
+  or to the arguments its constructor infers each from, an inherited
+  constructor's matched in terms of the class declaring it and carried down
+  each `extends` clause, or, where no argument can supply one, to its written
+  default. A spread argument supplies as many parameters as its tuple type
+  holds, or every one after it. An inherited field reads the parameters of the
+  class above as the `extends` clause binds them, followed through a
+  constructor's aliases and class expressions. A field whose type is inferred
+  from its initializer declares what its initializer's type does by
+  provenance, and otherwise only what its type's written parts do
 - what a value's own type declares by its provenance, however the value was
   made: the type's written parts, each member, and each index signature, whose
   declaration writes its type without naming a type parameter declaring what
   that type does, read by the rule for a type written out, and an intersection
   counting only as far as every one of its parts does. Provenance reads a type
-  from where it was written: a cast, a call's type arguments or its signature's
-  written return type, a construction's written or defaulted type arguments, an
-  annotation. A type inferred from something else is read from that: a literal's
-  from its parts, a binding's from its initializer, a call's whose return type
-  is inferred from what the function's body returns, each parameter holding the
-  argument passed to it unless the body reassigns it, and a call's whose written
-  return type is a type parameter from the arguments it is inferred from, one
-  passed for a parameter of that type, or a callback returning it, read through
-  the callback's own signature. A part read by a key that is not a literal may
-  be any part
+  from where it was written: a cast, an annotation, a signature's written
+  return type, or a call's or a construction's type arguments, written or
+  inferred. A type inferred from something else is read from that: a
+  literal's from its parts, a binding's from its initializer, a parameter's
+  with no type written from its default, and a call's whose return type is
+  inferred from what the function's body returns, read with the call's type
+  parameters bound. A call infers a type parameter from each argument matched
+  against the type its parameter writes, the `this` parameter aside, through
+  the parts of literals, arrays, tuples, unions, index signatures, reactive
+  wrappers, the members of a generic declaration, and a callback's return
+  type, which is read through the callback's own signature; a rest parameter
+  takes each argument past it, and a spread argument as many parameters as its
+  tuple type holds. A type parameter named anywhere else is inferred from
+  something the match does not read, and declares nothing. A method's call
+  also binds the type parameters of the class or the interface declaring it,
+  from a construction of it or a written type naming it that the receiver is
+  read from. A part read by a key whose type is no literal may be any part, and
+  a key whose type is a literal, or a union of them, reads each part it names
 - another pattern's result, which passed this check in its own compile; a
   cell; a literal, a function, or JSX
 
