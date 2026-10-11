@@ -106,7 +106,7 @@ export class VDomRenderer {
   async render(
     container: HTMLElement,
     cellRef: CellRef,
-    options?: { runsPiece?: boolean },
+    options?: { runsPiece?: CellRef },
   ): Promise<() => Promise<void>> {
     if (this.#disposed) {
       // The connection was disposed before this render began (its teardown ran

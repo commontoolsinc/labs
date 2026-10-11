@@ -23,6 +23,9 @@ export interface VDomSessionLog {
   /** Cell references passed to `mount`, in order. */
   mounted: CellRef[];
 
+  /** The piece each `mount` named to run (`runsPiece`), in order. */
+  runsPiece: (CellRef | undefined)[];
+
   /** Mount ids passed to `unmount`, in order. */
   unmounted: number[];
 
@@ -52,6 +55,7 @@ export function createRenderableCellHandle<T>(
 ): { cell: CellHandle<T>; log: VDomSessionLog } {
   const log: VDomSessionLog = {
     mounted: [],
+    runsPiece: [],
     unmounted: [],
     detached: false,
     attached: false,
@@ -61,8 +65,13 @@ export function createRenderableCellHandle<T>(
 
   const session: VDomConnection = {
     signal: lifetime.signal,
-    mount: (_mountId: number, cellRef: CellRef) => {
+    mount: (
+      _mountId: number,
+      cellRef: CellRef,
+      options?: { runsPiece?: CellRef },
+    ) => {
       log.mounted.push(cellRef);
+      log.runsPiece.push(options?.runsPiece);
       // `null`: nothing was rendered, so the tree has no root child.
       return Promise.resolve({ rootId: null });
     },

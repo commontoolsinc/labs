@@ -147,6 +147,21 @@ describe("child run ownership", () => {
     expect(runtime.runner.cancels.has(key(child))).toBe(false);
   });
 
+  it("lets a parent stop its child while only a start that does not claim is resolving", async () => {
+    const { parent, child } = await runningNestedChild(
+      "release during unclaimed start parent",
+    );
+
+    // The parent stops before the display's start decides; that start can
+    // never give the child a lifetime, so it does not hold the child.
+    const displayStart = runtime.start(child, { claims: false });
+    runtime.runner.stop(parent);
+    await expect(displayStart).resolves.toBe(false);
+    await runtime.idle();
+
+    expect(runtime.runner.cancels.has(key(child))).toBe(false);
+  });
+
   it("claims a nested child when a claiming start joins one that does not", async () => {
     const { parent, child } = await runningNestedChild(
       "joined claiming start parent",

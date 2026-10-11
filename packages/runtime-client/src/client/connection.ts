@@ -158,7 +158,7 @@ export interface VDomConnection {
   mount(
     mountId: number,
     cellRef: CellRef,
-    options?: { runsPiece?: boolean },
+    options?: { runsPiece?: CellRef },
   ): Promise<VDomMountResponse>;
   unmount(mountId: number): Promise<void>;
   sendEvent(
@@ -808,14 +808,16 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   async #mountVDom(
     mountId: number,
     cellRef: CellRef,
-    options?: { runsPiece?: boolean },
+    options?: { runsPiece?: CellRef },
   ): Promise<VDomMountResponse> {
     try {
       const response = await this.request<RequestType.VDomMount>({
         type: RequestType.VDomMount,
         mountId,
         cell: cellRef,
-        ...(options?.runsPiece === true ? { runsPiece: true } : {}),
+        ...(options?.runsPiece !== undefined
+          ? { runsPiece: options.runsPiece }
+          : {}),
       });
       return response!;
     } catch (error) {

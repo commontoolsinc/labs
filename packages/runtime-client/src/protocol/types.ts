@@ -3261,12 +3261,14 @@ export type VDomMountRequest = BaseRequest & {
   cell: CellRef;
 
   /**
-   * The mount displays the piece `cell` belongs to, so that piece runs, as
-   * opening the piece directly makes it run: the worker starts it if it is
-   * not running, without taking it from a pattern that owns it. Absent for a
-   * mount that only reads, such as a chip naming a piece.
+   * The piece the mount displays, which then runs, as opening the piece
+   * directly makes it run: the worker starts it if it is not running, without
+   * taking it from a pattern that owns it. Named apart from `cell`, which can
+   * be a path into another document that only links to the piece; a
+   * reference that is not a piece runs nothing. Absent for a mount that only
+   * reads, such as a chip naming a piece.
    */
-  runsPiece?: boolean;
+  runsPiece?: CellRef;
 };
 
 /**

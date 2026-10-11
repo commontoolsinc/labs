@@ -76,6 +76,7 @@ import {
   isCell,
   isCellResult,
   isLoopbackHostname,
+  isPieceRoot,
   markDurableReadTx,
   type NormalizedFullLink,
   normalizeSpaceHost,
@@ -4099,7 +4100,9 @@ export class RuntimeProcessor {
     if (!this.#runtime.viewScopedReplicationRequested) {
       // In view-scoped replication the mount above is itself the demand that
       // a visible root run; here a display has to ask (`runsPiece`).
-      if (request.runsPiece === true) this.#runDisplayedPiece(rawCell);
+      if (request.runsPiece !== undefined) {
+        this.#runDisplayedPiece(getCell(this.#runtime, request.runsPiece));
+      }
       return render();
     }
     return this.#runtime.viewReplication.mount(
@@ -4121,31 +4124,24 @@ export class RuntimeProcessor {
   /**
    * Starts the piece a mount displays, as opening it directly does
    * (`VDomMountRequest.runsPiece`), without taking it from a pattern that
-   * owns it (`claims: false`). The piece is the document the mounted cell
-   * addresses, so a variant like `piece[TILE_UI]` starts `piece`, not the
-   * document its value links to; a document that holds a link, as a pinned
-   * reference does, is followed by the start itself. A document that is not
-   * a piece is left alone. Not awaited: the render does not wait on a start,
-   * and `Runtime.settled()` covers it.
+   * owns it (`claims: false`). A cell that is not a piece, once its document
+   * has loaded, runs nothing. Not awaited: the render does not wait on a
+   * start, and `Runtime.settled()` covers it.
    */
-  #runDisplayedPiece(mounted: Cell<unknown>): void {
-    const piece = this.#runtime.getCellFromLink({
-      ...mounted.getAsNormalizedFullLink(),
-      path: [],
-    });
-    const start = this.#runtime.start(piece, { claims: false }).catch((
-      error: unknown,
-    ) => {
-      if (
-        error instanceof Error &&
-        error.message.includes("no pattern identity")
-      ) return;
-      displayLogger.warn("display-start", () => [
-        "Starting a displayed piece failed",
-        error,
-      ]);
-    });
-    this.#runtime.trackAsyncWork(start);
+  #runDisplayedPiece(piece: Cell<unknown>): void {
+    const start = piece.sync()
+      .then(() =>
+        isPieceRoot(this.#runtime, piece)
+          ? this.#runtime.start(piece, { claims: false })
+          : false
+      )
+      .catch((error: unknown) => {
+        displayLogger.warn("display-start", () => [
+          "Starting a displayed piece failed",
+          error,
+        ]);
+      });
+    this.#runtime.trackAsyncWork(start, piece);
   }
 
   /**

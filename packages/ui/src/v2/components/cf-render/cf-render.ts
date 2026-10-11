@@ -501,7 +501,7 @@ export class CFRender extends BaseElement {
       // Full is the universal floor: render the piece's [UI] chain directly.
       if (kind === "full") {
         this._log("rendering full [UI] into container");
-        this._cleanup = this._mount(container, cell, generation);
+        this._cleanup = this._mount(container, cell, currentTarget, generation);
         this._hasRendered = true;
         return;
       }
@@ -519,6 +519,7 @@ export class CFRender extends BaseElement {
         this._cleanup = this._mount(
           container,
           presence.key(variantKey),
+          currentTarget,
           generation,
         );
         this._hasRendered = true;
@@ -558,20 +559,22 @@ export class CFRender extends BaseElement {
   /**
    * Mounts `cell` into `container` as the root of a render of its own, which
    * decides under the viewer's render policy what reaches the page. Every
-   * caller displays the piece itself (full, an exported variant, the default
+   * caller displays `piece` itself (full, an exported variant, the default
    * tile), so the piece runs, as opening it directly makes it run
    * (`runsPiece`); the default chip, which only names the piece, renders
-   * through `createNameChip()` instead.
+   * through `createNameChip()` instead. `piece` is the resolved target, since
+   * `cell` can be a link to it held in another piece's document.
    */
   private _mount(
     container: HTMLElement,
     cell: CellHandle,
+    piece: CellHandle,
     generation: number,
   ): () => void {
     return render(
       container,
       cell as CellHandle<VNode>,
-      { ...this.#renderErrorOptions(generation), runsPiece: true },
+      { ...this.#renderErrorOptions(generation), runsPiece: piece },
     );
   }
 
@@ -627,7 +630,7 @@ export class CFRender extends BaseElement {
     scaler.className = "tile-default";
     clip.appendChild(scaler);
     container.appendChild(clip);
-    const inner = this._mount(scaler, cell, this._renderGeneration);
+    const inner = this._mount(scaler, cell, cell, this._renderGeneration);
     const onClick = (e: MouseEvent) => this._navigateToPiece(e);
     clip.addEventListener("click", onClick);
     return () => {

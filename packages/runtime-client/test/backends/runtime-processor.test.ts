@@ -8402,90 +8402,154 @@ describe("runtime-processor", () => {
 
   describe("`RuntimeProcessor` vdom mount of a displayed piece", () => {
     // A render displays a piece as opening it directly does, so the piece
-    // runs: a mount that asks (`runsPiece`) starts the piece it displays,
+    // runs: a mount that names the piece it displays (`runsPiece`) starts it,
     // without claiming it, and a mount that only reads leaves it alone.
 
-    async function stoppedPiece(
+    async function stoppedPiece<T>(
       runtime: Runtime,
       cause: string,
-    ): Promise<Cell<{ doubled: number }>> {
+      build: (cf: ReturnType<typeof createTrustedBuilder>["commonfabric"]) => {
+        pattern: Parameters<Runtime["setup"]>[1];
+        input: unknown;
+      },
+    ): Promise<Cell<T>> {
       const { commonfabric: cf } = createTrustedBuilder(runtime);
-      const pattern = cf.pattern<{ value: number }>(({ value }) => ({
-        doubled: cf.lift((value: number) => value * 2)(value),
-      }));
+      const { pattern, input } = build(cf);
       const tx = runtime.edit();
-      const piece = runtime.getCell<{ doubled: number }>(
-        cfcSigner.did(),
-        cause,
-        undefined,
-        tx,
-      );
-      await runtime.setup(tx, pattern, { value: 3 }, piece);
+      const piece = runtime.getCell<T>(cfcSigner.did(), cause, undefined, tx);
+      await runtime.setup(tx, pattern, input, piece);
       expect((await tx.commit().settled).error).toBeUndefined();
       expect(runtime.runner.isRunning(piece)).toBe(false);
       return piece;
     }
 
-    /** Mounts `cell`, lets the runtime settle, and reports whether `piece`
-     * then runs. */
-    async function mountAndCheck(
+    const doubler = (cause: string) => (runtime: Runtime) =>
+      stoppedPiece<{ doubled: number }>(runtime, cause, (cf) => ({
+        pattern: cf.pattern<{ value: number }>(({ value }) => ({
+          doubled: cf.lift((value: number) => value * 2)(value),
+        })),
+        input: { value: 3 },
+      }));
+
+    /** Mounts `cell`, naming `runsPiece` as the piece displayed, and lets the
+     * runtime settle; the returned function unmounts. */
+    async function mount(
       runtime: Runtime,
       cell: Cell<unknown>,
-      piece: Cell<unknown>,
-      runsPiece: boolean | undefined,
-    ): Promise<boolean> {
+      runsPiece: Cell<unknown> | undefined,
+    ): Promise<() => Promise<void>> {
       const state = buildProcessor({ runtime });
       // handleVDomMount posts to the worker scope; stub it for this thread.
       const hadPostMessage = "postMessage" in globalThis;
       const originalPostMessage = (globalThis as any).postMessage;
       (globalThis as any).postMessage = () => {};
-      try {
-        state.handleVDomMount({
-          type: RequestType.VDomMount,
-          mountId: 1,
-          cell: cell.getAsNormalizedFullLink() as unknown as CellRef,
-          ...(runsPiece === undefined ? {} : { runsPiece }),
-        });
-        await runtime.settled();
-        const running = runtime.runner.isRunning(piece);
-        state.handleVDomUnmount({ type: RequestType.VDomUnmount, mountId: 1 });
-        await runtime.settled();
-        return running;
-      } finally {
+      const restore = () => {
         if (hadPostMessage) {
           (globalThis as any).postMessage = originalPostMessage;
         } else {
           delete (globalThis as any).postMessage;
         }
+      };
+      try {
+        state.handleVDomMount({
+          type: RequestType.VDomMount,
+          mountId: 1,
+          cell: createCellRef(cell),
+          ...(runsPiece === undefined
+            ? {}
+            : { runsPiece: createCellRef(runsPiece) }),
+        });
+        await runtime.settled();
+      } catch (error) {
+        restore();
+        throw error;
       }
+      return async () => {
+        try {
+          state.handleVDomUnmount({
+            type: RequestType.VDomUnmount,
+            mountId: 1,
+          });
+          await runtime.settled();
+        } finally {
+          restore();
+        }
+      };
     }
 
-    it("starts the piece whose field a display mounts", async () => {
+    it("starts the piece a display names", async () => {
       const { runtime } = createRuntime();
       try {
-        const piece = await stoppedPiece(runtime, "displayed piece field");
-        expect(await mountAndCheck(runtime, piece.key("doubled"), piece, true))
-          .toBe(true);
+        const piece = await doubler("displayed piece")(runtime);
+        const unmount = await mount(runtime, piece.key("doubled"), piece);
+        expect(runtime.runner.isRunning(piece)).toBe(true);
+        await unmount();
       } finally {
         await runtime.dispose();
       }
     });
 
-    it("follows a link a displayed document holds to the piece", async () => {
-      // As a pinned reference does: the mounted document links to the piece.
+    it("starts the piece named, not the piece whose document links to it", async () => {
+      // As a profile or a grid shows an element: the mounted cell is a field
+      // of the container's document whose value links to the piece.
       const { runtime } = createRuntime();
       try {
-        const piece = await stoppedPiece(runtime, "linked displayed piece");
+        const piece = await doubler("linked displayed piece")(runtime);
+        const container = await stoppedPiece<{ pinned: unknown }>(
+          runtime,
+          "container of the displayed piece",
+          (cf) => ({
+            pattern: cf.pattern<{ pinned: unknown }>(({ pinned }) => ({
+              pinned,
+            })),
+            input: { pinned: piece },
+          }),
+        );
+        const unmount = await mount(runtime, container.key("pinned"), piece);
+        expect(runtime.runner.isRunning(piece)).toBe(true);
+        expect(runtime.runner.isRunning(container)).toBe(false);
+        await unmount();
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("leaves a displayed piece releasable by a pattern that owns it", async () => {
+      // The display does not claim the piece, so a release stops it.
+      const { runtime } = createRuntime();
+      try {
+        const piece = await doubler("releasable displayed piece")(runtime);
+        const unmount = await mount(runtime, piece.key("doubled"), piece);
+        expect(runtime.runner.isRunning(piece)).toBe(true);
+        runtime.runner.releaseChild(piece, undefined);
+        await runtime.idle();
+        expect(runtime.runner.isRunning(piece)).toBe(false);
+        await unmount();
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("runs nothing, and warns of nothing, for a named cell that is no piece", async () => {
+      const { runtime } = createRuntime();
+      const warnings = () =>
+        getLogger("runtime-client.display").countsByKey["display-start"]
+          ?.warn ?? 0;
+      try {
         const tx = runtime.edit();
-        const pin = runtime.getCell<unknown>(
+        const plain = runtime.getCell<{ text: string }>(
           cfcSigner.did(),
-          "pin to the displayed piece",
+          "a displayed document that is no piece",
           undefined,
           tx,
         );
-        pin.set(piece);
+        plain.set({ text: "hello" });
         expect((await tx.commit().settled).error).toBeUndefined();
-        expect(await mountAndCheck(runtime, pin, piece, true)).toBe(true);
+        const before = warnings();
+        const unmount = await mount(runtime, plain.key("text"), plain);
+        expect(runtime.runner.isRunning(plain)).toBe(false);
+        expect(warnings()).toBe(before);
+        await unmount();
       } finally {
         await runtime.dispose();
       }
@@ -8494,10 +8558,10 @@ describe("runtime-processor", () => {
     it("leaves the piece alone when a mount only reads it", async () => {
       const { runtime } = createRuntime();
       try {
-        const piece = await stoppedPiece(runtime, "read-only mounted piece");
-        expect(
-          await mountAndCheck(runtime, piece.key("doubled"), piece, undefined),
-        ).toBe(false);
+        const piece = await doubler("read-only mounted piece")(runtime);
+        const unmount = await mount(runtime, piece.key("doubled"), undefined);
+        expect(runtime.runner.isRunning(piece)).toBe(false);
+        await unmount();
       } finally {
         await runtime.dispose();
       }

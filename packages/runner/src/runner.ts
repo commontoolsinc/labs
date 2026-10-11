@@ -432,12 +432,10 @@ type StartAttempt = {
   settled?: Promise<boolean>;
   // Whether a caller of start() asked for the result to have a lifetime of
   // its own. Joining callers share one attempt but not one ownership: any of
-  // them asking makes the attempt claim. False for a start that only asks the
-  // result to run, as rendering it does.
+  // them asking makes the attempt claim, which it can until it decides, as
+  // only an undecided attempt can be joined. False for a start that only asks
+  // the result to run, as rendering it does.
   claims?: boolean;
-  // Set once the attempt has decided: the target it left running, if any. A
-  // claiming caller that joins after the decision claims that target itself.
-  decided?: { running?: `${MemorySpace}/${ScopeKey}/${URI}` };
   // The pattern keys this attempt has read inherited authority for. The walk
   // runs again from the top after the read, and must not read again for a
   // grant the durable metadata does not carry.
@@ -4107,7 +4105,7 @@ export class Runner {
     if (
       inFlight?.settled !== undefined && this.#isStartAttemptCurrent(inFlight)
     ) {
-      if (claims) this.#claimStartAttempt(inFlight);
+      if (claims) inFlight.claims = true;
       return inFlight.settled;
     }
     const attempt: StartAttempt = {
@@ -4134,7 +4132,10 @@ export class Runner {
           const stillRunning = started && target !== undefined &&
             this.#isStartAttemptCurrentFor(attempt, target) &&
             this.#cancels.has(target);
-          attempt.decided = { running: stillRunning ? target : undefined };
+          // Decided: a later caller starts afresh, and decides its own claim.
+          if (this.#inFlightStartsByDoc.get(startKey) === attempt) {
+            this.#inFlightStartsByDoc.delete(startKey);
+          }
           if (stillRunning && attempt.claims) {
             this.#independentlyStartedResults.add(target);
           }
@@ -4149,22 +4150,6 @@ export class Runner {
     } catch (error) {
       this.#finishStartAttempt(attempt);
       return Promise.reject(error);
-    }
-  }
-
-  /**
-   * Makes a joined start attempt claim its result: before the attempt decides,
-   * by marking it; after, by claiming the target it left running, while that
-   * target still runs.
-   */
-  #claimStartAttempt(attempt: StartAttempt): void {
-    if (attempt.decided === undefined) {
-      attempt.claims = true;
-      return;
-    }
-    const running = attempt.decided.running;
-    if (running !== undefined && this.#cancels.has(running)) {
-      this.#independentlyStartedResults.add(running);
     }
   }
 
@@ -4223,8 +4208,14 @@ export class Runner {
     // page that is still opening from being closed by its parent. An attempt
     // that then fails leaves the result registered until the runtime stops it,
     // which is the same bound the scheduler already accepts for a start that
-    // exhausts its retries.
-    if ((this.#activeStartAttemptsByDoc.get(key)?.size ?? 0) > 0) return;
+    // exhausts its retries. A start that does not claim, as a display's does,
+    // never gives the result a lifetime, so it does not hold the child; the
+    // stop below supersedes it.
+    const attempts = this.#activeStartAttemptsByDoc.get(key);
+    if (
+      attempts !== undefined &&
+      [...attempts].some((attempt) => attempt.claims !== false)
+    ) return;
     if (registration === undefined) {
       // A commit-gated start installs nothing until its transaction commits,
       // so a launch whose child is still gated holds that child through the
