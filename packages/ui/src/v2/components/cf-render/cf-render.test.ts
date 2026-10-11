@@ -1037,7 +1037,11 @@ describe("hasVariantValue", () => {
 describe("CFRender variants", () => {
   type Internals = {
     _containerRef: { value?: HTMLDivElement };
-    _mount(container: HTMLElement, cell: CellHandle): () => void;
+    _mount(
+      container: HTMLElement,
+      cell: CellHandle,
+      piece: CellHandle,
+    ): () => void;
     _renderCell(): Promise<void>;
     _renderChipDefault(container: HTMLElement, cell: CellHandle): () => void;
     _renderTileDefault(container: HTMLElement, cell: CellHandle): () => void;
@@ -1096,10 +1100,12 @@ describe("CFRender variants", () => {
       const element = new CFRender();
       const internals = element as unknown as Internals;
       const mounted: (readonly string[])[] = [];
+      const runs: CellHandle[] = [];
       let defaults = 0;
       internals._containerRef = { value: {} as HTMLDivElement };
-      internals._mount = (_container, cell) => {
+      internals._mount = (_container, cell, runsPiece) => {
         mounted.push(cell.ref().path);
+        runs.push(runsPiece);
         return () => {};
       };
       internals._renderTileDefault = () => {
@@ -1109,6 +1115,8 @@ describe("CFRender variants", () => {
       element.cell = piece;
       element.variant = "tile";
       await internals._renderCell();
+      // The exported tile is the piece's own, and the piece is what runs.
+      expect(runs).toEqual([piece]);
       outcomes.push({ mounted, defaults, schemas, reads });
     }
     expect(outcomes[0]).toEqual({

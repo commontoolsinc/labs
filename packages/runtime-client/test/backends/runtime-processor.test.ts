@@ -8517,6 +8517,22 @@ describe("runtime-processor", () => {
       }
     });
 
+    it("gives a displayed piece a lifetime of its own, as opening it does", async () => {
+      // Opening a piece claims it, so a pattern's release leaves it running;
+      // a display starts it the same way.
+      const { runtime } = createRuntime();
+      try {
+        const piece = await doubler("claimed displayed piece")(runtime);
+        const unmount = await mount(runtime, piece.key("doubled"), piece);
+        runtime.runner.releaseChild(piece, undefined);
+        await runtime.idle();
+        expect(runtime.runner.isRunning(piece)).toBe(true);
+        await unmount();
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
     it("runs nothing, and warns of nothing, for a named cell that is no piece", async () => {
       const { runtime } = createRuntime();
       const warnings = () =>
