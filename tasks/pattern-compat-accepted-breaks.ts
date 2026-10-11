@@ -1193,11 +1193,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20261008T164451Z-n7gF99zc-4syFWet",
       "20261008T210117Z-UFEwl2NpHQpxqXsF",
       "20261008T214130Z-p3Zx6MHfQub4Jhqr",
-      "20261008T225325Z-PhnyFM45uYaav17c",
       "20261008T231303Z-40_BirmSRf8AZ9Su",
-      "20261009T161814Z-Oyyi7wIUz7AJ5r33",
-      "20261009T210117Z-3GKaIZwG8Yel9N7f",
-      "20261010T055011Z-kPOS_bsln0EOlG9e",
     ],
     paths: [
       "result.chatManager.$VIEWS.chats.rooms",
@@ -1276,5 +1272,55 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     reason:
       "a manager's request outcome now types `delivery`, and a refused one the `shared-inbox` code, which the recorded outcomes left open; no stored request outcome holds either",
     record: "docs/history/fabrichat-add-member-offer-break.md",
+  },
+  {
+    // Home types its `chatManager` as the manager's output, so the `delivery`
+    // and the refusal code a manager's request outcome gained reach home's
+    // contract too. These baselines also report the scope the manager's
+    // `rooms` declares, which `fabrichat-view-scopes-break.md` records under
+    // the same ruling it carries there, and the proof now blames `requests`
+    // in its place: it reports one issue per role. The entry names both
+    // paths. Home is a required pattern, so it carries the ruling that lets
+    // it name one.
+    pattern: "system/home.tsx",
+    baselines: [
+      "20261008T225325Z-PhnyFM45uYaav17c",
+      "20261009T161814Z-Oyyi7wIUz7AJ5r33",
+      "20261009T210117Z-3GKaIZwG8Yel9N7f",
+      "20261010T055011Z-kPOS_bsln0EOlG9e",
+    ],
+    paths: [
+      "result.chatManager.$VIEWS.chats.rooms",
+      "result.chatManager.$VIEWS.chats.requests.*",
+    ],
+    reason:
+      "home's chat manager's request outcomes now type `delivery`, and a refused one the `shared-inbox` code, and its rooms declare the per-session scope they are derived in; a home rolled forward still delivers both",
+    record: "docs/history/fabrichat-add-member-offer-break.md",
+    requiredPatternOverride: {
+      rulingBy: "Dan",
+      on: "2026-10-11",
+      reason:
+        "taking home's part of the break once its roll-forward was measured: \"assuming the contract breakage can be automatically handled the way the previous one was, then that's okay\"",
+    },
+  },
+  {
+    // The same ruling, against the home baseline recorded with the scope
+    // the manager's views declare.
+    pattern: "system/home.tsx",
+    baselines: [
+      "20261011T170655Z-AJPqLNiOact-MHN0",
+    ],
+    paths: [
+      "result.chatManager.$VIEWS.chats.requests.*",
+    ],
+    reason:
+      "home's chat manager's request outcomes now type `delivery`, and a refused one the `shared-inbox` code, which the recorded outcomes left open; a home rolled forward still delivers them",
+    record: "docs/history/fabrichat-add-member-offer-break.md",
+    requiredPatternOverride: {
+      rulingBy: "Dan",
+      on: "2026-10-11",
+      reason:
+        "taking home's part of the break once its roll-forward was measured: \"assuming the contract breakage can be automatically handled the way the previous one was, then that's okay\"",
+    },
   },
 ];
