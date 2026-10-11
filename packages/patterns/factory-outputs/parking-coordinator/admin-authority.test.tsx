@@ -12,7 +12,7 @@
  */
 import { action, assert, pattern, TESTS, UI, Writable } from "commonfabric";
 import { findNodeByProp, propValue } from "../../test/vnode-helpers.ts";
-import ParkingCoordinator, { DEFAULT_SPOTS } from "./main.tsx";
+import ParkingCoordinator from "./main.tsx";
 import type { ParkingProfile, Person } from "./main.tsx";
 
 const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
@@ -63,7 +63,6 @@ export default pattern(() => {
   // profile either way — so the drop is only observable here.
   const s10Registry = Writable.of<{ admins?: { displayName: string }[] }>({});
   const s10 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [rosterAlice, rosterBob],
     requests: [],
     adminRegistry: s10Registry as never,
@@ -158,7 +157,6 @@ export default pattern(() => {
   // Carol acts; the bootstrap grant goes to Dave, so Carol is left holding no
   // role while the roster is no longer empty.
   const s11 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [rosterCarol, rosterDave],
     requests: [],
     viewer: { name: "Carol", profile: rosterCarolProfile },
@@ -234,7 +232,6 @@ export default pattern(() => {
   };
 
   const s12 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [rosterErin],
     requests: [],
     viewer: { name: "Erin", profile: rosterErinProfile },
@@ -281,7 +278,6 @@ export default pattern(() => {
   };
 
   const s13 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [unclaimedFrank, unclaimedGina],
     requests: [],
     viewer: { name: "Frank", profile: frankProfile },
@@ -336,7 +332,6 @@ export default pattern(() => {
   // neither the claim nor the grant is on offer, because both would be
   // refused.
   const s14 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [unclaimedFrank],
     requests: [],
   });
@@ -367,7 +362,6 @@ export default pattern(() => {
   // offers the claim, and the handler refuses it, which is where the question
   // can actually be asked.
   const s15 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [unclaimedFrank],
     requests: [],
     viewer: { name: "Frank" },
@@ -410,7 +404,6 @@ export default pattern(() => {
   };
 
   const s16 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [claimedHana],
     requests: [],
     viewer: { name: "Nameless" },
@@ -454,7 +447,6 @@ export default pattern(() => {
   };
 
   const s17 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [claimedAnn, unclaimedBen],
     requests: [],
     viewer: { name: "Ben", profile: benProfile },

@@ -30,7 +30,7 @@ import {
   hasText,
   propValue,
 } from "../../test/vnode-helpers.ts";
-import ParkingCoordinator, { DEFAULT_SPOTS } from "./main.tsx";
+import ParkingCoordinator from "./main.tsx";
 import type {
   ParkingProfile,
   ParkingSpot,
@@ -79,7 +79,6 @@ export default pattern(() => {
   // hold a role needs one on their row.
   const s1Viewer = Writable.of<ParkingProfile>({ name: "Alice" });
   const s1 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [],
     requests: [],
     viewer: { name: "Alice", profile: s1Viewer },
@@ -181,7 +180,6 @@ export default pattern(() => {
   // Subject 2: Priority Reordering
   // ============================================================
   const s2 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [
       {
         name: "Alice",
@@ -254,7 +252,6 @@ export default pattern(() => {
     priorityRank: 1,
   };
   const s3 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [adminAlice3],
     requests: [],
     viewer: { name: "Alice", profile: alice3Profile },
@@ -336,7 +333,6 @@ export default pattern(() => {
   };
 
   const s4 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [alice4, bob4, carol4],
     requests: [],
   });
@@ -427,7 +423,6 @@ export default pattern(() => {
   };
 
   const s5 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [alice4, bob4, carol4, dave5],
     requests: [
       {
@@ -472,7 +467,6 @@ export default pattern(() => {
   // Subject 6: Cancellation
   // ============================================================
   const s6 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [alice4],
     requests: [
       {
@@ -504,7 +498,6 @@ export default pattern(() => {
   // ============================================================
   const alice7Profile = Writable.of<ParkingProfile>({ name: "Alice" });
   const s7 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [{ ...alice4, profile: alice7Profile }, bob4],
     requests: [],
     viewer: { name: "Alice", profile: alice7Profile },
@@ -580,7 +573,6 @@ export default pattern(() => {
   // ============================================================
   const alice8Profile = Writable.of<ParkingProfile>({ name: "Alice" });
   const s8 = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [{ ...alice4, profile: alice8Profile }],
     requests: [],
     viewer: { name: "Alice", profile: alice8Profile },
@@ -681,7 +673,6 @@ export default pattern(() => {
 
   // 9a: addPerson WITH vehicles — plateId normalized, plateState defaulted
   const s9a = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [],
     requests: [],
   });
@@ -724,7 +715,6 @@ export default pattern(() => {
 
   // 9b: addPerson with a vehicle whose plateId is blank after normalization → dropped
   const s9b = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [],
     requests: [],
   });
@@ -755,7 +745,6 @@ export default pattern(() => {
 
   // 9c: existing callers that don't pass vehicles → default [] (backward-compat)
   const s9c = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [],
     requests: [],
   });
@@ -779,7 +768,6 @@ export default pattern(() => {
 
   // 9e: addPerson with invalid make+model combo → model dropped, make preserved
   const s9e = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [],
     requests: [],
   });
@@ -813,7 +801,6 @@ export default pattern(() => {
 
   // 9f: addPerson with valid make+model combo → both kept
   const s9f = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [],
     requests: [],
   });
@@ -846,7 +833,6 @@ export default pattern(() => {
 
   // 9g: addPerson with two vehicles sharing same plateId+state → deduped to one
   const s9g = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [],
     requests: [],
   });
@@ -887,7 +873,6 @@ export default pattern(() => {
 
   // 9h: addPerson with invalid color → stored as ""
   const s9h = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [],
     requests: [],
   });
@@ -936,7 +921,6 @@ export default pattern(() => {
   };
 
   const s9d = ParkingCoordinator({
-    spots: DEFAULT_SPOTS,
     people: [personWithVehicle],
     requests: [],
   });

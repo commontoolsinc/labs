@@ -119,10 +119,21 @@ export type LobbyAdminList = RequiresIntegrity<
   readonly [typeof LOBBY_ADMIN_INTEGRITY]
 >;
 
-/** First explicit role minted while leaving the open bootstrap policy. */
-export type LobbyAdminBootstrapRole = AddIntegrity<
-  LobbyAdminRoleAssignment,
-  readonly [typeof LOBBY_ADMIN_INTEGRITY]
+/**
+ * The first explicit role, recorded while leaving the open bootstrap policy.
+ * While `admins` is empty this role is the whole explicit policy, so it
+ * carries the same `TrustedActionWrite` binding as the roster: only
+ * `commitTrustedLobbyAction`, from a gesture on the trusted lobby surface, may
+ * modify it.
+ */
+export type LobbyAdminBootstrapRole = TrustedActionWrite<
+  AddIntegrity<
+    LobbyAdminRoleAssignment,
+    readonly [typeof LOBBY_ADMIN_INTEGRITY]
+  >,
+  typeof commitTrustedLobbyAction,
+  typeof TRUSTED_LOBBY_ACTION,
+  typeof TRUSTED_LOBBY_SURFACE
 >;
 
 /** Both directions are committed by the role-checking trusted handler. */

@@ -122,9 +122,21 @@ export type ChatAdminList = RequiresIntegrity<
   readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
 >;
 
-export type ChatAdminBootstrapRole = AddIntegrity<
-  ChatAdminRoleAssignment,
-  readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+/**
+ * The first explicit role, recorded while leaving the open bootstrap policy.
+ * While `admins` is empty this role is the whole explicit policy, so it
+ * carries the roster's `TrustedActionWrite` binding: only
+ * `commitTrustedAdminToggle`, from a gesture on the trusted admin surface, may
+ * modify it.
+ */
+export type ChatAdminBootstrapRole = TrustedActionWrite<
+  AddIntegrity<
+    ChatAdminRoleAssignment,
+    readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+  >,
+  typeof commitTrustedAdminToggle,
+  typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+  typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
 >;
 
 export type ChatEveryoneAdminFlag =
