@@ -73,6 +73,7 @@ import {
   cfcFloorTrustContext,
   consumedIntegrityAt,
   ownEvidenceAt,
+  referenceIntegrityAt,
 } from "./prepare.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
 import type { CfcNodeInputRefusal, ImplementationIdentity } from "./types.ts";
@@ -310,12 +311,26 @@ type InputReach = {
     location: NormalizedFullLink;
     leaves: (readonly string[])[];
     references: (readonly string[])[];
+    /** The integrity of the references followed to reach it (§8.2.4). */
+    through: readonly CfcAtom[];
   }[];
-  /** The evidence of each container a declared path was found absent from. */
-  readonly absences: (readonly CfcAtom[])[];
-  /** How many observations carry no evidence (see the module comment). */
-  readonly withoutEvidence: number;
+  /**
+   * The integrity of each observation recorded whole: an absence, with its
+   * container's evidence, and an observation that carries no evidence of its
+   * own (see the module comment); each with the integrity of the references
+   * followed to reach it.
+   */
+  readonly observations: (readonly CfcAtom[])[];
 };
+
+/** `left` and `right` together, each atom once. */
+const union = (
+  left: readonly CfcAtom[],
+  right: readonly CfcAtom[],
+): CfcAtom[] => [
+  ...left,
+  ...right.filter((atom) => !left.some((kept) => deepEqual(kept, atom))),
+];
 
 /** A value's leaf positions relative to it, and the references it holds. */
 const leavesOf = (
@@ -353,24 +368,42 @@ const reachThroughInput = (
   resolution: NodeInputResolution,
 ): InputReach => {
   const locations: InputReach["locations"] = [];
-  const absences: (readonly CfcAtom[])[] = [];
-  let withoutEvidence = 0;
+  const observations: (readonly CfcAtom[])[] = [];
   const followed = new Set<string>();
   const { codeSchema, graphSchema } = resolution;
   const graphDefaults = foreignDefaultAt(graphSchema, path, codeSchema, path);
 
+  // An observation that carries no evidence of its own: only what the
+  // references followed to reach it apply (§8.2.4).
+  const noEvidence = (through: readonly CfcAtom[]) => {
+    observations.push(through);
+  };
+
   // `container` holds no value at the rest of the walk: a `shape`
   // observation with the container's own evidence, unless a schema not the
   // code's would hand the code a default there.
-  const absentFrom = (container: NormalizedFullLink, defaulting: boolean) => {
-    if (defaulting) withoutEvidence += 1;
-    else absences.push(ownEvidenceAt(tx, container));
+  const absentFrom = (
+    container: NormalizedFullLink,
+    defaulting: boolean,
+    through: readonly CfcAtom[],
+  ) => {
+    if (defaulting) noEvidence(through);
+    else observations.push(union(through, ownEvidenceAt(tx, container)));
   };
 
   const at = (location: NormalizedFullLink, key: string) => ({
     ...location,
     path: [...location.path, key],
   });
+
+  // A reference held in a stored document at `slot`: what it reaches is
+  // observed with the reference's own integrity added (§8.2.4,
+  // `I_T ∪ I_R_applicable`); its confidentiality is never removed, and is
+  // not checked here.
+  const throughSlot = (
+    slot: NormalizedFullLink,
+    through: readonly CfcAtom[],
+  ) => union(through, referenceIntegrityAt(tx, slot));
 
   // A value read from a stored document at `location`, with `rest` of the
   // declared path still to walk; the first `fixed` segments of `rest` are a
@@ -382,48 +415,48 @@ const reachThroughInput = (
     fixed: number,
     defaulting: boolean,
     chain: readonly string[],
+    through: readonly CfcAtom[],
   ): void => {
     if (isPrimitiveCellLink(value)) {
       const link = parseLink(value, location);
-      if (link === undefined) withoutEvidence += 1;
-      else {follow(
-          link,
-          rest.slice(fixed),
-          defaulting,
-          chain,
-          rest.slice(0, fixed),
-        );}
-      return;
+      if (link === undefined) return noEvidence(through);
+      return follow(
+        link,
+        rest.slice(fixed),
+        defaulting,
+        chain,
+        throughSlot(location, through),
+        rest.slice(0, fixed),
+      );
     }
     if (rest.length === 0) {
       const { leaves, references } = leavesOf(value);
-      if (leaves.length > 0) locations.push({ location, leaves, references });
-      // A reference inside the value is followed: its target's integrity
-      // is what the code is handed (the slot adds confidentiality only).
+      if (leaves.length > 0) {
+        locations.push({ location, leaves, references, through });
+      }
+      // A reference inside the value is followed: what it reaches is
+      // observed with the reference's integrity added.
       for (const reference of references) {
-        const held = valuesAt(value, reference)[0];
-        const link = parseLink(held, {
-          ...location,
-          path: [...location.path, ...reference],
-        });
-        if (link === undefined) withoutEvidence += 1;
-        else follow(link, [], defaulting, chain);
+        const slot = { ...location, path: [...location.path, ...reference] };
+        const link = parseLink(valuesAt(value, reference)[0], slot);
+        if (link === undefined) noEvidence(through);
+        else {
+          follow(link, [], defaulting, chain, throughSlot(slot, through));
+        }
       }
       return;
     }
     const [segment, ...remaining] = rest;
-    // A segment of a reference's own path that is not there, or a walk past
-    // a scalar: the reference or the walk chose a position no container
-    // holds, so nothing vouches for it.
-    if (!isPlainContainer(value)) {
-      withoutEvidence += 1;
-      return;
-    }
+    // A walk past a scalar: the reference or the walk chose a position no
+    // container holds, so nothing vouches for it.
+    if (!isPlainContainer(value)) return noEvidence(through);
     if (segment === "*") {
       const members = Object.entries(value);
       // An empty container enumerated: the absence of any member, observed
       // with the container's own evidence, as a missing key is.
-      if (members.length === 0) return absentFrom(location, defaulting);
+      if (members.length === 0) {
+        return absentFrom(location, defaulting, through);
+      }
       for (const [key, child] of members) {
         inDocument(
           at(location, key),
@@ -432,6 +465,7 @@ const reachThroughInput = (
           Math.max(0, fixed - 1),
           defaulting,
           chain,
+          through,
         );
       }
       return;
@@ -440,9 +474,10 @@ const reachThroughInput = (
       ? Reflect.get(value, segment)
       : undefined;
     if (child === undefined) {
-      if (fixed > 0) withoutEvidence += 1;
-      else absentFrom(location, defaulting);
-      return;
+      // A segment of a reference's own path that is not there is the
+      // reference's choice, not an absence its container vouches for.
+      if (fixed > 0) return noEvidence(through);
+      return absentFrom(location, defaulting, through);
     }
     inDocument(
       at(location, segment),
@@ -451,25 +486,26 @@ const reachThroughInput = (
       Math.max(0, fixed - 1),
       defaulting,
       chain,
+      through,
     );
   };
 
   // Reads the target's document from its root, so a reference partway along
-  // the target's own path is followed like any other.
-  // `before` is a reference's own path still unwalked when this one was
-  // reached partway along it; it stays fixed, like this link's own path.
+  // the target's own path is followed like any other. `before` is a
+  // reference's own path still unwalked when this one was reached partway
+  // along it; it stays fixed, like this link's own path.
   const follow = (
     link: NormalizedFullLink,
     rest: readonly string[],
     defaulting: boolean,
     chain: readonly string[],
+    through: readonly CfcAtom[],
     before: readonly string[] = [],
-  ) => {
+  ): void => {
     const own = [...link.path, ...before];
     const walk = [...own, ...rest];
-    // The link's schema describes its target, the position `rest` above
-    // the declared path's end; a default it would supply there that the
-    // code's schema would not is the wiring's.
+    // The link's schema describes its target; a default it would supply at
+    // the declared path that the code's schema would not is the wiring's.
     const carriesDefault = defaulting ||
       foreignDefaultAt(link.schema, [...before, ...rest], codeSchema, path);
     const target = addressKey({
@@ -479,11 +515,11 @@ const reachThroughInput = (
     if (
       chain.includes(target) || chain.length >= MAX_PATH_RESOLUTION_LENGTH
     ) {
-      withoutEvidence += 1;
-      return;
+      return noEvidence(through);
     }
-    // The same target, walk and default exposure observe the same values.
-    const key = JSON.stringify([target, rest, carriesDefault]);
+    // The same target, walk, default exposure and reference integrity
+    // observe the same values.
+    const key = JSON.stringify([target, rest, carriesDefault, through]);
     if (followed.has(key)) return;
     followed.add(key);
     // The verifier's own read (§8.10.1, §18.6.2): marked by `meta`, so it
@@ -491,10 +527,7 @@ const reachThroughInput = (
     const root = { ...link, path: [] };
     const value: unknown = tx.readValueOrThrow(root, { meta });
     // A document with no value at all is no container to be absent from.
-    if (value === undefined) {
-      withoutEvidence += 1;
-      return;
-    }
+    if (value === undefined) return noEvidence(through);
     inDocument(
       root,
       value,
@@ -502,53 +535,47 @@ const reachThroughInput = (
       own.length,
       carriesDefault,
       [...chain, target],
+      through,
     );
   };
 
   // A value the binding holds at the declared path: its references are
-  // followed, and every other value in it is the wiring's own.
+  // followed (the binding's own slots are plumbing and add nothing), and
+  // every other value in it is the wiring's own.
   const heldAtPath = (value: unknown): void => {
     if (isCellLink(value)) {
       const link = parseLink(value, base);
-      if (link === undefined) withoutEvidence += 1;
-      else follow(link, [], graphDefaults, []);
-      return;
+      if (link === undefined) return noEvidence([]);
+      return follow(link, [], graphDefaults, [], []);
     }
     if (isPlainContainer(value) && Object.keys(value).length > 0) {
       for (const child of Object.values(value)) heldAtPath(child);
       return;
     }
-    withoutEvidence += 1;
+    noEvidence([]);
   };
 
   const inBinding = (value: unknown, rest: readonly string[]): void => {
     if (isCellLink(value)) {
       const link = parseLink(value, base);
-      if (link === undefined) withoutEvidence += 1;
-      else follow(link, rest, graphDefaults, []);
-      return;
+      if (link === undefined) return noEvidence([]);
+      return follow(link, rest, graphDefaults, [], []);
     }
     if (rest.length === 0) return heldAtPath(value);
     const [segment, ...remaining] = rest;
     // The wiring leaving a path out is the wiring's choice: no evidence.
-    if (!isPlainContainer(value)) {
-      withoutEvidence += 1;
-      return;
-    }
+    if (!isPlainContainer(value)) return noEvidence([]);
     const children = segment === "*"
       ? Object.values(value)
       : Object.hasOwn(value, segment)
       ? [Reflect.get(value, segment)]
       : [];
-    if (children.length === 0) {
-      withoutEvidence += 1;
-      return;
-    }
+    if (children.length === 0) return noEvidence([]);
     for (const child of children) inBinding(child, remaining);
   };
 
   inBinding(binding, path);
-  return { locations, absences, withoutEvidence };
+  return { locations, observations };
 };
 
 /**
@@ -595,14 +622,12 @@ export const nodeInputRefusals = (
       resolution,
     );
     const observations: (readonly CfcAtom[])[] = [
-      ...reach.locations.flatMap(({ location, leaves, references }) =>
-        consumedIntegrityAt(tx, location, leaves, references)
+      ...reach.locations.flatMap(({ location, leaves, references, through }) =>
+        consumedIntegrityAt(tx, location, leaves, references).map(
+          (integrity) => union(integrity, through),
+        )
       ),
-      ...reach.absences,
-      ...Array.from(
-        { length: reach.withoutEvidence },
-        (): readonly CfcAtom[] => [],
-      ),
+      ...reach.observations,
     ];
     if (
       cfcIntegritySatisfiesFloorCoherently(

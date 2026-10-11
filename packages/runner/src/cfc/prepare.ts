@@ -6850,6 +6850,33 @@ export const consumedIntegrityAt = (
 };
 
 /**
+ * The integrity a reference held at `address` applies to what it reaches
+ * (§8.2.4's `I_R_applicable`): the slot's own label as the container's writer
+ * left it, resolved at the slot, without link-carried entries, which copy the
+ * target's evidence onto the reference (§8.2.5).
+ */
+export const referenceIntegrityAt = (
+  tx: IExtendedStorageTransaction,
+  address: NormalizedFullLink,
+): readonly CfcAtom[] => {
+  const scope = normalizeCellScope(address.scope);
+  const metadata = storedMetadataFor(
+    tx,
+    address.space,
+    address.id,
+    scope,
+    "application/json",
+  );
+  if (metadata === undefined) return [];
+  const path = canonicalizeLogicalPath(address.path);
+  const entries = metadata.labelMap.entries.filter((entry) =>
+    entry.origin !== "link" && isPrefix(entry.path, path) &&
+    isWitnessEvidence(entry)
+  ).map(asWitnessEvidence);
+  return labelForEntriesAtPath(entries, path)?.integrity ?? [];
+};
+
+/**
  * The evidence a container at `address` carries about its own current value:
  * the integrity minted for the value now at exactly its path, which a write
  * below it by another writer withdraws. Never a label inherited from an
