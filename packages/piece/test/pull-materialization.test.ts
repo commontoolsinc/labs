@@ -7767,6 +7767,69 @@ describe("piece pull materialization", () => {
       );
     });
 
+    /** Starts a piece whose portrait handle links a producer's result. */
+    const startWithProducedPortrait = async () => {
+      const producer = await pieces.runPersistent(
+        trustPattern(runtime, {
+          argumentSchema: { type: "object", properties: {} },
+          resultSchema: {
+            type: "object",
+            properties: { value: portraitSchema(false) },
+          },
+          result: {},
+          nodes: [],
+        }),
+        {},
+        undefined,
+        { start: true },
+      );
+      await new PieceController(pieces, producer).result.set(
+        { mediaType: "image/gif", width: 10 },
+        ["value"],
+      );
+      const piece = await pieces.runPersistent(
+        trustPattern(runtime, {
+          argumentSchema: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              portrait: portraitSchema(true),
+            },
+            required: ["name"],
+          },
+          resultSchema: { type: "object", properties: {} },
+          result: {},
+          nodes: [],
+        }),
+        { name: "ada" },
+        undefined,
+        { start: true },
+      );
+      const controller = new PieceController(pieces, piece);
+      await controller.input.set(producer.key("value"), ["portrait"]);
+      return { producer, controller };
+    };
+
+    it("writes through a linked handle into the document it refers to", async () => {
+      const { producer, controller } = await startWithProducedPortrait();
+
+      await expect(
+        controller.input.set("image/png", ["portrait", "mediaType"]),
+      ).resolves.toBeUndefined();
+      expect(await new PieceController(pieces, producer).result.get(["value"]))
+        .toEqual({ mediaType: "image/png", width: 10 });
+    });
+
+    it("refuses a malformed value written through a linked handle", async () => {
+      const { producer, controller } = await startWithProducedPortrait();
+
+      await expect(
+        controller.input.set(42, ["portrait", "mediaType"]),
+      ).rejects.toThrow(/does not match/);
+      expect(await new PieceController(pieces, producer).result.get(["value"]))
+        .toEqual({ mediaType: "image/gif", width: 10 });
+    });
+
     /** Starts a piece holding its portrait inline at the handle position. */
     const startWithInlinePortrait = async () => {
       const piece = await pieces.runPersistent(

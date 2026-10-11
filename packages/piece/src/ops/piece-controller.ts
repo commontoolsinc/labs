@@ -3472,23 +3472,31 @@ class PiecePropIo implements PieceCellIo {
         }
         // The stored root reads with each declared handle left a handle, so
         // what a handle refers to is judged where it is read through the
-        // handle and does not decide this write. The one exception is a
-        // handle the write path passes through: the write lands in what that
-        // handle holds, so it is opened and judged with the write applied.
+        // handle and does not decide this write. The exception is each
+        // handle the write path passes through: the write lands in what those
+        // handles hold, so they are opened and judged with the write applied.
         const storedRoot = materializeForValidation(targetCell, schema, tx);
-        const crossedHandle = handleOnWritePath(storedRoot, writePath);
-        const openedRoot = crossedHandle === undefined
-          ? storedRoot
-          : replaceMaterializedValueAtPath(
-            storedRoot,
-            crossedHandle.path,
-            materializeHandleForValidation(
-              crossedHandle.cell,
-              schema,
-              crossedHandle.path,
-              tx,
-            ),
+        let openedRoot = storedRoot;
+        for (
+          let crossed = handleOnWritePath(openedRoot, writePath);
+          crossed !== undefined;
+          crossed = handleOnWritePath(openedRoot, writePath)
+        ) {
+          const held = materializeHandleForValidation(
+            crossed.cell,
+            schema,
+            crossed.path,
+            tx,
           );
+          // A handle that opens to another handle holds no value a path can
+          // continue into, and the write path stops being judged there.
+          if (isCell(held)) break;
+          openedRoot = replaceMaterializedValueAtPath(
+            openedRoot,
+            crossed.path,
+            held,
+          );
+        }
         const stageAt = (candidate: unknown) =>
           replaceMaterializedValueAtPath(openedRoot, writePath, candidate);
         const stagedRoot = stageAt(materializedValue);

@@ -228,13 +228,21 @@ function reduceToHandles(
   leads: HandleLeads,
 ): JSONSchema {
   if (!isObjectNotArray(schema)) return true;
+  const keys = Object.keys(schema);
   if (ContextualFlowControl.getAsCellValues(schema).length > 0) {
+    // A keyword judging the handle's value whole needs that value read.
+    if (
+      keys.some((key) =>
+        key !== "asCell" && key !== "scope" && !HANDLE_PATH_KEYWORDS.has(key)
+      )
+    ) {
+      return true;
+    }
     return {
       asCell: schema.asCell,
       ...(schema.scope === undefined ? {} : { scope: schema.scope }),
     };
   }
-  const keys = Object.keys(schema);
   const unions = keys.filter((key) => UNION_KEYWORDS.has(key));
   if (
     unions.length > 1 ||
@@ -356,29 +364,28 @@ export function materializeForValidation(
     }
     if (isCell(value)) {
       if (isCellLink(raw) || isStream(value)) return value;
-      // A handle at the root is the value this call was asked to open, and
-      // reads as a schemaless value would rather than as itself again.
-      return path.length === 0
-        ? value.asSchema(undefined).withTx(tx).get()
-        : materializeHandleForValidation(value, schema, path, tx);
+      return materializeHandleForValidation(value, schema, path, tx);
     }
     const container = value as Record<string, unknown> | unknown[];
     if (opened.has(container)) return opened.get(container);
-    opened.set(container, container);
-    let result: Record<string, unknown> | unknown[] | undefined;
+    // The copy is published before its fields are opened, so that a back
+    // edge reaching this container again reaches the copy.
+    const result = Array.isArray(container)
+      ? container.slice()
+      : { ...container };
+    opened.set(container, result);
     for (const [key, child] of Object.entries(container)) {
       const rawChild = isObjectOrArray(raw)
         ? (raw as Record<string, unknown>)[key]
         : undefined;
-      const next = open(child, rawChild, base, [...path, key]);
-      if (next === child) continue;
-      result ??= Array.isArray(container)
-        ? container.slice()
-        : { ...container };
-      (result as Record<string, unknown>)[key] = next;
+      (result as Record<string, unknown>)[key] = open(
+        child,
+        rawChild,
+        base,
+        [...path, key],
+      );
     }
-    opened.set(container, result ?? container);
-    return result ?? container;
+    return result;
   };
   const link = cell.getAsNormalizedFullLink();
   return open(
@@ -411,6 +418,11 @@ export function materializeHandleForValidation(
   const resolved = resolveRootRefForStructure(declared);
   const { asCell: _wrappers, ...held } = resolved;
   const wrappers = ContextualFlowControl.getAsCellValues(resolved);
+  // A handle `schema` declares only through a union names no one schema for
+  // what it holds, and that value is read as a schemaless read would.
+  if (wrappers.length === 0) {
+    return handle.asSchema(undefined).withTx(tx).get();
+  }
   return materializeForValidation(
     handle,
     wrappers.length > 1 ? { ...held, asCell: wrappers.slice(1) } : held,

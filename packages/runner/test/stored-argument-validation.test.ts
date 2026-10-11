@@ -833,6 +833,49 @@ describe("stored-argument-validation", () => {
       }
     });
 
+    it("returns no issue for a malformed document behind an asCell link nested in a root inline handle", () => {
+      const tx = runtime.edit();
+      try {
+        const thumb = runtime.getCell(space, "thumb", undefined, tx);
+        thumb.set({ mediaType: 42 });
+        const argument = runtime.getCell(space, "argument", undefined, tx);
+        argument.set({ mediaType: "image/png", thumb });
+        const schema: JSONSchema = {
+          type: "object",
+          properties: {
+            mediaType: { type: "string" },
+            thumb: portraitSchema(true),
+          },
+          asCell: ["cell"],
+        };
+        expect(issue(argument, schema, tx)).toBeUndefined();
+      } finally {
+        tx.abort();
+      }
+    });
+
+    it("returns the mismatch for a linked document under an asCell `const`", () => {
+      // A keyword judging the handle's value whole needs that value read.
+      const tx = runtime.edit();
+      try {
+        const portrait = runtime.getCell(space, "portrait", undefined, tx);
+        portrait.set({ mediaType: "image/gif" });
+        const argument = runtime.getCell(space, "argument", undefined, tx);
+        argument.set({ portrait });
+        expect(issue(argument, {
+          type: "object",
+          properties: {
+            portrait: {
+              ...portraitSchema(true) as JSONSchemaObj,
+              const: { mediaType: "image/png" },
+            },
+          },
+        }, tx)).toContain("portrait: value does not match const");
+      } finally {
+        tx.abort();
+      }
+    });
+
     it("returns no issue for a linked value under a `oneOf` of two handles", () => {
       const tx = runtime.edit();
       try {
@@ -966,6 +1009,10 @@ describe("stored-argument-validation", () => {
       expect(handleBoundarySchema({
         anyOf: [{ type: "string" }, portrait],
       })).toBe(true);
+    });
+
+    it("returns `true` for a handle judging its value whole", () => {
+      expect(handleBoundarySchema({ ...portrait, const: {} })).toBe(true);
     });
 
     it("returns `true` for a node judging its value whole", () => {
