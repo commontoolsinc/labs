@@ -337,6 +337,7 @@ describe("loom-root", () => {
           "presentation-refusals.test.tsx",
           "multi-user.test.tsx",
           "url-view.test.tsx",
+          "meeting.test.tsx",
         ].map((name) =>
           fromFileUrl(new URL(`../../patterns/loom/${name}`, import.meta.url))
         ),
