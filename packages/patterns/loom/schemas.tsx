@@ -1,4 +1,5 @@
 /** Public linked-cell contract of a shared Loom. */
+
 import type {
   Default,
   NAME,
@@ -121,6 +122,33 @@ export type ChatRoomCell = Writable<
   ChatRoomRecord | Default<Record<PropertyKey, never>>
 >;
 
+/** The meeting occurrence associated with this Loom, absent while unbound. */
+export interface MeetingAssociation {
+  /** Canonical lowercase 64-character hexadecimal meeting occurrence key. */
+  key?: string;
+
+  [field: string]: unknown;
+}
+
+/** Shared durable meeting association, initialized empty. */
+export type MeetingAssociationCell = Writable<
+  MeetingAssociation | Default<Record<PropertyKey, never>>
+>;
+
+/** The outcome of one binding request; a conflict names the stored key. */
+export type BindMeetingResult =
+  | { status: "bound"; key: string }
+  | { status: "already-bound"; key: string }
+  | { status: "conflict"; key: string }
+  | { status: "invalid-key" }
+  | { status: "invalid-state" };
+
+/** A meeting key and an optional cell receiving this request's outcome. */
+export interface BindMeetingRequest {
+  key: string;
+  reply?: Writable<BindMeetingResult>;
+}
+
 /** Shared state supplied when a Loom is instantiated. */
 export interface LoomInput {
   title?: PerSpace<Writable<string | Default<"Shared Loom">>>;
@@ -130,6 +158,7 @@ export interface LoomInput {
   >;
   participants?: PerSpace<ParticipantRosterCell>;
   chatRoom?: PerSpace<ChatRoomCell>;
+  meeting?: PerSpace<MeetingAssociationCell>;
   hiddenPanels?: PerUser<Writable<Writable<Panel>[] | Default<[]>>>;
   privatePanels?: PerUser<Writable<PrivatePanel[] | Default<[]>>>;
 }
@@ -225,6 +254,8 @@ export interface LoomOutput {
   chatRoom?: Writable<LinkedChatRoom>;
   setChatRoom: Stream<ChatRoomChoice>;
   ensureChatRoom: Stream<void>;
+  meeting: MeetingAssociation;
+  bindMeeting: Stream<BindMeetingRequest>;
   retitleLoom: Stream<{ title: string }>;
   retitlePanel: Stream<PanelTitle>;
   retargetPanel: Stream<PanelRetarget>;
