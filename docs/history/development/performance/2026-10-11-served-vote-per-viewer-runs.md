@@ -65,7 +65,7 @@ handler's dependency pull. The 100 to 340 ms walks the previous records saw
 were the serving runtime's own loads under the posture without the
 read-through, and under the read-through they are on neither thread.
 
-## The 87 runs: one per connected session
+## The 87 runs: one per viewer
 
 Grouping the action spans by the pass they ran in, each of the hot nodes runs
 five times within one pass under five voters and three times under three,
@@ -79,18 +79,19 @@ whatever the option count:
 
 That is the fan-out the specification states
 ([`docs/specs/server-side-execution/scopes.md`](../../../specs/server-side-execution/scopes.md)
-§2): a derivation that reads a per-user or
-per-session value has one instance per demanding (user, session) pair, the
+§2): a derivation that reads a per-user value has one instance per demanding
+user, one that reads a per-session value has one per demanding session, the
 serving loop computes everyone's, and the scheduler's fan-out loop runs each
-demanded instance in turn. The client arm never meets it: each client computes
-only its own instance, and the poll's own single-runtime test handles a vote in
-four passes.
+demanded instance in turn. Each voter here is one user with one session, so
+the copies count the same at either scope: one per voter. The client arm never
+meets it: each client computes only its own instance, and the poll's own
+single-runtime test handles a vote in four passes.
 
 What put the poll's whole graph on that path is one argument. `tallyOption`
 took the viewer's profile to mark which vote in a tally is the viewer's own
-(`isSelf` on each voter row), so the five option tallies were per-session, the
-ranking over them was per-session, each card's rank and swatches were
-per-session, and every one of them ran for every voter on every vote. The nodes
+(`isSelf` on each voter row), so the five option tallies were per-viewer, the
+ranking over them was per-viewer, each card's rank and swatches were
+per-viewer, and every one of them ran for every voter on every vote. The nodes
 that ran five times per pass were exactly the tally, the ranking, each card's
 rank, the option-card map and the cards' own lifts.
 
@@ -112,7 +113,7 @@ profile cell by `equals`, in a `computed` at the swatch: the key comparison
 did not ring the viewer's swatch in the poll's own test, and `equals`, which
 the marker used before, does. The tally rows carry the voter cell and nothing of the viewer, so
 the tally, the ranking and each card's rank are one derivation each; what runs
-per session is the swatch's comparison. The burst under the measured window,
+per viewer is the swatch's comparison. The burst under the measured window,
 the pattern as it now is:
 
 | arm | burst, avg | range | waves (cut) | scheduler settle per event |
@@ -133,15 +134,16 @@ is the graph's depth, is what the next measurement is about.
 The rule this leaves behind is in `docs/common/patterns/multi-user-patterns.md`
 under "Keep the viewer out of shared derivations", and the pattern-dev and
 pattern-critic skills point at it: a shared derivation that reads the viewer
-is one derivation per viewing session wherever a server derives it for every
-session, so the viewer belongs at the leaf that needs it.
+is one derivation per viewer, per user or per session by what it read,
+wherever a server derives it for everyone, so the viewer belongs at the leaf
+that needs it.
 
 ## What this says about the three questions the previous record left
 
 - **What the runs are.** Above: fan-out across sessions of a graph whose root
   reads the viewer, times the depth of that graph.
 - **Why a pass costs 11 to 14 ms.** It does not, as such: a pass is one level
-  of the graph, run once per session, at about 2.3 ms an action plus 0.6 ms to
+  of the graph, run once per viewer, at about 2.3 ms an action plus 0.6 ms to
   re-subscribe the union of the instances' reads. Five instances of one node
   is 12 ms. The pass count per vote, 28, is the graph's depth under the pull
   scheduler's one-frontier-per-iteration settle and does not change with the

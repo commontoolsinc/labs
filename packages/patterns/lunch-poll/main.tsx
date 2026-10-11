@@ -1032,9 +1032,9 @@ interface OptionTally {
      * `equals`, to ring the viewer's own vote. That comparison happens at the
      * swatch rather than here so that the tally reads nothing of the viewer
      * and is one derivation shared by everyone: a tally that marked the
-     * viewer's vote itself would be one derivation per viewing session
-     * wherever a server derives it for every session, and so would the
-     * ranking and every card downstream of it.
+     * viewer's vote itself would be one derivation per viewer wherever a
+     * server derives it for everyone, and so would the ranking and every
+     * card downstream of it.
      */
     voter: LunchProfileCell | undefined;
   }>;

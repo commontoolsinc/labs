@@ -902,7 +902,7 @@ const handlers: Record<
    * Resolve once the list the piece result holds at `path`, read as a map
    * from each element's values at the `keys` paths to its value at the
    * `valueKey` path, equals `expected`: the same keys and no others, each at
-   * its expected value. A path descends through a cell where an element holds
+   * its expected value in its string form. A path descends through a cell where an element holds
    * one, so a key may name a field of the row's author. Read at this runtime's
    * quiescence and woken by the cell's own changes, so it ends when this
    * replica's view of the list is current, not when a message says so.
@@ -923,7 +923,7 @@ const handlers: Record<
       for (const element of value) {
         found.set(
           rowKeyOf(keyPaths.map((keyPath) => valueAt(element, keyPath))),
-          rowKeyOf([valueAt(element, valuePath)]),
+          String(valueAt(element, valuePath)),
         );
       }
       return found.size === wantedKeys.length &&

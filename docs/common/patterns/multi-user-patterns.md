@@ -288,9 +288,10 @@ The viewer is whoever the runtime says they are; `#profile` is how you read it.
 
 Under server execution the serving loop derives for everyone at once, and a
 derivation that reads the viewer's identity has no one value: it runs once per
-connected session, and so does everything downstream of it. A tally of shared
+viewer, per user or per session by what it read, and so does everything
+downstream of it. A tally of shared
 votes that also marks "which of these is mine" turns the tally, the ranking
-over it, and every card that reads the ranking into per-session work, five
+over it, and every card that reads the ranking into per-viewer work, five
 copies of each for five viewers, where a client runtime computes only its own.
 The runtime finds that out by running the node, so nothing in the source says
 which derivations fan out.

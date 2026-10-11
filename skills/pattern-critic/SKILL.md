@@ -47,9 +47,9 @@ Warnings summary line, never Failed.
   or `lift` over shared data that also reads the viewer's profile, `#profile`
   wish result, or "me" cell to mark what is the viewer's, when its result feeds
   other derivations or the view's shared parts. Under server execution such a
-  node runs once per connected session, and so does everything downstream of it.
-  Derive the shared data from shared inputs and decide what is the viewer's at
-  the leaf. See
+  node runs once per viewer, per user or per session by what it read, and so
+  does everything downstream of it. Derive the shared data from shared inputs
+  and decide what is the viewer's at the leaf. See
   `docs/common/patterns/multi-user-patterns.md#keep-the-viewer-out-of-shared-derivations`.
 
 - **Oversized cross-pattern contracts:** for every type describing linked,

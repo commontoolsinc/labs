@@ -108,9 +108,9 @@ a typed-name field), store each participant's live `#profile` cell in the shared
 bound to that cell (`cf-avatar` + snapshot only as an offline fallback), and
 identify people by `equals()` on a cell reference, not display name. Keep the
 viewer's identity out of shared derivations: under server execution a derivation
-that reads it runs once per connected session, and so does everything
-downstream, so derive shared data from shared inputs and decide what is the
-viewer's at the leaf. See
+that reads it runs once per viewer (per user or per session, by what it read),
+and so does everything downstream, so derive shared data from shared inputs and
+decide what is the viewer's at the leaf. See
 `docs/common/patterns/multi-user-patterns.md#presenting-identity`,
 `docs/common/patterns/multi-user-patterns.md#keep-the-viewer-out-of-shared-derivations`
 and `docs/common/components/COMPONENTS.md#identity-components`.
