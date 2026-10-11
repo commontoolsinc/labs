@@ -7497,7 +7497,7 @@ export class SpaceReplica
     // Mark the layer dead for that window so no new commit is minted and sent
     // against it; the promise settles once the drop and its revert are done.
     const dropped = Promise.withResolvers<void>();
-    if (operations.some((op) => diagProfileDocs.has(op.id))) {
+    if (true) {
       console.warn(`[diag-prof] reject ${this.#space.slice(-6)} local=${localSeq} ${rejection.name}: ${String(rejection.message).slice(0, 200)}`);
     }
     this.#rejectedPendingLayers.set(localSeq, dropped.promise);
@@ -8399,10 +8399,10 @@ export class SpaceReplica
         undefined,
         upsert.scopeKey,
       );
-      if (diagProfileDocs.has(upsert.id as string)) {
+      if (true) {
         const v = (upsert.doc as { value?: { defaultPattern?: { profiles?: unknown[] }; profiles?: unknown[] } } | undefined)?.value;
-        const l = v?.defaultPattern?.profiles ?? v?.profiles;
-        console.warn(`[diag-prof] frame ${this.#space.slice(-6)} ${String(upsert.id).slice(-12)} seq=${upsert.seq} confSeqBefore=${record.confirmed.seq} len=${Array.isArray(l) ? l.length : "none"} deleted=${upsert.deleted === true} pending=${record.pending.map((e) => e.localSeq).join("/")} type=${type}`);
+        const l = Array.isArray(v) ? v : (v?.defaultPattern?.profiles ?? v?.profiles);
+        console.warn(`[diag-prof] frame ${this.#space.slice(-6)} ${String(upsert.id)} seq=${upsert.seq} confSeqBefore=${record.confirmed.seq} len=${Array.isArray(l) ? l.length : "none"} deleted=${upsert.deleted === true} pending=${record.pending.map((e) => e.localSeq).join("/")} type=${type}`);
       }
       // Watch refreshes can arrive after local confirmations. Never move the
       // confirmed base backwards; pending replay depends on monotonic bases.
@@ -9059,14 +9059,14 @@ export class SpaceReplica
       const paths = pending.op === "patch"
         ? pending.patches.map((p) => `${p.op}:${p.path}`)
         : [pending.op];
-      if (diagProfileDocs.has(id) || paths.some((p) => p.includes("profiles"))) {
+      if (true) {
         diagProfileDocs.add(id);
         const lenOf = (doc: unknown) => {
           const v = (doc as { value?: { defaultPattern?: { profiles?: unknown[] }; profiles?: unknown[] } } | undefined)?.value;
-          const l = v?.defaultPattern?.profiles ?? v?.profiles;
+          const l = Array.isArray(v) ? v : (v?.defaultPattern?.profiles ?? v?.profiles);
           return Array.isArray(l) ? l.length : `none(${typeof l})`;
         };
-        console.warn(`[diag-prof] apply ${this.#space.slice(-6)} ${id.slice(-12)} local=${localSeq} confSeq=${record.confirmed.seq} confLen=${lenOf(record.confirmed.value)} confLoaded=${record.confirmed.value !== undefined} pendingBefore=${record.pending.length} ops=${paths.join(",").slice(0, 300)} newLen=${pending.op === "delete" ? "-" : lenOf(pending.value)}`);
+        console.warn(`[diag-prof] apply ${this.#space.slice(-6)} ${id} local=${localSeq} confSeq=${record.confirmed.seq} confLen=${lenOf(record.confirmed.value)} confLoaded=${record.confirmed.value !== undefined} pendingBefore=${record.pending.length} ops=${paths.join(",").slice(0, 300)} newLen=${pending.op === "delete" ? "-" : lenOf(pending.value)}`);
       }
     }
     record.pending.push(
@@ -9241,7 +9241,7 @@ export class SpaceReplica
     // The accept is being applied (immediately at verdict, or promoted
     // off the parked set): release any read-barrier waiter (whenApplied).
     this.#resolveAppliedWaiter(localSeq);
-    if (operations.some((op) => diagProfileDocs.has(op.id))) {
+    if (true) {
       console.warn(`[diag-prof] accept ${this.#space.slice(-6)} local=${localSeq} seq=${applied.seq} class=${coverClass}`);
     }
     const keys = new Map(

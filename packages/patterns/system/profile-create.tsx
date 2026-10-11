@@ -186,6 +186,12 @@ export const submitProfileCreation = handler<
     // shows `initialName` until a name is saved.
     const index = ((profiles as any).asSchema(profileLinkListSchema()).get() ??
       []).length as number;
+    let diagLink = "?";
+    try {
+      const l = (profiles as any).getAsNormalizedFullLink?.();
+      diagLink = l ? `${String(l.space).slice(-6)}/${l.id}/${(l.path ?? []).join(".")}` : "none";
+    } catch (e) { diagLink = "err:" + String(e).slice(0, 80); }
+    console.warn(`[diag-create] index=${index} profilesLink=${diagLink}`);
     profiles.push(
       ProfileHome.inSpace(undefined, { grants: { "*": "WRITE" }, root: true })({
         initialName: name,
