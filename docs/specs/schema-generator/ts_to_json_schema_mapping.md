@@ -1762,7 +1762,10 @@ and its original (`cross-stage-state.ts`), and `narrowedFrom`, `spelledBy` and
 `schema-generator.ts` and `object-formatter.ts`); an `items` lookup reads the
 current hint node (`common-fabric-formatter.ts`); a `narrowedFrom` lookup reads
 the node, and the node inside its parentheses (`schema-generator.ts`); a
-`spelledBy` or `definesDocument` lookup reads the node (`formatChildType` in
+`definesDocument` lookup reads the node (`formatChildType` in
+`schema-generator.ts`); a `spelledBy` lookup reads the node, wherever a member
+or a printed generation root is formatted (`formatChildType` and
+`#generateSchemaInternal` in
 `schema-generator.ts`).
 
 - **`items: false`** — array-typed wrapper contents collapse to
@@ -1849,6 +1852,21 @@ the node, and the node inside its parentheses (`schema-generator.ts`); a
   neither definition can stand for the other.
 
   The node's own hints still apply.
+
+  The object formatter applies the same rule where it has no node for a
+  member: a member of an object literal, read from its type, is read at the
+  annotation of the binding or member its value reads, written `p: a`,
+  `p: x.a` or `{ a }`, where that annotation denotes the member's type and
+  names a value binding (`readBindingAnnotation` in
+  `src/typescript/value-annotation.ts`, called from `object-formatter.ts`). A
+  callback's inferred result is a print of such a type, so a result written
+  `{ whole: a }` keeps the policy `a`'s annotation names. Only an annotation
+  whose every `typeof` is a `PolicyOf`'s rules is read so
+  (`namesOnlyPolicyBindings`): one that names a writer leaves the value read
+  by its type, as the object views the document that stores the writer's
+  policy, and reads that policy in part (§11, `definesDocument`). A value
+  any other expression writes, such as an element of an array literal, has no
+  binding to read, and is read by its type.
 
 ## 14. Options
 
