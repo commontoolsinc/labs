@@ -841,9 +841,9 @@ describe("mergeCfcSchemaEnvelopes", () => {
     } as const;
 
     const merged = mergeCfcSchemaEnvelopes(stored, candidate) as JSONSchemaObj;
-    const entries = cfcSchemaEntries(merged);
-    expect(entries.map((entry) => entry.path)).toEqual([["pin"]]);
-    expect((entries[0].schema as JSONSchemaObj).ifc).toEqual({
+    const pin = merged.properties?.pin as JSONSchemaObj;
+    expect(pin.$ref).toBeUndefined();
+    expect(pin.ifc).toEqual({
       uiContract: { helper: "UiAction", action: "PinNote" },
     });
   });

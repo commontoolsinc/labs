@@ -4,7 +4,7 @@
 `schemas.tsx` defines its public contract and re-exports the participant
 roster's types from `participants.tsx`, which also holds the roster's one
 writer, `addParticipant`. The shared inputs are `title`, `panels`,
-`presentation`, `participants`, `chatRoom`, and `meeting`; `hiddenPanels` and
+`presentation`, `participants`, and `chatRoom`; `hiddenPanels` and
 `privatePanels` belong to one user, and `viewerState` to one session.
 
 A panel is a `piece`, `document`, or HTTP(S) `url`. Piece and document targets
@@ -258,34 +258,7 @@ stays named until `setChatRoom` clears it, as any link does. The input holds the
 link in a record, `{ room? }`, because a handler's cell for a field holding a
 link writes through it, so replacing the link there would write into the room.
 
-`meeting` is the Loom's shared, durable meeting association, a record with an
-optional `key`. An empty record, including the default for a root whose input
-has no `meeting` field, names no meeting. The key is the existing CFS meeting
-occurrence key: the lowercase 64-character hexadecimal SHA-256 of its organizer,
-iCalUID, and UTC original start time, computed by CFS. The root validates the
-key's format and stores it without recomputing it.
-
-`bindMeeting({key, reply?})` binds an empty association once. A same-key replay
-confirms the association, and a different key leaves it unchanged. The handler
-reads the association inside its transaction, so competing binds retry against
-the first committed key. If supplied, the per-event reply cell receives
-`{status: "bound", key}`, `{status: "already-bound", key}`, or
-`{status: "conflict", key}`, where a conflict names the stored key. An invalid
-request key receives `{status: "invalid-key"}`. Unrecognized stored state,
-including extra fields without a key or a malformed stored key, receives
-`{status: "invalid-state"}` and stays intact. Extra metadata alongside a valid
-key stays intact on replay or conflict. A caller omitting `reply` confirms
-success by observing the matching `meeting.key` in the root's output.
-
-The association is meaningful shared state, independent of panels, chat, and
-each viewer's overlay. Source updates preserve it through its `PerSpace` input.
-Binding is a consistency guard; the space's existing WRITE authority governs the
-handler. Explicit adoption of an existing Loom belongs to the caller's
-owner-authorized workflow. A root without `bindMeeting` is unsupported for that
-workflow: a caller must not infer support from an absent key, replace the root,
-or overwrite its contents to adopt it.
-
-Run and attach all thirteen tests when deploying or updating source:
+Run and attach all twelve tests when deploying or updating source:
 
 ```sh
 deno task cf test packages/patterns/loom/main.test.tsx
@@ -300,7 +273,6 @@ deno task cf test packages/patterns/loom/ensure-chat-room.test.tsx
 deno task cf test packages/patterns/loom/retitle-retarget.test.tsx
 deno task cf test packages/patterns/loom/overlay.test.tsx
 deno task cf test packages/patterns/loom/private-panels.test.tsx
-deno task cf test packages/patterns/loom/meeting.test.tsx
 
 deno task cf piece new packages/patterns/loom/main.tsx \
   --root packages/patterns \
@@ -315,15 +287,10 @@ deno task cf piece new packages/patterns/loom/main.tsx \
   --test packages/patterns/loom/ensure-chat-room.test.tsx \
   --test packages/patterns/loom/retitle-retarget.test.tsx \
   --test packages/patterns/loom/overlay.test.tsx \
-  --test packages/patterns/loom/private-panels.test.tsx \
-  --test packages/patterns/loom/meeting.test.tsx
+  --test packages/patterns/loom/private-panels.test.tsx
 ```
 
 Repeat all `--test` arguments with every `piece setsrc`. A source closure for
 custom-root provisioning carries the same test modules in its `sourceRoots`.
 `packages/piece/test/loom-root.test.ts` also exercises full foreign references
 and replayed runtime invocations against the compiled source.
-`packages/piece/test/loom-meeting.test.ts` checks malformed stored state and
-preservation through a source update.
-`packages/patterns/integration/loom-meeting-multi-runtime.test.ts` checks
-competing meeting bindings through independent runtimes.

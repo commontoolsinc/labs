@@ -4227,6 +4227,20 @@ export class SpaceReplica
     }
   >();
 
+  /**
+   * The `toSeq` of the last pushed frame (`MemoryV2Client.isPushedSync`) this
+   * replica applied whole. Every frame before it applied too, so each watched
+   * document holds every change committed at or below it.
+   */
+  #completeThroughSeq = 0;
+
+  /**
+   * Whether a frame failed to apply, or applied with entries quarantined. A
+   * later push carries only what changed after it, so the documents it missed
+   * stay behind and no push makes the replica current again until a reset.
+   */
+  #completeThroughLost = false;
+
   #nextLocalSeq = 1;
 
   /** The Phase-3 event-intent queue (events.md §5, LT9), created on the
@@ -5496,6 +5510,44 @@ export class SpaceReplica
     );
   }
 
+  /** ISpaceReplica.completeThroughSeq. */
+  completeThroughSeq(): number | undefined {
+    if (this.#completeThroughLost || this.#completeThroughSeq === 0) {
+      return undefined;
+    }
+    // A server that runs server execution commits its executor's waves
+    // outside the publication turn a push is complete under, and a server
+    // that does not say could be one.
+    if (this.#sessionClient?.serverFlags?.serverExecution !== false) {
+      return undefined;
+    }
+    return this.#completeThroughSeq;
+  }
+
+  /** ISpaceReplica.isConfirmedDocument. */
+  isConfirmedDocument(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    const key = this.#docKeyOf({ id, scope }, identity);
+    const delivered = this.#delivered.get(key);
+    if (delivered === undefined) return false;
+    const record = this.#docs.get(key);
+    if (record === undefined) return true;
+    const { confirmed } = record;
+    if (
+      record.pending.length > 0 || confirmed.localFold === true ||
+      confirmed.localWavePromotion !== undefined
+    ) {
+      return false;
+    }
+    // Past its delivered seq, the confirmed state is an own accepted write
+    // promoted locally, which a push through that seq has since covered.
+    return confirmed.seq <= delivered.seq ||
+      confirmed.seq <= this.#completeThroughSeq;
+  }
+
   /** Whether an optimistic local write for this doc is still pending — not
    *  yet promoted into the confirmed mirror (a parked accept keeps it
    *  pending until its marker arrives; CT-1927). */
@@ -6605,6 +6657,8 @@ export class SpaceReplica
     this.#docs.clear();
     this.#watchedIds.clear();
     this.#delivered.clear();
+    this.#completeThroughSeq = 0;
+    this.#completeThroughLost = false;
     this.#resetConflictAdmissionState();
     this.#rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
     this.#cancelQueuedWatchRefresh();
@@ -8420,8 +8474,14 @@ export class SpaceReplica
     this.#frameApplyDepth += 1;
     try {
       this.#applySessionSyncFrame(sync, type);
+    } catch (error) {
+      this.#completeThroughLost = true;
+      throw error;
     } finally {
       this.#frameApplyDepth -= 1;
+    }
+    if (MemoryV2Client.isPushedSync(sync)) {
+      this.#completeThroughSeq = Math.max(this.#completeThroughSeq, sync.toSeq);
     }
     // The frame's crossings name documents in other spaces: their loads
     // are kicked once the frame's own documents are in. Nothing here waits
@@ -8465,6 +8525,7 @@ export class SpaceReplica
     // applies.
     const quarantined = this.#validateArrivedSchemaDocuments(sync);
     if (quarantined.size > 0) {
+      this.#completeThroughLost = true;
       const suspendedPlans = (sync.viewPlans ?? this.#viewPlans).map((
         plan,
       ) => ({ ...plan, eligibleActions: [] }));
