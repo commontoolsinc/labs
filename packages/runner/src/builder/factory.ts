@@ -75,6 +75,7 @@ import { currentPrincipal } from "./current-principal.ts";
 import { getPatternEnvironment } from "./env.ts";
 import { eventKey } from "./event-key.ts";
 import { h, UiAction, UiDisclosure, UiPromptSlot } from "./h.ts";
+import { nameInstance } from "./instance-name.ts";
 import {
   action,
   assert,
@@ -216,6 +217,9 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     // the assertion failed.
     assertCapture,
     assertRenderParts,
+
+    // Names a sub-pattern instance, for its identity.
+    nameInstance,
 
     // Built-in modules
     str: trustedStr,

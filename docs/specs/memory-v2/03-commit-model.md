@@ -126,6 +126,20 @@ they stand, since that is how the store applied them. Mergeable ops are not
 positional and are never substituted: an `append` means "add to whatever is
 there", and a concurrent write must read through it.
 
+A pending write whose read a delivered value has already proved stale is
+still read as that write until its verdict, computed array included. The
+client's view changes only where the client holds one coherent prefix of the
+space's history: a refusal's drop waits for the catch-up marker, which rides
+the fan-out frame covering the verdict, and that frame carries the whole
+watch set at one seq (04-protocol.md §4.11.2), so what a re-run then reads
+is the single-snapshot view §3.3.4 requires. A single delivered document is
+not such a point: one that arrives alone, through a read of a document the
+session does not watch, is at head while the rest of the replica is not, and
+a view that switched on its arrival would have a re-run commit over a state
+no point in history held. Nothing built over the stale write can be accepted
+meanwhile, since the read that makes the write refusable dooms a commit that
+named it.
+
 ### 3.3.4 Single-Snapshot Rule
 
 A commit's read set MUST describe one coherent client view: confirmed bases

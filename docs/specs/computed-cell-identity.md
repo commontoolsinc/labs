@@ -86,10 +86,14 @@ changes, and only for entities whose ids carry the computed scheme.
 ### Internal cell identity
 
 The pattern builder assigns each internal root cell a `partialCause` —
-the cell's declared name, or an anonymous `{ $generated: N }` counter, with
-`$kind: "stream"` mixed in for stream cells
-(`packages/runner/src/builder/pattern.ts`). At instantiation the runner
-mints the entity id from the piece's result cell and that partial cause:
+the cell's declared name, the instance name of a named sub-pattern instance,
+or an anonymous `{ $generated: N }` counter, with `$kind: "stream"` mixed in
+for stream cells (`packages/runner/src/builder/pattern.ts`). The counter
+numbers anonymous roots in the order the builder's walk reaches them, which
+is the pattern's inputs and then its result, `[UI]` tree included, so a
+`{ $generated: N }` cause moves when a cell is added ahead of it anywhere in
+that walk. At instantiation the runner mints the entity id from the piece's
+result cell and that partial cause:
 
 ```ts
 // Shown for illustration only.
@@ -109,6 +113,31 @@ scheme onto the tagged hash — historically always `of:`.
 The manifest of materialized internal cells is stored in result-cell
 metadata and matched by partial cause plus kind
 (`packages/runner/src/runner.ts`, `materializeDerivedInternalCells`).
+
+### Sub-pattern instance identity
+
+A sub-pattern instance runs under a child result cell minted from the
+instance's output spot, `{ resultFor: <spot> }`, and the spot is the
+parent's internal cell for the instance's partial cause. Everything the child
+holds hangs off that result cell, so the partial cause is the child's
+identity.
+
+An instance given a name by `nameInstance(Child(...), "child")`
+(`packages/runner/src/builder/instance-name.ts`) is a **named instance**. The
+builder takes that name as the instance's partial cause,
+`{ $generated: "instance", name: "child" }`, wherever no result key, node
+input or authored `.for()` names it already. The name sits under the
+reserved `$generated` key, so no authored cause can equal it. An instance
+name given to more than one root in a pattern names none of them, and each
+keeps a positional cause. A stream root never takes an instance name, and a
+name given to one does not count toward another root's. A named instance's
+child stays where it is however its siblings are rearranged, and moves only
+when the instance is renamed.
+
+A named instance also records, as its descriptor's `legacyPartialCause`, the
+`{ $generated: N }` it would take without its name. It still consumes that
+number, so every other anonymous root keeps the number it would have without
+instance names.
 
 ### Transaction provenance
 
