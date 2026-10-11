@@ -158,7 +158,10 @@ these that applies:
    pattern in the same update hands each the state of the one whose place it
    takes. With no such spot, or no child set up there, the instance goes on to
    the next step. An instance whose own source changed in the same update goes
-   on that way, since its pattern identity changed with it.
+   on that way, since its pattern identity changed with it, and so does a new
+   instance of a pattern the previous pattern does not set up, which step 4
+   then hands the child at its own `legacyPartialCause` where no move shows, as
+   a parent with no instance names does.
 3. Without that pattern, or where step 2 places the instance at no set-up child,
    it is the one set-up child, among the positional spots the parent's manifest
    records, whose `patternIdentity` is the instance's own child pattern
