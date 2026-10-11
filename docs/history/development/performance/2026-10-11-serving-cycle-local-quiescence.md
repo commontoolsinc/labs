@@ -92,12 +92,17 @@ settle reaches the deadline, no probe completes, and no cycle proves
 coverage; the seed, whose clients wait on coverage, went from 64 s to 87 s.
 Either piece alone did the same (167 and 128 behind). The change was
 reverted, and the publish and the drain stay inside the cycle, after the
-commit. The burst's own lag figure does not separate the two: read at the
-moment the last vote is verified, the watermark sits 315 commits behind the
-head under the worker on the final code and 69 behind on stage 4's, since
-every settle in a burst is cut and the burst's clients do not wait on
-coverage; it says how far behind the loop runs while input lasts, and the
-seed, whose clients do wait, is where stage 4's loss showed.
+commit. The burst's own lag figure does not separate the two, and it shows
+something else: on the main thread the watermark sits one commit behind the
+head both before a burst and when its last vote is verified, while under the
+worker it sits 246 behind before and 328 behind after on the final code, and
+253 and 312 on the stage 2 code, before the settle changed. The worker's loop
+does not cover the benchmark's bursts even in the quiet between them, which
+predates these stages, belongs to the worker arm rather than to the cycle
+(the seed under the worker ends one behind), and goes on the list the
+worker record keeps of what still differs under it. The burst's clients do
+not wait on coverage, so the figure costs the burst nothing; the seed, whose
+clients do wait, is where stage 4's loss showed.
 
 **What cuts every settle is the scheduler's own work.** The `scheduler
 settle per event` column is `scheduler/execute/settle`, the derivations the
