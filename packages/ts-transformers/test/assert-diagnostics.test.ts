@@ -583,6 +583,39 @@ export default pattern(() => {
   assertEquals(holderSchemas, [holderSchema, holderSchema]);
 });
 
+Deno.test("assert compares the cells it captures as a computed does", async () => {
+  const root = await transformed(
+    `import { assert, computed, equals, pattern, Writable } from "commonfabric";
+
+interface Item {
+  name: string;
+}
+
+export default pattern(() => {
+  const first = new Writable<Item>({ name: "x" });
+  const second = new Writable<Item>({ name: "y" });
+  const asserted = assert(() => equals(first, second));
+  const computedCheck = computed(() => equals(first, second));
+  return { asserted, computedCheck };
+});`,
+  );
+
+  const inputSchema = {
+    type: "object",
+    properties: {
+      first: { type: "unknown", asCell: ["comparable"] },
+      second: { type: "unknown", asCell: ["comparable"] },
+    },
+    required: ["first", "second"],
+  };
+
+  // Each capture is recorded, so its parent is the recording rather than
+  // `equals`. Taken for a value handed to an unknown callee, it would be read
+  // in full, and the lift would subscribe to all of each `Item` it only
+  // compares.
+  assertEquals(liftInputSchemas(root), [inputSchema, inputSchema]);
+});
+
 Deno.test("assert leaves an operator it does not record alone", async () => {
   const root = await transformed(patternSource(`
   const check = assert(() => (a.get(), b.get() === 2));

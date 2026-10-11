@@ -2521,14 +2521,6 @@ export function analyzeFunctionCapabilities(
       }
     };
 
-    // Whether `usage` is an argument that a known identity call only compares.
-    const isIdentityOnlyArgument = (usage: ts.Expression): boolean => {
-      const parent = usage.parent;
-      return !!parent && ts.isCallExpression(parent) &&
-        parent.arguments.includes(usage) &&
-        isKnownIdentityArgumentCall(parent, checker);
-    };
-
     const getIdentifierName = (
       expression: ts.Expression,
     ): string | undefined => {
@@ -3718,7 +3710,7 @@ export function analyzeFunctionCapabilities(
             const resolvedSource = materializeSourceRef(source);
             const usage = outermostTransparentWrapper(node);
             const parent = usage.parent;
-            const identityOnlyArgumentUse = isIdentityOnlyArgument(usage);
+            const identityOnlyArgumentUse = identityArgumentUses.has(node);
             // A value below the root that leaves the analysis whole is read
             // in full wherever it lands, so it is charged as a full-shape
             // read rather than a plain one: a plain read at a path keeps the
@@ -4362,7 +4354,8 @@ export function analyzeFunctionCapabilities(
           // An `assert` body's operand recording wraps each argument, and
           // which source an argument comes from, and whether it is cell-like,
           // are questions about the value the recording hands back. The
-          // member-access visit charges no read to a member recorded here.
+          // visits of the arguments themselves, which come after this one,
+          // treat an argument recorded here as compared rather than read.
           for (const argument of node.arguments) {
             const comparedArgument = unwrapAssertCapture(argument);
             const source = resolveSourceRef(comparedArgument);
