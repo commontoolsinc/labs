@@ -17,7 +17,13 @@ import {
   AgentRunRecordSchema,
 } from "@commonfabric/runner/agent-run";
 import { patternCoverageCollector } from "@commonfabric/integration/pattern-coverage";
+import { rowKeyOf } from "@commonfabric/integration/row-key";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import {
+  clearTimingMeasures,
+  getLoggerCountsBreakdown,
+  TIMING_MEASURE_PREFIX,
+} from "@commonfabric/utils/logger";
 import {
   debugVDOMSchema,
   rendererVDOMSchema,
@@ -78,7 +84,6 @@ import {
   type WorkerResponse,
 } from "./multi-runtime-ipc.ts";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
-import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { holdWorkerLifetimeLock } from "@commonfabric/utils/worker-lifetime";
 import { authenticatedOwnerFromLabel } from "../../ui/src/v2/components/cf-owner-view/owner-predicate.ts";
@@ -157,6 +162,20 @@ function result(): Cell<any> {
 /** The key {@link addressedResults} holds the piece at `address` under. */
 function addressKey(address: PieceAddress): string {
   return `${address.space} ${address.id}`;
+}
+
+/**
+ * The value `path` reaches inside `value`, reading through any cell met on
+ * the way, so a field held as a link resolves to what it links to.
+ */
+function valueAt(value: unknown, path: readonly (string | number)[]): unknown {
+  let current = value;
+  for (const segment of path) {
+    if (isCell(current)) current = current.get();
+    current = (current as Record<string | number, unknown> | undefined)
+      ?.[segment];
+  }
+  return isCell(current) ? current.get() : current;
 }
 
 /**
@@ -879,37 +898,36 @@ const handlers: Record<
   },
 
   /**
-   * Resolve once the list the piece result holds at `path`, grouped by the
-   * values each element holds at `keys`, counts exactly `expected` members per
-   * group, where `expected` maps a group's key values joined by `"\0"` to a
-   * count. Read at this runtime's quiescence and woken by the cell's own
-   * changes, so it ends when this replica's view of the list is current, not
-   * when a message says so. An element held as a cell is read through it.
+   * Resolve once the list the piece result holds at `path`, read as a map
+   * from each element's values at the `keys` paths to its value at the
+   * `valueKey` path, equals `expected`: the same keys and no others, each at
+   * its expected value. A path descends through a cell where an element holds
+   * one, so a key may name a field of the row's author. Read at this runtime's
+   * quiescence and woken by the cell's own changes, so it ends when this
+   * replica's view of the list is current, not when a message says so.
    */
-  async waitForTally({ path, piece, keys, expected }) {
+  async waitForRows({ path, piece, keys, valueKey, expected }) {
     const target = await resultAt(piece);
     let cell = target;
     for (const segment of (path ?? []) as (string | number)[]) {
       cell = cell.key(segment as never);
     }
-    const names = keys as string[];
-    const wanted = expected as Record<string, number>;
-    const groups = Object.keys(wanted);
+    const keyPaths = keys as (string | number)[][];
+    const valuePath = valueKey as (string | number)[];
+    const wanted = expected as Record<string, string>;
+    const wantedKeys = Object.keys(wanted);
     await waitForCellValue<unknown>(controller().runtime, cell, (value) => {
       if (!Array.isArray(value)) return false;
-      const counts: Record<string, number> = {};
+      const found = new Map<string, string>();
       for (const element of value) {
-        const row = (typeof (element as { get?: unknown })?.get === "function"
-          ? (element as { get(): unknown }).get()
-          : element) as Record<string, unknown> | undefined;
-        const group = names.map((name) =>
-          String(row?.[name])
-        ).join("\0");
-        counts[group] = (counts[group] ?? 0) + 1;
+        found.set(
+          rowKeyOf(keyPaths.map((keyPath) => valueAt(element, keyPath))),
+          rowKeyOf([valueAt(element, valuePath)]),
+        );
       }
-      return Object.keys(counts).length === groups.length &&
-        groups.every((group) => counts[group] === wanted[group]);
-    }, { stuckLabel: `waitForTally at ${JSON.stringify(path)}` });
+      return found.size === wantedKeys.length &&
+        wantedKeys.every((key) => found.get(key) === wanted[key]);
+    }, { stuckLabel: `waitForRows at ${JSON.stringify(path)}` });
     return {};
   },
 
@@ -1197,6 +1215,25 @@ const handlers: Record<
     return convertCellsToLinks(
       cell.asSchema({ ifc: { confidentiality: [] } }).get(),
     );
+  },
+
+  /**
+   * The timing measures this worker's loggers emitted since the last call,
+   * as the perf-investigation scripts read them, and nothing when emission
+   * is off. Drained on each call, so a capture is the measures of one window.
+   */
+  timingMeasures() {
+    const entries: { name: string; startTime: number; duration: number }[] = [];
+    for (const entry of performance.getEntriesByType("measure")) {
+      if (!entry.name.startsWith(TIMING_MEASURE_PREFIX)) continue;
+      entries.push({
+        name: entry.name,
+        startTime: entry.startTime,
+        duration: entry.duration,
+      });
+    }
+    clearTimingMeasures();
+    return Promise.resolve(entries as unknown as FabricValue);
   },
 
   async idle() {

@@ -284,6 +284,43 @@ const hasProfile = computed(() => (profileNameWish.result ?? "").trim() !== "");
 **Never** add a "type your name" field and treat that string as the current user.
 The viewer is whoever the runtime says they are; `#profile` is how you read it.
 
+### Keep the viewer out of shared derivations
+
+Under server execution the serving loop derives for everyone at once, and a
+derivation that reads the viewer's identity has no one value: it runs once per
+connected session, and so does everything downstream of it. A tally of shared
+votes that also marks "which of these is mine" turns the tally, the ranking
+over it, and every card that reads the ranking into per-session work, five
+copies of each for five viewers, where a client runtime computes only its own.
+The runtime finds that out by running the node, so nothing in the source says
+which derivations fan out.
+
+Derive shared data from shared inputs alone, and decide what is the viewer's at
+the leaf, from one small per-viewer value:
+
+```tsx
+// Shown for illustration only.
+// `viewerProfile` is the viewer's profile cell. Each tally row carries its
+// vote's voter as the profile cell, and nothing about the viewer.
+const tallies = options.map((option) =>
+  computed(() => tallyOption(option, votesFor(option), users)) // shared
+);
+// In the view, where a row renders, compare the two cells:
+{tally.voters.map((row) => {
+  const selfRing = computed(() =>                                  // per viewer
+    row.voter !== undefined && equals(row.voter, viewerProfile)
+      ? "0 0 0 2px white"
+      : "none"
+  );
+  return <span style={{ boxShadow: selfRing }}>{row.initials}</span>;
+})}
+```
+
+The tallies and the ranking then run once per change, and only the comparison
+at the leaf runs per viewer. The same holds for any "is this me", "my entry",
+or "can I" read: carry the identity-free data through the shared derivations
+and apply the viewer's identity where it is displayed or acted on.
+
 ### Show every participant with `cf-profile-badge`
 
 ```tsx

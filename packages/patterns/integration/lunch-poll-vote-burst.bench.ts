@@ -68,6 +68,7 @@
 
 import { expect } from "@std/expect";
 import { join } from "@std/path";
+import { rowKeyOf } from "@commonfabric/integration/row-key";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
@@ -132,23 +133,28 @@ function colorOf(index: number, position: number, round: number): string {
   return COLORS[(index + position + round) % COLORS.length];
 }
 
-/** The tally every session's vote list holds once `round`'s votes are in. */
-function tallyOf(round: number): Record<string, number> {
-  const tally: Record<string, number> = {};
-  voters.forEach((_, index) => {
+/**
+ * The vote list every session holds once `round`'s votes are in, as the map
+ * `waitForRows` compares: each (voter, option) row at the vote it cast this
+ * round, and no other rows, the voter named by the display name each claimed,
+ * which this file keeps distinct. Keyed by voter rather than counted by
+ * option, so a list missing one vote and holding a stale one never matches.
+ */
+function rowsOf(round: number): Record<string, string> {
+  const expected: Record<string, string> = {};
+  NAMES.forEach((name, index) => {
     options.forEach((option, position) => {
-      const group = `${option}\0${colorOf(index, position, round)}`;
-      tally[group] = (tally[group] ?? 0) + 1;
+      expected[rowKeyOf([name, option])] = colorOf(index, position, round);
     });
   });
-  return tally;
+  return expected;
 }
 
 /**
  * Fire every vote before any of them settles, then wait until every
- * session's own vote list holds the round's tally at quiescence: the moment
- * each client's view is settled, on the OFF arm through the others' pushed
- * votes and its own derivations, on the ON arm through the served
+ * session's own vote list holds exactly the round's rows at quiescence: the
+ * moment each client's view is settled, on the OFF arm through the others'
+ * pushed votes and its own derivations, on the ON arm through the served
  * consequences and their delivery. That is the burst's measured end.
  */
 async function burst(round: number): Promise<void> {
@@ -164,10 +170,15 @@ async function burst(round: number): Promise<void> {
       )
     ),
   );
-  const tally = tallyOf(round);
+  const expected = rowsOf(round);
   await Promise.all(
     voters.map((voter) =>
-      voter.waitForTally(["votes"], ["optionId", "voteType"], tally)
+      voter.waitForRows(
+        ["votes"],
+        [["voter", "name"], ["optionId"]],
+        ["voteType"],
+        expected,
+      )
     ),
   );
 }

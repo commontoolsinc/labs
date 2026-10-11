@@ -659,21 +659,26 @@ export class MultiRuntimeSession {
   }
 
   /**
-   * Resolve once this replica's list at `path`, grouped by the values each
-   * element holds at `keys`, counts exactly `expected` members per group:
-   * `expected` maps a group's key values joined by `"\0"` to a count. Read at
-   * this runtime's quiescence and woken by the list's own changes, so it is
-   * the moment this session's view of the list is current, on either arm.
+   * Resolve once this replica's list at `path`, read as a map from each
+   * element's values at the `keys` paths to its value at the `valueKey` path,
+   * equals `expected`: the same keys and no others, each at its expected
+   * value. A path descends through a cell where an element holds one, so a
+   * key may name a field of the row's author; build `expected` with
+   * `rowKeyOf` from `@commonfabric/integration/row-key`. Read at this
+   * runtime's quiescence and woken by the list's own changes, so it is the
+   * moment this session's view of the list is current, on either arm.
    */
-  async waitForTally(
+  async waitForRows(
     path: (string | number)[],
-    keys: string[],
-    expected: Record<string, number>,
+    keys: (string | number)[][],
+    valueKey: (string | number)[],
+    expected: Record<string, string>,
     opts: { piece?: PieceAddress } = {},
   ): Promise<void> {
-    await this.#client.call("waitForTally", {
+    await this.#client.call("waitForRows", {
       path,
       keys,
+      valueKey,
       expected,
       piece: opts.piece,
     });
@@ -702,6 +707,21 @@ export class MultiRuntimeSession {
    */
   async barrier(): Promise<void> {
     await this.#client.call("barrier");
+  }
+
+  /**
+   * The timing measures this session's loggers emitted since the last call,
+   * in the shape the perf-investigation scripts read; empty unless the worker
+   * runs with `CF_TIMING_MEASURES=1` in its environment. Drained on each call.
+   */
+  async timingMeasures(): Promise<
+    { name: string; startTime: number; duration: number }[]
+  > {
+    return await this.#client.call("timingMeasures") as {
+      name: string;
+      startTime: number;
+      duration: number;
+    }[];
   }
 
   /** Capture scheduler graph, settle stats history, and action run trace. */
