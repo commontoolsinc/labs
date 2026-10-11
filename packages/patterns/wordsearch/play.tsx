@@ -70,10 +70,10 @@ export const WordSearchPlay = pattern<
   WordSearchPlayOutput
 >(({ title, puzzle, found }) => {
   // The cell tapped first, waiting for a word's other end, in the
-  // arrangement it was tapped in, and whether the last second tap missed:
-  // this tab's alone.
+  // arrangement it was tapped in, and what the last second tap came to (a
+  // find or a miss), to say until the next tap: this tab's alone.
   const anchor = Writable.perSession.of({ at: "", index: -1 });
-  const missed = Writable.perSession.of(false);
+  const said = Writable.perSession.of("");
 
   // The arrangement: a first tap in another one waits for nothing.
   const arrangement = computed(() =>
@@ -107,7 +107,7 @@ export const WordSearchPlay = pattern<
         `WordSearchPlay: no cell ${index} in a ${puzzle.rows}×${puzzle.cols} grid`,
       );
     }
-    missed.set(false);
+    said.set("");
     const first = anchor.get().at === arrangement ? anchor.get().index : -1;
     if (first < 0) {
       anchor.set({ at: arrangement, index });
@@ -120,7 +120,7 @@ export const WordSearchPlay = pattern<
     const hits = placementsBetween(puzzle, first, index);
     if (hits.length === 0) {
       // Not a word's two ends: say so, and take this tap as a new first one.
-      missed.set(true);
+      said.set("Not a word");
       anchor.set({ at: arrangement, index });
       return;
     }
@@ -129,13 +129,16 @@ export const WordSearchPlay = pattern<
     const current = found.get().filter((k) => keys.includes(k));
     // A word and its reversal share a run: the first not yet found is found.
     const hit = hits.find((p) => !current.includes(placementKey(p)));
-    if (hit !== undefined) found.set([...current, placementKey(hit)]);
+    if (hit !== undefined) {
+      found.set([...current, placementKey(hit)]);
+      said.set(`Found ${hit.label}`);
+    }
   });
 
   const restart = action(() => {
     found.set([]);
     anchor.set({ at: "", index: -1 });
-    missed.set(false);
+    said.set("");
   });
 
   const grid = computed(() => gridStyle(puzzle.cols));
@@ -178,8 +181,8 @@ export const WordSearchPlay = pattern<
       : `${foundHere.length} of ${puzzle.placements.length} found`
   );
   const status = computed(() =>
-    missed.get()
-      ? "Not a word"
+    said.get()
+      ? said.get()
       : changed
       ? "Puzzle changed"
       : foundHere.length === 0
@@ -213,7 +216,10 @@ export const WordSearchPlay = pattern<
                   Start over
                 </cf-button>
               </cf-hstack>
-              <cf-text tone="muted">{status}</cf-text>
+              {/* Read out as it changes: a find, a miss, a moved puzzle. */}
+              <div role="status" aria-live="polite">
+                <cf-text tone="muted">{status}</cf-text>
+              </div>
               <div style={grid}>
                 {cells.map((cell) => (
                   <button

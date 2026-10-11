@@ -132,6 +132,14 @@ export default pattern(() => {
       { action: tapEnds({ puzzle, tap, n: 0, reversed: false }) },
       { assertion: assert(() => play.foundCount === 1) },
       { assertion: assert(() => waiting(play[UI]) === -1) },
+      // The find is said, in a status region a screen reader reads out.
+      {
+        assertion: assert(() =>
+          textContent(
+            findNode(play[UI], (n) => propValue(n, "role") === "status"),
+          ).includes(`Found ${puzzle.placements[0].label}`)
+        ),
+      },
       // Its cells are drawn found, and no others.
       {
         assertion: assert(() =>

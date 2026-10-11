@@ -784,9 +784,9 @@ starts unsolved. Takes the `puzzle` that `wordsearch/wordsearch.tsx` puts out.
 
 ```ts
 interface WordSearchPlayInput {
+  title?: string | Default<"Word Search">;
   puzzle?: WordSearch; // from wordsearch/generator.ts
   found?: PerUser<Writable<string[] | Default<[]>>>;
-  anchor?: PerSession<Writable<number | Default<-1>>>;
 }
 ```
 
